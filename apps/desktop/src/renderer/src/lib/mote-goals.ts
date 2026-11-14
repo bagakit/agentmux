@@ -45,7 +45,7 @@ export function moteGoalContext(state: ReturnType<typeof useAppStore.getState>, 
 
 export function goalsForMote(records: Readonly<Record<string, DemandRecord>>, sessionIds: readonly string[], contentRef?: DemandContentReference | null): DemandRecord[] {
   const members = new Set(sessionIds)
-  return Object.values(records).filter(goal => goal.sessionIds.some(id => members.has(id)) || Boolean(contentRef && goal.contentRefs?.some(ref =>
+  return Object.values(records).filter(goal => goal.sessionIds.some(id => typeof id === 'string' && members.has(id)) || Boolean(contentRef && goal.contentRefs?.some(ref =>
       ref.hostId === contentRef.hostId && ref.workspaceId === contentRef.workspaceId && ref.zoneId === contentRef.zoneId)))
     .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
 }

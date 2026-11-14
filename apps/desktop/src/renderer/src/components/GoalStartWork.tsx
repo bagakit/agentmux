@@ -1,4 +1,5 @@
 import type { GoalResponsibilityRow } from '@agentmux/core/goal-responsibility'
+import { demandAgentReferenceLabel, type DemandAgentReference } from '@agentmux/demand/relations'
 import type { GoalNextStepSource } from '../lib/goal-presentation'
 import { GoalExecutionResponsibility } from './GoalResponsibilitySummary'
 import { GoalEvidence } from './GoalEvidence'
@@ -8,7 +9,7 @@ import { GoalContinuationAgent } from './GoalContinuationControl'
 /** Shares the Goal's original observation, navigation and result review; never invents an A2A report. */
 export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, review, responsibilities, focus, primary, embedded = false }: {
   responsibilities?: ReadonlyMap<string, GoalResponsibilityRow> | undefined; focus?: GoalNextStepSource | undefined; primary?: boolean; embedded?: boolean;
-  rows: GoalStartRow[]; supervisorSessionId: string | null | undefined; active: boolean
+  rows: GoalStartRow[]; supervisorSessionId: DemandAgentReference | null | undefined; active: boolean
   openAgent: (sessionId: string, hostId?: string) => Promise<void>; review: () => Promise<void>
 }) {
   return rows.map(({ start, observation, next, issue }) => <article className="goal-delegation__item" key={start.operationId} data-goal-work-operation={start.operationId} data-goal-work-kind="start">
@@ -33,7 +34,7 @@ export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, re
     <details className="goal-delegation__source"><summary>Original Start and input</summary>
       {embedded && issue && issue !== responsibilities?.get(`start:${start.operationId}`)?.reason && issue !== observation?.attention?.reason ? <p>{issue}</p> : null}
       {embedded && observation?.attention ? <p>Supervisor reminder {observation.attention.state}. {observation.attention.reason} Reminder receipt does not accept this Goal.</p> : null}
-      <dl>{embedded ? <><dt>Follow-up</dt><dd>{supervisorSessionId ?? 'Needs an assigned Supervisor'}</dd></> : null}<dt>Host</dt><dd>{start.hostId}</dd><dt>Worker</dt><dd>{start.agentSessionId}</dd><dt>Original Run</dt><dd>{start.runId}</dd>
+      <dl>{embedded ? <><dt>Follow-up</dt><dd>{supervisorSessionId ? demandAgentReferenceLabel(supervisorSessionId) : 'Needs an assigned Supervisor'}</dd></> : null}<dt>Host</dt><dd>{start.hostId}</dd><dt>Worker</dt><dd>{start.agentSessionId}</dd><dt>Original Run</dt><dd>{start.runId}</dd>
         <dt>Start operation</dt><dd>{start.operationId}</dd><dt>Input observation</dt><dd>{observation?.input.state ?? 'unknown'}</dd>
         {start.receipt ? <><dt>Retained Core receipt</dt><dd>{start.receipt.itemId}</dd></> : null}
         <dt>Result basis</dt><dd>{start.resultBasis ? 'Captured at this Start' : 'Unknown for this original Start'}</dd></dl>

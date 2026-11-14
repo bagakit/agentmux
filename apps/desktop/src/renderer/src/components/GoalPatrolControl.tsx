@@ -22,7 +22,7 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
   const patrol = demand.patrols?.filter(item => item.purpose !== 'plan').at(-1), observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
   const pending = Boolean(patrol && !patrol.report && observed?.state !== 'stale')
   const manager = demand.responsibility?.supervisor, attempt = patrol?.attempts.at(-1)
-  const targetSessionId = pending ? attempt?.target.agentSessionId ?? patrol?.supervisorAgentSessionId ?? null : demand.supervisorSessionId ?? manager?.agentSessionId ?? null
+  const targetSessionId = pending ? attempt?.target.agentSessionId ?? patrol?.supervisorAgentSessionId ?? null : typeof demand.supervisorSessionId === 'string' ? demand.supervisorSessionId : demand.supervisorSessionId ? null : manager?.agentSessionId ?? null
   const supervisorHosts = goalSupervisorHostWitnesses(demand)
   const targetHostId = pending ? attempt?.target.hostId : (manager?.agentSessionId === targetSessionId ? manager.hostId : undefined) ??
     (targetSessionId === demand.supervisorSessionId && supervisorHosts.length === 1 ? supervisorHosts[0] : undefined)

@@ -34,7 +34,7 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   const firstPresentation = useGoalAgentPresentation(firstDestination?.agentSessionId, firstDestination?.hostId)
   const firstHostName = useAppStore(state => firstDestination ? state.config?.hosts.find(host => host.id === firstDestination.hostId)?.label ?? firstDestination.hostId : null)
   const currentRun = useAppStore(state => {
-    const matches = (target && targetHostId ? agentSessionPresentationIndex(state.sessions).get(target) ?? [] : []).filter(item => item.control.agentSessionId === target &&
+    const matches = (typeof target === 'string' && targetHostId ? agentSessionPresentationIndex(state.sessions).get(target) ?? [] : []).filter(item => item.control.agentSessionId === target &&
       item.control.hostId === targetHostId && item.hostId === targetHostId)
     return matches.length === 1 && matches[0]?.kind === 'agent' ? matches[0].control.run.runId : null
   })
@@ -83,15 +83,16 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
       <p className="goals-muted">Choose a Supervisor to make this plan.</p>
       <button type="button" className="small-button" data-goal-plan-request={original ? undefined : true} disabled={working} onClick={chooseSupervisor}>Choose Supervisor to plan</button>
     </> : null}
-    {demand.supervisorSessionId || original ? <div className="goals-inline-actions">
+    {demand.supervisorSessionId && typeof demand.supervisorSessionId !== 'string' && !original ? <p className="goals-service" role="status">Supervisor {currentPresentation.name} is retained. Planning requires its original current execution access.</p> : null}
+    {typeof demand.supervisorSessionId === 'string' || original ? <div className="goals-inline-actions">
       <button type="button" className="small-button" data-goal-plan-request disabled={pending || busy || working} onClick={() => { setUnsentSelection(null); onRequest() }}>
         {pending ? `Preparing request to ${presentation.name ?? 'Supervisor'}…` : original ? `Check request to ${presentation.name ?? 'original Supervisor'}`
           : retained && retained.requestId !== unsentSelection ? `Check request to ${currentPresentation.name ?? 'Supervisor'}` : `Ask ${currentPresentation.name ?? 'Supervisor'} to plan`}
       </button>
-      {newRequest && demand.supervisorSessionId ? <button type="button" className="small-button" disabled={working || pending} onClick={() => void run(async () => {
+      {newRequest && typeof demand.supervisorSessionId === 'string' ? <button type="button" className="small-button" disabled={working || pending} onClick={() => void run(async () => {
         await useAppStore.getState().requestDemandPmoTask(demand.id, 'plan', { newRequest: true })
       })}>New request to {currentPresentation.name ?? 'current Supervisor'}</button> : null}
-      {target ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? target : null,
+      {typeof target === 'string' ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? target : null,
         targetHostId, targetHostId === undefined ? 'The original Supervisor destination is unconfirmed. Check the retained request to read its destination.' : undefined)}>
         Open {presentation.name ?? 'Supervisor'} conversation</button> : null}
       {canContinue ? <button type="button" className="small-button" disabled={working} onClick={() => void run(async () => {

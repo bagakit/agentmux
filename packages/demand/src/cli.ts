@@ -1,3 +1,4 @@
+import { parseDemandAgentReference, parseDemandAgentReferences, demandAgentReferenceLabel, type DemandAgentReference } from './agent-reference.js'
 import { parseDemandContentReferences } from './content-references.js'
 import { mintObjectId } from '@agentmux/identity'
 import { DemandNameChangeError, openDemandStore } from './demand-store.js'
@@ -69,7 +70,7 @@ async function execute(command: string, options: Map<string, string[]>, store: R
     return await store.listNameChanges(required(options, 'id'), { ...(offset === undefined ? {} : { offset }), ...(limit === undefined ? {} : { limit }) })
   }
   if (command === 'create') {
-    const input: CreateDemandInput = { title: required(options, 'title'), sessionIds: options.get('session-id') ?? [], ...relationPatch(options) }
+    const input: CreateDemandInput = { title: required(options, 'title'), sessionIds: relatedReferences(options), ...relationPatch(options) }
     const refs = option(options, 'content-refs'); if (refs !== undefined) input.contentRefs = parseDemandContentReferences(JSON.parse(refs))
     const id = option(options, 'id'); if (id !== undefined) input.id = id
     const description = option(options, 'description'); if (description !== undefined) input.description = description
@@ -82,6 +83,7 @@ async function execute(command: string, options: Map<string, string[]>, store: R
   }
   if (command === 'update') {
     const patch: UpdateDemandInput = relationPatch(options)
+    if (options.has('agent-ref') || options.has('session-id')) patch.sessionIds = relatedReferences(options)
     const refs = option(options, 'content-refs'); if (refs !== undefined) patch.contentRefs = parseDemandContentReferences(JSON.parse(refs))
     const title = option(options, 'title'); if (title !== undefined) patch.title = title
     const description = option(options, 'description'); if (description !== undefined) patch.description = description
@@ -106,7 +108,8 @@ async function execute(command: string, options: Map<string, string[]>, store: R
   }
   if (command === 'link-session' || command === 'unlink-session') {
     const id = required(options, 'id')
-    const sessionId = required(options, 'session-id')
+    if (options.has('agent-ref') && options.has('session-id')) throw new Error('Choose --agent-ref or --session-id, not both')
+    const sessionId = options.has('agent-ref') ? parseDemandAgentReference(JSON.parse(required(options, 'agent-ref'))) : required(options, 'session-id')
     const receipt = command === 'link-session' ? await store.linkSession(id, sessionId) : await store.unlinkSession(id, sessionId)
     return { receipt, demand: receipt.demand, revision: receipt.revision }
   }
@@ -163,7 +166,7 @@ async function execute(command: string, options: Map<string, string[]>, store: R
     if (sessionId && patch.assigneeSessionIds === undefined) patch.assigneeSessionIds = [sessionId]
     const expectedUpdatedAt = numberOption(options, 'expected-updated-at')
     const updated = await store.update(id, patch, { context, operationId: option(options, 'operation-id') ?? requestId, ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })
-    const activity = await store.addActivity(id, { kind: 'handoff', message: `Handoff to ${(patch.assigneeSessionIds ?? []).join(', ') || 'unassigned'}.`, actorId: context.actor.id })
+    const activity = await store.addActivity(id, { kind: 'handoff', message: `Handoff to ${(patch.assigneeSessionIds ?? []).map(demandAgentReferenceLabel).join(', ') || 'unassigned'}.`, actorId: context.actor.id })
     return { receipt: updated, demand: activity.demand, revision: activity.revision, sessionId: sessionId ?? null }
   }
   if (command === 'remove' || command === 'delete') {
@@ -237,14 +240,22 @@ function priorityOption(options: Map<string, string[]>, key: string): DemandPrio
 }
 
 function helpText(): string {
-  return `agentmux-demand — filesystem Demand store\n\nUsage:\n  agentmux-demand --root <directory> list\n  agentmux-demand --root <directory> create --title <title> [options]\n  agentmux-demand --root <directory> show --id <id>\n  agentmux-demand --root <directory> update --id <id> [options]\n  agentmux-demand --root <directory> propose-alignment --id <id> --proposal <json>\n  agentmux-demand --root <directory> propose-grounding --id <id> --proposal <json>\n  agentmux-demand --root <directory> delete --id <id> --confirm delete\n  agentmux-demand --root <directory> link-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> unlink-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> link-project --id <id> --project-id <id>\n  agentmux-demand --root <directory> unlink-project --id <id>\n  agentmux-demand --root <directory> decision-log --id <id> --question <text> --decision <text> [--rationale <text>]\n  agentmux-demand --root <directory> activity --id <id> --kind <kind> --message <text>\n  agentmux-demand --root <directory> assign --id <id> [--project-id <id>] [--assignee-session-id <id>] [--start]\n  agentmux-demand --root <directory> start --id <id> [--session-id <id>] [--project-id <id>] [--assignee-session-id <id>]\n  agentmux-demand --root <directory> handoff --id <id> --assignee-session-id <id> [--to-session <id>]\n\nCreate/update/assign/handoff accept repeatable --assignee-session-id, --clear-assignees, --supervisor-session-id or --clear-supervisor. Assignment does not start execution unless --start is explicit; this filesystem CLI never submits input.\nTitle update accepts --operation-id <id> and --expected-revision <revision>.\nRead structured title history with name-history --id <id> [--offset <n>] [--limit <1..100>].\nCreate/update accept --content-refs <json> for exact content provenance. Update appends sources and accepts --expected-updated-at <ms> from the original record.\nUpdate also accepts --alignment <json> and --grounding <json>. Proposals never confirm goals or accept results.\nThe root must be explicit with --root or AGENTMUX_DEMAND_ROOT.`
+  return `agentmux-demand — filesystem Demand store\n\nUsage:\n  agentmux-demand --root <directory> list\n  agentmux-demand --root <directory> create --title <title> [options]\n  agentmux-demand --root <directory> show --id <id>\n  agentmux-demand --root <directory> update --id <id> [options]\n  agentmux-demand --root <directory> propose-alignment --id <id> --proposal <json>\n  agentmux-demand --root <directory> propose-grounding --id <id> --proposal <json>\n  agentmux-demand --root <directory> delete --id <id> --confirm delete\n  agentmux-demand --root <directory> link-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> unlink-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> link-project --id <id> --project-id <id>\n  agentmux-demand --root <directory> unlink-project --id <id>\n  agentmux-demand --root <directory> decision-log --id <id> --question <text> --decision <text> [--rationale <text>]\n  agentmux-demand --root <directory> activity --id <id> --kind <kind> --message <text>\n  agentmux-demand --root <directory> assign --id <id> [--project-id <id>] [--assignee-session-id <id>] [--start]\n  agentmux-demand --root <directory> start --id <id> [--session-id <id>] [--project-id <id>] [--assignee-session-id <id>]\n  agentmux-demand --root <directory> handoff --id <id> --assignee-session-id <id> [--to-session <id>]\n\nQualified relations: --agent-ref <json> (repeatable related), --assignees <json-array>, --supervisor-ref <json>. Do not combine each with its raw Session flag. These save business locators only, never input authority.\nCreate/update/assign/handoff accept repeatable --assignee-session-id, --clear-assignees, --supervisor-session-id or --clear-supervisor. Assignment does not start execution unless --start is explicit; this filesystem CLI never submits input.\nTitle update accepts --operation-id <id> and --expected-revision <revision>.\nRead structured title history with name-history --id <id> [--offset <n>] [--limit <1..100>].\nCreate/update accept --content-refs <json> for exact content provenance. Update appends sources and accepts --expected-updated-at <ms> from the original record.\nUpdate also accepts --alignment <json> and --grounding <json>. Proposals never confirm goals or accept results.\nThe root must be explicit with --root or AGENTMUX_DEMAND_ROOT.`
+}
+
+function relatedReferences(options: Map<string, string[]>): DemandAgentReference[] {
+  if (options.has('agent-ref') && options.has('session-id')) throw new Error('Choose --agent-ref or --session-id, not both')
+  return parseDemandAgentReferences(options.has('agent-ref') ? options.get('agent-ref')!.map(text => JSON.parse(text)) : options.get('session-id') ?? [])
 }
 
 function relationPatch(options: Map<string, string[]>): Pick<UpdateDemandInput, 'assigneeSessionIds' | 'supervisorSessionId'> {
   const patch: Pick<UpdateDemandInput, 'assigneeSessionIds' | 'supervisorSessionId'> = {}
-  if (options.has('assignee-session-id')) patch.assigneeSessionIds = options.get('assignee-session-id')!
+  if (options.has('assignees') && options.has('assignee-session-id')) throw new Error('Choose --assignees or --assignee-session-id, not both')
+  if (options.has('assignees')) patch.assigneeSessionIds = parseDemandAgentReferences(JSON.parse(required(options, 'assignees')))
+  if (options.has('assignee-session-id')) patch.assigneeSessionIds = parseDemandAgentReferences(options.get('assignee-session-id')!)
   if (options.has('clear-assignees')) patch.assigneeSessionIds = []
-  const supervisor = option(options, 'supervisor-session-id')
+  if (options.has('supervisor-ref') && options.has('supervisor-session-id')) throw new Error('Choose --supervisor-ref or --supervisor-session-id, not both')
+  const supervisor = options.has('supervisor-ref') ? parseDemandAgentReference(JSON.parse(required(options, 'supervisor-ref'))) : option(options, 'supervisor-session-id')
   if (supervisor !== undefined && options.has('clear-supervisor')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Choose or clear the Supervisor explicitly, not both.')
   if (supervisor !== undefined) patch.supervisorSessionId = supervisor
   if (options.has('clear-supervisor')) patch.supervisorSessionId = null

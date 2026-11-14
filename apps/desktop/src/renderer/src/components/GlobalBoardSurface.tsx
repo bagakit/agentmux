@@ -1,4 +1,5 @@
 import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
+import { demandAgentReferenceKey, demandAgentReferenceLabel, mergeDemandAgentReferences } from '@agentmux/demand/relations'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -52,8 +53,8 @@ export function GlobalBoardSurface() {
   const assigneeEntries = useAppStore(useShallow(state => {
     if (!filtersOpen && assigneeFilter === 'all') return [] as string[]
     const index = agentSessionPresentationIndex(state.sessions)
-    const ids = [...new Set([...state.sessions.filter(session => session.kind === 'agent').map(session => session.control.agentSessionId), ...Object.values(state.demands).flatMap(demand => demand.assigneeSessionIds ?? [])])].sort()
-    return ids.flatMap(id => { const candidates = index.get(id), session = candidates?.length === 1 ? candidates[0] : undefined; return [id, session ? state.agentNames[session.id] ?? session.label : `${id} · Unavailable`] })
+    const refs = mergeDemandAgentReferences(state.sessions.filter(session => session.kind === 'agent').map(session => session.control.agentSessionId), Object.values(state.demands).flatMap(demand => demand.assigneeSessionIds ?? []))
+    return refs.flatMap(ref => { const candidates = typeof ref === 'string' ? index.get(ref) : undefined, session = candidates?.length === 1 ? candidates[0] : undefined; return [demandAgentReferenceKey(ref), session ? state.agentNames[session.id] ?? session.label : `${demandAgentReferenceLabel(ref)} · Unavailable`] })
   }))
   const assigneeIds = assigneeEntries.filter((_value, index) => index % 2 === 0)
   const assigneeName = (id: string) => { const index = assigneeIds.indexOf(id); return index < 0 ? `${id} · Unavailable` : assigneeEntries[index * 2 + 1]! }
@@ -77,7 +78,7 @@ export function GlobalBoardSurface() {
     const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
     const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeSessionIds?.length : Boolean(demand.projectId && demand.assigneeSessionIds?.length))
     const matchesHistory = showHistory || statusFilter !== 'all' || (demand.status !== 'cancelled' && (demand.status !== 'done' || !isCurrentGroundingAccepted(demand.alignment, demand.grounding)))
-    return matchesQuery && matchesHistory && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.includes(assigneeFilter))
+    return matchesQuery && matchesHistory && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.some(ref => demandAgentReferenceKey(ref) === assigneeFilter))
   }), [assigneeFilter, projectFilter, query, routingFilter, statusFilter, showHistory, projectedDemands])
   const columns = useMemo(() => demandColumns(filteredDemands), [filteredDemands])
   const acknowledgementFailed = (id: string) => Boolean(acknowledgementFeedback[id]?.failure)

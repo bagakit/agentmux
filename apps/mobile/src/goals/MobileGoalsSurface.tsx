@@ -1,3 +1,4 @@
+import { demandAgentReferenceLabel } from '@agentmux/demand/relations'
 import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { formatMobileTime, withMobileTime } from '../presentation/time'
 import { mobileGoalStatus as statuses, mobileGoalOutcome } from './presentation'
@@ -252,7 +253,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
       <label>工作状态<select disabled={saving} aria-label="工作状态" value={goal.status} onChange={event => { void save({ status: event.target.value as AgentMuxRpcGoal['status'] }) }}>{AGENTMUX_DEMAND_STATUSES.map(value => <option key={value} value={value}>{statuses[value]}</option>)}</select></label>
       <p>工作状态不代表目标确认或结果接受。</p>
       <label>优先级<select disabled={saving} aria-label="优先级" value={goal.priority} onChange={event => { void save({ priority: event.target.value as AgentMuxRpcGoal['priority'] }) }}>{AGENTMUX_DEMAND_PRIORITIES.map(value => <option key={value} value={value}>{priorities[value]}</option>)}</select></label>
-      <dl><dt>目标 ID</dt><dd>{goal.id}</dd><dt>项目</dt><dd>{goal.projectId ? `${goal.projectName ?? '名称未确认'} · ${goal.projectId}` : '未分配项目'}</dd><dt>负责人</dt><dd>{goal.assigneeSessionIds?.join('、') || '未分配'}</dd><dt>Supervisor</dt><dd>{goal.supervisorSessionId ?? '未指定'}</dd><dt>标签</dt><dd>{goal.tags?.join('、') || '无'}</dd><dt>父目标</dt><dd>{goal.parentGoalId ?? '无'}</dd><dt>计划开始</dt><dd>{goal.plannedStartAt ? (formatMobileTime(goal.plannedStartAt) ?? '时间未记录') : '未设置'}</dd><dt>目标日期</dt><dd>{goal.targetAt ? (formatMobileTime(goal.targetAt) ?? '时间未记录') : '未设置'}</dd><dt>最后更新</dt><dd>{(formatMobileTime(goal.updatedAt) ?? '时间未记录')}</dd></dl>
+      <dl><dt>目标 ID</dt><dd>{goal.id}</dd><dt>项目</dt><dd>{goal.projectId ? `${goal.projectName ?? '名称未确认'} · ${goal.projectId}` : '未分配项目'}</dd><dt>负责人</dt><dd>{goal.assigneeSessionIds?.map(demandAgentReferenceLabel).join('、') || '未分配'}</dd><dt>Supervisor</dt><dd>{goal.supervisorSessionId ? demandAgentReferenceLabel(goal.supervisorSessionId) : '未指定'}</dd><dt>标签</dt><dd>{goal.tags?.join('、') || '无'}</dd><dt>父目标</dt><dd>{goal.parentGoalId ?? '无'}</dd><dt>计划开始</dt><dd>{goal.plannedStartAt ? (formatMobileTime(goal.plannedStartAt) ?? '时间未记录') : '未设置'}</dd><dt>目标日期</dt><dd>{goal.targetAt ? (formatMobileTime(goal.targetAt) ?? '时间未记录') : '未设置'}</dd><dt>最后更新</dt><dd>{(formatMobileTime(goal.updatedAt) ?? '时间未记录')}</dd></dl>
     </details>
     <details><summary>活动与决策记录</summary><ul>{goal.activityLog?.map((entry, index) => <li key={index}>{entry}</li>)}</ul>
       {decisions === null ? <p>决策记录尚未确认。</p> : decisions.map((decision, index) => <div key={index}><p>{decision.question}</p><p>{decision.decision}</p><p>{decision.rationale}</p></div>)}

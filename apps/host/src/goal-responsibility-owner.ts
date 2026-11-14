@@ -69,7 +69,7 @@ export class GoalResponsibilityOwner {
         add(this.sessions, key(ref.hostId, ref.agentSessionId), goal.id); add(this.runs, key(ref.hostId, ref.runId), goal.id); add(this.hosts, ref.hostId, goal.id)
       }
       for (const delegation of goal.delegations ?? []) add(this.sources, key(delegation.hostId, delegation.sourceMessageId), goal.id)
-      if (goal.supervisorSessionId) add(this.managers, goal.supervisorSessionId, goal.id)
+      if (typeof goal.supervisorSessionId === 'string') add(this.managers, goal.supervisorSessionId, goal.id)
       if (changed) queueMicrotask(() => { void this.refresh(goal.id) })
     }
     if (deadlinesChanged) this.schedule()
@@ -145,11 +145,13 @@ export class GoalResponsibilityOwner {
       if (prior) return prior
       const pending = this.runtime.observeGoalAgent(host, session); states.set(id, pending); return pending
     }
-    let supervisor: GoalSupervisorObservation = { agentSessionId: goal.supervisorSessionId, state: 'missing', reason: 'Choose a Supervisor for this original Goal.' }
-    const management = goal.supervisorSessionId ? goalSupervisorHost(goal, this.runtime).then(async hostId => ({ hostId, status: await status(hostId, goal.supervisorSessionId!) })) : null
+    const supervisorReference = goal.supervisorSessionId && typeof goal.supervisorSessionId !== 'string' ? goal.supervisorSessionId : undefined
+    let supervisor: GoalSupervisorObservation = { agentSessionId: typeof goal.supervisorSessionId === 'string' ? goal.supervisorSessionId : null, ...(supervisorReference ? { agentReference: supervisorReference } : {}), state: supervisorReference ? 'unknown' : 'missing', reason: supervisorReference ? 'The original Source-qualified Supervisor is retained; its automatic management observation is not available through the legacy Host owner.' : 'Choose a Supervisor for this original Goal.' }
+    const supervisorId = typeof goal.supervisorSessionId === 'string' ? goal.supervisorSessionId : undefined
+    const management = supervisorId ? goalSupervisorHost(goal, this.runtime).then(async hostId => ({ hostId, status: await status(hostId, supervisorId) })) : null
     const supervisorRead = management ? management.then(value => {
       const observed = value.status
-      supervisor = { agentSessionId: goal.supervisorSessionId, hostId: value.hostId, runId: observed.run.runId,
+      supervisor = { agentSessionId: supervisorId ?? null, hostId: value.hostId, runId: observed.run.runId,
         state: observed.run.state !== 'running' ? 'ended' : currentAgentSemanticStatus(observed.session.semanticStatus)?.state === 'error' ? 'blocked'
           : observed.observation.semantic === 'unknown' || observed.observation.readiness === 'unknown' || observed.observation.stale && observed.observation.semantic === 'active'
           ? 'unknown' : observed.observation.semantic === 'active' || observed.observation.readiness === 'pending' ? 'busy' : 'available',
@@ -157,7 +159,7 @@ export class GoalResponsibilityOwner {
           : currentAgentSemanticStatus(observed.session.semanticStatus)?.state === 'error' ? 'Core reports an original native management error. Keep its Session and inspect or continue its responsibility.'
           : observed.observation.semantic === 'unknown' || observed.observation.stale && observed.observation.semantic === 'active' ? 'Management observation is unknown; its original Session and capabilities are retained.'
           : 'The exact management Session was observed at its original Host.' }
-    }).catch(error => { supervisor = { agentSessionId: goal.supervisorSessionId, state: 'unknown', reason: 'Observing the original management Session failed: ' + describe(error) } }) : Promise.resolve()
+    }).catch(error => { supervisor = { agentSessionId: supervisorId ?? null, state: 'unknown', reason: 'Observing the original management Session failed: ' + describe(error) } }) : Promise.resolve()
     const facts = await Promise.all(references.map(async execution => {
       const fact: GoalExecutionFacts = { execution, inputConfirmed: false }
       if (execution.kind === 'start') {

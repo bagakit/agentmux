@@ -1,3 +1,5 @@
+import type { DemandAgentReference } from './agent-reference.js'
+export type { DemandAgentReference, DemandSpaceMemberReference } from './agent-reference.js'
 import type { DemandPatrol } from './goal-patrol.js'
 import type { DemandDispatch } from './dispatch.js'
 import type { DemandProgress } from './responsibility.js'
@@ -97,9 +99,9 @@ export type Demand = {
   parentDemandId: string | null
   /** Human planning order; never execution authority. */
   phaseIndex?: number | null
-  sessionIds: string[]
-  assigneeSessionIds: string[]
-  supervisorSessionId: string | null
+  sessionIds: DemandAgentReference[]
+  assigneeSessionIds: DemandAgentReference[]
+  supervisorSessionId: DemandAgentReference | null
   participations: DemandParticipation[]
   creationOrigin?: DemandCreationOrigin
   /** New Host creation only; absent original records retain unknown discussion provenance. */
@@ -146,9 +148,9 @@ export type CreateDemandInput = {
   targetAt?: number | null
   parentDemandId?: string | null
   phaseIndex?: number | null
-  sessionIds?: readonly string[]
-  assigneeSessionIds?: readonly string[]
-  supervisorSessionId?: string | null
+  sessionIds?: readonly DemandAgentReference[]
+  assigneeSessionIds?: readonly DemandAgentReference[]
+  supervisorSessionId?: DemandAgentReference | null
   contentRefs?: readonly DemandContentReference[]
 }
 

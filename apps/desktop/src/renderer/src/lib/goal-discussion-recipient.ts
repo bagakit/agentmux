@@ -1,5 +1,6 @@
 import { useShallow } from 'zustand/react/shallow'
 import { useMemo } from 'react'
+import { demandAgentReferenceLabel, type DemandAgentReference } from '@agentmux/demand/relations'
 import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { readGoalDiscussionBinding, resolveGoalDiscussionBinding } from '@agentmux/host/goal-discussion-bindings'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
@@ -54,9 +55,9 @@ export function useGoalDiscussionRecipient(goalId: string) {
 }
 
 /** Presentation for one exact canonical recipient; absence never selects a replacement. */
-export function useGoalAgentPresentation(agentSessionId: string | null | undefined, hostId?: string) {
+export function useGoalAgentPresentation(agentSessionId: DemandAgentReference | null | undefined, hostId?: string) {
   const presentation = useAppStore(useShallow(state => {
-    if (!agentSessionId || hostId === undefined) return null
+    if (typeof agentSessionId !== 'string' || !agentSessionId || hostId === undefined) return null
     const matches = (agentSessionPresentationIndex(state.sessions).get(agentSessionId) ?? []).filter(session => session.control.agentSessionId === agentSessionId &&
       session.control.hostId === session.hostId && session.control.hostId === hostId)
     const session = matches.length === 1 ? matches[0] : undefined
@@ -64,7 +65,7 @@ export function useGoalAgentPresentation(agentSessionId: string | null | undefin
   }))
   const userName = useAppStore(state => presentation ? state.agentNames[presentation.id] : undefined)
   const firstPrompt = useAppStore(useMemo(() => presentation ? createFirstPromptSelector(presentation.id) : () => null, [presentation?.id]))
-  return { name: presentation ? agentDisplayName({ userName, firstPrompt, fallbackLabel: presentation.label, providerLabel: presentation.providerId }) : null,
+  return { name: agentSessionId && typeof agentSessionId !== 'string' ? demandAgentReferenceLabel(agentSessionId) : presentation ? agentDisplayName({ userName, firstPrompt, fallbackLabel: presentation.label, providerLabel: presentation.providerId }) : null,
     hostId: presentation?.hostId ?? null, toolExecution: presentation?.toolExecution ?? null, workPlacement: presentation?.workPlacement, workspacePath: presentation?.workspacePath }
 }
 

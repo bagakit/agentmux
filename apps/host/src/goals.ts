@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { formatGoalAddress } from '@agentmux/core/sharing'
+import { assertNewGoalSourceRelations, goalSourceRpc } from './goal-source-relations.js'
 import { createHostGoalDiscussions } from './goal-discussions.js'
 import { resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences.js'
 import { deriveObjectId } from '@agentmux/core/object-id'
@@ -164,7 +165,8 @@ export function createHostGoals(options: {
     if (choices.length !== 1) throw new AgentMuxError('The exact original Project is unavailable or ambiguous. The Goal and input are retained.', 'UNKNOWN_WORKSPACE')
     return choices[0]!
   }
-  const update = async (goal: Demand, patch: Parameters<DemandStore['update']>[1], operationId: string, name: AgentMuxNameContext | undefined, context: AgentMuxRpcCallContext, expectedUpdatedAt?: number) => {
+  const update = async (goal: Demand, patch: Parameters<DemandStore['update']>[1], operationId: string, name: AgentMuxNameContext | undefined, context: AgentMuxRpcCallContext, expectedUpdatedAt?: number, relationAccess?: import('@agentmux/core/control').GoalRelationAccess[]) => {
+    await assertNewGoalSourceRelations(goal, patch, relationAccess, (access, runtimeId) => goalSourceRpc({ runtime: options.runtime, clients }, access, runtimeId, context), context.signal)
     const originalProject = Object.hasOwn(patch, 'projectId') ? await project(patch.projectId) : undefined
     const participation = patch.description !== undefined || patch.alignment !== undefined ? participant(name, 'requirements') : undefined
     await current(context)
@@ -193,6 +195,7 @@ export function createHostGoals(options: {
       const raw = await readOriginalMoteConfiguration(options.configurationPath), preferences = record(raw) && record(raw.goals) ? raw.goals : {}
       const participation = participant(name, 'create')
       await current(context)
+      await assertNewGoalSourceRelations(await demands.get(goalId) ?? undefined, req, req.relationAccess, (access, runtimeId) => goalSourceRpc({ runtime: options.runtime, clients }, access, runtimeId, context), context.signal)
       const saved = await demands.create({ id: goalId, title: req.title, description: req.description ?? '', projectId: req.projectId ?? null, projectName: selected?.name ?? null,
         ...(req.priority ? { priority: req.priority } : {}), ...(req.status ? { status: req.status } : {}), ...(req.assigneeSessionIds ? { assigneeSessionIds: req.assigneeSessionIds } : {}),
         ...(req.supervisorSessionId === undefined ? {} : { supervisorSessionId: req.supervisorSessionId }), ...(req.sessionIds ? { sessionIds: req.sessionIds } : {}), ...(req.tags ? { tags: req.tags } : {}), ...(req.plannedStartAt === undefined ? {} : { plannedStartAt: req.plannedStartAt }), ...(req.targetAt === undefined ? {} : { targetAt: req.targetAt }), ...(req.parentDemandId === undefined ? {} : { parentDemandId: req.parentDemandId }), ...(req.phaseIndex === undefined ? {} : { phaseIndex: req.phaseIndex }),  ...(req.contentRefs ? { contentRefs: req.contentRefs } : {}) },
@@ -215,7 +218,7 @@ export function createHostGoals(options: {
       const { activityLog, ...patch } = req.patch
       const originalLog = goal.activities.map(activity => `${activity.kind}: ${activity.message}`)
       if (activityLog && originalLog.some((message, index) => activityLog[index] !== message)) throw new AgentMuxError('Goal activity is append-only. Original records remain available.', 'CONTROL_REQUEST_CONFLICT')
-      await update(goal, patch, req.requestId, name, context, req.expectedUpdatedAt)
+      await update(goal, patch, req.requestId, name, context, req.expectedUpdatedAt, req.relationAccess)
       for (const [index, message] of (activityLog?.slice(originalLog.length) ?? []).entries()) { await current(context); await demands.addActivity(goal.id, { kind: 'board', message, actorId: name?.actor.id ?? null, operationId: req.requestId + ':activity:' + index }) }
       if (req.decision) await saveDecision(goal.id, req.decision, req.requestId, context)
       const saved = await get(goal.id)
@@ -254,7 +257,7 @@ export function createHostGoals(options: {
     }
     if (req.operation === 'demand.assign' || req.operation === 'demand.handoff') {
       const saved = await update(goal, { ...(req.assigneeSessionIds ? { assigneeSessionIds: req.assigneeSessionIds } : req.operation === 'demand.handoff' && req.sessionId ? { assigneeSessionIds: [req.sessionId] } : {}),
-        ...(req.supervisorSessionId === undefined ? {} : { supervisorSessionId: req.supervisorSessionId }), ...(req.operation === 'demand.assign' && req.projectId !== undefined ? { projectId: req.projectId } : {}) }, req.requestId, name, context, req.expectedUpdatedAt ?? goal.updatedAt)
+        ...(req.supervisorSessionId === undefined ? {} : { supervisorSessionId: req.supervisorSessionId }), ...(req.operation === 'demand.assign' && req.projectId !== undefined ? { projectId: req.projectId } : {}) }, req.requestId, name, context, req.expectedUpdatedAt ?? goal.updatedAt, req.relationAccess)
       if (req.operation === 'demand.assign') {
         if (req.start) await startGoal(saved.demand, req.sessionId, req.requestId, context)
         return { operation: req.operation, demand: await projectGoal((await get(goal.id))), receipt: { demandId: goal.id, assignedAt: saved.demand.updatedAt, startRequested: req.start } }
@@ -269,6 +272,7 @@ export function createHostGoals(options: {
     const original = await demands.inspectDispatch(goal.id, operationId)
     if (original && (sessionId !== undefined && original.agentSessionId !== sessionId || Boolean(continuation) !== (original.execution === 'continue'))) throw new AgentMuxError('The original Goal Start target or execution changed. Inspect that operation without replaying it.', 'CONTROL_REQUEST_CONFLICT')
     const selected = original?.agentSessionId ?? sessionId ?? (goal.assigneeSessionIds.length === 1 ? goal.assigneeSessionIds[0] : undefined)
+    if (selected !== undefined && typeof selected !== 'string') throw new AgentMuxError('This Source-qualified Start requires its current finite Goal execution access. The original relation and Agent remain retained.', 'CONTROL_UNAVAILABLE')
     if (!selected || !original && !goal.assigneeSessionIds.includes(selected)) throw new AgentMuxError('Choose the exact responsible Agent before starting this Goal. Creation or assignment alone does not start it.', 'INVALID_CONTROL_REQUEST')
     if (original?.stage === 'confirmed') {
       const loop = original.loopId ? (await progress.listGoals(goal.id)).find(value => value.loopId === original.loopId) : undefined

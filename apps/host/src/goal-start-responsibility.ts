@@ -75,7 +75,7 @@ export class GoalStartResponsibilityOwner {
         const ref = { goalId: goal.id, operationId: start.operationId }
         add(this.workers, key(start.hostId, start.runId), ref)
         add(this.sessions, key(start.hostId, start.agentSessionId), ref)
-        if (goal.supervisorSessionId && goal.supervisorSessionId !== start.agentSessionId) add(this.sessions, key(start.hostId, goal.supervisorSessionId), ref)
+        if (typeof goal.supervisorSessionId === 'string' && goal.supervisorSessionId !== start.agentSessionId) add(this.sessions, key(start.hostId, goal.supervisorSessionId), ref)
         add(this.hosts, start.hostId, ref)
         const epoch = JSON.stringify([goal.supervisorSessionId, goal.grounding?.submissionId, start])
         if (this.epochs.get(id) !== epoch) queueMicrotask(() => { if (!this.controller.signal.aborted) void this.check(ref) })
@@ -113,6 +113,7 @@ export class GoalStartResponsibilityOwner {
     if (!goal || !start || start.execution !== 'finite' || closed(goal)) return
     const observed = await this.observe(goal, start)
     if (observed.originalRun?.state !== 'exited' && observed.originalRun?.state !== 'interrupted') return
+    if (goal.supervisorSessionId && typeof goal.supervisorSessionId !== 'string') throw new Error('This Source-qualified Supervisor has no approved automatic reminder contract. The original worker and request are retained.')
     if (!goal.supervisorSessionId) throw new Error('No Supervisor is assigned to this original Goal. Retain its worker identity and explicit continuation entry.')
     let attention = start.attention
     if (attention && attention.supervisorAgentSessionId !== goal.supervisorSessionId)

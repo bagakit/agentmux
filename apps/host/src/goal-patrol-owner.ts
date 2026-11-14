@@ -115,6 +115,7 @@ export class GoalPatrolOwner {
       if (original.purpose !== purpose) throw new AgentMuxError('This original operation belongs to another Goal request purpose. Its original input is retained.', 'CONTROL_REQUEST_CONFLICT')
       await this.check(goalId, original.operationId); return original
     }
+    if (goal.supervisorSessionId && typeof goal.supervisorSessionId !== 'string') throw new AgentMuxError('This Source-qualified Supervisor has no approved automatic patrol contract. Its original relation and work remain retained.', 'CONTROL_UNAVAILABLE')
     if (purpose === 'plan' && !goal.supervisorSessionId) throw new AgentMuxError('This Goal has no Supervisor. Keep this planning request and choose a Supervisor in the original Goal relationships, then explicitly send it.', 'GOAL_PLAN_SUPERVISOR_REQUIRED')
     let planningHost: string | undefined
     if (purpose === 'plan') { try { planningHost = await goalSupervisorHost(goal, this.runtime) } catch (error) { this.issues.set(key(goalId, operationId), describe(error)) } }

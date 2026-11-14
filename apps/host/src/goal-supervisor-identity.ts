@@ -8,6 +8,7 @@ type Runtime = { resolveGoalAgent?(agentSessionId: string): Promise<{ hostId: st
 /** Saved role witnesses qualify a Session id without reselecting another Runtime's namesake. */
 export async function goalSupervisorHost(goal: Demand, runtime: Runtime): Promise<string> {
   const sessionId = goal.supervisorSessionId
+  if (sessionId && typeof sessionId !== 'string') throw new AgentMuxError('The Source-qualified Supervisor requires its original current actor and qualified action. Existing Agents and legacy work remain available.', 'CONTROL_UNAVAILABLE')
   if (!sessionId) throw new AgentMuxError('This Goal has no current Supervisor. Original work and input remain available.', 'CONTROL_UNAVAILABLE')
   const hosts = goalSupervisorHostWitnesses(goal)
   if (hosts.length === 1) return hosts[0]!

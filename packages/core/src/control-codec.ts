@@ -1,4 +1,6 @@
 import { formatGoalAddress } from './sharing.js'
+import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalRelationAccesses } from './goal-agent-reference.js'
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { parseBrowserAgentWorkspaceParams, parseBrowserAgentWorkspaceResult } from './browser-agent-workspace.js'
 import { isSettingsPreferenceMethod, parseSettingsPreferenceParams, parseSettingsPreferenceResult } from './settings-preferences.js'
 import { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './browser-lifecycle.js'
@@ -585,8 +587,8 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   }
   if (source.operation === 'demand.create') {
     const title = text(source.title, 'Demand title')
-    const sessionIds = source.sessionIds === undefined ? undefined : arrayOfIds(source.sessionIds, 'Demand Session ids')
-    return {
+    const sessionIds = source.sessionIds === undefined ? undefined : parseGoalAgentReferences(source.sessionIds)
+    return { ...(source.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(source.relationAccess) }),
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, title,
       ...(source.demandId === undefined ? {} : { demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST') }),
       ...(source.description === undefined ? {} : { description: text(source.description, 'Demand description') }),
@@ -594,8 +596,8 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       ...(source.priority === undefined ? {} : { priority: demandPriority(source.priority) }),
       ...(source.status === undefined ? {} : { status: demandStatus(source.status) }),
       ...(sessionIds ? { sessionIds } : {}),
-      ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: arrayOfIds(source.assigneeSessionIds, 'Goal assignee Sessions') }),
-      ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : id(source.supervisorSessionId, 'Goal Supervisor is invalid.', 'INVALID_CONTROL_REQUEST') }),
+      ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: parseGoalAgentReferences(source.assigneeSessionIds) }),
+      ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : parseGoalAgentReference(source.supervisorSessionId) }),
       ...(source.contentRefs === undefined ? {} : { contentRefs: contentReferences(source.contentRefs) }),
       ...(source.tags === undefined ? {} : { tags: arrayOfIds(source.tags, 'Goal tags') }),
       ...(source.plannedStartAt === undefined ? {} : { plannedStartAt: source.plannedStartAt === null ? null : finiteNumber(source.plannedStartAt, 'Goal planned start is invalid.') }),
@@ -625,18 +627,18 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (patchSource.priority !== undefined) patch.priority = demandPriority(patchSource.priority)
     if (patchSource.projectId !== undefined) patch.projectId = patchSource.projectId === null ? null : spaceControlId(patchSource.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true)
     if (patchSource.projectName !== undefined) patch.projectName = patchSource.projectName === null ? null : text(patchSource.projectName, 'Project name')
-    if (patchSource.assigneeSessionIds !== undefined) patch.assigneeSessionIds = arrayOfIds(patchSource.assigneeSessionIds, 'Goal assignee Sessions')
-    if (Object.hasOwn(patchSource, 'supervisorSessionId')) patch.supervisorSessionId = patchSource.supervisorSessionId === null ? null : id(patchSource.supervisorSessionId, 'Goal Supervisor Session is invalid.', 'INVALID_CONTROL_REQUEST')
+    if (patchSource.assigneeSessionIds !== undefined) patch.assigneeSessionIds = parseGoalAgentReferences(patchSource.assigneeSessionIds)
+    if (Object.hasOwn(patchSource, 'supervisorSessionId')) patch.supervisorSessionId = patchSource.supervisorSessionId === null ? null : parseGoalAgentReference(patchSource.supervisorSessionId)
     if (patchSource.activityLog !== undefined) patch.activityLog = arrayOfIds(patchSource.activityLog, 'Goal activities')
     if (patchSource.tags !== undefined) patch.tags = Array.isArray(patchSource.tags) ? patchSource.tags.map((tag) => text(tag, 'Demand tag')) : (() => { throw new AgentMuxError('Demand tags are invalid.', 'INVALID_CONTROL_REQUEST') })()
     if (patchSource.plannedStartAt !== undefined) patch.plannedStartAt = patchSource.plannedStartAt === null ? null : finiteNumber(patchSource.plannedStartAt, 'Demand planned start timestamp is invalid.')
     if (patchSource.targetAt !== undefined) patch.targetAt = patchSource.targetAt === null ? null : finiteNumber(patchSource.targetAt, 'Demand target timestamp is invalid.')
     if (patchSource.parentDemandId !== undefined) patch.parentDemandId = patchSource.parentDemandId === null ? null : id(patchSource.parentDemandId, 'Parent Demand id is invalid.', 'INVALID_CONTROL_REQUEST')
     if (patchSource.phaseIndex !== undefined) patch.phaseIndex = demandPhaseIndex(patchSource.phaseIndex)
-    if (patchSource.sessionIds !== undefined) patch.sessionIds = arrayOfIds(patchSource.sessionIds, 'Demand Session ids')
+    if (patchSource.sessionIds !== undefined) patch.sessionIds = parseGoalAgentReferences(patchSource.sessionIds)
     if (patchSource.contentRefs !== undefined) patch.contentRefs = contentReferences(patchSource.contentRefs)
     if (source.expectedUpdatedAt !== undefined && (!Number.isSafeInteger(source.expectedUpdatedAt) || (source.expectedUpdatedAt as number) < 0)) throw new AgentMuxError('Expected Goal update timestamp is invalid.', 'INVALID_CONTROL_REQUEST')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), patch,
+    return { ...(source.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(source.relationAccess) }), schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), patch,
       ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: source.expectedUpdatedAt as number }), ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) }) }
   }
   if (source.operation === 'demand.patrol-all') {
@@ -662,7 +664,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   }
   if (source.operation === 'demand.assign') {
     if (typeof source.start !== 'boolean') throw new AgentMuxError('Demand assignment start flag is invalid.', 'INVALID_CONTROL_REQUEST')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.projectId === undefined ? {} : { projectId: source.projectId === null ? null : spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }), ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: arrayOfIds(source.assigneeSessionIds, 'Goal assignee Sessions') }), ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : id(source.supervisorSessionId, 'Goal Supervisor is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: finiteNumber(source.expectedUpdatedAt, 'Expected Goal version is invalid.') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), start: source.start }
+    return { ...(source.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(source.relationAccess) }), schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.projectId === undefined ? {} : { projectId: source.projectId === null ? null : spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }), ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: parseGoalAgentReferences(source.assigneeSessionIds) }), ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : parseGoalAgentReference(source.supervisorSessionId) }), ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: finiteNumber(source.expectedUpdatedAt, 'Expected Goal version is invalid.') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), start: source.start }
   }
   if (source.operation === 'demand.start') {
     let continuation: { intervalMs: number; alignmentRevision: number } | undefined
@@ -681,7 +683,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST'), loopId: id(source.loopId, 'Loop id is invalid.', 'INVALID_CONTROL_REQUEST'), action: source.action as 'pause' | 'resume' | 'stop' | 'check', expectedRevision: source.expectedRevision as number, ...(owner ? { caller: owner } : {}) }
   }
   if (source.operation === 'demand.handoff') {
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: arrayOfIds(source.assigneeSessionIds, 'Goal assignee Sessions') }), ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : id(source.supervisorSessionId, 'Goal Supervisor is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: finiteNumber(source.expectedUpdatedAt, 'Expected Goal version is invalid.') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }) }
+    return { ...(source.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(source.relationAccess) }), schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: parseGoalAgentReferences(source.assigneeSessionIds) }), ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : parseGoalAgentReference(source.supervisorSessionId) }), ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: finiteNumber(source.expectedUpdatedAt, 'Expected Goal version is invalid.') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }) }
   }
   if (source.operation === 'demand.delete') {
     if (source.confirmation !== 'delete') throw new AgentMuxError('Demand deletion requires explicit confirmation.', 'INVALID_CONTROL_REQUEST')
@@ -1028,10 +1030,11 @@ function demandPhaseIndex(value: unknown, code: 'INVALID_CONTROL_REQUEST' | 'CON
 
 function parseDemand(value: unknown): AgentMuxDemand {
   const source = object(value, 'Control demand is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  const sessionIds = arrayOfIds(source.sessionIds, 'Control demand Session ids')
-  const assigneeSessionIds = arrayOfIds(source.assigneeSessionIds, 'Control Goal assignee Sessions')
-  const supervisorSessionId = source.supervisorSessionId === null ? null : id(source.supervisorSessionId, 'Control Goal Supervisor is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  if (new Set(assigneeSessionIds).size !== assigneeSessionIds.length || assigneeSessionIds.some(id => !sessionIds.includes(id)) || supervisorSessionId !== null && !assigneeSessionIds.includes(supervisorSessionId)) throw new AgentMuxError('Control Goal collaboration relations are inconsistent.', 'CONTROL_PROTOCOL_ERROR')
+  const sessionIds = parseGoalAgentReferences(source.sessionIds, 'CONTROL_PROTOCOL_ERROR')
+  const assigneeSessionIds = parseGoalAgentReferences(source.assigneeSessionIds, 'CONTROL_PROTOCOL_ERROR')
+  const supervisorSessionId = source.supervisorSessionId === null ? null : parseGoalAgentReference(source.supervisorSessionId, 'CONTROL_PROTOCOL_ERROR')
+  const relatedKeys = new Set(sessionIds.map(demandAgentReferenceKey)), assignedKeys = new Set(assigneeSessionIds.map(demandAgentReferenceKey))
+  if (assigneeSessionIds.some(ref => !relatedKeys.has(demandAgentReferenceKey(ref))) || supervisorSessionId !== null && !assignedKeys.has(demandAgentReferenceKey(supervisorSessionId))) throw new AgentMuxError('Control Goal collaboration relations are inconsistent.', 'CONTROL_PROTOCOL_ERROR')
   let participations: AgentMuxDemand['participations'], creationOrigin: AgentMuxDemand['creationOrigin']
   let goalFacts: Pick<AgentMuxDemand, 'alignment' | 'grounding' | 'dispatches' | 'delegations' | 'progressUpdates' | 'patrols' | 'plan'> = {}
   try {

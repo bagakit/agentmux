@@ -1,3 +1,4 @@
+import type { DemandAgentReference } from '@agentmux/demand/relations'
 import { execFile } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
@@ -49,7 +50,7 @@ export async function readContinuousProgressTaskSource(source: ContinuousProgres
   throw new Error('Task source lifecycle is unconfirmed; manual input remains available.')
 }
 
-export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: string[]; assigneeSessionIds: string[]; supervisorSessionId: string | null; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> }; plan?: GoalPlan; delegations?: DemandDelegation[] }
+export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: DemandAgentReference[]; assigneeSessionIds: DemandAgentReference[]; supervisorSessionId: DemandAgentReference | null; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> }; plan?: GoalPlan; delegations?: DemandDelegation[] }
 export type GoalProgressReader = (goalId: string) => Promise<GoalProgressRecord | null>
 export type GoalProgressDecision = { action: 'continue' | 'pause' | 'stop'; reason: string; continuation?: string }
 

@@ -1,10 +1,12 @@
+import { demandAgentReferenceKey, type DemandAgentReference, type DemandSpaceMemberReference } from './agent-reference.js'
+export * from './agent-reference.js'
 import type { Demand, DemandStatus } from './demand-types.js'
 import { delegationWorkerHostId } from './delegations.js'
 
 /** Saved witnesses only. Current Runtime discovery/control remains with the Host. */
 export function goalSupervisorHostWitnesses(goal: Partial<Pick<Demand, 'supervisorSessionId' | 'creationOrigin' | 'participations' | 'plan' | 'delegations'>>): readonly string[] {
   const sessionId = goal.supervisorSessionId
-  if (!sessionId) return []
+  if (typeof sessionId !== 'string') return []
   const requester = goal.participations?.find(item => item.id === goal.creationOrigin?.requesterParticipationId && item.agentSessionId === sessionId)
   return [...new Set([
     ...(requester ? [requester.hostId] : []),
@@ -23,6 +25,8 @@ export type GoalRelation = { goalId: string; title: string; status: DemandStatus
 export type GoalRelationSource = Pick<Demand, 'id' | 'title' | 'status'> & Partial<Pick<Demand,
   'sessionIds' | 'assigneeSessionIds' | 'supervisorSessionId' | 'participations' | 'dispatches' | 'delegations' | 'progressUpdates'>>
 export type DemandRelations = {
+  /** Source-qualified original relationship; never decoded as a Host-qualified identity. */
+  sourceQualified: ReadonlyMap<string, { reference: DemandSpaceMemberReference; relations: readonly GoalRelation[] }>
   qualified: ReadonlyMap<string, readonly GoalRelation[]>
   /** Original bare references, never a confirmed relationship to any Host. */
   unqualified: ReadonlyMap<string, readonly GoalRelation[]>
@@ -32,7 +36,8 @@ export const demandRelationKey = (hostId: string, agentSessionId: string) => JSO
 /** Read original business references; this projection grants no current-work or Runtime authority. */
 export function projectDemandRelations(goals: Iterable<GoalRelationSource>): DemandRelations {
   type Target = Map<string, { relation: GoalRelation; roles: Map<string, GoalRelationRole> }>
-  const qualified = new Map<string, Target>(), unqualified = new Map<string, Target>()
+  const qualified = new Map<string, Target>(), unqualified = new Map<string, Target>(), sourceQualified = new Map<string, Target>()
+  const sourceReferences = new Map<string, DemandSpaceMemberReference>()
   const add = (index: Map<string, Target>, key: string, goal: GoalRelationSource, role: GoalRelationRole) => {
     const targets = index.get(key) ?? new Map()
     let target = targets.get(goal.id)
@@ -41,7 +46,11 @@ export function projectDemandRelations(goals: Iterable<GoalRelationSource>): Dem
     index.set(key, targets)
   }
   for (const goal of goals) {
-    const bare = (sid: string, kind: GoalRelationRoleKind, field: string) => add(unqualified, sid, goal, { kind, source: { kind: 'assignment', id: field } })
+    const bare = (ref: DemandAgentReference, kind: GoalRelationRoleKind, field: string) => {
+      const role: GoalRelationRole = { kind, source: { kind: 'assignment', id: field } }
+      if (typeof ref === 'string') add(unqualified, ref, goal, role)
+      else { const key = demandAgentReferenceKey(ref); sourceReferences.set(key, ref); add(sourceQualified, key, goal, role) }
+    }
     const exact = (hostId: string, sid: string, kind: GoalRelationRoleKind, source: GoalRelationRole['source']) =>
       add(qualified, demandRelationKey(hostId, sid), goal, { kind, source })
     for (const sid of goal.sessionIds ?? []) bare(sid, 'related', 'sessionIds')
@@ -65,5 +74,5 @@ export function projectDemandRelations(goals: Iterable<GoalRelationSource>): Dem
   }
   const finish = (index: Map<string, Target>) => new Map([...index].map(([key, targets]) => [key,
     [...targets.values()].map(({ relation, roles }) => ({ ...relation, roles: [...roles.values()] }))]))
-  return { qualified: finish(qualified), unqualified: finish(unqualified) }
+  return { qualified: finish(qualified), unqualified: finish(unqualified), sourceQualified: new Map([...finish(sourceQualified)].map(([key, relations]) => [key, { reference: sourceReferences.get(key)!, relations }])) }
 }

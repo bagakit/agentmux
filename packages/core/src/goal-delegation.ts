@@ -1,3 +1,4 @@
+import { parseGoalAgentReference } from './goal-agent-reference.js'
 import { parseDemandPatrols, parseDemandPatrolReportInput, type DemandPatrol, type DemandPatrolReportInput } from '@agentmux/demand'
 import { parseGoalPatrolObservations, type GoalPatrolObservation } from './goal-patrol.js'
 import { type GoalDelegationMethod } from './goal-delegation-methods.js'
@@ -42,7 +43,7 @@ export type GoalDelegationParamsMap = {
 }
 export type GoalDelegationObservation = { operationId: string; communication?: DispatchObservation & { hostId: string }; workerRun?: Pick<AgentMuxRun, 'runId' | 'state'>; unknown?: string; recoverableReport?: DemandDelegationReportInput; attention?: { state: 'prepared' | 'confirmed' | 'unknown'; reason: string } }
 /** `planState` is the Goal owner's derivation of `plan`; a reader keeps the owner's rules and checks only that it describes this plan and these delegations. */
-export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; plan?: GoalPlan; planState?: GoalPlanState; planStateIssue?: string; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[]; progressUpdates?: DemandProgress[]; responsibility?: GoalResponsibilityObservation; patrols?: DemandPatrol[]; patrolObservations?: GoalPatrolObservation[]; goalState?: { status: import('@agentmux/demand').DemandStatus; supervisorSessionId: string | null; alignment?: import('@agentmux/demand').DemandAlignment } }
+export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; plan?: GoalPlan; planState?: GoalPlanState; planStateIssue?: string; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[]; progressUpdates?: DemandProgress[]; responsibility?: GoalResponsibilityObservation; patrols?: DemandPatrol[]; patrolObservations?: GoalPatrolObservation[]; goalState?: { status: import('@agentmux/demand').DemandStatus; supervisorSessionId: import('@agentmux/demand/relations').DemandAgentReference | null; alignment?: import('@agentmux/demand').DemandAlignment } }
 /** The worker submits a message at its own Core; it does not attest an update to the owner Goal. */
 export type GoalReportSubmissionResult = { kind: 'report-submission'; goalId: string; delegationOperationId: string;
   sourceMessageId: string; submission: AgentMuxRpcResult<'agent.send'> }
@@ -112,7 +113,7 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
   const goalState = p.goalState === undefined ? undefined : (() => {
     const state = record(p.goalState, ['status', 'supervisorSessionId', 'alignment'])
     if (!['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'].includes(String(state.status))) throw new AgentMuxError('Invalid original Goal business state.', 'CONTROL_PROTOCOL_ERROR')
-    return { status: state.status as import('@agentmux/demand').DemandStatus, supervisorSessionId: state.supervisorSessionId === null ? null : id(state.supervisorSessionId), ...(state.alignment === undefined ? {} : { alignment: parseAlignment(state.alignment) }) }
+    return { status: state.status as import('@agentmux/demand').DemandStatus, supervisorSessionId: state.supervisorSessionId === null ? null : parseGoalAgentReference(state.supervisorSessionId, 'CONTROL_PROTOCOL_ERROR'), ...(state.alignment === undefined ? {} : { alignment: parseAlignment(state.alignment) }) }
   })()
   const patrols = p.patrols === undefined ? undefined : parseDemandPatrols(p.patrols)
   const patrolObservations = p.patrolObservations === undefined ? undefined : parseGoalPatrolObservations(p.patrolObservations, (patrols ?? []).map(p => p.operationId))

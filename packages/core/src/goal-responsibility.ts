@@ -1,3 +1,5 @@
+import { parseGoalAgentReference } from './goal-agent-reference.js'
+import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { isDemandEvidenceReference } from '@agentmux/demand/goals'
 import { demandExecutionKey, demandHandoffDestinations, demandProgressBusinessCurrent, latestDemandProgress, sameDemandExecution, type Demand, type DemandExecutionReference,
   type DemandProgress, type DemandResponsibilityBasis } from '@agentmux/demand'
@@ -10,6 +12,7 @@ import { AgentMuxError } from './errors.js'
 export const GOAL_IDLE_GRACE_MS = 60_000
 export type GoalSupervisorObservation = {
   agentSessionId: string | null
+  agentReference?: DemandSpaceMemberReference
   hostId?: string
   runId?: string
   state: 'available' | 'busy' | 'blocked' | 'ended' | 'unknown' | 'missing'
@@ -22,7 +25,7 @@ export type GoalResponsibilityRow = {
   binding: 'confirmed' | 'unconfirmed' | 'ambiguous'
   phase: GoalResponsibilityPhase
   reason: string
-  nextOwner: { kind: 'worker' | 'manager' | 'human' | 'external'; agentSessionId: string | null; action: string }
+  nextOwner: { kind: 'worker' | 'manager' | 'human' | 'external'; agentSessionId: string | null; agentReference?: DemandSpaceMemberReference; action: string }
   alert: 'stalled' | 'error' | 'ended' | 'manager-review' | 'unknown' | null
   basis: DemandResponsibilityBasis
   observation?: AgentObservation
@@ -61,13 +64,13 @@ export function observeGoalExecution(goal: Demand, facts: GoalExecutionFacts, no
   const current = update && demandProgressBusinessCurrent(goal, update) ? update : undefined
   const row: GoalResponsibilityRow = { execution, binding: facts.inputConfirmed ? ambiguous ? 'ambiguous' : 'confirmed' : 'unconfirmed',
     phase: 'unknown', reason: facts.unknown ?? 'The original execution observation is unknown.', alert: 'unknown', basis,
-    nextOwner: { kind: 'manager', agentSessionId: goal.supervisorSessionId, action: 'Inspect the original execution and its input.' },
+    nextOwner: { kind: 'manager', agentSessionId: typeof goal.supervisorSessionId === 'string' ? goal.supervisorSessionId : null, ...(goal.supervisorSessionId && typeof goal.supervisorSessionId !== 'string' ? { agentReference: goal.supervisorSessionId } : {}), action: 'Inspect the original execution and its input.' },
     ...(status ? { observation: status.observation } : {}), ...(basis.stateEnteredAt ? { stateSince: basis.stateEnteredAt } : {}),
     ...(update ? { progress: update } : {}) }
   const set = (phase: GoalResponsibilityPhase, reason: string, alert: GoalResponsibilityRow['alert'],
     kind: GoalResponsibilityRow['nextOwner']['kind'] = 'manager', action = 'Inspect the original work and record its next responsibility.') => {
     row.phase = phase; row.reason = reason; row.alert = alert
-    row.nextOwner = { kind, agentSessionId: kind === 'worker' ? execution.agentSessionId : kind === 'manager' ? goal.supervisorSessionId : null, action }
+    row.nextOwner = { kind, agentSessionId: kind === 'worker' ? execution.agentSessionId : kind === 'manager' && typeof goal.supervisorSessionId === 'string' ? goal.supervisorSessionId : null, ...(kind === 'manager' && goal.supervisorSessionId && typeof goal.supervisorSessionId !== 'string' ? { agentReference: goal.supervisorSessionId } : {}), action }
     return row
   }
   if (goal.status === 'done' || goal.status === 'cancelled') return set('closed', 'This Goal is closed; original execution and evidence are retained.', null)
@@ -128,9 +131,15 @@ function time(value: unknown): number {
   return value
 }
 import { parseDemandExecutionReference, parseDemandProgress, parseDemandResponsibilityBasis } from '@agentmux/demand'
+function qualified(value: Record<string, unknown>): { agentReference?: DemandSpaceMemberReference } {
+  if (value.agentReference === undefined) return {}
+  const ref = parseGoalAgentReference(value.agentReference, 'CONTROL_PROTOCOL_ERROR')
+  if (typeof ref === 'string' || value.agentSessionId !== null) throw new AgentMuxError('Qualified management observation cannot also name a bare Session.', 'CONTROL_PROTOCOL_ERROR')
+  return { agentReference: ref }
+}
 export function parseGoalResponsibility(value: unknown, references: readonly DemandExecutionReference[]): GoalResponsibilityObservation {
   const p = record(value, ['scope', 'observedAt', 'supervisor', 'executions'])
-  const s = record(p.supervisor, ['agentSessionId', 'hostId', 'runId', 'state', 'reason'])
+  const s = record(p.supervisor, ['agentSessionId', 'agentReference', 'hostId', 'runId', 'state', 'reason'])
   if (!['available', 'busy', 'blocked', 'ended', 'unknown', 'missing'].includes(String(s.state))) throw new AgentMuxError('Invalid original Supervisor observation.', 'CONTROL_PROTOCOL_ERROR')
   if (!Array.isArray(p.executions)) throw new AgentMuxError('Goal responsibility requires original execution observations.', 'CONTROL_PROTOCOL_ERROR')
   const seen = new Set<string>()
@@ -142,7 +151,7 @@ export function parseGoalResponsibility(value: unknown, references: readonly Dem
     if (!['confirmed', 'unconfirmed', 'ambiguous'].includes(String(r.binding)) ||
       !['executing', 'idle-grace', 'stalled', 'needs-input', 'blocked', 'waiting-external', 'report-review', 'result-review', 'handed-off', 'ended', 'unknown', 'closed'].includes(String(r.phase)) ||
       r.alert !== null && !['stalled', 'error', 'ended', 'manager-review', 'unknown'].includes(String(r.alert))) throw new AgentMuxError('Invalid original responsibility phase.', 'CONTROL_PROTOCOL_ERROR')
-    const next = record(r.nextOwner, ['kind', 'agentSessionId', 'action'])
+    const next = record(r.nextOwner, ['kind', 'agentSessionId', 'agentReference', 'action'])
     if (!['worker', 'manager', 'human', 'external'].includes(String(next.kind))) throw new AgentMuxError('Invalid next responsibility.', 'CONTROL_PROTOCOL_ERROR')
     let observation: AgentObservation | undefined
     if (r.observation !== undefined) {
@@ -156,11 +165,11 @@ export function parseGoalResponsibility(value: unknown, references: readonly Dem
     if (progress && !sameDemandExecution(progress.execution, execution)) throw new AgentMuxError('Progress belongs to another execution.', 'CONTROL_PROTOCOL_ERROR')
     return { execution, binding: r.binding as GoalResponsibilityRow['binding'], phase: r.phase as GoalResponsibilityPhase,
       reason: text(r.reason), alert: r.alert as GoalResponsibilityRow['alert'], basis: parseDemandResponsibilityBasis(r.basis),
-      nextOwner: { kind: next.kind as GoalResponsibilityRow['nextOwner']['kind'], agentSessionId: next.agentSessionId === null ? null : text(next.agentSessionId), action: text(next.action) },
+      nextOwner: { kind: next.kind as GoalResponsibilityRow['nextOwner']['kind'], agentSessionId: next.agentSessionId === null ? null : text(next.agentSessionId), ...qualified(next), action: text(next.action) },
       ...(observation ? { observation } : {}), ...(r.stateSince === undefined ? {} : { stateSince: time(r.stateSince) }),
       ...(r.nextCheckAt === undefined ? {} : { nextCheckAt: time(r.nextCheckAt) }), ...(progress ? { progress } : {}) }
   })
   if (executions.length !== references.length) throw new AgentMuxError('Original execution observations are incomplete.', 'CONTROL_PROTOCOL_ERROR')
-  return { scope: text(p.scope), observedAt: time(p.observedAt), supervisor: { agentSessionId: s.agentSessionId === null ? null : text(s.agentSessionId),
+  return { scope: text(p.scope), observedAt: time(p.observedAt), supervisor: { agentSessionId: s.agentSessionId === null ? null : text(s.agentSessionId), ...qualified(s),
     state: s.state as GoalSupervisorObservation['state'], reason: text(s.reason), ...(s.hostId === undefined ? {} : { hostId: text(s.hostId) }), ...(s.runId === undefined ? {} : { runId: text(s.runId) }) }, executions }
 }

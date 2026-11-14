@@ -77,7 +77,7 @@ export class GoalDelegationAttentionOwner {
         if (delegation.collection) continue
         const ref = { goalId: goal.id, operationId: delegation.operationId }
         add(this.workers, key(delegationWorkerHostId(delegation), delegation.workerRunId), ref)
-        if (goal.supervisorSessionId) add(this.supervisors, key(delegation.hostId, goal.supervisorSessionId), ref)
+        if (typeof goal.supervisorSessionId === 'string') add(this.supervisors, key(delegation.hostId, goal.supervisorSessionId), ref)
         add(this.sources, key(delegation.hostId, delegation.sourceMessageId), ref)
         add(this.hosts, delegation.hostId, ref)
         if (delegationWorkerHostId(delegation) !== delegation.hostId) add(this.hosts, delegationWorkerHostId(delegation), ref)
@@ -116,6 +116,7 @@ export class GoalDelegationAttentionOwner {
     const goal = await this.demands.get(ref.goalId)
     const delegation = goal?.delegations?.find(item => item.operationId === ref.operationId)
     if (!goal || !delegation?.linkedAt || delegation.collection || !goal.supervisorSessionId) return
+    if (typeof goal.supervisorSessionId !== 'string') { this.issue(ref, 'This Source-qualified Supervisor has no approved automatic reminder contract. The original request and Agent remain retained.'); return }
     const scope = { controller: new AbortController(), supervisor: goal.supervisorSessionId, runId: delegation.attention?.supervisorRunId }
     this.scopes.set(key(ref.goalId, ref.operationId), scope)
     const signal = AbortSignal.any([this.controller.signal, scope.controller.signal])

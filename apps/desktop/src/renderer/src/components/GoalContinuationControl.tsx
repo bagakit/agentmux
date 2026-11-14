@@ -1,3 +1,4 @@
+import { demandAgentReferenceLabel, type DemandAgentReference } from '@agentmux/demand/relations'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -58,6 +59,7 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
     if (flight.current || mutation.current) return
     const alignment = demand.alignment
     if (!retry) {
+      if (supervisorId && typeof supervisorId !== 'string') { setError('Ongoing progress is not available for this Source-qualified Supervisor. Its relation and existing Agent remain retained; finite Start has its own explicit action.'); return }
       if (attempt.current || alignment?.confirmedAt == null || !supervisorId || !assigneeSessionIds.includes(supervisorId)) return
       attempt.current = { goalId: demand.id, sessionId: supervisorId, intervalMs: Number(minutes) * 60_000, alignmentRevision: alignment.revision, operationId: mintObjectId() }
     }
@@ -113,10 +115,11 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
       <div className="goals-continuation__actions">{(['pause', 'resume', 'check', 'stop'] as const).filter(action => action === 'stop' ? loop.status !== 'stopped' : action === 'resume' ? loop.status === 'paused' && loop.initialDelivery?.state === 'confirmed' : loop.status === 'active').map(action => <button type="button" className="small-button" key={action} disabled={busy || Boolean(mutation.current) || !Number.isSafeInteger(loop.revision) || !loop.revision} onClick={() => mutate(loop, action)}>{action === 'check' ? 'Check now' : action.charAt(0).toUpperCase() + action.slice(1)}</button>)}</div>
     </div>)}
     {!currentLoops.some(loop => loop.status !== 'stopped') && observedGoal === demand.id ? <details className="goals-continuation__configure"><summary>Configure ongoing progress</summary>
-      <div className="goals-supervisor-identity"><div><span>Supervisor</span>{supervisorId && supervisorHost ? <GoalContinuationAgent agentSessionId={supervisorId} hostId={supervisorHost} active={active} size={20} />
-        : <span>{supervisorId ? `Reference ${supervisorId} · Host unconfirmed` : 'Choose an execution Agent to supervise.'}</span>}</div>
+      <div className="goals-supervisor-identity"><div><span>Supervisor</span>{typeof supervisorId === 'string' && supervisorHost ? <GoalContinuationAgent agentSessionId={supervisorId} hostId={supervisorHost} active={active} size={20} />
+        : <span>{supervisorId ? `Reference ${demandAgentReferenceLabel(supervisorId)} · current access unconfirmed` : 'Choose an execution Agent to supervise.'}</span>}</div>
         <button type="button" className="small-button" disabled={busy} onClick={openSupervisor}>{supervisorId ? 'Edit Supervisor' : 'Choose Supervisor'}</button></div>
-      {supervisorId ? <form className="goals-continuation__start" onSubmit={event => { event.preventDefault(); start() }}>
+      {supervisorId && typeof supervisorId !== 'string' ? <p className="goals-service">Ongoing progress is not available for this Source-qualified Supervisor. The relation, existing Agent and original loops remain retained.</p> : null}
+      {typeof supervisorId === 'string' ? <form className="goals-continuation__start" onSubmit={event => { event.preventDefault(); start() }}>
       <label className="goals-continuation__interval">Check every<TextInput aria-label="Goal continuation minutes" type="number" min="1" value={minutes} disabled={busy || Boolean(attempt.current)} onChange={event => setMinutes(event.target.value)} /> minutes</label>
       <button type="submit" className="small-button" disabled={busy || Boolean(mutation.current) || Boolean(attempt.current) || demand.alignment?.confirmedAt == null || !assigneeSessionIds.includes(supervisorId) || !Number.isFinite(Number(minutes)) || Number(minutes) < 1}>Start and continue</button>
       {demand.alignment?.confirmedAt == null ? <p className="goals-service">Confirm this Goal’s scope before enabling automatic work.</p> : null}
@@ -140,7 +143,11 @@ function continuationAgentPresentation(state: ReturnType<typeof useAppStore.getS
     appearance: session ? state.config?.executors[session.executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[session.executorId] : undefined
   }
 }
-export function GoalContinuationAgent({ agentSessionId, hostId, active, size }: { agentSessionId: string; hostId?: string; active: boolean; size: number }) {
+export function GoalContinuationAgent({ agentSessionId, hostId, active, size }: { agentSessionId: DemandAgentReference; hostId?: string; active: boolean; size: number }) {
+  return typeof agentSessionId === 'string' ? <LegacyGoalContinuationAgent agentSessionId={agentSessionId} {...(hostId === undefined ? {} : { hostId })} active={active} size={size} />
+    : <strong title={demandAgentReferenceLabel(agentSessionId)}>{demandAgentReferenceLabel(agentSessionId)}</strong>
+}
+function LegacyGoalContinuationAgent({ agentSessionId, hostId, active, size }: { agentSessionId: string; hostId?: string; active: boolean; size: number }) {
   const firstPrompt = useMemo(() => {
     let id = agentSessionId, read = createFirstPromptSelector(agentSessionId)
     return (state: ReturnType<typeof useAppStore.getState>, sessionId: string) => {

@@ -1,3 +1,4 @@
+import type { DemandAgentReference } from '@agentmux/demand/relations'
 import type { DemandContentReference } from '@agentmux/demand'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
@@ -24,8 +25,8 @@ export type DemandRecord = {
   priority: DemandPriority
   projectId: string | null
   projectName: string | null
-  assigneeSessionIds?: string[]
-  supervisorSessionId?: string | null
+  assigneeSessionIds?: DemandAgentReference[]
+  supervisorSessionId?: DemandAgentReference | null
   participations?: import('@agentmux/demand').DemandParticipation[]
   creationOrigin?: import('@agentmux/demand').DemandCreationOrigin
   tags?: string[]
@@ -34,7 +35,7 @@ export type DemandRecord = {
   parentDemandId?: string | null
   phaseIndex?: number | null
   activityLog?: string[]
-  sessionIds: string[]
+  sessionIds: DemandAgentReference[]
   contentRefs?: DemandContentReference[]
   createdAt: number
   updatedAt: number
@@ -79,11 +80,11 @@ export function projectDemands(
     .map((demand) => ({
       ...demand,
       sessions: demand.sessionIds.flatMap((sessionId) => {
-        const session = sessionById.get(sessionId)
+        const session = typeof sessionId === 'string' ? sessionById.get(sessionId) : undefined
         return session ? [session] : []
       }),
       workspacePath: demand.sessionIds
-        .map((sessionId) => sessionById.get(sessionId)?.workspacePath ?? null)
+        .map((sessionId) => typeof sessionId === 'string' ? sessionById.get(sessionId)?.workspacePath ?? null : null)
         .find((path): path is string => Boolean(path)) ?? null
     }))
 }

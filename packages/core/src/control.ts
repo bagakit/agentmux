@@ -1,3 +1,6 @@
+export type { GoalRelationAccess, GoalRuntimeAccess, GoalQualifiedAccess } from './goal-agent-reference.js'
+import type { DemandAgentReference } from '@agentmux/demand/relations'
+import type { GoalRelationAccess } from './goal-agent-reference.js'
 import { SETTINGS_PREFERENCE_METHODS } from './settings-preferences.js'
 import type { AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import type { RendererAllocationsInput, RendererAllocationsResult } from './renderer-allocations.js'
@@ -457,8 +460,8 @@ export type AgentMuxDemand = {
   projectId: string | null
   projectName: string | null
   executorId?: string | null
-  assigneeSessionIds: string[]
-  supervisorSessionId: string | null
+  assigneeSessionIds: DemandAgentReference[]
+  supervisorSessionId: DemandAgentReference | null
   tags?: string[]
   plannedStartAt?: number | null
   targetAt?: number | null
@@ -479,7 +482,7 @@ export type AgentMuxDemand = {
   participations: import('@agentmux/demand').DemandParticipation[]
   creationOrigin?: import('@agentmux/demand').DemandCreationOrigin
   discussionOperationId?: string
-  sessionIds: string[]
+  sessionIds: DemandAgentReference[]
   contentRefs?: DemandContentReference[]
   createdAt: number
   updatedAt: number
@@ -501,6 +504,7 @@ export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'deman
 export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string; dispatchOperationId?: string }
 export type AgentMuxControlDemandCreateRequest = RequestBase & {
   operation: 'demand.create'
+  relationAccess?: GoalRelationAccess[]
   /** Caller-held original identity allows reading an uncertain save without creating again. */
   demandId?: string
   title: string
@@ -508,9 +512,9 @@ export type AgentMuxControlDemandCreateRequest = RequestBase & {
   projectId?: string
   priority?: AgentMuxDemandPriority
   status?: AgentMuxDemandStatus
-  assigneeSessionIds?: string[]
-  supervisorSessionId?: string | null
-  sessionIds?: string[]
+  assigneeSessionIds?: DemandAgentReference[]
+  supervisorSessionId?: DemandAgentReference | null
+  sessionIds?: DemandAgentReference[]
   contentRefs?: DemandContentReference[]
   tags?: string[]
   plannedStartAt?: number | null
@@ -521,6 +525,7 @@ export type AgentMuxControlDemandCreateRequest = RequestBase & {
 }
 export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   operation: 'demand.update'
+  relationAccess?: GoalRelationAccess[]
   expectedUpdatedAt?: number
   demandId: string
   patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
@@ -535,11 +540,12 @@ export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'dema
 export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
 export type AgentMuxControlDemandAssignRequest = RequestBase & {
   operation: 'demand.assign'
+  relationAccess?: GoalRelationAccess[]
   demandId: string
   sessionId?: string
   projectId?: string | null
-  assigneeSessionIds?: string[]
-  supervisorSessionId?: string | null
+  assigneeSessionIds?: DemandAgentReference[]
+  supervisorSessionId?: DemandAgentReference | null
   start: boolean
   expectedUpdatedAt?: number
 }
@@ -557,9 +563,10 @@ export type AgentMuxControlDemandContinuationActionRequest = RequestBase & {
 }
 export type AgentMuxControlDemandHandoffRequest = RequestBase & {
   operation: 'demand.handoff'
+  relationAccess?: GoalRelationAccess[]
   demandId: string
-  assigneeSessionIds?: string[]
-  supervisorSessionId?: string | null
+  assigneeSessionIds?: DemandAgentReference[]
+  supervisorSessionId?: DemandAgentReference | null
   sessionId?: string
   expectedUpdatedAt?: number
 }

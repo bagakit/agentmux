@@ -19,7 +19,7 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
     const byId = agentSessionPresentationIndex(state.sessions)
     let count = 0, unconfirmed = 0; const statuses = new Set<string>()
     for (const id of demand.sessionIds) {
-      const matches = byId.get(id), session = matches?.length === 1 ? matches[0] : undefined
+      const matches = typeof id === 'string' ? byId.get(id) : undefined, session = matches?.length === 1 ? matches[0] : undefined
       if (session) { count++; statuses.add(session.status.state.replaceAll('_', ' ')) } else unconfirmed++
     }
     const focused = selectedSessionId ? byId.get(selectedSessionId) : undefined

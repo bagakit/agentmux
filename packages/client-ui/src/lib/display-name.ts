@@ -1,4 +1,8 @@
 import type { AgentTimelineSnapshot } from '@agentmux/core'
+/** Display-only abbreviation. Original identity and addressing keys keep their full bytes. */
+export function compactReferenceId(value: string): string {
+  return value.length > 20 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
+}
 /**
  * 显示名的唯一求值处。
  *

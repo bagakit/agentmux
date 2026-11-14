@@ -1,3 +1,4 @@
+import { demandAgentReferenceKey, mergeDemandAgentReferences } from '@agentmux/demand/relations'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
@@ -9,7 +10,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { clearGoalAgentCreationDraft, clearGoalAgentSelectionDraft, retainGoalAgentCreationDraft, retainGoalAgentSelectionDraft, useAppStore, type LauncherExecutionSelection } from '../store'
 import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
-import { goalAgentRows, goalCreationDraftKey, type GoalAgentCreationDraft, type GoalAgentSelectionDraft, type GoalAgentRole, type GoalAgentRow } from '../lib/goal-agent-selection'
+import { goalAgentRows, goalAgentRowReference, goalAgentSelectionKey, goalCreationDraftKey, readGoalAgentSelectionDraft, type GoalAgentCreationDraft, type GoalAgentSelectionDraft, type GoalAgentRole, type GoalAgentRow } from '../lib/goal-agent-selection'
 import { projectWorkspaces, workspaceProjectId } from '../lib/workspace-projects'
 import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
 import { executorsForHost, hostExecutorInventoryMatches } from '../lib/executors'
@@ -38,12 +39,18 @@ export function GoalAgentFace({ row }: { row: GoalAgentRow }) {
 
 /** One editor for explicit business relationships; creation uses the original spatial/Core owner. */
 export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: DemandRecord; role: GoalAgentRole; onSave: GoalRelationSave; onClose(): void }) {
+  const raw = useAppStore(state => state.goalAgentSelectionDrafts[goalCreationDraftKey(demand.id, role)])
+  const saved = useMemo(() => readGoalAgentSelectionDraft(raw, demand.id, role), [raw, demand.id, role])
+  if (raw !== undefined && !saved) return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" /><Dialog.Content className="confirmation-dialog dialog-surface goal-agent-picker"><Dialog.Title className="confirmation-dialog__title">Original selection retained</Dialog.Title><Dialog.Description>This version cannot read the original selection. Its saved bytes and other drafts remain intact; no relationship or Agent action was submitted.</Dialog.Description><details className="goal-team__identity-details"><summary>Original selection details</summary><code>{JSON.stringify(raw)}</code></details><footer><button type="button" className="small-button" onClick={onClose}>Close</button></footer></Dialog.Content></DocumentOverlayPortal></Dialog.Root>
+  return <GoalAgentPickerEditor key={goalCreationDraftKey(demand.id, role)} demand={demand} role={role} saved={saved} onSave={onSave} onClose={onClose} />
+}
+function GoalAgentPickerEditor({ demand, role, saved, onSave, onClose }: { demand: DemandRecord; role: GoalAgentRole; saved: GoalAgentSelectionDraft | undefined; onSave: GoalRelationSave; onClose(): void }) {
   const document = useWorkbenchDocument()
   const state = useAppStore(useShallow(state => ({ sessions: state.sessions, config: state.config, agentNames: state.agentNames,
     timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots, hostExecutorInventories: state.hostExecutorInventories,
     executorDetections: state.executorDetections })))
   const draft = useAppStore(state => state.goalAgentCreationDrafts[goalCreationDraftKey(demand.id, role)])
-  const initialSelection = useRef<GoalAgentSelectionDraft>(useAppStore.getState().goalAgentSelectionDrafts[goalCreationDraftKey(demand.id, role)] ?? {
+  const initialSelection = useRef<GoalAgentSelectionDraft>(saved ?? {
     goalId: demand.id, role, selected: role === 'assignees' ? demand.assigneeSessionIds ?? [] : role === 'related' ? demand.sessionIds : demand.supervisorSessionId ? [demand.supervisorSessionId] : [], expectedUpdatedAt: demand.updatedAt })
   const [selection, setSelection] = useState(initialSelection.current)
   const { selected, expectedUpdatedAt, replacement } = selection
@@ -52,7 +59,7 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
     const next = { ...selectionRef.current, ...patch }; selectionRef.current = next; setSelection(next)
     void retainGoalAgentSelectionDraft(next)
   }
-  function addCreatedSession(id: string) { changeSelection({ selected: [...new Set([...selectionRef.current.selected, id])] }); setMode('existing') }
+  function addCreatedSession(id: string) { changeSelection({ selected: mergeDemandAgentReferences(selectionRef.current.selected, [id]) }); setMode('existing') }
   useEffect(() => { void retainGoalAgentSelectionDraft(initialSelection.current) }, [])
   const [query, setQuery] = useState(''), [mode, setMode] = useState<'existing' | 'mote' | 'agent'>('existing')
   const [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null)
@@ -82,9 +89,9 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
   const observed = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch)
   const motes = observed?.filter(topic => !topic.readError && scratchTopicKind(topic.id, observed) === 'mote') ?? []
   const rows = useMemo(() => goalAgentRows(state, demand, [...selected, ...(role === 'supervisor' ? demand.assigneeSessionIds ?? [] : [])]), [state, demand, selected, role])
-    .filter(row => role !== 'supervisor' || (demand.assigneeSessionIds ?? []).includes(row.id))
+    .filter(row => role !== 'supervisor' || (demand.assigneeSessionIds ?? []).some(ref => demandAgentReferenceKey(ref) === demandAgentReferenceKey(goalAgentRowReference(row))))
   const filtered = rows.filter(row => `${row.name} ${row.context} ${row.status} ${row.id}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
-  const removingSupervisor = role === 'assignees' && demand.supervisorSessionId && !selected.includes(demand.supervisorSessionId)
+  const removingSupervisor = role === 'assignees' && demand.supervisorSessionId && !selected.some(ref => demandAgentReferenceKey(ref) === demandAgentReferenceKey(demand.supervisorSessionId!))
   const changed = expectedUpdatedAt !== demand.updatedAt
 
   function observe(result: AgentMuxSpaceMutationReport) {
@@ -155,11 +162,12 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
     const patch = role === 'supervisor' ? { supervisorSessionId: selected[0] ?? null }
       : role === 'related' ? { sessionIds: selected }
       : { assigneeSessionIds: selected, ...(removingSupervisor ? { supervisorSessionId: replacement || null } : {}) }
+    const submittedSelection = selectionRef.current
     setBusy(true); setIssue(null)
     try {
       if (!await onSave(patch, expectedUpdatedAt)) { setIssue('Relationships are not saved. Your selected Agents and created Session are retained. Review the current Goal and retry.'); return }
       if (draft && report?.agent?.createOperationId === draft.operationId && report.agent.creationPersistence !== 'unconfirmed' && report.save.diskDurability === 'confirmed') await clearGoalAgentCreationDraft(demand.id, draft.role, draft.operationId)
-      await clearGoalAgentSelectionDraft(demand.id, role)
+      await clearGoalAgentSelectionDraft(demand.id, role, submittedSelection)
       onClose()
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
     finally { setBusy(false) }
@@ -194,11 +202,11 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
             <div className="goal-agent-picker__rows" aria-label={`Choose ${labels[role].toLowerCase()}`}>
               {role === 'supervisor' ? <label className="goal-agent-picker__row"><input type="radio" name="goal-supervisor" checked={!selected.length} disabled={busy} onChange={() => changeSelection({ selected: [] })} /><span><strong>No Supervisor</strong><small>Explicitly clear the selection</small></span></label> : null}
               {filtered.map(row => {
-                const required = role === 'related' && (demand.assigneeSessionIds ?? []).includes(row.id)
-                return <label key={row.id} className="goal-agent-picker__row" data-session-id={row.id}>
-                  <input type={role === 'supervisor' ? 'radio' : 'checkbox'} name={role === 'supervisor' ? 'goal-supervisor' : undefined} checked={selected.includes(row.id)} disabled={busy || required || !row.selectable && !selected.includes(row.id)}
-                    onChange={event => changeSelection({ selected: role === 'supervisor' ? [row.id] : event.target.checked ? [...selected, row.id] : selected.filter(id => id !== row.id) })} />
-                  <GoalAgentFace row={row} /><span><strong>{row.name} <AgentWorkModeBadge source={row.session} hosts={state.config?.hosts} embedded /></strong><small>{row.context}</small><small>{row.status}{required ? ' · Assignee retains this relationship' : row.related ? ' · Related to this Goal' : row.participated ? ' · Participated in this Goal' : row.project ? ' · Bound Project' : ''}</small><small className="goal-agent-picker__identity">{row.id}</small></span>
+                const required = role === 'related' && (demand.assigneeSessionIds ?? []).some(ref => demandAgentReferenceKey(ref) === demandAgentReferenceKey(goalAgentRowReference(row)))
+                return <label key={row.id} className="goal-agent-picker__row" data-goal-agent-key={row.id} data-session-id={typeof row.reference === 'string' ? row.reference : undefined}>
+                  <input type={role === 'supervisor' ? 'radio' : 'checkbox'} name={role === 'supervisor' ? 'goal-supervisor' : undefined} checked={selected.some(ref => goalAgentSelectionKey(ref) === row.id)} disabled={busy || required || !row.selectable && !selected.some(ref => goalAgentSelectionKey(ref) === row.id)}
+                    onChange={event => changeSelection({ selected: role === 'supervisor' ? [goalAgentRowReference(row)] : event.target.checked ? mergeDemandAgentReferences(selected, [goalAgentRowReference(row)]) : selected.filter(ref => goalAgentSelectionKey(ref) !== row.id) })} />
+                  <GoalAgentFace row={row} /><span><strong>{row.name} {typeof row.reference === 'string' ? <AgentWorkModeBadge source={row.session} hosts={state.config?.hosts} embedded /> : null}</strong><small>{row.context}</small><small>{row.status}{required ? ' · Assignee retains this relationship' : row.related ? ' · Related to this Goal' : row.participated ? ' · Participated in this Goal' : row.project ? ' · Bound Project' : ''}</small>{typeof row.reference === 'string' ? <small className="goal-agent-picker__identity">{row.reference}</small> : <details className="goal-team__identity-details"><summary>Reference details</summary><code>{JSON.stringify(row.reference)}</code></details>}</span>
                 </label>
               })}
               {!filtered.length ? <p className="goals-muted">{query ? 'No matching Agents.' : role === 'supervisor' ? 'Choose an assignee first.' : 'No Agent Sessions are currently observed. Saved references remain.'}</p> : null}
@@ -228,7 +236,7 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
             {mode === 'mote' || draft ? <button type="button" className="primary-button" disabled={busy} onClick={() => void createSession()}><ThemeActionCreateAgentIcon size={13} />{draft ? draft.phase === 'not-dispatched' ? 'Save selection and create once' : 'Check original creation' : 'Create Mote Session'}</button> : null}
             <p className="goals-caption">Creation sends no task. Save the relationship below; Continue is a separate action.</p>
           </div>}
-          {removingSupervisor ? <label className="goal-agent-picker__replacement">Current Supervisor is being removed<SelectionField key={JSON.stringify([demand.id, role])} label="Replacement Supervisor" value={replacement ?? '__choose__'} options={[{ value: '__choose__', label: 'Choose replacement or clear…', disabled: true }, { value: '', label: 'Clear Supervisor' }, ...rows.filter(row => selected.includes(row.id)).map(row => ({ value: row.id, label: row.name }))]} onValueChange={replacement => changeSelection({ replacement })} /></label> : null}
+          {removingSupervisor ? <label className="goal-agent-picker__replacement">Current Supervisor is being removed<SelectionField key={JSON.stringify([demand.id, role])} label="Replacement Supervisor" value={replacement === undefined ? '__choose__' : replacement === '' ? '' : goalAgentSelectionKey(replacement)} options={[{ value: '__choose__', label: 'Choose replacement or clear…', disabled: true }, { value: '', label: 'Clear Supervisor' }, ...rows.filter(row => selected.some(ref => goalAgentSelectionKey(ref) === row.id)).map(row => ({ value: row.id, label: row.name }))]} onValueChange={key => { const original = selected.find(ref => goalAgentSelectionKey(ref) === key); if (key === '') changeSelection({ replacement: '' }); else if (original !== undefined) changeSelection({ replacement: original }); else setIssue('The selected Supervisor reference changed. Keep the original draft and review the current selection.') }} /></label> : null}
           {draft ? <div className="goal-agent-picker__receipt" role="status"><strong>{report?.agent?.createOperationId === draft.operationId ? 'Original Session observed' : draft.phase === 'not-dispatched' ? 'Creation has not been dispatched' : 'Creation confirmation pending'}</strong>
             <span>{report?.agent?.agentSessionId ?? draft.operationId}</span><span>Creation: {report?.agent ? report.agent.creationPersistence === 'unconfirmed' ? 'Saving unconfirmed' : 'Recorded by Core' : 'Unconfirmed'} · Task: {report?.agent?.initialPrompt === 'not-requested' ? 'Not sent' : 'Not confirmed'} · Relationship: Save separately</span>
             {report?.issues.map((entry, index) => <span key={index}>{entry.message}</span>)}<button type="button" className="small-button" disabled={busy} onClick={() => { if (draft.phase === 'not-dispatched') void dispatchOriginal(draft); else void inspectOriginal(draft) }}>{draft.phase === 'not-dispatched' ? 'Save selection and create once' : 'Check original operation'}</button></div> : null}

@@ -1,3 +1,4 @@
+import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { DemandRecord } from './global-demand-board'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { agentSessionPresentationIndex } from './session-presentation'
@@ -19,7 +20,7 @@ export function goalTeamIdentities(goal: DemandRecord) {
   }
   for (const node of goal.plan?.nodes ?? []) if (node.executor) add(node.executor, ['planned-executor'])
   const supervisorHosts = goalSupervisorHostWitnesses(goal)
-  if (goal.supervisorSessionId && supervisorHosts.length === 1) {
+  if (typeof goal.supervisorSessionId === 'string' && supervisorHosts.length === 1) {
     const subject = { hostId: supervisorHosts[0]!, agentSessionId: goal.supervisorSessionId }, key = collaborationSubjectKey(subject)
     add(subject, ['supervisor']); identities.set(key, { ...identities.get(key)!, currentSupervisor: true })
   }
@@ -29,17 +30,17 @@ export function goalTeamIdentities(goal: DemandRecord) {
 
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
 export type GoalTeamActor = { key: string; session: Agent; identity: GoalTeamIdentity; roles: readonly GoalAgentRole[]; recommended: boolean }
-export type GoalTeamGroup = { id: string; roles: readonly GoalAgentRole[]; identities: readonly GoalTeamIdentity[]; actors: readonly GoalTeamActor[]; unconfirmedRoles: readonly GoalAgentRole[] }
+export type GoalTeamGroup = { id: string; legacySessionId?: string; reference?: DemandSpaceMemberReference; roles: readonly GoalAgentRole[]; identities: readonly GoalTeamIdentity[]; actors: readonly GoalTeamActor[]; unconfirmedRoles: readonly GoalAgentRole[] }
 type Team = { groups: readonly GoalTeamGroup[]; actors: readonly GoalTeamActor[] }
 const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((item, i) => item === b[i])
 
 /** Read only this Goal's original references through the shared inventory index.
  * A bare reference never selects the first Host or synthesizes an Actor. */
 export function createGoalTeamSelector(goal: DemandRecord, references = goalTeamIdentities(goal)) {
-  const roles = new Map<string, GoalAgentRole[]>()
+  const roles = new Map<string, { reference: string | DemandSpaceMemberReference; roles: GoalAgentRole[] }>()
   for (const [role, ids] of [['supervisor', goal.supervisorSessionId ? [goal.supervisorSessionId] : []],
     ['assignees', goal.assigneeSessionIds ?? []], ['related', goal.sessionIds]] as const) {
-    for (const id of ids) roles.set(id, [...new Set([...roles.get(id) ?? [], role])])
+    for (const reference of ids) { const key = demandAgentReferenceKey(reference), previous = roles.get(key); roles.set(key, { reference, roles: [...new Set([...previous?.roles ?? [], role])] }) }
   }
   let held: Team = { groups: [], actors: [] }
   let sessions: readonly SessionSnapshot[] | undefined
@@ -47,18 +48,20 @@ export function createGoalTeamSelector(goal: DemandRecord, references = goalTeam
     if (sessions === state.sessions) return held
     sessions = state.sessions
     const index = agentSessionPresentationIndex(state.sessions)
-    const groups = new Map<string, { id: string; roles: GoalAgentRole[]; identities: GoalTeamIdentity[] }>()
+    const groups = new Map<string, { id: string; legacySessionId?: string; reference?: DemandSpaceMemberReference; roles: GoalAgentRole[]; identities: GoalTeamIdentity[] }>()
     for (const identity of references.identities.values()) {
-      const id = identity.subject.agentSessionId, group = groups.get(id) ?? { id, roles: [], identities: [] }
+      const legacySessionId = identity.subject.agentSessionId, id = demandAgentReferenceKey(legacySessionId), group = groups.get(id) ?? { id, legacySessionId, roles: [], identities: [] }
       group.identities.push(identity); groups.set(id, group)
     }
-    for (const [originalId, assigned] of roles) {
+    for (const [key, { reference, roles: assigned }] of roles) {
+      if (typeof reference !== 'string') { groups.set(key, { id: key, reference, roles: assigned, identities: [] }); continue }
+      const originalId = reference
       // A retained presentation alias may join an already qualified original
       // subject; the alias itself supplies no new Host or write authority.
       const presentation = goalAgentPresentation(index.get(originalId) ?? [], originalId)
       const canonical = presentation && references.identities.has(collaborationSubjectKey(presentation.control)) ? presentation.control.agentSessionId : originalId
-      const group = groups.get(canonical) ?? { id: canonical, roles: [], identities: [] }
-      group.roles = [...new Set([...group.roles, ...assigned])]; groups.set(canonical, group)
+      const groupKey = demandAgentReferenceKey(canonical), group = groups.get(groupKey) ?? { id: groupKey, legacySessionId: canonical, roles: [], identities: [] }
+      group.roles = [...new Set([...group.roles, ...assigned])]; groups.set(groupKey, group)
     }
     const oldActors = new Map(held.actors.map(actor => [actor.key, actor])), oldGroups = new Map(held.groups.map(group => [group.id, group]))
     let recommendations = 0

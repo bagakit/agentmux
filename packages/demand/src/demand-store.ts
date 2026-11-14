@@ -1,3 +1,4 @@
+import { parseDemandAgentReference, parseDemandAgentReferences, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from './agent-reference.js'
 import { parseDemandDiscussionIntent, type DemandDiscussionIntent } from './discussion.js'
 import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
 import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
@@ -210,10 +211,11 @@ function parseDemand(value: unknown, label: string): Demand {
   const targetAt = record.targetAt === undefined || record.targetAt === null ? null : timestamp(record.targetAt, `${label}.targetAt`)
   const parentDemandId = record.parentDemandId === undefined ? null : nullableString(record.parentDemandId, `${label}.parentDemandId`)
   const activities = record.activities.map((entry, index) => parseActivity(entry, `${label}.activities[${index}]`))
-  const sessionIds = stringArray(record.sessionIds, `${label}.sessionIds`)
-  const assigneeSessionIds = record.assigneeSessionIds === undefined ? [] : stringArray(record.assigneeSessionIds, `${label}.assigneeSessionIds`)
-  const supervisorSessionId = record.supervisorSessionId === undefined ? null : nullableString(record.supervisorSessionId, `${label}.supervisorSessionId`)
-  if (assigneeSessionIds.some(id => !sessionIds.includes(id)) || supervisorSessionId !== null && !assigneeSessionIds.includes(supervisorSessionId)) throw new Error(`${label} has inconsistent collaboration relations`)
+  const sessionIds = parseDemandAgentReferences(record.sessionIds)
+  const assigneeSessionIds = record.assigneeSessionIds === undefined ? [] : parseDemandAgentReferences(record.assigneeSessionIds)
+  const supervisorSessionId = record.supervisorSessionId === undefined ? null : record.supervisorSessionId === null ? null : parseDemandAgentReference(record.supervisorSessionId)
+  const related = new Set(sessionIds.map(demandAgentReferenceKey)), assigned = new Set(assigneeSessionIds.map(demandAgentReferenceKey))
+  if (assigneeSessionIds.some(ref => !related.has(demandAgentReferenceKey(ref))) || supervisorSessionId !== null && !assigned.has(demandAgentReferenceKey(supervisorSessionId))) throw new Error(`${label} has inconsistent collaboration relations`)
   const participations = parseDemandParticipations(record.participations ?? [])
   const creationOrigin = record.creationOrigin === undefined ? undefined : parseDemandCreationOrigin(record.creationOrigin)
   if (record.discussionIntent !== undefined && record.discussionOperationId === undefined) throw new Error(`${label} has no original discussion operation`)
@@ -428,7 +430,7 @@ export class DemandStore {
       if (original && options.discussionOperationId && original.discussionOperationId === options.discussionOperationId && original.creationOrigin?.operationId === operationId) {
         const expected = { title, description: input.description ?? '', projectId: input.projectId ?? null, priority: input.priority ?? 'normal', status: input.status ?? 'backlog',
           assigneeSessionIds: [...(input.assigneeSessionIds ?? [])], supervisorSessionId: input.supervisorSessionId ?? null,
-          sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])], tags: [...(input.tags ?? [])],
+          sessionIds: mergeDemandAgentReferences(input.sessionIds ?? [], input.assigneeSessionIds ?? []), tags: [...(input.tags ?? [])],
           plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: phaseIndex(input.phaseIndex, 'phaseIndex'), contentRefs: input.contentRefs }
         if (Object.entries(expected).some(([key, value]) => JSON.stringify(original[key as keyof Demand]) !== JSON.stringify(value)))
           throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal creation is retained but its current content differs. Inspect that same Goal without creating another.')
@@ -452,7 +454,7 @@ export class DemandStore {
         targetAt: input.targetAt ?? null,
         parentDemandId: input.parentDemandId ?? null,
         phaseIndex: phaseIndex(input.phaseIndex, 'phaseIndex'),
-        sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])],
+        sessionIds: mergeDemandAgentReferences(input.sessionIds ?? [], input.assigneeSessionIds ?? []),
         assigneeSessionIds: [...(input.assigneeSessionIds ?? [])],
         supervisorSessionId: input.supervisorSessionId ?? null,
         participations: [],
@@ -1006,7 +1008,7 @@ export class DemandStore {
       if (patch.sessionIds !== undefined) demand.sessionIds = [...patch.sessionIds]
       if (patch.assigneeSessionIds !== undefined) {
         demand.assigneeSessionIds = [...patch.assigneeSessionIds]
-        demand.sessionIds = [...new Set([...demand.sessionIds, ...patch.assigneeSessionIds])]
+        demand.sessionIds = mergeDemandAgentReferences(demand.sessionIds, patch.assigneeSessionIds)
       }
       if (Object.hasOwn(patch, 'supervisorSessionId')) {
         demand.supervisorSessionId = patch.supervisorSessionId ?? null
@@ -1162,20 +1164,20 @@ export class DemandStore {
     return this.remove(id)
   }
 
-  async linkSession(id: string, sessionId: string): Promise<DemandReceipt> {
+  async linkSession(id: string, sessionId: DemandAgentReference): Promise<DemandReceipt> {
     return this.mutate('link-session', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
-      inputString(sessionId, 'sessionId')
-      if (!demand.sessionIds.includes(sessionId)) demand.sessionIds.push(sessionId)
+      const reference = parseDemandAgentReference(sessionId)
+      demand.sessionIds = mergeDemandAgentReferences(demand.sessionIds, [reference])
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     })
   }
 
-  async unlinkSession(id: string, sessionId: string): Promise<DemandReceipt> {
+  async unlinkSession(id: string, sessionId: DemandAgentReference): Promise<DemandReceipt> {
     return this.mutate('unlink-session', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
-      demand.sessionIds = demand.sessionIds.filter((entry) => entry !== sessionId)
+      demand.sessionIds = demand.sessionIds.filter(entry => demandAgentReferenceKey(entry) !== demandAgentReferenceKey(parseDemandAgentReference(sessionId)))
       validateNewDemand(demand, this.storePath)
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
@@ -1583,8 +1585,8 @@ function resolveCreationRequester(demand: Demand, source: DemandParticipationSou
   origin.requesterParticipationId = participation.id
   if (origin.supervisorDefaultPending && origin.requesterAsSupervisor && allowSupervisorDefault && demand.supervisorSessionId === null) {
     demand.supervisorSessionId = source.agentSessionId
-    demand.assigneeSessionIds = [...new Set([...demand.assigneeSessionIds, source.agentSessionId])]
-    demand.sessionIds = [...new Set([...demand.sessionIds, source.agentSessionId])]
+    demand.assigneeSessionIds = mergeDemandAgentReferences(demand.assigneeSessionIds, [source.agentSessionId])
+    demand.sessionIds = mergeDemandAgentReferences(demand.sessionIds, [source.agentSessionId])
   }
   origin.supervisorDefaultPending = false
 }

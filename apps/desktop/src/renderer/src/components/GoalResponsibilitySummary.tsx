@@ -1,3 +1,4 @@
+import { demandAgentReferenceLabel } from '@agentmux/demand/relations'
 import { useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
@@ -45,7 +46,7 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
   if (!observed && !hasExecutionRecords && !patrolPresent && !retained && !issue && !current.delegationObservationIssue) return null
   return <div className={`goal-responsibility${compact ? ' goal-responsibility--compact' : ''}`} aria-label="Execution responsibility" data-goal-responsibility={current.id}>
     {!compact && !embedded ? <strong className="goal-responsibility__heading">Execution responsibility</strong> : null}
-    {observed && !embedded ? <div className="goal-responsibility__manager"><span>Supervisor</span>{observed.supervisor.agentSessionId ? identity(observed.supervisor.agentSessionId, observed.supervisor.hostId) : <span>Unassigned</span>}
+    {observed && !embedded ? <div className="goal-responsibility__manager"><span>Supervisor</span>{observed.supervisor.agentReference ? <code>{demandAgentReferenceLabel(observed.supervisor.agentReference)}</code> : observed.supervisor.agentSessionId ? identity(observed.supervisor.agentSessionId, observed.supervisor.hostId) : <span>Unassigned</span>}
       {observed.supervisor.state === 'ended' ? <span className="goal-responsibility__notice">Supervisor Run ended · Restore original Session</span>
         : observed.supervisor.state === 'blocked' ? <span className="goal-responsibility__notice">Supervisor needs attention</span>
         : observed.supervisor.state === 'unknown' ? <span className="goal-responsibility__notice">Supervisor observation unconfirmed</span>
@@ -57,7 +58,7 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
         <span className={`goal-responsibility__phase${row.alert ? ' goal-responsibility__phase--attention' : ''}`}>{GOAL_RESPONSIBILITY_LABELS[row.phase]}</span>
         {row.binding !== 'confirmed' ? <span className="goal-responsibility__binding">{row.binding === 'ambiguous' ? 'Multiple execution sources' : 'Original input unconfirmed'}</span> : null}
       </div>
-      <div className="goal-responsibility__next"><span>Next</span>{row.nextOwner.agentSessionId ? identity(row.nextOwner.agentSessionId,
+      <div className="goal-responsibility__next"><span>Next</span>{row.nextOwner.agentReference ? <code>{demandAgentReferenceLabel(row.nextOwner.agentReference)}</code> : row.nextOwner.agentSessionId ? identity(row.nextOwner.agentSessionId,
         row.nextOwner.kind === 'manager' && row.nextOwner.agentSessionId === observed?.supervisor.agentSessionId ? observed.supervisor.hostId
           : row.nextOwner.kind === 'worker' && row.nextOwner.agentSessionId === row.execution.agentSessionId ? row.execution.hostId : undefined) : <span>{row.nextOwner.kind === 'human' ? 'Human review' : row.nextOwner.kind === 'external' ? 'External conditions' : 'Owner unconfirmed'}</span>}
         <span className="goal-responsibility__next-action">{row.nextOwner.action}</span>
@@ -84,7 +85,7 @@ export function GoalExecutionResponsibility({ row }: { row: GoalResponsibilityRo
   if (!row) return null
   return <div className="goal-work__responsibility" data-goal-execution-responsibility={`${row.execution.kind}:${row.execution.operationId}`}>
     <p><strong>{GOAL_RESPONSIBILITY_LABELS[row.phase]}</strong>{row.binding !== 'confirmed' ? <span> · {row.binding === 'ambiguous' ? 'Multiple execution sources' : 'Original input unconfirmed'}</span> : null}</p>
-    <details><summary>Responsibility and source</summary>{row.reason ? <p>{row.reason}</p> : null}<p>{row.nextOwner.action}</p><dl><dt>Next owner</dt><dd>{row.nextOwner.agentSessionId ?? row.nextOwner.kind}</dd>
+    <details><summary>Responsibility and source</summary>{row.reason ? <p>{row.reason}</p> : null}<p>{row.nextOwner.action}</p><dl><dt>Next owner</dt><dd>{row.nextOwner.agentReference ? demandAgentReferenceLabel(row.nextOwner.agentReference) : row.nextOwner.agentSessionId ?? row.nextOwner.kind}</dd>
       <dt>Original operation</dt><dd>{row.execution.kind} · {row.execution.operationId}</dd><dt>Host / Run</dt><dd>{row.execution.hostId} / {row.execution.runId}</dd>
       <dt>State since</dt><dd>{row.stateSince ? new Date(row.stateSince).toLocaleString() : 'Unknown'}</dd><dt>Source</dt><dd>{row.observation?.source ?? 'Unknown'}</dd></dl>{row.progress ? <p>{row.progress.summary}{row.progress.evidence.map(source => <span key={source}>{source}</span>)}</p> : null}</details>
   </div>

@@ -1027,7 +1027,7 @@ export type AppState = GitReadingActions & {
   spatialRequests: Record<string, SpatialRequestBinding>
   agentOperations: AgentOperationReferences
   /** UI intent only; original Core/spatial creation still owns the reserved Session. */
-  goalAgentSelectionDrafts: Record<string, GoalAgentSelectionDraft>
+  goalAgentSelectionDrafts: Record<string, unknown>
   goalFiniteStartIntents: Record<string, GoalFiniteStartIntent>
   sessionRecordDeletionRequests: Record<string, unknown>
   goalDiscussionRequests: Record<string, GoalDiscussionRequest>
@@ -3953,7 +3953,7 @@ type PersistedAppState = {
   spaceZoneBindings?: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
   agentOperations: AgentOperationReferences
-  goalAgentSelectionDrafts?: Record<string, GoalAgentSelectionDraft>
+  goalAgentSelectionDrafts?: Record<string, unknown>
   goalFiniteStartIntents?: Record<string, GoalFiniteStartIntent>
   sessionRecordDeletionRequests?: Record<string, unknown>
   goalDiscussionRequests?: Record<string, GoalDiscussionRequest>
@@ -5025,9 +5025,9 @@ export async function retainGoalAgentSelectionDraft(draft: GoalAgentSelectionDra
   useAppStore.setState(state => ({ goalAgentSelectionDrafts: { ...state.goalAgentSelectionDrafts, [key]: draft } }))
   return await saveWorkbenchSelection(false)
 }
-export async function clearGoalAgentSelectionDraft(goalId: string, role: GoalAgentSelectionDraft['role']): Promise<void> {
+export async function clearGoalAgentSelectionDraft(goalId: string, role: GoalAgentSelectionDraft['role'], expected: GoalAgentSelectionDraft): Promise<void> {
   const key = goalCreationDraftKey(goalId, role)
-  useAppStore.setState(state => { const goalAgentSelectionDrafts = { ...state.goalAgentSelectionDrafts }; delete goalAgentSelectionDrafts[key]; return { goalAgentSelectionDrafts } })
+  useAppStore.setState(state => { if (state.goalAgentSelectionDrafts[key] !== expected) return state; const goalAgentSelectionDrafts = { ...state.goalAgentSelectionDrafts }; delete goalAgentSelectionDrafts[key]; return { goalAgentSelectionDrafts } })
   await saveWorkbenchSelection(false)
 }
 export async function retainGoalFiniteStartIntent(intent: GoalFiniteStartIntent): Promise<AgentMuxSpatialSave> {
@@ -7267,7 +7267,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
     const controlProject = (id: string) => projectWorkspaces((get().config?.workspaces ?? []).filter(workspace => !isScratchWorkspaceId(workspace.id))).find(project => project.id === id)
-    const demandRecord = (id: string): DemandRecord & { assigneeSessionIds: string[]; supervisorSessionId: string | null; participations: NonNullable<DemandRecord['participations']> } => {
+    const demandRecord = (id: string): DemandRecord & { assigneeSessionIds: NonNullable<DemandRecord['assigneeSessionIds']>; supervisorSessionId: NonNullable<DemandRecord['supervisorSessionId']> | null; participations: NonNullable<DemandRecord['participations']> } => {
       const demand = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === id)
       if (!demand) throw controlFailure('CONTROL_FAILED', `Demand is not available: ${id}`)
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand

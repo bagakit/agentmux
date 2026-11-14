@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
-import { goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
+import { demandAgentReferenceLabel, goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
 import { GoalCommonProperties, GoalProperties } from './GoalProperties'
 import { GoalWorkArea } from './GoalWorkArea'
 import { GoalIntent } from './GoalIntent'
@@ -159,7 +159,7 @@ function GoalMeta({ demand }: { demand: DemandProjection }) {
       : <span data-goal-meta-plan="unavailable">Plan · node states unavailable</span> : null}
     <span className="goals-detail__meta-agent" data-goal-meta-supervisor>{demand.supervisorSessionId
       ? supervisorHosts.length === 1 ? <>Supervisor <GoalContinuationAgent agentSessionId={demand.supervisorSessionId} hostId={supervisorHosts[0]!} active size={16} /></>
-        : <span title={`Session ${demand.supervisorSessionId}`}>Supervisor reference · {supervisorHosts.length ? 'Host conflict' : 'Host unconfirmed'}</span> : 'No Supervisor yet'}</span>
+        : <span title={demandAgentReferenceLabel(demand.supervisorSessionId)}>Supervisor reference · {typeof demand.supervisorSessionId === 'string' ? supervisorHosts.length ? 'Host conflict' : 'Host unconfirmed' : demandAgentReferenceLabel(demand.supervisorSessionId)}</span> : 'No Supervisor yet'}</span>
     <span>{demand.projectName ?? 'No project'}</span>
   </p>
 }

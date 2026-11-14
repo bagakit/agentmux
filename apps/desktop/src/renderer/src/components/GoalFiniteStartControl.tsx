@@ -1,3 +1,4 @@
+import { demandAgentReferenceKey, mergeDemandAgentReferences } from '@agentmux/demand/relations'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
@@ -6,22 +7,22 @@ import { clearGoalFiniteStartIntent, retainGoalFiniteStartIntent, useAppStore } 
 import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
 import type { GoalFiniteStartIntent } from '../lib/goal-finite-start'
-import { goalAgentRows } from '../lib/goal-agent-selection'
+import { goalAgentRows, goalAgentRowReference } from '../lib/goal-agent-selection'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { GoalAgentFace, GoalAgentPicker } from './GoalAgentPicker'
 
 /** An explicit one-time task. The existing Start owner retains all input and execution facts. */
 export function GoalFiniteStartControl({ demand, primary = false, embedded = false, conclusion }: { demand: DemandRecord; primary?: boolean; embedded?: boolean; conclusion?: string | undefined }) {
-  const ids = useMemo(() => [...new Set(demand.assigneeSessionIds ?? [])], [demand.assigneeSessionIds])
+  const ids = useMemo(() => mergeDemandAgentReferences(demand.assigneeSessionIds ?? []), [demand.assigneeSessionIds])
   const facts = useAppStore(useShallow(state => {
     const index = agentSessionPresentationIndex(state.sessions)
-    return [state.config, state.scratchTopicSnapshots, ...ids.flatMap(id => [id, state.agentNames[id], ...(index.get(id) ?? []).flatMap(session => [session.id, session.label, session.providerId, session.executorId, session.workspacePath, session.hostId, session.status.state, Boolean(session.pendingInteraction), state.agentNames[session.id], firstPromptFromTimeline(state.timelines[session.id])])])]
+    return [state.config, state.scratchTopicSnapshots, ...ids.flatMap(id => typeof id !== 'string' ? [demandAgentReferenceKey(id)] : [id, state.agentNames[id], ...(index.get(id) ?? []).flatMap(session => [session.id, session.label, session.providerId, session.executorId, session.workspacePath, session.hostId, session.status.state, Boolean(session.pendingInteraction), state.agentNames[session.id], firstPromptFromTimeline(state.timelines[session.id])])])]
   }))
   const intent = useAppStore(s => s.goalFiniteStartIntents[demand.id])
   const rows = useMemo(() => {
     const state = useAppStore.getState(), index = agentSessionPresentationIndex(state.sessions)
-    return goalAgentRows({ ...state, sessions: [...new Set(ids.flatMap(id => index.get(id) ?? []))] }, demand, ids).filter(row => ids.includes(row.id))
+    return goalAgentRows({ ...state, sessions: [...new Set(ids.flatMap(id => typeof id === 'string' ? index.get(id) ?? [] : []))] }, demand, ids).filter(row => ids.some(ref => demandAgentReferenceKey(ref) === demandAgentReferenceKey(goalAgentRowReference(row))))
   }, [facts, demand, ids])
   const [selected, setSelected] = useState<string | null>(null), [picker, setPicker] = useState(false)
   const [busy, setBusy] = useState(false), [message, setMessage] = useState<string | null>(null)
@@ -52,7 +53,9 @@ export function GoalFiniteStartControl({ demand, primary = false, embedded = fal
   useEffect(() => { setSelected(null); setMessage(null); setPicker(false) }, [demand.id])
   useEffect(() => { if (intent?.phase === 'may-have-dispatched') void run(() => inspect(intent.operationId)) }, [demand.id, intent?.operationId])
   async function start() {
-    const saved: GoalFiniteStartIntent | undefined = intent ?? (target ? { goalId: demand.id, operationId: mintObjectId(), sessionId: target.id, expectedUpdatedAt: demand.updatedAt, phase: 'not-attempted' } : undefined)
+    if (!intent && target?.reference && typeof target.reference !== 'string') { setMessage('This Source-qualified Start needs its original current execution access. The selected relation and existing Agent are retained.'); return }
+    const reference = target && goalAgentRowReference(target)
+    const saved: GoalFiniteStartIntent | undefined = intent ?? (typeof reference === 'string' ? { goalId: demand.id, operationId: mintObjectId(), sessionId: reference, expectedUpdatedAt: demand.updatedAt, phase: 'not-attempted' } : undefined)
     if (!saved) return
     if (saved.phase === 'may-have-dispatched') { await inspect(saved.operationId); return }
     let persistence = await retainGoalFiniteStartIntent(saved)

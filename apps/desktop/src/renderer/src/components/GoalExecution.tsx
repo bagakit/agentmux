@@ -16,6 +16,7 @@ import { GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
 import { FocusContextCardBody } from './FocusContextCardBody'
 import { GoalTeamReference, goalTeamSourceLabels } from './GoalTeamReference'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import '../styles/goal-team.css'
 
 const ThemeActionChooseAssigneeIcon = semanticIconComponent('action.choose-assignee')
@@ -56,11 +57,11 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
         return <GoalTeamReference key={key} identity={identity} read={reads.get(key)} roles={identity.currentSupervisor ? ['supervisor'] : []} onRetry={() => retry(key)} />
       })}
       {!group.identities.length ? <div className="goal-team__unresolved" data-goal-team-unconfirmed={group.id}>
-        <span aria-hidden="true"><ThemeObjectAgentIcon size={18} /></span><div><strong>Agent reference</strong><span>The original Host is not confirmed.</span>
-          <details className="goal-team__identity-details"><summary>Reference details</summary><code>{group.id}</code></details></div>
+        <span aria-hidden="true"><ThemeObjectAgentIcon size={18} /></span><div><strong>{group.reference ? compactReferenceId(group.reference.execution.agentSessionId) : 'Agent reference'}</strong><span>{group.reference ? `Runtime ${compactReferenceId(group.reference.execution.runtimeId)} · Space ${compactReferenceId(group.reference.source.spaceId)}` : 'The original Host is not confirmed.'}</span>
+          <details className="goal-team__identity-details"><summary>Reference details</summary><code>{group.reference ? JSON.stringify(group.reference) : group.legacySessionId}</code></details></div>
       </div> : null}
       {group.unconfirmedRoles.length ? <div className="goal-team__unqualified-roles">
-        <span>{group.unconfirmedRoles.map(role => <span key={role} data-goal-team-role={role} data-role-host="unconfirmed">{roleNames[role]} </span>)} · Host not confirmed</span>
+        <span>{group.unconfirmedRoles.map(role => <span key={role} data-goal-team-role={role} data-role-host="unconfirmed">{roleNames[role]} </span>)} · {group.reference ? 'Current execution not observed' : 'Host not confirmed'}</span>
         <button type="button" className="small-button" onClick={() => setRole(group.unconfirmedRoles[0]!)}>Review relationship</button>
       </div> : null}
     </div>)}</div>

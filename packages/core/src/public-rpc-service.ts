@@ -2731,9 +2731,9 @@ export class AgentMuxRpcService {
           if (request.operation !== 'demand.create') {
             const previous = await this.execute(rpcControlRequest('goal.inspect', { goalId: request.demandId }))
             if (previous.operation !== 'demand.show' || !previous.demand) throw new AgentMuxError('Original Goal read is unconfirmed; inspect it before changing assignment.', 'CONTROL_PROTOCOL_ERROR')
-            previous.demand.assigneeSessionIds.forEach(id => retained.add(id))
+            previous.demand.assigneeSessionIds.forEach(ref => { if (typeof ref === 'string') retained.add(ref) })
           }
-          for (const assignee of assignees) if (!retained.has(assignee) && (await this.owner(assignee)).agentSessionId !== assignee)
+          for (const assignee of assignees) if (typeof assignee === 'string' && !retained.has(assignee) && (await this.owner(assignee)).agentSessionId !== assignee)
             throw new AgentMuxError('New Goal assignment requires the complete exact Session ID.', 'INVALID_CONTROL_REQUEST')
         }
       }

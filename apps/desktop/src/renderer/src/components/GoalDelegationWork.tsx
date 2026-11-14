@@ -2,7 +2,7 @@ import { GoalEvidence } from './GoalEvidence'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useRef, useState, Fragment, type ReactNode } from 'react'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
-import { goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
+import { demandAgentReferenceLabel, goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
@@ -80,7 +80,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
       <strong data-goal-current-conclusion={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? true : undefined} data-goal-current-source={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'delegation' : undefined}>{row.next}</strong>
       <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={row.delegation.workerAgentSessionId} hostId={delegationWorkerHostId(row.delegation)} active={active} size={14} /></span> · Follow-up {current.supervisorSessionId
         ? supervisorHost ? <span><GoalContinuationAgent agentSessionId={current.supervisorSessionId} hostId={supervisorHost} active={active} size={14} /></span>
-          : <span title={current.supervisorSessionId}>Supervisor reference · Host unconfirmed</span> : 'needs an assigned Supervisor'}</p>
+          : <span title={demandAgentReferenceLabel(current.supervisorSessionId)}>Supervisor reference · {typeof current.supervisorSessionId === 'string' ? 'Host unconfirmed' : demandAgentReferenceLabel(current.supervisorSessionId)}</span> : 'needs an assigned Supervisor'}</p>
       {embedded ? <GoalExecutionResponsibility row={responsibilities.get(`delegation:${row.delegation.operationId}`)} /> : null}
       {row.report ? <p className="goal-delegation__summary">{row.report.grounding.summary}</p> : null}
       {row.issue && row.issue !== current.delegationObservationIssue ? <p className="goals-service" role="status">{row.issue}</p> : null}

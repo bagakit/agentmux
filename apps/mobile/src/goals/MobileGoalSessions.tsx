@@ -8,9 +8,11 @@ import { getDeviceWorkface } from '../recovery/device-workface'
 import { sameMobileGoalDraftScope, type MobileGoalDraftScope } from '../recovery/goal-drafts'
 import { mobileGoalDraftSource } from './useGoalDraft'
 import { MobileAgentRow } from '../navigation/MobileAgentRow'
+import { mobileGoalReferenceLabel } from './presentation'
+import { demandAgentReferenceKey, demandAgentReferenceLabel, mergeDemandAgentReferences, type DemandAgentReference } from '@agentmux/demand/relations'
 
 export function MobileGoalSessions({ client, sessionIds, visible, openSession, goal, factScope }: {
-  client: AgentMuxHostedClient | null; sessionIds: string[]; visible: boolean
+  client: AgentMuxHostedClient | null; sessionIds: DemandAgentReference[]; visible: boolean
   goal?: AgentMuxRpcGoal
   factScope?: MobileGoalDraftScope | null
   openSession: ((id: string, identity: MobileObjectIdentity) => void) | undefined
@@ -19,8 +21,8 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
   const [revision, refresh] = useState(0)
   const rowsScope = useRef<MobileGoalDraftScope | null>(null)
   const sourceKey = JSON.stringify(mobileGoalDraftSource(client, getDeviceWorkface()))
-  const references = [...new Set([...sessionIds, ...(goal?.assigneeSessionIds ?? []), ...(goal?.supervisorSessionId ? [goal.supervisorSessionId] : []),
-    ...(goal?.dispatches ?? []).map(value => value.agentSessionId), ...(goal?.participations ?? []).map(value => value.agentSessionId)])]
+  const references = mergeDemandAgentReferences(sessionIds, goal?.assigneeSessionIds ?? [], goal?.supervisorSessionId ? [goal.supervisorSessionId] : [],
+    (goal?.dispatches ?? []).map(value => value.agentSessionId), (goal?.participations ?? []).map(value => value.agentSessionId)).filter(value => typeof value === 'string')
   const ids = JSON.stringify(references)
   useEffect(() => {
     if (!visible || !references.length || !client?.forwardRpc) return
@@ -47,10 +49,11 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
     return () => { live = false }
   }, [client, visible, ids, revision, sourceKey, JSON.stringify(factScope)])
   const displayedRows = !goal || !!rowsScope.current && !!factScope && sameMobileGoalDraftScope(rowsScope.current, factScope) ? rows : []
-  const name = (id: string) => displayedRows.find(value => value.agentSessionId === id)?.name || 'Agent 名称未确认'
+  const name = (id: DemandAgentReference) => typeof id === 'string' ? displayedRows.find(value => value.agentSessionId === id)?.name || 'Agent 名称未确认' : mobileGoalReferenceLabel(id)
   const sessions = <section aria-label="关联会话"><h3>关联会话</h3>
     {issue && <MobileNotice identity={[goal?.id,issue]} role="status">{issue}</MobileNotice>}
     {sessionIds.map(id => {
+      if (typeof id !== 'string') return <div key={demandAgentReferenceKey(id)} className="mobile-goal-session"><strong>{mobileGoalReferenceLabel(id)}</strong><p>原 Source 关系已保留；打开或输入需要当前准确执行入口。</p><details><summary>完整来源身份</summary><pre>{JSON.stringify(id, null, 2)}</pre></details></div>
       const row = displayedRows.find(value => value.agentSessionId === id)
       const identity = { name: row?.name || 'Agent 名称未确认', project: row?.project || '项目未确认' }
       const originalSource = () => {
@@ -59,7 +62,7 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
         setIssue('没有打开：当前连接的 Mac 与这个目标不一致，连回原来的 Mac 后再试。')
         return false
       }
-      return <div key={id} className="mobile-goal-session"><strong>{identity.name}</strong><p>{identity.project}{row?.state ? ` · ${row.state}` : ''}</p>
+      return <div key={demandAgentReferenceKey(id)} className="mobile-goal-session"><strong>{identity.name}</strong><p>{identity.project}{row?.state ? ` · ${row.state}` : ''}</p>
         {row?.recap && <p>{row.recap.text}<small> · {row.recap.source}</small></p>}
         {row?.detail && <p>{row.detail}</p>}
         {openSession && <div className="mobile-agent-row"><MobileAgentRow agentSessionId={id} identity={identity} beforeMenu={originalSource} onOpen={() => {
@@ -85,8 +88,8 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
           <p>{name(value.agentSessionId)} · {stages[value.stage]} · {value.execution === 'continue' ? '续跑输入' : '单次输入'}</p>
           <p className="mobile-goals-body">{value.prompt}</p><pre>{JSON.stringify(value, null, 2)}</pre>
         </div>)}</details></>}
-    <details><summary>负责人身份与参与来源</summary><dl><dt>负责人会话</dt><dd>{goal.assigneeSessionIds?.join('、') || '未分配'}</dd>
-      <dt>Supervisor 会话</dt><dd>{goal.supervisorSessionId ?? '未指定'}</dd></dl>
+    <details><summary>负责人身份与参与来源</summary><dl><dt>负责人会话</dt><dd>{goal.assigneeSessionIds?.map(demandAgentReferenceLabel).join('、') || '未分配'}</dd>
+      <dt>Supervisor 会话</dt><dd>{goal.supervisorSessionId ? demandAgentReferenceLabel(goal.supervisorSessionId) : '未指定'}</dd></dl>
       {(goal.participations ?? []).map(value => <div key={value.id}><p>{name(value.agentSessionId)} · {value.kind === 'create' ? '创建参与' : value.kind === 'requirements' ? '需求整理参与' : '讨论参与'}</p><pre>{JSON.stringify(value, null, 2)}</pre></div>)}
       {goal.creationOrigin && <><p>创建策略只表示来源；设置 Supervisor 不会自动开始执行。</p><pre>{JSON.stringify(goal.creationOrigin, null, 2)}</pre></>}
     </details>
