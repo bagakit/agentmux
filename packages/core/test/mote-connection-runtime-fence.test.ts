@@ -6,7 +6,7 @@ import { AgentMuxControlServer, type AgentMuxControlServerOptions } from '../src
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import type { AgentMuxRuntimeOwnerIdentity } from '../src/hosted-client-contract.js'
-import type { MoteConnectionOperation, MoteConnectionPort, MoteConnectionSync } from '../src/mote-connection-contract.js'
+import type { MoteConnectionOperation, MoteConnectionPort, MoteConnectionSync } from '../src/mote/connection-contract.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { fixturePath } from './helpers/fixture-values.js'
 

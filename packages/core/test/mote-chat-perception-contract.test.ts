@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { GUIDE_DOCUMENTS } from '../src/generated/agentmux-guides-index.js'
-import { MOTE_CHAT_UNREVIEWED_BOUND, parseMoteChatParams, parseMoteChatResult } from '../src/mote-chat.js'
+import { MOTE_CHAT_UNREVIEWED_BOUND, parseMoteChatParams, parseMoteChatResult } from '../src/mote/chat.js'
 
 const target = { spaceId: 'mote', zoneId: 'home', expectedResource: { hostId: 'local', workspaceId: 'homes', workspacePath: '/mote-homes' } }
 const application = { domain: 'chat.example', appId: 'mote-app' }

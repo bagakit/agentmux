@@ -8,7 +8,7 @@ const mutation = process.env.MOTE_PARENT_FENCE_MUTANT
 const report = process.env.MOTE_PARENT_FENCE_LOADED
 if (mutation && !['omit-initial-fence', 'omit-effect-fence'].includes(mutation)) throw Error('Unknown Mote parent fence mutation')
 const exports = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json'), 'utf8')).exports
-const observed = new Set(['public-rpc-service', 'mote-connection-codec', 'public-rpc-server', 'public-rpc-client',
+const observed = new Set(['public-rpc-service', 'mote/connection-codec', 'public-rpc-server', 'public-rpc-client',
   'public-rpc-wire', 'client', 'hosted-runtime-service'])
 
 export default defineConfig({ root, cacheDir: resolve(root, '.tmp/mote-parent-fence', mutation ?? 'normal'),
@@ -22,7 +22,7 @@ export default defineConfig({ root, cacheDir: resolve(root, '.tmp/mote-parent-fe
     },
     transform(original, id) {
       const path = relative(root, id.split('?')[0]!)
-      const match = /^packages\/core\/src\/([^/]+)\.ts$/u.exec(path)
+      const match = /^packages\/core\/src\/(.+)\.ts$/u.exec(path)
       if (!match || !observed.has(match[1]!)) return
       let loaded = original
       if (mutation && path === 'packages/core/src/public-rpc-service.ts') {

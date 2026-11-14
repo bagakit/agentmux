@@ -5,7 +5,7 @@ import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { parseConnectionIngressRecord } from '../src/ingress-codec.js'
 import { isMoteChatMethod, moteChatDiagnosisCode, moteChatDiagnosisKey, parseMoteChatParams, parseMoteChatResult,
   moteChatPreparationReason, moteChatInputFailureCode, moteChatInputFailureCodes, moteChatDiagnosisGenerationKey,
-  type MoteChatDiagnosis, type MoteChatDiagnosisInput, type MoteChatDiagnosisIntake } from '../src/mote-chat.js'
+  type MoteChatDiagnosis, type MoteChatDiagnosisInput, type MoteChatDiagnosisIntake } from '../src/mote/chat.js'
 import { parseConnectionDiagnosisWaiting } from '../src/connection-diagnosis-codec.js'
 import type { AgentInputSubmissionReceipt, AgentInputWaitReason } from '../src/agent-input-wait.js'
 import { fixturePath } from './helpers/fixture-values.js'

@@ -10,7 +10,7 @@ const variants: Record<string, { path: string; before: string; after: string; al
     after: "const proof = { key: { kind: 'message' as const, agentSessionId: source.input.agentSessionId, expectedRun: source.input.expectedRun, messageId: source.input.messageId }, status: 'terminal-confirmed' as const }" },
   hint: { path: 'packages/core/src/agent-message-input.ts', before: "moteReply?.route === 'unconfirmed'", after: 'false' },
   consumer: { path: 'packages/connectors/src/connection-services.ts', before: 'publication: () => publication', after: 'publication: () => undefined' },
-  dto: { path: 'packages/core/src/mote-chat-codec.ts', before: 'const binding = o.binding, source = delivery.reference.source', after: 'return true\n  const binding = o.binding, source = delivery.reference.source' },
+  dto: { path: 'packages/core/src/mote/chat-codec.ts', before: 'const binding = o.binding, source = delivery.reference.source', after: 'return true\n  const binding = o.binding, source = delivery.reference.source' },
   'unknown-dispatch': { path: 'packages/connectors/src/publication-host.ts', before: 'adapter.inspect!(parsePreparedPublication(retained.prepared, adapter), retained.target, credential, signal, retained.mapping)', after: 'adapter.dispatch(parsePreparedPublication(retained.prepared, adapter), retained.target, credential, signal, retained.mapping)' },
   notice: { path: 'packages/connectors/src/publication-host.ts', before: "if (source.kind === 'mote-chat-reply') {\n      const original", after: "if (source.kind === 'mote-chat-reply') {\n      return this.noticeTarget(notice)\n      const original" }
 }
