@@ -515,8 +515,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       expect(installedManifest.dependencies['@agentmux/providers']).toBe(manifests.get('@agentmux/providers')!.version)
       const defaultProviders = await execFileAsync(process.execPath, ['--input-type=module', '--eval', `
         import assert from 'node:assert/strict'
-        import { AgentMuxClient, BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core'
-        const client = new AgentMuxClient()
+        import { AgentMuxClient, AgentMuxFileAgentSessionStore, BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core'
+        const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(process.cwd() + '/provider-consumer-sessions.json') })
         try {
           assert.deepEqual(client.catalog().map(entry => entry.id).sort(), [...BUILT_IN_AGENT_PROVIDER_IDS].sort())
           assert.equal(client.providers.get('antigravity').executable, 'agy')
@@ -527,7 +527,10 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           assert.deepEqual(plan.args, ['--conversation', 'same-native-conversation'])
           process.stdout.write('packaged default Provider and original resume verified')
         } finally { await client.dispose() }
-      `], { cwd: consumerDirectory })
+      `], { cwd: consumerDirectory, env: {
+        ...process.env, AGENTMUX_STATE_DIRECTORY: join(consumerDirectory, 'provider-consumer-state'),
+        AGENTMUX_RUNTIME_DIRECTORY: join(consumerDirectory, 'provider-consumer-runtime')
+      } })
       expect(defaultProviders.stdout).toBe('packaged default Provider and original resume verified')
       const packagedHook = await execFileAsync(process.execPath, [join(packageRoot, 'dist/agentmux-hook.mjs'), '--event', 'PreToolUse'], {
         cwd: consumerDirectory, env: { AGENTMUX_HOOK_PROVIDER: 'antigravity' }
