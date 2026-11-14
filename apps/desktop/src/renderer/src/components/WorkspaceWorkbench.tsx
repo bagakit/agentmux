@@ -9,7 +9,7 @@ import { agentWorkPlacement, workReferenceHostId } from '../lib/agent-work-mode'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { useWorkbenchWindowRevision, workbenchWindowPlacement, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { openWorkbenchWindow } from '../lib/workbench-windows'
-import { useWorkbenchDocument } from '../lib/workbench-document'
+import { useWorkbenchDocument, useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -516,9 +516,13 @@ function SurfaceContent({ surface, ...props }: SurfaceContentProps) {
   const browserPresentation = useWorkbenchBrowserPresentation()
   const browserTargets = useContext(WorkbenchBrowserTargetsContext)
   const independentDocument = useWorkbenchDocument() !== document
+  const windowDocument = useWorkbenchWindowDocument()
+  const windows = useContext(WorkbenchWindowTargetsContext)
+  const nativeWindowTarget = windows.find(window => (!independentDocument || window.windowId === windowDocument?.windowId) &&
+    window.target?.tabId === props.tabId && (window.target.kind === 'tab' || window.target.regionId === surface.regionId))?.target ?? undefined
   return <SurfaceContentBody {...props} surface={surface} parked={parked} monacoReleased={monacoReleased}
     browserReleased={browserReleased} browserPresentation={browserPresentation} browserTargets={browserTargets}
-    independentDocument={independentDocument} />
+    independentDocument={independentDocument} nativeWindowTarget={nativeWindowTarget} />
 }
 
 // Shared resource notifications can change another Region's facts. Keep their lightweight
@@ -543,7 +547,8 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
   browserReleased,
   browserPresentation,
   browserTargets,
-  independentDocument
+  independentDocument,
+  nativeWindowTarget
 }: SurfaceContentProps & {
   parked: boolean
   monacoReleased: boolean
@@ -551,6 +556,7 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
   browserPresentation: ReturnType<typeof useWorkbenchBrowserPresentation>
   browserTargets: readonly WorkbenchViewTarget[]
   independentDocument: boolean
+  nativeWindowTarget: AppWindowDescriptor['target'] | undefined
 }) {
   if (isSessionSurface(surface)) {
     const original = (
@@ -600,6 +606,23 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
     const windowTarget = independentDocument ? workbenchBrowserWindowTarget(browserTargets, browserPresentation, surface.regionId) : undefined
     const presentedTargets = windowTarget ? browserTargets.map(target => target === windowTarget
       ? { ...target, active: browserPresentation.active, visible: nativeSurfacesVisible } : target) : browserTargets
+    const windowReference = nativeWindowTarget ? { displayWorkspaceId: nativeWindowTarget.displayWorkspaceId,
+      groupId: nativeWindowTarget.groupId, tabId: nativeWindowTarget.tabId, regionId: surface.regionId } : undefined
+    const mainReference = browserPresentation.reference ? { ...browserPresentation.reference, regionId: surface.regionId } : undefined
+    const reference = independentDocument ? windowReference : mainReference ?? windowReference
+    // The physical primary stage stays in this original tree. A native window
+    // supplies its exact occurrence without creating another placement target.
+    const primaryTarget: WorkbenchViewTarget | undefined = reference && browserPresentation.tabHostId ? {
+      hostId: browserPresentation.tabHostId, reference, surface: browserPresentation.surface ?? 'space',
+      active: browserPresentation.active, visible: nativeSurfacesVisible,
+      ...(browserPresentation.controlsOpen === undefined ? {} : { controlsOpen: browserPresentation.controlsOpen })
+    } : undefined
+    const primaryStage = primaryTarget && reference ? {
+      occurrence: { presentationId: `browser-primary:${JSON.stringify([tabId, surface.regionId])}`, location: reference,
+        returnContext: workbenchReturnContext(browserPresentation, reference) ?? undefined },
+      stageHostId: primaryTarget.hostId, visible: nativeSurfacesVisible, active: browserPresentation.active,
+      yieldToFocusRing: focus.nativeViewYieldsToRing, target: primaryTarget
+    } : undefined
     return (
       <BrowserPane key={surface.browserId}
         tab={surface}
@@ -612,11 +635,11 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
                 ? { ...target, returnContext: browserPresentation.returnContext } : target, { ...target.reference, regionId: surface.regionId }) ?? undefined },
             stageHostId: workbenchBrowserStageHostId(target, surface.regionId), visible: target.visible !== false,
             active: target.active, yieldToFocusRing: focusForPresentation(target).nativeViewYieldsToRing, target }] : [])}
+        primaryStage={primaryStage}
         renderPresentationFrame={browserFrame}
         onPresentationInputSelected={onBrowserInputSelected}
         visible={nativeSurfacesVisible}
         released={browserReleased}
-        yieldToFocusRing={focus.nativeViewYieldsToRing}
         presentationTargetId={windowTarget?.hostId ?? primaryPresentationHostId ?? browserPresentation.tabHostId}
         controlPanelOpen={browserPresentation.survey ? browserPresentation.controlsOpen : undefined}
         onControlConfirmation={browserPresentation.onBrowserControlConfirmation}

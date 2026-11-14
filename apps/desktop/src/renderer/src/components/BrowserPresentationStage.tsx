@@ -268,7 +268,11 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   const stopGeometry = useRef<() => void>(() => {})
   const observe = useCallback(() => {
     stopGeometry.current()
-    const update = () => { const next = geometry(); synchronizer.current?.observe(next.visible ? next.bounds : null, next.visible ? next.inputVisible : undefined) }
+    const update = () => {
+      const next = geometry()
+      if (!lease.current && next.visible) registrationRetry.current?.()
+      synchronizer.current?.observe(next.visible ? next.bounds : null, next.visible ? next.inputVisible : undefined)
+    }
     const stage = element.current
     stopGeometry.current = stage ? observeBrowserStageGeometry(stage, update,
       latest.current.presentation.visible && !latest.current.blocked) : () => {}
@@ -283,11 +287,12 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       if (!cancelled) setNotice({ source, message: error instanceof Error ? error.message : String(error) })
     }
     const retry = (explicit = false) => {
-      if (cancelled || registering || lease.current || !registrationFailed) return
-      if (!explicit && attemptedNavigationId === latest.current.navigationId) return
+      if (cancelled || registering || lease.current) return
+      if (!explicit && registrationFailed && attemptedNavigationId === latest.current.navigationId) return
       void mount().catch(failure)
     }
     const mount = async () => {
+      if (cancelled || registering || lease.current || !geometry().visible) return
       registering = true
       registrationFailed = false
       setRegistrationPending(true)
@@ -328,8 +333,9 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
         () => !cancelled && visibleCurrent(registered))
     }
     registrationRetry.current = retry
-    // One task lets the stable host attach, including while hidden. Resource loading is not a trust gate.
-    const mountTask = setTimeout(() => { if (!cancelled) void mount().catch(failure) }, 0)
+    // Observe before registration: a retained or zero-size stage can become
+    // consumable later without recreating its DOM or waking a cold page early.
+    const mountTask = setTimeout(() => { if (!cancelled) observe() }, 0)
     return () => { cancelled = true; clearTimeout(mountTask); if (registrationRetry.current === retry) registrationRetry.current = null
       stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null
       const current = lease.current; lease.current = null
@@ -337,7 +343,10 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       else if (!registering) removed.current?.() }
   }, [browserId, windowDocument?.windowId, windowDocument?.documentGeneration, presentation.occurrence.presentationId, occurrenceLocationKey, returnContextKey, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
   useLayoutEffect(() => { registrationRetry.current?.() }, [navigationId])
-  useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, blocked, observe])
+  useLayoutEffect(() => {
+    observe()
+    if (presentation.visible && !blocked) registrationRetry.current?.(true)
+  }, [presentation.visible, presentation.yieldToFocusRing, presentation.stageHostId, blocked, observe])
   useLayoutEffect(() => {
     const current = lease.current
     if (!inputSelected || !current) return

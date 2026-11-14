@@ -68,21 +68,12 @@ import {
   type ScreenshotCompleteInput,
   type ScreenshotEditorHandle
 } from './browser-screenshot/ScreenshotEditor'
-import {
-  LatestBrowserBoundsSynchronizer,
-  focusRingYieldOf,
-  hasPositiveBrowserStageGeometry,
-  nativeBoundsClearOfFocusRing,
-  regionAncestorOf,
-  rendererCssBoundsToWindowDip
-} from '../lib/browser-bounds-sync'
-import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserWorkbenchSurface, WorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
 import { resolveBrowserAgentControl } from '../../../shared/browser-agent-control'
-import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, workbenchBrowserWindowTarget, type WorkbenchViewTarget, type WorkbenchPresentation } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, type WorkbenchViewTarget, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { spatialCatalog, zoneContext } from '../lib/space-agent-control'
@@ -310,11 +301,11 @@ function BrowserPaneContent({
   connection,
   visible,
   released = false,
-  yieldToFocusRing = false,
   presentationTargetId,
   controlPanelOpen,
   onControlConfirmation,
   presentations = [],
+  primaryStage,
   renderPresentationFrame,
   onPresentationInputSelected,
   onRegionSplit,
@@ -331,18 +322,13 @@ function BrowserPaneContent({
   startPage?: BrowserStartPageConfig | undefined
   onRegionClose?: (() => void) | undefined
   presentations?: readonly WorkbenchBrowserPresentation[] | undefined
+  /** Actual primary stage; external projections keep their own presentation trees. */
+  primaryStage?: WorkbenchBrowserPresentation | undefined
   renderPresentationFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
   onPresentationInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
   visible: boolean
   /** Main-owned WebContentsView is released for a long-hidden, rebuildable Region. */
   released?: boolean
-  /**
-   * 这一格是当前聚焦的那一格，所以原生视图要按焦点环宽内缩让位。由上游的 `regionFocusExpression`
-   * 与挂在 Region 上的类名**同一次**算出（见 lib/region-focus.ts）——别在这里自己判焦点：环宽那个
-   * 自定义属性声明在 `:root`，任何 Region 都继承得到，所以「有没有 Region 祖先」根本不是焦点判据，
-   * 那样每一格都内缩，未聚焦的 browser 区会镶一圈无环的深边。
-   */
-  yieldToFocusRing?: boolean
   /** The actual presentation host may change without changing page visibility or size. */
   presentationTargetId?: string | undefined
   /** Survey has its own controls; hidden Space dock state cannot cover this page. */
@@ -358,8 +344,7 @@ function BrowserPaneContent({
   const openFile = useAppStore((state) => state.openFile)
   const primaryPresentation = useWorkbenchBrowserPresentation()
   const independentDocument = useWorkbenchDocument() !== document
-  const windowTarget = independentDocument ? workbenchBrowserWindowTarget(presentations.map(presentation => presentation.target), primaryPresentation, tab.regionId) : undefined
-  const windowPresentation = presentations.find(presentation => presentation.target === windowTarget && presentation.visible && presentation.active)
+  const windowPresentation = independentDocument ? presentations.find(presentation => presentation.target.hostId === presentationTargetId && presentation.visible && presentation.active) : undefined
   const sourcePresentations = useRef({ primary: primaryPresentation, targets: presentations })
   sourcePresentations.current = { primary: primaryPresentation, targets: presentations }
   const discussionOrigin = useRef<string | null>(null)
@@ -391,17 +376,10 @@ function BrowserPaneContent({
   const agentAppearance = useAppStore(state => state.config?.browser.agentControl)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   // Selection comes from the owning surface, never the first rendered occurrence.
-  const selectedPresentationId = useAppStore(state => windowPresentation?.occurrence.presentationId ?? selectedBrowserPresentationId(presentations, state))
+  const selectedPresentationId = useAppStore(state => presentations.length === 0 && primaryStage?.visible && primaryStage.active
+    ? primaryStage.occurrence.presentationId : windowPresentation?.occurrence.presentationId ?? selectedBrowserPresentationId(presentations, state))
   const media = useBrowserPresentationCapture(tab.browserId)
   const stageRef = useRef<HTMLDivElement>(null)
-  // 焦点结论用 ref 承接，边界同步那条 effect 从 ref 读它而不订阅它（#545）：直接把 prop 放进那条
-  // effect 的依赖数组会让它在每次焦点切换时拆了重建，中间闪一帧（见那条 effect 的注释）。ref 保证
-  // 边界计算里读到的永远是当前焦点值（不会 stale），而焦点翻转由下方那条独立 effect 触发一次重算。
-  const yieldToFocusRingRef = useRef(yieldToFocusRing)
-  // 边界同步那条 effect 每次挂载时把它的重算入口挂上来；焦点那条 effect 借它在不拆 synchronizer 的
-  // 前提下重算。effect 未挂载（stage 还没有）时是 null，焦点 effect 的 `?.()` 便安全地什么都不做。
-  const recomputeBoundsRef = useRef<(() => void) | null>(null)
-  const rebindBoundsObserverRef = useRef<(() => void) | null>(null)
   const screenshotToken = useRef(0)
   const selectionToken = useRef(0)
   const [screenshot, setScreenshot] = useState<{ kind: 'capture'; capture: BrowserScreenshotCapture; key: number; capturedAt: number } | { kind: 'open'; key: number } | null>(null)
@@ -664,10 +642,6 @@ function BrowserPaneContent({
   }
   const pageAction = useRef(runPageAction)
   pageAction.current = runPageAction
-  const placesPageDirectly = presentations.length === 0
-  useEffect(() => placesPageDirectly ? api.browser.onPageKey(key => {
-    if (key.browserId === tab.browserId && key.leaseId === null) pageAction.current(tab.browserId, key.action)
-  }) : undefined, [tab.browserId, placesPageDirectly])
   const recoveryVisible = (visible || presentations.some(presentation => presentation.visible)) && Boolean(
     tab.error || released || restoring || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable || restoreError !== null)
   const previewKey = JSON.stringify([tab.browserId, tab.profileId, tab.mode, tab.workspaceId, tab.navigationId])
@@ -766,103 +740,7 @@ function BrowserPaneContent({
     active: !released && !restoring && !tab.nativeOwnerDeferred && !tab.nativeOwnerUnavailable && restoreError === null, nativeOwnerPresent: annotationOwnerPresent
   })
 
-  useLayoutEffect(() => {
-    const stage = stageRef.current
-    if (!stage || presentations.length > 0) return
-    let frame = 0
-    const synchronizer = new LatestBrowserBoundsSynchronizer(
-      async (bounds) => await api.browser.setBounds(tab.browserId, bounds),
-      reportError
-    )
-    const update = (): void => {
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        const navigatorCoversBrowser = (controlPanelOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900)
-        if (
-          !visible ||
-          released ||
-          restoring ||
-          restoreError !== null ||
-          screenshot !== null ||
-          elementSelection !== null ||
-          navigatorCoversBrowser ||
-          __AGENTMUX_WEB_PREVIEW__ ||
-          tab.error ||
-          tab.certificateRequest ||
-          // 原生视图是**窗口级**层，画在页面之上。不把它藏起来，那个提问就渲染在它背后——看不见，
-          // 也点不到，于是这一问永远没人能回答，而页面看起来只是什么都没发生。和 `tab.error` 同理。
-          tab.appLinkPrompt !== null ||
-          tab.url === 'about:blank'
-        ) {
-          synchronizer.observe(null)
-          return
-        }
-        const rect = stage.getBoundingClientRect()
-        // During native window/pane resize the stage can briefly report zero geometry while still
-        // belonging to the visible Browser. Keep the last valid native frame until a usable rect arrives;
-        // explicit visibility/release branches above still hide it when the surface really goes away.
-        if (!hasPositiveBrowserStageGeometry(rect)) return
-        // 让开 Region 的焦点框：原生视图是窗口级层，画在页面之上，焦点框盖不过它（详见
-        // nativeBoundsClearOfFocusRing 的注释）。让位量走 focusRingYieldOf——**只有聚焦的那一格**
-        // 取环宽，其余格取 0。不能像从前那样只问「有没有 .workbench-region 祖先」：环宽声明在 :root，
-        // 每个 Region 都继承得到，那等于无条件内缩，未聚焦的 browser 区镶一圈无环的深边（#350）。
-        // 求交本身与焦点无关（让位量 0 时就是「把 stage 夹进 Region」），没有 Region 祖先
-        // （独立窗口等）时按原样铺满。
-        //
-        // 焦点结论从 ref 读，不直接读 yieldToFocusRing prop（#545）：见下方 yieldToFocusRingRef 的
-        // 注释。读 ref 不是 stale closure——ref 永远是当前值；直接读 prop 才会 stale，那正是把它
-        // 放进依赖数组的理由，而放进依赖数组会让整条 effect 在焦点变化时拆了重建（闪烁）。
-        const stageBounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-        const region = regionAncestorOf(stage)
-        let bounds = stageBounds
-        if (region) {
-          const regionRect = region.getBoundingClientRect()
-          bounds = nativeBoundsClearOfFocusRing(
-            stageBounds,
-            { x: regionRect.x, y: regionRect.y, width: regionRect.width, height: regionRect.height },
-            focusRingYieldOf(region, yieldToFocusRingRef.current)
-          )
-        }
-        synchronizer.observe(rendererCssBoundsToWindowDip(bounds, api.ui.getZoomFactor()))
-      })
-    }
-    // 把重算入口交给焦点那条 effect，让它能在**不拆掉这个 synchronizer** 的前提下重算边界。
-    recomputeBoundsRef.current = update
-    let stopObserving = observeBrowserStageGeometry(stage, update, visible && !released && !restoring)
-    rebindBoundsObserverRef.current = () => {
-      stopObserving()
-      stopObserving = observeBrowserStageGeometry(stage, update, visible && !released && !restoring)
-      update()
-    }
-    return () => {
-      recomputeBoundsRef.current = null
-      rebindBoundsObserverRef.current = null
-      cancelAnimationFrame(frame)
-      synchronizer.dispose()
-      stopObserving()
-      void api.browser.setBounds(tab.browserId, null).catch(() => {})
-    }
-    // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
-    // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
-    // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
-  }, [screenshot, elementSelection, released, restoring, restoreError, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.certificateRequest, tab.browserId, tab.error, tab.url, visible, presentations.length])
 
-  useLayoutEffect(() => {
-    // Portal children run before their host moves. Rebind against connected ancestors after that
-    // commit, keeping the existing synchronizer alive (no transient setBounds(null) on a host move).
-    let cancelled = false
-    queueMicrotask(() => { if (!cancelled) rebindBoundsObserverRef.current?.() })
-    return () => { cancelled = true }
-  }, [presentationTargetId])
-
-  // 焦点环内缩是一件与「边界同步的生命周期」正交的事，所以它有自己的依赖数组（#545）。焦点结论翻转时
-  // 只重算一次边界——复用上面那个还活着的 synchronizer（recomputeBoundsRef），不拆不建，因此没有那道
-  // 藏一帧再显示的闪烁。焦点变化不改变任何尺寸，ResizeObserver 不会触发，所以必须由这条 effect 显式重算，
-  // 否则焦点到达 browser 区时不内缩（#341 回归）、离开时不退回（#350 回归）。
-  useLayoutEffect(() => {
-    yieldToFocusRingRef.current = yieldToFocusRing
-    recomputeBoundsRef.current?.()
-  }, [yieldToFocusRing])
 
   async function run(action: () => Promise<BrowserSnapshot>, onFailure?: (cause: unknown) => void): Promise<void> {
     if (busy) return
@@ -1341,13 +1219,14 @@ function BrowserPaneContent({
 
   const defaultPresentationVisible = visible
   const renderPane = (presentation?: WorkbenchBrowserPresentation): ReactNode => {
+    const stagePresentation = presentation ?? primaryStage
     const key = presentation?.occurrence.presentationId ?? tab.browserId
     let addressInput = addressInputs.current.get(key)
     if (!addressInput) { addressInput = createRef<BrowserAddressInputHandle>(); addressInputs.current.set(key, addressInput) }
     const startInputKey = `${key}:start`
     let startInput = addressInputs.current.get(startInputKey)
     if (!startInput) { startInput = createRef<BrowserAddressInputHandle>(); addressInputs.current.set(startInputKey, startInput) }
-    const visible = presentation?.visible ?? defaultPresentationVisible
+    const visible = stagePresentation?.visible ?? defaultPresentationVisible
     const regionSurface = presentation?.target.surface ?? regionSplitSurface
     const inSurvey = regionSurface === 'survey'
     const startPageConfig = presentation ? presentation.target.browserStartPage : startPage
@@ -1358,7 +1237,7 @@ function BrowserPaneContent({
       Item={DropdownMenu.Item} Group={DropdownMenu.Group} Label={DropdownMenu.Label} /> : null
     const connectionUnavailable = released || restoring || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable || restoreError !== null
     const blocked = connectionUnavailable || screenshot !== null || elementSelection !== null || Boolean(tab.error) || Boolean(tab.certificateRequest) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
-      Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
+      Boolean((stagePresentation?.target.controlsOpen ?? controlPanelOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
     const stageContent = <>
 
         {screenshot ? (
@@ -1765,12 +1644,12 @@ function BrowserPaneContent({
         ...(annotationSync.cause ? { cause: annotationSync.cause } : {}), available: annotationSync.available, visible
       }} actions={annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null} />
       <div className="browser-body">
-      {presentation && !connectionUnavailable && !__AGENTMUX_WEB_PREVIEW__ ? <BrowserPresentationStage browserId={tab.browserId} navigationId={tab.navigationId} presentation={presentation}
+      {stagePresentation && !__AGENTMUX_WEB_PREVIEW__ ? <BrowserPresentationStage browserId={tab.browserId} navigationId={tab.navigationId} presentation={stagePresentation}
         control={tab.control} preferences={resolveBrowserAgentControl(agentAppearance)}
-        inputSelected={presentation.occurrence.presentationId === selectedPresentationId}
-        onInputSelected={() => onPresentationInputSelected?.(presentation.target)}
+        inputSelected={stagePresentation.occurrence.presentationId === selectedPresentationId}
+        onInputSelected={() => onPresentationInputSelected?.(stagePresentation.target)}
         onPageKey={action => runPageAction(key, action)}
-        blocked={blocked} media={media} stageRef={presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>
+        blocked={blocked} media={media} stageRef={!presentation || presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>
         : <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>{stageContent}</div>}
 
       {managementVisited ? <aside className="browser-trace-rail browser-management-rail" aria-label="Browser management controls" hidden={!managementOpen} inert={!managementOpen || !visible}>
