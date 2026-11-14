@@ -1301,7 +1301,8 @@ export class AgentMuxRpcService {
       return parseRuntimeV8ProfileResult(result, input) as AgentMuxRpcResult<M>
     }
     if (isHostMaintenanceMethod(method)) {
-      const input = parseHostMaintenanceParams(method, params)
+      const maintenanceMethod: import('./public-rpc-host-maintenance.js').HostMaintenanceMethod = method
+      const input = parseHostMaintenanceParams(maintenanceMethod, params)
       const caller = await this.authenticated(context)
       if (method === 'settings.hosts.maintenance-review' && context.caller !== undefined) throw new AgentMuxError(
         'Maintenance review requires a transport-approved person or device without a managed Agent caller. The request and healthy Runs remain available.', 'CONTROL_PERMISSION_DENIED')
@@ -1315,13 +1316,20 @@ export class AgentMuxRpcService {
         if (context.caller) await this.authenticated(context)
       }
       await assertCurrent()
-      if (!this.ports.hostMaintenance) throw new AgentMuxError('The original Host configuration service has no maintenance review owner. Existing checks, operations and healthy Runs remain available.', 'CONTROL_UNAVAILABLE')
+      if (!this.ports.hostMaintenance) {
+        // The original client may own configuration/review in another process.
+        // Authenticate and fence at this Core before using its explicit bridge;
+        // the destination still authenticates the original actor itself.
+        if (this.ports.forwardControl) return parseHostMaintenanceResult(
+          maintenanceMethod, await this.ports.forwardControl(maintenanceMethod, input, context), input) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The original Host configuration service has no maintenance review owner. Existing checks, operations and healthy Runs remain available.', 'CONTROL_UNAVAILABLE')
+      }
       const record = method === 'settings.hosts.maintenance-request'
         ? await this.ports.hostMaintenance.request(input as HostMaintenanceParamsMap['settings.hosts.maintenance-request'], actor, assertCurrent)
         : method === 'settings.hosts.maintenance-review'
           ? await this.ports.hostMaintenance.review(input as HostMaintenanceParamsMap['settings.hosts.maintenance-review'], actor, assertCurrent)
           : await this.ports.hostMaintenance.inspect(input.operationId, actor)
-      return parseHostMaintenanceResult(method, { record }, input) as AgentMuxRpcResult<M>
+      return parseHostMaintenanceResult(maintenanceMethod, { record }, input) as AgentMuxRpcResult<M>
     }
     if (isTailcatKeyMethod(method)) {
       const input = parseTailcatKeyParams(params)
