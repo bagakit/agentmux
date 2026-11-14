@@ -1781,6 +1781,14 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted()
       return parseAgentMuxRpcDeviceResult(method, await this.ports.deviceAdministration.call(method, input, context), input) as AgentMuxRpcResult<M>
     }
+    if (method === 'runtime.owner.identity' && !this.ports.hostedRuntime && this.ports.callOriginalCore) {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
+        'The runtime domain requires a transport-approved user or device, without a managed Agent caller.', 'AGENT_CAPABILITY_INVALID')
+      rpcString((delegatedHostRouteActor(context) ?? context.principal).id, 'Transport principal')
+      rpcRecord(params, AGENTMUX_HOSTED_RPC_FIELDS['runtime.owner.identity'])
+      context.signal?.throwIfAborted()
+      return await this.ports.callOriginalCore('local', method, params, context)
+    }
     if (Object.hasOwn(AGENTMUX_HOSTED_RPC_METHODS, method)) {
       const hosted = await this.hosted(method, params, context)
       const inputContext = this.inputCallContext(context)
@@ -1799,10 +1807,16 @@ export class AgentMuxRpcService {
       if (context.caller || !context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('Takeover cancellation requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
       const input = parseAgentTakeoverCancellation(params), control = this.ports.spatialAgentControl
       rpcControlRequest('agent.open', input.request)
-      if (!control?.cancelTakeover) throw new AgentMuxError('The original Takeover cancellation owner is unavailable.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const actor = delegatedHostRouteActor(context) ?? context.principal
       if (!['user','device'].includes(actor.kind)) throw new AgentMuxError('The original cancellation actor is unconfirmed.', 'CONTROL_PERMISSION_DENIED')
+      if (!control?.cancelTakeover) {
+        if (this.ports.callOriginalCore) {
+          const result = await this.ports.callOriginalCore<'agent.takeover.cancel' | 'agent.takeover.cancel.inspect'>('local', method, input, context)
+          return parseAgentTakeoverCancellationResult(result, input) as AgentMuxRpcResult<M>
+        }
+        throw new AgentMuxError('The original Takeover cancellation owner is unavailable.', 'CONTROL_UNAVAILABLE')
+      }
       return parseAgentTakeoverCancellationResult(await control.cancelTakeover(input, context, method === 'agent.takeover.cancel.inspect', { kind: actor.kind as 'user'|'device', id: actor.id }), input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.creation.inspect' || method === 'agent.creation.resolve') {
