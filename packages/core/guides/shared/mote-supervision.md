@@ -12,6 +12,17 @@ can acquire a new reply without another Mote link. Keep each source issue unknow
 discarding other readable work. Do not scan unrelated Sessions or infer progress from
 silence, a title, an idle turn or a running process.
 
+The same page also reads the exact current Main's original scheduled arrangements in
+`arrangements`, independently of linked work. Keep its `sourceStatus`, coverage and
+`hasMore` separate from the linked-page cursor: an empty work page is not no saved work.
+Read a relevant `scheduleId` through `schedule inspect` at `arrangements.ownerHostId` before
+acting; the reference/status is not its prompt, a completed task or permission to resume.
+Only this Mote's current maintenance source is omitted. Other original arrangements,
+including paused and unknown ones, stay visible. An unavailable arrangement source does
+not erase readable linked work. Coverage is current-Main schedules only; general
+`agent progress list` and formal Goals still have their original separate readers and
+authorization. Do not infer that all work is absent from one source's empty or limited page.
+
 Read the original report and evidence before deciding the next authorized action. For a
 formal Goal, establish its original owner from the exact delegation/source before reading
 current standards, plan and Supervisor there. The returned Goal reference is frozen
