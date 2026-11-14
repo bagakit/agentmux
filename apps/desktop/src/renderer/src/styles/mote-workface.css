@@ -1,8 +1,4 @@
 @import './mote-workface-frame.css';/* Identity stays with the navigation while the conversation body changes. */
-.mote-space-frame__header { min-height: 40px; height: 40px; box-sizing: border-box; padding: 4px 12px; gap: 8px; }
-.mote-space-frame__navigation { min-height: 24px; gap: 12px; flex-wrap: nowrap; }
-.mote-space-frame__navigation > .surface-mode-switch { flex: 0 1 auto; padding: 0; }
-.mote-space-frame__navigation > .surface-mode-switch button { min-height: 24px; height: 24px; padding: 2px 9px; font-size: var(--fs-meta); }
 .mote-conversation-identity { display: inline-flex; align-items: center; gap: 8px; min-width: 64px; max-width: 180px; flex: 0 1 auto; }
 .mote-conversation-identity__avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: 0 0 28px; }
 .mote-conversation-identity__avatar > .space-object-icon, .mote-conversation-identity__avatar > .mote-identity-motion { width: 100%; height: 100%; }
@@ -18,9 +14,6 @@
 .mote-heartbeat-lamp[data-mote-care="unbound"] .mote-heartbeat-lamp__signal { color: var(--text-3); }
 @container mote-space (max-width: 760px) { .mote-heartbeat-lamp { width: 26px; padding: 3px; } .mote-heartbeat-lamp__label { display: none; } }
 @container mote-workface (max-width: 560px) { .mote-heartbeat-lamp { width: 26px; padding: 3px; } .mote-heartbeat-lamp__label { display: none; } }
-.mote-space-frame__header .mote-cooperation--navigation { padding: 0; }
-.mote-space-frame__header .mote-cooperation__team { min-height: 24px; height: 24px; }
-.mote-workface__navigation { display: flex; align-items: center; gap: 12px; min-height: 40px; height: 40px; box-sizing: border-box; padding: 4px 12px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0; }
 .mote-workface { container-name: mote-workface; }
 .mote-workface__original[hidden], .mote-threads-panel[hidden], .pane-tabbar[hidden] { display: none; }
 .pane-group.pane-group--mote-conversation { --pane-tabbar-height: 0px; }
@@ -39,24 +32,8 @@
 .mote-threads-panel__locations { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
 .mote-cooperation--threads { border: 0; padding: 0; }
 .mote-cooperation--threads .mote-cooperation__team-body { max-height: none; }
-@container mote-workface (max-width: 560px) {
-  .mote-workface__navigation { gap: 8px; padding-inline: 10px; }
-  .mote-workface__navigation > .mote-conversation-identity { max-width: 120px; }
-}
-.mote-space-frame__navigation .surface-mode-switch button { display: inline-flex; align-items: center; gap: 5px; }
 .mote-space-frame, .mote-workface { position: relative; }
 .mote-main-slot { display: inline-flex; align-items: center; flex: 0 0 auto; margin-inline-start: auto; }
-.mote-space-frame__header > .mote-main-slot { flex: 0 1 280px; min-width: 0; gap: 4px; }
-@container mote-space (max-width: 760px) {
-  .mote-space-frame__header { height: auto; flex-direction: column; align-items: stretch; gap: 2px; padding-block: 6px; }
-  .mote-space-frame__navigation { flex: none; width: 100%; min-height: 28px; gap: 8px; }
-  .mote-space-frame__navigation > .mote-conversation-identity { max-width: 100px; }
-  .mote-space-frame__navigation > .surface-mode-switch { flex: 1; }
-  .mote-space-frame__navigation > .surface-mode-switch button { padding-inline: 7px; }
-  .mote-space-frame__header > .mote-main-slot { flex: none; width: 100%; min-height: 28px; margin-inline-start: 0; }
-  .mote-space-frame__header .mote-cooperation--navigation { max-width: none; }
-}
-.mote-workface__navigation > .mote-cooperation { margin-inline-start: auto; }
 .mote-main-actions[data-presentation="menu"] { font-size: var(--fs-meta); }
 .mote-main-actions__trigger { appearance: none; border: 0; background: transparent; font: inherit; cursor: pointer; color: var(--text-3); padding: 3px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--radius-sm); -webkit-app-region: no-drag; }
 .mote-main-actions__trigger:hover, .mote-main-actions__trigger[data-state="open"] { color: var(--text); background: var(--surface-2); }
@@ -71,7 +48,6 @@
 .pane-group.pane-group--mote-conversation { grid-template-rows: minmax(0, 1fr); }
 .mote-workface__handoff { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px; color: var(--text-3); font-size: var(--fs-meta); }
 .mote-workface__handoff button { border: 0; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
-.mote-workface__navigation > .pane-action, .mote-workface__navigation > .mote-profile-trigger { flex-shrink: 0; width: 24px; min-width: 24px; height: 24px; min-height: 24px; }
 
 .mote-main-service { padding: 4px 12px; border-bottom: 1px solid var(--line-soft); }
 .mote-main-recovery__actions, .activity-feed__session-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }

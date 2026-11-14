@@ -6,10 +6,9 @@ import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import { useSpaceContentPresentation } from '../lib/space-content-presentation'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 import { useAppStore } from '../store'
-import { SurfaceModeSwitch } from './SurfaceModeSwitch'
-import { MoteConversationIdentity } from './MoteConversationIdentity'
+import { MotePageNavigation } from './MotePageNavigation'
 import type { MoteThreadView } from '@agentmux/client-ui/components/MoteConversationThreads'
-import { emptyMoteThreadCounts, moteThreadOptions, type MoteThreadCount } from './MoteThreadNavigation'
+import { emptyMoteThreadCounts, type MoteThreadCount } from './MoteThreadNavigation'
 
 export type MoteContentSection = 'profile' | 'ideas' | 'calendar'
 export type MoteSpaceSection = MoteContentSection | 'discussion' | 'threads'
@@ -76,15 +75,11 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
   return <MoteDialogueViewProvider scope={scope} active={visible}><MoteSpaceContext.Provider value={scope && presentation ? { actionsHost, topicId: scope.topic.id, section, select, threadView: currentThreads.view, selectThreads, reportCount, navigationRevision: content.revision, threadReference: content.owner === owner && section === 'threads' ? content.threadReference : undefined, threadEvent: content.owner === owner && section === 'threads' ? content.threadEvent : undefined, entryToken: content.owner === owner && section === 'discussion' ? content.entryToken : undefined } : null}>
     <WindowSidebarLayoutContext.Provider value={sidebars ? { ...sidebars, chromeInFrame: visible } : null}>
     <div className="mote-space-frame" data-mote-space={visible ? scope.topic.id : undefined} data-mote-space-id={visible ? objectTarget?.spaceId : undefined} data-mote-page={visible ? section : undefined}>
-      {scope && presentation ? <header className="mote-space-frame__header" hidden={!visible}>
-        <div className="mote-space-frame__navigation">
-        {!projectRailOpen ? <SidebarToggleChrome /> : null}
-        <MoteConversationIdentity scope={scope} visible={visible} />
-        <SurfaceModeSwitch<MoteContentSection | 'discussion' | MoteThreadView> value={section === 'threads' ? currentThreads.view : section} active={visible} ariaLabel="Mote pages" onChange={next => next === 'work' || next === 'private' || next === 'members' ? selectThreads(next) : select(next)}
-          options={[{ value: 'profile', label: 'Profile' }, { value: 'discussion', label: 'Discussion' }, ...moteThreadOptions(currentThreads.counts), { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} />
-        </div>
-        <span className="mote-main-slot" ref={setActionsHost} />
-      </header> : null}
+      {scope && presentation ? <MotePageNavigation surface="space" scope={scope} active={visible}
+        value={section === 'threads' ? currentThreads.view : section} counts={currentThreads.counts}
+        onChange={next => next === 'work' || next === 'private' || next === 'members' ? selectThreads(next) : select(next)}
+        leading={!projectRailOpen ? <SidebarToggleChrome /> : null}
+        actions={<span className="mote-main-slot" hidden={section !== 'discussion'} ref={setActionsHost} />} /> : null}
       {children}
     </div>
     </WindowSidebarLayoutContext.Provider>

@@ -1,0 +1,75 @@
+.mote-page-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 14px;
+  min-width: 0;
+  flex: none;
+  padding: 7px 14px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-1);
+}
+.mote-page-bar[hidden], .mote-page-bar [hidden] { display: none; }
+.mote-page-bar__identity, .mote-page-bar__actions, .mote-page-bar .mote-main-slot {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.mote-page-bar__identity { gap: 8px; }
+.mote-page-bar__identity > .sidebar-toggle-chrome { flex: none; width: auto; height: auto; padding: 0; }
+.mote-page-bar__actions { justify-content: flex-end; }
+.mote-page-bar__actions .mote-cooperation--navigation { min-width: 0; padding: 0; }
+.mote-page-bar__actions .mote-cooperation__team { min-height: 28px; }
+.mote-page-bar__actions :is(.pane-action,.mote-profile-trigger) { flex: none; }
+.mote-page-bar__pages { min-width: 0; justify-self: center; max-width: 100%; }
+.mote-page-bar__pages .surface-mode-switch {
+  margin: 0;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-3) 46%, var(--surface-1));
+}
+.mote-page-bar__pages .surface-mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  height: 29px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-weight: 550;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.mote-page-bar__pages .surface-mode-switch .selected { color: var(--text); }
+.mote-page-bar__pages .surface-mode-switch > .liquid-selection {
+  --radius: 8px;
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line-soft), 0 1px 3px var(--wash-1);
+}
+.mote-page-bar__pages .mote-thread-count { background: transparent; min-width: 1ch; padding: 0; }
+@container (max-width: 940px) {
+  .mote-page-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 8px;
+    padding: 6px 10px;
+  }
+  .mote-page-bar__actions { grid-column: 2; grid-row: 1; max-width: min(48cqi, 260px); }
+  .mote-page-bar__pages { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  .mote-page-bar__pages .surface-mode-switch { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+  .mote-page-bar__pages .surface-mode-switch button { padding-inline: 9px; }
+}
+@container (max-width: 430px) {
+  .mote-page-bar__pages .surface-mode-switch { gap: 1px; }
+  .mote-page-bar__pages .surface-mode-switch button { padding-inline: 6px; }
+  .mote-page-bar__identity { gap: 4px; }
+}
+@media (pointer: coarse) {
+  .mote-page-bar__pages .surface-mode-switch button { min-height: 44px; }
+}
+@media (forced-colors: active) {
+  .mote-page-bar__pages .surface-mode-switch button.selected { background: Highlight; color: HighlightText; }
+}
