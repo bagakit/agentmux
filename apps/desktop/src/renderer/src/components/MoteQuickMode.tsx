@@ -104,7 +104,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     if (!originalHeartbeat && !current.accepted && (edited.current || current.saved?.pending || resumeRequest.current)) retainedQuickDrafts.set(draftKey, { draft: current.draft, minutes: current.minutes, rolloverKind: current.rolloverKind, rolloverMinutes: current.rolloverMinutes, saved: current.saved, resume: resumeRequest.current })
   }, [draftKey])
   const facts = useAppStore(useShallow(state => ({ tabs: state.tabs, layouts: state.layouts, config: state.config, snapshots: state.scratchTopicSnapshots,
-    bindings: state.spaceZoneBindings, categories: state.topicCategories, detections: state.executorDetections, inventory: state.hostExecutorInventories[scope.workspace.hostId] })))
+    bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const ownAgentIds = useMemo(() => [...new Set(Object.values(facts.tabs).filter(tab => tab.workspaceId === scope.workspace.id)
     .flatMap(tab => Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : [])))], [facts.tabs, scope.workspace.id])
   const execution = useAppStore(useShallow(state => Object.fromEntries(ownAgentIds.map(id => {
@@ -113,7 +113,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   }))))
   const choices = useMemo(() => moteConversationChoices(useAppStore.getState(), scope.topic, scope.workspace.id,
     spatialCatalog(useAppStore.getState(), [scope.topic])), [facts.tabs, facts.layouts, facts.config, facts.snapshots, facts.bindings, facts.categories, execution, scope.topic, scope.workspace.id])
-  const executors = executorsForHost(facts.config, scope.workspace.hostId, facts.detections, facts.inventory)
+  const executors = (saved?.choices?.executors ?? []).map(executor => ({ id: executor.id, label: executor.name, providerId: executor.providerId }))
   const conversationLabels = useAppStore(useShallow(state => Object.fromEntries(choices.map(choice => [choice.sessionId,
     moteConversationLabel(state, choice) ?? choice.sessionId]))))
   useLayoutEffect(() => {

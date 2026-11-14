@@ -119,7 +119,10 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
           submission.current = query; setSent({ operationId: query.operationId, prompt: query.prompt, key })
           void state.submit({ operationId: query.operationId, prompt: query.prompt })
         } } : {})} />}
-      notice={<>{state.issue && <p role="status">{state.issue}</p>}{notice && <p role="status">{notice}</p>}{persistenceIssue && <p role="status">{persistenceIssue}</p>}
+      notice={<>{state.issue && <p role="status">{state.issue}
+        {state.reading?.preferences.status === 'ready' && !state.reading.executor && (mode === 'new' || !state.reading.dialogue.main.current)
+          ? <> <button type="button" className="small-button" onClick={event => onConfigure(event.currentTarget)}>配置 Agent</button></> : null}
+      </p>}{notice && <p role="status">{notice}</p>}{persistenceIssue && <p role="status">{persistenceIssue}</p>}
         {automatic && <div role="status">正在按此 Mote 的空闲策略承接原输入。<details><summary>本次输入</summary><p>{automatic.query.prompt}</p></details></div>}
         {mode !== 'new' && state.reading?.dialogue.main.current && <p role="status">已有当前主对话，这里不会另建主 Agent；草稿保留，可从「对话选项」返回当前主对话。</p>}
         {state.busy && !(sent && sent.key === key) && <p role="status">正在接通这次对话…</p>}

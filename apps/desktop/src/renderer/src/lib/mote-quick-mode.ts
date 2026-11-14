@@ -1,6 +1,6 @@
 import type { FileDocument } from '@agentmux/core'
 import type { FileReadResult } from '@agentmux/core/files'
-import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MotePresenceReading, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickBaseline, type MoteQuickChoices, type MoteQuickPreferencesSaveParams, type MotePresenceReading, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from './mote-workface'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
@@ -10,7 +10,7 @@ import { documentKey } from './workbench-tabs'
 import { moteConnectionTarget } from './mote-connection-default'
 import { api } from './api'
 
-export type SavedMoteQuickMode = { document: FileDocument | null; defaults: MoteQuickDefaults; issue?: string; source?: FileReadResult; pending?: MoteQuickPreferencesSaveParams; maintenance?: MotePresenceReading }
+export type SavedMoteQuickMode = { document: FileDocument | null; defaults: MoteQuickDefaults; choices?: MoteQuickChoices; issue?: string; source?: FileReadResult; pending?: MoteQuickPreferencesSaveParams; maintenance?: MotePresenceReading }
 export async function readMoteQuickDefaults(scope: MoteWorkfaceScope): Promise<SavedMoteQuickMode> {
   const target = moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings)
   if (!target) return { document: null, defaults: {}, issue: 'The original Mote resource is unconfirmed. Its settings and conversations remain available.' }
@@ -18,7 +18,7 @@ export async function readMoteQuickDefaults(scope: MoteWorkfaceScope): Promise<S
 }
 export async function readMoteQuickTarget(target: MotePreferencesTarget): Promise<SavedMoteQuickMode> {
   const input = { kind: 'quick' as const, target }, result = parseMotePreferencesReadResult(await api.motePreferences.read(input), input)
-  return { document: result.source?.result.status === 'read' ? result.source.result.document : null, defaults: result.defaults ?? {}, ...(result.source ? { source: result.source } : {}), ...(result.issue ? { issue: result.issue } : {}), ...(result.maintenance ? { maintenance: result.maintenance } : {}) }
+  return { document: result.source?.result.status === 'read' ? result.source.result.document : null, defaults: result.defaults ?? {}, choices: result.choices, ...(result.source ? { source: result.source } : {}), ...(result.issue ? { issue: result.issue } : {}), ...(result.maintenance ? { maintenance: result.maintenance } : {}) }
 }
 export type MoteQuickWrite = { status: 'saved' | 'unchanged'; source: MoteQuickBaseline }
 export class MoteQuickSaveError extends Error {

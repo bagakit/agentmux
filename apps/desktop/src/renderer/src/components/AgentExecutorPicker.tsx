@@ -16,7 +16,7 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 
 type ExecutorPickerProps = {
-  executors: readonly ExecutorChoice[]
+  executors: readonly Pick<ExecutorChoice, 'id' | 'label' | 'providerId' | 'detection'>[]
   selected: string | null
   onConfigure?: (() => void) | undefined
   onSelect(id: string): void
