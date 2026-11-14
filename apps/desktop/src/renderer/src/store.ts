@@ -805,6 +805,8 @@ export type AgentSteerReaction = { code: string; replySource: ConversationReplyS
 export type MoteMainInputSelection = Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>
 export type AgentSteerOptions = {
   focusTask?: AgentMuxFocusTaskReference | undefined
+  /** Read-only transport facts for this admission; never inserted into the local Session map. */
+  originalSession?: SessionSnapshot
   moteMain?: MoteMainInputSelection | undefined
   moteSource?: import('@agentmux/core').AgentInputMoteSource | undefined
   inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
@@ -890,7 +892,7 @@ export function agentSteerCanEdit(entry: AgentSteerQueueEntry, inFlightId?: stri
 }
 
 function manualComposerBinding(sessionId: string, origin?: 'manual', options?: AgentSteerOptions): AgentSteerQueueEntry['directInputBinding'] {
-  const session = useAppStore.getState().sessions.find(item => item.id === sessionId)
+  const session = options?.originalSession ?? useAppStore.getState().sessions.find(item => item.id === sessionId)
   // This is the direct user's new producer contract, not a recovered queue tag
   // or an inference from authorHuman, current predecessor or the message body.
   const recipient = options?.browserRecipient ?? options?.browserInput?.control
@@ -5540,7 +5542,7 @@ function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
 
 function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = mintObjectId(), origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions, directInputBinding?: AgentSteerQueueEntry['directInputBinding']): string | false {
   if (!text.trim() && !agentMuxNote?.trim()) return false
-  const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
+  const session = options?.originalSession ?? useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
   const browserRecipient = options?.browserRecipient ?? options?.browserInput?.control
   if (browserRecipient && (origin !== 'manual' || browserRecipient.hostId !== session.control.hostId ||
@@ -5589,7 +5591,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ...(focusTask ? { focusTask } : {}),
     operationId,
     promptCondition: options?.goalContinuation ? validateAgentPromptCondition(options.goalContinuation.condition) : null,
-    ...(directInputBinding ? { directInputBinding, directInputControl: structuredClone(browserRecipient ?? session.control), runId: directInputBinding.expectedRun.runId } : {}),
+    ...(directInputBinding ? { directInputBinding, runId: directInputBinding.expectedRun.runId } : {}),
+    ...(directInputBinding || options?.originalSession ? { directInputControl: structuredClone(browserRecipient ?? session.control) } : {}),
     ...(options?.execution === undefined ? {} : { execution: options.execution }),
     ...(options?.goalContinuation ? { goalContinuation: structuredClone(options.goalContinuation) } : {}),
     ...(options?.goalPmo ? { goalPmo: structuredClone(options.goalPmo) } : {}),
@@ -13250,7 +13253,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   send(sessionId, text, onRejected, origin, agentMuxNote, options) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    const operationId = mintObjectId(), session = get().sessions.find(item => item.id === sessionId)
+    const operationId = mintObjectId(), session = options?.originalSession ?? get().sessions.find(item => item.id === sessionId)
     const seed = startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
       operationId, hostId: session?.hostId ?? null, prompt: composeAgentPrompt(text, agentMuxNote).text })
     const reject = (error: unknown) => {

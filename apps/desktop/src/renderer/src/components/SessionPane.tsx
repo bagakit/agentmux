@@ -263,6 +263,10 @@ export function SessionPane({
   // One exact Core terminal fact outranks a stale presentation. The original
   // global Session projection and all other consumers retain their own owners.
   const session = surfaceKind === 'agent' && retainedHistory?.state === 'deleted' ? undefined : observedSession
+  const composerProviderCatalogEntry = useObservedAppStore('sessionPane', observationVisible, consumerScope, state =>
+    session?.kind === 'agent' ? state.providerCatalog.find(entry => entry.id === session.providerId) : undefined)
+  // The same resolved execution facts feed every local Composer projection; Region remains presentation only.
+  const composerExecutionProps = { session, ownerKey: session?.id ?? sessionId, providerCatalogEntry: composerProviderCatalogEntry ?? null }
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const legacyExecution = useLegacyExecutionRecovery(mailboxOrigin.tabId && mailboxOrigin.regionId
     ? { tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId, agentSessionId: sessionId } : undefined,
@@ -979,7 +983,7 @@ export function SessionPane({
       executionHost={preSnapshotHost} eligible={false} recovery={content(target)}
       readOnly={readOnly} resourceOrigin={linkOrigin} renderFrame={renderPresentationFrame}
       selectRegion={() => onPresentationSelected?.(target)}
-      {...(projectionPolicy.allowsRecovery && session?.kind === 'agent' ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading}
+      {...(projectionPolicy.allowsRecovery && session?.kind === 'agent' ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading}
         mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }}
         onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
         visible={false} {...(tabName ? { tabName } : {})} /> } : {})} />) : null}
@@ -995,7 +999,7 @@ export function SessionPane({
       {sessionHeader()}
       {takeoverSurface}
       <div className="agent-body">{acceptedSurface}</div>
-      {!readOnly ? <AgentSessionComposer resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
+      {!readOnly ? <AgentSessionComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
     </section>)
   }
 
@@ -1097,7 +1101,7 @@ export function SessionPane({
             restore: 'Check again to read the same Session identity; no Agent will be started.' }
         }} actions={<button type="button" className="small-button" disabled={historyCatalogue.loading}
           onClick={historyCatalogue.refresh}><ThemeActionRefreshIcon size={12} /> Check again</button>} /> : null}
-        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
+        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
   }
@@ -1319,7 +1323,7 @@ export function SessionPane({
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
-      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
+      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer {...composerExecutionProps} aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
         visible={target.visible !== false && viewMode !== 'terminal' && canReadConversation} {...(tabName ? { tabName } : {})} /> } : {})}
     />) : null}
     <ConversationProcessSurface><section
@@ -1441,7 +1445,7 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          <AgentSessionComposer aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer {...composerExecutionProps} aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section></ConversationProcessSurface>
