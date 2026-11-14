@@ -674,7 +674,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
         if (action.cancelled || attempts.current.get(originalKey) !== original) return
         if (!full || isHostedAgentSessionSummary(full) || full.agentSessionId !== originalId ||
             full.hostId !== originalSession.hostId || full.run.runId !== originalSession.run.runId) throw Object.assign(
-          new Error('原消息正文还没完整核实，保留原消息，可以稍后再核对。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+          new Error('这条消息正文还没完整核实，保留这条消息，可以稍后再核对。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
         originalSession = full
       }
       if (original.moteMain && (originalSession.agentSessionId !== original.moteMain.reference.sessionId || originalSession.hostId !== original.moteMain.reference.hostId)) {
