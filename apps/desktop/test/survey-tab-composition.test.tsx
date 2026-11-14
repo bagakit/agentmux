@@ -42,6 +42,7 @@ import { scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 import { connectWorkbenchCloseApiOwner } from './helpers/workbench-close-api-owner'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import type { AgentLaunchResult } from '../src/shared/contracts'
+import type { WorkbenchWindowDocument, WorkbenchWindowResponse } from '../src/shared/workbench-windows'
 import { prepareSourceCoreCli } from './helpers/source-core-cli.mjs'
 import { parseAgentMuxControlRequest } from '../../../packages/core/src/control-codec'
 import '../scripts/fixtures/survey-tab-composition/native-listener.setup'
@@ -2068,6 +2069,11 @@ it('[page-order] repeated exact page admission preserves the user order while st
 })
 
 
+function completedWindowReply(calls: [WorkbenchWindowResponse][], requestId: string, document: WorkbenchWindowDocument) {
+  return calls.find(([reply]) => reply.requestId === requestId && reply.windowId === document.windowId &&
+    reply.documentGeneration === document.documentGeneration && (reply.outcome === 'applied' || reply.outcome === 'rejected'))?.[0]
+}
+
 it.each([false, true, 'focus-local'] as const)('[window-return-app] original exact-page host returns to its Survey unless later navigation supersedes it: %s', async later => {
   let requestListener: ((request: import('../src/shared/workbench-windows').WorkbenchWindowRequest) => void) | undefined
   vi.spyOn(api.ui.workbenchWindows, 'onRequest').mockImplementation(listener => { requestListener = listener; return () => { requestListener = undefined } })
@@ -2093,8 +2099,7 @@ it.each([false, true, 'focus-local'] as const)('[window-return-app] original exa
     const dispatch = async (action: object, id: string) => {
       expect(requestListener).toBeDefined()
       await act(async () => requestListener!({ requestId: id, ...identity, target, ...action } as import('../src/shared/workbench-windows').WorkbenchWindowRequest))
-      await vi.waitFor(() => expect(response.mock.calls.some(([reply]) => reply.requestId === id)).toBe(true))
-      return response.mock.calls.find(([reply]) => reply.requestId === id)![0]
+      return vi.waitUntil(() => completedWindowReply(response.mock.calls, id, identity))
     }
     const prepared = await dispatch({ action: 'prepare' }, 'prepare-original-return')
     expect(prepared).toMatchObject({ outcome: 'applied', returnContext: { surface: 'survey', reference, selection: { kind: 'page', ...page } } })
@@ -2113,7 +2118,7 @@ it.each([false, true, 'focus-local'] as const)('[window-return-app] original exa
       if (later === 'focus-local') await act(async () => useAppStore.getState().setMainSurface('agents'))
       childDocument.dispatchEvent(new Event('compositionstart', { bubbles: true }))
       await act(async () => requestListener!({ requestId: 'later-original-return', ...identity, target, action: 'return', returnContext: context, navigate: true }))
-      expect(response.mock.calls.some(([reply]) => reply.requestId === 'later-original-return')).toBe(false)
+      expect(completedWindowReply(response.mock.calls, 'later-original-return', identity)).toBeUndefined()
       if (later === 'focus-local') {
         const beforeClose = useAppStore.getState()
         await click(named('Close Focus workspace'))
@@ -2122,7 +2127,7 @@ it.each([false, true, 'focus-local'] as const)('[window-return-app] original exa
         expect(document.querySelector('.global-focus-surface')?.classList.contains('global-board-surface--session-open')).toBe(false)
       } else await act(async () => useAppStore.getState().setMainSurface('agents'))
       await act(async () => childDocument.dispatchEvent(new Event('compositionend', { bubbles: true })))
-      await vi.waitFor(() => expect(response.mock.calls.some(([reply]) => reply.requestId === 'later-original-return' && reply.outcome === 'applied')).toBe(true))
+      expect(await vi.waitUntil(() => completedWindowReply(response.mock.calls, 'later-original-return', identity))).toMatchObject({ outcome: 'applied' })
       expect(useAppStore.getState().mainSurface).toBe('agents')
       if (later === 'focus-local') expect(document.querySelector('.global-focus-surface')?.classList.contains('global-board-surface--session-open')).toBe(false)
     }
@@ -2146,9 +2151,9 @@ it('[window-return-app] one automatic native-window intent retains its exact con
   const original = calls.mock.calls[0]![1] as import('@agentmux/core/control').AppWindowParamsMap['app.window.open']
   expect(original).toEqual({ operationId: expect.any(String), target, focus: false })
   const prepare = async (requestId: string, operationId: string) => {
-    await act(async () => listener!({ requestId, windowId: 'intent-child', documentGeneration: 'intent-child-document', action: 'prepare', operationId, target }))
-    await vi.waitFor(() => expect(replies.mock.calls.some(([reply]) => reply.requestId === requestId)).toBe(true))
-    return replies.mock.calls.find(([reply]) => reply.requestId === requestId)![0]
+    const identity = { windowId: 'intent-child', documentGeneration: 'intent-child-document' }
+    await act(async () => listener!({ requestId, ...identity, action: 'prepare', operationId, target }))
+    return vi.waitUntil(() => completedWindowReply(replies.mock.calls, requestId, identity))
   }
   expect((await prepare('exact-intent-prepare', original.operationId)).returnContext).toEqual(context)
   expect((await prepare('other-public-prepare', 'another-original-operation')).returnContext).toMatchObject({ surface: 'survey' })
@@ -2215,8 +2220,9 @@ it('[window-return-app] a sole Browser borrows the unique visible Survey occurre
     presentation: 'pending', bounds: null, focused: null }] }))
   await act(async () => listener!({ action: 'prepare', requestId: 'plain-survey-prepare', operationId: 'plain-survey-public-open',
     windowId: 'plain-return-shell', documentGeneration: 'plain-return-shell-document', target: originalTarget }))
-  await vi.waitFor(() => expect(replies.mock.calls.some(([reply]) => reply.requestId === 'plain-survey-prepare')).toBe(true))
-  expect(replies.mock.calls.find(([reply]) => reply.requestId === 'plain-survey-prepare')![0]).toMatchObject({ outcome: 'applied',
+  const completed = await vi.waitUntil(() => completedWindowReply(replies.mock.calls, 'plain-survey-prepare', {
+    windowId: 'plain-return-shell', documentGeneration: 'plain-return-shell-document' }))
+  expect(completed).toMatchObject({ outcome: 'applied',
     returnContext: { surface: 'survey', reference, selection: { kind: 'page', ...page } } })
 })
 
