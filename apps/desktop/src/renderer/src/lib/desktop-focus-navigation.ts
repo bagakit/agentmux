@@ -3,6 +3,7 @@ import type { AgentMuxDesktopMainSurface, AgentMuxDesktopSelection, AgentMuxDesk
   AgentMuxDesktopSurface, AgentMuxSpaceCatalog, AgentMuxSpaceSelector, AgentMuxSpatialIssue } from '@agentmux/core'
 import type { WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
+import { isSessionSurface } from './workbench-surface-kinds'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
@@ -72,6 +73,20 @@ export function workbenchSelectionCatalog(state: NavigationState): AgentMuxSpace
   const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
   const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch)
   return workbenchNavigationCatalog(state, topics)
+}
+
+/** The original Session binding and physical display address own each choice. */
+export function sessionWorkbenchReferences(tabs: Readonly<Record<string, WorkbenchTab>>, catalog: AgentMuxSpaceCatalog,
+  sessionId: string, groupId?: string): WorkbenchProjectionSelection[] {
+  const references = new Map<string, WorkbenchProjectionSelection>()
+  for (const location of catalog.locations) {
+    const surface = tabs[location.tabId]?.regions[location.regionId]
+    if (!surface || !isSessionSurface(surface) || surface.sessionId !== sessionId || groupId && location.groupId !== groupId) continue
+    const reference = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId,
+      tabId: location.tabId, regionId: location.regionId }
+    references.set(JSON.stringify(reference), reference)
+  }
+  return [...references.values()]
 }
 
 /** A local focus keeps its explicit parent; an explicit jump can resolve another object. */

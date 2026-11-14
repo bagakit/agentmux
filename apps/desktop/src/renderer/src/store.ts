@@ -139,7 +139,7 @@ import { executeWorkfaceFileOpen, resolveFileOpenTarget } from './lib/workface-f
 import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
-import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
+import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
 import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readFocusAgentPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
@@ -1377,7 +1377,10 @@ export type AppState = GitReadingActions & {
   ): Promise<AgentMuxControlResult>
   /** Whether the original display selection was committed. Refusal preserves the current context.
    * `keepSurface` places and selects the same occurrence without leaving the current main surface (Focus shows it in place). */
-  selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean }): boolean
+  sessionLocationRequest: { requestId: string; sessionId: string; label: string; groupId?: string; keepSurface?: boolean; issue?: string } | null
+  dismissSessionLocationRequest(requestId: string): void
+  chooseSessionLocation(requestId: string, reference: WorkbenchProjectionSelection): boolean
+  selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean; reference?: WorkbenchProjectionSelection }): boolean
   prepareWorkbenchLayout(workspaceId: string): WorkspaceLayout
   createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
@@ -5584,6 +5587,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,
+  sessionLocationRequest: null,
   focusAgentReveal: null,
   conversationRevealIntent: null,
   focusTimelineNameWidth: FOCUS_TIMELINE_NAME_WIDTH_DEFAULT,
@@ -7362,10 +7366,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       signal?.removeEventListener('abort', cancel)
     }
   },
+  dismissSessionLocationRequest(requestId) {
+    if (get().sessionLocationRequest?.requestId === requestId) set({ sessionLocationRequest: null })
+  },
+  chooseSessionLocation(requestId, reference) {
+    const request = get().sessionLocationRequest
+    if (request?.requestId !== requestId) return false
+    return get().selectSession(request.sessionId, request.groupId, { ...(request.keepSurface !== undefined ? { keepSurface: request.keepSurface } : {}), reference })
+  },
   selectSession(id, preferredTabGroupId, options) {
     // Placement and selection are one decision; only the visible main surface is the caller's choice.
     const navigation = options?.keepSurface ? {} : { mainSurface: 'workbench' as const }
-    if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return false
+    const fail = (message: string, error: unknown = new Error(message)): false => {
+      const request = get().sessionLocationRequest
+      if (request?.sessionId === id) set({ sessionLocationRequest: { ...request, issue: message } })
+      else get().reportError(error, { kind: 'indeterminate' })
+      return false
+    }
+    if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return fail('This Session view is closing. Its work is kept; choose an available location after closing finishes.')
     const current = get(), catalog = workbenchSelectionCatalog(current)
     const existing = Object.values(current.tabs).flatMap((tab) => (
       workbenchSurfaces(tab).flatMap((surface) => (
@@ -7379,34 +7397,41 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // and can differ after a spatial move; rebuilding this Tab from cwd would move its other
       // Regions too and leave the same Tab in two Workspace layouts. Recovery may also retain
       // this projection before a fresh Session snapshot arrives.
-      const owners = new Set(existing.map(item => JSON.stringify([item.tab.id, item.surface.regionId])))
-      let references = [...new Map(catalog.locations.filter(location => owners.has(JSON.stringify([location.tabId, location.regionId])))
-        .map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
-      // An explicit Space Group is the caller's navigation intent. Held Focus only
-      // disambiguates inside that scope; it cannot erase a different requested Group.
-      if (preferredTabGroupId) references = references.filter(reference => reference.groupId === preferredTabGroupId)
-      const held = current.agentFocus.execution.sessionId === id ? current.agentFocus.execution.reference : undefined
-      if (held && references.some(reference => reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId &&
-        reference.tabId === held.tabId && reference.regionId === held.regionId)) references = references.filter(reference =>
-          reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId && reference.tabId === held.tabId && reference.regionId === held.regionId)
+      let references = sessionWorkbenchReferences(current.tabs, catalog, id, preferredTabGroupId)
+      // The person's exact choice takes precedence over a previously held occurrence.
+      if (options?.reference) references = references.filter(reference => sameWorkbenchProjectionSelection(reference, options.reference!))
+      else {
+        const held = current.agentFocus.execution.sessionId === id ? current.agentFocus.execution.reference : undefined
+        if (held && references.some(reference => sameWorkbenchProjectionSelection(reference, held)))
+          references = references.filter(reference => sameWorkbenchProjectionSelection(reference, held))
+      }
       if (references.length !== 1) {
-        current.reportError(new Error('The Session has no unique confirmed display occurrence. Its original workface and input are kept; choose its exact Tab, Group and Region.'), { kind: 'indeterminate' })
-        return false
+        if (!options?.reference && references.length > 1) {
+          set({ sessionLocationRequest: { requestId: mintObjectId(), sessionId: id,
+            label: current.sessions.find(session => session.id === id)?.label ?? id,
+            ...(preferredTabGroupId ? { groupId: preferredTabGroupId } : {}),
+            ...(options?.keepSurface !== undefined ? { keepSurface: options.keepSurface } : {}) } })
+          return false
+        }
+        return fail(options?.reference ? 'This location no longer contains the original Session. Choose one of its current locations.'
+          : 'The Session has no unique confirmed display occurrence. Its original workface and input are kept; choose its exact Tab, Group and Region.')
       }
       const reference = references[0]!
       let choice: AgentMuxDesktopSpaceSelection
       try { choice = resolveWorkbenchOccurrenceSelection(current, catalog, { workspaceId: reference.displayWorkspaceId,
         groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation') }
-      catch (error) { current.reportError(error, { kind: 'indeterminate' }); return false }
+      catch (error) { return fail(presentError(error), error) }
       set((state) => ({
+        ...(state.sessionLocationRequest?.sessionId === id ? { sessionLocationRequest: null } : {}),
         activeWorkspaceId: reference.displayWorkspaceId, workbenchSpaceSelection: choice,
         retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
         ...navigation,
         displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
       }))
-      get().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'pointer', reference.groupId)
+      get().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, options?.reference ? 'navigation' : 'pointer', reference.groupId)
       return true
     }
+    if (options?.reference) return fail('This location no longer contains the original Session. Its existing work is kept; no new view was created.')
     const session = get().sessions.find((candidate) => candidate.id === id)
     const workspace = session ? workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)) : null
     if (!session || !workspace) {

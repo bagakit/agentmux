@@ -9,6 +9,8 @@ import {
   type WorkbenchTab
 } from './workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
+import type { WorkbenchProjectionSelection } from './workbench-projection'
+import { regionIds, type WorkspaceLayout } from '@agentmux/layout'
 
 // The quick switcher's data core. It fuses the window's open tabs and agent sessions into one ranked
 // list a single keystroke can search, and — the AgentMux twist — floats sessions that need you above
@@ -20,8 +22,9 @@ import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-
 export type QuickSwitchTarget =
   | { kind: 'tab'; tabId: string; workspaceId: string; tabGroupId: string }
   | { kind: 'session'; sessionId: string }
+  | { kind: 'session-location'; reference: WorkbenchProjectionSelection }
 
-export type QuickSwitchKind = 'session' | 'tab'
+export type QuickSwitchKind = 'session' | 'tab' | 'location'
 
 export type QuickSwitchItem = {
   id: string
@@ -43,6 +46,27 @@ export type QuickSwitchItem = {
   // it is never derived from the visible title or subtitle text. Session rows carry null.
   surfaceKind: WorkbenchSurface['kind'] | null
   target: QuickSwitchTarget
+}
+
+/** Labels describe an exact existing occurrence; they never resolve its identity. */
+export function buildSessionLocationItems(input: {
+  label: string
+  references: readonly WorkbenchProjectionSelection[]
+  config: AppConfig | null
+  tabs: Readonly<Record<string, WorkbenchTab>>
+  layouts: Readonly<Record<string, WorkspaceLayout>>
+}): QuickSwitchItem[] {
+  return input.references.map(reference => {
+    const workspace = input.config?.workspaces.find(one => one.id === reference.displayWorkspaceId)
+    const host = input.config?.hosts.find(one => one.id === workspace?.hostId)
+    const tab = input.tabs[reference.tabId]!
+    const groups = input.layouts[reference.displayWorkspaceId]?.groups ?? []
+    const regionIndex = regionIds(tab.layout.root).indexOf(reference.regionId)
+    return { id: JSON.stringify(reference), kind: 'location', title: tab.name || input.label,
+      subtitle: `${workspace?.name ?? reference.displayWorkspaceId} · ${host?.label ?? workspace?.hostId ?? 'Unknown machine'} · Group ${groups.findIndex(one => one.id === reference.groupId) + 1} · Region ${regionIndex + 1}`,
+      providerId: null, state: null, observedAt: 0, surfaceKind: null,
+      target: { kind: 'session-location', reference } }
+  })
 }
 
 // Attention weight: needs-you rows lift highest, then errors, then working, then everything idle.
