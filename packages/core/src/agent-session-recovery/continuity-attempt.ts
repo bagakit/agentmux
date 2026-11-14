@@ -823,6 +823,8 @@ export async function performAgentContinuity(
         reason: 'lifecycle-busy', evidence: { kind: 'agent-session-store' } })
     }
     receipt.error = error instanceof Error ? error.message : String(error)
+    if (error instanceof AgentMuxError) receipt.errorCode = error.code
+    else delete receipt.errorCode
     if (receipt.launchInput?.state === 'prepared') receipt.launchInput.state = error instanceof AgentMuxError &&
       error.creationFailure?.operationId === agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId) &&
       error.creationFailure.disposition === 'not_applied' ? 'not-applied' : 'unknown'
