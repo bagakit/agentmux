@@ -375,7 +375,7 @@
 .focus-context__topic { min-width: 0; display: flex; align-items: flex-start; gap: var(--sp-1); color: var(--text-2); font-size: var(--fs-micro); font-weight: 400; }
 .focus-context__topic > svg { flex: 0 0 auto; margin-top: 2px; }
 .focus-context__topic > span { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
-.focus-topic-section { grid-column: 1 / -1; min-width: 0; padding: var(--sp-2) var(--sp-1) var(--sp-1); }
+.focus-topic-section { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-1); min-width: 0; padding: var(--sp-2) var(--sp-1) var(--sp-1); border-bottom: 1px solid var(--line-soft); }
 .focus-topic-section:first-child { padding-top: var(--sp-1); }
 .focus-topic-section .focus-context__topic { color: var(--text-2); font-weight: 500; }
 @media (prefers-reduced-motion: reduce) { .focus-project-lanes__collection > svg:first-child { transition: none; } }

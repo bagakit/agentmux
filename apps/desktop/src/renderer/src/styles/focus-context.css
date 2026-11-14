@@ -355,4 +355,7 @@
 .focus-zone-notices { flex: none; min-width: 0; padding-inline: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .focus-zone-notice { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 3px; }
 .focus-zone-notices .focus-project-lanes__recovery, .focus-zone-notices .focus-project-lanes__source { white-space: normal; }
+/* Section boundaries are clearer than footer provenance, below the container title. */
+.focus-topic-section .focus-zone-heading { flex: 1; }
+.focus-topic-section .focus-zone-heading .focus-project-lanes__label strong { font-weight: 500; color: var(--text-2); }
 .focus-topic-section .focus-zone-notice__name { display: none; }
