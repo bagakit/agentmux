@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
-const product = file => /^(?:apps\/desktop\/src\/|packages\/[^/]+\/src\/)/.test(file)
+const product = file => /^(?:apps|packages)\/[^/]+\/src\//.test(file)
 
 export function createCaptureSourcePin({ root, revision }) {
   root = resolve(root)
@@ -36,7 +36,7 @@ export function createCaptureSourcePin({ root, revision }) {
     child.stdin.on('error', () => {})
     child.stdin.end(batch.map(item => item.object).join('\n') + '\n')
   }
-  if (commit) for (const record of execFileSync('git', ['ls-tree', '-rz', commit, '--', 'apps/desktop/src', 'packages'], { cwd: root, maxBuffer: 16 * 1024 * 1024 }).toString().split('\0').filter(Boolean)) {
+  if (commit) for (const record of execFileSync('git', ['ls-tree', '-rz', commit, '--', 'apps', 'packages'], { cwd: root, maxBuffer: 16 * 1024 * 1024 }).toString().split('\0').filter(Boolean)) {
     const [entry, file] = record.split('\t'), [, kind, object] = entry.split(' ')
     if (kind === 'blob' && product(file)) blobs.set(file, object)
   }

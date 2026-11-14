@@ -168,6 +168,7 @@ async function compileRenderer() {
     find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
     replacement: resolve(root, 'packages/core', entry.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
   }))
+  aliases.push({ find: '@agentmux/host/host-configuration', replacement: join(root, 'apps/host/src/host-configuration.ts') })
   // Resolve these UI/layout browser exports against this exact candidate, even
   // when dependencies are shared with another worktree. Core and identity use
   // their explicit source aliases below; third-party dependencies stay original.
