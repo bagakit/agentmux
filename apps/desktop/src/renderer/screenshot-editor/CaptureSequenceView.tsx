@@ -201,8 +201,8 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
     <div className="capture-sequence__controls">
       {<>{snapshot.state === 'ready' ? <><label>Sampling <select value={fps} disabled={busy} onChange={e => setFps(Number(e.target.value))}>{[2, 5, 10].map(v => <option key={v} value={v}>{v} fps</option>)}</select></label><button className="primary-button" disabled={busy} onClick={() => void action(async () => { originalGif.current = null; setKeyframes([]); setIndex(0); merge(await api.start(input.requestId, fps)) })}>Start recording</button></> : recording ? <button className="primary-button" disabled={snapshot.state === 'stopping'} onClick={() => void action(async () => { merge(await api.stop(input.requestId)); setPlaying(false) })}>{snapshot.state === 'stopping' ? 'Finishing frame…' : 'Stop recording'}</button> : <span>Ready to review</span>}
         <button disabled={busy || recording} onClick={() => void action(async () => {
-          const data = await api.openGif(input.requestId); if (!data) return
-          const bytes = Uint8Array.from(data), info = inspectGif(bytes), decoded = await decodeGif(bytes)
+          const bytes = await api.openGif(input.requestId); if (!bytes) return
+          const info = inspectGif(bytes), decoded = await decodeGif(bytes)
           originalGif.current = bytes; setKeyframes(info.metadata?.keyframes ?? []); setIndex(0); setPlaying(false)
           setSnapshot(old => ({ ...old, state: 'review', frames: decoded }))
         })}>Open GIF…</button></>}
@@ -219,7 +219,7 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
     </div>
     {gif && snapshot.state === 'review' && frames.length > 0 ? <footer>
       <div className="capture-sequence__playback"><button disabled={busy} onClick={() => setPlaying(v => !v)}>{playing ? 'Pause' : 'Play'}</button><button disabled={busy || index <= 0} aria-label="Previous frame" onClick={() => select(index - 1)}>‹</button><div className="capture-sequence__track"><input type="range" aria-label="Current frame" min={0} max={frames.length - 1} value={index} disabled={busy} onChange={e => select(Number(e.target.value))} /><div className="capture-sequence__markers">{keyframes.map(k => <button key={k.frameIndex} aria-label={`Go to keyframe ${k.frameIndex + 1}`} title={`Frame ${k.frameIndex + 1}: ${k.note}`} style={{ left: `${frames.length > 1 ? k.frameIndex / (frames.length - 1) * 100 : 0}%` }} onClick={() => select(k.frameIndex)} />)}</div></div><button aria-label="Next frame" disabled={busy || index >= frames.length - 1} onClick={() => select(index + 1)}>›</button><output>{index + 1} / {frames.length} · {(time / 1000).toFixed(2)} s</output></div>
-      <div className="capture-sequence__export"><button disabled={busy} onClick={() => void action(async () => { const result = await api.saveGif(input.requestId, [...await encode()]); if (result.status === 'saved') setIssue('GIF saved with keyframe notes.') })}>Save GIF…</button><button className="primary-button" disabled={busy} onClick={() => void action(async () => { await api.attachGif(input.requestId, [...await encode()]) })}>Use GIF</button></div>
+      <div className="capture-sequence__export"><button disabled={busy} onClick={() => void action(async () => { const result = await api.saveGif(input.requestId, await encode()); if (result.status === 'saved') setIssue('GIF saved with keyframe notes.') })}>Save GIF…</button><button className="primary-button" disabled={busy} onClick={() => void action(async () => { await api.attachGif(input.requestId, await encode()) })}>Use GIF</button></div>
     </footer> : null}
     {issue || snapshot.issue ? <p className="capture-sequence__issue" role="status">{issue ?? snapshot.issue}</p> : null}
   </main>

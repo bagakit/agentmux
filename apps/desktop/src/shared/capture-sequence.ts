@@ -20,8 +20,8 @@ export type CaptureSequenceApi = {
   inspect(requestId: string, afterFrames?: number): Promise<SequenceSnapshot>
   undo(requestId: string): Promise<SequenceSnapshot>
   finishScroll(requestId: string, image: BrowserPng): Promise<void>
-  saveGif(requestId: string, data: number[]): Promise<{ status: 'saved' | 'cancelled'; path?: string }>
-  openGif(requestId: string): Promise<number[] | null>
-  attachGif(requestId: string, data: number[]): Promise<void>
+  saveGif(requestId: string, data: Uint8Array): Promise<{ status: 'saved' | 'cancelled'; path?: string }>
+  openGif(requestId: string): Promise<Uint8Array | null>
+  attachGif(requestId: string, data: Uint8Array): Promise<void>
   cancel(requestId: string): Promise<void>
 }

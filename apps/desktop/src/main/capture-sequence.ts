@@ -346,7 +346,7 @@ export class CaptureSequenceOwner {
     if (record.surface && record.input) { try { record.surface.begin(this.liveProgress(record)) } catch { record.surface.close(true) } }
     try { await this.persist(record) } catch (error) { console.warn('Capture sequence receipt:', error) }
   }
-  private async invoke(event: IpcMainInvokeEvent, action: string, input?: { requestId?: string; fps?: number; afterFrames?: number; image?: BrowserPng; data?: number[] }): Promise<unknown> {
+  private async invoke(event: IpcMainInvokeEvent, action: string, input?: { requestId?: string; fps?: number; afterFrames?: number; image?: BrowserPng; data?: Uint8Array }): Promise<unknown> {
     const record = this.windows.get(event.sender)
     if (!record?.input || !record.window || record.window.isDestroyed() || record.window.webContents !== event.sender || event.senderFrame !== event.sender.mainFrame) throw new Error('This capture request does not belong to the original window.')
     if (action === 'load') return this.snapshot(record)
@@ -422,7 +422,7 @@ export class CaptureSequenceOwner {
       const choice = await dialog.showOpenDialog(record.window, { filters: [{ name: 'GIF animation', extensions: ['gif'] }], properties: ['openFile'] })
       if (choice.canceled || !choice.filePaths[0]) return null
       if ((await stat(choice.filePaths[0])).size > MAX_FRAME_BYTES) throw new Error('This GIF exceeds the 64 MB input budget. Your current recording is kept.')
-      const bytes = await readFile(choice.filePaths[0]); inspectGif(bytes); return [...bytes]
+      const bytes = await readFile(choice.filePaths[0]); inspectGif(bytes); return bytes
     }
     if (action === 'finish-scroll') {
       if (record.inflight || record.receipt.state === 'recording') throw new Error('Stop capture before exporting its result.')
@@ -433,8 +433,8 @@ export class CaptureSequenceOwner {
     }
     if (action === 'save-gif' || action === 'attach-gif') {
       if (record.inflight || record.receipt.state === 'recording') throw new Error('Stop recording before exporting GIF.')
-      if (!Array.isArray(input.data) || input.data.some(v => !Number.isInteger(v) || v < 0 || v > 255)) throw new Error('Keep the encoded GIF bytes.')
-      const bytes = Uint8Array.from(input.data); const gif = inspectGif(bytes)
+      if (!(input.data instanceof Uint8Array)) throw new Error('Keep the encoded GIF bytes.')
+      const bytes = input.data; const gif = inspectGif(bytes)
       if (!gif.metadata) throw new Error('Keep the GIF keyframe metadata with the exported animation.')
       if (action === 'save-gif') {
         const choice = await dialog.showSaveDialog(record.window, { defaultPath: screenshotFileName(record.input.source.capturedAt).replace(/\.png$/, '.gif'), filters: [{ name: 'GIF animation', extensions: ['gif'] }] })
