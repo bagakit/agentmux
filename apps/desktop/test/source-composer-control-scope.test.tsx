@@ -101,3 +101,16 @@ it('an unknown Source never borrows a configured Session matching its canonical 
   expect(dom.container.querySelector('[aria-label="Message Agent"]')!.getAttribute('contenteditable')).toBe('true')
   expect(dom.draft(owner)).toBe('Original private draft')
 })
+
+it('Source typing and unrelated Session updates create no observer input or history calls', async () => {
+  const mailbox=vi.spyOn(api.sessions,'inputMailbox'),history=vi.spyOn(api.sessions,'readHistory')
+  const messages=vi.spyOn(api.sessions,'listMessages'),automation=vi.spyOn(api.continuousProgress,'list')
+  await dom.render(<AgentSessionComposer sessionId={owner} source={{target,session:original}} />)
+  const editor=dom.container.querySelector<HTMLElement & {editor:import('@tiptap/core').Editor}>('[aria-label="Message Agent"]')!
+  await act(async()=>{
+    editor.editor.commands.setContent({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Keep editing this original Source'}]}]})
+    useAppStore.setState({sessions:Array.from({length:100},(_,index)=>composerSession('unrelated-agent-'+index))})
+  })
+  expect(dom.draft(owner)).toBe('Keep editing this original Source')
+  for(const method of [mailbox,history,messages,automation,vi.mocked(api.sessions.notifyInputOccupation),vi.mocked(api.continuousProgress.pauseForInput)])expect(method).not.toHaveBeenCalled()
+})
