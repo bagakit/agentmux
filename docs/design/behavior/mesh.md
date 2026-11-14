@@ -216,7 +216,7 @@ Host 的公共配置链支持按稳定 ID 新增、读取、完整 expected/CAS 
 
 ## 公共能力与当前基线
 
-公共能力分为配置读取及原操作查询、完整 CAS 配置、被动网络观察和准确链接转换四类，对应设计入口 `settings.mesh.inspect`、`settings.mesh.configure`、`mesh.inspect`、`mesh.link`。GUI、CLI 和 SDK 消费同一 owner 的类型、严格解析、回执与真实状态；精确参数、权限、支持版本与命令以[公共能力来源](../../specs/public-capabilities.md)、实际能力发现及 help／skill 为准。本节不把设计入口存在当作已运行。
+`settings.mesh.inspect` 读取配置和原保存回执，`settings.mesh.configure` 按原修订完整保存，`mesh.inspect` 读取当前网络观察。App 和 CLI 从设置读取结果取得原节点的公开配对码，并在保存前使用同一解码规则预览。CLI 入口为 `amux mesh code` 和 `amux mesh code read`。读取和预览不改变成员资格。`mesh.link` 经选定网关的已公布入口为原端点生成访问链接，端点仍按自己的设备授权处理访问。精确参数、权限、支持版本与命令见[公共能力来源](../../specs/public-capabilities.md)及[Mesh 操作指南](../../../packages/core/guides/modules/mesh.md)。
 
 `mesh.inspect` 被动读取网络 producer 的准确当前快照，分开表达期望／采用修订、监听、peer 认证、拓扑、候选路径、时间、覆盖与局部失败；不因查看而建连、保存或铸造身份。`mesh.link` 只将完整原 ConnectionOffer 的 carrier 转为本 owner 已确认的网络路径与明确发布的 ingress，保留原 serverId 和 daemon E2EE public key；不从拓扑猜 key、不接受客户端任意替换 endpoint，不把监听地址或 peer 私有拨号地址冒充公网入口。路径或入口未知只拒本次转换，保留原 offer；返回链接仍由原终点认证和授权，不证明外网可达或业务完成。
 
