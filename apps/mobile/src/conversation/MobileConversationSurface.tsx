@@ -291,8 +291,10 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       agentSessionId, session, available })
   function responseStatus(key: string, attempt: ResponseAttempt) {
     return <aside key={key} className="mobile-send-status" data-phase={attempt.phase} data-original-response={attempt.original!.input.operationId}>
-      <MobileNotice identity={[attempt.original?.input.operationId,attempt.phase,attempt.message]} role="status">{attempt.message}</MobileNotice>
-      <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询答复结果</button>
+      <MobileNotice identity={[attempt.original?.input.operationId,attempt.phase,attempt.message]} role="status">
+        <span className="mobile-send-status__line" title={attempt.message}>{attempt.message}</span>
+        <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询答复结果</button>
+      </MobileNotice>
     </aside>
   }
   const mainAvatar = useCallback((size?: number) => <MobileMoteSpeakerAvatar spaceId={moteTarget?.spaceId ?? ''} name={moteName ?? 'Mote'} appearance={moteAppearance} {...(size === undefined ? {} : { size })} />,

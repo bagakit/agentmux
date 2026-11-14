@@ -108,6 +108,19 @@
 .mobile-app .mobile-conversation__interaction .agent-interaction__options { gap: var(--sp-3); }
 .mobile-app .mobile-conversation__interaction .agent-interaction__options button { min-height: 48px; padding: 10px 14px; border-radius: var(--mobile-radius); font-size: var(--fs-body); }
 .mobile-app .mobile-conversation__interaction .agent-interaction__actions button { min-height: 44px; border-radius: var(--mobile-radius); }
+/* Verdicts share one row with the primary answer first; dismissing is not a verdict, so it is a
+ * full-width text action on its own row below them. */
+.mobile-app .mobile-conversation__interaction .agent-interaction__actions { gap: var(--sp-3); }
+.mobile-app .mobile-conversation__interaction .agent-interaction__actions > button:not(.agent-interaction__dismiss) { flex: 1 1 0; justify-content: center; }
+.mobile-app .mobile-conversation__interaction .agent-interaction__actions > button.is-primary { order: -1; }
+.mobile-app .mobile-conversation__interaction .agent-interaction__actions > .agent-interaction__dismiss { order: 1; flex: 1 0 100%; margin: 0; color: var(--text-2); background: transparent; }
+/* A kept reply status is one line on the reading gutter: what happened, then how to check it. */
+.mobile-app .mobile-send-status[data-original-response] { display: block; margin: 2px var(--mobile-gutter) 0; }
+.mobile-app .agent-interaction .mobile-send-status[data-original-response] { margin: 4px 0 0; }
+.mobile-app .mobile-send-status[data-original-response] > .mobile-notice { align-items: center; }
+.mobile-app .mobile-send-status[data-original-response] .mobile-notice__body { display: flex; align-items: center; gap: var(--sp-3); }
+.mobile-app .mobile-send-status__line { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); }
+.mobile-app .mobile-send-status[data-original-response] .mobile-notice__body > button { flex: 0 0 auto; padding: 0 4px; color: var(--green); font-size: var(--fs-meta); background: transparent; }
 
 /* Bottom sheets: one radius tier above groups, a real grab handle, a titled header. */
 .mobile-sheet { border-radius: var(--mobile-radius-sheet) var(--mobile-radius-sheet) 0 0; padding-inline: var(--mobile-gutter); background: var(--mobile-page); }

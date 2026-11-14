@@ -132,8 +132,6 @@
 .mobile-send-status .message-delivery-failure .message-delivery-failure__dismiss { background: transparent; padding: 0; border: 0; }
 .mobile-send-status[data-phase='unknown'] { color: var(--status-warning-text); }
 .mobile-send-status p { margin: 0 0 4px; overflow-wrap: anywhere; user-select: text; }
-.mobile-send-status[data-original-response] { grid-template-columns: minmax(0, 1fr); }
-.mobile-send-status[data-original-response] > button { justify-self: start; color: var(--green); font-size: var(--fs-meta); }
 .agent-interaction .mobile-send-status[data-original-response] { margin: 4px 0 0; }
 .agent-interaction:has(.mobile-send-status[data-original-response]) .agent-interaction__actions { opacity: .45; }
 .mobile-send-status__diagnosis { grid-column: 1 / -1; min-width: 0; color: var(--text-2); }

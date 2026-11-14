@@ -80,7 +80,7 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
     attempt.phase = receipt.delivery === 'unknown' || receipt.delivery === 'saved' ? 'unknown' : 'confirmed'
     attempt.message = receipt.nativeCompleted ? '这个请求已完成。'
       : receipt.delivery === 'saved' ? '答复已保存；是否送达尚未确认。'
-      : receipt.delivery === 'unknown' ? '还没确认答复是否送达，可以查询结果。' : '答复已送达对话，Agent 是否采用还需要查看。'
+      : receipt.delivery === 'unknown' ? '还没确认答复是否送达，可以查询结果。' : '答复已送达，Agent 是否采用待查看。'
   }
   async function inspectResponse(key: string, attempt: ResponseAttempt): Promise<AgentMuxInteractionOperationReceipt | null> {
     if (!client || !attempt.original) return null
