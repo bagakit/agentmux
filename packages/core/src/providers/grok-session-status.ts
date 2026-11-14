@@ -6,7 +6,7 @@ import type { AgentProviderPromptExecutionContext, AgentProviderSessionStatusObs
 import type { AgentPromptExecutionEvidence, AgentProviderSessionHistoryContext, AgentProviderSessionStatus } from '../types.js'
 import type { NativeJsonlHistoryRecord, NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
-import { openGrokReader, resolveGrokUpdatesPath, verifyGrokSummaryIdentity } from './grok-native-history.js'
+import { openGrokReader, resolveGrokUpdatesPath, verifyGrokSummaryIdentity } from './grok-history.js'
 import { grokProcessSource } from './grok-native-source.js'
 
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)

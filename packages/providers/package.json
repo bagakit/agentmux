@@ -80,6 +80,14 @@
       "types": "./dist/grok/provider.d.ts",
       "import": "./dist/grok/provider.js"
     },
+    "./grok/input-initialization": {
+      "types": "./dist/grok/input-initialization.d.ts",
+      "import": "./dist/grok/input-initialization.js"
+    },
+    "./grok/native-history": {
+      "types": "./dist/grok/native-history.d.ts",
+      "import": "./dist/grok/native-history.js"
+    },
     "./antigravity/acp-probe": {
       "types": "./dist/antigravity/acp-probe.d.ts",
       "import": "./dist/antigravity/acp-probe.js"
@@ -134,6 +142,7 @@
     "typescript": "^5.9.0"
   },
   "dependencies": {
+    "@noble/hashes": "2.4.0",
     "json-rpc-2.0": "1.8.1"
   }
 }

@@ -6,7 +6,7 @@ import { nativeProcessBirth, nativeProcessFiles, type NativeProcessFile } from '
 import { readNativeHistoryBytes } from '../native-jsonl-history-reader.js'
 import { SESSION_HISTORY_TIMEOUT_MS } from '../session-history.js'
 import type { AgentProviderPromptExecutionContext } from '../agent-provider.js'
-import { verifyGrokSummaryIdentity } from './grok-native-history.js'
+import { verifyGrokSummaryIdentity } from './grok-history.js'
 
 const unavailable = () => new AgentMuxError('The original writable Grok source is unconfirmed. Retained work and manual input remain available.', 'AGENT_NATIVE_STATUS_UNAVAILABLE')
 const writable = (file: NativeProcessFile) => file.access === 'w' || file.access === 'u'

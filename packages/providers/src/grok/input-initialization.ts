@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { realpath } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
-import type { AgentProviderInputInitialization, AgentProviderInputInitializationContext } from '../agent-provider.js'
 
 const execute = promisify(execFile)
 // Preserve the original argv. Only these root options are known to leave `inspect`
@@ -24,27 +23,34 @@ function inspectionArgs(original: readonly string[]): readonly string[] | undefi
 }
 
 /** Native inspect reports configuration, not a live input channel or trust consent. */
-export async function readGrokInputInitialization(context: AgentProviderInputInitializationContext): Promise<AgentProviderInputInitialization> {
+export async function readGrokInputInitialization(context: {
+  command?: string
+  args: readonly string[]
+  workspacePath: string
+  processId?: number
+  env: Readonly<Record<string, string | undefined>>
+  signal?: AbortSignal
+}) {
   const args = inspectionArgs(context.args)
   const home = process.platform === 'win32' ? 'USERPROFILE' : 'HOME'
   // Core supplies the original process environment. An unset optional root belongs
   // to the native CLI; never fill it from the observing Host after reconfiguration.
   if (!context.command || !isAbsolute(context.command) && !context.command.includes('/') && !context.env?.PATH || context.processId === undefined || !args ||
-      !context.env?.[home]) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
+      !context.env?.[home]) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' } as const
   try {
     const env = Object.fromEntries(Object.entries(context.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
     const { stdout } = await execute(context.command, [...args, 'inspect', '--json'], {
       cwd: context.workspacePath, env, ...(context.signal ? { signal: context.signal } : {}), maxBuffer: 1024 * 1024
     })
     const value: unknown = JSON.parse(stdout)
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' } as const
     const observed = value as Record<string, unknown>
     if (typeof observed.cwd !== 'string' || typeof observed.projectTrusted !== 'boolean' ||
-        observed.cwd !== context.workspacePath && await realpath(observed.cwd) !== await realpath(context.workspacePath)) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
-    return observed.projectTrusted === false ? { state: 'pending', reason: 'directory-trust', source: 'native-protocol', scope: 'prerequisite' }
-      : { state: 'unknown', reason: 'native-input-unconfirmed', source: 'unavailable', scope: 'unknown' }
+        observed.cwd !== context.workspacePath && await realpath(observed.cwd) !== await realpath(context.workspacePath)) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' } as const
+    return observed.projectTrusted === false ? { state: 'pending', reason: 'directory-trust', source: 'native-protocol', scope: 'prerequisite' } as const
+      : { state: 'unknown', reason: 'native-input-unconfirmed', source: 'unavailable', scope: 'unknown' } as const
   } catch {
     context.signal?.throwIfAborted()
-    return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
+    return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' } as const
   }
 }
