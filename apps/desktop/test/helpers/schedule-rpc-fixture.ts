@@ -1,8 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { connectAgentMuxRpc, type ContinuousProgressLoop } from '@agentmux/core'
-import { AgentMuxControlServer } from '../../../../packages/core/src/public-rpc-server.js'
+import { AgentMuxControlServer, connectAgentMuxRpc, type ContinuousProgressLoop } from '@agentmux/core'
 import { ContinuousProgressLoopManager, type FutureProgressInputOwner } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
