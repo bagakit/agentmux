@@ -47,8 +47,30 @@ export function projectContinuityFacts(source: ContinuityFacts, previous?: Conti
   }
   const operation = source.continuity && source.continuityOperations?.[source.continuity.operationId]
   const continuity = operation && configValuesEqual(source.continuity, operation) ? operation : source.continuity
-  return structuredClone({ ...(continuity ? { continuity } : {}),
+  const next = structuredClone({ ...(continuity ? { continuity } : {}),
     ...(source.continuityOperations ? { continuityOperations: source.continuityOperations } : {}) })
+  if (!previous) return next
+  const continuityOperations = next.continuityOperations && shareEqualSubtrees(previous.continuityOperations, next.continuityOperations)
+  const shared = continuity && continuity === operation ? continuityOperations![continuity.operationId]
+    : next.continuity && shareEqualSubtrees(previous.continuity, next.continuity)
+  return { ...(shared ? { continuity: shared } : {}), ...(continuityOperations ? { continuityOperations } : {}) }
+}
+
+// Older Session arrays stay reachable from retained callbacks; sharing equal subtrees keeps a
+// changed operation from duplicating its unchanged frozen input body in every retained version.
+// Writes into `next`, so it accepts only a freshly cloned plain JSON graph.
+function shareEqualSubtrees<T>(previous: unknown, next: T): T {
+  if (Object.is(previous, next)) return previous as T
+  if (!previous || !next || typeof previous !== 'object' || typeof next !== 'object' ||
+    Array.isArray(previous) !== Array.isArray(next)) return next
+  const before = previous as Record<string, unknown>, after = next as Record<string, unknown>
+  let same = Object.keys(before).length === Object.keys(after).length
+  for (const key of Object.keys(after)) {
+    const value = shareEqualSubtrees(before[key], after[key])
+    after[key] = value
+    same &&= Object.hasOwn(before, key) && value === before[key]
+  }
+  return same ? previous as T : next
 }
 
 /** Renderer-only live provenance on the original timeline slot. Never persisted or transported by Core. */
