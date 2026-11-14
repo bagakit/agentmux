@@ -70,6 +70,11 @@ for await (const line of createInterface({ input: process.stdin })) {
       update({ sessionUpdate: 'tool_call_update', toolCallId: 'original-tool-call', status: 'completed' })
       send({ method: 'session/update', params: { sessionId: 'foreign-session', update: { sessionUpdate: 'agent_message_chunk',
         messageId: 'foreign-msg', content: { type: 'text', text: 'Foreign message' } } } })
+      update({ sessionUpdate: 'usage_update', used: 34250, size: 137000, cost: { amount: 0.045, currency: 'USD' } })
+      update({ sessionUpdate: 'usage_update', used: 50000 })
+      send({ method: 'session/update', params: { sessionId: 'foreign-session', update: {
+        sessionUpdate: 'usage_update', used: 36000, size: 60000
+      } } })
       permission(41, 'original-tool-call')
     }
   } else if (method === 'session/cancel' && params.sessionId === sessionId && id === undefined && pendingPrompt) {

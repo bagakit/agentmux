@@ -742,6 +742,7 @@ it.each([['structured protocol', true, 'session-conversation'], ['terminal', fal
     const draft = `Original ${label} Composer input`
     const originalSession = composerSession()
     const session = structured ? { ...originalSession, structuredPromptInput: true as const,
+      contextWindowUsage: { usedTokens: 34250, capacityTokens: 137000, observedAt: 1000 },
       nativeConfiguration: { revision: 'native-revision', options: [
         { id: 'details', type: 'boolean' as const, name: 'Details', currentValue: true }
       ] } } : originalSession
@@ -751,6 +752,12 @@ it.each([['structured protocol', true, 'session-conversation'], ['terminal', fal
     await dom.render(<AgentSessionComposer sessionId={sid} />)
     const settings = dom.container.querySelector('.composer-session-controls [aria-label="Session settings"]')
     expect(Boolean(settings)).toBe(structured)
+    const context = dom.container.querySelector('.composer__context')
+    expect(context?.textContent?.trim()).toBe(structured ? '25%' : '—')
+    const detail = dom.container.querySelector('.composer__context-card')?.textContent ?? ''
+    expect(detail).toContain('Cumulative tokens not reported.')
+    expect(detail).toContain('No native response sample.')
+    expect(detail.includes('Context observed')).toBe(structured)
     await click(action(dom.container, 'Send'))
     await settled(() => expect(submit, JSON.stringify(queue().map(item => ({
       error: item.error, errorCode: item.errorCode, binding: item.directInputBinding, status: item.status

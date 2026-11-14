@@ -168,6 +168,13 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(await calls()).toEqual(promptCalls)
     const readPermission = async () => (await core.readAgentSession(session.agentSessionId))?.pendingInteraction?.request
     const permission = await until(readPermission, request => request?.kind === 'permission', 'first exact ACP permission')
+    const usage = (await core.readAgentSession(session.agentSessionId))?.contextWindowUsage
+    expect(usage).toEqual({ usedTokens: 34250, capacityTokens: 137000, observedAt: expect.any(Number) })
+    const readUsageThroughCli = async () => JSON.parse((await exec(process.execPath,
+      [...cli, 'agent', 'inspect', '--session', session.agentSessionId], { env: scope.env })).stdout).result.session
+    const sessionWithUsage = await readUsageThroughCli()
+    expect(sessionWithUsage.contextWindowUsage).toEqual(usage)
+    expect(sessionWithUsage.turnUsage).toBeUndefined()
     expect(permission).toMatchObject({ kind: 'permission', nativeToolCallId: 'original-tool-call', options: [
       { id: 'native-allow-exact', kind: 'allow-once' }, { id: 'native-deny-exact', kind: 'reject-once' }
     ] })
@@ -193,6 +200,10 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     const originalPermission = await until(readPermission, request => request?.id === permission?.id && !request?.responseUnavailableReason,
       'same unanswered ACP permission after Core restart')
     expect(originalPermission).toEqual(permission)
+    const rejoinedUsage = await until(readUsageThroughCli, current => current?.contextWindowUsage !== undefined,
+      'the original native context-window observation on the same actor after Core restart', 4_000)
+    expect(rejoinedUsage.contextWindowUsage).toEqual(usage)
+    expect(rejoinedUsage.turnUsage).toBeUndefined()
     expect(await calls()).toEqual(promptCalls)
     const answerFile = join(scope.root, 'permission-answer.json')
     await writeFile(answerFile, JSON.stringify({ agentSessionId: session.agentSessionId, expectedRun: session.run,
@@ -247,6 +258,7 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(resumed.agentSessionId).toBe(session.agentSessionId)
     expect(resumed.run.runId).not.toBe(session.run.runId)
     expect(resumed.nativeHandle).toEqual(saved?.nativeHandle)
+    expect((await readUsageThroughCli()).contextWindowUsage).toBeUndefined()
     expect(await calls()).toEqual(resumedCalls)
 
     process.kill(resumedCalls[7]!.pid, 'SIGTERM')
