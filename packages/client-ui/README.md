@@ -113,6 +113,8 @@ Import `@agentmux/client-ui/styles.css` alongside the host’s theme tokens and 
 
 Import dialogs from `@agentmux/client-ui/components/Modal`. Hosts that load styles individually also include `@agentmux/client-ui/styles/overlays.css`. The shared module owns modal presentation, attachment slots and focus lifetime on top of Radix. Use `useModalOverlayContainer` for attached custom portals. A `null` target means the slot is still being prepared. Keep the attachment there once ready. Business requests and drafts stay with the caller.
 
+For a tree rendered into a separate document or a dedicated overlay container, import `ClientUiOverlayProvider` from `@agentmux/client-ui/overlay-host`. Pass `host={{ ownerDocument, overlayContainer: () => overlayRoot }}` using the document and container that host the original trigger. Both dialogs and menus use that scope. Pass a container directly to a Portal when it needs its own destination, such as an attachment in an open dialog.
+
 ## Native actions
 
 Import `Button` and `IconButton` from `@agentmux/client-ui/components/Button` and `@agentmux/client-ui/components/IconButton`. Both render a native button, default `type` to `button`, and forward native props and React 19 refs; use an explicit `type="submit"` for form submission. Callers keep their handlers, `disabled`, `aria-busy`, requests and drafts; busy presentation never disables an otherwise available action or retries an operation.
