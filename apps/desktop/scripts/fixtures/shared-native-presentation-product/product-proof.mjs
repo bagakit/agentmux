@@ -1,4 +1,5 @@
 import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire, isBuiltin } from 'node:module'
@@ -22,18 +23,21 @@ const receipt = { schema: 'agentmux.browser-presentation-product-native.v1', evi
 const mediaOnly=process.argv.includes('--media-only')
 const surveyInitial=process.argv.includes('--survey-initial')
 const previewFailure=process.argv.includes('--survey-preview-failure')
+const withoutLayoutHost = process.argv.includes('--mote-responsive-without-layout-host')
+const moteResponsive = process.argv.includes('--mote-responsive') || withoutLayoutHost
+const sourceBound = surveyInitial || moteResponsive
 const sourceAliases = []
-if (surveyInitial) for (const pkg of ['core','demand']) {
+if (sourceBound) for (const pkg of ['core','demand']) {
  const manifest = JSON.parse(await readFile(join(root,'packages',pkg,'package.json'),'utf8'))
  for (const [key,value] of Object.entries(manifest.exports)) sourceAliases.push({find:key==='.'?`@agentmux/${pkg}`:`@agentmux/${pkg}/${key.slice(2)}`,replacement:resolve(root,'packages',pkg,value.import.replace('./dist/',pkg==='core'?'./src/':'./').replace(/\.js$/,'.ts'))})
 }
 sourceAliases.sort((a,b)=>b.find.length-a.find.length)
-if(surveyInitial)sourceAliases.push({find:'@agentmux/layout',replacement:join(root,'packages/layout/src/index.ts')})
-receipt.firstPressRequested=!mediaOnly
+if(sourceBound)sourceAliases.push({find:'@agentmux/layout',replacement:join(root,'packages/layout/src/index.ts')})
+receipt.firstPressRequested=!mediaOnly && !moteResponsive
 const inputs = new Map(), logs = []
 let privateRoot
 try {
-  if (surveyInitial) receipt.freshness = { sourceBound: true, rebuilt: false, boundary: 'Actual Core/Demand/Layout Source aliases replace private package dist, with nonempty compiled input manifest.' }
+  if (sourceBound) receipt.freshness = { sourceBound: true, rebuilt: false, boundary: 'Actual Core/Demand/Layout Source aliases replace private package dist, with nonempty compiled input manifest.' }
   else {
   const freshness = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e',
     `const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root,'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`], { cwd: root, encoding: 'utf8' })
@@ -42,12 +46,14 @@ try {
   assert.equal(freshness.status, 0, 'Unmodified production Core/Demand freshness guard')
   }
   receipt.main = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
-  privateRoot = await mkdtemp(join(tmpdir(), surveyInitial ? 'amp-' : 'amux-native-resource-'))
+  privateRoot = await mkdtemp(join(tmpdir(), sourceBound ? 'amp-' : 'amux-native-resource-'))
   const out = join(privateRoot, 'out'); await mkdir(out)
   await symlink(join(desktop, 'node_modules'), join(privateRoot, 'node_modules'))
   const plugin = { name: 'literal-production-source-binding', setup(builder) {
-    if (surveyInitial && builder.initialOptions.format === 'esm') builder.onResolve({ filter: /^[^./]/ }, async args => {
+    if (sourceBound && builder.initialOptions.format === 'esm') builder.onResolve({ filter: /^[^./]/ }, async args => {
       if (args.pluginData?.externalResolution || args.path === 'electron' || isBuiltin(args.path)) return
+      // browserSourceBuild already resolves this workspace package to compile-time Source.
+      if (args.path === '@agentmux/browser' || args.path.startsWith('@agentmux/browser/')) return
       const source = sourceAliases.find(value => value.find === args.path)
       if (source) return { path: source.replacement }
       if (args.path.startsWith('@agentmux/client-ui/')) {
@@ -73,11 +79,15 @@ try {
     })
   } }
   const main = join(out, 'main.mjs'), preload = join(out, 'preload.cjs'), entry = join(out, 'entry.js')
-  const settings = { bundle: true, packages: 'external', platform: 'node', target: 'node22', format: 'cjs', external: ['electron'], ...(surveyInitial?{alias:Object.fromEntries(sourceAliases.map(({find,replacement})=>[find,replacement]))}:{}), plugins: [plugin], metafile: true, logLevel: 'silent' }
-  const mainBuild = await build({ ...settings, ...(surveyInitial?{packages:'bundle'}:{}), format: 'esm', entryPoints: [join(fixture, 'product-main.ts')], outfile: main,
+  const settings = { bundle: true, packages: 'external', platform: 'node', target: 'node22', format: 'cjs', external: ['electron'], ...(sourceBound?{alias:Object.fromEntries(sourceAliases.map(({find,replacement})=>[find,replacement]))}:{}), plugins: [plugin], metafile: true, logLevel: 'silent' }
+  const mainBuild = await build({ ...settings, ...(sourceBound?{packages:'bundle'}:{}), format: 'esm', entryPoints: [join(fixture, 'product-main.ts')], outfile: main,
     banner: { js: "import {createRequire as createNativeRequire} from 'node:module';const require=createNativeRequire(import.meta.url);" } })
   // Sandboxed preload bundles local pure dependencies; only Electron is a native external.
-  const preloadBuild = await build({ ...settings, packages: 'bundle', entryPoints: [join(desktop, 'src/preload/index.ts')], outfile: preload })
+  const preloadBuild = await build({ ...settings, platform: 'browser', packages: 'bundle',
+    conditions: ['module', 'browser', 'production'], mainFields: ['browser', 'module', 'main'],
+    entryPoints: [join(desktop, 'src/preload/index.ts')], outfile: preload })
+  assert.ok(Object.values(preloadBuild.metafile.outputs).every(output => output.imports.every(input => input.path === 'electron')),
+    'The sandboxed production preload requires only Electron')
   const rendererPlugin = { name: 'literal-product-App-renderer', enforce: 'pre', async transform(code,id) {
     const file=id.split('?')[0]
     if (!file.startsWith(root+'/') || file.includes('/node_modules/') || !/\.[cm]?[jt]sx?$/.test(file)) return
@@ -87,6 +97,13 @@ try {
       assert.equal(code.split(needle).length,2);const changed=code.replace(needle,'export const api = mockApi')
       receipt.typedNonBrowserFactory={path:relative(root,file),originalSHA256:digest(code),compiledSHA256:digest(changed),browserAndMedia:'The exact production preload Browser namespace replaces only the maintained non-Browser typed data fixture.'}
       return{code:changed,map:null}
+    }
+    if (withoutLayoutHost && file === join(desktop, 'src/renderer/src/components/WorkspaceWorkbench.tsx')) {
+      const declaration = /\s*\.\.\.\(target\.surface === 'mote' \? \{ layoutHost: 'sole' as const \} : \{\}\),/
+      const altered = code.replace(declaration, '')
+      assert.notEqual(altered, code, 'Withdraw the actual Mote layout host at the compiled product call site')
+      receipt.mutation = { source: relative(root, file), originalDigest: digest(code), compiledDigest: digest(altered) }
+      return { code: altered, map: null }
     }
   } }
   const cssPlugin={postcssPlugin:'literal-product-App-css',OnceExit(css){css.walk(node=>{const input=node.source?.input;if(input?.file?.startsWith(root+'/apps/desktop/'))inputs.set(input.file,digest(input.css))})}}
@@ -103,7 +120,9 @@ try {
     await copy(join(resolve(root,reuse),'compiled'),out)
     receipt.rendererReuse={evidence:reuse,sourceCount:reusedSources.length,actualSourceExact:true}
   } else {
-  await viteBuild({configFile:false,root:fixture,base:'./',logLevel:'error',...(surveyInitial?{resolve:{alias:sourceAliases}}:{}),plugins:[rendererPlugin],css:{postcss:{plugins:[cssPlugin]}},
+  await viteBuild({configFile:false,root:fixture,base:'./',logLevel:'error',
+    resolve:{alias:[...sourceAliases, ...Object.entries(radixOverlayAliases).map(([find, replacement]) => ({find, replacement}))],dedupe:['react','react-dom']},
+    plugins:[rendererPlugin],css:{postcss:{plugins:[cssPlugin]}},worker:{format:'es'},
     define:{__AGENTMUX_WEB_PREVIEW__:'false','process.env.NODE_ENV':'"production"'},build:{outDir:out,emptyOutDir:false,target:'esnext',rollupOptions:{input:join(fixture,'product-index.html')}}})
   }
   const entryBuild = {metafile: 'Actual Vite product Renderer; original Source and CSS captured by pre transform/PostCSS AST.'}
@@ -133,30 +152,41 @@ for(const type of ['mousedown','mouseup'])document.addEventListener(type,e=>sour
     const directory = join(root, 'packages', name)
     const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
     assert.equal(typeof manifest.exports['.'].import, 'string', 'Actual public ESM export')
-    packageEntries.push(surveyInitial ? sourceAliases.find(value=>value.find===`@agentmux/${name}`).replacement : resolve(directory, manifest.exports['.'].import))
+    packageEntries.push(sourceBound ? sourceAliases.find(value=>value.find===`@agentmux/${name}`).replacement : resolve(directory, manifest.exports['.'].import))
   }
   for (const file of ['pnpm-lock.yaml','packages/core/package.json','packages/demand/package.json',...packageEntries]) {
     const path = resolve(root, file); inputs.set(path, digest(await readFile(path)))
   }
   receipt.inputs = Object.fromEntries([...inputs].map(([path, sha]) => [relative(root, path), sha]))
   await writeFile(join(evidence, 'metafiles.json'), JSON.stringify({ main: mainBuild.metafile, preload: preloadBuild.metafile, entry: entryBuild.metafile }, null, 2) + '\n')
+  const browserRequire = createRequire(join(root, 'packages/browser/package.json'))
+  const nativeExtension = dirname(browserRequire.resolve('fs-native-extensions/package.json'))
+  await mkdir(join(out, 'node_modules'))
+  await symlink(nativeExtension, join(out, 'node_modules/fs-native-extensions'))
   const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'),
     AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: join(privateRoot, 'messages.ndjson'),
     AGENTMUX_AGENT_SESSION_STORE: join(privateRoot, 'sessions.json') }
   delete env.ELECTRON_RUN_AS_NODE
-  receipt.process = await runProbeProcess(require('electron'), [main, html, privateRoot, preload, evidence, sourcePage, ...(mediaOnly?['--media-only']:[]),...(surveyInitial?['--survey-initial']:[]),...(previewFailure?['--survey-preview-failure']:[])],
+  receipt.process = await runProbeProcess(require('electron'), [main, html, privateRoot, preload, evidence, sourcePage, ...(mediaOnly?['--media-only']:[]),...(surveyInitial?['--survey-initial']:[]),...(previewFailure?['--survey-preview-failure']:[]), ...(moteResponsive ? ['--mote-responsive'] : [])],
     { cwd: root, temporaryRoot: privateRoot, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   receipt.native = JSON.parse(await readFile(join(evidence, 'native-receipt.json'), 'utf8'))
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs].map(async ([path]) => [relative(root, path), digest(await readFile(path))])))
   assert.deepEqual(receipt.sourceAfter, receipt.inputs, 'Actual Source/compiled dependency inputs before/after')
-  assert.equal(receipt.process.exitCode, 0, 'Original private product fixture exit')
-  assert.equal(receipt.native.passed, true, 'Actual product facts')
-  assert.ok(receipt.native.openProduct.stages.length >= (surveyInitial ? 1 : 2), 'Actual App product stages are nonempty')
-  receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs].map(async ([path]) => [relative(root, path), digest(await readFile(path))])))
-  assert.deepEqual(receipt.sourceAfter, receipt.inputs, 'Actual Source/compiled dependency inputs before/after')
+  assert.ok(receipt.native.openProduct?.stages?.length >= (surveyInitial ? 1 : 2),
+    receipt.native.failure?.message ?? 'Actual App product stages are nonempty')
   receipt.frames = await Promise.all(receipt.native.frames.map(async frame => {
     const bytes = await readFile(join(evidence, frame.file)); return { ...frame, sha256: digest(bytes), bytes: bytes.length }
   }))
+  if (withoutLayoutHost) {
+    assert.ok(receipt.mutation, 'The intended product source mutation was loaded')
+    assert.equal(receipt.native.passed, false, 'The geometry assertion must reject the historical behavior')
+    assert.match(receipt.native.failure?.message ?? '', /Responsive Mote preview did not follow its only visible right Region/)
+    assert.ok(receipt.frames.some(frame => frame.file === 'actual-Mote-responsive-sole.png'), 'Retain the reproduced before frame')
+    receipt.mutation.rejected = true
+  } else {
+    assert.equal(receipt.process.exitCode, 0, 'Original private product fixture exit')
+    assert.equal(receipt.native.passed, true, receipt.native.failure?.message ?? 'Actual product facts')
+  }
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally {
