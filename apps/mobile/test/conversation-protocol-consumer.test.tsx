@@ -77,7 +77,7 @@ async function authenticatedConsumer(core: AgentMuxClient, root: string, agentSe
   closes.push(() => rpc.dispose())
   const client = await connectHostedAgentMux({ rpc }); closes.push(() => client.dispose())
   const openTerminal = vi.fn()
-  const surface = () => <MobileConversationSurface client={client} agentSessionId={agentSessionId} connection={{ state: 'connected', message: 'Authenticated original Host' }} platform={createBrowserPlatform()} onShowTerminal={openTerminal} />
+  const surface = (onStatusChange?: Parameters<typeof MobileConversationSurface>[0]['onStatusChange']) => <MobileConversationSurface onStatusChange={onStatusChange} client={client} agentSessionId={agentSessionId} connection={{ state: 'connected', message: 'Authenticated original Host' }} platform={createBrowserPlatform()} onShowTerminal={openTerminal} />
   return { client, rpc, url, authenticated, device, openTerminal, surface }
 }
 
@@ -247,13 +247,14 @@ it('authenticated Mobile keeps captured original speech readable when the native
     status: 'complete', createdAt: _historyTailFixtureEpoch(0, 0, 1), updatedAt: _historyTailFixtureEpoch(0, 0, 1), title: 'Observed original reply', content: 'Original captured reply remains readable' }
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
   vi.mocked(f.core.providers.get('codex').readSessionHistoryPage!).mockRejectedValue(Object.assign(new Error('Original native reader unavailable'), { code: 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED' }))
-  const view = await mount(f.surface())
+  const onStatusChange = vi.fn()
+  const view = await mount(f.surface(onStatusChange))
   await vi.waitFor(() => expect(view.element.textContent).toContain(item.content))
   await click(view.element.querySelector<HTMLButtonElement>('[data-captured-reply-observation="retained-hook-reply"] .conversation-reply-observation__toggle')!)
   const reply = view.element.querySelector<HTMLElement>('[data-message-id="retained-hook-reply"]')!
   expect(reply.closest('details:not([open]), [hidden], [inert]')).toBeNull()
   expect(view.element.querySelector('[data-native-record-id]')).toBeNull()
-  await vi.waitFor(() => expect(view.element.textContent).toContain('Original native reader unavailable'))
+  await vi.waitFor(() => expect(onStatusChange.mock.calls.at(-1)?.[0].readingIssue).toContain('Original native reader unavailable'))
   expect(view.element.textContent).not.toContain('暂无已确认的对话内容')
   expect(reply.dataset.status).toBe('complete')
   expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled()

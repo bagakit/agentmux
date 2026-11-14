@@ -25,14 +25,15 @@ afterEach(async () => {
 })
 describe('mounted mobile consumer of the original hosted Session and shared UI', () => {
   it('preserves an editable draft and references without an authorized client', async () => {
-    const f = fixture(), attach = vi.fn(), options = props(f)
+    const f = fixture(), attach = vi.fn(), onStatusChange = vi.fn(), options = { ...props(f), onStatusChange }
     const view = await mount(<MobileConversationSurface {...options} onAttach={attach} />)
     await paste(view.element, '待完成的草稿\n原生输入')
     expect(editor(view.element).textContent).toContain('待完成的草稿')
     expect(editor(view.element).textContent).toContain('原生输入')
     await view.render(<MobileConversationSurface {...options} client={null}
       connection={{ state: 'unavailable', message: '尚未授权' }} onAttach={attach} />)
-    expect(view.element.textContent).toContain('当前发送暂不可用')
+    expect(onStatusChange.mock.calls.at(-1)?.[0].connection).toMatchObject({ state: 'unavailable', message: '尚未授权' })
+    expect(view.element.querySelector('.mobile-conversation__connection')).toBeNull()
     expect(editor(view.element).textContent).toContain('待完成的草稿')
     expect(editor(view.element).textContent).toContain('原生输入')
     expect(button(view.element, 'Send').disabled).toBe(false)

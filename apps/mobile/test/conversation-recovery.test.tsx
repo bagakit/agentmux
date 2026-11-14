@@ -24,14 +24,15 @@ describe('original conversation observation recovery', () => {
     const reads = vi.spyOn(f.client, 'readAgentConversation').mockResolvedValueOnce({ ...complete, items: captured,
       coverage: complete.coverage.map(coverage => coverage.source.kind === 'native' ? { ...coverage, current: 'unavailable', gaps: [{ code: 'SOURCE_PENDING', message: 'source not confirmed yet' }] } : coverage),
       window: { ...complete.window, itemCount: captured.length } })
-    const view = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={createBrowserPlatform()} />)
+    const onStatusChange = vi.fn()
+    const view = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={createBrowserPlatform()} onStatusChange={onStatusChange} />)
     expect(view.element.textContent).toContain('Agent 自己一直能正常干活。')
     await click(view.element.querySelector<HTMLButtonElement>('[data-captured-reply-observation="answer"] button')!)
     const text = view.element.querySelector('.conversation-native-thread')!.textContent!
     expect(text.indexOf('大白话')).toBeLessThan(text.indexOf('Agent 自己'))
     expect(text.indexOf('Agent 自己')).toBeLessThan(text.indexOf('继续'))
-    expect(view.element.textContent).toContain('source not confirmed yet')
-    await click(button(view.element, '刷新记录'))
+    expect(onStatusChange.mock.calls.at(-1)?.[0].readingIssue).toContain('source not confirmed yet')
+    await act(async () => { await onStatusChange.mock.calls.at(-1)![0].refresh() })
     expect(reads.mock.calls.length).toBeGreaterThan(1)
     expect(view.element.querySelector('[data-native-record-id="native-answer"]')).not.toBeNull()
     expect(f.submit).not.toHaveBeenCalled()

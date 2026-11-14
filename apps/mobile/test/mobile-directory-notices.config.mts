@@ -10,7 +10,7 @@ const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.MO
 if (mutation && !Object.hasOwn(directoryNoticeMutations, mutation)) throw Error('Unknown directory notice mutation')
 const variant = mutation ? directoryNoticeMutations[mutation] : undefined
 const identityModule = `export const identityRuntimeSource = ${JSON.stringify((await bundleIdentityRuntime()).source)};\n`
-const inputs = new Set(['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', 'apps/mobile/test/mobile-directory-notices.test.tsx'])
+const inputs = new Set(['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileConversationStatus.tsx', 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', 'apps/mobile/test/mobile-directory-notices.test.tsx'])
 export default defineConfig({ ...base, cacheDir: resolve(root, '.tmp/mobile-directory-notices', mutation ?? 'baseline'),
   resolve: { ...base.resolve, alias: (base.resolve?.alias as { find: string; replacement: string }[]).map(entry => entry.find === '@agentmux/identity/runtime-source' ? { ...entry, replacement: 'virtual:mobile-directory-identity-source' } : entry) },
   plugins: [...(base.plugins ?? []), { name: 'actual-directory-notice-source', enforce: 'pre',

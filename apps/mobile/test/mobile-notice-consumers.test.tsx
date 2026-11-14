@@ -50,20 +50,24 @@ it.each(['export', 'inspect'] as const)('shows a later explicit %s failure even 
   expect(exportFile).toHaveBeenCalledTimes(action === 'export' ? 2 : 0)
 })
 
-it('restores an original connection notice from the fixed App menu without losing draft or invoking an operation', async () => {
+it('retains original connection diagnostics through the fixed action and App menu without losing draft or invoking an operation', async () => {
   getDeviceWorkface().updateNavigation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })
   const f = connectedFixture(), platform = createBrowserPlatform()
   const connection = { state: 'disconnected' as const, message: '原连接中断；健康状态未知' }
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={platform} />)
   await paste(view.element, '离线保留的正文')
   const originalEditor = editor(view.element), packet = structuredClone(getDeviceWorkface().snapshot().record.conversation)
-  await click(button(view.element.querySelector('.mobile-conversation__connection')!, '收起提醒'))
   expect(view.element.querySelector('.mobile-conversation__connection')).toBeNull()
+  await click(button(view.element, '当前对话操作'))
+  const diagnostic = document.body.querySelector('.mobile-session-diagnostic')!
+  expect(diagnostic.textContent).toContain(connection.message)
+  expect(button(diagnostic as HTMLElement, '重新读取对话')).toBeDefined()
+  expect(button(diagnostic as HTMLElement, '查看连接')).toBeDefined()
+  await click(button(document.body, '关闭面板'))
   await openAppMenu(view.element)
   await click(button(document.body, '提醒与诊断'))
-  expect(document.body.querySelector('[role=dialog]')!.textContent).toContain('有已收起的提醒')
-  await click(button(document.body, '恢复已收起提醒'))
-  expect(view.element.querySelector('.mobile-conversation__connection')?.textContent).toContain(connection.message)
+  expect(document.body.querySelector('.mobile-session-diagnostic')?.textContent).toContain(connection.message)
+  expect(view.element.querySelector('.mobile-conversation__connection')).toBeNull()
   expect(editor(view.element)).toBe(originalEditor)
   expect(originalEditor.textContent).toBe('离线保留的正文')
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(packet)

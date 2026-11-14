@@ -74,30 +74,43 @@ it.each(['focus', 'mote', 'space'] as const)('keeps %s issues in the actual App 
 
 it('scopes missing selected-session metadata to that conversation while retaining diagnostics and its mounted draft', async () => {
   await getDeviceWorkface().updateNavigation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })
-  const f = directoryFixture(), readSession = f.client.agentSession.bind(f.client)
+  const f = directoryFixture(), readSession = f.client.readAgentSession.bind(f.client)
   let missing = false
-  vi.spyOn(f.client, 'agentSession').mockImplementation(id => { if (missing && id === 'session-original') throw Error('Original Session metadata unavailable'); return readSession(id) })
+  vi.spyOn(f.client, 'readAgentSession').mockImplementation(async id => { if (missing && id === 'session-original') throw Error('Original Session metadata unavailable'); return readSession(id) })
   const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '已连接' }} platform={createBrowserPlatform()} />)
   await paste(view.element, '保留这段对话里的未发送正文')
   const originalEditor = editor(view.element), originalDraft = structuredClone(getDeviceWorkface().snapshot().record.conversation)
   missing = true
   await act(async () => f.emit({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as never))
-  expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('对话信息还没确认')
+  await vi.waitFor(() => expect(button(view.element, '当前对话操作').getAttribute('aria-description')).toBe('对话信息待确认'))
+  expect(view.element.querySelector('.mobile-conversation__connection')).toBeNull()
+  expect(view.element.querySelector('.mobile-service-notice')).toBeNull()
+  await click(button(view.element, '当前对话操作'))
+  const diagnostic = document.body.querySelector<HTMLElement>('.mobile-session-diagnostic')!
+  expect(diagnostic).not.toBeNull()
+  expect(diagnostic.closest('[hidden]'), 'the original diagnosis is visible in the real action sheet').toBeNull()
+  expect(diagnostic.textContent).toContain('Original Session metadata unavailable')
+  expect(diagnostic.textContent).toContain('session-original')
+  expect(button(diagnostic, '重新读取对话')).toBeDefined()
+  await click(button(document.body, '关闭面板'))
   for (const home of ['Focus', 'Mote', 'Space']) {
     await openPrimary(view.element, home)
-    expect(view.element.querySelector('.mobile-service-notice')?.textContent ?? '').not.toContain('对话信息还没确认')
+    const shellNotice = view.element.querySelector('.mobile-service-notice')?.textContent ?? ''
+    expect(shellNotice).not.toContain('Original Session metadata unavailable')
+    expect(shellNotice).not.toContain('对话信息待确认')
     expect(editor(view.element)).toBe(originalEditor)
     expect(originalEditor.textContent).toBe('保留这段对话里的未发送正文')
   }
   await openAppMenu(view.element)
   await click(button(document.body, '提醒与诊断'))
-  const diagnostic = document.body.querySelector('.mobile-session-diagnostic')!
-  expect(diagnostic).not.toBeNull()
-  expect(diagnostic.textContent).toContain('对话信息还没确认')
-  expect(diagnostic.textContent).toContain('session-original')
-  expect(button(diagnostic, '查看 Mac 连接')).toBeDefined()
-  await click(button(diagnostic, '返回这段对话'))
-  expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('对话信息还没确认')
+  const retainedDiagnostic = document.body.querySelector<HTMLElement>('.mobile-session-diagnostic')!
+  expect(retainedDiagnostic.textContent).toContain('Original Session metadata unavailable')
+  expect(retainedDiagnostic.textContent).toContain('session-original')
+  missing = false
+  const reads = vi.mocked(f.client.readAgentSession).mock.calls.length
+  await click(button(retainedDiagnostic, '重新读取对话'))
+  await vi.waitFor(() => expect(vi.mocked(f.client.readAgentSession).mock.calls.length).toBeGreaterThan(reads))
+  await vi.waitFor(() => expect(document.body.querySelector('.mobile-session-diagnostic')?.textContent).not.toContain('Original Session metadata unavailable'))
   expect(editor(view.element)).toBe(originalEditor)
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(originalDraft)
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')

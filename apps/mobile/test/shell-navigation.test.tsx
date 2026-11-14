@@ -85,7 +85,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     expect(view.element.textContent).toContain('Mac 上的对话不受影响')
   })
 
-  it('shows one connection notice at the visible workface while retaining independent unknown delivery and the original draft', async () => {
+  it('keeps the connection reason in the fixed conversation action while retaining independent unknown delivery and the original draft', async () => {
     getDeviceWorkface().updateNavigation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })
     const f = clientFixture(), platform = createBrowserPlatform()
     f.submit.mockRejectedValueOnce(Object.assign(new Error('Receipt lost after dispatch'), { code: 'STALE_AGENT_SESSION' }))
@@ -96,9 +96,11 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     const originalRequest = f.submit.mock.calls[0]![0]
     const offline = { state: 'disconnected' as const, message: '连接中断，正在自动重连。' }
     await view.render(<MobileApp client={f.client} connection={offline} platform={platform} />)
-    const connectionNotice = view.element.querySelector('.mobile-conversation-panel:not([hidden]) .mobile-conversation__connection')
-    expect(connectionNotice?.textContent).toContain(offline.message)
+    expect(view.element.querySelector('.mobile-conversation__connection')).toBeNull()
     expect(view.element.querySelector('.mobile-service-notice')).toBeNull()
+    await click(button(view.element, '当前对话操作'))
+    expect(document.body.querySelector('.mobile-session-diagnostic')?.textContent).toContain(offline.message)
+    await click(button(document.body, '关闭面板'))
     expect(view.element.querySelector('.mobile-send-status[data-phase="unknown"]')).not.toBeNull()
     expect(editor(view.element)).toBe(originalEditor)
     expect(originalEditor.textContent).toBe('原请求与草稿都保留')
@@ -152,6 +154,9 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
     await view.render(<MobileApp client={f.client} connection={unavailable} platform={createBrowserPlatform()} />)
     expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('暂时无法保存导航位置')
-    expect(view.element.querySelector('.mobile-conversation__connection')?.textContent).toContain(unavailable.message)
+    expect(view.element.querySelector('.mobile-conversation__connection')).toBeNull()
+    await click(button(view.element, '当前对话操作'))
+    expect(document.body.querySelector('.mobile-session-diagnostic')?.textContent).toContain(unavailable.message)
+    expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('暂时无法保存导航位置')
   })
 })

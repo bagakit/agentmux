@@ -6,7 +6,7 @@ import { relative, resolve } from 'node:path'
 import { directoryNoticeMutations } from '../test/mobile-directory-notices-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../..'), mobile = resolve(root, 'apps/mobile')
 const directory = resolve(root, '.local/state/mobile-directory-fix', 'notices-' + randomUUID())
-const sourceFiles = ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', 'apps/mobile/src/mobile.css',
+const sourceFiles = ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileConversationStatus.tsx', 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', 'apps/mobile/src/mobile.css',
   'apps/mobile/test/mobile-directory-notices.test.tsx', 'apps/mobile/test/mobile-directory-tree.test.tsx', 'apps/mobile/test/spatial-navigation.test.tsx',
   'apps/mobile/test/mobile-directory-notices.config.mts', 'apps/mobile/test/mobile-directory-notices-mutations.mjs', 'apps/mobile/scripts/verify-mobile-directory-notices.mjs']
 const sha = value => createHash('sha256').update(value).digest('hex')
@@ -21,7 +21,7 @@ try {
     const env = { ...process.env, MOBILE_DIRECTORY_LOADED: loaded }; delete env.MOBILE_DIRECTORY_MUTATION; delete env.MOBILE_WEB_MUTANT; delete env.MOBILE_WEB_LOADED
     if (variant) env.MOBILE_DIRECTORY_MUTATION = label
     const run = await new Promise((accept, reject) => {
-      const child = spawn('pnpm', ['exec', 'vitest', 'run', '--config', 'test/mobile-directory-notices.config.mts', '--reporter=json', '--outputFile=' + result], { cwd: mobile, env, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn('pnpm', ['--config.verify-deps-before-run=false', 'exec', 'vitest', 'run', '--config', 'test/mobile-directory-notices.config.mts', '--reporter=json', '--outputFile=' + result], { cwd: mobile, env, stdio: ['ignore', 'pipe', 'pipe'] })
       let log = ''; child.stdout.on('data', value => { log += value }); child.stderr.on('data', value => { log += value })
       child.once('error', reject); child.once('close', (code, signal) => accept({ code, signal, log }))
     })
@@ -30,7 +30,7 @@ try {
     const report = JSON.parse(await readFile(result, 'utf8'))
     const tests = report.testResults.flatMap(file => file.assertionResults).filter(test => !['pending', 'skipped'].includes(test.status))
     const evaluations = (await readFile(loaded, 'utf8')).trim().split('\n').filter(Boolean).map(row => JSON.parse(row))
-    for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', 'apps/mobile/test/mobile-directory-notices.test.tsx']) assert.ok(evaluations.some(row => row.path === file), 'Real owner/consumer must load: ' + file)
+    for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileConversationStatus.tsx', 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', 'apps/mobile/test/mobile-directory-notices.test.tsx']) assert.ok(evaluations.some(row => row.path === file), 'Real owner/consumer must load: ' + file)
     if (variant) {
       assert.notEqual(run.code, 0, 'Mutated production behavior must fail its consumer')
       assert.equal(tests.length, 1); assert.equal(report.numFailedTests, 1); assert.equal(report.numPassedTests, 0)

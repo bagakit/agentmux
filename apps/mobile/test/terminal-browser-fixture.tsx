@@ -44,6 +44,18 @@ const finite = {
   runtimeIdentity() { return { hostId: 'local', instanceId: 'private-fixture-runtime', buildIdentity: 'fixture', protocolVersion: 1, processId: null } },
   agentSession(id: string) { if (id !== session.agentSessionId) throw new Error('Fixture Session mismatch'); return session },
   agentSessions() { return [session] },
+  async readAgentSession(id: string): Promise<AgentMuxAgentSession | null> {
+    // Each bounded port supplies its own original A/B facts through this receiver.
+    // Never borrow the outer Session A after a same-page port/SID rebind.
+    const original = this.agentSession(id)
+    if (original.agentSessionId !== id) throw new Error('Fixture point-read Session mismatch')
+    calls.push({ method: 'readAgentSession', args: [id] })
+    return original
+  },
+  async sessionHistorySources(input: { agentSessionId?: string } = {}): Promise<import('@agentmux/core').AgentSessionHistoryDescriptor[]> {
+    const originals = input.agentSessionId ? [this.agentSession(input.agentSessionId)] : this.agentSessions()
+    return originals.map(original => ({ agentSessionId: original.agentSessionId, hostId: original.hostId, state: 'active' as const }))
+  },
   async sessionHistoryPage() { return { agentSessionId: session.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'private-native' }, items: [], nextCursor: null } },
   async sessionTimeline() { return { agentSessionId: session.agentSessionId, revision: 0, items: [] } },
   async observeSessionHistory() { return { source: { providerId: 'codex', nativeSessionId: 'private-native' }, dispose() {} } },
@@ -370,7 +382,7 @@ export async function runRebindBrowserProof() {
   await rebind(heldPort); await clickControl()
   terminal!.input('late original', true); terminal!.input('Session A suffix', true)
   const otherSession = { ...session, agentSessionId: 'private-fixture-other-session', run: { runId: 'private-fixture-other-run' } }
-  const other = port({ agentSession(id) { assert(id === otherSession.agentSessionId, 'Selected Session B facts'); return otherSession } })
+  const other = port({ agentSession(id) { assert(id === otherSession.agentSessionId, 'Selected Session B facts'); return otherSession }, agentSessions() { return [otherSession] } })
   await rebind(other, otherSession.agentSessionId)
   await clickControl(); const beforeLate = writes().length
   rejectOriginal(new Error('Late Session A ACK remains unknown'))
