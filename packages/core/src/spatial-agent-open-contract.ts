@@ -55,6 +55,7 @@ export function parseMoteMainCreationIntent(value: unknown, code: 'INVALID_CONTR
   if(p.handover !== undefined && (p.handover !== true || !baseline.defaults.conversation)) throw new AgentMuxError('Main handover requires the original predecessor role.',code)
   const rollover=p.rollover===undefined?undefined:parseMoteMainRolloverDecision(p.rollover,code)
   if(rollover&&(!sameMotePreferencesTarget(rollover.target,target)||rollover.expectedRoleRevision!==p.expectedRoleRevision||!deferredInput||deferredInput.operationId!==rollover.queryOperationId))throw new AgentMuxError('The rollover belongs to another original Query or Mote.',code)
+  if(rollover?.policy.kind==='executor-change'&&baseline.defaults.executorId!==rollover.policy.executorId)throw new AgentMuxError('The Executor change belongs to another saved choice. Keep its original Query.',code)
   return { ...(rollover?{rollover}:{}), ...(deferredInput ? {deferredInput} : {}), ...(p.handover ? {handover:true as const} : {}), target, baseline, expectedRoleRevision: p.expectedRoleRevision as string | null,
     sourceOperationId: p.sourceOperationId as string, bindOperationId: p.bindOperationId as string }
 }

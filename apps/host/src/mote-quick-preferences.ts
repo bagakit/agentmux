@@ -22,13 +22,14 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
   async read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult> {
     input = { kind: 'quick', target: input.target }
     let source: MoteQuickPreferencesReadResult['source'] = null
+    let defaults: MoteQuickPreferencesReadResult['defaults'] = null
     const empty = { executors: [], conversations: [], destinations: [] }
     try {
       const main = await this.ports.main.readCurrentMoteMain(input.target)
       if (!main.identity) throw new Error(main.issue ?? 'The original Mote identity is unconfirmed.')
       const file = await readMoteQuickModeSource(this.ports.files, input.target)
       source = file.source
-      const defaults = moteQuickModeDefaults(file.mode)
+      defaults = moteQuickModeDefaults(file.mode)
       const catalog = await this.ports.catalog(), locations = catalog?.locations.filter(value => value.spaceId === input.target.spaceId) ?? []
       const conversations = locations.flatMap(location => {
         const region = catalog!.regions.find(value => value.tabId === location.tabId && value.regionId === location.regionId)
@@ -38,7 +39,7 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
       return parseMotePreferencesReadResult({ ...input, status: 'ready', source, defaults,
         choices: { executors, conversations, destinations: locations.map(value => ({ reference: { kind: 'occurrence', displayWorkspaceId: value.displayWorkspaceId, groupId: value.groupId, tabId: value.tabId, regionId: value.regionId }, label: `${value.tabId} · ${value.regionId}` })) },
         main: main.identity.moteId === PMO_TEAMS_TOPIC_ID, issue: null, ...(this.ports.maintenance ? { maintenance: this.ports.maintenance(input.target) } : {}) }, input)
-    } catch (error) { return parseMotePreferencesReadResult({ ...input, status: 'unconfirmed', source, defaults: null, choices: empty, main: null, issue: String(error) }, input) }
+    } catch (error) { return parseMotePreferencesReadResult({ ...input, status: 'unconfirmed', source, defaults, choices: empty, main: null, issue: String(error) }, input) }
   }
   async save(raw: MoteQuickPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult> {
     return this.ports.main.withRole?await this.ports.main.withRole(raw.target,()=>this.saveInRole(raw,context)):await this.saveInRole(raw,context)

@@ -14,8 +14,11 @@ export type MoteMainPeriod = { id:string; roleRevision:string; reference:MoteDef
   startedAt:number|null; endedAt:number|null; start:MoteMainTransitionCause|null; end:MoteMainTransitionCause|null;
   range:{kind:'bounded';after:ConversationCheckpoint;through:ConversationCheckpoint|null} | {kind:'unconfirmed';issue:string} | {kind:'whole-session'} }
 export type MoteMainRolloverDecision = { target:MotePreferencesTarget; expectedRoleRevision:string; reference:MoteDefaultConversation;
-  policyRevision:string; policy:Extract<MoteMainRolloverPolicy,{kind:'idle'}>; activity:{inputKey:AgentPromptInputKey;run:AgentMuxRunRef;sourceId:string;sequence:number;idleSince:number};
-  evaluatedAt:number; queryOperationId:string; creationOperationId:string }
+  /** Original new Query key; older historical periods may predate this witness. */
+  queryInputKey?:Extract<AgentPromptInputKey,{kind:'prompt'}>;
+  policyRevision:string; evaluatedAt:number; queryOperationId:string; creationOperationId:string } & (
+  { policy:Extract<MoteMainRolloverPolicy,{kind:'idle'}>; activity:{inputKey:AgentPromptInputKey;run:AgentMuxRunRef;sourceId:string;sequence:number;idleSince:number} }
+  | { policy:{kind:'executor-change';previousExecutorId:string;executorId:string}; queryInputKey:Extract<AgentPromptInputKey,{kind:'prompt'}>; activity?:never })
 export type MoteMainRolloverReading = {status:'keep-current'|'not-due'|'due'|'unconfirmed';decision:MoteMainRolloverDecision|null;issue:string|null}
 export function parseMoteMainPeriod(value: unknown): MoteMainPeriod {
  const p=rpcRecord(value,['id','roleRevision','reference','startedAt','endedAt','start','end','range'],'CONTROL_PROTOCOL_ERROR')
@@ -39,9 +42,22 @@ export type MoteMainTransitionPreparation = {
 }
 
 export function parseMoteMainRolloverDecision(value:unknown,code:'INVALID_CONTROL_REQUEST'|'INVALID_CLI_ARGUMENT'|'CONTROL_PROTOCOL_ERROR'='INVALID_CONTROL_REQUEST'):MoteMainRolloverDecision {
- const p=rpcRecord(value,['target','expectedRoleRevision','reference','policyRevision','policy','activity','evaluatedAt','queryOperationId','creationOperationId'],code)
+ const p=rpcRecord(value,['target','expectedRoleRevision','reference','queryInputKey','policyRevision','policy','activity','evaluatedAt','queryOperationId','creationOperationId'],code)
  parseMotePreferencesTarget(p.target,code);const reference=parseMoteDefaultConversation(p.reference,code)
  for(const field of ['expectedRoleRevision','policyRevision','queryOperationId','creationOperationId'])if(typeof p[field]!=='string'||!String(p[field]).trim()||/[\0\r\n]/u.test(String(p[field])))throw new AgentMuxError('The original rollover identity is invalid.',code)
+ if(!Number.isSafeInteger(p.evaluatedAt)||Number(p.evaluatedAt)<0)throw new AgentMuxError('The original rollover evaluation time is invalid.',code)
+ if(p.queryInputKey!==undefined) {
+  let key:AgentPromptInputKey
+  try { key=validateAgentPromptInputKey(p.queryInputKey) }
+  catch { throw new AgentMuxError('The rollover Query key is invalid.',code) }
+  if(key.kind!=='prompt'||key.agentSessionId!==reference.sessionId||key.submissionId!==p.queryOperationId)throw new AgentMuxError('The rollover Query key names another original input.',code)
+ }
+ if(p.policy && typeof p.policy==='object' && 'kind' in p.policy && p.policy.kind==='executor-change') {
+  const choice=rpcRecord(p.policy,['kind','previousExecutorId','executorId'],code)
+  for(const field of ['previousExecutorId','executorId'])if(typeof choice[field]!=='string'||!String(choice[field]).trim()||/[\0\r\n]/u.test(String(choice[field])))throw new AgentMuxError('The original Executor change identity is invalid.',code)
+  if(choice.previousExecutorId===choice.executorId||p.activity!==undefined||p.queryInputKey===undefined)throw new AgentMuxError('An Executor change requires its original Query key and different Executors, without idle evidence.',code)
+  return p as MoteMainRolloverDecision
+ }
  const policy=parseMoteQuickDefaults({conversationRollover:p.policy},code).conversationRollover
  const a=rpcRecord(p.activity,['inputKey','run','sourceId','sequence','idleSince'],code),key=validateAgentPromptInputKey(a.inputKey),run=rpcRecord(a.run,['runId'],code)
  if(policy?.kind!=='idle'||key.kind!=='prompt'||key.agentSessionId!==reference.sessionId||key.expectedRun.runId!==run.runId||typeof a.sourceId!=='string'||!a.sourceId||!Number.isSafeInteger(a.sequence)||Number(a.sequence)<1||!Number.isSafeInteger(a.idleSince)||Number(a.idleSince)<0||!Number.isSafeInteger(p.evaluatedAt)||Number(p.evaluatedAt)<Number(a.idleSince))throw new AgentMuxError('The original rollover activity source is invalid.',code)

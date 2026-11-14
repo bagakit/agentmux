@@ -1882,7 +1882,15 @@ export class AgentMuxRpcService {
           const existing=(await this.spatial.read())?.graph
           if(!existing||!spatialAgentOpenRecord(existing,request.requestId)) {
             const main=await this.ports.moteDialogue?.mainInput?.readCurrentMoteMain(intent.target,context.signal)
-            const decision=main&&await this.evaluateMoteRollover(main,intent.rollover.queryOperationId,await this.messageRouteJournal(),context)
+            const key=intent.rollover.queryInputKey
+            if(!key||key.kind!=='prompt'||key.agentSessionId!==intent.rollover.reference.sessionId||key.submissionId!==intent.rollover.queryOperationId)throw new AgentMuxError('The original rollover Query key is unconfirmed. Keep this request and inspect its original input.','MOTE_MAIN_CHANGED')
+            const journal=await this.messageRouteJournal()
+            const sources=(await this.clients()).filter(scope=>scope.hostId===intent.rollover!.reference.hostId),source=sources.length===1?sources[0]:undefined
+            if(!source||this.endpointUnverified(source.client))throw new AgentMuxError('The original rollover Query owner is unavailable. Keep its original key.','CONTROL_UNAVAILABLE')
+            const original=await this.inspectMainInputAt(source,key,context)
+            const routed=main?.identity?await journal.readMoteMainInputRoute(main.identity,key.submissionId):null
+            if(routed||original.input||original.record)throw new AgentMuxError('This Query already belongs to its original input producer. No new Main was created.','MOTE_MAIN_INPUT_PREEXISTING')
+            const decision=main&&await this.evaluateMoteRollover(main,key,journal,context)
             const frozen=(value:import('./mote-main-period.js').MoteMainRolloverDecision)=>{const {evaluatedAt:_now,...original}=value;return original}
             if(decision?.status!=='due'||!decision.decision||request.requestId!==intent.rollover.creationOperationId||intent.deferredInput?.operationId!==intent.rollover.queryOperationId||!isDeepStrictEqual(frozen(decision.decision),frozen(intent.rollover)))throw new AgentMuxError('The original rollover policy, role or activity changed. Keep this Query and inspect its original source.','MOTE_MAIN_CHANGED')
           }
@@ -4069,8 +4077,6 @@ export class AgentMuxRpcService {
       } else {
         if (main.status !== 'ready' || !main.current || !main.roleRevision || main.roleRevision !== expectedRoleRevision || main.current.sessionId !== submit.agentSessionId)
           throw new AgentMuxError('The main Agent changed before accepting this logical input. The original draft was retained; no later Agent received it.', 'MOTE_MAIN_CHANGED')
-        rollover=await this.evaluateMoteRollover(main,operationId,journal,context)
-        if(rollover.status==='due')return {route:null,record:null,input:null,disposition:'rollover-required',rollover}
         const owners = (await this.clients()).filter(scope => scope.hostId === main.current!.hostId)
         if (owners.length !== 1 || this.endpointUnverified(owners[0]!.client)) throw new AgentMuxError('The exact current main Host is unavailable or ambiguous. Keep the original draft.', 'CONTROL_UNAVAILABLE')
         const prior = await this.inspectMainInputAt(owners[0]!, key, context)
@@ -4081,6 +4087,10 @@ export class AgentMuxRpcService {
           if (concurrent.intentDigest !== digest || concurrent.roleRevision !== expectedRoleRevision || !isDeepStrictEqual(concurrent.key,key)) throw new AgentMuxError('This logical main input already names another original role, target or content. Keep its original input key.', 'AGENT_PROMPT_OPERATION_CONFLICT')
           route = concurrent
         } else {
+          // Only a new logical Query can change its Main. A pre-existing input
+          // producer or retained route keeps its original Session and operation.
+          rollover=await this.evaluateMoteRollover(main,key,journal,context)
+          if(rollover.status==='due')return {route:null,record:null,input:null,disposition:'rollover-required',rollover}
           // Validate an existing Host capture before freezing a new role route. This read grants no input authority.
           if (submit.capturedContext) await resolveAgentInputContextCapture({reference:submit.capturedContext.reference,
             agentSessionId:submit.agentSessionId,expectedRun:submit.expectedRun,operationId:submit.operationId,prompt:submit.prompt,
@@ -4126,12 +4136,36 @@ export class AgentMuxRpcService {
     return {...(route.rollover?{rollover:route.rollover}:{}),route,record:result.record,input:result.input ?? null,...(rollover?{rollover}:{})}
   }
 
-  private async evaluateMoteRollover(main: import('./mote-dialogue.js').MoteMainSnapshot, operationId:string, journal:DurableAgentMuxMessageQueue, context:AgentMuxRpcCallContext):Promise<import('./mote-main-period.js').MoteMainRolloverReading> {
+  private async evaluateMoteRollover(main: import('./mote-dialogue.js').MoteMainSnapshot, queryInputKey:Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>, journal:DurableAgentMuxMessageQueue, context:AgentMuxRpcCallContext):Promise<import('./mote-main-period.js').MoteMainRolloverReading> {
+    const operationId=queryInputKey.submissionId
     let rollover:import('./mote-main-period.js').MoteMainRolloverReading={status:'unconfirmed',decision:null,issue:'The original Main dialogue activity is unconfirmed. Existing input remains available.'}
     if(main.status!=='ready'||!main.identity||!main.current||!main.roleRevision)return rollover
     try {
-        const preference=this.ports.moteQuickPreferences&&await this.ports.moteQuickPreferences.read({kind:'quick',target:main.target})
-        const policy=preference?.status==='ready'?preference.defaults?.conversationRollover:undefined
+        let preference:import('./mote-preferences.js').MoteQuickPreferencesReadResult|undefined
+        try { preference=this.ports.moteQuickPreferences&&await this.ports.moteQuickPreferences.read({kind:'quick',target:main.target}) }
+        catch { throw new AgentMuxError('The saved Main Executor choice could not be read. Keep this Query and inspect the original Mote settings; no input was sent.','MOTE_MAIN_EXECUTOR_UNCONFIRMED') }
+        if(!preference?.defaults||!preference.source?.resource||!['read','deleted'].includes(preference.source.result.status))throw new AgentMuxError('The saved Main Executor choice is unconfirmed. Keep this Query and inspect the original Mote settings; no input was sent.','MOTE_MAIN_EXECUTOR_UNCONFIRMED')
+        // Original MOTE facts survive unrelated choice/catalog observations.
+        // Only their owner supplies defaults; Core never reparses display text or YAML.
+        const policy=preference.defaults.conversationRollover
+        const executorId=preference.defaults.executorId
+        if(executorId) {
+          const scopes=(await this.clients()).filter(scope=>scope.hostId===main.current!.hostId),scope=scopes.length===1?scopes[0]:undefined
+          if(!scope||this.endpointUnverified(scope.client))throw new AgentMuxError('The original Main Executor owner is unconfirmed. Keep this Query and inspect that original Host; no input was sent.', 'MOTE_MAIN_EXECUTOR_UNCONFIRMED')
+          let session:Awaited<ReturnType<typeof scope.client.readAgentSession>>
+          try { session=await scope.client.readAgentSession(main.current.sessionId) }
+          catch { throw new AgentMuxError('The original Main Executor could not be read. Keep this Query and inspect the original Session; no input was sent.', 'MOTE_MAIN_EXECUTOR_UNCONFIRMED') }
+          if(!session||session.agentSessionId!==main.current.sessionId||!session.executorId)throw new AgentMuxError('The original Main Executor is unconfirmed. Keep this Query and inspect the original Session; no input was sent.', 'MOTE_MAIN_EXECUTOR_UNCONFIRMED')
+          if(queryInputKey.agentSessionId!==session.agentSessionId||queryInputKey.expectedRun.runId!==session.run.runId)throw new AgentMuxError('The original Main Run changed before this new Query. Keep its original key and inspect that Session.','MOTE_MAIN_CHANGED')
+          if(session.executorId!==executorId) {
+            const choice={kind:'executor-change' as const,previousExecutorId:session.executorId,executorId}
+            const policyRevision=createHash('sha256').update(JSON.stringify([main.identity,choice])).digest('hex')
+            const creationOperationId='mote-rollover:'+createHash('sha256').update(JSON.stringify([main.identity,main.roleRevision,policyRevision,operationId])).digest('hex')
+            await this.ports.moteDialogue?.mainInput?.assertCurrent(main,context.signal)
+            return {status:'due',decision:{target:main.target,expectedRoleRevision:main.roleRevision,reference:main.current,
+              queryInputKey,policyRevision,policy:choice,evaluatedAt:Date.now(),queryOperationId:operationId,creationOperationId},issue:null}
+          }
+        }
         if(policy?.kind==='idle') {
           rollover={status:'unconfirmed',decision:null,issue:'The original Main dialogue idle source is unconfirmed. Its existing input remains available.'}
           const latest=await journal.latestMoteMainInputRoute(main.identity,main.roleRevision)
@@ -4165,7 +4199,7 @@ export class AgentMuxRpcService {
                   const policyRevision=createHash('sha256').update(JSON.stringify([main.identity,policy])).digest('hex')
                   const creationOperationId='mote-rollover:'+createHash('sha256').update(JSON.stringify([main.identity,main.roleRevision,policyRevision,operationId])).digest('hex')
                   await this.ports.moteDialogue?.mainInput?.assertCurrent(main,context.signal)
-                  const decision={target:main.target,expectedRoleRevision:main.roleRevision,reference:main.current,policyRevision,policy,
+                  const decision={target:main.target,expectedRoleRevision:main.roleRevision,reference:main.current,queryInputKey,policyRevision,policy,
                     activity:{inputKey,run:idle.run,sourceId:idle.sourceId,sequence:idle.sequence,idleSince:idle.observedAt},evaluatedAt:sourceNow,queryOperationId:operationId,creationOperationId}
                   return {status:'due',decision,issue:null}
                 }
@@ -4173,8 +4207,8 @@ export class AgentMuxRpcService {
               }
             }
           } else if(!latest) rollover={status:'not-due',decision:null,issue:null}
-        } else if(preference?.status==='ready') rollover={status:'keep-current',decision:null,issue:null}
-    } catch(error){return {status:'unconfirmed',decision:null,issue:'Inspecting the original rollover source failed: '+String(error)}}
+        } else rollover={status:'keep-current',decision:null,issue:null}
+    } catch(error){if(error instanceof AgentMuxError&&['MOTE_MAIN_EXECUTOR_UNCONFIRMED','MOTE_MAIN_CHANGED'].includes(error.code))throw error;return {status:'unconfirmed',decision:null,issue:'Inspecting the original rollover source failed: '+String(error)}}
     return rollover
   }
 
