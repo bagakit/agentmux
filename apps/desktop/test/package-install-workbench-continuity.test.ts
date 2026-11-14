@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -15,12 +15,22 @@ const io = vi.hoisted(() => ({
   after: null as DesktopClientObservation | null,
   failAfterRead: false, failEveryRead: false, outgoingMisses: 0, outgoingReads: 0, missesAfterLaunch: 0,
   tick: 0, nativePlan: null as any, nativeConfirmation: null as any,
-  copies: 0, quits: 0, signaturePaths: [] as string[], hashInputs: [] as string[], signatureFailure: false, foreignStage: '', copyTarget: '', resultFacts: null as Record<string, unknown> | null
+  copies: 0, quits: 0, signaturePaths: [] as string[], hashInputs: [] as string[], signatureFailure: false, foreignStage: '', copyTarget: '', resultFacts: null as Record<string, unknown> | null,
+  copyFailure: false, cleanupFailure: false, cutoverFailure: false, sourceChange: '' as '' | 'missing' | 'seal', replaceStage: false,
+  cleanupProbeUnavailable: '' as '' | 'source' | 'stage'
 }))
 const roots: string[] = []
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>()
-  return { ...actual, lstat: async (...args: Parameters<typeof actual.lstat>) => {
+  return { ...actual, rm: async (...args: Parameters<typeof actual.rm>) => {
+    if (io.cleanupFailure && String(args[0]).includes('/.AgentMux.install-')) throw new Error('PRIVATE_CLEANUP_FAILED')
+    return actual.rm(...args)
+  }, rename: async (...args: Parameters<typeof actual.rename>) => {
+    if (io.cutoverFailure && args[0] === io.app) throw new Error('PRIVATE_CUTOVER_FAILED')
+    return actual.rename(...args)
+  }, lstat: async (...args: Parameters<typeof actual.lstat>) => {
+    if (io.cleanupProbeUnavailable === 'source' && args[0] === io.candidate || io.cleanupProbeUnavailable === 'stage' && String(args[0]).includes('/.AgentMux.install-'))
+      throw new Error('PRIVATE_CLEANUP_OBSERVATION_UNAVAILABLE')
     const observation = await actual.lstat(...args)
     // Only the selected private stage's external UID observation is controlled.
     return args[0] === io.foreignStage ? Object.assign(Object.create(observation), { uid: process.getuid!() + 1 }) : observation
@@ -40,12 +50,22 @@ vi.mock('node:child_process', async original => {
       try {
         if (command === 'cp' || command === 'ditto') {
           io.copies++
-          expect(args.at(-2)).toBe(io.candidate)
-          expect(args.at(-1)).toBe(io.copyTarget || join(dirname(io.app), `.AgentMux.install-${process.pid}.app`))
+          expect(args.at(-2)).toBe(command === 'cp' ? io.candidate + '/.' : io.candidate)
+          if (io.copyTarget) expect(args.at(-1)).toBe(io.copyTarget)
+          else expect(args.at(-1)).toMatch(new RegExp(`^${dirname(io.app)}/\\.AgentMux\\.install-${process.pid}-[a-f0-9-]{36}\\.app$`))
           await cp(args.at(-2)!, args.at(-1)!, { recursive: true })
+          if (io.copyFailure) throw new Error('PRIVATE_COPY_FAILED')
         } else {
           expect(command, 'No live OS operation is admitted').toBe('codesign')
           io.signaturePaths.push(args.at(-1)!)
+          if (io.sourceChange === 'missing') await rm(io.candidate, { recursive: true })
+          if (io.sourceChange === 'seal') await writeFile(join(io.candidate, 'Contents/_CodeSignature/CodeResources'), 'changed signed source')
+          if (io.replaceStage) {
+            await rename(args.at(-1)!, args.at(-1)! + '.original')
+            // The replacement is an external observation at the same pathname.
+            await mkdir(args.at(-1)!)
+            await writeFile(join(args.at(-1)!, 'foreign-content'), 'preserve this replacement')
+          }
           if (io.signatureFailure) throw new Error('PRIVATE_SIGNATURE_INVALID')
         }
         child.stdout.end(); child.stderr.end(); child.emit('exit', 0, null)
@@ -88,13 +108,14 @@ afterEach(async () => {
   }
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
+  io.cleanupFailure = false
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-install-continuity-')); roots.push(root)
   const home = join(root, 'home'), app = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate.app')
-  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, outgoingMisses: 0, outgoingReads: 0, missesAfterLaunch: 0, tick: 0, nativePlan: null, nativeConfirmation: null, copies: 0, quits: 0, signaturePaths: [], hashInputs: [], signatureFailure: false, foreignStage: '', copyTarget: '', resultFacts: null })
+  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, outgoingMisses: 0, outgoingReads: 0, missesAfterLaunch: 0, tick: 0, nativePlan: null, nativeConfirmation: null, copies: 0, quits: 0, signaturePaths: [], hashInputs: [], signatureFailure: false, foreignStage: '', copyTarget: '', resultFacts: null, copyFailure: false, cleanupFailure: false, cutoverFailure: false, sourceChange: '', replaceStage: false, cleanupProbeUnavailable: '' })
   const identity = { schema: 'agentmux.package-identity.v1' as const, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40),
     appVersion: '0.1.0', platform: process.platform, arch: process.arch }
   for (const [directory, sourceCommit] of [[app, 'a'.repeat(40)], [candidate, 'c'.repeat(40)]]) {
@@ -551,7 +572,84 @@ it('[prepared-stage] default installation still copies and qualifies the selecte
   const result = await install(f, 'full')
   expect(result.ui.status).toBe('committed')
   expect(io.copies).toBe(1); expect(io.quits).toBe(1); expect(io.cutovers).toBe(1)
-  expect(io.signaturePaths).toEqual([join(dirname(f.app), `.AgentMux.install-${process.pid}.app`)])
+  expect(io.signaturePaths).toHaveLength(1)
+  expect(await readdir(dirname(f.app))).toEqual(['AgentMux.app'])
+})
+
+it.each(['copy', 'signature', 'qualification'] as const)('[stage-cleanup] %s failure reclaims only this attempt and preserves the signed source and live App', async failure => {
+  const f = await fixture(), unrelated = join(dirname(f.app), '.AgentMux.install-123.app')
+  await mkdir(unrelated); await writeFile(join(unrelated, 'retained'), 'other attempt')
+  if (failure === 'copy') io.copyFailure = true
+  if (failure === 'signature') io.signatureFailure = true
+  if (failure === 'qualification') io.before!.workbench.loading = true
+  const error = await install(f).catch(error => error)
+  expect(error).toBeInstanceOf(Error)
+  expect(error.installStage.status).toBe('removed')
+  expect(await readdir(dirname(f.app))).toEqual(['.AgentMux.install-123.app', 'AgentMux.app'])
+  expect(await readFile(join(unrelated, 'retained'), 'utf8')).toBe('other attempt')
+  expect(await readFile(join(f.candidate, 'Contents/MacOS/AgentMux'), 'utf8')).toContain('Private file')
+  expect(io.pid).toBe(201); expect(io.quits).toBe(0)
+  if (failure === 'qualification') {
+    expect(error.transaction.ui.status).toBe('not-started')
+    expect(error.transaction.installStage).toEqual(error.installStage)
+  }
+})
+
+it.each(['missing', 'seal'] as const)('[stage-cleanup] a %s signed source preserves the continuation candidate', async change => {
+  const f = await fixture(); io.signatureFailure = true; io.sourceChange = change
+  const error = await install(f).catch(error => error)
+  expect(error.message).toContain('PRIVATE_SIGNATURE_INVALID')
+  expect(error.installStage.status).toBe('retained')
+  expect(await readFile(join(error.installStage.path, 'Contents/_CodeSignature/CodeResources'), 'utf8')).toContain('Private signature seal')
+  expect(io.pid).toBe(201); expect(io.quits).toBe(0)
+})
+
+it('[stage-cleanup] a replaced stage object is retained at the same pathname', async () => {
+  const f = await fixture(); io.signatureFailure = true; io.replaceStage = true
+  const error = await install(f).catch(error => error)
+  expect(error.message).toContain('PRIVATE_SIGNATURE_INVALID')
+  expect(error.installStage.status).toBe('retained')
+  expect(error.installStage.reason).toContain('changed identity')
+  expect(await readFile(join(error.installStage.path, 'foreign-content'), 'utf8')).toBe('preserve this replacement')
+})
+
+it('[stage-cleanup] cleanup failure preserves the original installation error and transaction', async () => {
+  const f = await fixture(); io.before!.workbench.loading = true; io.cleanupFailure = true
+  const error = await install(f).catch(error => error)
+  expect(error.message).toBe('The saved workbench is still loading; no UI commit can be confirmed.')
+  expect(error.transaction.ui.status).toBe('not-started')
+  expect(error.installStage).toEqual({ status: 'retained', path: io.signaturePaths[0], reason: 'PRIVATE_CLEANUP_FAILED' })
+  expect(await lstat(error.installStage.path)).toBeDefined()
+  expect(io.pid).toBe(201); expect(io.quits).toBe(0)
+})
+
+it('[stage-cleanup] cutover failure retains the qualified candidate for continuation', async () => {
+  const f = await fixture(); io.cutoverFailure = true
+  const error = await install(f).catch(error => error)
+  expect(error.message).toBe('PRIVATE_CUTOVER_FAILED')
+  expect(error.installStage.status).toBe('retained')
+  expect(error.installStage.reason).toContain('cutover began')
+  expect(await readFile(join(error.installStage.path, 'Contents/MacOS/AgentMux'), 'utf8')).toContain('Private file')
+  expect(await readFile(join(f.app, 'Contents/MacOS/AgentMux'), 'utf8')).toContain('Private file')
+})
+
+it.each(['source', 'stage'] as const)('[stage-cleanup] unavailable %s cleanup evidence does not block the original successful install', async probe => {
+  const f = await fixture(); io.cleanupProbeUnavailable = probe
+  const result = await install(f)
+  expect(result.ui.status).toBe('committed')
+  expect(io.quits).toBe(1); expect(io.cutovers).toBe(1)
+  expect(await readdir(dirname(f.app))).toEqual(['AgentMux.app'])
+})
+
+it('[stage-cleanup] a retained uniquely named stage can be explicitly adopted without another copy', async () => {
+  const f = await fixture(); io.signatureFailure = true; io.cleanupFailure = true
+  const error = await install(f).catch(error => error), stage = error.installStage.path
+  io.signatureFailure = false; io.cleanupFailure = false
+  const result = await install(f, 'full', stage)
+  expect(result.ui.status).toBe('committed')
+  expect(io.copies).toBe(1)
+  expect(io.signaturePaths).toEqual([stage, stage])
+  expect(await readdir(dirname(f.app))).toEqual(['AgentMux.app'])
 })
 
 it('[prepared-stage] reuses the exact retained directory without copy or removal through the full install consumer', async () => {

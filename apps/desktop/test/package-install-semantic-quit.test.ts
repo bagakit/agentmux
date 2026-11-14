@@ -10,6 +10,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 type Row = { uid: number; pid: number; ppid: number; birth: string; command: string }
 type Scope = {
   root: string; home: string; app: string; candidate: string; store: string
+  stage?: string
   gui: Row | null; host: Row | null; worker: Row | null
   nativeChild?: boolean; run?: Row
   hostMode: string; workerMode?: string; retainNamespaceWorker?: boolean; publicPid: number; publicStore: string
@@ -42,7 +43,8 @@ vi.mock('node:child_process', async importOriginal => {
       }
       f.events.push('public-owner')
       return { stdout: JSON.stringify({ hostProcessId: f.publicPid, storePath: f.publicStore,
-        socketPath: join(f.root, 'native.sock'), owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' } }), stderr: '' }
+        socketPath: join(f.root, 'native.sock'), owner: { runtimeId: 'original-runtime',
+          ownerInstanceId: f.publicPid === 311 ? 'candidate-owner' : 'original-owner' } }), stderr: '' }
     }
     if (command === '/usr/bin/python3') {
       const requested = args.slice(2).map(Number)
@@ -53,8 +55,9 @@ vi.mock('node:child_process', async importOriginal => {
       }))), stderr: '' }
     }
     if (command === '/bin/ps') {
-      const selected = args[0] === '-p' ? rows.filter(row => row.pid === Number(args[1])) : rows
-      if (!selected.length) throw Object.assign(new Error('Owned process exited'), { code: 1 })
+      const requested = args[0] === '-p' ? args[1]!.split(',').map(Number) : null
+      const selected = requested ? rows.filter(row => requested.includes(row.pid)) : rows
+      if (!selected.length) throw Object.assign(new Error('Owned process exited'), { code: 1, stdout: '', stderr: '' })
       return { stdout: selected.map(row => `${row.uid} ${row.pid} ${row.ppid} ${row.birth} ${row.command}`).join('\n') + '\n', stderr: '' }
     }
     if (command === '/usr/sbin/lsof' && f.completeActivation && f.host?.pid === 311) {
@@ -76,10 +79,13 @@ vi.mock('node:child_process', async importOriginal => {
         let output = ''
         if (command === 'ditto' || command === 'cp') {
           if (command === 'cp') args = args.slice(1)
-          expect(args[0]).toBe(f.candidate); expect(args[1]).toBe(join(f.home, `Applications/.AgentMux.install-${process.pid}.app`))
+          expect(args[0]).toBe(command === 'cp' ? f.candidate + '/.' : f.candidate)
+          expect(dirname(args[1]!)).toBe(join(f.home, 'Applications'))
+          expect(args[1]!.slice(dirname(args[1]!).length + 1)).toMatch(/^\.AgentMux\.install-\d+-[a-f0-9-]{36}\.app$/)
+          f.stage = args[1]
           await cp(args[0]!, args[1]!, { recursive: true })
         } else if (command === 'codesign') {
-          expect(args).toContain(join(f.home, `Applications/.AgentMux.install-${process.pid}.app`))
+          expect(args).toContain(f.stage)
         } else if (command === 'plutil') output = 'dev.agentmux.desktop\n'
         else if (command === 'osascript') {
           expect(args).toEqual(['-e', 'quit app id "dev.agentmux.desktop"'])
@@ -110,15 +116,28 @@ vi.mock('node:fs/promises', async importOriginal => {
       if (f.completeActivation) return await actual.rename(from, to)
       throw new Error('OWNED_CUTOVER_BOUNDARY')
     }
-    if (f?.completeActivation && from === join(f.home, `Applications/.AgentMux.install-${process.pid}.app`) && to === f.app) return await actual.rename(from, to)
+    if (f?.completeActivation && from === f.stage && to === f.app) return await actual.rename(from, to)
     throw new Error('Unowned directory cutover refused')
   } }
 })
 
-// These scenarios own a foreground Host, not a registered launchd job.
+// The outgoing Host is foreground; a successfully activated candidate has its
+// original platform service. Only that external service observation is controlled.
 vi.mock('../../host/dist/macos-service.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../host/dist/macos-service.js')>(),
-  macosHostServiceRegistration: async () => null
+  macosHostServiceRegistration: async () => boundary.scope?.host?.pid === 311 ? { pid: 311 } : null,
+  macosHostServicePid: async () => {
+    expect(boundary.scope?.host?.pid).toBe(311)
+    return 311
+  },
+  inspectMacosHostService: async (service: { executable: string; storePath: string }) => {
+    const f = boundary.scope!
+    expect(f.host?.pid).toBe(311)
+    expect(service.executable).toBe(join(f.app, 'Contents/MacOS/AgentMux'))
+    expect(service.storePath).toBe(f.store)
+    return { owner: { processId: 311, runtimeId: 'original-runtime', ownerInstanceId: 'candidate-owner' },
+      storePath: f.store, process: { ...f.host! } }
+  }
 }))
 
 vi.mock('../scripts/package-runtime-upgrade.mjs', async importOriginal => {
@@ -470,9 +489,12 @@ it('the semantic shutdown waits for original children without signalling a linge
   const f = await fixture({ worker: true }); f.worker!.ppid = 211; f.retainNamespaceWorker = true
   f.gui = null; f.host!.ppid = 1
   const { stopSemanticHostForInstall } = await import('../scripts/package-semantic-host.mjs')
-  const plan = { currentApp: f.app, originalSource: 'a'.repeat(40), owner: { ...f.host! }, identity: { hostProcessId: 211, storePath: f.store } }
+  const plan = { currentApp: f.app, originalSource: 'a'.repeat(40), owner: { ...f.host! },
+    identity: { hostProcessId: 211, storePath: f.store,
+      owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' } } }
   const ops = {
     source: async () => 'a'.repeat(40), bootstrap: async () => plan.identity,
+    serviceOwner: async () => null,
     processRow: async (pid: number) => [f.host, f.worker].find(row => row?.pid === pid) ?? null,
     processes: async () => { const rows = [f.host, f.worker].filter((row): row is Row => !!row); return {
       serving: [], externalNode: rows.map(row => row.pid), processes: rows,

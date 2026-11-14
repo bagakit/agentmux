@@ -10,13 +10,15 @@ export default defineConfig({
     const originalSHA256 = createHash('sha256').update(source).digest('hex')
     const mutant = process.env.PACKAGE_STAGE_MUTANT
     const anchors = {
+      'skip-stage-cleanup': ["await rm(next, { recursive: true })", '/* mutant leaves disposable stage */'],
+      'ignore-source-change': ["sourceBefore && isDeepStrictEqual(sourceBefore, await signedSourceIdentity(appPath))", 'true'],
+      'ignore-stage-change': ["ownedStage.identity && current.isDirectory() && !current.isSymbolicLink() && current.dev === ownedStage.identity.dev && current.ino === ownedStage.identity.ino", 'true'],
+      'delete-cutover-stage': ["else if (cutoverStarted) cleanup", 'else if (false) cleanup'],
       'copy-retained-stage': ['if (preparedApplicationPath === null) {', 'if (true) {'],
       'skip-package-identity': ['assertPackageIdentity(await readPackageIdentity(next), await readPackageIdentity(appPath))', '/* mutant omits selected source identity */'],
-      'skip-stage-name': ['stageName.startsWith(prefix) && /^[1-9]\\d*\\.app$/.test(stageName.slice(prefix.length))', 'true'],
+      'skip-stage-name': ['stageName.startsWith(prefix) && /^[1-9]\\d*(?:-[a-f0-9-]{36})?\\.app$/.test(stageName.slice(prefix.length))', 'true'],
       'skip-stage-uid': ['stage.uid === process.getuid()', 'true'],
-      'skip-canonical-object': [
-        "    if (previouslyInstalled) {\n      const installed = await stat(destination)\n      assert(installed.dev !== stage.dev || installed.ino !== stage.ino,\n        'A prepared installer stage must be a different real directory from the canonical application; the application was not changed.')\n    }\n", ''
-      ],
+      'skip-canonical-object': ['installed.dev !== stage.dev || installed.ino !== stage.ino', 'true'],
       'skip-signed-bytes': ['stageHash === selectedHash', 'true'],
       'skip-retained-signature': ["await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })", '/* mutant omits stage signature verification */']
     }
