@@ -55,6 +55,7 @@ function Surface() {
     <h2 style={{ color: 'var(--text)', fontSize: 'var(--fs-base)' }}>Browser task · explicit target set</h2>
     <BrowserTaskAssetEditor asset={asset} assets={[asset, child]} recording={null} busy={true} onImport={() => {}} onLocateStep={() => {}} onStop={() => {}} onSaveDraft={async () => {}} onSaveVersion={async () => {}} onRun={async () => {}}
       renderParallel={number => <BrowserTaskParallel asset={asset} version={asset.versions.find(version => version.version === number)!} assets={[asset, child]} current={retained}
+        onContinue={(request, event) => { if (!event.nativeEvent.isTrusted) throw new Error('Native human input is required'); return api.browser.continueTaskParallelTarget(request.browserId, request.operationId, request.targetId, request.input) }}
         onStart={(request, event) => { trusted = event.nativeEvent.isTrusted; if (!trusted) throw new Error('Private proof requires actual native input'); return api.browser.runTaskParallel(request.browserId, request.assetId, request.version, request.input) }} />} />
   </main>}</DesktopClientUiProvider>
 }
