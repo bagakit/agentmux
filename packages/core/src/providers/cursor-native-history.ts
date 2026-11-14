@@ -55,7 +55,7 @@ export function cursorDataRoot(
   const raw = executionEnvironmentValue(env, 'CURSOR_DATA_DIR')
   if (raw !== undefined && raw.trim().length > 0) {
     if (isAbsolute(raw)) return raw
-    return workspacePath ? resolve(workspacePath, raw) : resolve(raw)
+    return executionPath(raw, workspacePath)
   }
   return executionPath(join(executionHomeDirectory(env), '.cursor'), workspacePath)
 }

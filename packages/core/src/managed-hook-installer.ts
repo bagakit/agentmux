@@ -8,13 +8,14 @@ import {
   readFile,
   realpath,
   rename,
+  stat,
   unlink,
   writeFile
 } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { AgentMuxError } from './errors.js'
-import { countLegacyHookDeclarations, inspectManagedHookContent, prepareMergedHookContent, type AgentHookMergeStrategy } from './hook-config-merge.js'
+import { legacyHookEntrypoints, inspectManagedHookContent, prepareMergedHookContent, type AgentHookMergeStrategy } from './hook-config-merge.js'
 import type { AgentProviderId } from './types.js'
 
 const MAX_HOOK_FILE_BYTES = 256 * 1024
@@ -46,10 +47,11 @@ export type AgentManagedHookInspection = {
   status: 'installed' | 'not_installed' | 'partial' | 'error' | 'skipped'
   code: string
   action: string | null
-  targets: Array<{ path: string; status: 'current' | 'not_present' | 'partial' | 'error'; code?: string; legacyDeclarations?: number }>
+  targets: Array<{ path: string; status: 'current' | 'not_present' | 'partial' | 'error'; code?: string;
+    legacyDeclarations?: number; missingLegacyEntrypoints?: number }>
 }
 
-export type AgentHostExecutorHookTarget = { runtimeId: string; executorId: string; configRevision: string; workspacePath: string }
+export type AgentHostExecutorHookTarget = { runtimeId: string; executorId: string; configRevision: string; workspacePath?: string | undefined }
 export type AgentHostExecutorHookResult = AgentHostExecutorHookTarget & {
   inspection: AgentManagedHookInspection
   health: 'current' | 'issue' | 'unknown' | 'not-managed'
@@ -244,6 +246,14 @@ export class AgentManagedHookInstaller {
   /** Fresh disk observation only: no preview admission, receipt, mkdir or native process. */
   async inspect(plan: AgentManagedHookPlan): Promise<AgentManagedHookInspection> {
     const targets: AgentManagedHookInspection['targets'] = []
+    const missingPaths = new Map<string, boolean>()
+    const isMissing = async (path: string) => {
+      const previous = missingPaths.get(path)
+      if (previous !== undefined) return previous
+      const missing = await stat(path).then(() => false, (error: NodeJS.ErrnoException) => error.code === 'ENOENT' || error.code === 'ENOTDIR')
+      missingPaths.set(path, missing)
+      return missing
+    }
     try {
       validatePlan(plan)
       for (const mutation of plan.mutations) {
@@ -258,10 +268,16 @@ export class AgentManagedHookInstaller {
               : { present: true, current: content === mutation.content }
           if (!plan.retainPreviousDeclarations && facts.current && mutation.merge && previous?.content &&
               prepareMergedHookContent(content ?? null, mutation.content, mutation.merge, previous.content).content !== content) facts.current = false
-          const legacyDeclarations = plan.retainPreviousDeclarations && mutation.merge && content !== undefined
-            ? countLegacyHookDeclarations(content, mutation.merge, plan.providerId) : 0
+          const legacy = plan.retainPreviousDeclarations && mutation.merge && content !== undefined
+            ? legacyHookEntrypoints(content, mutation.merge, plan.providerId) : []
+          let missingLegacyEntrypoints = 0
+          for (const [executable, runner] of legacy) {
+            if (await isMissing(executable) || await isMissing(runner)) missingLegacyEntrypoints++
+          }
+          const legacyDeclarations = legacy.length
           targets.push({ path: mutation.path, status: legacyDeclarations ? 'partial' : facts.current ? 'current' : facts.present ? 'partial' : 'not_present',
-            ...(legacyDeclarations ? { legacyDeclarations, code: 'MANAGED_HOOK_LEGACY_CARRIER' } : {}) })
+            ...(legacyDeclarations ? { legacyDeclarations, code: 'MANAGED_HOOK_LEGACY_CARRIER' } : {}),
+            ...(missingLegacyEntrypoints ? { missingLegacyEntrypoints } : {}) })
         } catch (error) {
           targets.push({ path: mutation.path, status: 'error', code: inspectionErrorCode(error) })
         }

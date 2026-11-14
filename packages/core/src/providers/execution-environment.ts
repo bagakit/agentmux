@@ -1,5 +1,6 @@
 import { userInfo } from 'node:os'
-import { resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
+import { AgentMuxError } from '../errors.js'
 
 /** Overrides merge into the launching process; an own undefined removes an inherited value. */
 export type ProviderExecutionEnvironment = Readonly<Record<string, string | undefined>>
@@ -15,7 +16,11 @@ export function executionHomeDirectory(env?: ProviderExecutionEnvironment): stri
 }
 
 /** A relative native configuration path is relative to the launched process, not the Core. */
-export function executionPath(path: string, workspacePath: string = process.cwd()): string {
+export function executionPath(path: string, workspacePath?: string): string {
+  if (isAbsolute(path)) return resolve(path)
+  if (workspacePath === undefined) {
+    throw new AgentMuxError('Choose the execution workspace to resolve this relative native configuration path.', 'HOOK_WORKSPACE_REQUIRED')
+  }
   return resolve(workspacePath, path)
 }
 

@@ -108,7 +108,7 @@ export const CURSOR_HOOKS: AgentNativeHookSpecification = {
 
 /** User-level Hook declarations contain no directory trust authority. */
 export function createCursorManagedHookPlan(
-  workspacePath: string,
+  workspacePath?: string,
   env?: ProviderExecutionEnvironment
 ): AgentManagedHookPlan {
   const command = runScopedHookCommand('cursor')

@@ -69,7 +69,7 @@ export function isExecutorHookMethod(method: string): method is 'settings.execut
 export function parseExecutorHookTarget(p: Record<string, unknown>): AgentHostExecutorHookTarget {
   return { runtimeId: rpcString(p.runtimeId, 'Original Runtime ID'), executorId: rpcString(p.executorId, 'Executor ID'),
     configRevision: rpcString(p.configRevision, 'Current Executor configuration revision'),
-    workspacePath: rpcString(p.workspacePath, 'Workspace path') }
+    ...(p.workspacePath === undefined ? {} : { workspacePath: rpcString(p.workspacePath, 'Workspace path') }) }
 }
 export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M, value: unknown): HostSettingsParameterMap[M] {
   if (isExecutorHookMethod(method)) {
@@ -158,10 +158,12 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
       typeof inspection.code !== 'string' || (inspection.action !== null && typeof inspection.action !== 'string') ||
       !Array.isArray(inspection.targets)) return fail()
     for (const target of inspection.targets) {
-      const item = rpcRecord(target, ['path', 'status', 'code', 'legacyDeclarations'], protocol)
+      const item = rpcRecord(target, ['path', 'status', 'code', 'legacyDeclarations', 'missingLegacyEntrypoints'], protocol)
       if (typeof item.path !== 'string' || typeof item.status !== 'string' || !['current', 'not_present', 'partial', 'error'].includes(item.status) ||
         (item.code !== undefined && typeof item.code !== 'string') ||
-        (item.legacyDeclarations !== undefined && (typeof item.legacyDeclarations !== 'number' || !Number.isSafeInteger(item.legacyDeclarations) || item.legacyDeclarations < 1))) fail()
+        (item.legacyDeclarations !== undefined && (typeof item.legacyDeclarations !== 'number' || !Number.isSafeInteger(item.legacyDeclarations) || item.legacyDeclarations < 1)) ||
+        (item.missingLegacyEntrypoints !== undefined && (typeof item.legacyDeclarations !== 'number' || typeof item.missingLegacyEntrypoints !== 'number' ||
+          !Number.isSafeInteger(item.missingLegacyEntrypoints) || item.missingLegacyEntrypoints < 1 || item.missingLegacyEntrypoints > item.legacyDeclarations))) fail()
     }
     const update = rpcRecord(p.update, ['status', 'receiptId', 'code'], protocol)
     if (typeof update.status !== 'string' || (method === 'settings.executors.hooks-inspect' ? update.status !== 'not-requested' :
