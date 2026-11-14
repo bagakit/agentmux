@@ -43,5 +43,5 @@ export function configuredAgentFallbackLabel(config: Pick<PresentationConfigurat
   session: { executorId: string; providerId: string; hostId: string; workspacePath: string }, confirmedProjectName?: string): string {
   const executor = Object.hasOwn(config.executors, session.executorId) ? config.executors[session.executorId] : undefined
   const label = executor?.providerId === session.providerId ? executor.label : session.executorId
-  return `${label} · ${confirmedProjectName ?? workspacePresentationLabel(config, session.hostId, session.workspacePath)}`
+  return `${label} · ${confirmedProjectName?.trim() ? confirmedProjectName : workspacePresentationLabel(config, session.hostId, session.workspacePath)}`
 }
