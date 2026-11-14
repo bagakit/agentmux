@@ -95,6 +95,10 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
       const listing = await rpc('file.list', { ...fileScope(params), path: directory })
       if (token !== intent.current) return
       if (listing.result.status === 'unknown') throw new Error(listing.result.message)
+      if (listing.result.status !== 'listed') {
+        setCandidates([])
+        throw new Error('引用需要的文件名称列表尚未确认（当前返回目录条目）')
+      }
       setCandidates(listing.result.files.filter(path => path.endsWith(NOTE_FILE_EXTENSION)).map(path => ({ path: directory === '.' ? path : directory + '/' + path, params })))
       setIssue(`${indexIssue}请为这条引用选择对应的笔记文件。${!listing.result.complete ? '文件列表还不完整，可以刷新重试。' : ''}`)
     } catch (error) { if (token === intent.current) setIssue(`引用读取未完成：${error instanceof Error ? error.message : String(error)}。可以重试。`) }
