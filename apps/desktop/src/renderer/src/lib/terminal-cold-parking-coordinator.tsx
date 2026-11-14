@@ -259,11 +259,11 @@ export function useTerminalColdParking({
   )
   const parkCooldownUntilMs = parkCooldownUntilRef.current
   const policy = useMemo(() => ({
-    nowMs,
+    nowMs: Date.now(),
     parkingEnabled,
     measurementActive,
     parkCooldownUntilMs
-  }), [measurementActive, nowMs, parkingEnabled, parkCooldownUntilMs])
+  }), [bookkeepingRevision, candidateKey, measurementActive, nowMs, parkingEnabled, parkCooldownUntilMs])
   const parkedRegionIds = useMemo(
     () => selectColdParkedTerminalRegions(stampedCandidates, policy),
     [policy, stampedCandidates]
