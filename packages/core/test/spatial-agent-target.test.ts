@@ -75,7 +75,7 @@ async function fixture(sourceContext = '  Source business context\n') {
 it('the public Source describes its actual owner and preserves complete CLI launch fields into the foreign child', async () => {
   const f = await fixture()
   expect(await f.rpc.call('agent.open.describe', { expectedRuntimeId: 'runtime-b' })).toEqual({
-    source: { runtimeId: 'runtime-b', ownerInstanceId: 'instance-b' }, contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: null } })
+    source: { runtimeId: 'runtime-b', ownerInstanceId: 'instance-b' }, contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: 1 } })
   expect(f.runtime.executionHost).not.toHaveBeenCalled()
   const options = join(f.root, 'options.json'); await writeFile(options, JSON.stringify({ model: 'target-choice' }))
   const prompt = '  Original task\n', note = '  Caller note\n'
