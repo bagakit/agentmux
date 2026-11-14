@@ -27,7 +27,7 @@ export function createMobileTerminalControl({ client, agentSessionId, report, st
   let noticeKind: NoticeKind | null = null
   let unresolved: { intentId: string; runId: string; kind: Intent['kind']; createdAt: number } | null = null
   let state: MobileTerminalControlState = { mode: 'watch', phase: 'idle', queuedBytes: 0,
-    message: '观看不发送输入，终端大小跟随 Mac。', notice: null, storageIssue: null }
+    message: '观看不发送输入，终端大小跟随远端。', notice: null, storageIssue: null }
   const publish = (change: Partial<MobileTerminalControlState>) => {
     state = { ...state, ...change }; if (!closed) report(state)
   }

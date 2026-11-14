@@ -40,7 +40,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const controls = useRef(new Map<string, ReturnType<typeof createMobileTerminalControl>>())
   const selectedSession = useRef(agentSessionId); selectedSession.current = agentSessionId
   const [inputState, setInputState] = useState<MobileTerminalControlState>({ mode: 'watch', phase: 'idle', queuedBytes: 0,
-    message: '观看不发送输入，终端大小跟随 Mac。', storageIssue: null, notice: null })
+    message: '观看不发送输入，终端大小跟随远端。', storageIssue: null, notice: null })
   const [sizeOpen, setSizeOpen] = useState(false)
   const [keysOpen, setKeysOpen] = useState(true)
   const [cols, setCols] = useState('80'), [rows, setRows] = useState('24')
@@ -175,7 +175,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     <div className="mobile-terminal-toolbar" role="toolbar" aria-label="终端工具">
       <span className="mobile-terminal-mode-state" data-mode={inputState.mode}>{inputState.mode === 'control'
         ? <><span className="mobile-terminal-mode-state__dot" aria-hidden="true" />正在控制</>
-        : <><SemanticIcon name="action.reveal" size={16} />只读查看<span className="mobile-terminal-mode-state__detail"> · 大小跟随 Mac</span></>}</span>
+        : <><SemanticIcon name="action.reveal" size={16} />只读查看<span className="mobile-terminal-mode-state__detail"> · 大小跟随远端</span></>}</span>
       {agentSessionId && (inputState.mode === 'watch' ? <button className="mobile-terminal-mode" disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}>控制终端</button>
         : <button className="mobile-terminal-mode" onClick={() => control.current?.watch()}>回到观看</button>)}
       {inputState.mode === 'control' && <button className="mobile-terminal-keys-toggle" aria-label="终端按键" aria-expanded={keysOpen} onPointerDown={event => event.preventDefault()}
@@ -198,7 +198,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     <Dialog.Root open={readingOpen} onOpenChange={setReadingOpen}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-terminal-reading-sheet">
         <MobileSheetHeader onClose={() => setReadingOpen(false)} title="终端阅读" closeLabel="关闭终端阅读" />
-        <Dialog.Description>缩放只改变手机上的显示，Mac 上的终端大小不变。</Dialog.Description>
+        <Dialog.Description>缩放调整本机的显示大小。终端尺寸由运行它的设备决定。</Dialog.Description>
         <div className="mobile-terminal-reading-tools" aria-label="本机终端阅读">
           <button aria-label="缩小终端文字" onClick={() => gestures.current?.zoom(fontSize - 1)}><SemanticIcon name="action.decrease-font-size" size={18} /></button>
           <button aria-label="恢复终端文字大小" onClick={() => gestures.current?.zoom(MOBILE_TERMINAL_FONT_DEFAULT)}>{fontSize}px</button>

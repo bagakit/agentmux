@@ -41,7 +41,7 @@ export function MobileConnectPage({ connection, appIcon, panel, gatewayEndpoint,
   const active = progress.findIndex(state => state === 'current' || state === 'attention')
   return <section className="mobile-connect-page" data-connect-state={connection.paired === false ? 'unpaired' : connection.state}>
     <BrandIcon icon={appIcon} className="mobile-connect-dragon" size={72} alt="AgentMux" />
-    <h1>{connectTitle(connection)}</h1>
+    <h1>{gatewayEndpoint ? '连接此设备' : connectTitle(connection)}</h1>
     {gatewayEndpoint ? <p className="mobile-connect-gateway">通过网关 <bdi>{gatewayEndpoint}</bdi></p> : <ol className="mobile-connect-steps" aria-label="接入进度">
       {STEPS.map((label, index) => <li key={label} className="mobile-connect-step" data-step-state={progress[index]} aria-current={index === active ? 'step' : undefined}>
         <StepMark state={progress[index]!} index={index} />
