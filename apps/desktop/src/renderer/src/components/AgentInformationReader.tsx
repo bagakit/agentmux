@@ -19,6 +19,7 @@ import { AgentReadingBody as ReadingBody } from './AgentReadingBody'
 import { currentAgentSemanticStatus, msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import { nativeBindingKey } from '../../../shared/agent-native-source'
 import { agentContextForSession, type FocusContext } from '../lib/focus-context'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { type AgentInformationPreview as PreviewRequest, agentInformationPreview } from '../lib/agent-information-preview'
 import { captureReadingAnchor, restoreReadingAnchor } from '../lib/reading-anchor'
 import { useAppStore } from '../store'
@@ -238,9 +239,11 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   }, [document, request.bookmark?.key, tab])
   const readingSameSource = Boolean(context.access ? context.access.isCurrent?.() && session?.control.run.runId === currentReading.context.runId && currentReading.context.access?.identity.runtimeId === context.access.identity.runtimeId && currentReading.context.access?.identity.agentSessionId === context.access.identity.agentSessionId : session && session.control.run.runId === currentReading.context.runId && (session.kind !== 'agent' || nativeBindingKey(session) === currentReading.sourceKey))
   const sameSource = context.access ? context.access.isCurrent?.() === true : Boolean(session)
-  const replacedLocalSource = useAppStore(state => visible && !context.access && state.sessions.some(current =>
-    current.id === context.id && current.hostId === context.hostId &&
-    (current.control.run.runId !== context.runId || current.kind === 'agent' && nativeBindingKey(current) !== request.sourceKey)))
+  const replacedLocalSource = useAppStore(state => {
+    const current = visible && !context.access ? sessionPresentationById(state.sessions).get(context.id) : undefined
+    return Boolean(current && current.hostId === context.hostId &&
+      (current.control.run.runId !== context.runId || current.kind === 'agent' && nativeBindingKey(current) !== request.sourceKey))
+  })
   const changedSource = context.access?.observation === 'changed' || replacedLocalSource || Boolean(
     context.access && currentReading.context.access?.identity.runtimeId && context.access.identity.runtimeId &&
     (currentReading.context.access.identity.runtimeId !== context.access.identity.runtimeId ||
