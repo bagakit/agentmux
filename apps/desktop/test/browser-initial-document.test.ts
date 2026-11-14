@@ -53,6 +53,9 @@ const native = vi.hoisted(() => {
       const set = this.listeners.get(event) ?? new Set()
       set.add(listener); this.listeners.set(event, set); return this
     }
+    prependListener(event: string, listener: (...args: any[]) => void) {
+      this.listeners.set(event, new Set([listener, ...this.listeners.get(event) ?? []])); return this
+    }
     once(event: string, listener: (...args: any[]) => void) {
       const wrapped = (...args: any[]) => { this.removeListener(event, wrapped); listener(...args) }
       return this.on(event, wrapped)
@@ -129,8 +132,10 @@ function fixture() {
   const demonstrations={get:vi.fn(async()=>null),stop:vi.fn(async()=>null),getPersistenceWarning:()=>undefined} as unknown as BrowserDemonstrationRecorder
   const manager=new BrowserViewManager(window as never,{defaultProfileId:()=> 'original-profile',resolvePartition:id=>'persist:'+id},new BrowserRefLedgerStore(directory),{rememberedSchemes:async()=>({}),rememberScheme:async()=>{},openExternal(){}},journal,undefined,results,demonstrations)
   managers.push(manager)
-  const sendCommand=vi.fn(async(method:string):Promise<unknown>=>method==='Runtime.evaluate'?{result:{value:{url:views[0]?.webContents.getURL(),body:'Original loaded document'}}}:{})
-  const session={sendCommand,frames:new Map(),endedReason:null,detach:vi.fn(),observe:()=>()=>{}}
+  const sendCommand=vi.fn(async(method:string,_params?:unknown):Promise<unknown>=>method==='Runtime.evaluate'?{result:{value:{url:views[0]?.webContents.getURL(),body:'Original loaded document'}}}:{})
+  // A run's page dialog and file chooser observation shares the session; these cases count document commands only.
+  const interrupts=new Set(['Page.enable','Page.disable','Page.setInterceptFileChooserDialog']),interruptCommands=vi.fn(async(_method:string,_params?:unknown)=>({}))
+  const session={sendCommand:(method:string,params?:unknown)=>interrupts.has(method)?interruptCommands(method,params):sendCommand(method,params),frames:new Map(),endedReason:null,detach:vi.fn(),observe:()=>()=>{}}
   vi.spyOn(BrowserCdpSession,'attach').mockReturnValue(session as never)
   const entry=()=>Reflect.get(manager,'entries').get('original-browser')
   return{manager,journal,views,sendCommand,session,entry,demonstrations,results,attachments}
