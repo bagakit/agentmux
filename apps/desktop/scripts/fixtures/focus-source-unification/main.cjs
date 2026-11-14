@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path')
 const {app,BrowserWindow}=require('electron')
 const [html,privateRoot,evidence,mode]=process.argv.slice(2)
-const primaryOnly=mode==='--primary-only',memberState=mode==='--member-state'
+const primaryOnly=mode==='--primary-only',memberState=mode==='--member-state',unconfirmed=mode==='--unconfirmed'
 app.setPath('userData',path.join(privateRoot,'user-data'));app.setPath('sessionData',path.join(privateRoot,'session-data'))
 const result={schema:'agentmux.focus-source-unification-actual.v1',passed:false,pid:process.pid,frames:[],scenes:[],rendererConsole:[],boundary:'Actual App/GlobalFocusSurface/unified source adapter/normal lane/card/Reader/filter/menu. Original source and Native IO are controlled typed preview leaves. No user Run, Runtime, restart or installation claim.'}
 let win
@@ -14,6 +14,18 @@ app.whenReady().then(async()=>{try{
  const settle=()=>read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
  const click=async selector=>{const r=await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control '+${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`);assert.equal(r.hit,true,'Actual center hit '+selector);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:r.x,y:r.y,button:'left',clickCount:1})}
  const captureMember=async(file,label)=>{await settle();await pause(160);await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.frames.push({file,label,viewport:await read('innerWidth')})}
+ if(unconfirmed){
+  await until('unconfirmed original member is visible',()=>read('window.unifiedFocusProof?.ready&&[...document.querySelectorAll(".focus-context")].some(e=>e.textContent.includes("Agent · 4iSNA9U2sBCU"))'))
+  result.before=await read('window.unifiedFocusProof.facts()')
+  for(const[width,height,theme]of[[1440,900,'dark'],[420,800,'dark'],[1440,900,'light'],[420,800,'light']]){
+   win.setContentSize(width,height);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle()
+   assert.equal(await read('document.documentElement.scrollWidth>innerWidth+1'),false)
+   assert.equal(await read('[...document.querySelectorAll(".focus-context")].filter(e=>e.textContent.includes("Agent · 4iSNA9U2sBCU")).length'),2)
+   assert.equal(await read('[...document.querySelectorAll(".focus-context")].filter(e=>e.textContent.includes("Position R6A39kP2s4Bd")||e.textContent.includes("Position B7C48mQ3t5Ce")).length'),2)
+   await captureMember('unconfirmed-'+width+'-'+theme+'.png','original unconfirmed identity in the ordinary Focus list')
+  }
+  result.after=await read('window.unifiedFocusProof.facts()');assert.deepEqual(result.after.runs,result.before.runs);assert.deepEqual(result.after.drafts,result.before.drafts);result.passed=true;return
+ }
  if(memberState){
   await until('real Global original missing source card',()=>read('window.unifiedFocusProof?.ready&&document.querySelectorAll(".global-focus-main .focus-context[data-session-id]").length===5'))
   result.before=await read('window.unifiedFocusProof.facts()')

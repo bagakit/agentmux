@@ -11,7 +11,7 @@ import '../../../src/renderer/src/styles/index.css'
 
 // Original authority/Native process IO are controlled preview leaves. The App,
 // source adapter, normal Context/lane/card/Reader/filter/menu remain production.
-const memberStateMode=window.__memberStateScene===true
+const memberStateMode=window.__memberStateScene===true,unconfirmedMode=window.__unconfirmedScene===true
 const config=await api.config.get(),initial=await api.sessions.snapshot(),base=initial.sessions.find(s=>s.kind==='agent')
 if(!base?.control?.run?.runId)throw Error('Existing typed preview Agent required')
 const {pendingInteraction:_pending,...agent}=base,now=Date.now(),path='/original/analysis-project'
@@ -29,6 +29,11 @@ const target={hostId:'local',reference,zoneId:'original-zone',workspaceId:worksp
 const members=[['working',reference.runtimeId,'local'],['interrupted',reference.runtimeId,'local'],['reading',reference.runtimeId,'local'],['working','original-other-runtime','original-agent-device'],['unobserved','unavailable-original-runtime','unavailable-agent-device']]
 const sourceTabs=members.map((_,i)=>({tabId:'source-tab-'+i,zoneId:target.zoneId,workspaceId:workspace.id,name:null,regionIds:['source-region-'+i]}))
 const sourceRegions=members.map(([sid,runtimeId,hostId],i)=>({regionId:'source-region-'+i,tabId:'source-tab-'+i,kind:'agent',agentSessionId:sid,runId:'source-run-'+i,creationOperationId:'source-create-'+i,execution:{hostId,runtimeId,cwd:path}}))
+if(unconfirmedMode){
+ Object.assign(sourceRegions[4],{regionId:'R6A39kP2s4Bd',agentSessionId:'4iSNA9U2sBCU',execution:null,runId:null});sourceTabs[4].regionIds=['R6A39kP2s4Bd']
+ sourceTabs.push({tabId:'unknown-source-tab',zoneId:target.zoneId,workspaceId:workspace.id,name:null,regionIds:['B7C48mQ3t5Ce']})
+ sourceRegions.push({regionId:'B7C48mQ3t5Ce',tabId:'unknown-source-tab',kind:'agent',agentSessionId:'4iSNA9U2sBCU',runId:null,execution:null})
+}
 for(let i=5;i<12;i++){sourceTabs.push({tabId:'source-tab-'+i,zoneId:target.zoneId,workspaceId:workspace.id,name:null,regionIds:['source-region-'+i]});sourceRegions.push({regionId:'source-region-'+i,tabId:'source-tab-'+i,kind:i===11?'launcher':'browser',agentSessionId:null,runId:null})}
 // This original foreign Tab is mixed: primary selection must retain both Regions.
 const browserPosition=sourceRegions.find(region=>region.regionId==='source-region-5')
@@ -39,7 +44,7 @@ const opening={reference,source,revision:5},events=members.map(([sid,runtimeId,h
 api.spaceMounts.watch=async()=>({initial:snapshot,dispose(){}})
 let memberReadMode='missing',sourceChecks=0
 const sessionObservers=new Set(),memberCalls=[]
-const originalEvents=()=>events.map((event,index)=>memberStateMode&&index===3?{...event,state:memberReadMode==='observed'?event.state:memberReadMode==='pending'?{status:'pending'}:{status:'missing',authority:{runtimeId:event.member.runtimeId,ownerInstanceId:event.member.runtimeId+'-instance'}}}:event)
+const originalEvents=()=>events.filter((_,index)=>!unconfirmedMode||index!==4).map((event,index)=>memberStateMode&&index===3?{...event,state:memberReadMode==='observed'?event.state:memberReadMode==='pending'?{status:'pending'}:{status:'missing',authority:{runtimeId:event.member.runtimeId,ownerInstanceId:event.member.runtimeId+'-instance'}}}:event)
 api.spaceMounts.sessions=async(_target,emit,signal)=>{sourceChecks++;sessionObservers.add(emit);signal?.addEventListener('abort',()=>sessionObservers.delete(emit),{once:true});queueMicrotask(()=>originalEvents().forEach(observation=>emit({type:'observation',observation})));return{initial:opening,dispose(){sessionObservers.delete(emit)}}}
 
 const name='另一原设备上的独立核查任务'

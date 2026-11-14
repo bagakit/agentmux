@@ -10,13 +10,13 @@ import {pathToFileURL} from 'node:url'
 import {runProbeProcess,listProbeProcesses} from './probe-process.mjs'
 
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop')
-assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===5&&['--primary-only','--member-state'].includes(process.argv[4])),'Use --evidence <private evidence directory> [--primary-only|--member-state]')
-const primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state'
+assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===5&&['--primary-only','--member-state','--unconfirmed'].includes(process.argv[4])),'Use --evidence <private evidence directory> [--primary-only|--member-state|--unconfirmed]')
+const primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
 const privateRoot=await mkdtemp(join(tmpdir(),'amux-focus-source-unification-')),fixture=join(desktop,'scripts/fixtures/focus-source-unification'),mainFixture=join(fixture,'main.cjs')
 const require=createRequire(join(desktop,'package.json')), {build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
-const receipt={schema:'agentmux.focus-source-unification-scene.v1',framePolicy:memberState?'source-member-state':primaryOnly?'source-primary-only':'all-scenes',capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
+const receipt={schema:'agentmux.focus-source-unification-scene.v1',framePolicy:unconfirmed?'unconfirmed-source':memberState?'source-member-state':primaryOnly?'source-primary-only':'all-scenes',capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
   boundary:'Light Renderer-only actual App/Focus/Workbench/Stable/Store and installed Panel browser primary. Maintained typed preview API; only SessionPane PTY/Agent paint and unused Monaco painting leaves isolated. No Runtime/native simultaneous presentation, Writer, ordinary restart or user installation.'}
 try{
   const freshness=spawnSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',`const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root,'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`],{cwd:root,encoding:'utf8'})
@@ -70,14 +70,14 @@ try{
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.avif':'file','.gif':'file','.png':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
   receipt.metafile=buildResult.metafile;receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
   for(const suffix of ['App.tsx','GlobalFocusSurface.tsx','WorkspaceWorkbench.tsx','StableWorkbenchView.tsx','store.ts','focus-tab-projection.ts','agent-focus.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual loaded '+suffix)
-  const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script>window.__memberStateScene='+JSON.stringify(memberState)+';window.__originalForeignConversation='+JSON.stringify(originalConversationPage)+';window.__originalForeignBody='+JSON.stringify(foreignBody)+';window.__originalForeignInput='+JSON.stringify(foreignInput)+'</script><script type="module" src="./app.js"></script></html>')
+  const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script>window.__unconfirmedScene='+JSON.stringify(unconfirmed)+';window.__memberStateScene='+JSON.stringify(memberState)+';window.__originalForeignConversation='+JSON.stringify(originalConversationPage)+';window.__originalForeignBody='+JSON.stringify(foreignBody)+';window.__originalForeignInput='+JSON.stringify(foreignInput)+'</script><script type="module" src="./app.js"></script></html>')
   receipt.compiled={renderer:hash(await readFile(renderer)),css:hash(await readFile(join(out,'app.css')))}
   const env={...process.env,AGENTMUX_DESKTOP_USER_DATA:join(privateRoot,'user-data'),AGENTMUX_RUNTIME_DIRECTORY:join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:join(privateRoot,'state')};delete env.ELECTRON_RUN_AS_NODE
-  receipt.process=await runProbeProcess(require('electron'),[mainFixture,html,privateRoot,evidence,...(memberState?['--member-state']:primaryOnly?['--primary-only']:[])],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
+  receipt.process=await runProbeProcess(require('electron'),[mainFixture,html,privateRoot,evidence,...(unconfirmed?['--unconfirmed']:memberState?['--member-state']:primaryOnly?['--primary-only']:[])],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
   receipt.actual=JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'))
   assert.equal(receipt.process.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true)
   receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})))
-  assert.ok(memberState?receipt.frames.length>=6:primaryOnly?receipt.frames.length===1&&receipt.frames[0].file==='unified-focus-source-primary.png':receipt.frames.length>=6,'Requested actual ordinary Focus scenes')
+  assert.ok(unconfirmed?receipt.frames.length===4:memberState?receipt.frames.length>=6:primaryOnly?receipt.frames.length===1&&receipt.frames[0].file==='unified-focus-source-primary.png':receipt.frames.length>=6,'Requested actual ordinary Focus scenes')
   receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])))
   assert.deepEqual(receipt.sourceAfter,receipt.inputs,'Nonempty current Source stable before/after')
   receipt.capturedPass=true
