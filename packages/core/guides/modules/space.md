@@ -88,6 +88,62 @@ only its final outbound owner composes platform context. The immutable request a
 adopted-route parent/child bind these exact contributions. After an unknown result retain
 the original operation and full input; changed choices, notes or dimensions need a new intent.
 
+## Associate an independent original Coordinator
+
+When only A can reach B, keep A's original execution Coordinator and creation C.
+B does not need a reverse Host or an A Session copy. Read B's agent.open.describe
+once for this new operation and require externalAssociation:1. Retain the exact B
+Runtime/Workspace/directory from its original Zone and the original A continuation.
+
+`agent execution binding --input FILE|-` accepts `{bindingId,view:"association"}`
+on A's original authenticated endpoint. Only this explicit view adds association:
+its confirmed state contains the original reference and journal-frozen agentRuntimeId,
+resourceRuntimeId and resourceWorkspacePath. Missing frozen facts are unconfirmed;
+current Host names, routes or service identity do not fill them. Ordinary binding,
+inspect, continue and rejoin keep their original behavior and permission boundary.
+
+Use `inspectCoordinatorAgentReference(aRpc, reference, expectedResource)` from
+`@agentmux/core/agent-open-reference` with
+`reference={kind:"coordinator-agent",runtimeId:A,binding:{bindingId,agentSessionId,createOperationId:C}}`
+and `expectedResource={runtimeId:B,workspaceId,workspacePath}`. This finite reader
+checks A's actual owner, original journal and original Session creation/tool binding.
+It does not open general Host observations, create, send input, qualify a Provider
+or claim the Run is currently connected. Unconfirmed results retain the original
+reference. This contract covers A's Agent and Coordinator on that same Core.
+
+Then use `agent open --association FILE|- --space SPACE --zone ZONE --new-tab
+--operation-id L` on B, or the same public agent.open with
+`content={kind:"agent-session",reference,expectedResource}` and `focus:false`.
+The file contains `{reference,expectedResource}`. An exact empty Tab/Region destination
+can replace --new-tab. B atomically validates its current original resource and slot,
+records L and returns association plus its business address. Only that acknowledged
+write reports confirmed save durability; a later inspect or unchanged reentry reports
+the current retained membership without reconstructing its original write ACK. The report's agent is
+null: opened confirms only that reference's membership, never A creation or input.
+The Region contains only an association locator; it cannot select B's same-named SID.
+Source metadata retains the original A Runtime/SID with unavailable observation
+where no original A carrier exists. B member controls refuse that external target.
+An unreadable association emits a separate watch event with type:association,
+association:{regionId,operationId:L}, and state:{status:unavailable,issue}. It has no
+invented member, Runtime or SID. The original Region/L and healthy neighbors remain;
+an already observed same-L selector stays unavailable rather than being removed.
+Source association uses B's original authenticated Space writer, including a valid
+B managed caller. That permission never authorizes reading or controlling A.
+
+Read an unknown L with `space inspect --operation-id L`. An explicit same-L reentry
+keeps the same reference/resource/address and does not recreate C or resend input.
+Changing them requires a separate explicit association intent. Source association
+never grants Start, managed-Agent, PMO or native human approval authority. Use A's
+separately authenticated original SDK for its controls and original continuation.
+
+For a new creation carrying Source-generated context, the original Coordinator
+requires the actual selected target handler's complete ordinary launch contract
+before either helper Start. Its matching Runtime/Executor receipt stays in that
+same original journal. A missing receipt keeps that new C unconfirmed; explicit
+same-C continuation may obtain it after the target is updated. An existing original
+Session or confirmed receipt does not lose qualification when that metadata field
+later disappears. It is not Provider/Native qualification or a grant of input.
+
 <!-- amux:generated command:space.snapshot -->
 <!-- amux:generated command:space.watch -->
 <!-- amux:generated command:space.apply -->
