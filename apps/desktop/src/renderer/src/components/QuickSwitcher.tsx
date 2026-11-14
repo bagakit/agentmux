@@ -189,6 +189,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
         <Dialog.Content
           ref={contentRef}
           className="quick-switch dialog-surface"
+          data-session-locations={Boolean(locationRequest)}
           aria-label={locationRequest ? 'Choose a Session location' : effectiveMode === 'files' ? 'Open a project file' : 'Jump to a session or tab'}
           onOpenAutoFocus={event => {
             if (requestId && !open) {

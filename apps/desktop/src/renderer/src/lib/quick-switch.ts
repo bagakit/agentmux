@@ -59,7 +59,7 @@ export function buildSessionLocationItems(input: {
   tabs: Readonly<Record<string, WorkbenchTab>>
   layouts: Readonly<Record<string, WorkspaceLayout>>
 }): QuickSwitchItem[] {
-  return input.references.map(reference => {
+  const items: QuickSwitchItem[] = input.references.map(reference => {
     const workspace = input.config?.workspaces.find(one => one.id === reference.displayWorkspaceId)
     const host = input.config?.hosts.find(one => one.id === workspace?.hostId)
     const tab = input.tabs[reference.tabId]!
@@ -69,11 +69,29 @@ export function buildSessionLocationItems(input: {
     const regionIndex = regionIds(tab.layout.root).indexOf(reference.regionId)
     const title = tab.name && tab.name !== 'Tab' && tab.name !== input.label ? tab.name : space?.name ?? workspace?.name ?? input.label
     return { id: JSON.stringify(reference), kind: 'location', title,
-      subtitle: [space?.name, workspace?.name ?? reference.displayWorkspaceId, host?.label ?? workspace?.hostId ?? 'Unknown machine',
+      subtitle: [...new Set([space?.name, workspace?.name ?? reference.displayWorkspaceId, host?.label ?? workspace?.hostId ?? 'Unknown machine',
         groups.includes(reference.groupId) ? `Group ${groups.indexOf(reference.groupId) + 1}` : reference.groupId,
-        regionIndex >= 0 ? `Region ${regionIndex + 1}` : reference.regionId].filter(Boolean).join(' · '),
+        regionIndex >= 0 ? `Region ${regionIndex + 1}` : reference.regionId].filter(Boolean))].join(' · '),
       providerId: null, state: null, observedAt: 0, surfaceKind: null,
       target: { kind: 'session-location', reference } }
+  })
+  const labels = new Map<string, QuickSwitchItem[]>()
+  for (const item of items) { const key = `${item.title}\n${item.subtitle}`; const group = labels.get(key) ?? []; group.push(item); labels.set(key, group) }
+  return items.map(item => {
+    let others = labels.get(`${item.title}\n${item.subtitle}`)!.filter(other => other.id !== item.id)
+    if (!others.length || item.target.kind !== 'session-location') return item
+    const reference = item.target.reference, hints: string[] = []
+    // Only genuine label collisions need address text. These are original IDs,
+    // never invented ordinals or a different navigation target.
+    for (const [field, label] of [['tabId', 'Tab'], ['spaceId', 'Space'], ['displayWorkspaceId', 'Workspace'], ['groupId', 'Group'], ['regionId', 'Region'], ['zoneId', 'Zone'], ['workspaceId', 'Workspace']] as const) {
+      const value = reference[field]
+      if (others.some(other => other.target.kind === 'session-location' && other.target.reference[field] !== value)) {
+        hints.push(`${label} ${value ?? 'unbound'}`)
+        others = others.filter(other => other.target.kind === 'session-location' && other.target.reference[field] === value)
+      }
+      if (!others.length) break
+    }
+    return { ...item, subtitle: [...hints, item.subtitle].join(' · ') }
   })
 }
 
