@@ -335,6 +335,8 @@ await client.dispose()
 
 `readAgentSession(完整 SID)` 从持久 metadata owner 读取一个准确的 Session，保留 owner 已确认的 started-unconfirmed Run 观察：确知不存在时返回 `null`，读取失败时保持未知；它不探测、不接管、也不启动 Run。Hosted 客户端复用有限的 `runtime.invoke`，只返回这次读取，不更新会话缓存。
 
+`connectHostedAgentMux({ rpc, waitForReady: false })` 在后台观察完整目录，准确读取不等待目录；`connectRelayHostedClient({ ...options, waitForReady: false })` 还会先完成原加密 hello、Host 核对与控制 owner 确认，再返回同一个 client。省略该选项时仍等待完整目录。`sessionObservation()` 返回 `state: 'unconfirmed' | 'ready' | 'unavailable'`、`hasSnapshot` 及失败时的 `diagnostic`；`onStatusEvent` / `onEvent` 的 `session-observation-state` 是本地 SDK 观察，不是新的 RPC 或 Run 状态。尚无完整快照时，`agentSessions()`、`catalog()` 与 `providers.catalog()` 抛出 `HOSTED_SESSION_OBSERVATION_UNCONFIRMED`，不能把它当作空目录；已有快照丢流则保留原缓存。`connect()` 可重试目录观察，目录失败不撤销准确控制能力，也不会重放输入。
+
 连接中断时，Session、Tab、Region、布局和未发出的输入保持原身份。缓存只代表最后一次观察，服务窗说明失败的步骤与恢复动作；只有 Core 明确确认 Session 已终结，才允许移除对应的投影，观察结果为 unknown / unavailable 时保留原工作面。Owner 重启时用原持久目录恢复 Session，再附着到同一个 ctxmux Run；Provider 原生 Resume 保持 Session ID，并创建带 provenance 的新 Run。
 
 ## Notebook 目录 API 与 CLI
