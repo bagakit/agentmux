@@ -242,7 +242,7 @@ export class ContinuousProgressLoopManager {
             await save({ ...adoption!, state: 'prepared', issue: 'The original claimed input is retained. Inspect its original operation before adopting this future definition.' })
             return { ...adoption!, loopId: loop.loopId }
           }
-          const publishedAt = this.now(), nextCheckAt = nextIntervalOccurrence(loop.nextCheckAt, publishedAt, loop.everyMs!)
+          const publishedAt = this.now(), nextCheckAt = loop.nextCheckAt > publishedAt ? loop.nextCheckAt : nextIntervalOccurrence(loop.nextCheckAt, publishedAt, loop.everyMs!)
           if (nextCheckAt === null || nextCheckAt <= publishedAt) throw new AgentMuxError('A strictly future occurrence is unconfirmed.', 'SCHEDULE_NO_FUTURE_OCCURRENCE')
           adoption = { ...adoption!, state: 'unconfirmed', publishedAt, issue: 'The future definition is published; Core activation is not yet confirmed.' }
           this.patch(loop.loopId, { futureIntentId: adoption.newDefinition.intentId, currentDefinition: adoption.newDefinition,
