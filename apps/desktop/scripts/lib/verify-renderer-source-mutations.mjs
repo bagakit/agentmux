@@ -73,7 +73,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     // Request filesystem copy-on-write; private inodes and byte verification stay unchanged.
     for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts']) await cp(join(root, file), join(copy, file), { mode: fsConstants.COPYFILE_FICLONE })
     await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
-    const packageDirectories = ['packages/core', 'packages/layout', 'packages/demand', 'packages/client-ui', 'packages/git',
+    const packageDirectories = ['packages/core', 'packages/browser', 'packages/layout', 'packages/demand', 'packages/client-ui', 'packages/git',
       'packages/identity', 'packages/relay', 'packages/diagnostic-evidence', 'packages/capsule', 'packages/editor-extensions', 'apps/host', 'apps/mobile']
     for (const directory of packageDirectories) {
       const destination = join(copy, directory)

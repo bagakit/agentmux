@@ -36,6 +36,14 @@ async function order(input?: unknown, code = 0, displayWorkspaceId = 'resource')
 }
 
 describe('Workspace Agent list preference through actual compiled public CLI and Store', () => {
+  it('applies a real CLI manual write without optional history or communication availability', async () => {
+    const history = vi.spyOn(api.sessions, 'historySources').mockImplementation(() => new Promise(() => {}))
+    vi.mocked(api.sessions.messageEvents).mockImplementation(() => new Promise(() => {}))
+    const result = await order({ order: [reference(neighborSid), reference(targetSid)] })
+    expect(result).toMatchObject({ outcome: 'changed', storedOrder: [reference(neighborSid), reference(targetSid)] })
+    expect(history).not.toHaveBeenCalled(); expect(api.sessions.messageEvents).not.toHaveBeenCalled()
+    fixture.noLifecycle()
+  }, 2500)
   it('reports actual derivation/A2A order and expands a child-only CLI move to its original complete group', async () => {
     const child = { ...agent('derived-child'), createdAt: 30, creation: { createOperationId: 'original-child-create', initialPrompt: 'confirmed' as const,
       createdBy: { agentSessionId: targetSid, run: agent(targetSid).control.run, owner: { kind: 'local' as const } } } }

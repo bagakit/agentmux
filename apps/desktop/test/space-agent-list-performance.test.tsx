@@ -10,6 +10,7 @@ import { createWorkspaceAgentSessionsSelector, workspaceAgentSessions } from '..
 import { sessionPresentationsAtPath } from '../src/renderer/src/lib/session-presentation'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { api } from '../src/renderer/src/lib/api'
 
 const observed = vi.hoisted(() => ({ goals: [] as (readonly SessionSnapshot[])[] }))
 vi.mock('../src/renderer/src/lib/focus-goal-links', async original => {
@@ -126,4 +127,49 @@ it('keeps Scratch directory authority, unknown observations, aliases, ambiguity 
   const next = measured([...source, { ...composerSession('entered'), workspacePath: physical }])
   expect(ids(select(next.source, scratch, [topic]))).toEqual(['entered', 'physical', 'retained', 'root'])
   expect(next.cost).toEqual({ directoryPasses: 1, filters: 0 })
+})
+
+it('reads new relationships once per exact member, bounds concurrent readers and ignores delivery-only churn', async () => {
+  type Event = Parameters<Parameters<typeof api.sessions.onEvent>[0]>[0]
+  const listeners = new Set<(event: Event) => void>()
+  vi.spyOn(api.sessions, 'onEvent').mockImplementation(listener => { listeners.add(listener); return () => { listeners.delete(listener) } })
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [], warnings: [] })
+  const pending: { id: string; finish(): void }[] = []
+  let running = 0, maximum = 0
+  const read = vi.spyOn(api.sessions, 'messageEvents').mockImplementation(subject => new Promise(resolve => {
+    running++; maximum = Math.max(maximum, running)
+    pending.push({ id: subject.agentSessionId, finish: () => { running--; resolve({ hostId: subject.hostId, participantSessionId: subject.agentSessionId,
+      afterSequence: 0, latest: true, beforeSequence: null, throughSequence: 0, incarnation: 'cost-journal', messageId: null,
+      broadcastOperationId: null, events: [], nextAfterSequence: null, nextBeforeSequence: null }) } })
+  }))
+  const local = Array.from({ length: 12 }, (_, index) => composerSession(`incremental-${index}`))
+  useAppStore.setState({ sessions: [...local, ...outside] })
+  await dom.render(<SurfaceToolDock workspace={workspace} />)
+  expect(read).toHaveBeenCalledTimes(4)
+  while (pending.length) { const batch = pending.splice(0); await act(async () => batch.forEach(value => value.finish())) }
+  expect(read).toHaveBeenCalledTimes(local.length)
+  expect(maximum).toBe(4)
+  for (let index = 0; index < 5; index++) {
+    await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, composerSession(`added-${index}`)] })))
+    expect(read).toHaveBeenCalledTimes(local.length + index + 1)
+    await act(async () => pending.shift()!.finish())
+  }
+  const before = read.mock.calls.length
+  for (let index = 0; index < 20; index++) await act(async () => {
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'unrelated-0' ? { ...session, updatedAt: index } : session) }))
+    for (const listener of listeners) listener({ hostId: 'local', type: 'core', event: {
+      type: 'agent-message-changed', messageId: `delivery-${index}`, sequence: index + 1, messageSequence: 1, live: true,
+      recordKind: 'delivery', senderSessionId: 'incremental-0', recipientSessionId: 'incremental-1'
+    } } as Event)
+  })
+  expect(read).toHaveBeenCalledTimes(before)
+  await act(async () => {
+    for (const listener of listeners) listener({ hostId: 'local', type: 'core', event: {
+      type: 'agent-message-changed', messageId: 'new-original', sequence: 30, messageSequence: 30, live: true,
+      recordKind: 'message', senderSessionId: 'incremental-0', recipientSessionId: 'incremental-1'
+    } } as Event)
+  })
+  expect(read).toHaveBeenCalledTimes(before + 2)
+  expect(pending.map(value => value.id).sort()).toEqual(['incremental-0', 'incremental-1'])
+  await act(async () => pending.splice(0).forEach(value => value.finish()))
 })
