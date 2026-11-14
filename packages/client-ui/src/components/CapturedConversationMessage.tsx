@@ -9,9 +9,9 @@ import { conversationReplyPreview } from '../lib/conversation-reply-preview.js'
 import { formatClock } from '../lib/conversation-time.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
-import { ConversationSendReceipt, conversationSendReceiptState, ConversationSubmissionFacts, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
+import { ConversationSendReceipt, ConversationSubmissionFacts, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
 import { useClientUiPlatform } from '../platform.js'
-import { resolveConversationShowSendReceipts } from '../lib/conversation-send-receipts.js'
+import { conversationSendReceiptState, resolveConversationShowSendReceipts } from '../lib/conversation-send-receipts.js'
 export type CapturedMessagePresentation = Pick<ConversationMessageProps, 'detailsOnlyMetadata' | 'sourceLabelsInDetails' | 'showInputSource'> & {
   expandedContent: boolean
   inputReadPending: boolean

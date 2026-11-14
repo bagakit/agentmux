@@ -5,7 +5,7 @@ import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.j
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import type { AgentInputSubmissionObservation } from '@agentmux/core'
 import { useClientUiPlatform } from '../platform.js'
-import { resolveConversationConfirmedSendReceipt, resolveConversationShowSendReceipts } from '../lib/conversation-send-receipts.js'
+import { conversationSendReceiptPresentation, conversationSendReceiptState } from '../lib/conversation-send-receipts.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
 import { useVisibleWork } from '../lib/use-visible-work.js'
@@ -21,18 +21,6 @@ const inputAttention: Record<AgentInputSubmissionObservation['status'], string |
 
 /** Bound work to the preview; the original reader retains the complete content. */
 export const conversationSubmissionPreview = (text: string, limit = 160) => text.slice(0, limit).replace(/\s+/gu, ' ').trim()
-
-/** Presentation over one original receipt and an already accepted Core membership only. */
-export function conversationSendReceiptState(record: ConversationSourceRecord, nativeAccepted = false) {
-  const item = record.original.kind === 'captured' ? record.original.item : undefined
-  const status = item?.inputSubmission?.status
-  const confirmed = status === 'admitted' || nativeAccepted
-  const attention = item?.status === 'failed' || item?.externalInput?.state === 'refused' || !confirmed
-    || status === 'waiting' || status === 'unknown' || status === 'stopped' || status === 'not-applied'
-    || item?.inputSubmission?.observation === 'rejoin-needed'
-  const pending = !confirmed && item?.status !== 'failed' && status === 'waiting' && item?.inputSubmission?.observation === 'owned'
-  return { confirmed, attention, pending }
-}
 
 /** One disclosure around the same original reader; never a copied body or a second history. */
 export function ConversationSendReceipt({ record, nativeAccepted = false, nativeReadable = false, original = false, active = true,
@@ -51,21 +39,14 @@ export function ConversationSendReceipt({ record, nativeAccepted = false, native
   const platform = useClientUiPlatform()
   if (record.original.kind !== 'captured') return children
   const item = record.original.item
-  const state = conversationSendReceiptState(record, nativeAccepted)
-  const show = resolveConversationShowSendReceipts(platform.conversationShowSendReceipts)
-  const confirmedMode = resolveConversationConfirmedSendReceipt(platform.conversationConfirmedSendReceipt)
-  // A sole readable input always keeps its own full-text disclosure, even under Hide.
-  const hide = !state.attention && nativeReadable && (!show || state.confirmed && confirmedMode === 'hide')
-  // Terminal delivery has its own truthful status; a compact receipt needs no
-  // guessed native counterpart and does not promote it to Agent acceptance.
-  const deliveredUnconfirmed = !state.confirmed && (item.inputSubmission?.status === 'terminal-confirmed' || item.inputSubmission?.status === 'launch-carried')
-  const compact = !original && (!show || deliveredUnconfirmed || state.confirmed && confirmedMode !== 'keep')
-  return <div className="conversation-send-receipt" data-receipt-mode={compact ? 'compact' : 'keep'} data-receipt-confirmed={state.confirmed} data-receipt-attention={state.attention} data-receipt-active={active && show}
+  const state = conversationSendReceiptPresentation(record, { nativeAccepted, nativeReadable, original,
+    showReceipts: platform.conversationShowSendReceipts, confirmedReceipt: platform.conversationConfirmedSendReceipt })
+  return <div className="conversation-send-receipt" data-receipt-mode={state.compact ? 'compact' : 'keep'} data-receipt-confirmed={state.confirmed} data-receipt-attention={state.attention} data-receipt-active={active && state.show}
     data-message-source-key={conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id })} tabIndex={-1}>
     <ConversationMessageDisclosure preview={conversationSubmissionPreview(item.content ?? '', 96)} reveal={reveal}
-      hidden={hide} expanded={!compact} {...(!compact ? { open: true } : open === undefined ? {} : { open })} {...(onOpenChange ? { onOpenChange } : {})}
+      hidden={state.hidden} expanded={!state.compact} {...(!state.compact ? { open: true } : open === undefined ? {} : { open })} {...(onOpenChange ? { onOpenChange } : {})}
       summary={<span className="conversation-send-receipt__summary"><SemanticIcon name={state.confirmed ? 'action.confirm' : 'action.send'} size={12} aria-hidden="true" />
-        <span>{state.confirmed ? item.inputSubmission?.status === 'admitted' ? 'Agent 已接收' : '原生记录已对应' : '消息输入'}</span><time>{renderClock(item.createdAt)}</time>
+        <span>{state.label}</span><time>{renderClock(item.createdAt)}</time>
         {state.attention ? <ConversationSubmissionSummary record={record} renderClock={renderClock} showTime={false} attentionOnly /> : null}</span>}>
       {children}
     </ConversationMessageDisclosure>
