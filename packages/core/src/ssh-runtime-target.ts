@@ -1,5 +1,6 @@
+import { rpcString } from './rpc-data.js'
 import { AgentMuxError } from './errors.js'
-import type { AgentMuxRpcRemoteEndpoint, AgentMuxTailcatTarget } from './public-rpc.js'
+import type { AgentMuxRpcEndpoint, AgentMuxRpcRemoteEndpoint, AgentMuxTailcatTarget } from './public-rpc.js'
 
 /** A saved remote Host's connection target; the same shape connects, repairs routes and is inspected. */
 export type AgentMuxSshRuntimeTarget = {
@@ -31,4 +32,23 @@ export function agentMuxSshEndpoint(target: AgentMuxSshRuntimeTarget): AgentMuxR
     ...(target.identityFile === undefined ? {} : { identityFile: target.identityFile }),
     ...(target.remoteCommand === undefined ? {} : { command: target.remoteCommand }),
     ...(target.remoteSocketPath === undefined ? {} : { socketPath: target.remoteSocketPath }) }
+}
+
+/** Exact SSH invocation projection, shared by transport and configuration observation. */
+function quoteShell(value: string): string { return "'" + value.replaceAll("'", "'\\''") + "'" }
+export function agentMuxRpcSshArguments(endpoint: Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }>): string[] {
+  const host = rpcString(endpoint.host, 'SSH Host')
+  if (host.startsWith('-')) throw new AgentMuxError('Invalid SSH Host.', 'INVALID_CONTROL_REQUEST')
+  const destination = endpoint.user ? `${rpcString(endpoint.user, 'SSH user')}@${host}` : host
+  const command = rpcString(endpoint.command ?? 'amux', 'Remote CLI command')
+  const args = ['-T', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes']
+  if (endpoint.port !== undefined) {
+    if (!Number.isInteger(endpoint.port) || endpoint.port < 1 || endpoint.port > 65535) throw new AgentMuxError('Invalid SSH port.', 'INVALID_CONTROL_REQUEST')
+    args.push('-p', String(endpoint.port))
+  }
+  if (endpoint.identityFile) args.push('-i', rpcString(endpoint.identityFile, 'SSH identity file'))
+  const remote = [command]
+  if (endpoint.socketPath) remote.push('--endpoint', `unix:${rpcString(endpoint.socketPath, 'Remote socket')}`)
+  remote.push('system', 'endpoint', '--stdio')
+  return [...args, '--', destination, remote.map(quoteShell).join(' ')]
 }

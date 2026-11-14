@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks'
 import { AgentMuxError } from './errors.js'
-import { rpcRecord, rpcString } from './rpc-business-codec.js'
+import { rpcRecord, rpcString } from './rpc-data.js'
 import { settingsResourceRecord } from './settings-resource-json.js'
 import { observeRead } from './observation-read.js'
 import { agentMuxSshEndpoint, type AgentMuxSshRuntimeTarget } from './ssh-runtime-target.js'

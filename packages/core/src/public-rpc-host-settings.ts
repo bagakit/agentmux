@@ -7,7 +7,7 @@ import { parseHostAgentResourceObservation, type HostAgentResourceObservation } 
 import { settingsResourceRecord } from './settings-resource-json.js'
 import type { AgentMuxControlSettingsResourceFields } from './control.js'
 import { AgentMuxError } from './errors.js'
-import { rpcRecord, rpcString } from './rpc-business-codec.js'
+import { rpcRecord, rpcString } from './rpc-data.js'
 import type { AgentMuxCreationTrust, AgentMuxCreationAuthorityIdentity } from './agent-creation-admission.js'
 import { parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput, type AgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { parseHostExecutorDescriptor, parseHostExecutorInventory, type AgentMuxHostExecutorInventory, type AgentMuxHostExecutorConfiguration, type AgentMuxHostExecutorConfigureInput, type AgentMuxHostExecutorRemoval } from './executor-contract.js'
@@ -115,7 +115,7 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
   if (method === 'settings.executors.discover' || method === 'settings.executors.register' || method === 'settings.executors.unregister') {
     const p = rpcRecord(value, method === 'settings.executors.discover' ? ['routeHostId', 'runtimeId', 'executors'] : method === 'settings.executors.unregister' ? ['routeHostId', 'runtimeId', 'executorId', 'removedRegistration', 'registrationRevision', 'effectiveExecutor'] : ['routeHostId', 'runtimeId', 'executor'], 'CONTROL_PROTOCOL_ERROR')
     if (p.routeHostId !== input.hostId || typeof p.runtimeId !== 'string' || !p.runtimeId || /[\0\r\n]/u.test(p.runtimeId)) fail()
-     if (method === 'settings.executors.discover') {
+    if (method === 'settings.executors.discover') {
       return { routeHostId: input.hostId, ...parseHostExecutorInventory({ runtimeId: p.runtimeId, executors: p.executors }) } as HostSettingsResultMap[M]
     }
     if (method === 'settings.executors.unregister') {

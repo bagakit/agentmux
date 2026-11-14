@@ -1,3 +1,5 @@
+import { agentMuxRpcSshArguments } from './ssh-runtime-target.js'
+export { agentMuxRpcSshArguments } from './ssh-runtime-target.js'
 import { parseTerminalInspection, parseTerminalOutputParams } from './terminal-observation.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { parseHostRouteResult } from './host-route.js'
@@ -130,23 +132,6 @@ function timeout(method: AgentMuxRpcMethod): number {
   return Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)
     ? agentMuxControlTimeoutMs(AGENTMUX_RPC_CONTROL_METHODS[method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS])
     : AGENTMUX_RPC_NATIVE_METHODS[method as keyof typeof AGENTMUX_RPC_NATIVE_METHODS] === 'long' ? 60_000 : 2_000
-}
-function quoteShell(value: string): string { return "'" + value.replaceAll("'", "'\\''") + "'" }
-export function agentMuxRpcSshArguments(endpoint: Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }>): string[] {
-  const host = rpcString(endpoint.host, 'SSH Host')
-  if (host.startsWith('-')) throw new AgentMuxError('Invalid SSH Host.', 'INVALID_CONTROL_REQUEST')
-  const destination = endpoint.user ? `${rpcString(endpoint.user, 'SSH user')}@${host}` : host
-  const command = rpcString(endpoint.command ?? 'amux', 'Remote CLI command')
-  const args = ['-T', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes']
-  if (endpoint.port !== undefined) {
-    if (!Number.isInteger(endpoint.port) || endpoint.port < 1 || endpoint.port > 65535) throw new AgentMuxError('Invalid SSH port.', 'INVALID_CONTROL_REQUEST')
-    args.push('-p', String(endpoint.port))
-  }
-  if (endpoint.identityFile) args.push('-i', rpcString(endpoint.identityFile, 'SSH identity file'))
-  const remote = [command]
-  if (endpoint.socketPath) remote.push('--endpoint', `unix:${rpcString(endpoint.socketPath, 'Remote socket')}`)
-  remote.push('system', 'endpoint', '--stdio')
-  return [...args, '--', destination, remote.map(quoteShell).join(' ')]
 }
 type Reader = { dispose(): Promise<void> }
 async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCRequest, onFrame: (frame: unknown) => void,

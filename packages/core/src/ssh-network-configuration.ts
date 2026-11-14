@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { isIP } from 'node:net'
 import { AgentMuxError } from './errors.js'
-import { agentMuxRpcSshArguments } from './public-rpc-client.js'
-import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from './public-rpc-wire.js'
+import { agentMuxRpcSshArguments } from './ssh-runtime-target.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from './public-rpc-frame.js'
 import type { AgentMuxRpcEndpoint } from './public-rpc.js'
 
 const execute = promisify(execFile)
