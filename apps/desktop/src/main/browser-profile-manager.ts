@@ -333,7 +333,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   /** Read actual original bytes after an uncertain write; never replay it or sign durability from a read. */
   private async observeUnconfirmedWrite(cause: unknown): Promise<BrowserProfileSnapshot> {
     try {
-      const snapshot = await this.store.list()
+      const snapshot = await this.store.read()
       this.adopt(snapshot)
       return snapshot
     } catch (readError) {

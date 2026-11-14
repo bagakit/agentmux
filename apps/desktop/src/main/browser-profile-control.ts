@@ -42,7 +42,7 @@ async function owned<T>(write: () => Promise<T>): Promise<T> {
 export async function executeBrowserProfileControl(request: ProfileRequest, ports: BrowserProfileControlPorts,
   actor: AgentMuxNameActor | undefined): Promise<ProfileResult> {
   await ports.profiles.initialize()
-  if (request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.trash.ls') await ports.profiles.refresh()
+  if (request.operation === 'browser.profile.proxy.ls' || request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.trash.ls') await ports.profiles.refresh()
   switch (request.operation) {
     case 'browser.profile.proxy.ls': return { operation: request.operation, revision: ports.profiles.listRevision(), proxies: ports.profiles.listProxies() }
     case 'browser.profile.proxy.create': return { operation: request.operation, ...await owned(() => ports.profiles.saveProxy(request.edit)) }
