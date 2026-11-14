@@ -66,6 +66,9 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 
 ### Revision-aware 保存与外部冲突
 
+- 正文读取可携 `readIdentity`：entry 来自读取该正文的同一 Native FD，ancestorWitnesses 按 pinned parent 到原 Workspace root 排序并包含 root，均复用完整 FileEntryWitness 与原 birth/statx 算法。前后复核原 FD／scope；不得读取后另 stat 路径贴给旧正文。无预算读取不新增正文上限，byte-range 保原 hash／offset／cost／取消合同。来源元数据有界，超限、缺代次或 scope 失观仅令来源未知，保原 body／read／edit；正常受支持读取须真实给出来源。来源不是 mutation ACK、权限或当前路径存在证明，NoteFileWitness 原五字段历史不变。
+- 原 FileDocument 可以持有读取来源，written 回执不承诺或夹带它。Renderer 唯一采用 written revision 的原 reducer 清旧 readIdentity，包括同正文 hash 的 atomic replacement；只有原完整 body read 和最终 document lifetime／generation CAS 可以装新来源。Core/Main 不以 write 回执或后 stat 补签，旧 spread 不得将旧 inode 来源随新 revision 续回。CLI 复用原 file.read typed 结果与权限，不新增读操作 ID、来源 Store 或 Native Runtime。
+
 - Desktop Main 唯一持有 Workspace Root 约束、磁盘 revision、原子替换、单文件观察和磁盘错误事实；Renderer 只经 typed read、write、observe 和 move 能力访问文件。
 - 写入必须携带读取时的 revision，结果区分已写入、冲突、错误与未知；替换之后才丢失回执属于未知，不能解释成明确未写入。远端 Workspace 无法满足同一原子保存合同时明确返回不支持。
 - 写入或替换失败保持原文件字节不变。revision 只是乐观并发信号：最终复核与原子替换之间仍存在外部进程的竞争窗口，不宣称强跨进程 compare-and-swap。

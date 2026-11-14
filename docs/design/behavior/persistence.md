@@ -1,5 +1,7 @@
 # 用户数据与本地持久化
 
+FileDocument 的可选 readIdentity 仅保该份正文的原 Native 读取来源，不是路径变更回执、保存确认或权限账本。旧记录缺来源仍保正文、草稿和原工作面；written 不能继承旧 inode 来源，重新读取与采用边界归 [Files 的保存合同](files-and-git.md#revision-aware-保存与外部冲突)。
+
 本文定义保存承诺、唯一持久来源与跨进程恢复的共同边界。[Session 恢复](session-recovery.md)定义原身份和工作面的具体恢复行为；各存储 owner 的当前机制由架构文档说明，不能以设计合同代签实现完成。
 
 ## 数据按语义归属
