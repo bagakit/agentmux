@@ -192,6 +192,14 @@ Read only the matching local help:
   credentials; its `--help` describes setup. Browser/operation IDs stay explicit, stream Gap
   facts remain visible, and cancelling an observation never substitutes for browser.stop.
 - amux browser run --help: page-program API, capability names and original result/receipt reads.
+- amux browser viewport --help: change the same embedded page's execution Viewport through its original owner.
+  `--preset mobile|tablet|desktop|responsive` shares the App's presets; custom `--width 844 --height 390`
+  (mobile layout by default) tests landscape without navigation. `--screen desktop` chooses desktop
+  layout behavior. These are layout dimensions, not a complete device identity. Supporting targets
+  advertise `setViewport`; page programs use `setViewport('mobile')` or
+  `setViewport({width:844,height:390,screenPosition:'mobile'})`, followed by `pageInfo()` for the
+  original applied state. Human control and Stop remain authoritative. Keep unknown operation IDs
+  and inspect rather than replay. Screenshot sampling is separate: `browser capture --pixel-ratio 2`.
 - amux browser task --help: source/draft discovery, draft edit/publish, original create receipts,
   version reliability, run, batch, explicit parallel targets and stop.
   `browser task parallel --browser SOURCE --asset ID --version N --input FILE|-` accepts
