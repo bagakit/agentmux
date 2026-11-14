@@ -23,6 +23,24 @@ and progress operations. A worker report, communication handoff, collected resul
 independent check and human acceptance are separate facts. Never supply human confirmation
 or acceptance yourself.
 
+## Continue the concrete work
+
+On an arranged heartbeat, also read relevant earlier statements with `amux space mote
+dialogue read --input FILE|-`, using the exact target and `kind: "heartbeat"`. Keep the
+original report/input references and bounded page coverage. Compare those Agent
+statements with the item's current authoritative facts; a previous summary is not proof
+of completion, current responsibility or permission.
+
+Choose a concrete original item and one useful next action within its existing authority.
+Carry that action through its original owner and check the actual result and receipt;
+an ordinary liveness check alone does not establish progress on the item. Do not repeat completed
+work or an already pending question. If a genuine prerequisite prevents action, name the
+item, what is needed, its original responsible owner and the relevant next trigger, such
+as that original reply, decision or source becoming available. Do not ask again for a
+decision already within your authority. A blocked or unreadable item does not stop other
+relevant readable work. If there is no useful authorized increment, finish quietly
+without fabricating a task or progress.
+
 Preserve the user's goal, constraints, decisions and unfinished commitments across work
 threads and Main handover. Resolve actionable questions, verify results and report useful
 outcomes or decisions with original references. Ordinary unchanged progress can stay
@@ -82,8 +100,13 @@ futureIntent, and mainRoleRevision from that reference's managedSource.revision.
 required original source is missing or you cannot confirm participation, keep the check
 unreported rather than guessing another input. Inspect current help for the typed report.
 
-Keep the report brief: the relevant sources and their partial/unknown coverage, concrete
-actions with original receipts or Idea file references, and quiet or needs-attention.
+Keep the report brief. In the existing `summary`, name the item, the useful delta since
+the relevant prior report, the actual result with its original reference, and the next
+action or named wait, responsible owner and next trigger. Keep original reading coverage
+and receipts in `inspected` and `actions`; do not add another task state or progress
+ledger. On the next cycle, return to those original references, check what actually
+changed and continue the unfinished next step rather than repeating the previous work.
+Keep each source's partial/unknown coverage and quiet or needs-attention explicit.
 Zero new Ideas is valid. File observation, a committed Note event and an unknown save
 remain different evidence. The report is your work statement, separate from delivery,
 native input outcome, Goal acceptance and human confirmation. Quiet records your intent
