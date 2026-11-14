@@ -132,9 +132,10 @@ it('actual Global Focus combines two Topics in one Collection without replacing 
   expect(research.textContent).toContain('Research'); expect(workingCards(research)).toEqual(['a1', 'b1', 'a2'])
   for (const [id, suffix] of [['a1', 'a'], ['b1', 'b'], ['a2', 'a']] as const) {
     expect(card(id).querySelector('.focus-context__identity strong')?.textContent).toBe(`Task ${id}`)
-    expect(card(id).querySelector('[data-focus-topic-id]')?.textContent).toBe(topicBy(suffix).title)
-    expect(card(id).querySelector('[data-focus-topic-id]')?.getAttribute('data-focus-topic-id')).toBe(topicIdentity(suffix))
-    expect(card(id).querySelector('[data-focus-topic-id]')?.getAttribute('title')).toContain(topicBy(suffix).title)
+    expect(card(id).querySelector('[data-focus-topic-id]')).toBeNull()
+    expect(card(id).closest('[data-focus-card-key]')!.querySelector('[data-focus-zone-footer] [data-focus-topic-id]')?.textContent).toBe(topicBy(suffix).title)
+    expect(card(id).closest('[data-focus-card-key]')!.querySelector('[data-focus-zone-footer] [data-focus-topic-id]')?.getAttribute('data-focus-topic-id')).toBe(topicIdentity(suffix))
+    expect(card(id).closest('[data-focus-card-key]')!.querySelector('[data-focus-zone-footer] [data-focus-topic-id]')?.getAttribute('title')).toContain(topicBy(suffix).title)
   }
   expect(card('needs-you').textContent).toContain('Allow editing original file?')
   expect(card('needs-you').dataset.bucket).toBe('attention')
@@ -233,7 +234,7 @@ it('counts one exact Topic across its confirmed directory lanes while keeping ev
   expect(laneFor('a2')).toBe(research); expect(laneFor('b1')).toBe(research)
   expect(research.querySelector('.focus-project-lanes__collection-count')?.textContent).toBe('2 Topics · 4 Agents')
   expect(cardsIn(research)).toHaveLength(4); expect(new Set(mainCards()).size).toBe(9)
-  expect(card('a2').querySelector('[data-focus-topic-id]')?.getAttribute('data-focus-topic-id')).toBe(topicIdentity('a'))
+  expect(card('a2').closest('[data-focus-card-key]')!.querySelector('[data-focus-zone-footer] [data-focus-topic-id]')?.getAttribute('data-focus-topic-id')).toBe(topicIdentity('a'))
   await mode('sections')
   expect(workingCards(laneFor('a1'))).toEqual(['a1', 'a2', 'b1'])
 })

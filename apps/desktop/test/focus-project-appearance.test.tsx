@@ -89,7 +89,7 @@ it('removing the first checkout preserves project preference draft and the other
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null })
   const a = lane('a'), b = lane('b'), remote = lane('c', 'remote')
   useAppStore.setState({ config: { ...composerConfig, workspaces: [{ ...composerConfig.workspaces[0]!, id: 'root', name: 'Actual root' }] } })
-  const render = (lanes: readonly FocusProjectLane[], currentLaneId = 'b') => dom.render(<FocusProjectLanes resourceMenus lanes={lanes} currentLaneId={currentLaneId} selectedProjectKey={key('root', 'remote')} onSelect={() => {}} renderLane={(lane, heading) => <>{heading}{[...(lane.zoneHeadings?.values() ?? [])]}<input aria-label={'Draft ' + lane.id} defaultValue="Original work" /></>} />)
+  const render = (lanes: readonly FocusProjectLane[], currentLaneId = 'b') => dom.render(<FocusProjectLanes resourceMenus lanes={lanes} currentLaneId={currentLaneId} selectedProjectKey={key('root', 'remote')} onSelect={() => {}} renderLane={(lane, heading) => <>{heading}{[...(lane.zoneHeadings?.values() ?? [])].map(view => view.section)}<input aria-label={'Draft ' + lane.id} defaultValue="Original work" /></>} />)
   await render([a, b, remote])
   expect(dom.container.querySelectorAll('[data-project-group-key]')).toHaveLength(2)
   const project = frame('root'), original = project.querySelector('input[aria-label^="Draft "]')
