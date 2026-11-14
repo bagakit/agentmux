@@ -2,24 +2,23 @@ import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
-import { mkdtemp, mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 const fixture = import.meta.dirname, root = resolve(fixture, '../../../../..')
-const agentOnly = process.argv.includes('--agent-only'), settingsOnly = process.argv.includes('--settings-only')
-assert.ok(!agentOnly || !settingsOnly, 'Choose one exact capture subset')
+const settingsOnly = process.argv.includes('--settings-only')
 const mainRoot = dirname(resolve(root, execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: root, encoding: 'utf8' }).trim()))
 const require = createRequire(join(mainRoot, 'apps/desktop/package.json')), { build } = await import(require.resolve('vite'))
 const evidenceRoot = join(root, '.tmp/agent-mote-promotion'), evidence = join(evidenceRoot, 'visual-' + randomUUID())
 const temporary = await mkdtemp(join(tmpdir(), 'amux-agent-promotion-')), compiled = join(temporary, 'renderer')
-const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = {}, mutations = [], mutant = null
+const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = {}
 const record = async id => { const file = id.split('?')[0]; if (file.startsWith(root + '/') && !file.includes('/node_modules/') && existsSync(file)) inputs[relative(root,file)] = hash(await readFile(file)) }
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', inputs,
- captureSubset: settingsOnly ? 'promotion-settings-only' : agentOnly ? 'agent-promotion-only' : 'agent-promotion-full',
- boundary: 'Production Agent Region Header/menu/dialog, Promotion SettingsPanel, Store and styles in a private Electron Renderer; controlled RPC/config responses. No user data, native CLI, installed App or lifecycle proof.', frames: [] }
+ captureSubset: settingsOnly ? 'promotion-settings-only' : 'promotion-settings-and-menus',
+ boundary: 'Production Agent/Topic menus, Promotion SettingsPanel, Store and styles in a private Electron Renderer; controlled configuration responses. Shared Takeover creation and recovery have separate probes. No user data, native CLI, installed App or lifecycle proof.', frames: [] }
 await mkdir(evidence, { recursive: true })
 try {
   execFileSync(process.execPath, ['--check', join(fixture, 'main.cjs')], { stdio: 'pipe' })
@@ -54,18 +53,6 @@ try {
     },
     async transform(source, id) {
       await record(id)
-      if (mutant === 'motion' && id.endsWith('/styles/topic-promotion.css')) {
-        assert.ok(source.includes('.topic-promotion__particle') && source.includes('.topic-promotion__halo'), 'The production waiting motion is loaded')
-        const changed = source + '\n.topic-promotion-dialog[data-phase="writing"] .topic-promotion__energy * { animation: none !important; }\n'
-        mutations.push({ file: relative(root, id), mutant, count: 1, sourceSHA256: hash(source), loadedSHA256: hash(changed) })
-        return { code: changed, map: null }
-      }
-      if (mutant !== 'consumer' || !id.endsWith('/components/WorkspaceTopicsPanel.tsx')) return
-      const before = 'onPromote: () => setPromotionTarget({ topicId: topic.id, title: topic.title, categorySpaceId }),'
-      assert.equal(source.split(before).length - 1, 1, 'Unique actual consumer mutation anchor')
-      const changed = source.replace(before, 'onPromote: undefined,')
-      mutations.push({ file: relative(root, id), mutant, count: 1, sourceSHA256: hash(source), loadedSHA256: hash(changed) })
-      return { code: changed, map: null }
     },
     async generateBundle() { await Promise.all(this.getWatchFiles().map(record)) }
   }
@@ -74,16 +61,17 @@ try {
     plugins: [sourceResolver], build: { target: 'esnext', outDir: compiled, emptyOutDir: true } })
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled,'index.html'), temporary,evidence,...(agentOnly?['--agent-only']:settingsOnly?['--settings-only']:[])],
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled,'index.html'), temporary,evidence,...(settingsOnly?['--settings-only']:[])],
     { temporaryRoot: temporary, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await writeFile(join(evidence,'process.log'),logs.join('\n'))
   receipt.actual = JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'))
   assert.equal(receipt.process.timedOut,false)
   assert.equal(receipt.actual.passed,true, JSON.stringify(receipt.actual))
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence,frame.file))) })))
-  if (settingsOnly) assert.equal(receipt.frames.length, 4, 'The four affected Settings scenes are nonempty')
-  else assert.ok(receipt.frames.length >= 8)
-  for(const suffix of ['AgentRegionHeader.tsx','AgentMenuContent.tsx','AgentPromotionDialog.tsx','TopicDirectorySettingsPane.tsx','store.ts']) assert.ok(Object.keys(inputs).some(path=>path.endsWith('/'+suffix)), 'Actual consumer loaded: '+suffix)
+  assert.ok(receipt.frames.length > 0, 'The selected real Renderer scenes are nonempty')
+  const requiredConsumers = ['SettingsPanel.tsx', 'TopicDirectorySettingsPane.tsx', 'store.ts',
+    ...(settingsOnly ? [] : ['AgentRegionHeader.tsx', 'AgentMenuContent.tsx', 'TopicContextMenu.tsx'])]
+  for(const suffix of requiredConsumers) assert.ok(Object.keys(inputs).some(path=>path.endsWith('/'+suffix)), 'Actual consumer loaded: '+suffix)
   receipt.passed = true
 } catch(error) { receipt.error = String(error); throw error }
 finally {

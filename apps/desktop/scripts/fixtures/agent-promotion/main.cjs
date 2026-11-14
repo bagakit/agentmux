@@ -1,9 +1,7 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
 const { app, BrowserWindow } = require('electron')
 const [html, temporary, evidence] = process.argv.slice(2)
-const agentOnly = process.argv.includes('--agent-only')
 const settingsOnly = process.argv.includes('--settings-only')
-assert.ok(!agentOnly || !settingsOnly, 'Choose one exact capture subset')
 app.setPath('userData',path.join(temporary,'user-data')); app.setPath('sessionData',path.join(temporary,'session-data'))
 const report={passed:false,frames:[],console:[]};let win
 app.whenReady().then(async()=>{try{
@@ -15,7 +13,7 @@ app.whenReady().then(async()=>{try{
  const click=async selector=>{const p=await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw Error('Missing control: '+${JSON.stringify(selector)});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',clickCount:1});await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseReleased',...p,button:'left',clickCount:1});await paint()}
  const text=async label=>{await read(`(()=>{document.querySelectorAll('[data-probe-click]').forEach(n=>n.removeAttribute('data-probe-click'));const n=[...document.querySelectorAll('button,[role=menuitem]')].find(n=>n.textContent.trim()===${JSON.stringify(label)});if(!n)throw Error('Missing text: '+${JSON.stringify(label)});n.dataset.probeClick=''})()`);await click('[data-probe-click]')}
  const revealTakeover=async()=>{if(settingsOnly){await paint();await read('document.querySelector("[data-settings-field=agent-transfer]").scrollIntoView({block:"end"})');await until('Takeover explanation is completely visible','(()=>{const n=document.querySelector("[data-settings-field=agent-transfer]"),r=n.getBoundingClientRect();return r.top>=-1&&r.bottom<=innerHeight+1&&n.textContent.includes("original location, membership and Main remain")})()')}}
- const capture=async(file,label)=>{if(agentOnly&&!/^(?:05|06|07|08|09|10|11|12|13)-agent-/u.test(file))return;await read('document.querySelectorAll(".settings-concept-intro__art img,.topic-promotion__art").forEach(img=>{img.loading="eager"})');await until('Visible scene images and fonts','document.fonts.status==="loaded"&&[...document.querySelectorAll(".settings-concept-intro__art img,.topic-promotion__art")].every(img=>img.complete&&img.naturalWidth>0)');await paint();const writing=await read('document.querySelector(".agent-promotion-dialog")?.dataset.phase==="writing"');await new Promise(done=>setTimeout(done,writing?120:850));const geometry=await read(`(()=>{const n=document.querySelector('.agent-promotion-dialog');const r=n?.getBoundingClientRect();return{width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth,dialog:r?{x:r.x,y:r.y,right:r.right,bottom:r.bottom}:null}})()`);assert.ok(geometry.documentWidth<=geometry.width+1,'No document overflow');if(geometry.dialog){assert.ok(geometry.dialog.x>=-1&&geometry.dialog.right<=geometry.width+1);assert.ok(geometry.dialog.y>=-1&&geometry.dialog.bottom<=geometry.height+1)}await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());report.frames.push({file,label,geometry})}
+ const capture=async(file,label)=>{await read('document.querySelectorAll(".settings-concept-intro__art img,.topic-promotion__art").forEach(img=>{img.loading="eager"})');await until('Visible scene images and fonts','document.fonts.status==="loaded"&&[...document.querySelectorAll(".settings-concept-intro__art img,.topic-promotion__art")].every(img=>img.complete&&img.naturalWidth>0)');await paint();await new Promise(done=>setTimeout(done,850));const geometry=await read(`(()=>{const n=document.querySelector('.agent-region-menu,.topic-context-menu');const r=n?.getBoundingClientRect();return{width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth,menu:r?{x:r.x,y:r.y,right:r.right,bottom:r.bottom}:null}})()`);assert.ok(geometry.documentWidth<=geometry.width+1,'No document overflow');if(geometry.menu){assert.ok(geometry.menu.x>=-1&&geometry.menu.right<=geometry.width+1);assert.ok(geometry.menu.y>=-1&&geometry.menu.bottom<=geometry.height+1)}await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());report.frames.push({file,label,geometry})}
  await win.loadFile(html);win.webContents.debugger.attach('1.3')
  await until('Promotion settings','document.querySelector("[aria-label=\\"Allow promotion\\"]")!==null')
  report.before=await read('agentPromotionProbe.facts()')
@@ -46,32 +44,8 @@ app.whenReady().then(async()=>{try{
  await read('agentPromotionProbe.theme(true)');await capture('16-topic-menu-light.png','Topic menu shared Promotion icon in light theme');await read('agentPromotionProbe.theme(false)')
  await win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});await win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'})
  win.setContentSize(1000,760)
- const open=async()=>{await click('[aria-label^="More actions for"]');await click('[data-agent-promotion]');await until('Read original owner','document.querySelector(".agent-promotion-dialog")?.dataset.phase==="ready"')}
- await open();await capture('05-agent-disabled.png','New promotion off, original work and recovery retained');await text('取消')
- await read('agentPromotionProbe.policy(true)');await open()
- await capture('06-agent-choices.png','Existing Clubs are primary; no destination is guessed')
- await click('.agent-promotion__club:first-of-type input')
- await read('agentPromotionProbe.theme(true)');await capture('07-agent-choice-light.png','Selected original Club in light theme');await read('agentPromotionProbe.theme(false)')
- await text('加入 Club');await until('Writing','document.querySelector(".agent-promotion-dialog")?.dataset.phase==="writing"')
- await capture('08-agent-writing.png','Actual original association write in flight')
- await read('agentPromotionProbe.unknown()');await until('Unknown','document.querySelector(".agent-promotion-dialog")?.dataset.phase==="unknown"')
- win.setContentSize(420,740);await capture('09-agent-unknown-narrow.png','Unknown original operation: inspect before explicit continuation')
- await text('查看结果');await read('agentPromotionProbe.policy(false)')
- await until('Retained partial','[...document.querySelectorAll(".agent-promotion-dialog button")].some(n=>n.textContent.trim()==="继续操作"&&!n.disabled)')
- await capture('10-agent-partial-narrow.png','Original partial continuation remains available with new promotion off')
- await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
- await text('继续操作');await read('agentPromotionProbe.complete()');await until('Completed','document.querySelector(".agent-promotion-feedback")!==null')
- win.setContentSize(1000,760);await capture('11-agent-complete.png','Local completion retains original Agent and draft')
- await click('[aria-label="关闭晋升提示"]');await until('Local feedback dismissed','document.querySelector(".agent-promotion-feedback")===null')
- await read('agentPromotionProbe.policy(true);agentPromotionProbe.empty(true)');await open()
- assert.equal(await read('document.querySelector(".agent-promotion-dialog")?.dataset.phase'),'ready','Historical complete does not close a new action')
- await capture('12-agent-empty.png','Empty existing roster keeps explicit two-level creation available')
- await click('.agent-promotion__new input');win.setContentSize(420,740)
- await capture('13-agent-new-club-narrow.png','Explicit team creation plus original Thread joining; reduced-motion narrow surface')
- await text('取消')
  report.after=await read('agentPromotionProbe.facts()')
  for(const key of ['sessions','tabs','layouts','drafts','activeWorkspaceId'])assert.deepEqual(report.after[key],report.before[key],'Original '+key+' retained')
- const applies=report.after.calls.filter(call=>call.method==='agent.promote.apply');assert.equal(applies.length,2);assert.deepEqual(applies[0].params,applies[1].params,'Partial continues the exact original request')
  assert.equal(await read('document.querySelector("[aria-label=\\"Original draft\\"]").value'),'Keep the original draft')
  report.passed=true
 }catch(error){report.error=error.stack||String(error);if(win)report.failureScene=await win.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,transfer:document.querySelector("[data-settings-field=agent-transfer]")?.getBoundingClientRect().toJSON()})').catch(()=>null)}finally{await fs.writeFile(path.join(evidence,'actual.json'),JSON.stringify(report,null,2));if(win&&!win.isDestroyed())win.destroy();app.exit(report.passed?0:1)}})
