@@ -6,6 +6,7 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { connectionLinkUrl } from '@agentmux/relay/offer'
 import type { HostConfig } from '../../../src/shared/contracts'
+import { applyConfigEdit } from '../../../src/shared/config-edit'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 import '../../../src/renderer/src/styles/index.css'
 const ids = ['aa11cc22dd33ee44'.repeat(4), 'bb22dd33ee44ff55'.repeat(4), 'cc33ee44ff55aa66'.repeat(4), 'dd44ff55aa66bb77'.repeat(4), 'ee55aa66bb77cc88'.repeat(4)]
@@ -45,6 +46,7 @@ const resource = (id: string) => {
 }
 api.nodePublishing.call=(async(method:string,params:any)=>method==='node.inspect'?{node:{runtimeId:params.hostId==='local'?'runtime-this-mac':'runtime-'+params.hostId,ownerInstanceId:'original-'+params.hostId,alias:params.hostId},policyRevision:'original-policy',resourcesShared:true,roots:[],landing:null}:resource(params.hostId)) as typeof api.nodePublishing.call
 api.nodePublishing.owner=(async(target:any)=>{if(target.hostId==='private')throw Error('This device has published access only.');return resource(target.hostId)}) as typeof api.nodePublishing.owner
+api.config.save = async (next, expected) => applyConfigEdit(useAppStore.getState().config!, expected, next)
 mountThemeRuntime(window, { appAppearance: 'dark' })
 useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' },{ id:'farm-cn1',kind:'ssh',label:'Farm CN1',hostname:'farm-cn1.internal',runtimeId:'runtime-farm-cn1' },{id:'studio',kind:'ssh',label:'Studio Mac',hostname:'studio.internal',runtimeId:'runtime-studio'},{id:'build',kind:'ssh',label:'Build runner',hostname:'build.internal',runtimeId:'runtime-build'},{id:'private',kind:'ssh',label:'Private workspace',hostname:'private.internal',runtimeId:'runtime-private'},{id:'unavailable',kind:'ssh',label:'Remote workbench · secondary machine',hostname:'remote.internal',runtimeId:'runtime-unavailable'},...(state === 'initial' ? ([
  { id:'build-secondary',kind:'ssh',label:'Build secondary',hostname:'build-secondary.internal',runtimeId:'runtime-build-secondary' },
@@ -57,3 +59,7 @@ useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local
  } })
 createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual fixture · production Settings · controlled topology/resource observations; not live host telemetry</footer></div></DesktopClientUiProvider>)
 Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, relayOff: () => { state = 'initial' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
+if (state === 'geography') useAppStore.setState({ config: {
+  ...useAppStore.getState().config!,
+  meshMapLocations: { local: '31.2304, 121.4737', 'farm-cn1': '49.2827, -123.1207', studio: '52.52, 13.405', build: '0, 0', private: '31.2304, 121.4737' },
+} })

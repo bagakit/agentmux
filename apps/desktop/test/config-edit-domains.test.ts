@@ -135,4 +135,23 @@ describe('optional preference edits', () => {
     expect(await f.bytes()).toBe(bytes)
     expect(f.publish).toHaveBeenCalledTimes(2)
   })
+
+  it('commits map coordinates together per original Host and clears them when that Host is removed', async () => {
+    const remote = { id: 'original-remote', label: 'Original remote', kind: 'ssh' as const, hostname: 'original.internal' }
+    const f = await configOwnerFixture({ hosts: [...DEFAULT_CONFIG.hosts, remote] })
+    const before = f.owner.current
+    await Promise.all([
+      f.owner.edit(before, { ...before, meshMapLocations: { local: '0, 0' } }),
+      f.owner.edit(before, { ...before, meshMapLocations: { [remote.id]: '45, -90' } })
+    ])
+    const saved = await f.store.readSaved()
+    expect(saved.hosts).toEqual(before.hosts)
+    expect(saved.meshMapLocations).toEqual({ local: '0, 0', [remote.id]: '45, -90' })
+    await expect(f.owner.edit(before, { ...before, meshMapLocations: { local: '4, 0' } })).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    await expect(f.owner.edit(saved, { ...saved, meshMapLocations: { ...saved.meshMapLocations, local: '0, 181' } })).rejects.toThrow()
+    await f.owner.update(current => ({ ...current, hosts: current.hosts.filter(host => host.id !== remote.id) }))
+    await expect(f.owner.edit(saved, { ...saved, meshMapLocations: { ...saved.meshMapLocations, [remote.id]: '45, -91' } })).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    await f.owner.update(current => ({ ...current, hosts: [...current.hosts, remote] }))
+    expect((await f.disk()).meshMapLocations).toEqual({ local: '0, 0' })
+  })
 })

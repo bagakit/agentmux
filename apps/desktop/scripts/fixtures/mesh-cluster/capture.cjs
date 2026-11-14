@@ -1,5 +1,5 @@
 const {app,BrowserWindow}=require('electron'),fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict')
-const [url,profile,output]=process.argv.slice(2)
+const [url,profile,output,scope]=process.argv.slice(2)
 app.setPath('userData',path.resolve(profile));app.disableHardwareAcceleration()
 const delay=ms=>new Promise(done=>setTimeout(done,ms)),receipt={captureOnly:true,aestheticReview:'pending-independent-review',passed:false,frames:[],console:[],boundary:'Production SettingsPanel and Mesh components inside private Electron; controlled mesh/resource observations. Actual original Core/RPC/Native consumers are proven separately.'}
 let window
@@ -16,6 +16,7 @@ app.whenReady().then(async()=>{try{
  const pathVisibility=async name=>{const value=await evaluate("(()=>{const c=document.querySelector('.mesh-explorer__canvas').getBoundingClientRect();return Array.from(document.querySelectorAll('.react-flow__node')).filter(e=>e.querySelector('[data-on-path]')).map(e=>{const r=e.getBoundingClientRect();return {id:e.dataset.id,inside:r.left>=c.left-1&&r.right<=c.right+1&&r.top>=c.top-1&&r.bottom<=c.bottom+1}})})()");assert.ok(value.length>=3&&value.every(e=>e.inside),'the selected '+name+' must be fully visible beside the inspector');receipt.pathVisibility??={};receipt.pathVisibility[name]=value}
  const top=()=>evaluate("document.querySelector('[data-mesh-view]:not([hidden])').scrollTop=0")
  await fs.mkdir(output,{recursive:true})
+ if(scope!=='geography'){
  await window.loadURL(url);await wait('[data-mesh-topology]');await delay(1100)
  assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.settings-nav-children button')).map(e=>e.textContent.trim())"),['Gateways','Machines','Device connections'])
  assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),6)
@@ -29,7 +30,7 @@ app.whenReady().then(async()=>{try{
   return { graphs: canvas.querySelectorAll('.react-flow').length, hosts: canvas.querySelectorAll('[data-host-node]').length, saved: saved.length, relay: relay.length,
     sharedLocal: canvas.querySelectorAll('[data-id="saved:client"] [data-shared-local]').length,
     savedAtLocal: saved.filter(touchesLocal).length, relayAtLocal: relay.filter(touchesLocal).length,
-    outline: getComputedStyle(canvas.querySelector('.mesh-explorer__map-outline')).maskImage.includes('mesh-world'),
+    outline: getComputedStyle(canvas.querySelector('.mesh-explorer__map-outline, .mesh-geography__land')).maskImage.includes('mesh-world'),
     savedDashed: saved.every(path => getComputedStyle(path).strokeDasharray !== 'none'),
     relaySolid: relay.every(path => getComputedStyle(path).strokeDasharray === 'none') }
  })()`)
@@ -37,7 +38,12 @@ app.whenReady().then(async()=>{try{
  assert.deepEqual(receipt.mixed,{graphs:1,hosts:5,saved:5,relay:5,sharedLocal:1,savedAtLocal:5,relayAtLocal:2,outline:true,savedDashed:true,relaySolid:true})
  for(let i=0;i<150;i++){if(await evaluate('document.querySelector(".cluster-machines-coverage").textContent.includes("4 / 6")'))break;await delay(50)}
  await frame('overview-dark')
- window.setContentSize(560,930);await frame('mixed-narrow-dark')
+ window.setContentSize(560,930);await wait('.mesh-explorer__canvas[data-narrow]')
+ for(let i=0;i<180;i++){
+  if(await evaluate("document.querySelector('[aria-label=\"Rearrange observed topology\"]').textContent==='Arrange'"))break
+  await delay(50)
+ }
+ await frame('mixed-narrow-dark')
  receipt.narrowType = await evaluate(`(() => {
   const card = document.querySelector('[data-shared-local]')
   const scale = card.getBoundingClientRect().width / card.offsetWidth
@@ -119,7 +125,79 @@ app.whenReady().then(async()=>{try{
  await window.loadURL(url+'?scenario=empty');await wait('.mesh-explorer__no-connections')
  await frame('no-connections-dark')
  assert.equal(await evaluate("document.querySelector('.mesh-explorer__graph')"),null)
+ } else {
+  await window.loadURL(url+'?scenario=initial')
+  await wait('.mesh-explorer__canvas [data-host-node]')
+  await frame('logical-no-locations-dark')
+ }
+ await window.loadURL(url+'?scenario=geography')
+ await wait('[data-geographic-point="saved:client"] circle')
+ await wait('.mesh-explorer-edge--relay path')
+ const geography = () => evaluate(`(() => {
+  const atlas = document.querySelector('.mesh-geography__atlas').getBoundingClientRect()
+  const canvas = document.querySelector('.mesh-explorer__canvas').getBoundingClientRect()
+  const tray = document.querySelector('.mesh-geography__tray').getBoundingClientRect()
+  const pins = Object.fromEntries([...document.querySelectorAll('[data-geographic-point]')].map(mark => {
+    const pin = mark.querySelector('circle').getBoundingClientRect()
+    return [mark.dataset.geographicPoint, {x: (pin.left + pin.width / 2 - atlas.left) / atlas.width, y: (pin.top + pin.height / 2 - atlas.top) / atlas.height}]
+  }))
+  const local = document.querySelector('[data-id="saved:client"]').getBoundingClientRect()
+  const sameSite = document.querySelector('[data-id="saved:host:private"]').getBoundingClientRect()
+  const saved = document.querySelector('[data-testid="rf__edge-saved:host:build"] .react-flow__edge-path').getAttribute('d')
+  const loop = document.querySelector('[data-testid="rf__edge-saved:host:private"] .react-flow__edge-path').getAttribute('d')
+  return { pins, atlasWidth: atlas.width, canvasWidth: canvas.width, atlasLeft: atlas.left, atlasTop: atlas.top,
+    trayBeside: tray.left >= atlas.right, trayBelow: tray.top >= atlas.bottom, panStart: [atlas.left + atlas.width * .23, atlas.top + atlas.height * .68],
+    bothLabels: sameSite.bottom <= local.top || sameSite.top >= local.bottom,
+    savedAtEquator: saved.endsWith('500,250'), sameSiteLink: loop.includes(' C '), tray: document.querySelector('.mesh-geography__tray').textContent }
+ })()`)
+ await frame('geographic-overview-dark')
+ receipt.geography = await geography()
+ assert.equal(Object.keys(receipt.geography.pins).length,5)
+ assert.ok(receipt.geography.bothLabels)
+ assert.ok(receipt.geography.savedAtEquator)
+ assert.ok(receipt.geography.sameSiteLink)
+ assert.ok(receipt.geography.trayBeside && receipt.geography.atlasWidth / receipt.geography.canvasWidth > .68)
+ assert.ok(receipt.geography.tray.includes('Location unknown5'))
+ const closeTo = (actual, expected) => Math.abs(actual - expected) < .001
+ assert.ok(closeTo(receipt.geography.pins['saved:client'].x, (121.4737 + 180) / 360))
+ assert.ok(closeTo(receipt.geography.pins['saved:client'].y, (90 - 31.2304) / 180))
+ assert.ok(closeTo(receipt.geography.pins['saved:host:farm-cn1'].x, (-123.1207 + 180) / 360))
+ assert.ok(closeTo(receipt.geography.pins['saved:host:build'].y, .5))
+ await click('[aria-label="Zoom in network"]');await frame('geographic-zoom-dark')
+ const zoomed = await geography()
+ assert.ok(zoomed.atlasWidth > receipt.geography.atlasWidth * 1.1)
+ for (const [id, point] of Object.entries(receipt.geography.pins)) {
+   assert.ok(closeTo(zoomed.pins[id].x, point.x) && closeTo(zoomed.pins[id].y, point.y))
+ }
+ receipt.geography.sharedViewport = true
+ await click('[aria-label="Fit observed topology"]')
+ const [x,y] = receipt.geography.panStart
+ window.webContents.debugger.attach('1.3')
+ await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',buttons:1,clickCount:1})
+ await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:x+35,y:y+18,button:'left',buttons:1})
+ await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseReleased',x:x+35,y:y+18,button:'left',buttons:0,clickCount:1})
+ window.webContents.debugger.detach()
+ await delay(150)
+ const panned = await geography()
+ assert.ok(panned.atlasLeft > receipt.geography.atlasLeft + 15)
+ assert.ok(closeTo(panned.pins['saved:client'].x, receipt.geography.pins['saved:client'].x))
+ receipt.geography.sharedPan = true
+ await click('[aria-label="Fit observed topology"]')
+ await evaluate('meshFixture.theme("light")');await frame('geographic-overview-light')
+ window.setContentSize(560,950);await frame('geographic-narrow-light')
+ assert.ok((await geography()).trayBelow)
+ await evaluate('meshFixture.theme("dark")');await frame('geographic-narrow-dark')
+ window.setContentSize(1440,1050)
+ await click('.mesh-explorer__canvas [data-host-node="studio"]')
+ await click('[aria-label="Selected saved connection"] .mesh-explorer__detail-actions button:first-child')
+ await wait('[aria-label="Latitude, longitude"]')
+ await frame('geographic-location-editor')
+ await type('[aria-label="Latitude, longitude"]','')
+ await button('Save locations')
+ assert.equal(await evaluate("document.querySelector('[data-geographic-point=\"saved:host:studio\"]')"),null)
+ await frame('geographic-location-cleared')
+ receipt.geography.clearedExactHost = true
  receipt.overflow=Object.values(receipt.frameOverflow).some(Boolean)
  assert.equal(receipt.overflow,false,'every full frame fits horizontally')
  receipt.passed=true
-}catch(error){receipt.failure={message:error.message,stack:error.stack};process.exitCode=1}finally{await fs.mkdir(output,{recursive:true});await fs.writeFile(path.join(output,'capture.json'),JSON.stringify(receipt,null,2));window?.destroy();app.exit(receipt.passed?0:1)}})
+}catch(error){receipt.failure={message:error.message,stack:error.stack};process.exitCode=1}finally{try{await fs.mkdir(output,{recursive:true});await fs.writeFile(path.join(output,'capture.json'),JSON.stringify(receipt,null,2))}catch(error){receipt.passed=false;console.error(error)}window?.destroy();app.exit(receipt.passed?0:1)}})

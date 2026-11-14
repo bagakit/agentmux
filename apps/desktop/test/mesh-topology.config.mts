@@ -10,7 +10,7 @@ const mutations: Record<string, [string, string, string]> = {
   'one-sided-link': ['mesh-topology.ts', 'other.epoch !== neighbor.peerEpoch || back.peerEpoch !== record.epoch || back.connectionId !== neighbor.connectionId || ', ''],
   'circuit-as-route': ['mesh-topology.ts', "if (selected?.kind === 'circuit') return model.circuits.find(circuit => circuit.circuitId === selected.id)?.path ?? []", "if (selected?.kind === 'circuit') return model.routes[0]?.path ?? []"],
   'foreign-selection': ['MeshNetworkMap.tsx', 'key={meshTopologySource(snapshot)}', 'key="shared-source"'],
-  'poll-relayout': ['MeshNetworkMap.tsx', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions]', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions, snapshot]'],
+  'poll-relayout': ['MeshNetworkMap.tsx', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions, geographic]', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions, geographic, snapshot]'],
   'lost-selection-fit': ['MeshNetworkMap.tsx', 'setFocusRequest(value => value + 1)', 'setFocusRequest(value => value)'],
   'poll-focus': ['MeshNetworkMap.tsx', 'focusRequest === focusedRequest.current', 'false'],
   'separate-list-inspector': ['MeshNetworkMap.tsx', "!onGateway || view === 'list' ? inspector : null", "!onGateway ? inspector : null"],
