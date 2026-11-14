@@ -169,7 +169,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     {goals?.length === 1000 && <MobileNotice identity={[goals?.length]} role="status">目录只读到前 1000 个目标，搜索只覆盖这些；其他目标可按 Goal ID 打开。</MobileNotice>}
     {visible && !selected && !discussionTab && <section className={`mobile-goals-start${confirmedEmpty ? ' mobile-goals-start--empty' : ''}`} aria-label="目标工坊">
       <img className="mobile-goals-start__art" src={confirmedEmpty ? goalsEmpty : goalsCompanions} alt="" width={confirmedEmpty ? 160 : 84} height={confirmedEmpty ? 107 : 58} loading="lazy" decoding="async" />
-      <div className="mobile-goals-start__copy"><h2>{confirmedEmpty ? '从一个想法开始' : '把目标落到成果'}</h2><p>{confirmedEmpty ? '还没有目标。和 Mote 一起开始。' : '拆清目标，协作推进，核对成果。'}</p></div>
+      <div className="mobile-goals-start__copy"><strong>{confirmedEmpty ? '从一个想法开始' : '把目标落到成果'}</strong><p>{confirmedEmpty ? '还没有目标。和 Mote 一起开始。' : '拆清目标，协作推进，核对成果。'}</p></div>
       {!createOpen && <Button variant="primary" className="mobile-goals-start__create" aria-label="开始新目标" onClick={() => setCreateOpen(true)}><SemanticIcon name="action.add-item" size={16} />新建目标</Button>}
     </section>}
       <MobileGoalCreate client={client} expanded={createOpen} visible={visible && selected === null && !discussionTab} openDiscussion={openDiscussion} beginPresentation={beginPresentation} created={(goal, present) => {
