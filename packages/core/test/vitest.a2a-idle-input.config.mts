@@ -32,7 +32,7 @@ export default defineConfig({ root, plugins: [{ name: 'original-workspace-source
   const mutation = process.env.AGENTMUX_IDLE_INPUT_MUTATION
   if (mutation && !mutations[mutation]) throw new Error('Unknown idle input mutation')
   const change = mutation && mutations[mutation], before = code
-  if (change && file === 'packages/core/src/' + change[0]) {
+  if (change && file === change[0]) {
     if (code.split(change[1]).length !== 2) throw new Error('Idle input mutation anchor is not unique: ' + mutation)
     code = code.replace(change[1], change[2])
   }

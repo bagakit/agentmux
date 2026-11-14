@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config'
-import { appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 
@@ -23,9 +23,9 @@ export const mutations = {
     "codexInvocation(args, ['resume', sessionId], prompt)", "codexInvocation(['resume', sessionId, ...args], [], prompt)"],
   'prompt-is-native-option': ['resume', 'packages/core/src/providers/codex.ts',
     "...(prompt ? ['--', prompt] : [])", "...(prompt ? [prompt] : [])"],
-  'managed-resume-drops-original-policy': ['resume', 'packages/core/src/providers/codex-native-input.ts',
-    "resume.sandbox = value as NonNullable<CodexManagedResume['sandbox']>", "resume.sandbox = 'danger-full-access'"],
-  'managed-resume-confuses-option-value': ['resume', 'packages/core/src/providers/codex-native-input.ts',
+  'managed-resume-drops-original-policy': ['resume', 'packages/providers/src/codex/input-protocol.ts',
+    "resume.sandbox = value as NonNullable<CodexManagedThreadConfiguration['sandbox']>", "resume.sandbox = 'danger-full-access'"],
+  'managed-resume-confuses-option-value': ['resume', 'packages/providers/src/codex/input-protocol.ts',
     "const actionIndex = args.length - (prompt?.trim() ? 4 : 2)", "const actionIndex = args.indexOf('resume')"],
   'require-private-actor': ['input', 'packages/core/src/prompt-submission.ts',
     'rejoiningFrozenPlan || current.hostId', 'rejoiningFrozenPlan || !current.nativeActor || current.hostId'],
@@ -56,8 +56,10 @@ export default defineConfig({ root, cacheDir: resolve(root, '.tmp/provider-nativ
     const directory = resolve(root, 'packages', match[1])
     const value = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')).exports?.[match[2] ? '.' + match[2] : '.']
     const entry = typeof value === 'string' ? value : value?.import
-    if (typeof entry === 'string' && entry.startsWith('./dist/')) return resolve(directory,
-      entry.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts'))
+    if (typeof entry === 'string' && entry.startsWith('./dist/')) {
+      const source = resolve(directory, entry.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts'))
+      if (existsSync(source)) return source
+    }
   }, transform(code, id) {
     const file = relative(root, id.split('?')[0])
     if (!/^(?:packages\/[^/]+|apps\/desktop)\/src\//u.test(file)) return

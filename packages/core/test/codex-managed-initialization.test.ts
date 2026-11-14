@@ -12,7 +12,7 @@ import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation
 import { prepareCodexManagedLaunch } from '../src/providers/codex-native-input.js'
 import { codexFrontendSocketPath, openCodexFrontendControl, observeCodexTerminalFrontend, reconnectCodexTerminalFrontend,
   CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from '../src/providers/codex-managed-frontend.js'
-import type { CodexManagedRunPlan } from '../src/providers/codex-managed-run.js'
+import type { CodexManagedRunPlan } from '@agentmux/providers/codex/input-protocol'
 
 const cleanups: Array<() => Promise<unknown>> = []
 let root: string, worker: string

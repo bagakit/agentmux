@@ -1,3 +1,4 @@
+import type { CodexManagedRunPlan } from '@agentmux/providers/codex/input-protocol'
 import { codexFrontendSocketPath, observeCodexTerminalFrontend, reconnectCodexTerminalFrontend, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from '../src/providers/codex-managed-frontend.js'
 import { fixturePath as _historyFixturePath } from "./helpers/fixture-values.js"
 import { afterEach, expect, it, vi } from 'vitest'
@@ -10,7 +11,7 @@ import { createRequire } from 'node:module'
 import { build } from 'esbuild'
 import { nativeResumeSource } from './helpers/native-resume-source.js'
 import { prepareCodexManagedLaunch } from '../src/providers/codex-native-input.js'
-import { CODEX_NATIVE_TOKEN_ENV, runCodexManaged, type CodexManagedRunPlan } from '../src/providers/codex-managed-run.js'
+import { CODEX_NATIVE_TOKEN_ENV, runCodexManaged } from '../src/providers/codex-managed-run.js'
 import { nativeProcessTcpListeners } from '../src/agent-native-process.js'
 import { resolveLaunchOptionArgv } from '../src/agent-launch-option.js'
 import { CODEX_LAUNCH_OPTIONS } from '../src/providers/launch-options.js'

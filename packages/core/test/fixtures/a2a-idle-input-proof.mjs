@@ -1,18 +1,18 @@
 /** @type {Record<string, [string, string, string]>} */
 export const idleInputMutations = {
-  'manual-input-requires-native-qualification': ['prompt-submission.ts', "const sessionConversation = admissionIntent?.kind === 'session-conversation'", "const sessionConversation = admissionIntent?.kind === 'session-conversation' || admissionIntent?.kind === 'manual-actor'"],
-  'native-queue-becomes-steer': ['providers/codex-native-input.ts', "if (frozen.operation === 'queue-idle') {", 'if (false) {'],
-  'native-idle-target-is-omitted': ['prompt-submission.ts', '...(nativeIdleOnly ? { idleOnly: true } : {})', '...{}'],
-  'completion-fence-is-omitted': ['prompt-submission.ts', '} else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {', '} else if (false) {'],
-  'final-input-fence-is-omitted': ['prompt-submission.ts', 'if (nativeIdleOnly && nativeInputByte !== undefined && currentRun.acceptedInputBytes !== nativeInputByte)', 'if (false)'],
-  'notification-identity-is-omitted': ['prompt-submission.ts', 'message.questionReply, message.a2aNotificationId, message.inputContext', 'message.questionReply, message.inputContext'],
-  'edited-notification-is-adopted': ['native-input-adoption.ts', "item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt", 'true'],
-  'native-queue-receipt-is-unchecked': ['providers/codex-native-input.ts', "if (typeof queued?.id !== 'string' || !queued.id || queued.clientUserMessageId !== frozen.clientCorrelation ||\n                !isDeepStrictEqual(queued.input, input)) throw unavailable()", 'void queued'],
-  'notification-identity-is-not-restored': ['prompt-submission-record.ts', "...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),", ''],
-  'independent-idle-notification-is-blocked': ['prompt-submission.ts', '&& !(manual && nativePredecessor) && !independentIdleNotification)) {', '&& !(manual && nativePredecessor))) {'],
-  'independent-idle-completion-is-consumed': ['prompt-submission.ts', 'completionId === expectedCompletionId && !independentIdleNotification)', 'completionId === expectedCompletionId)'],
-  'controlled-notice-reservation-spills-to-other-key': ['agent-global-message-queue.ts', "key.kind === 'prompt' && isDeepStrictEqual(this.notification(key.submissionId)?.key, key)", "key.kind === 'prompt' && this.notification(key.submissionId)"],
-  'uncontrolled-notice-reservation-spills-to-other-key': ['agent-global-message-queue.ts', 'if (expectedNotificationId === undefined ? sameNotificationKey :', 'if (expectedNotificationId === undefined ? notice !== undefined :'],
+  'manual-input-requires-native-qualification': ['packages/core/src/prompt-submission.ts', "const sessionConversation = admissionIntent?.kind === 'session-conversation'", "const sessionConversation = admissionIntent?.kind === 'session-conversation' || admissionIntent?.kind === 'manual-actor'"],
+  'native-queue-becomes-steer': ['packages/providers/src/codex/input-protocol.ts', "if (frozen.operation === 'queue-idle') {", 'if (false) {'],
+  'native-idle-target-is-omitted': ['packages/core/src/prompt-submission.ts', '...(nativeIdleOnly ? { idleOnly: true } : {})', '...{}'],
+  'completion-fence-is-omitted': ['packages/core/src/prompt-submission.ts', '} else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {', '} else if (false) {'],
+  'final-input-fence-is-omitted': ['packages/core/src/prompt-submission.ts', 'if (nativeIdleOnly && nativeInputByte !== undefined && currentRun.acceptedInputBytes !== nativeInputByte)', 'if (false)'],
+  'notification-identity-is-omitted': ['packages/core/src/prompt-submission.ts', 'message.questionReply, message.a2aNotificationId, message.inputContext', 'message.questionReply, message.inputContext'],
+  'edited-notification-is-adopted': ['packages/core/src/native-input-adoption.ts', "item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt", 'true'],
+  'native-queue-receipt-is-unchecked': ['packages/providers/src/codex/input-protocol.ts', "if (typeof queued?.id !== 'string' || !queued.id || queued.clientUserMessageId !== frozen.clientCorrelation ||\n          !isDeepStrictEqual(queued.input, input)) throw unavailable()", 'void queued'],
+  'notification-identity-is-not-restored': ['packages/core/src/prompt-submission-record.ts', "...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),", ''],
+  'independent-idle-notification-is-blocked': ['packages/core/src/prompt-submission.ts', '&& !(manual && nativePredecessor) && !independentIdleNotification)) {', '&& !(manual && nativePredecessor))) {'],
+  'independent-idle-completion-is-consumed': ['packages/core/src/prompt-submission.ts', 'completionId === expectedCompletionId && !independentIdleNotification)', 'completionId === expectedCompletionId)'],
+  'controlled-notice-reservation-spills-to-other-key': ['packages/core/src/agent-global-message-queue.ts', "key.kind === 'prompt' && isDeepStrictEqual(this.notification(key.submissionId)?.key, key)", "key.kind === 'prompt' && this.notification(key.submissionId)"],
+  'uncontrolled-notice-reservation-spills-to-other-key': ['packages/core/src/agent-global-message-queue.ts', 'if (expectedNotificationId === undefined ? sameNotificationKey :', 'if (expectedNotificationId === undefined ? notice !== undefined :'],
 }
 
 // Executed collaborators of the input, original-author, wire and queue assertions.
@@ -44,4 +44,5 @@ export const idleInputOwners = [
     'agent-message-envelope.ts',
   ].map(file => 'packages/core/src/' + file),
   'packages/providers/src/codex/native-rpc.ts',
+  'packages/providers/src/codex/input-protocol.ts',
 ]

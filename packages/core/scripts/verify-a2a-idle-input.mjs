@@ -75,7 +75,7 @@ try {
   for (const mutation of mutations) {
     const edit = idleInputMutations[mutation]
     assert.ok(edit, 'Every owning mutation has its exact source edit: ' + mutation)
-    const source = await readFile(join(root, 'packages/core/src', edit[0]), 'utf8')
+    const source = await readFile(join(root, edit[0]), 'utf8')
     assert.equal(source.split(edit[1]).length, 2, 'Unique original source target before running tests: ' + mutation)
   }
   receipt.sourceBefore = await hashes()

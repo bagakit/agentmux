@@ -12,7 +12,7 @@ const unit = 'packages/core/test/codex-durable-queue.test.ts'
 const actor = 'packages/core/test/codex-idle-queue.test.ts'
 const native = 'packages/core/test/codex-durable-queue-native.test.ts'
 const sources = ['packages/providers/src/codex/native-queue.ts',
-  'packages/core/src/providers/codex-native-input.ts', 'packages/providers/src/codex/native-rpc.ts',
+  'packages/core/src/providers/codex-native-input.ts', 'packages/providers/src/codex/input-protocol.ts', 'packages/providers/src/codex/native-rpc.ts',
   'packages/providers/src/app-server/native-session.ts', 'packages/core/src/agent-native-process.ts',
   'packages/core/test/fixtures/codex-queue-rpc.mjs', config, unit, actor, native]
 const sha = value => createHash('sha256').update(value).digest('hex')

@@ -4,11 +4,10 @@ import { isAbsolute } from 'node:path'
 import { idleInputMutations, idleInputOwners } from '../../test/fixtures/a2a-idle-input-proof.mjs'
 
 export const referenceProofSha = bytes => createHash('sha256').update(bytes).digest('hex')
-const coreSource = 'packages/core/src/'
-/** Loaded records name repository files; the shared mutation table names Core source files. */
+/** Loaded records and the shared mutation table name the exact repository source. */
 export function nativeMutationTarget(mutation) {
   const file = idleInputMutations[mutation]?.[0]; assert.ok(file, 'Declared native mutation: ' + mutation)
-  return coreSource + file
+  return file
 }
 /** One coherent set of observed compiler conditions; the target alone may be edited. */
 export function nativeSourceConditions(records, targetFile) {

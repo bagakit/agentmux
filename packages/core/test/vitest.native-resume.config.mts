@@ -4,6 +4,9 @@ import { resolve } from 'node:path'
 import type { UserConfig } from 'vitest/config'
 
 const config: UserConfig = { ...base,
+  resolve: { alias: {
+    '@agentmux/providers/codex/input-protocol': resolve(import.meta.dirname, '../../providers/src/codex/input-protocol.ts')
+  } },
   cacheDir: resolve(import.meta.dirname, '../../../.local/state/conversation-native-resume/cache', process.env.AGENTMUX_NATIVE_RESUME_MUTATION ?? 'positive'),
   plugins: [{ name: 'actual-native-resume-source', enforce: 'pre' as const,
     transform(code: string, id: string) { const next = nativeResumeSource(code, id); if (next !== code) return { code: next, map: null } }

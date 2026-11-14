@@ -35,7 +35,7 @@ test('rejects undeclared compilation edits and malformed source conditions', () 
 })
 
 test('binds every loaded declared owner to its current bytes and its one declared mutation', () => {
-  const [file, before, after] = idleInputMutations[mutation], path = 'packages/core/src/' + file
+  const [path, before, after] = idleInputMutations[mutation]
   const source = 'prefix ' + before + ' suffix', edited = source.replace(before, after)
   const record = (name, text, original = text) => ({ file: name, originalSHA256: sha(original), sha256: sha(text), bytes: Buffer.byteLength(text) })
   const red = [{ ...record(path, edited, source), mutation }, record('packages/relay/src/index.ts', 'undeclared dependency')]

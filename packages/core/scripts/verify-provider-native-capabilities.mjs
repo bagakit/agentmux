@@ -14,7 +14,7 @@ export async function verifyProviderNativeCapabilities(scope) {
   const hash = bytes => createHash('sha256').update(bytes).digest('hex')
   const inputs = ['packages/core/src/agent-provider.ts', 'packages/core/src/prompt-submission.ts',
     'packages/core/src/client.ts', 'packages/core/src/agent-native-process.ts', 'packages/core/native/native-socket-peer.c',
-    'packages/core/src/providers/codex-native-input.ts', 'packages/providers/src/codex/native-queue.ts',
+    'packages/core/src/providers/codex-native-input.ts', 'packages/providers/src/codex/input-protocol.ts', 'packages/providers/src/codex/native-queue.ts',
     ...scopes[scope], config, 'packages/core/scripts/verify-provider-native-capabilities.mjs']
   // These subprocess fixtures are actual proof inputs, outside Vite's loaded graph.
   if (scope === 'resume') inputs.push('packages/core/scripts/verify-codex-resume-invocation.mjs',
