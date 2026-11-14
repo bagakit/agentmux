@@ -2603,6 +2603,11 @@ export class AgentMuxRpcService {
       return await caller.client.forwardRpc(method, params, context)
     }
     let result: unknown
+    if (method === 'space.mote.preferences.save' && p.kind === 'quick' && p.action !== undefined &&
+        (caller || context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
+          typeof context.principal.id !== 'string' || !context.principal.id.trim())) {
+      throw new AgentMuxError('Adopting Mote guidance requires its original authenticated person or device. The original arrangement and input remain available.', 'CONTROL_PERMISSION_DENIED')
+    }
     const preferences = p.kind === 'quick' ? this.ports.moteQuickPreferences : this.ports.motePreferences
     if (preferences && (p.kind === 'quick' || p.kind === 'connection') &&
         (method === 'space.mote.preferences.read' || method === 'space.mote.preferences.save')) {
@@ -2625,7 +2630,7 @@ export class AgentMuxRpcService {
       const result = input.kind === 'quick' ? await this.ports.moteQuickPreferences!.save(input, administration) : await this.ports.motePreferences!.save(input, administration)
       await administration.assertCurrent()
       const parsed = parseMotePreferencesSaveResult(result,input)
-      if (input.kind === 'quick' && parsed.kind === 'quick') {
+      if (input.kind === 'quick' && parsed.kind === 'quick' && !input.action) {
         // Only this original writer result enters the admission; no public receipt-submission API.
         try { await this.spatial.recordMoteMainBindingResult(input,parsed) }
         catch (error) { return { ...parsed, message:[parsed.message,'The original preference result is retained; Main admission retention is unconfirmed: ' + String(error)].filter(Boolean).join('\n') } as AgentMuxRpcResult<M> }

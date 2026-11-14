@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util'
+import { parseContinuousProgressDefinitionReference, parseContinuousProgressDefinition, parseContinuousProgressGuidanceAdoption, parseContinuousProgressGuidanceAdoptions, type ContinuousProgressDefinitionReference, type ContinuousProgressDefinition, type ContinuousProgressGuidanceAdoption } from '../continuous-progress-definition.js'
 import { sameConnectionApplication } from '../connections-contract.js'
 import { parseConnectionApplication } from '../room-binding-codec.js'
 import { deriveObjectId } from '../object-id.js'
@@ -31,7 +33,10 @@ export function moteMinutesToMs(value: string, options: { wholeMinutes?: boolean
   return Number.isSafeInteger(ms) && ms > 0 && (!options.wholeMinutes || ms >= 60_000) ? ms : null
 }
 export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; conversationRevision?: string; /** Retained legacy file value; no lifecycle execution effect. */ recovery?: 'startup' | 'on-open'; presence?: MotePresencePreferences; conversationRollover?: MoteMainRolloverPolicy; conversationTransition?: MoteMainTransitionMarker }
-export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('../continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null }
+export type MoteGuidanceReading = { availableRevision: string; currentDefinition: ContinuousProgressDefinitionReference | ContinuousProgressDefinition | null; adoptedRevision: string | null; adoptions: ContinuousProgressGuidanceAdoption[] }
+export type MoteMaintenanceAdoption = ContinuousProgressGuidanceAdoption & { loopId: string }
+export type MoteGuidanceAdoptionAction = { kind: 'adopt-current-guidance'; expectedSchedule: { loopId: string; revision: number }; expectedMain: { roleRevision: string; reference: MoteDefaultConversation }; expectedDefinition: ContinuousProgressDefinitionReference; guidanceRevision: string }
+export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('../continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null; guidance?: MoteGuidanceReading }
 export interface MoteQuickPreferencesPort {
   read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult>
   save(input: MoteQuickPreferencesSaveParams, context?: import('../connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult>
@@ -64,12 +69,12 @@ export type MoteQuickPreferencesReadResult = MoteQuickPreferencesReadInput & {
   choices: MoteQuickChoices; main: boolean | null; issue: string | null; maintenance?: MotePresenceReading
 }
 export type MoteQuickPreferencesSaveInput = MoteQuickPreferencesReadInput & {
-  baseline: MoteQuickBaseline; values: MoteQuickDefaults; destination?: MotePreferencesDestination
+  baseline: MoteQuickBaseline; values: MoteQuickDefaults; destination?: MotePreferencesDestination; action?: MoteGuidanceAdoptionAction
 }
 export type MoteQuickPreferencesSaveParams = MoteQuickPreferencesSaveInput & { operationId: string }
 export type MoteQuickPreferencesSaveResult = MoteQuickPreferencesReadInput & {
   operationId: string; status: 'saved' | 'unchanged' | 'refused-before-write' | 'unconfirmed'
-  source: MoteQuickBaseline | null; message: string | null
+  source: MoteQuickBaseline | null; message: string | null; maintenanceAdoption?: MoteMaintenanceAdoption
 }
 /** A reference in the original Connection service, never another credential owner. */
 export type MoteConnectionRef = { connectionId: string; application: ConnectionApplication }
@@ -130,6 +135,27 @@ export function sameMoteQuickDefaults(a: MoteQuickDefaults, b: MoteQuickDefaults
 export function sameMotePreferencesTarget(a: MotePreferencesTarget, b: MotePreferencesTarget): boolean {
   return a.spaceId === b.spaceId && a.zoneId === b.zoneId && (['hostId', 'workspaceId', 'workspacePath'] as const)
     .every(key => a.expectedResource[key] === b.expectedResource[key])
+}
+export function parseMoteGuidanceAdoptionAction(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MoteGuidanceAdoptionAction {
+  const p = fields(value, ['kind', 'expectedSchedule', 'expectedMain', 'expectedDefinition', 'guidanceRevision'], ['kind', 'expectedSchedule', 'expectedMain', 'expectedDefinition', 'guidanceRevision'], code)
+  const schedule = fields(p.expectedSchedule, ['loopId', 'revision'], ['loopId', 'revision'], code)
+  const main = fields(p.expectedMain, ['roleRevision', 'reference'], ['roleRevision', 'reference'], code)
+  if (p.kind !== 'adopt-current-guidance' || !Number.isSafeInteger(schedule.revision) || Number(schedule.revision) < 1) fail('The original guidance adoption action is invalid.', code)
+  return { kind: 'adopt-current-guidance', expectedSchedule: { loopId: id(schedule.loopId, code), revision: Number(schedule.revision) },
+    expectedMain: { roleRevision: id(main.roleRevision, code), reference: parseMoteDefaultConversation(main.reference, code) },
+    expectedDefinition: parseContinuousProgressDefinitionReference(p.expectedDefinition, code), guidanceRevision: id(p.guidanceRevision, code) }
+}
+export function parseMoteGuidanceReading(value: unknown, code: Code = 'CONTROL_PROTOCOL_ERROR'): MoteGuidanceReading {
+  const p = fields(value, ['availableRevision', 'currentDefinition', 'adoptedRevision', 'adoptions'], ['availableRevision', 'currentDefinition', 'adoptedRevision', 'adoptions'], code)
+  const raw = p.currentDefinition === null ? null : rpcRecord(p.currentDefinition, undefined, code)
+  const currentDefinition = raw === null ? null : Object.hasOwn(raw, 'baseIntentId') || Object.hasOwn(raw, 'guidanceRevision')
+    ? parseContinuousProgressDefinition(raw, code) : parseContinuousProgressDefinitionReference(raw, code)
+  return { availableRevision: id(p.availableRevision, code), currentDefinition, adoptedRevision: p.adoptedRevision === null ? null : id(p.adoptedRevision, code),
+    adoptions: parseContinuousProgressGuidanceAdoptions(p.adoptions, code) }
+}
+export function parseMoteMaintenanceAdoption(value: unknown, code: Code = 'CONTROL_PROTOCOL_ERROR'): MoteMaintenanceAdoption {
+  const { loopId, ...receipt } = rpcRecord(value, undefined, code)
+  return { loopId: id(loopId, code), ...parseContinuousProgressGuidanceAdoption(receipt, code) }
 }
 export function parseMoteConnectionValues(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MoteConnectionValues {
   const p = fields(value, ['connection'], ['connection'], code)
@@ -211,7 +237,7 @@ export function parseMotePreferencesSaveInput(value: MoteQuickPreferencesSaveInp
 export function parseMotePreferencesSaveInput(value: MoteConnectionPreferencesSaveInput, code?: Code): MoteConnectionPreferencesSaveInput
 export function parseMotePreferencesSaveInput(value: unknown, code?: Code): MotePreferencesSaveInput
 export function parseMotePreferencesSaveInput(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MotePreferencesSaveInput {
-  const p = fields(value, ['kind', 'target', 'baseline', 'values', 'destination'], ['kind', 'target', 'baseline', 'values'], code)
+  const p = fields(value, ['kind', 'target', 'baseline', 'values', 'destination', 'action'], ['kind', 'target', 'baseline', 'values'], code)
   const base = parseMotePreferencesReadInput({ kind: p.kind, target: p.target }, code)
   if (base.kind === 'connection') {
     fields(p, ['kind', 'target', 'baseline', 'values'], [], code)
@@ -220,13 +246,15 @@ export function parseMotePreferencesSaveInput(value: unknown, code: Code = 'INVA
   const baseline = parseMoteQuickBaseline(p.baseline, base.target, code), values = parseMoteQuickDefaults(p.values, code)
   const destination = p.destination === undefined ? undefined : parseMotePreferencesDestination(p.destination, code)
   if (!destination && !sameMoteDefaultConversation(baseline.defaults.conversation, values.conversation)) fail('Changing the original Main requires its exact legitimate destination.', code)
-  return { ...base, baseline, values, ...(destination ? { destination } : {}) }
+  const action = p.action === undefined ? undefined : parseMoteGuidanceAdoptionAction(p.action, code)
+  if (action && destination) fail('Guidance adoption does not bind or move the original Mote display.', code)
+  return { ...base, baseline, values, ...(destination ? { destination } : {}), ...(action ? { action } : {}) }
 }
 export function parseMotePreferencesSaveParams(value: MoteQuickPreferencesSaveParams, code?: Code): MoteQuickPreferencesSaveParams
 export function parseMotePreferencesSaveParams(value: MoteConnectionPreferencesSaveParams, code?: Code): MoteConnectionPreferencesSaveParams
 export function parseMotePreferencesSaveParams(value: unknown, code?: Code): MotePreferencesSaveParams
 export function parseMotePreferencesSaveParams(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MotePreferencesSaveParams {
-  const p = fields(value, ['kind', 'target', 'baseline', 'values', 'destination', 'operationId'], ['operationId'], code)
+  const p = fields(value, ['kind', 'target', 'baseline', 'values', 'destination', 'action', 'operationId'], ['operationId'], code)
   const { operationId, ...input } = p
   return { ...parseMotePreferencesSaveInput(input, code), operationId: id(operationId, code) }
 }
@@ -272,9 +300,9 @@ export function parseMotePreferencesReadResult(value: unknown, input?: MotePrefe
   if (p.status === 'unconfirmed' && !p.issue) fail('Unconfirmed Mote preferences require their original reason.', code)
   let maintenance: MotePresenceReading | undefined
   if (p.maintenance !== undefined) {
-    const value = fields(p.maintenance, ['status','schedule','issue'], ['status','schedule','issue'], code)
+    const value = fields(p.maintenance, ['status','schedule','issue','guidance'], ['status','schedule','issue'], code)
     if (!['active','paused','disabled','unbound','unconfirmed'].includes(value.status as string) || value.issue !== null && typeof value.issue !== 'string') fail('Mote maintenance observation is invalid.', code)
-    maintenance = { status: value.status as MotePresenceReading['status'], schedule: value.schedule === null ? null : parseScheduleRecord(value.schedule), issue: value.issue as string | null }
+    maintenance = { status: value.status as MotePresenceReading['status'], schedule: value.schedule === null ? null : parseScheduleRecord(value.schedule), issue: value.issue as string | null, ...(value.guidance === undefined ? {} : { guidance: parseMoteGuidanceReading(value.guidance, code) }) }
   }
   return { kind: 'quick', target: base.target, status: p.status as 'ready' | 'unconfirmed', source, defaults, choices, main: p.main as boolean | null, issue: p.issue as string | null, ...(maintenance ? { maintenance } : {}) }
 }
@@ -292,11 +320,12 @@ export function parseMotePreferencesSaveResult(value: unknown, params: MoteQuick
 export function parseMotePreferencesSaveResult(value: unknown, params: MoteConnectionPreferencesSaveParams): MoteConnectionPreferencesSaveResult
 export function parseMotePreferencesSaveResult(value: unknown, params?: MotePreferencesSaveParams): MotePreferencesSaveResult
 export function parseMotePreferencesSaveResult(value: unknown, params?: MotePreferencesSaveParams): MotePreferencesSaveResult {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = fields(value, ['kind', 'target', 'operationId', 'status', 'source', 'message'], ['kind', 'target', 'operationId', 'status', 'source', 'message'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', p = fields(value, ['kind', 'target', 'operationId', 'status', 'source', 'message', 'maintenanceAdoption'], ['kind', 'target', 'operationId', 'status', 'source', 'message'], code)
   const base = parseMotePreferencesReadInput({ kind: p.kind, target: p.target }, code), operationId = id(p.operationId, code)
   if (params && (operationId !== params.operationId || !sameMotePreferencesTarget(base.target, params.target) || base.kind !== params.kind)) fail('Mote save receipt belongs to another original request.', code)
   if (p.status !== 'saved' && p.status !== 'unchanged' && p.status !== 'refused-before-write' && p.status !== 'unconfirmed' || !(p.message === null || typeof p.message === 'string')) fail('Mote save receipt is invalid.', code)
   if (base.kind === 'connection') {
+    if (p.maintenanceAdoption !== undefined) fail('Connection preferences cannot adopt Mote guidance.', code)
     const source = p.source === null ? null : parseMoteConnectionBaseline(p.source, base.target, code)
     const confirmed = p.status === 'saved' || p.status === 'unchanged'
     if (confirmed && (!source?.document || params?.kind === 'connection' && !sameMoteConnectionValues(source.values, params.values)) ||
@@ -305,6 +334,16 @@ export function parseMotePreferencesSaveResult(value: unknown, params?: MotePref
   }
   const source = p.source === null ? null : parseMoteQuickBaseline(p.source, base.target, code)
   const confirmed = p.status === 'saved' || p.status === 'unchanged'
-  if (confirmed && (!source?.document || params?.kind === 'quick' && !sameMoteQuickDefaults(source.defaults, effectiveMoteQuickSave(params))) || !confirmed && (!p.message || source !== null)) fail('Mote save status lacks its original writer facts.', code)
-  return { ...base, operationId, status: p.status as MotePreferencesSaveResult['status'], source, message: p.message as string | null }
+  if (confirmed && (!source?.document || params?.kind === 'quick' && !sameMoteQuickDefaults(source.defaults, params.action ? params.baseline.defaults : effectiveMoteQuickSave(params))) || !confirmed && (!p.message || source !== null)) fail('Mote save status lacks its original writer facts.', code)
+  const maintenanceAdoption = p.maintenanceAdoption === undefined ? undefined : parseMoteMaintenanceAdoption(p.maintenanceAdoption, code)
+  if (maintenanceAdoption && maintenanceAdoption.operationId !== operationId) fail('Guidance adoption names another original operation.', code)
+  if (maintenanceAdoption && p.status === 'saved') fail('Guidance adoption cannot report a File write.', code)
+  if (params?.kind === 'quick') {
+    const action = params.action
+    if (action && confirmed && !isDeepStrictEqual(source, params.baseline)) fail('Guidance adoption cannot change the original File baseline.', code)
+    if (!action && maintenanceAdoption || action && (p.status === 'saved' || confirmed && !maintenanceAdoption)) fail('Guidance adoption requires its separate original receipt and unchanged File.', code)
+    if (action && maintenanceAdoption && (maintenanceAdoption.loopId !== action.expectedSchedule.loopId || maintenanceAdoption.expectedRevision !== action.expectedSchedule.revision ||
+      maintenanceAdoption.oldDefinition.intentId !== action.expectedDefinition.intentId || maintenanceAdoption.oldDefinition.operationId !== action.expectedDefinition.operationId || maintenanceAdoption.newDefinition.guidanceRevision !== action.guidanceRevision)) fail('Guidance adoption receipt belongs to another original request.', code)
+  }
+  return { ...base, operationId, status: p.status as MotePreferencesSaveResult['status'], source, message: p.message as string | null, ...(maintenanceAdoption ? { maintenanceAdoption } : {}) }
 }

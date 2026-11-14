@@ -1,3 +1,5 @@
+export * from './continuous-progress-definition.js'
+import type { ContinuousProgressDefinition, ContinuousProgressGuidanceAdoption } from './continuous-progress-definition.js'
 import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
@@ -50,6 +52,8 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   /** Initial input is saved in this same loop before the original input queue may send. */
   initialDelivery?: { operationId: string; prompt: string; condition: AgentPromptCondition; state: 'prepared' | 'unknown' | 'confirmed'; startedAt: number }
   futureIntentId?: string
+  currentDefinition?: ContinuousProgressDefinition
+  guidanceAdoptions?: ContinuousProgressGuidanceAdoption[]
   lastOccurrenceAt?: number
   intervalMs: number
   prompt: string

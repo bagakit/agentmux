@@ -666,7 +666,7 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   } else if (operation === 'space.mote.preferences.read') {
     result = { operation, ...parseMotePreferencesReadResult(source.result) }
   } else if (operation === 'space.mote.preferences.save') {
-    const body = fields(source.result, ['kind', 'target', 'requestId', 'status', 'source', 'message'], code)
+    const body = fields(source.result, ['kind', 'target', 'requestId', 'status', 'source', 'message', 'maintenanceAdoption'], code)
     if (body.requestId !== requestId) fail('Mote preferences receipt Request ID is mismatched.', code)
     const { requestId: _request, ...publicBody } = body
     const { operationId: _id, ...parsed } = parseMotePreferencesSaveResult({ ...publicBody, operationId: requestId })

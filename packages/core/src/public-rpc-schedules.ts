@@ -1,3 +1,4 @@
+import { parseContinuousProgressDefinition, parseContinuousProgressGuidanceAdoptions } from './continuous-progress-definition.js'
 import { parseAutomaticInputSource, sameAutomaticInputSource, type AutomaticInputSource } from './automatic-input-source.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -74,8 +75,10 @@ export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, valu
 }
 export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource'], code)
+  const p = rpcRecord(value, ['loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','currentDefinition','guidanceAdoptions'], code)
   if (p.managedSource !== undefined) parseAutomaticInputSource(p.managedSource)
+  if (p.currentDefinition !== undefined) parseContinuousProgressDefinition(p.currentDefinition)
+  if (p.guidanceAdoptions !== undefined) parseContinuousProgressGuidanceAdoptions(p.guidanceAdoptions)
   parseScheduleTarget({ hostId: p.hostId, agentSessionId: p.agentSessionId, providerId: p.providerId, workspacePath: p.workspacePath }, code)
   string(p.loopId, code); string(p.prompt, code, 64 * 1024); integer(p.intervalMs, code, 1); integer(p.nextCheckAt, code)
   if (!['active','paused','stopped'].includes(p.status as string)) invalid('Schedule state is invalid.', code)
@@ -151,7 +154,7 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
             ['hostId','agentSessionId','providerId','workspacePath'].some(key => schedule[key as keyof ContinuousProgressTarget] !== request.target[key as keyof ContinuousProgressTarget])) invalid('Schedule receipt belongs to different intent or target.', code)
       } else if (method === 'schedule.inspect') {
         const request = params as ScheduleParamsMap['schedule.inspect']
-        if (request.scheduleId ? schedule.loopId !== request.scheduleId : ![schedule.creationOperationId, schedule.lastMutation?.operationId, schedule.pendingCompletion?.operationId, schedule.lastTickId].includes(request.operationId)) invalid('Schedule inspection returned another identity.', code)
+        if (request.scheduleId ? schedule.loopId !== request.scheduleId : ![schedule.creationOperationId, schedule.lastMutation?.operationId, schedule.pendingCompletion?.operationId, schedule.lastTickId].includes(request.operationId) && !schedule.guidanceAdoptions?.some(receipt => receipt.operationId === request.operationId)) invalid('Schedule inspection returned another identity.', code)
       } else {
         const request = params as ScheduleMutation
         if (schedule.loopId !== request.scheduleId || schedule.revision !== request.expectedRevision + 1 || schedule.lastMutation?.operationId !== request.operationId || schedule.lastMutation.action !== method.slice('schedule.'.length)) invalid('Schedule mutation receipt does not match its original request.', code)
