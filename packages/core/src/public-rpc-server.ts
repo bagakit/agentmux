@@ -300,9 +300,14 @@ export class AgentMuxControlServer {
         if (!forwarded || request.method !== 'system.subscription.cancel') throw new AgentMuxError('A forwarding grant authorizes only its exact original request.', 'CONTROL_PERMISSION_DENIED')
       }
       const owner = forwarded ?? channel
-      const request = Array.isArray(incoming) ? undefined : parseRpcRequest(incoming)
-      const openingId = request && Object.hasOwn(request, 'id') && request.id !== null && isAgentMuxRpcMethod(request.method) &&
-        !isAgentMuxRpcStream(request.method, rpcRecord(request.params ?? {})) ? request.id : undefined
+      let openingId: string | number | undefined
+      try {
+        const request = Array.isArray(incoming) ? undefined : parseRpcRequest(incoming)
+        if (request && Object.hasOwn(request, 'id') && request.id !== null && isAgentMuxRpcMethod(request.method) &&
+          !isAgentMuxRpcStream(request.method, rpcRecord(request.params ?? {}))) openingId = request.id
+      } catch {
+        // The dispatcher below owns malformed-frame validation and its original numeric error mapping.
+      }
       const openingController = openingId === undefined ? undefined : new AbortController()
       if (openingId !== undefined) openingControllers.set(openingId, openingController!)
       const context = { ...owner.context, afterResponse: [] as Array<() => void | Promise<void>>,
