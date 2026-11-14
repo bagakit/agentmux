@@ -443,11 +443,13 @@ it('keeps check and cancel outside collapsed complete technical details, while c
   expect(current().cancellation).toBeUndefined(); expect(inputCalls).toEqual([])
 })
 
-it('an unavailable original owner shows a retryable first-level cancellation result and retains its complete cause in details', async () => {
+it('an unavailable original owner identifies the failed preparation across Check and can retry the exact request', async () => {
+  const owner = vi.mocked(api.spatial.owner).getMockImplementation()!
   vi.mocked(api.spatial.owner).mockRejectedValue(Error('Original spatial owner cannot be located'))
   const before = useAppStore.getState()
   await render(); await press('取消接手')
-  await vi.waitFor(() => expect(dom.container.textContent).toContain('取消未提交，可重试或查看详情'))
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-text="取消未提交"]')).not.toBeNull())
+  expect(dom.container.textContent).toContain('未能确认原工作区。')
   expect(buttons('重试取消')).toHaveLength(1)
   expect(buttons('检查结果')).toHaveLength(1)
   expect(inputCalls).toEqual([])
@@ -455,6 +457,17 @@ it('an unavailable original owner shows a retryable first-level cancellation res
   const popup = await openDetails()
   expect(popup.textContent).toContain('Original spatial owner cannot be located')
   expect(popup.textContent).toContain(originalFailure)
+  await press('关闭操作详情')
+  await press('检查结果')
+  await vi.waitFor(() => expect(buttons('检查结果')[0]!.disabled).toBe(false))
+  expect(dom.container.textContent).toContain('未能确认原工作区。')
+  expect(buttons('重试取消')).toHaveLength(1)
+  expect(inputCalls).toEqual([])
+  vi.mocked(api.spatial.owner).mockImplementation(owner)
+  await press('重试取消')
+  await vi.waitFor(() => expect(current().phase).toBe('cancelled'))
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel'])
+  expect(inputCalls[0]!.input.request).toEqual(operation.takeoverSource.coreRequest)
   preserved(before)
 })
 
@@ -479,14 +492,32 @@ it('a waiting original Check leaves direct cancellation usable and cannot overwr
   expect(vi.mocked(api.spatial.inspectOperation)).not.toHaveBeenCalled()
 })
 
-it('a legacy record without the complete request keeps Check and explains its missing cancellation target before details', async () => {
+it('a legacy record opens and folds its exact read-only reference without a business Cancel action', async () => {
   operation = { ...operation, takeoverSource: { ...operation.takeoverSource, coreRequest: undefined } }
   useAppStore.setState({ agentOperations: { [agentOperationKey(operation)]: operation } })
+  const before = useAppStore.getState()
+  const inspect = vi.spyOn(before, 'executeControl')
   await render()
-  expect(dom.container.textContent).toContain('缺少原请求，只能检查')
+  expect(buttons('查看原接手记录')).toHaveLength(1)
+  expect(buttons('检查结果')).toHaveLength(0)
+  expect(buttons('取消接手')).toHaveLength(0)
+  const popup = await openDetails()
+  expect(popup.textContent).toContain('旧记录缺少完整请求')
+  expect(popup.querySelector('code')?.textContent).toBe(operation.operationId)
   expect(buttons('检查结果')).toHaveLength(1)
   expect(buttons('取消接手')).toHaveLength(0)
+  await press('检查结果')
+  await vi.waitFor(() => expect(buttons('检查结果')[0]!.disabled).toBe(false))
+  expect(inspect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operation: 'space.inspect', target: { requestId: operation.operationId } }))
+  await press('关闭操作详情')
+  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
+  expect(buttons('查看原接手记录')).toHaveLength(1)
+  const reopened = await openDetails()
+  expect(reopened.querySelector('code')?.textContent).toBe(operation.operationId)
+  expect(current().takeoverSource).toEqual(operation.takeoverSource)
+  expect(current().cancellation).toBeUndefined()
   expect(inputCalls).toEqual([])
+  preserved(before)
 })
 
 it('two actual feedback projections share one cancellation while preserving the original draft focus', async () => {

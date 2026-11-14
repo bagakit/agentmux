@@ -4,6 +4,7 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  const facts=()=>read('window.takeoverFeedbackProof.facts()')
  const card='.focus-context[data-session-id="working"]'
  const area='.focus-context-card:has('+card+') > .agent-operation-feedback:not(.agent-operation-feedback--compact)'
+ const legacyArea='.focus-context-card:has(.focus-context[data-session-id="reading"]) > .agent-operation-feedback:not(.agent-operation-feedback--compact)'
  const popup='.agent-operation-feedback__popover'
  const press=async(text,scope=area)=>{
   await read(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)}||e.getAttribute('aria-label')===${JSON.stringify(text)});if(!e)throw Error('Missing actual button '+${JSON.stringify(text)});document.querySelector('[data-feedback-click]')?.removeAttribute('data-feedback-click');e.dataset.feedbackClick='true'})()`)
@@ -34,7 +35,7 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
   win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle()
   assert.equal(await read('!!document.querySelector(".agent-operation-feedback__popover")'),false)
   const before=await cardHeights()
-  await frame('unconfirmed-'+w+'-'+theme,'Two actual adjacent Focus cards keep compact Check and Cancel actions on their first level')
+  await frame('unconfirmed-'+w+'-'+theme,'Actionable takeover and compact read-only neighbor on their original Focus cards')
   await details();await settle()
   const after=await cardHeights();assert.deepEqual(after,before,'Opening the operation popover cannot expand either adjacent card')
   result.cardDensity??=[];result.cardDensity.push({width:w,theme,before,after,unchanged:true})
@@ -42,7 +43,21 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
   await closeDetails()
  }
  win.setContentSize(1440,900);await read('window.unifiedFocusProof.theme("dark")');await settle()
+ await press('查看原接手记录',legacyArea)
+ await until('actual read-only operation details',()=>read('document.querySelector(".agent-operation-feedback__popover")?.textContent.includes("旧记录缺少完整请求")'))
+ await frame('legacy-record-normal-dark','Original legacy record remains readable and can be folded again')
+ await closeDetails()
+ await read('window.takeoverFeedbackProof.failOwnerRead(true)')
  await press('取消接手')
+ await until('first-level cancellation preparation failure',()=>read('document.querySelector('+JSON.stringify(area)+')?.textContent.includes("未能确认原工作区。")'))
+ assert.equal((await facts()).calls.length,0,'Failed preparation does not dispatch a cancellation')
+ for(const[w,h,theme]of samples){
+  win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle()
+  await frame('not-submitted-'+w+'-'+theme,'Preparation failure names the failed step with the original retry available')
+ }
+ win.setContentSize(1440,900);await read('window.unifiedFocusProof.theme("dark")');await settle()
+ await read('window.takeoverFeedbackProof.failOwnerRead(false)')
+ await press('重试取消')
  await until('exact pending cancellation reaches original owner leaf',()=>read('window.takeoverFeedbackProof.calls.some(c=>c.method==="cancel")'))
  await frame('pending-normal','Pending original cancellation preserves original Agent and draft')
  const pending=await facts();assert.notEqual(pending.operation.cancellation.input.operationId,pending.operation.operationId)

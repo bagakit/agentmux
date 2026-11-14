@@ -14,13 +14,15 @@ const mutations: Record<string, [string, string, string]> = {
   'restored-cancellation-reset': ['agent-operation.ts', "phase: result?.outcome === 'cancelled' ? 'cancelled' : 'unconfirmed'", "phase: 'unconfirmed'"],
   'discard-original-message': ['session-takeover-cancellation.ts', '...held, cancellation: next,', '...held, message: undefined, cancellation: next,'],
   'weaker-observation-wins': ['session-takeover-cancellation.ts', "const weaker = known && known.outcome !== 'unconfirmed' &&", "const weaker = false && known && known.outcome !== 'unconfirmed' &&"],
-  'source-runtime-used': ['session-takeover-cancellation.ts', 'operation.takeoverSource.coreRuntimeId ?? (await api.spatial.owner()).owner.runtimeId', 'operation.takeoverSource.expectedRuntimeId ?? (await api.spatial.owner()).owner.runtimeId'],
+  'source-runtime-used': ['session-takeover-cancellation.ts', 'operation.takeoverSource.coreRuntimeId ?? await api.spatial.owner()', 'operation.takeoverSource.expectedRuntimeId ?? await api.spatial.owner()'],
   'checkpoint-blocks-owner': ['session-takeover-cancellation.ts', 'retain(held, pending)\n  try {', 'retain(held, pending)\n  await checkpointAgentOperations()\n  try {'],
   'random-recovery-control': ['session-takeover-cancellation.ts', 'new TextEncoder().encode(request.operationId)', 'new TextEncoder().encode(crypto.randomUUID())'],
   'cancel-recovery-skipped': ['agent-operation-feedback.ts', 'if (await recoverTakeoverCancellation(started) || !stillCurrent()) return', 'if (!stillCurrent()) return'],
   'observed-unknown-forgotten': ['session-takeover-cancellation.ts', "if (result.cancellationAdmission !== 'observed' && result.outcome === 'unconfirmed') return false", "if (result.outcome === 'unconfirmed') return false"],
   'check-blocks-cancel': ['AgentOperationFeedback.tsx', 'disabled={preparingCancel || cancellation?.pending}', 'disabled={checking || preparingCancel || cancellation?.pending}'],
-  'owner-failure-hidden': ['AgentOperationFeedback.tsx', '取消未提交，可重试或查看详情', ''],
+  'owner-failure-hidden': ['AgentOperationFeedback.tsx', '未能确认原工作区。', '未能准备取消请求。'],
+  'check-erases-owner-failure': ['AgentOperationFeedback.tsx', 'function check() {\n    setChecking(true)', 'function check() {\n    setCancelIssue(null)\n    setChecking(true)'],
+  'legacy-record-clutters-card': ['AgentOperationFeedback.tsx', 'Boolean(takeover && !hasRequest && !cancellation &&', 'Boolean(false && takeover && !hasRequest && !cancellation &&'],
   'inspection-renames': ['session-takeover.ts', 'return takeoverReport(result.request.report)', 'return nameTakeover(source, takeoverReport(result.request.report))'],
   'continuation-replaces-control': ['session-takeover-cancellation.ts', 'const cancellation: TakeoverCancellation = held.cancellation ??', 'const cancellation: TakeoverCancellation =']
 }
