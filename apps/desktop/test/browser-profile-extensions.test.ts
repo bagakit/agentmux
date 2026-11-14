@@ -5,8 +5,9 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, readdir, rename } fro
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { zipSync, strToU8 } from 'fflate'
-import { writeFileSync } from 'node:fs'
-const sourceRace = vi.hoisted(() => ({ swap: undefined as undefined | (() => void) }))
+import { writeFileSync, renameSync, symlinkSync } from 'node:fs'
+const sourceRace = vi.hoisted(() => ({ swap: undefined as undefined | (() => void), beforeCopy: undefined as undefined | (() => void), failDirectory: undefined as string | undefined }))
+vi.mock('node:fs/promises', async original => { const fs = await original<typeof import('node:fs/promises')>(); const before = (target: unknown) => { if (String(target).endsWith('.package-snapshot') && sourceRace.beforeCopy) { const swap = sourceRace.beforeCopy; sourceRace.beforeCopy = undefined; swap() } }; return { ...fs, open: async (...args: Parameters<typeof fs.open>) => { const handle = await fs.open(...args); if (String(args[0]) === sourceRace.failDirectory) { handle.sync = async () => { sourceRace.failDirectory = undefined; throw Error('Private directory fsync acknowledgement lost') } } return handle }, copyFile: async (...args: Parameters<typeof fs.copyFile>) => { before(args[1]); return fs.copyFile(...args) }, cp: async (...args: Parameters<typeof fs.cp>) => { before(args[1]); return fs.cp(...args) } } })
 vi.mock('node:fs', async original => { const fs = await original<typeof import('node:fs')>(); return { ...fs, createReadStream: (...args: Parameters<typeof fs.createReadStream>) => { const stream = fs.createReadStream(...args); if (sourceRace.swap) { const swap = sourceRace.swap; sourceRace.swap = undefined; stream.once('end', swap) } return stream } } })
 vi.mock('electron', () => ({ app: { getLocale: () => 'en-US' }, BrowserWindow: class {}, session: { fromPartition: () => { throw Error('No implicit Session') } }, webContents: { getAllWebContents: () => [] } }))
 import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
@@ -18,7 +19,7 @@ import { privateRpcCorePort } from '../../../packages/core/test/helpers/private-
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { executeBrowserProfileControl } from '../src/main/browser-profile-control.js'
 const roots: string[] = []
-afterEach(async () => { vi.restoreAllMocks(); sourceRace.swap = undefined; await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+afterEach(async () => { vi.restoreAllMocks(); sourceRace.swap = undefined; sourceRace.beforeCopy = undefined; sourceRace.failDirectory = undefined; await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 const identity = generateKeyPairSync('rsa', { modulusLength: 2048 }), key = identity.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-profile-extensions-')); roots.push(root)
@@ -229,6 +230,14 @@ describe('Profile extensions share the original configuration and native Session
       expect(f.loadedCalls).toEqual([])
     }
   })
+  it('requires original metadata directory durability before dispatch and keeps a missing acknowledgement pending', async () => {
+    const f = await fixture(), review = await f.prepare(await f.source())
+    sourceRace.failDirectory = f.root
+    await expect(f.manager.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED' })
+    expect(sourceRace.failDirectory).toBeUndefined(); expect(f.loadedCalls).toEqual([])
+    expect((await f.manager.extensions.list(f.profile.id, review.reviewId)).pending).toMatchObject([{ operationId: review.reviewId, sha256: review.sha256 }])
+    expect(f.manager.listProfiles().some(profile => profile.id === f.other.id)).toBe(true)
+  })
   it('keeps local source names and owned filesystem errors inside the trusted Main confirmation boundary', async () => {
     const f = await fixture(), original = await f.source(), sensitive = join(f.root, 'customer-private-token-FILENAME_SECRET')
     await rename(original, sensitive)
@@ -249,7 +258,7 @@ describe('Profile extensions share the original configuration and native Session
     expect(staged).toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_SOURCE_UNAVAILABLE' }); expect(staged.message).not.toContain(f.root)
     expect(f.loadedCalls).toHaveLength(1)
   })
-  it.each([2, 3])('verifies and extracts the same owned CRX%s snapshot when the original source changes between reads', async version => {
+  it.each([[2, false], [3, false], [2, true], [3, true]] as const)('verifies and extracts one owned CRX%s snapshot when source changes between reads (lstat-to-copy symlink=%s)', async (version, symlinkRace) => {
     const f = await fixture(), source = await f.source(), files = { 'manifest.json': await readFile(join(source, 'manifest.json')), 'content.js': Buffer.from('approved original code') }
     const zip = Buffer.from(zipSync(files)), replacement = Buffer.from(zipSync({ ...files, 'content.js': Buffer.from('unsigned replacement code') }))
     const publicKey = Buffer.from(key, 'base64'); let prefix: Buffer
@@ -262,9 +271,11 @@ describe('Profile extensions share the original configuration and native Session
       const proof = Buffer.concat([field(2, Buffer.concat([field(1, publicKey), field(2, signature)])), field(10000, signed)]), header = Buffer.alloc(12); header.write('Cr24'); header.writeUInt32LE(3, 4); header.writeUInt32LE(proof.length, 8); prefix = Buffer.concat([header, proof])
     }
     const path = join(f.root, 'sensitive-SNAPSHOT_SECRET.crx'); await writeFile(path, Buffer.concat([prefix, zip]))
-    sourceRace.swap = () => writeFileSync(path, Buffer.concat([prefix, replacement]))
+    const original = path + '.original'
+    if (symlinkRace) sourceRace.beforeCopy = () => { renameSync(path, original); symlinkSync(original, path) }
+    sourceRace.swap = () => writeFileSync(symlinkRace ? original : path, Buffer.concat([prefix, replacement]))
     const review = await f.prepare(path)
-    expect(sourceRace.swap).toBeUndefined(); expect(review.source).toMatchObject({ signature: 'package-verified', label: 'CRX package' }); expect(JSON.stringify(review)).not.toContain('SNAPSHOT_SECRET')
+    expect(sourceRace.swap).toBeUndefined(); expect(sourceRace.beforeCopy).toBeUndefined(); expect(review.source).toMatchObject({ signature: 'package-verified', label: 'CRX package' }); expect(JSON.stringify(review)).not.toContain('SNAPSHOT_SECRET')
     await f.manager.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)
     expect(await readFile(join(f.loadedCalls[0]!.path, 'content.js'), 'utf8')).toBe('approved original code')
     expect(f.loadedCalls).toHaveLength(1)
