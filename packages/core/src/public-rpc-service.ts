@@ -116,9 +116,9 @@ import { parseAgentMuxSearchInput } from './search-codec.js'
 import { isConnectionMethod, parseConnectionParams, parseConnectionResult } from './connections-codec.js'
 import type { ConnectionMethod, ConnectionPort } from './connections-contract.js'
 import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationRpcResult, type GoalDelegationsOwner } from './goal-delegation.js'
-import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult, type AgentMuxRpcMoteAvatarsOwner, type MoteAvatarWriteMethod } from './mote-avatar-write.js'
+import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult, type AgentMuxRpcMoteAvatarsOwner, type MoteAvatarWriteMethod } from './mote/avatar-write.js'
 import { parseAppearanceObservation, type AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
-import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult, type MoteAvatarSeriesMethod } from './mote-avatar-series.js'
+import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult, type MoteAvatarSeriesMethod } from './mote/avatar-series.js'
 import { DiagnosticEvidenceQuery } from '@agentmux/diagnostic-evidence'
 import { parseDiagnosticEvidenceParams, parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
 import { inspectDiagnosticEvidence } from './diagnostic-evidence-service.js'
@@ -2391,9 +2391,9 @@ export class AgentMuxRpcService {
       // This public reader identity comes from the authenticated call, never the receipt
       // or an internal historical read. It cannot attribute an old actorless publication.
       const readerIdentity = execution ? avatarActorIdentity(execution.actor) : undefined
-      const { readerIdentity: _untrustedReader, ...historical } = result as import('./mote-avatar-write.js').MoteAvatarRead
+      const { readerIdentity: _untrustedReader, ...historical } = result as import('./mote/avatar-write.js').MoteAvatarRead
       const projected = method === 'space.mote.avatar.read' ? { ...historical, ...(readerIdentity ? { readerIdentity } : {}) }
-        : { ...result, current: { ...(result as import('./mote-avatar-write.js').MoteAvatarSaveResult).current, readerIdentity } }
+        : { ...result, current: { ...(result as import('./mote/avatar-write.js').MoteAvatarSaveResult).current, readerIdentity } }
       return parseMoteAvatarWriteResult(method, projected, input) as AgentMuxRpcResult<M>
     }
     if (isMoteAvatarSeriesMethod(method)) {

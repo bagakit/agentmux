@@ -1,9 +1,9 @@
-import { avatarSavedReceiptMatches, parseAvatarActorIdentity, type AvatarActorIdentity, parseAvatarPublicationOperation, type AvatarExecutionContext, type AvatarPublicationOperation } from './object-avatar.js'
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
+import { avatarSavedReceiptMatches, parseAvatarActorIdentity, type AvatarActorIdentity, parseAvatarPublicationOperation, type AvatarExecutionContext, type AvatarPublicationOperation } from '../object-avatar.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
 import { parseMoteAvatarSeriesDefinition, parseMoteAvatarSeriesLocator, parseMoteAvatarSeriesParameters,
   isMoteAvatarSeriesChoice, type MoteAvatarSeriesChoice, type MoteAvatarSeriesDefinition, type MoteAvatarSeriesParameters, type MoteAvatarSeriesSource,
-  type MoteAvatarSeriesMethod, type MoteAvatarSeriesParameterMap, type MoteAvatarSeriesResultMap } from './mote-avatar-series.js'
+  type MoteAvatarSeriesMethod, type MoteAvatarSeriesParameterMap, type MoteAvatarSeriesResultMap } from './avatar-series.js'
 
 /** Exact original content identity. Presentation/focus never supplies authority. */
 export type MoteAvatarTarget = { workspaceId: string; topicId: string; objectKey: string }

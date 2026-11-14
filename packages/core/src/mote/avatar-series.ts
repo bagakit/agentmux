@@ -1,6 +1,6 @@
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
-import { isMoteFace, type MoteFace } from './mote-face.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
+import { isMoteFace, type MoteFace } from './face.js'
 
 /** Data sources and native artwork capabilities; no Agent or Runtime authority. */
 export type MoteAvatarSeriesLocator = { origin: 'builtin' | 'user'; seriesId: string; entryId: string }

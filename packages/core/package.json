@@ -355,16 +355,16 @@
       "import": "./dist/client-incident.js"
     },
     "./mote-face": {
-      "types": "./dist/mote-face.d.ts",
-      "import": "./dist/mote-face.js"
+      "types": "./dist/mote/face.d.ts",
+      "import": "./dist/mote/face.js"
     },
     "./mote-avatar-series": {
-      "types": "./dist/mote-avatar-series.d.ts",
-      "import": "./dist/mote-avatar-series.js"
+      "types": "./dist/mote/avatar-series.d.ts",
+      "import": "./dist/mote/avatar-series.js"
     },
     "./mote-avatar-write": {
-      "types": "./dist/mote-avatar-write.d.ts",
-      "import": "./dist/mote-avatar-write.js"
+      "types": "./dist/mote/avatar-write.d.ts",
+      "import": "./dist/mote/avatar-write.js"
     },
     "./goal-delegation": {
       "types": "./dist/goal-delegation.d.ts",

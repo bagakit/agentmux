@@ -2,7 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { avatarSeriesCanonical } from './mote-avatar-series.js'
+import { avatarSeriesCanonical } from './mote/avatar-series.js'
 
 /** Portable image contract; paths and object authority remain with the original Host. */
 export const AVATAR_INPUT_MAX_BYTES = 8 * 1024 * 1024
