@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { currentWorkspaceAliases } from './workspace-aliases.mjs'
 import { listProbeProcesses, signalOwnedProbeProcess, runProbeProcess } from '../../probe-process.mjs'
@@ -55,6 +55,11 @@ export async function runNative(requestedEvidence, options = {}) {
     await symlink(join(core, 'node_modules'), join(privateRoot, 'node_modules'))
     const { build: nodeBuild } = await import(coreRequire.resolve('esbuild'))
     const spatialModule = join(privateRoot, 'spatial-store.mjs')
+    const identityManifest = JSON.parse(await readFile(join(repo, 'packages/identity/package.json'), 'utf8'))
+    const generatedIdentity = await realpath(resolve(repo, 'packages/identity', identityManifest.exports['./runtime-source'].import))
+    sourceBefore[relative(repo, generatedIdentity)] = hash(await readFile(generatedIdentity))
+    receipt.generatedIdentitySource = { file: relative(repo, generatedIdentity), sha256: sourceBefore[relative(repo, generatedIdentity)],
+      qualification: 'Existing generated-only identity source-text artifact, resolved from its current public package export; not rebuilt or replaced by this fixture.' }
     const workspace = await currentWorkspaceAliases(repo)
     for (const path of workspace.manifests) sourceBefore[path.slice(repo.length + 1)] = hash(await readFile(path))
     const workspaceCode = path => workspace.directories.some(directory => path.startsWith(directory + '/')) || path.startsWith(desktop + '/')
@@ -65,7 +70,11 @@ export async function runNative(requestedEvidence, options = {}) {
       return actual
     }
     const spatialBuild = await nodeBuild({ absWorkingDir: repo, entryPoints: [join(core, 'src/spatial-state.ts')], outfile: spatialModule,
-      platform: 'node', format: 'esm', bundle: true, packages: 'external', alias: { '@agentmux/identity': join(repo, 'packages/identity/src/index.ts') }, metafile: true, logLevel: 'silent' })
+      platform: 'node', format: 'esm', bundle: true, packages: 'external',
+      plugins: [{ name: 'original-identity-source', setup(builder) {
+        builder.onResolve({ filter: /^@agentmux\/identity(?:\/runtime-source)?$/ }, ({ path }) => path === '@agentmux/identity'
+          ? { path: join(repo, 'packages/identity/src/index.ts') } : { path: generatedIdentity, external: true })
+      } }], metafile: true, logLevel: 'silent' })
     receipt.coreSpatialInputs = Object.fromEntries(await Promise.all(Object.keys(spatialBuild.metafile.inputs).map(async path => { await assertOwnWorkspace(resolve(repo, path)); return [path, hash(await readFile(resolve(repo, path)))] })))
     receipt.coreSpatialModuleSha256 = hash(await readFile(spatialModule))
     const { build } = await import(require.resolve('vite'))
