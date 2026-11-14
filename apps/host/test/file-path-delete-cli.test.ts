@@ -382,7 +382,9 @@ it('the original byte-reader rejects a substituted private claim before retainin
     if (options.expectedWitness) {
       claimed = join(workspace.path, path)
       await rename(claimed, claimed + '.original')
-      await writeFile(claimed, body.replace('Original body', 'Decoy body'))
+      // Keep the byte length identical: size validation cannot stand in for the
+      // original FD generation check when another inode occupies its claim.
+      await writeFile(claimed, body.replace('Original body', 'Imposter body'))
     }
     return actual.call(this, workspace, path, options)
   })
@@ -390,7 +392,7 @@ it('the original byte-reader rejects a substituted private claim before retainin
   expect(reply.code, reply.stdout + reply.stderr).toBe(0)
   expect(reply.body.result.result).toMatchObject({ filesystem: 'unknown', phase: 'claimed' })
   expect(await readFile(claimed + '.original', 'utf8')).toBe(body)
-  expect(await readFile(claimed, 'utf8')).toContain('Decoy body')
+  expect(await readFile(claimed, 'utf8')).toContain('Imposter body')
   const resource = { hostId: 'local', workspaceId: f.workspace.id, workspacePath: f.root, path: input.path }
   expect((await notes.readHistory({ noteId: 'fd-original', resource })).entries).toHaveLength(0)
   facts.push({ case: 'private-claim-replacement', receipt: reply.body.result.result, originalAndDecoyRetained: true })
