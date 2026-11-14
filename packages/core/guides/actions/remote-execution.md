@@ -60,10 +60,13 @@ a Host does not require a project.
 In the global setup, choose a mode, the working folder and the Agent device. The working folder is where
 this task's files and commands live. Use an exact saved folder, or choose The device
 home and its device; preparation reads that device's confirmed home and registers
-the original folder. A generic Agent does not need a business project first. For separate execution,
-the Agent startup directory defaults to that Host's confirmed home and may be another
-registered directory there; it does not need a project copy. Register another missing
-folder through its original Host entry rather than guessing a same-named local path.
+the original folder. A generic Agent does not need a business project first. For separate execution
+without an explicitly chosen execution project, the current default startup directory is the
+device home. A selected locator read is available for an exact Agent Session, but it does not
+prepare a directory, grant access or change that launch default. Existing Sessions and frozen
+requests keep their original directory. Native user profiles, managed policy and explicitly
+selected project rules remain in force. Register a missing folder through its original Host entry
+rather than guessing a same-named local path.
 
 Review the Agent and Project ends, then Apply arrangement in the Launcher or Open in
 Launcher from Settings. This only prepares the original target. Choose an Agent from

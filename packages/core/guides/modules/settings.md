@@ -82,6 +82,13 @@ not a remote home source. This read does not start Native, scan Sessions or regi
 project. An unavailable Host remains unavailable; keep its original work and retry the
 same read when its connection returns. Do not substitute the caller's home.
 
+Add --session SID to the same home read to also return agentWorkspace with the exact
+runtimeId, agentSessionId and workspacePath chosen by the executing Core. The no-argument
+result is unchanged. This locator is only a stable per-Session address: it does not prove
+that the directory exists, is owned, is trusted, may be created or may start a Session.
+Unsupported targets and wrong Session/Runtime replies fail the selected read; never fall
+back to the home directory as a substitute locator.
+
 In Desktop, the person opens a device's home workface from its device name in Space,
 without a manual project setup step; an existing registered home directory reuses its
 original workface. Opening does not start an Agent or change another Session's cwd.
