@@ -274,9 +274,10 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   function buildEntries(): NotificationProjection {
     const currentEntries: ObservedNotificationEntry[] = []
     const historyEntries: ObservedNotificationEntry[] = []
-    const sessionsByIdentity = new Map(sessions.map(session => [JSON.stringify([session.control.hostId, session.id]), session]))
+    const sessionsByIdentity = new Map(sessions.filter(session => session.kind === 'agent')
+      .map(session => [JSON.stringify([session.control.hostId, session.control.agentSessionId]), session]))
     const sessionIdentity = (session: (typeof sessions)[number] | undefined): AgentMuxClientNotificationSubject => session
-      ? { kind: session.kind, hostId: session.control.hostId, ...(session.kind === 'agent' ? { agentSessionId: session.id } : {}), runId: session.control.run.runId }
+      ? { kind: session.kind, hostId: session.control.hostId, ...(session.kind === 'agent' ? { agentSessionId: session.control.agentSessionId } : {}), runId: session.control.run.runId }
       : { kind: 'unknown' }
     const sourceSubjects = (scope: string, item: ServiceNoticeItem): AgentMuxClientNotificationSubject => {
       if (scope === 'global:mote-heartbeats') {
