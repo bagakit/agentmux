@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentMuxAgentSession, AgentMuxInteractionOperationIntent, AgentMuxInteractionOperationReceipt, AgentMuxInteractionResponse } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentMuxInteractionOperationIntent, AgentMuxInteractionOperationReceipt, AgentMuxInteractionRequest, AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionOperationReceiptMatches, agentInteractionRequestsMatch } from '@agentmux/core/agent-interaction-state'
 import { deliveryOutcome, errorMessage } from './delivery'
 import type { createLocalDrafts, ResponseAttempt } from './local-drafts'
@@ -20,7 +20,7 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const pending = session?.pendingInteraction
-  const request = agentInteractionActiveRequest(pending)
+  const request: AgentMuxInteractionRequest | undefined = agentInteractionActiveRequest(pending)
   const responseUnavailableReason = pending && agentInteractionResponseUnavailableReason(pending)
   const requestRun = request?.evidence?.run ?? session?.run
   const runtimeId = client?.runtimeOwnerIdentity?.()?.runtimeId
