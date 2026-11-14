@@ -251,7 +251,17 @@ async function enableOriginalProgress() {
   const enable = await prepareOriginalProgress()
   await act(async () => enable.click())
   await vi.waitFor(() => expect(manager.list(), JSON.stringify({ ui: container.textContent, calls: bridge.invoke.mock.calls.filter(([channel]) => channel.startsWith('continuousProgress:')), draft: originalProgressDraft() })).toHaveLength(1), { timeout: 5000 })
-  await vi.waitFor(() => expect(container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')?.disabled).toBe(false))
+  await vi.waitFor(() => expect(container.querySelector<HTMLButtonElement>('[aria-label="Original progress request"] .automation-button--primary, form[aria-label="Continuous progress setup"] button[type="submit"]')?.disabled).toBe(false))
+}
+function originalRequestAction(label: string) {
+  const notice = container.querySelector<HTMLElement>('[aria-label="Original progress request"]')!
+  const actions = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === label)
+  expect(actions).toHaveLength(1)
+  expect(actions[0]!.closest('[aria-label="Original progress request"]')).toBe(notice)
+  expect(actions[0]!.closest('[hidden]')).toBeNull()
+  expect(notice.querySelectorAll('.automation-button--primary')).toHaveLength(1)
+  expect(container.querySelector('form[aria-label="Continuous progress setup"] button[type="submit"]')).toBeNull()
+  return actions[0]!
 }
 
 it('retains the original create request after the actual Host response is lost and only queries that operation', async () => {
@@ -276,7 +286,7 @@ it('retains the original create request after the actual Host response is lost a
   Object.defineProperty(opened, 'newState', { value: 'open' })
   await act(async () => { mailbox.dispatchEvent(opened); mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!.click() })
   expect(originalProgressDraft()?.progressRequest).toEqual(request)
-  const inspect = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original request')
+  const inspect = originalRequestAction('Check original request')
   expect(inspect).toBeDefined()
   await vi.waitFor(() => expect(inspect!.disabled).toBe(false))
   await act(async () => inspect!.click())
@@ -324,8 +334,12 @@ it.each(['prepared', 'started'] as const)('does not dispatch a create when retai
     return invoke(channel, ...args)
   })
   try {
+    const focusBeforeSave = phase === 'prepared' ? enable : container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!
+    focusBeforeSave.focus()
+    expect(document.activeElement).toBe(focusBeforeSave)
     await act(async () => enable.click())
     await vi.waitFor(() => expect(container.textContent).toContain('No action was dispatched'))
+    expect(document.activeElement).toBe(phase === 'prepared' ? originalRequestAction('Keep request and edit') : focusBeforeSave)
     expect(originalProgressDraft()?.progressRequest).toMatchObject({ kind: 'create', dispatch: 'prepared', input: { target: target(), operationId: expect.any(String) } })
     expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:create')).toEqual([])
     expect(manager.list()).toEqual([])
@@ -335,7 +349,7 @@ it.each(['prepared', 'started'] as const)('does not dispatch a create when retai
   }
   expect(manager.list(), 'Recovering storage cannot automatically replay the retained request.').toEqual([])
   const retained = structuredClone(originalProgressDraft()!.progressRequest!)
-  const edit = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Keep request and edit')!
+  const edit = originalRequestAction('Keep request and edit')
   await act(async () => edit.click())
   expect(originalProgressDraft()?.progressRequest).toBeUndefined()
   expect(originalProgressDraft()?.unconfirmedProgressRequests).toEqual([retained])
@@ -367,10 +381,17 @@ it('keeps an unknown original action when a later authorized action has replaced
   await vi.waitFor(() => expect(originalProgressDraft()?.progressRequest?.kind).toBe('action'))
   await vi.waitFor(() => expect(container.textContent).toContain('Private original action response loss'))
   const request = structuredClone(originalProgressDraft()!.progressRequest!)
+  const notice = container.querySelector<HTMLElement>('[aria-label="Original progress request"]')!
+  const details = notice.querySelector('details')!
+  await act(async () => { details.open = true })
+  expect(details.querySelector('pre')?.textContent).toBe(JSON.stringify(request.input, null, 2))
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'New automation')!.click())
+  await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Automation type"] input[value="schedule"]')!.click())
+  expect(container.querySelector('form[aria-label="Continuous progress setup"]')!.closest('[hidden]')).not.toBeNull()
   bridge.invoke.mockImplementation(invoke)
   const current = manager.list()[0]!
   await api.continuousProgress.action(target(), current.loopId, 'stop', current, 'later-independent-stop')
-  const inspect = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original request')!
+  const inspect = originalRequestAction('Check original request')
   await vi.waitFor(() => expect(inspect.disabled).toBe(false))
   await act(async () => inspect.click())
   await vi.waitFor(() => expect(container.textContent).toContain('Missing records do not prove it was not applied'))

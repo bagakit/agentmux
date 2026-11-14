@@ -156,6 +156,37 @@ describe('continuous progress panel', () => {
     expect(update.mock.calls[1]![0].operationId).not.toBe(update.mock.calls[0]![0].operationId)
   })
 
+  it('keeps one original request action available through a configuration conflict and a pending read', async () => {
+    const original = saved()
+    await mount(original)
+    vi.spyOn(api.continuousProgress, 'update').mockRejectedValueOnce(Object.assign(new Error('Original configuration changed'), { code: 'CONTROL_REQUEST_CONFLICT' }))
+    await edit('textarea', 'My retained update'); await submit()
+    expect(dom.container.textContent).toContain('Review latest settings')
+    const key = 'progress-update:' + JSON.stringify([target.hostId, target.agentSessionId, target.providerId, target.workspacePath])
+    const request = { kind: 'action' as const, dispatch: 'started' as const,
+      input: { target, loopId: original.loopId, action: 'pause' as const, expectedLoop: original, operationId: 'retained-original-action' } }
+    // Restore the original request at the existing private launcher-document seam.
+    await act(async () => { useLauncherState.getState().setProgressRequest(key, request) })
+    const notice = dom.container.querySelector<HTMLElement>('[aria-label="Original progress request"]')!
+    const matches = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === 'Check original request')
+    expect(matches).toHaveLength(1)
+    const inspect = matches[0]!
+    expect(inspect.closest('[aria-label="Original progress request"]')).toBe(notice)
+    expect(inspect.closest('[hidden]')).toBeNull()
+    expect(notice.querySelectorAll('.automation-button--primary')).toHaveLength(1)
+    expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="button"]')?.textContent).toBe('Review latest settings')
+    let release!: (loops: ContinuousProgressLoop[]) => void
+    const reading = new Promise<ContinuousProgressLoop[]>(done => { release = done })
+    vi.mocked(api.continuousProgress.list).mockImplementation(async (_target, operationId) => operationId === request.input.operationId ? reading : [original])
+    await act(async () => inspect.click())
+    expect([...notice.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
+    await act(async () => release([original]))
+    await vi.waitFor(() => expect(inspect.disabled).toBe(false))
+    expect(api.continuousProgress.list).toHaveBeenCalledWith(target, request.input.operationId)
+    expect(useLauncherState.getState().drafts[key]?.progressRequest).toEqual(request)
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe('My retained update')
+  })
+
   it('retains an unknown original request when a newer configuration supersedes its receipt and lets the user explicitly save again', async () => {
     await mount(saved())
     const update = vi.spyOn(api.continuousProgress, 'update').mockRejectedValueOnce(new Error('Lost original reply'))
