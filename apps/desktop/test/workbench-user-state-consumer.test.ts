@@ -179,6 +179,26 @@ it('question owner preserves the later attempt against stale CAS and does not re
   expect(f.store.getState().questionReplies[f.session.id]![key]).toBe(later)
 })
 
+it('question owner skips complete parsing and cloning for repeated unrelated refusal facts', async () => {
+  const input = { ...questionInput, answers: Array.from({ length: 256 }, (_, i) => ({
+    questionId: 'original-q-' + i, answer: 'Original retained answer '.repeat(24) + '中文'
+  })) }
+  const f = await fixture('Original unsent draft', false, { attempt: { ...unknownQuestion, input } })
+  const key = questionReplyKey(f.session.id, input)
+  f.store.getState().applyEvent(questionRefusalEvent(f.session as Extract<SessionSnapshot, { kind: 'agent' }>, 'other-original-submission', 2))
+  const held = f.store.getState().questionReplies[f.session.id]![key]!
+  expect(held.phase).toBe('unknown')
+  const parse = vi.spyOn(await import('@agentmux/client-ui/conversation-question-reply'), 'parseQuestionReplyAttempt')
+  const clone = vi.spyOn(globalThis, 'structuredClone')
+  for (let i = 0; i < 100; i++) f.store.getState().applyEvent(questionRefusalEvent(
+    f.session as Extract<SessionSnapshot, { kind: 'agent' }>, 'other-original-submission', 3 + i))
+  expect({ parsed: parse.mock.calls.filter(args => args[0] === held).length,
+    cloned: clone.mock.calls.filter(args => args[0] === held).length },
+  'Unrelated accepted facts must not reparse or clone the retained answers').toEqual({ parsed: 0, cloned: 0 })
+  expect(f.store.getState().questionReplies[f.session.id]![key]).toBe(held)
+  expect(f.store.getState().agentComposerDrafts['original-region']).toBe('Original unsent draft')
+})
+
 it('question owner keeps content and reports original save failure without claiming on-disk settlement', async () => {
   const f = await fixture('Original unsent draft', false, { attempt: unknownQuestion })
   const key = questionReplyKey(f.session.id, questionInput), writer = vi.mocked(f.api.ui.writeWorkbenchState)
