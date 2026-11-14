@@ -994,6 +994,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'agent.rename': 'long', 'agent.inspect': 'short', 'space.rename': 'long',
       'space.bind': 'long', 'space.unbind': 'long',
       'browser.task.assets': 'short', 'browser.task.inspect': 'short', 'browser.task.reliability': 'short',
+      'browser.task.parallel': 'long', 'browser.task.parallel-inspect': 'short', 'browser.task.parallel-list': 'short',
       'browser.task.run': 'long', 'browser.task.stop': 'short',
       'agent.open': 'long',
       'space.mv': 'long',
