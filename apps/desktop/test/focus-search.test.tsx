@@ -15,6 +15,8 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { moteAgent, moteConfig, seedMoteWorkface } from './fixtures/mote-workface'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => createElement('output') }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 const initial = useAppStore.getState()
@@ -35,10 +37,13 @@ beforeEach(async () => {
  useAppStore.setState({ loading: false, mainSurface: 'agents', config: { ...moteConfig, workspaces: [...moteConfig.workspaces, workspace] }, sessions: [a, b], timelines: {}, agentNames: { ExactSession: 'Investigation' },
   tabs: { [tab.id]: tab, [file.id]: file }, layouts: { [workspace.id]: createWorkspaceLayout('ExactGroup', [tab.id, file.id]), other: createWorkspaceLayout('OtherGroup', [tab.id]) },
   agentFocus: { execution: { sessionId: a.id, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { ExactSession: 'Original unsent draft' } })
- vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+ vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [], warnings: [] })
  vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspace.path })
  vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'repository', icon: null })
  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
+ vi.spyOn(api.spatial, 'read').mockImplementation(async () => ({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), []) }))
+ await initializeSpatialControlFixture()
+ // Observe only the mounted search phase, after the original startup owner settles.
  for (const key of ['launchAgent', 'recover', 'resume', 'stop', 'write', 'interrupt', 'readHistory'] as const) vi.spyOn(api.sessions, key)
  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
 })
@@ -58,7 +63,7 @@ it('finds typed links, all original ID axes and text in the mounted Focus consum
  }
  await setQuery('exactsession'); expect(shown()).toEqual([])
  await setQuery('amux://tab/ExactSession'); expect(shown()).toEqual([])
- await setQuery('amux://agent/ExactSession?execute=true'); expect(shown()).toEqual([]); expect(container.textContent).toContain('Choose an amux')
+ await setQuery('amux://agent/ExactSession?execute=true'); expect(shown()).toEqual([]); expect(container.querySelector('.focus-search-results__issue')?.textContent).toBe('Choose an exact amux object link or a Mote thread link.')
  expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts); expect(useAppStore.getState().agentFocus).toBe(state.agentFocus)
  for (const key of ['launchAgent', 'recover', 'resume', 'stop', 'write', 'interrupt', 'readHistory'] as const) expect(api.sessions[key]).not.toHaveBeenCalled()
 })

@@ -72,7 +72,7 @@ check('mounted global local-input entry copies original unassociated draft and r
   const copied = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const send = vi.spyOn(api.sessions, 'submitPrompt'), stop = vi.spyOn(api.sessions, 'stop'), reopen = vi.spyOn(api.sessions, 'reopen')
   const element = await mount(<LocalRetainedInputsPanel />)
-  await click(button(element, 'Local inputs'))
+  await click(button(element, 'Drafts & queue'))
   const records = [...element.querySelectorAll<HTMLDetailsElement>('.local-input-record')]
   expect(records.length, 'local-unassociated-route-present').toBe(2)
   await toggle(records[0]!); expect(records[0]!.querySelector('textarea')!.value).toBe(originalDraft)
@@ -142,7 +142,7 @@ async function desktop(seed: boolean) {
 check('original Main user-document hydrate and actual save keep unassociated input reachable without an active Session', async () => {
   const f = await desktop(true)
   const { LocalRetainedInputsPanel } = await import('../src/renderer/src/components/LocalRetainedInputs')
-  const element = await mount(<LocalRetainedInputsPanel />); await click(button(element, 'Local inputs'))
+  const element = await mount(<LocalRetainedInputsPanel />); await click(button(element, 'Drafts & queue'))
   expect(element.querySelectorAll('.local-input-record').length).toBe(2)
   expect(f.store.getState().agentComposerDrafts['old-orphan-region']).toBe(originalDraft)
   expect(f.store.getState().agentSteerQueues['retired-original']![0]).toMatchObject(originalQueue)
@@ -161,7 +161,7 @@ check('original Main user-document hydrate and actual save keep unassociated inp
   const f = await desktop(false)
   const { LocalRetainedInputsPanel } = await import('../src/renderer/src/components/LocalRetainedInputs')
   const copied = vi.spyOn(f.api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  const element = await mount(<LocalRetainedInputsPanel />); await click(button(element, 'Local inputs'))
+  const element = await mount(<LocalRetainedInputsPanel />); await click(button(element, 'Drafts & queue'))
   const records = [...element.querySelectorAll<HTMLDetailsElement>('.local-input-record')]
   expect(records.length).toBe(2)
   await toggle(records[0]!); await click(button(records[0]!, 'Copy saved input')); expect(copied).toHaveBeenLastCalledWith(originalDraft)
