@@ -18,7 +18,7 @@ import {
   browserProfilePartition,
   BrowserProfileStore,
   profileSummary, type BrowserProfileTrashRecord,
-  BrowserProfileConfigurationConflict,
+  BrowserProfileConfigurationConflict, BrowserProfileWriteUnconfirmed,
   type BrowserProfileActivityCheckpoint,
   validateBrowserProfileLabel,
   type BrowserProfileEdit,
@@ -168,6 +168,14 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   proxyOf(profileId: string): { host: string; port: number } | null {
     const network = (this.profiles.get(profileId) ?? this.archivedProfiles.get(profileId)?.profile)?.network
     return network?.mode === 'proxy' ? { host: network.server.host, port: network.server.port } : null
+  }
+
+  /** Explicit reads repair a previously unknown write/read without replaying it or creating a catalog. */
+  async refresh(): Promise<void> {
+    this.assertInitialized()
+    const snapshot = await this.store.read()
+    // Reading is not another write/invalidation; the caller receives this exact original owner.
+    if (snapshot.sequence >= this.sequence) this.replace(snapshot)
   }
 
   listProfiles(): BrowserProfileSummary[] {
@@ -420,6 +428,9 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         const { snapshot, archive } = await this.store.archiveProfile(profileId, expectedRevision, data)
         this.adopt(snapshot)
         return { revision: snapshot.revision, archive: this.archiveSummary(archive) }
+      } catch (cause) {
+        if (cause instanceof BrowserProfileWriteUnconfirmed && cause.currentSnapshot) this.adopt(cause.currentSnapshot)
+        throw cause
       } finally { this.retiring.delete(profileId) }
     })
   }
@@ -439,6 +450,9 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         const saved = await this.store.restoreProfile(archiveId, expectedRevision, folderId)
         this.adopt(saved.snapshot)
         return { revision: saved.snapshot.revision, archiveId, profile: this.presentProfile(saved.profile) }
+      } catch (cause) {
+        if (cause instanceof BrowserProfileWriteUnconfirmed && cause.currentSnapshot) this.adopt(cause.currentSnapshot)
+        throw cause
       } finally { this.retiring.delete(profileId) }
     })
   }

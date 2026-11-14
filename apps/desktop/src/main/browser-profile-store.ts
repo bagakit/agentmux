@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
 import { app } from 'electron'
-import { durableWriteFile } from '@agentmux/core'
+import { durableWriteFile, DurableWriteError } from '@agentmux/core'
 import { z } from 'zod'
 import { clearsSemanticHues } from '../renderer/src/lib/conversation-avatar-color.js'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS } from '../shared/browser-profile-import-skip.js'
@@ -296,6 +296,14 @@ export function browserProfilePartition(profileId: string): string {
   return `${BROWSER_PROFILE_PARTITION_PREFIX}${profileIdSchema.parse(profileId)}`
 }
 
+/** A replacement/readback is not a directory-durability ACK. Snapshot stays inside Main. */
+export class BrowserProfileWriteUnconfirmed extends Error {
+  readonly code = 'BROWSER_PROFILE_WRITE_UNCONFIRMED'
+  constructor(operation: 'recycle' | 'restore', profileId: string, readonly currentSnapshot: BrowserProfileSnapshot | null, cause: unknown) {
+    super(`The ${operation} of Profile ${profileId} could not be confirmed. ${cause instanceof DurableWriteError ? cause.phase === 'after-replace' ? 'The metadata replacement applied, but its durable confirmation is missing.' : 'This attempt did not replace the metadata.' : 'The write may already have applied.'} Original data is kept. Read Profiles and Recycled Profiles to confirm the exact identity before explicitly retrying.`, { cause })
+  }
+}
+
 export class BrowserProfileStore {
   private operationTail: Promise<void> = Promise.resolve()
 
@@ -310,6 +318,9 @@ export class BrowserProfileStore {
   list(): Promise<BrowserProfileSnapshot> {
     return this.enqueue(async () => snapshotOf(await this.readOrInitialize()))
   }
+
+  /** Read the original file after initialization; missing is unknown, never a new empty catalog. */
+  read(): Promise<BrowserProfileSnapshot> { return this.enqueue(async () => snapshotOf(await this.readMetadata())) }
 
   inspectProfile(profileId: string): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {
@@ -567,7 +578,7 @@ export class BrowserProfileStore {
       this.assertProfileRevision(profile, expectedRevision)
       if (held.partition !== browserProfilePartition(id)) throw new Error('Retained data belongs to another Profile')
       const archive: BrowserProfileTrashRecord = { id: this.createUnusedProfileId(metadata), revision: mintObjectId(), archivedAt: Date.now(), profile: structuredClone(profile), data: held }
-      const snapshot = await this.commit({ ...metadata, profiles: metadata.profiles.filter(value => value.id !== id), trash: [...(metadata.trash ?? []), archive] })
+      const snapshot = await this.commit({ ...metadata, profiles: metadata.profiles.filter(value => value.id !== id), trash: [...(metadata.trash ?? []), archive] }, true, { operation: 'recycle', profileId: id })
       return { snapshot, archive: structuredClone(archive) }
     })
   }
@@ -590,7 +601,7 @@ export class BrowserProfileStore {
       if (folderOverride === null) delete profile.folderId
       else if (folderOverride !== undefined) profile.folderId = folderIdSchema.parse(folderOverride)
       if (profile.folderId !== undefined && !(metadata.folders ?? []).some(folder => folder.id === profile.folderId)) throw Object.assign(new Error('The original folder is unavailable. Explicitly choose a current folder or restore unfiled; the archive is kept.'), { code: 'BROWSER_PROFILE_RESTORE_FOLDER_CONFLICT' })
-      const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile], trash: metadata.trash!.filter(value => value.id !== id) })
+      const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile], trash: metadata.trash!.filter(value => value.id !== id) }, true, { operation: 'restore', profileId: archive.profile.id })
       return { snapshot, profile: profileSummary(profile, metadata.defaultProfileId) }
     })
   }
@@ -689,9 +700,18 @@ export class BrowserProfileStore {
   }
 
   /** Every commit advances sequence; configuration writes also advance collection CAS. */
-  private async commit(metadata: BrowserProfileMetadata, configuration = true): Promise<BrowserProfileSnapshot> {
+  private async commit(metadata: BrowserProfileMetadata, configuration = true, retirement?: { operation: 'recycle' | 'restore'; profileId: string }): Promise<BrowserProfileSnapshot> {
     const next = metadataSchema.parse({ ...metadata, revision: (metadata.revision ?? 0) + (configuration ? 1 : 0), sequence: (metadata.sequence ?? metadata.revision ?? 0) + 1 })
-    await this.writeMetadata(next)
+    try { await this.writeMetadata(next, retirement !== undefined) }
+    catch (cause) {
+      if (!retirement) throw cause
+      // The original producer's replacement fact survives a missing directory ACK. Prefer an
+      // authoritative current read when available, within the same Store queue. Neither is a
+      // power-loss durability confirmation, and an unreadable original file is never initialized.
+      let current = cause instanceof DurableWriteError && cause.phase === 'after-replace' ? snapshotOf(next) : null
+      try { current = snapshotOf(await this.readMetadata()) } catch { /* Keep the exact last producer fact, or unknown. */ }
+      throw new BrowserProfileWriteUnconfirmed(retirement.operation, retirement.profileId, current, cause)
+    }
     return snapshotOf(next)
   }
 
@@ -705,9 +725,9 @@ export class BrowserProfileStore {
     return id
   }
 
-  private async writeMetadata(metadata: BrowserProfileMetadata): Promise<void> {
+  private async writeMetadata(metadata: BrowserProfileMetadata, requireDirectorySync = false): Promise<void> {
     const validated = metadataSchema.parse(metadata)
     await mkdir(dirname(this.path), { recursive: true })
-    await durableWriteFile(this.path, `${JSON.stringify(validated, null, 2)}\n`)
+    await durableWriteFile(this.path, `${JSON.stringify(validated, null, 2)}\n`, { requireDirectorySync })
   }
 }
