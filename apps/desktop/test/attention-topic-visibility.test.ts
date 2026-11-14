@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentDisplayState, AgentTimelineSnapshot } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/contracts.js'
-import { createAttentionNotifier } from '../src/renderer/src/lib/attention-notifier.js'
+import { createAttentionNotifier, type AttentionReconcileInput } from '../src/renderer/src/lib/attention-notifier.js'
 import { visibleSessionIdsForState } from '../src/renderer/src/lib/session-visibility.js'
 import { activeTopicIdFromLayout } from '../src/renderer/src/lib/scratch-topic-layout.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
@@ -110,9 +110,7 @@ function scratchState(focusedGroupId: 'left' | 'right') {
 
 function ports() {
   return {
-    notify: vi.fn(async () => ({ status: 'shown' as const, presentation: 'as-requested' as const })),
-    onUnsupported: vi.fn(),
-    onDowngraded: vi.fn()
+    notify: vi.fn(async () => ({ status: 'shown' as const, presentation: 'as-requested' as const }))
   }
 }
 
@@ -134,19 +132,21 @@ describe('an Agent finishing behind another Scratch Topic', () => {
     expect(onScreen.has('shown'), '当前 Topic 的 Agent 该在屏，fixture 立错了').toBe(true)
 
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    let current: AttentionReconcileInput
+    const notifier = createAttentionNotifier({ ...io, snapshot: () => current })
     // Seed while still working, so the transition to done is a real transition, not first-sight.
     notifier.seed([agent('hidden', 'working'), agent('shown', 'working')])
 
     // The window has focus and the user is watching Topic A. The hidden-Topic Agent finishes.
-    await notifier.reconcile({
+    current = {
       sessions: [agent('hidden', 'done'), agent('shown', 'working')],
       windowFocused: true,
       visibleSessionIds: visibleSessionIdsForState(state),
       mode: 'standard',
       sound: false,
       timelines: {} as Record<string, AgentTimelineSnapshot>
-    })
+    }
+    await notifier.reconcile()
 
     expect(
       io.notify,
@@ -168,17 +168,19 @@ describe('an Agent finishing behind another Scratch Topic', () => {
     expect(onScreen.has('hidden'), '当前 Topic 的 Agent 被判成隐藏——投影把在屏的也切走了').toBe(true)
 
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    let current: AttentionReconcileInput
+    const notifier = createAttentionNotifier({ ...io, snapshot: () => current })
     notifier.seed([agent('hidden', 'working'), agent('shown', 'working')])
 
-    await notifier.reconcile({
+    current = {
       sessions: [agent('hidden', 'done'), agent('shown', 'working')],
       windowFocused: true,
       visibleSessionIds: visibleSessionIdsForState(state),
       mode: 'standard',
       sound: false,
       timelines: {} as Record<string, AgentTimelineSnapshot>
-    })
+    }
+    await notifier.reconcile()
 
     expect(
       io.notify,

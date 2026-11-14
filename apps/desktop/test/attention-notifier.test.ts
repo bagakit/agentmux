@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentDisplayState, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
-import { createAttentionNotifier } from '../src/renderer/src/lib/attention-notifier.js'
+import { createAttentionNotifier, type AttentionNotifierPorts, type AttentionReconcileInput } from '../src/renderer/src/lib/attention-notifier.js'
 
 function agent(id: string, state: AgentDisplayState): SessionSnapshot {
   return {
@@ -61,16 +61,22 @@ const away = {
 
 function ports() {
   return {
-    notify: vi.fn(async () => ({ status: 'shown' as const, presentation: 'as-requested' as const })),
-    onUnsupported: vi.fn(),
-    onDowngraded: vi.fn()
+    notify: vi.fn(async () => ({ status: 'shown' as const, presentation: 'as-requested' as const }))
   }
+}
+
+// Drive the same current-snapshot port as the mounted hook; updates can happen during a delivery.
+function drive(io: Omit<AttentionNotifierPorts, 'snapshot'>) {
+  let input: AttentionReconcileInput = { ...away, sessions: [] }
+  const owner = createAttentionNotifier({ ...io, snapshot: () => input })
+  return { ...owner, current(next: AttentionReconcileInput) { input = next },
+    reconcile(next: AttentionReconcileInput) { input = next; return owner.reconcile() } }
 }
 
 describe('attention notifier', () => {
   it('notifies on a transition into a category worth interrupting', async () => {
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    const notifier = drive(io)
     notifier.seed([agent('a', 'working')])
 
     const raised = await notifier.reconcile({ sessions: [agent('a', 'done')], ...away })
@@ -90,7 +96,7 @@ describe('attention notifier', () => {
     // 的话，把实现写成恒 true 也能绿。
     for (const sound of [true, false]) {
       const io = ports()
-      const notifier = createAttentionNotifier(io)
+      const notifier = drive(io)
       notifier.seed([agent('a', 'working')])
 
       await notifier.reconcile({ sessions: [agent('a', 'done')], ...away, sound })
@@ -101,7 +107,7 @@ describe('attention notifier', () => {
 
   it('does not notify twice for the same state', async () => {
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    const notifier = drive(io)
     notifier.seed([agent('a', 'working')])
 
     await notifier.reconcile({ sessions: [agent('a', 'done')], ...away })
@@ -113,7 +119,7 @@ describe('attention notifier', () => {
 
   it('seeds without notifying, so attaching does not replay old work', async () => {
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    const notifier = drive(io)
     // Seeding with already-finished Agents must not fire: that work predates the app being open.
     notifier.seed([agent('a', 'done'), agent('b', 'waiting')])
 
@@ -124,7 +130,7 @@ describe('attention notifier', () => {
 
   it('stays quiet about the Session the user is looking at', async () => {
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    const notifier = drive(io)
     notifier.seed([agent('a', 'working')])
 
     await notifier.reconcile({
@@ -141,7 +147,7 @@ describe('attention notifier', () => {
 
   it('composes a body with the Agent, its state, and the last exchange, then omits missing segments', async () => {
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    const notifier = drive(io)
     notifier.seed([agent('a', 'working')])
 
     // A full exchange: user asked, assistant replied, then the Agent went to waiting.
@@ -170,7 +176,7 @@ describe('attention notifier', () => {
 
   it('raises nothing on the off tier but still advances the baseline', async () => {
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    const notifier = drive(io)
     notifier.seed([agent('a', 'working')])
 
     // Off: the done transition happens but nothing is delivered.
@@ -186,51 +192,9 @@ describe('attention notifier', () => {
     expect(io.notify).toHaveBeenCalledOnce()
   })
 
-  it('reports an unsupported platform once, not on every event', async () => {
-    const io = {
-      notify: vi.fn(async () => ({ status: 'unsupported' as const, reason: 'Notifications are off.' })),
-      onUnsupported: vi.fn(),
-      onDowngraded: vi.fn()
-    }
-    const notifier = createAttentionNotifier(io)
-    notifier.seed([agent('a', 'working'), agent('b', 'working')])
-
-    await notifier.reconcile({ sessions: [agent('a', 'done'), agent('b', 'done')], ...away })
-    await notifier.reconcile({ sessions: [agent('a', 'waiting'), agent('b', 'waiting')], ...away })
-
-    // Four refusals, one report: a platform that refuses will refuse every time, and repeating it would
-    // turn one honest failure into a stream of noise.
-    expect(io.notify.mock.calls.length).toBe(4)
-    expect(io.onUnsupported).toHaveBeenCalledOnce()
-    expect(io.onUnsupported).toHaveBeenCalledWith('Notifications are off.')
-  })
-
-  it('reports a platform downgrade once, and never confuses it with unsupported', async () => {
-    // The banner DID show, just not persistently: shown + downgraded. This must reach onDowngraded, not
-    // onUnsupported, and only once even across several downgraded deliveries.
-    const io = {
-      notify: vi.fn(async () => ({ status: 'shown' as const, presentation: 'downgraded' as const })),
-      onUnsupported: vi.fn(),
-      onDowngraded: vi.fn()
-    }
-    const notifier = createAttentionNotifier(io)
-    notifier.seed([agent('a', 'working'), agent('b', 'working')])
-
-    await notifier.reconcile({
-      ...away,
-      mode: 'until-acknowledged',
-      sessions: [agent('a', 'done'), agent('b', 'waiting')]
-    })
-    await notifier.reconcile({ ...away, mode: 'until-acknowledged', sessions: [agent('a', 'error')] })
-
-    expect(io.onDowngraded).toHaveBeenCalledOnce()
-    expect(io.onDowngraded).toHaveBeenCalledWith('until-acknowledged')
-    expect(io.onUnsupported).not.toHaveBeenCalled()
-  })
-
   it('titles each category for the person reading a banner out of context', async () => {
     const io = ports()
-    const notifier = createAttentionNotifier(io)
+    const notifier = drive(io)
     notifier.seed([agent('a', 'working')])
 
     await notifier.reconcile({ sessions: [agent('a', 'waiting')], ...away })
@@ -239,4 +203,92 @@ describe('attention notifier', () => {
     expect(io.notify.mock.calls.map((call) => call[0]!.title))
       .toEqual(['Agent needs you', 'Agent failed'])
   })
+})
+
+it.each(['off', 'visible', 'second-visible', 'state', 'rebound', 'host', 'disposed'] as const)(
+  'rechecks %s before the next status delivery after a native wait', async kind => {
+    let finish!: (delivery: Awaited<ReturnType<AttentionNotifierPorts['notify']>>) => void
+    const io = { notify: vi.fn<AttentionNotifierPorts['notify']>().mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockResolvedValue({ status: 'shown', presentation: 'as-requested' }) }
+    const owner = drive(io)
+    owner.seed([agent('a', 'working'), agent('b', 'working')])
+    let current: AttentionReconcileInput = { ...away, sessions: [agent('a', 'done'), agent('b', 'done')] }
+    const pending = owner.reconcile(current)
+    if (kind === 'off') current = { ...current, mode: 'off' }
+    if (kind === 'visible') current = { ...current, windowFocused: true, visibleSessionIds: new Set(['b']) }
+    if (kind === 'second-visible') current = { ...current, windowFocused: true, visibleSessionIds: new Set(['b-view']),
+      sessions: [...current.sessions, { ...agent('b', 'done'), id: 'b-view' }] }
+    if (kind === 'state') current = { ...current, sessions: [agent('a', 'done'), agent('b', 'working')] }
+    if (kind === 'host') current = { ...current, sessions: [agent('a', 'done'), { ...agent('b', 'done'), hostId: 'other-host' }] }
+    if (kind === 'rebound') current = { ...current, sessions: [agent('a', 'done'), { ...agent('foreign', 'done'), id: 'b' }] }
+    owner.current(current)
+    if (kind === 'disposed') owner.dispose()
+    finish({ status: 'shown', presentation: 'as-requested' })
+    expect((await pending).map(event => event.sessionId)).toEqual(['a'])
+    expect(io.notify).toHaveBeenCalledOnce()
+  })
+
+it('uses current preferences and conversation while preserving the original transition across unrelated changes', async () => {
+  let finish!: (delivery: Awaited<ReturnType<AttentionNotifierPorts['notify']>>) => void
+  const io = { notify: vi.fn<AttentionNotifierPorts['notify']>().mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    .mockResolvedValue({ status: 'unknown', reason: 'Native display was not confirmed.' }) }
+  const owner = drive(io)
+  owner.seed([agent('a', 'working'), agent('b', 'working')])
+  const current = { ...away, sessions: [agent('a', 'done'), agent('b', 'waiting')] }
+  const pending = owner.reconcile(current)
+  owner.current({ ...current, mode: 'patient', sound: true, sessions: [agent('a', 'done'), { ...agent('b', 'waiting'), label: 'Current task' }, agent('unrelated', 'working')],
+    timelines: timelines('b', [timelineItem('assistant_message', 'Current original reply', 'r-current')]) })
+  finish({ status: 'shown', presentation: 'as-requested' })
+  expect((await pending).map(event => event.sessionId)).toEqual(['a', 'b'])
+  expect(io.notify.mock.calls[1]![0]).toMatchObject({ sessionId: 'b', mode: 'patient', sound: true,
+    body: 'Current task — Waiting for you\nCurrent task: Current original reply' })
+})
+
+it('an old batch cannot borrow a later A-B-A transition while same-state observations preserve a current one', async () => {
+  for (const changed of [false, true]) {
+    let finish!: (delivery: Awaited<ReturnType<AttentionNotifierPorts['notify']>>) => void
+    const io = { notify: vi.fn<AttentionNotifierPorts['notify']>().mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockResolvedValue({ status: 'shown', presentation: 'as-requested' }) }
+    const owner = drive(io)
+    owner.seed([agent('a', 'working'), agent('b', 'working')])
+    const waiting = { ...away, sessions: [agent('a', 'done'), agent('b', 'waiting')] }
+    const old = owner.reconcile(waiting)
+    if (changed) await owner.reconcile({ ...waiting, sessions: [agent('a', 'done'), agent('b', 'working')] })
+    await owner.reconcile(waiting)
+    finish({ status: 'shown', presentation: 'as-requested' })
+    expect((await old).map(event => event.sessionId)).toEqual(changed ? ['a'] : ['a', 'b'])
+    expect(io.notify.mock.calls.map(call => call[0].sessionId)).toEqual(['a', 'b'])
+  }
+})
+
+it('never snapshots, submits or feeds back after an explicit dispose', async () => {
+  const snapshot = vi.fn(() => ({ ...away, sessions: [agent('a', 'done')] })), io = ports()
+  const owner = createAttentionNotifier({ ...io, snapshot })
+  owner.dispose(); owner.dispose(); owner.seed([agent('a', 'working')])
+  expect(await owner.reconcile()).toEqual([])
+  expect(snapshot).not.toHaveBeenCalled(); expect(io.notify).not.toHaveBeenCalled()
+})
+
+it('announces one original transition for two background presentations and retains its baseline across display changes', async () => {
+  const io = ports(), owner = drive(io)
+  owner.seed([agent('canonical', 'working'), { ...agent('canonical', 'working'), id: 'second-view' }])
+  const done = [agent('canonical', 'done'), { ...agent('canonical', 'done'), id: 'second-view' }]
+  expect((await owner.reconcile({ ...away, sessions: done })).map(event => event.sessionId)).toEqual(['canonical'])
+  await owner.reconcile({ ...away, sessions: done.slice(1) })
+  expect(io.notify).toHaveBeenCalledOnce()
+  await owner.reconcile({ ...away, sessions: [{ ...agent('canonical', 'waiting'), id: 'second-view' }] })
+  expect(io.notify.mock.calls[1]![0]).toMatchObject({ sessionId: 'second-view', title: 'Agent needs you' })
+})
+
+it('a pending original transition may use its other accurate presentation after the first display disappears', async () => {
+  let finish!: (value: unknown) => void
+  const io = { notify: vi.fn<AttentionNotifierPorts['notify']>().mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    .mockResolvedValue({ status: 'shown', presentation: 'as-requested' }) }
+  const owner = drive(io)
+  owner.seed([agent('a', 'working'), agent('b', 'working')])
+  const pending = owner.reconcile({ ...away, sessions: [agent('a', 'done'), agent('b', 'waiting')] })
+  owner.current({ ...away, sessions: [agent('a', 'done'), { ...agent('b', 'waiting'), id: 'second-b-view' }] })
+  finish({ status: 'shown', presentation: 'as-requested' })
+  expect((await pending).map(event => event.sessionId)).toEqual(['a', 'second-b-view'])
+  expect(io.notify.mock.calls[1]![0]).toMatchObject({ sessionId: 'second-b-view', title: 'Agent needs you' })
 })

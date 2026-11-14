@@ -2,6 +2,7 @@
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { RuntimeEvent } from '../src/shared/contracts'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
@@ -19,11 +20,12 @@ import { configOwnerFixture } from './helpers/config-owner-fixture'
 const initial = useAppStore.getState()
 const config = { ...composerConfig, notifications: { mode: 'standard' as const, sound: false }, a2a: { notifications: 'follow-global' as const } }
 const agent = (id: string) => ({ ...composerSession(id), status: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now() } })
-let root: Root, container: HTMLDivElement, settingsRoot: Root | undefined
+let root: Root, container: HTMLDivElement, settingsRoot: Root | undefined, appUnmounted = false
 let emit: (event: RuntimeEvent) => void
 const sessions = [agent('notification-reader'), agent('notification-sender')]
 
 beforeEach(async () => {
+  appUnmounted = false
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.spyOn(document, 'hasFocus').mockReturnValue(false)
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
@@ -49,7 +51,7 @@ beforeEach(async () => {
     error: null, lastError: null, errorNoticeContext: null, errorDismissed: false, agentComposerDrafts: { 'notification-reader': 'Keep this draft' } }))
 })
 afterEach(async () => {
-  await act(async () => { root.unmount(); settingsRoot?.unmount() }); settingsRoot = undefined; container.remove()
+  await act(async () => { if (!appUnmounted) root.unmount(); settingsRoot?.unmount() }); settingsRoot = undefined; container.remove()
   vi.restoreAllMocks(); useAppStore.setState(initial, true)
 })
 
@@ -166,7 +168,7 @@ it.each(['unsupported', 'downgraded'] as const)('App attention and initialize A2
   expect(records()).toHaveLength(1)
   const first = records()[0]!
   expect(first.context).toMatchObject({ kind: 'process-degraded', event: { source: 'desktop-notifications',
-    key: kind === 'unsupported' ? 'unsupported' : 'presentation-downgraded', object: { kind: 'application', id: 'desktop' } } })
+    key: kind === 'downgraded' ? 'presentation-downgraded' : kind, object: { kind: 'application', id: 'desktop' } } })
   await act(async () => read(first.id))
   await act(async () => emit(message(1)))
   expect(notify).toHaveBeenCalledTimes(2)
@@ -269,6 +271,121 @@ it('the actual App subscription delivers the original preview with current task 
   expect(list).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: 'notification-reader' }, { direction: 'incoming', beforeSequence: 2, limit: 1 })
   expect(notify).toHaveBeenCalledExactlyOnceWith({ sessionId: 'notification-reader', title: 'Notification design → Main coordination',
     body: 'Please review the notification copy.', mode: 'standard', sound: false })
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().noticeReadReceipts).toBe(before.noticeReadReceipts)
+})
+
+it('the actual App suppresses both channels for a second visible presentation of the original Host/Session', async () => {
+  const notify = vi.mocked(api.ui.notifyAgentAttention), list = vi.mocked(api.sessions.listMessages)
+  const visible = { ...sessions[0]!, id: 'visible-reader' }
+  const tab = createWorkbenchTab('visible-tab', { regionId: 'visible-region', workspaceId: 'workspace', kind: 'agent', phase: 'attached', sessionId: visible.id })
+  const layout = createWorkspaceLayout('present-group')
+  layout.groups[0]!.tabOrder = [tab.id]; layout.groups[0]!.activeTabId = tab.id
+  vi.mocked(document.hasFocus).mockReturnValue(true)
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'))
+    useAppStore.setState({ sessions: [...sessions, visible], tabs: { [tab.id]: tab }, layouts: { workspace: layout }, activeWorkspaceId: 'workspace', mainSurface: 'workbench' })
+    emit(message(1))
+  })
+  await transition('done')
+  expect(list).not.toHaveBeenCalled(); expect(notify).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts['notification-reader']).toBe('Keep this draft')
+})
+
+it('the mounted attention consumer reads current Off after awaiting a native result and does not submit its stale next candidate', async () => {
+  let finish!: (delivery: Awaited<ReturnType<typeof api.ui.notifyAgentAttention>>) => void
+  const notify = vi.mocked(api.ui.notifyAgentAttention).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  await act(async () => useAppStore.setState({ sessions: sessions.map(session => ({ ...session, status: { state: 'done', source: 'native-hook', observedAt: Date.now() } })) }))
+  expect(notify).toHaveBeenCalledOnce()
+  await act(async () => {
+    useAppStore.setState({ config: { ...config, notifications: { mode: 'off', sound: true } } })
+    finish({ status: 'shown', presentation: 'as-requested' })
+  })
+  expect(notify).toHaveBeenCalledOnce()
+  expect(useAppStore.getState().noticeReadReceipts).toEqual({})
+})
+
+it('unmounting the real App retires pending attention results and its remaining batch', async () => {
+  let finish!: (delivery: Awaited<ReturnType<typeof api.ui.notifyAgentAttention>>) => void
+  const notify = vi.mocked(api.ui.notifyAgentAttention).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  await act(async () => useAppStore.setState({ sessions: sessions.map(session => ({ ...session, status: { state: 'waiting', source: 'native-hook', observedAt: Date.now() } })) }))
+  expect(notify).toHaveBeenCalledOnce()
+  await act(async () => { root.unmount(); appUnmounted = true })
+  await act(async () => finish({ status: 'failed', reason: 'Late failure from the original native request' }))
+  expect(notify).toHaveBeenCalledOnce()
+  expect(records()).toEqual([])
+  expect(useAppStore.getState().agentComposerDrafts['notification-reader']).toBe('Keep this draft')
+})
+
+it('unmounting the real App retires its in-flight A2A preview without native delivery or acknowledgement', async () => {
+  let finish!: (page: Awaited<ReturnType<typeof api.sessions.listMessages>>) => void
+  const list = vi.mocked(api.sessions.listMessages).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const notify = vi.mocked(api.ui.notifyAgentAttention), receipts = useAppStore.getState().noticeReadReceipts
+  await act(async () => emit(message(1)))
+  expect(list).toHaveBeenCalledOnce()
+  await act(async () => { root.unmount(); appUnmounted = true })
+  await act(async () => finish({ hostId: 'local', participantSessionId: 'notification-reader', direction: 'incoming', messages: [], nextBeforeSequence: null }))
+  expect(notify).not.toHaveBeenCalled(); expect(records()).toEqual([])
+  expect(useAppStore.getState().noticeReadReceipts).toBe(receipts)
+  expect(useAppStore.getState().agentComposerDrafts['notification-reader']).toBe('Keep this draft')
+})
+
+it.each(['failed', 'unknown'] as const)('both real OS consumers retain independent original %s receipts without reading or changing drafts', async status => {
+  const reason = status === 'failed' ? 'Original OS error -999' : 'No native display event before observation ended'
+  const notify = vi.mocked(api.ui.notifyAgentAttention).mockResolvedValue({ status, reason })
+  const before = useAppStore.getState()
+  await transition('done')
+  await act(async () => emit(message(1)))
+  await act(async () => emit(message(2)))
+  expect(notify).toHaveBeenCalledTimes(3)
+  expect(records()).toHaveLength(3)
+  expect(new Set(records().map(record => record.context?.event?.key)).size).toBe(3)
+  expect(records().every(record => record.message.includes(reason))).toBe(true)
+  for (const record of records()) expect(record.context).toMatchObject({ kind: status === 'failed' ? 'process-degraded' : 'indeterminate',
+    subject: sessions[0]!.control, event: { source: 'desktop-notifications' } })
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().noticeReadReceipts).toBe(before.noticeReadReceipts)
+})
+
+it.each(['unknown', 'rejected'] as const)('unmounting the real App ignores a late native A2A %s result from its retired subscription', async kind => {
+  let reject!: (error: Error) => void
+  let finish!: (delivery: Awaited<ReturnType<typeof api.ui.notifyAgentAttention>>) => void
+  const notify = vi.mocked(api.ui.notifyAgentAttention).mockImplementationOnce(() => new Promise((resolve, fail) => { finish = resolve; reject = fail }))
+  await act(async () => emit(message(1)))
+  expect(notify).toHaveBeenCalledOnce()
+  await act(async () => { root.unmount(); appUnmounted = true })
+  await act(async () => {
+    if (kind === 'rejected') reject(new Error('The original native transport ended after teardown'))
+    else finish({ status: 'unknown', reason: 'The original native observation ended after teardown' })
+  })
+  expect(records()).toEqual([])
+  expect(useAppStore.getState().agentComposerDrafts['notification-reader']).toBe('Keep this draft')
+})
+
+it.each(['attention', 'a2a'] as const)('%s keeps a late native failure on the exact original request subject across a Run replacement', async channel => {
+  let finish!: (delivery: Awaited<ReturnType<typeof api.ui.notifyAgentAttention>>) => void
+  const notify = vi.mocked(api.ui.notifyAgentAttention).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  if (channel === 'attention') await transition('waiting')
+  else await act(async () => emit(message(1)))
+  expect(notify).toHaveBeenCalledOnce()
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id !== 'notification-reader' ? session
+    : { ...session, control: { ...session.control, run: { runId: 'replacement-run' } } }) as typeof state.sessions })))
+  await act(async () => finish({ status: 'failed', reason: 'Native error for the original request' }))
+  expect(notify).toHaveBeenCalledOnce(); expect(records()).toHaveLength(1)
+  expect(records()[0]!.context?.subject).toEqual(sessions[0]!.control)
+  expect(records()[0]!.context?.subject).not.toEqual(useAppStore.getState().sessions[0]!.control)
+})
+
+it.each(['attention', 'a2a'] as const)('%s preserves its original request identity when native IPC rejects with no receipt', async channel => {
+  const notify = vi.mocked(api.ui.notifyAgentAttention).mockRejectedValue(new Error('Original IPC reply was lost'))
+  const before = useAppStore.getState()
+  if (channel === 'attention') await transition('waiting')
+  else await act(async () => emit(message(1)))
+  expect(notify).toHaveBeenCalledOnce(); expect(records()).toHaveLength(1)
+  expect(records()[0]!).toMatchObject({ message: expect.stringContaining('Original IPC reply was lost'), context: {
+    kind: 'indeterminate', subject: sessions[0]!.control, event: { source: 'desktop-notifications', key: expect.any(String) }
+  } })
+  expect(records()[0]!.message).toContain('not confirmed')
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(useAppStore.getState().noticeReadReceipts).toBe(before.noticeReadReceipts)
 })

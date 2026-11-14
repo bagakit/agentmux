@@ -9,7 +9,7 @@ const native = vi.hoisted(() => ({ options: [] as unknown[], shown: 0, focused: 
 vi.mock('electron', async () => { const { EventEmitter } = await import('node:events'); return { Notification: class extends EventEmitter {
   static isSupported() { return true }
   constructor(options: unknown) { super(); native.options.push(options) }
-  show() { native.shown++ }
+  show() { native.shown++; this.emit('show') }
   close() { this.emit('close') }
 } } })
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service.js'
@@ -20,6 +20,7 @@ import { parseHostedMessageEvent } from '../../../packages/core/src/hosted-value
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { hostedTestOwner } from '../../../packages/core/test/helpers/hosted-runtime-port.js'
 import { createA2AMessageNotifier } from '../src/renderer/src/lib/a2a-message-notifier.js'
+import { a2aNotificationContext } from '../src/renderer/src/lib/a2a-notification-context.js'
 import { createAgentNotifier } from '../src/main/agent-notifier.js'
 import type { AppConfig, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 import type { AgentMuxClientEvent } from '../../../packages/core/src/types.js'
@@ -37,7 +38,7 @@ const created = (sequence: number, extra = {}) => ({ type: 'core', hostId: 'loca
 it('only live background original creations notify once; receipt/catch-up/boot/mute and the visible recipient remain quiet', async () => {
   const notify = vi.fn(async () => {})
   let input = { config, sessions: [session('reader'), session('sender')], ready: true, windowFocused: false, visibleSessionIds: new Set<string>(), agentNames: {}, timelines: {} }
-  const owner = createA2AMessageNotifier({ notify, snapshot: () => input, listMessages: async (_reference, options) => ({
+  const owner = createA2AMessageNotifier({ notify, current: target => a2aNotificationContext(input, target), listMessages: async (_reference, options) => ({
     hostId: 'local', participantSessionId: 'reader', direction: options.direction, messages: [{ sequence: options.beforeSequence! - 1,
       envelope: { messageId: `mid-${options.beforeSequence! - 1}`, senderSessionId: 'sender', recipientSessionId: 'reader' },
       bodyPreview: 'Please review the notification copy.' } as never], nextBeforeSequence: null
@@ -86,8 +87,8 @@ it('a cross-process original journal write reaches the actual public Hosted cons
   const host = createAgentNotifier({ window: { isDestroyed: () => false, isMinimized: () => false, focus: () => native.focused++ } as never, onActivate: () => {} }); closes.push(() => host.dispose())
   let reader = hosted
   const delivered: Promise<void>[] = [], owner = createA2AMessageNotifier({
-    notify: async request => { expect(host.notify(request)).toMatchObject({ status: 'shown' }) },
-    snapshot: () => ({ config, sessions: [session('reader'), session('sender')], agentNames: {}, timelines: {}, ready: true, windowFocused: false, visibleSessionIds: new Set() }),
+    notify: async request => { expect(await host.notify(request)).toMatchObject({ status: 'shown' }) },
+    current: target => a2aNotificationContext({ config, sessions: [session('reader'), session('sender')], agentNames: {}, timelines: {}, ready: true, windowFocused: false, visibleSessionIds: new Set() }, target),
     listMessages: async (reference, options) => ({ ...await reader.listMessages({ ...options, participantSessionId: reference.agentSessionId }), hostId: reference.hostId })
   })
   const events: AgentMuxClientEvent[] = []

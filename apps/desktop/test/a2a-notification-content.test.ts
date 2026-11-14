@@ -1,6 +1,8 @@
 import { expect, it, vi } from 'vitest'
 import { composeA2AMessageNotification } from '../src/renderer/src/lib/a2a-notification-presentation'
-import { createA2AMessageNotifier, type A2ANotificationSnapshot } from '../src/renderer/src/lib/a2a-message-notifier'
+import { createA2AMessageNotifier } from '../src/renderer/src/lib/a2a-message-notifier'
+import { a2aNotificationContext } from '../src/renderer/src/lib/a2a-notification-context'
+type A2ANotificationSnapshot = Parameters<typeof a2aNotificationContext>[0]
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
 
 const sender = { sessionId: 'original-sender', fallback: 'Codex · Scratch' }
@@ -16,7 +18,7 @@ function fixture() {
   const f = { snapshot: { config: null, sessions: [session(sender.sessionId), session(recipient.sessionId)], agentNames: {}, timelines: {},
     ready: true, windowFocused: false, visibleSessionIds: new Set() } as A2ANotificationSnapshot,
     notify, listMessages, owner: null as unknown as ReturnType<typeof createA2AMessageNotifier> }
-  f.owner = createA2AMessageNotifier({ notify, listMessages, snapshot: () => f.snapshot })
+  f.owner = createA2AMessageNotifier({ notify, listMessages, current: target => a2aNotificationContext(f.snapshot, target) })
   return f
 }
 
@@ -100,4 +102,42 @@ it('uses current names and sound after reading, retaining the durable recipient 
   finish(page() as never); await pending
   expect(f.notify).toHaveBeenCalledExactlyOnceWith({ sessionId: recipient.sessionId, title: 'Notification design → Main coordination',
     body: 'Please review the notification copy.', mode: 'patient', sound: true })
+})
+
+it.each([false, true])('suppresses any visible presentation of the exact recipient only when focused=%s', async focused => {
+  const f = fixture()
+  f.snapshot = { ...f.snapshot, windowFocused: focused, visibleSessionIds: new Set(['second-recipient-view']),
+    sessions: [...f.snapshot.sessions, { ...session(recipient.sessionId), id: 'second-recipient-view' }] }
+  await f.owner.observe(arrival)
+  expect(f.listMessages).toHaveBeenCalledTimes(focused ? 0 : 1)
+  expect(f.notify).toHaveBeenCalledTimes(focused ? 0 : 1)
+})
+
+it('does not suppress the original recipient for a visible display alias or another Host', async () => {
+  const f = fixture()
+  f.snapshot = { ...f.snapshot, windowFocused: true, visibleSessionIds: new Set(['visible-alias', 'other-host']), sessions: [
+    ...f.snapshot.sessions, { ...session('foreign-agent'), id: 'visible-alias' },
+    { ...session(recipient.sessionId), hostId: 'other-host', id: 'other-host' }
+  ] }
+  await f.owner.observe(arrival)
+  expect(f.notify).toHaveBeenCalledOnce()
+})
+
+it('disposes before future observations without asking its former owner for facts', async () => {
+  const current = vi.fn(), listMessages = vi.fn(), notify = vi.fn()
+  const owner = createA2AMessageNotifier({ current, listMessages, notify })
+  owner.dispose(); owner.dispose()
+  await owner.observe(arrival)
+  expect(current).not.toHaveBeenCalled(); expect(listMessages).not.toHaveBeenCalled(); expect(notify).not.toHaveBeenCalled()
+})
+
+it('disposes an in-flight original read without consulting or notifying the retired owner', async () => {
+  const f = fixture()
+  const current = vi.fn(target => a2aNotificationContext(f.snapshot, target))
+  const owner = createA2AMessageNotifier({ current, listMessages: f.listMessages, notify: f.notify })
+  let finish!: (value: never) => void
+  f.listMessages.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const pending = owner.observe(arrival)
+  owner.dispose(); finish(page() as never); await pending
+  expect(current).toHaveBeenCalledOnce(); expect(f.notify).not.toHaveBeenCalled()
 })

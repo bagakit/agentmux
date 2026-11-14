@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 // STRUCTURAL guard: the attention path must not hold a SECOND "is this on screen" predicate.
@@ -26,7 +26,7 @@ import { describe, expect, it } from 'vitest'
 // The behavior seam in `attention-topic-visibility.test.ts` runs the real notifier against the real
 // authority; the two together are the guard.
 
-const RENDERER = new URL('../src/renderer/src/', import.meta.url).pathname
+const RENDERER = resolve(import.meta.dirname, '../src/renderer/src')
 const HOOK = 'hooks/useAgentAttentionNotifications.ts'
 const SESSION_VISIBILITY = 'lib/session-visibility.ts'
 const AUTHORITY = 'lib/surface-navigation-visibility.ts'
