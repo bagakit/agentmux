@@ -71,6 +71,11 @@ export class NodeLocationSource {
       if (site) return site
     } catch { signal?.throwIfAborted() }
     if (!policy?.estimatePublicEgress) return null
+    return this.readPublicEgress(signal)
+  }
+
+  async readPublicEgress(signal?: AbortSignal): Promise<NodeMapLocation | null> {
+    signal?.throwIfAborted()
     if (this.cached && this.cached.until > Date.now()) return this.cached.value
     const deadline = AbortSignal.timeout(2500)
     let value: NodeMapLocation | null = null

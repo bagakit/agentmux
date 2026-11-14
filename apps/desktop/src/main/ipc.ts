@@ -162,7 +162,7 @@ import { executeBrowserTaskControl } from './browser-task-control.js'
 import { createBrowserAutomationGate } from './browser-automation-gate.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
-import { registerMacMapLocationIpc } from './mac-map-location.js'
+import { registerMeshMapLocationIpc } from './mesh-map-location-ipc.js'
 import { registerScreenshotShortcut } from './screenshot-shortcut.js'
 import { ScreenCapture } from './screen-capture.js'
 import { saveScreenshotPng } from './screenshot-files.js'
@@ -389,6 +389,7 @@ export async function registerIpc(args: {
   loadedAppVersion?: string
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
+  resourceProbeTerminalReader?: (read: import('./resource-probe.js').ResourceProbeTerminalReader) => void
 }): Promise<() => Promise<void>> {
   const contents = args.window.webContents
   const capsuleClient: CapsulePort = { call: async (method, params) =>
@@ -803,6 +804,11 @@ export async function registerIpc(args: {
     isAvailable: () => acceptingControl && !args.window.isDestroyed() && !contents.isDestroyed(),
     sendRequest: (request) => contents.send(CONTROL_REQUEST_CHANNEL, request),
     sendCancellation: (cancellation) => contents.send(CONTROL_CANCEL_CHANNEL, cancellation)
+  })
+  args.resourceProbeTerminalReader?.(async (regionId, signal) => {
+    const result = await controlBridge.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
+      operation: 'inspect.region', target: { kind: 'region', regionId } }, signal)
+    return result.operation === 'inspect.region' ? result.region.terminalView : undefined
   })
   const closeBrowserResource = async (id: string): Promise<void> => {
     // Existing native owners retire synchronously along their original Close path.
@@ -1822,7 +1828,7 @@ export async function registerIpc(args: {
     remindPending: () => { if (!captureSurface.notice('Finish or cancel this screenshot first')) screenshotEditor.notice('Finish or cancel this screenshot first') } })
   registerNativeDesktopIpc({ capture: (mode, options) => screenCapture.capture(true, mode, options), native: getDesktopNativeUiOwner,
     handle: handleWithEvent,})
-  registerMacMapLocationIpc(handleWithEvent)
+  registerMeshMapLocationIpc(handleWithEvent)
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, contents, rawUrl)
   })

@@ -34,7 +34,12 @@ export function MeshSavedHost({ data }: NodeProps<SavedHostNode>) {
 }
 
 export function MeshSavedClient({ data }: NodeProps<SavedClientNode>) {
-  return <div className="mesh-saved-client"><HostIcon kind="local" size={15} /><strong>This device</strong>{data.locationHint && <small>{data.locationHint}</small>}<MeshPorts type="source" /></div>
+  return <div className="mesh-saved-client" data-location-estimate={data.locationHint ? '' : undefined}>
+    {!data.locationHint && <HostIcon kind="local" size={15} />}
+    <strong>This device</strong>
+    {data.locationHint && <small title="Estimated from public egress">{data.locationHint}</small>}
+    <MeshPorts type="source" />
+  </div>
 }
 
 export function savedConnectionNodes(hosts: readonly HostConfig[], twoBanks: boolean,

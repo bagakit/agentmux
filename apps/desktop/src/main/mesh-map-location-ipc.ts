@@ -1,9 +1,11 @@
 import { app, BrowserWindow, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { NodeLocationSource } from '@agentmux/core/node-location-source'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import type { MacMapLocationResult } from '../shared/mesh-map-locations.js'
 
 const require = createRequire(import.meta.url)
+const localLocation = new NodeLocationSource()
 
 /** Core Location must run inside the original foreground application bundle. */
 async function readMacMapLocation(sender: WebContents): Promise<MacMapLocationResult> {
@@ -20,8 +22,9 @@ async function readMacMapLocation(sender: WebContents): Promise<MacMapLocationRe
   }
 }
 
-export function registerMacMapLocationIpc(
-  handle: (channel: string, listener: (event: IpcMainInvokeEvent) => Promise<MacMapLocationResult>) => void
+export function registerMeshMapLocationIpc(
+  handle: <Result>(channel: string, listener: (event: IpcMainInvokeEvent) => Promise<Result>) => void
 ): void {
   handle('ui:requestMacMapLocation', event => readMacMapLocation(event.sender))
+  handle('ui:estimateLocalMapLocation', () => localLocation.readPublicEgress())
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
-import { meshPeerLocationKey, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
+import { meshLocationValue, meshPeerLocationKey, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
 import { api } from '../../lib/api'
 import { useMeshDeviceLocations } from './use-mesh-device-locations'
 import { savedMeshDevices } from './MeshSavedDevices'
@@ -50,7 +50,8 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
     return () => { controller.abort(); setBusy(false) }
   }, [active, visible, revision])
   const [geographicVisible, setGeographicVisible] = useState(true)
-  const observedLocations = useMeshDeviceLocations(hosts, active && visible && geographicVisible, revision, snapshot?.network?.networkId)
+  const observedLocations = useMeshDeviceLocations(hosts, active && visible && geographicVisible, revision,
+    !meshLocationValue(locations, 'local'), snapshot?.network?.networkId)
   const sameOwner = !snapshot || snapshot.owner.runtimeId === settings?.owner.runtimeId
     && snapshot.owner.ownerInstanceId === settings.owner.ownerInstanceId
   const savedTargets = sameOwner ? settings?.configuration.peers : undefined

@@ -1949,6 +1949,7 @@ export type AgentMuxDesktopApi = {
   }
   ui: {
     requestMacMapLocation?(): Promise<import('./mesh-map-locations').MacMapLocationResult>
+    estimateLocalMapLocation?(): Promise<import('./mesh-map-locations').MeshDeviceLocation | null>
     readLoadedIdentity(): Promise<import('./client-observation').DesktopLoadedIdentity>
     /** Original Main appearance captured once before this document's first paint. */
     initialTheme: import('./theme-bootstrap').ThemeBootstrap | null

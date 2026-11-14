@@ -469,6 +469,7 @@ const api: AgentMuxPreloadApi = {
   },
   ui: {
     ...(process.platform === 'darwin' ? { requestMacMapLocation: () => ipcRenderer.invoke('ui:requestMacMapLocation') } : {}),
+    estimateLocalMapLocation: () => ipcRenderer.invoke('ui:estimateLocalMapLocation'),
     readLoadedIdentity: () => ipcRenderer.invoke('ui:readLoadedIdentity'),
     initialTheme,
     workbenchWindows: {

@@ -10,7 +10,7 @@ import { SAVED_CLIENT_ID, savedHostId } from './MeshSavedConnections'
 
 type NodeRead = NodePublishingResults['node.location']
 
-function mapPoints(replies: ReadonlyMap<string, NodeRead>, networkId?: string | null): ReadonlyMap<string, MeshDeviceLocation> {
+function mapPoints(replies: ReadonlyMap<string, NodeRead>, networkId?: string | null) {
   const points = new Map<string, MeshDeviceLocation>()
   const origins = new Map<string, string | null>()
   for (const [hostId, reply] of replies) {
@@ -32,10 +32,11 @@ function mapPoints(replies: ReadonlyMap<string, NodeRead>, networkId?: string | 
 const empty = new Map<string, NodeRead>()
 
 /** The original Node is reached through its own saved carrier. Viewing the hidden graph starts no work. */
-export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boolean, refresh: number, networkId?: string | null) {
+export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boolean, refresh: number, estimateLocal: boolean, networkId?: string | null) {
   const links = useAppStore(state => state.meshDeviceLinks.saved)
   const key = JSON.stringify([hosts.map(clusterHostKey), links])
   const [observed, setObserved] = useState<{ key: string; replies: ReadonlyMap<string, NodeRead> }>()
+  const [localEstimate, setLocalEstimate] = useState<MeshDeviceLocation | null>(null)
   useEffect(() => {
     if (!active) return
     const cancel = new AbortController(), replies = new Map<string, NodeRead>()
@@ -53,6 +54,11 @@ export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boo
           }
         } catch { if (cancel.signal.aborted) return }
         update()
+        if (host.kind === 'local' && estimateLocal && !replies.get(SAVED_CLIENT_ID)?.location) {
+          void api.ui.estimateLocalMapLocation?.().then(location => {
+            if (!cancel.signal.aborted) setLocalEstimate(location)
+          }).catch(() => {})
+        }
       }
     }
     for (let index = 0; index < Math.min(hosts.length, 3); index++) void read()
@@ -72,7 +78,11 @@ export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boo
       }
     })()
     return () => cancel.abort()
-  }, [active, key, refresh])
+  }, [active, key, refresh, estimateLocal])
   const replies = observed?.key === key ? observed.replies : empty
-  return useMemo(() => mapPoints(replies, networkId), [replies, networkId])
+  return useMemo(() => {
+    const points = mapPoints(replies, networkId)
+    if (estimateLocal && localEstimate && !points.has(SAVED_CLIENT_ID)) points.set(SAVED_CLIENT_ID, localEstimate)
+    return points
+  }, [replies, networkId, estimateLocal, localEstimate])
 }

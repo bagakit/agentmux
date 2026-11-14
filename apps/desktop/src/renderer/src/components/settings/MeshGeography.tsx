@@ -45,7 +45,9 @@ export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points
   const placements = nodes.flatMap<N>(node => {
     const point = points.get(node.id)
     if (!point) return []
-    const width = node.width ?? 166, height = node.height ?? 64
+    const location = locations.get(node.id)
+    const width = node.type === 'savedClient' && location?.source === 'public-egress' ? 156 : node.width ?? 166
+    const height = node.height ?? 64
     let position = { x: point.x - width / 2, y: point.y + 14 }
     const overlaps = (at: XYPosition) => labels.some(label =>
       Math.abs(at.x + width / 2 - label.position.x - label.width / 2) < (width + label.width) / 2 + GUTTER &&
@@ -56,10 +58,9 @@ export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points
     }
     labels.push({ position, width, height })
     marks.push({ id: node.id, point, label: { x: position.x + width / 2, y: position.y + (position.y < point.y ? height : 0) } })
-    const location = locations.get(node.id)
     const hint = location?.source === 'public-egress'
       ? (location.accuracyKm === undefined ? 'IP estimate' : 'IP · ±' + location.accuracyKm + ' km') : undefined
-    return [{ ...node, data: { ...node.data, locationHint: hint }, position, draggable: false, className: 'mesh-geographic-node' }]
+    return [{ ...node, width, data: { ...node.data, locationHint: hint }, position, draggable: false, className: 'mesh-geographic-node' }]
   })
   const extent = labels.reduce((box, { position, width, height }) => ({
     left: Math.min(box.left, position.x),

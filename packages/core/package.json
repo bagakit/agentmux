@@ -474,6 +474,10 @@
       "types": "./dist/node-publishing.d.ts",
       "import": "./dist/node-publishing.js"
     },
+    "./node-location-source": {
+      "types": "./dist/node-location-source.d.ts",
+      "import": "./dist/node-location-source.js"
+    },
     "./executor-contract": {
       "types": "./dist/executor-contract.d.ts",
       "import": "./dist/executor-contract.js"
