@@ -20,6 +20,7 @@ import { WorkbenchUserStateStore } from './workbench-user-state.js'
 import { WorkbenchCloseOwner } from './workbench-close-owner.js'
 import { DesktopStorageRecoveryExports } from './storage-recovery-exports.js'
 import { recoverWorkbenchBeforeLoad } from './workbench-recovery-bootstrap.js'
+import { localRuntimeRecovery } from './local-runtime-recovery.js'
 import { applicationMenuTemplate } from './application-menu.js'
 import { ZoomCommands } from './zoom-commands.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
@@ -115,9 +116,12 @@ function startPrimaryInstance(): void {
   const storageRecoveryExports = new DesktopStorageRecoveryExports(workbenchUserState.path + '.recovery-exports',
     () => [workbenchUserState.recoverySource(), workbenchWindowStore.recoverySource(), workbenchCloseOwner.recoverySource()])
   // Observe original sources once before any default document/window load.
+  const storePath = desktopAgentSessionStorePath()
+  const runtimeLocation = { storePath, stateDirectory: dirname(storePath) }
+  const runtimeIdentityRecovery = localRuntimeRecovery(runtimeLocation)
   let recoveryBootstrap: Promise<import('./workbench-recovery-bootstrap.js').WorkbenchRecoveryBootstrap> | undefined
   const recoverWorkbench = () => recoveryBootstrap ??= recoverWorkbenchBeforeLoad({
-    storePath: desktopAgentSessionStorePath(), stateDirectory: dirname(desktopAgentSessionStorePath()),
+    ...runtimeLocation,
     socketPath: defaultAgentMuxControlSocketPath(), desktopSocketPath: `${defaultAgentMuxControlSocketPath()}.desktop`,
     user: workbenchUserState, windows: workbenchWindowStore, close: workbenchCloseOwner, exports: storageRecoveryExports })
   const performanceScene = new PerformanceSceneOwner(join(app.getPath('userData'), 'performance-scene.json'))
@@ -206,6 +210,7 @@ function startPrimaryInstance(): void {
     }))
 
   async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
+    await runtimeIdentityRecovery.check()
     await recoverWorkbench()
     const initialConfig = await configStore.get()
     const windowCreationStartedAtMs = Date.now()
@@ -300,7 +305,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, workbenchCloseOwner, storageRecoveryExports, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
+    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, workbenchCloseOwner, storageRecoveryExports, runtimeIdentityRecovery, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedAppVersion: app.getVersion(), loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })

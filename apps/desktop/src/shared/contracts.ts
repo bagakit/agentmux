@@ -1956,6 +1956,8 @@ export type AgentMuxDesktopApi = {
     writeFileViewReading(record: import('./workbench-user-state').FileViewReadingRecord): Promise<import('./workbench-user-state').FileViewReadingReceipt | null>
     readWorkbenchState(): Promise<string | null>
     readStorageRecovery(): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
+    readLocalRuntimeRecovery(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>
+    restoreLocalRuntimeIdentity(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>
     createStorageBackup(owner: import('@agentmux/core').AgentMuxRuntimeFence): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
     importWorkbenchState(value: string): Promise<string>
     writeWorkbenchState(value: string): Promise<import('./workbench-user-state').WorkbenchUserStateReceipt | null>

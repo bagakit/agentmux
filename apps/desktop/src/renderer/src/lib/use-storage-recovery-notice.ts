@@ -4,9 +4,12 @@ import type { RecoveryGeneration } from '@agentmux/core'
 import type { DesktopStorageRecoveryRead } from '../../../shared/storage-recovery'
 import { api } from './api'
 import { storageRecoveryNotice } from './storage-recovery-notice'
+import { useLocalRuntimeRecovery } from './use-local-runtime-recovery'
 
 /** Only caches exact owner observations for this mounted reader; no backup state or persistence owner. */
 export function useStorageRecoveryNotice() {
+  const { notice: identityRecovery } = useLocalRuntimeRecovery(!__AGENTMUX_WEB_PREVIEW__)
+  const identityNeedsBackup = Boolean(identityRecovery)
   const [read, setRead] = useState<DesktopStorageRecoveryRead | null>(null)
   const [error, setError] = useState<string | null>(null)
   const lastPoint = useRef<{ runtimeId: string; value: RecoveryGeneration } | null>(null)
@@ -23,13 +26,13 @@ export function useStorageRecoveryNotice() {
     catch (error) { if (mounted.current && generation === observation.current) setError(presentError(error)) }
   }, [accept])
   useEffect(() => {
-    if (__AGENTMUX_WEB_PREVIEW__) return
+    if (__AGENTMUX_WEB_PREVIEW__ || identityNeedsBackup) return
     mounted.current = true
     let stopped = false, timer: ReturnType<typeof setTimeout> | undefined
     const observe = async () => { await check(); if (!stopped) timer = setTimeout(() => { void observe() }, 5_000) }
     void observe()
     return () => { stopped = true; mounted.current = false; ++observation.current; clearTimeout(timer) }
-  }, [check])
+  }, [check, identityNeedsBackup])
   const retry = useCallback(async () => {
     if (!read) { await check(); return }
     const generation = ++observation.current
@@ -37,5 +40,6 @@ export function useStorageRecoveryNotice() {
     catch (error) { if (mounted.current && generation === observation.current) setError(presentError(error)) }
   }, [read, accept, check])
   const point = lastPoint.current?.value ?? null
-  return useMemo(() => storageRecoveryNotice(read, point, error, () => { void retry() }, () => { void check() }), [read, point, error, retry, check])
+  const backupNotice = useMemo(() => storageRecoveryNotice(read, point, error, () => { void retry() }, () => { void check() }), [read, point, error, retry, check])
+  return identityRecovery ?? backupNotice
 }

@@ -362,6 +362,7 @@ export async function registerIpc(args: {
   workbenchUserState: WorkbenchUserStateStore
   workbenchCloseOwner?: WorkbenchCloseOwner
   storageRecoveryExports?: DesktopStorageRecoveryExports
+  runtimeIdentityRecovery?: ReturnType<typeof import('./local-runtime-recovery.js').localRuntimeRecovery>
 
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
@@ -1664,6 +1665,12 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('ui:readWorkbenchState', () => workbenchUserState.read())
   handleWithEvent('ui:readStorageRecovery', () => args.runtime.readStorageRecovery())
+  handleWithEvent('ui:readLocalRuntimeRecovery', () => args.runtimeIdentityRecovery?.check() ?? { state: 'unchanged' })
+  handleWithEvent('ui:restoreLocalRuntimeIdentity', event => args.runtimeIdentityRecovery?.choose(async () => {
+    const choice = await dialog.showOpenDialog(args.window, { title: 'Choose original Runtime identity backup', properties: ['openFile'] })
+    assertAppDocumentSender(event, contents, args.appDocumentSources())
+    return choice.canceled ? null : choice.filePaths[0] ?? null
+  }) ?? { state: 'unchanged' })
   handleWithEvent('ui:createStorageBackup', (_event, owner: import('@agentmux/core').AgentMuxRuntimeFence) => args.runtime.createStorageBackup(owner))
   handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))
   handleWithEvent('ui:writeWorkbenchState', (event, request: import('../shared/workbench-user-state').WorkbenchUserStateWrite) =>

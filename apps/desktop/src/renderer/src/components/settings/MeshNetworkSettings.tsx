@@ -9,6 +9,8 @@ import { meshConfiguration, meshDraftForRuntime, meshForm, meshPeerCode, type Me
 import { SettingsSaveBar } from './SettingsSaveBar'
 import { MeshNetworkMap } from './MeshNetworkMap'
 import { MeshConnectionIntro } from './MeshConnectionIntro'
+import { ServiceWindowNotice } from '../ServiceWindowNotice'
+import { useLocalRuntimeRecovery } from '../../lib/use-local-runtime-recovery'
 import './mesh-settings.css'
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
@@ -146,9 +148,12 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
   }
   const peerCode = settings ? meshPeerCode(settings) : null
   const hasTopology = Boolean(network && (network.peers.length || network.records.length || network.routes.length))
+  const identityRecovery = useLocalRuntimeRecovery(active && !settings, () => { void inspect() })
   return <div className="mesh-network-settings" data-mesh-settings>
-    <header className="mesh-network-heading"><MeshConnectionIntro />{settings || !issue ? <button className="small-button" onClick={() => void inspect()} disabled={reading || saving}>{reading ? 'Reading…' : 'Refresh'}</button> : null}</header>
-    {!settings ? <section className="mesh-availability" role={issue ? 'alert' : 'status'}>
+    <header className="mesh-network-heading"><MeshConnectionIntro />{!identityRecovery.notice && (settings || !issue) ? <button className="small-button" onClick={() => void inspect()} disabled={reading || saving}>{reading ? 'Reading…' : 'Refresh'}</button> : null}</header>
+    {identityRecovery.notice ? <ServiceWindowNotice layout="surface" notice={identityRecovery.notice.notice}
+      actions={<><button className="primary-button" disabled={identityRecovery.restoring} onClick={identityRecovery.notice.action?.run}>{identityRecovery.notice.action?.label}</button>{onConnections ? <button className="small-button" onClick={onConnections}>Open saved connections</button> : null}</>} />
+    : !settings ? <section className="mesh-availability" role={issue ? 'alert' : 'status'}>
       <span className="mesh-section-kicker">{issue ? 'Setup unavailable' : 'Connecting to this Core'}</span>
       <h3>{issue ? 'Couldn’t read Mesh settings.' : 'Reading your network settings…'}</h3>
       <p>{issue ? 'Check this Core’s connection and version, then refresh. Your saved device connections are still available.' : 'You can keep using your saved connections while this Core responds.'}</p>
