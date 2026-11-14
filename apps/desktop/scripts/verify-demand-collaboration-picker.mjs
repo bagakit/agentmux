@@ -41,7 +41,7 @@ async function run(name,mutant) {
 }
 try {
  const baseline=await run('baseline');receipt.baseline={...baseline};delete receipt.baseline.rows
- assert.equal(baseline.exitCode,0);assert.equal(baseline.signal,null);assert.ok(baseline.testsPassed>=5)
+ assert.equal(baseline.exitCode,0);assert.equal(baseline.signal,null);assert.equal(baseline.testsPassed,4,'All four currently owned Demand picker cases must pass')
  for(const file of [...files.slice(0,5),base+'store.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/main/ipc.ts','packages/core/src/client.ts','packages/demand/src/demand-store.ts']) assert.ok(baseline.rows.some(row=>row.file===file),'Actual loaded consumer '+file)
  for(const mutant of mutations) {
   assert.equal((await fs.readFile(path.join(root,mutant.file),'utf8')).split(mutant.before).length,2,'One anchor '+mutant.id)
@@ -50,7 +50,7 @@ try {
   assert.ok(result.rows.some(row=>row.file===mutant.file && row.consumer==='actual-loaded-mutant' && row.beforeSha256!==row.afterSha256))
   console.log(mutant.id+': actual assertion RED')
  }
- const final=await run('final-current');receipt.final={...final};delete receipt.final.rows;assert.equal(final.exitCode,0);assert.equal(final.signal,null);assert.ok(final.testsPassed>=5)
+ const final=await run('final-current');receipt.final={...final};delete receipt.final.rows;assert.equal(final.exitCode,0);assert.equal(final.signal,null);assert.equal(final.testsPassed,4,'All four current Demand picker cases must pass after mutations')
  assert.deepEqual(await hashes(),receipt.source,'Owning source changed during proof');receipt.passed=true
 }catch(error){receipt.error={message:error.message,stack:error.stack}}
 await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2)+'\n')
