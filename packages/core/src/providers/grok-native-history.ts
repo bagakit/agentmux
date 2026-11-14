@@ -182,7 +182,7 @@ export async function resolveGrokUpdatesPath(
   return candidate
 }
 
-async function verifySummaryIdentity(
+export async function verifyGrokSummaryIdentity(
   sessionDir: string,
   context: GrokHistorySourceContext,
   budget: NativeHistoryReadBudget
@@ -493,10 +493,10 @@ function rawRecord(entry: NativeJsonlHistoryRecord, row: Update): AgentSessionHi
     contentParts: [{ kind: 'text', text: nativeJsonStringify(entry.value), contentEligibility: 'unconfirmed' }] }
 }
 
-async function openGrokReader(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
+export async function openGrokReader(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
   const budget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
   const transcriptPath = await resolveGrokUpdatesPath(context)
-  await verifySummaryIdentity(dirname(transcriptPath), context, budget)
+  await verifyGrokSummaryIdentity(dirname(transcriptPath), context, budget)
   return NativeJsonlHistoryReader.open({ ...context, transcriptPath }, budget)
 }
 
@@ -504,7 +504,7 @@ async function openGrokReader(context: AgentProviderSessionHistoryContext): Prom
 export async function observeGrokSessionHistory(context: AgentProviderSessionHistoryObservationContext): Promise<AgentSessionHistoryObservationHandle> {
   const budget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
   const transcriptPath = await resolveGrokUpdatesPath(context, true)
-  await verifySummaryIdentity(dirname(transcriptPath), context, budget)
+  await verifyGrokSummaryIdentity(dirname(transcriptPath), context, budget)
   return observeNativeJsonlHistory({ ...context, transcriptPath })
 }
 export async function readGrokSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {

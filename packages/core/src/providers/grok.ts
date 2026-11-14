@@ -10,6 +10,7 @@ import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversa
 import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { readGrokInputInitialization } from './grok-input-initialization.js'
+import { observeGrokSessionStatus, readGrokPromptExecutionEvidence } from './grok-session-status.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -42,6 +43,7 @@ export const GROK_HOOK_EVENTS = [
  */
 export const GROK_HOOKS: AgentNativeHookSpecification = {
   retainedRuntime: true,
+  nativeTurnIdKeys: ['promptId'],
   toolFields(eventName, payload) {
     if (!['pre_tool_use', 'post_tool_use', 'post_tool_use_failure'].includes(eventName)) return {}
     // Native stdin emits these same-value aliases; camelCase is the original spelling.
@@ -197,6 +199,8 @@ export function createGrokProvider(defineAgentProvider: ProviderFactory): AgentP
     observeSessionHistory: observeGrokSessionHistory,
     readConversationChanges: readGrokConversationChanges,
     readInputInitialization: readGrokInputInitialization,
+    observeSessionStatus: observeGrokSessionStatus,
+    readPromptExecutionEvidence: readGrokPromptExecutionEvidence,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? ['--', prompt] : [])
     ]

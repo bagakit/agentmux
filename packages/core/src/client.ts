@@ -1047,7 +1047,7 @@ export class AgentMuxClient {
   private readonly nativeStatusSettlements = new Set<Promise<void>>()
   private readonly nativeStatusWatches = new Map<string, {
     key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<void>
-    recordId?: string; sequence?: number
+    recordId?: string; sequence?: number; unconfirmed?: boolean; ingressRecordId?: string; ingressSequence?: number | undefined
   }>()
   private readonly terminalFrontendWatches = new Map<string, TerminalFrontendWatch>()
   private readonly screenEvidence: AgentScreenEvidenceStore
@@ -6696,7 +6696,7 @@ export class AgentMuxClient {
       return observation
     }
     try {
-      const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
+      const evidence = await provider.readPromptExecutionEvidence?.(await this.providerNativeContext(session, run))
       if (evidence?.state === 'idle') return { ...observation, nativeIdle: evidence }
       if (!evidence) return { ...observation, unavailable: new AgentMuxError('The Provider initial idle opportunity is unconfirmed. Inspect the original Session or read its retained Inbox.', 'AGENT_TURN_END_UNCONFIRMED') }
       return observation
@@ -6901,7 +6901,7 @@ export class AgentMuxClient {
       }
       if (nativeTargetSourceUnconfirmed(stored)) return unknown('The original native source is unconfirmed.')
       const provider = this.providers.get(session.providerId)
-      const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
+      const evidence = await provider.readPromptExecutionEvidence?.(await this.providerNativeContext(session, run))
       if (!evidence) return unknown('The Provider has not confirmed current native activity.')
       return { key, state: evidence.state === 'working' ? 'active' : 'idle', source: 'native-provider',
         sourceId: evidence.id, sourceNow: Date.now(), issue: null }
@@ -7385,29 +7385,9 @@ export class AgentMuxClient {
     let observed: import('./agent-provider.js').AgentProviderInputInitialization
     try {
       observed = await observePromptInput(observationSignal, async () => {
-        const launch = this.providerLaunch(session, run)
-        const stored = await this.store.readMetadata(session.agentSessionId)
-        if (!stored || !sameRun(stored.run, session.run)) throw new AgentMuxError('Original initialization source changed.', 'STALE_AGENT_SESSION')
-        let env: Readonly<Record<string, string | undefined>> | undefined
-        const resumed = Object.values(stored.continuityOperations ?? {}).find(operation => operation.kind === 'resumed' && operation.newRun?.runId === run.runId)
-          ?? (stored.continuity?.kind === 'resumed' && stored.continuity.newRun?.runId === run.runId ? stored.continuity : undefined)
-        const executor = resumed && readContinuityExecutor(stored.continuityExecutors, resumed.intentOperationId ?? resumed.operationId)
-        if (executor?.source === 'sdk') env = executor.options.env
-        else {
-          // Current same-named configuration cannot stand in for an original resume.
-          if (resumed && executor?.source !== 'creation') throw new AgentMuxError('Original resume environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
-          if (stored.creation?.executorRevision) {
-            const original = await this.hostExecutorOwner?.resolve(stored.executorId)
-            if (!original || original.descriptor.configRevision !== stored.creation.executorRevision || original.config.providerId !== stored.providerId) throw new AgentMuxError(
-              'Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
-            env = original.config.env
-          } else {
-            if (!stored.creation?.executorInvocationDigest) throw new AgentMuxError('Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
-            env = (await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(stored, {}, stored.agentSessionId)).env
-          }
-        }
+        const native = await this.providerNativeContext(session, run, true)
         observationSignal.throwIfAborted()
-        return await provider.readInputInitialization!({ ...launch, ...(env ? { env } : {}), workspacePath: session.workspacePath,
+        return await provider.readInputInitialization!({ ...native, workspacePath: session.workspacePath,
           agentSessionId: session.agentSessionId, run: { ...session.run }, purpose, ...(run.pid === null ? {} : { processId: run.pid }),
           ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}), signal: observationSignal })
       })
@@ -9071,6 +9051,12 @@ export class AgentMuxClient {
   /** Public projections overlay live Core observations without writing them to the Session store. */
   private projectSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
     const projected = cloneSession(session)
+    const watch = this.nativeStatusWatches.get(session.agentSessionId)
+    if (projected.semanticStatus?.source === 'native-transcript' && this.providers.get(session.providerId).observeSessionStatus &&
+        (!watch || watch.key !== JSON.stringify([session.run.runId, session.nativeHandle]) || watch.unconfirmed)) {
+      projected.semanticStatus = transitionAgentSemanticStatus(projected.semanticStatus, {
+        state: 'running', source: 'native-transcript', observedAt: projected.semanticStatus.observedAt })
+    }
     const currentActivity = this.projectCurrentActivity(session)
     if (currentActivity) projected.currentActivity = currentActivity
     if (session.nativeHandle) projected.nativeHandlePersistence = this.registry.isDurabilityUnconfirmed(session.agentSessionId)
@@ -10338,19 +10324,21 @@ export class AgentMuxClient {
     if (!provider.observeSessionStatus || !session.nativeHandle) return true
     const key = JSON.stringify([session.run.runId, session.nativeHandle])
     const existing = this.nativeStatusWatches.get(session.agentSessionId)
-    if (existing?.key === key) { await existing.pending; return Boolean(existing.observer) && !existing.controller.signal.aborted }
+    if (existing?.key === key && !existing.controller.signal.aborted) { await existing.pending; return Boolean(existing.observer) }
     existing?.controller.abort(); existing?.observer?.dispose()
     const watch: {
       key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<void>
-      recordId?: string; sequence?: number
+      recordId?: string; sequence?: number; unconfirmed?: boolean; ingressRecordId?: string; ingressSequence?: number | undefined
     } = {
-      key, controller: new AbortController(), pending: Promise.resolve()
+      key, controller: new AbortController(), pending: Promise.resolve(), unconfirmed: true
     }
     this.nativeStatusWatches.set(session.agentSessionId, watch)
     let unavailableObservation = false
     const unavailable = (code: string, message: string): void => {
       if (!this.currentSessionObservation(target) || watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
       unavailableObservation = true
+      watch.unconfirmed = true
+      this.publishSession(this.requireAgentSession(session.agentSessionId))
       this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code,
         message: `${message} The retained Session, Run and input remain available. Inspect the Session to retry observation.`,
         evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
@@ -10361,11 +10349,17 @@ export class AgentMuxClient {
       }
     }
     try {
-      watch.observer = await provider.observeSessionStatus({ args: [], workspacePath: session.workspacePath,
+      watch.observer = await provider.observeSessionStatus({ ...await this.providerNativeContext(session, await this.requireCurrentAgentRun(session)),
         nativeHandle: structuredClone(session.nativeHandle),
-        ...(session.nativePromptPredecessor ? { nativePromptPredecessor: structuredClone(session.nativePromptPredecessor) } : {}),
         signal: watch.controller.signal, onUnavailable: unavailable,
         onStatus: observation => {
+          const latestSequence = watch.ingressSequence ?? watch.sequence
+          if (this.currentSessionObservation(target) &&
+              !watch.controller.signal.aborted && this.nativeStatusWatches.get(session.agentSessionId) === watch && observation.recordId !== (watch.ingressRecordId ?? watch.recordId) &&
+              (latestSequence === undefined || observation.sequence === undefined || observation.sequence > latestSequence)) {
+            watch.unconfirmed = true
+            watch.ingressRecordId = observation.recordId; watch.ingressSequence = observation.sequence
+          }
           watch.pending = watch.pending.then(async () => {
             if (!this.currentSessionObservation(target) || watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch ||
               observation.recordId === watch.recordId || (watch.sequence !== undefined && observation.sequence !== undefined && observation.sequence <= watch.sequence)) return
@@ -10377,6 +10371,7 @@ export class AgentMuxClient {
             if (!ended && this.hookTurnPhases.get(session.run.runId) === 'in-turn' && hook?.nativeTurnId && hook.nativeTurnId !== observation.nativeTurnId &&
               (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= hook.observedAt)) return
             if (observation.state === 'unknown' && !ended) {
+              this.publishSession(current)
               watch.recordId = observation.recordId
               if (observation.sequence !== undefined) watch.sequence = observation.sequence
               this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
@@ -10464,7 +10459,12 @@ export class AgentMuxClient {
                 content: JSON.stringify(observation.failure)
               } }, { source: 'native-transcript', run: { ...next.run }, observedAt }, next.hostId)
             }
-            if (!displayAccepted) { this.publishSession(next); return }
+            if (!displayAccepted) {
+              if (!nativeTargetSourceUnconfirmed(next) && next.semanticStatus?.source === 'native-transcript' &&
+                  next.semanticStatus.state === observation.state && next.semanticStatus.nativeTurnId === observation.nativeTurnId && watch.ingressRecordId === observation.recordId) watch.unconfirmed = false
+              this.publishSession(next); return
+            }
+            if (watch.ingressRecordId === observation.recordId) watch.unconfirmed = false
             if (next.activityCommit && !next.activityCommit.latestCommitted) await this.flushAgentActivity(next)
             if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
             if (observation.state === 'working' || ended)
@@ -10928,8 +10928,26 @@ export class AgentMuxClient {
       : { command: invocation.program ?? this.providers.get(session.providerId).executable, args: invocation.args }
   }
 
-  private providerNativeContext(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): AgentProviderPromptExecutionContext {
-    return { args: this.providerLaunch(session, run).args, workspacePath: session.workspacePath,
+  private async providerNativeContext(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, requireOriginalSource = false): Promise<AgentProviderPromptExecutionContext> {
+    const stored = await this.store.readMetadata(session.agentSessionId)
+    if (!stored || !sameRun(stored.run, session.run)) throw new AgentMuxError('Original initialization source changed.', 'STALE_AGENT_SESSION')
+    let env: Readonly<Record<string, string | undefined>> | undefined
+    const resumed = Object.values(stored.continuityOperations ?? {}).find(operation => operation.kind === 'resumed' && operation.newRun?.runId === run.runId)
+      ?? (stored.continuity?.kind === 'resumed' && stored.continuity.newRun?.runId === run.runId ? stored.continuity : undefined)
+    const executor = resumed && readContinuityExecutor(stored.continuityExecutors, resumed.intentOperationId ?? resumed.operationId)
+    if (executor?.source === 'sdk') env = executor.options.env
+    else if (!resumed || executor?.source === 'creation') {
+      // Current same-named configuration cannot stand in for an original source.
+      if (stored.creation?.executorRevision) {
+        const original = await this.hostExecutorOwner?.resolve(stored.executorId)
+        if (!original || original.descriptor.configRevision !== stored.creation.executorRevision || original.config.providerId !== stored.providerId) throw new AgentMuxError(
+          'Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+        env = original.config.env
+      } else if (stored.creation?.executorInvocationDigest) {
+        env = (await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(stored, {}, stored.agentSessionId)).env
+      } else if (requireOriginalSource) throw new AgentMuxError('Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+    } else if (requireOriginalSource) throw new AgentMuxError('Original resume environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+    return { ...this.providerLaunch(session, run), ...(env ? { env } : {}), workspacePath: session.workspacePath,
       ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}),
       ...(session.nativePromptPredecessor?.run.runId === session.run.runId &&

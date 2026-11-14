@@ -154,6 +154,9 @@ export class NativeJsonlHistoryReader {
   /** Physical byte extent of this snapshot, excluding any unfinished append encountered at EOF. */
   get sourceSizeBytes(): number { return this.cut }
 
+  /** The opened descriptor's identity; a preceding path stat cannot identify this reader. */
+  get sourceIdentity(): Readonly<{ dev: number; ino: number }> { return { ...this.identity } }
+
   static async open(
     context: AgentProviderSessionHistoryContext,
     budget?: NativeHistoryReadBudget
