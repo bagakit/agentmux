@@ -1,10 +1,11 @@
 import { useShallow } from 'zustand/react/shallow'
+import { useMemo } from 'react'
 import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { readGoalDiscussionBinding, resolveGoalDiscussionBinding } from '@agentmux/host/goal-discussion-bindings'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { agentDisplayName } from './workbench-tabs'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
-import { agentSessionPresentationIndex, sessionPresentationById } from './session-presentation'
+import { agentSessionPresentationIndex, createFirstPromptSelector, sessionPresentationById } from './session-presentation'
 import type { GoalDiscussionTaskMode } from './goal-discussion-request'
 
 type State = Pick<ReturnType<typeof useAppStore.getState>, 'demandPmoTabIds' | 'tabs' | 'layouts'>
@@ -39,14 +40,17 @@ export function useGoalDiscussionRecipient(goalId: string) {
 
 /** Presentation for one exact canonical recipient; absence never selects a replacement. */
 export function useGoalAgentPresentation(agentSessionId: string | null | undefined, hostId?: string) {
-  return useAppStore(useShallow(state => {
-    if (!agentSessionId) return { name: null, hostId: null, toolExecution: null }
+  const presentation = useAppStore(useShallow(state => {
+    if (!agentSessionId) return null
     const matches = (agentSessionPresentationIndex(state.sessions).get(agentSessionId) ?? []).filter(session => session.control.agentSessionId === agentSessionId &&
       session.control.hostId === session.hostId && (hostId === undefined || session.control.hostId === hostId))
     const session = matches.length === 1 ? matches[0] : undefined
-    return { name: session?.kind === 'agent' ? agentDisplayName({ userName: state.agentNames[session.id], firstPrompt: firstPromptFromTimeline(state.timelines[session.id]), fallbackLabel: session.label, providerLabel: session.providerId }) : null,
-      hostId: session?.control.hostId ?? null, toolExecution: session?.toolExecution ?? null }
+    return session ? { id: session.id, label: session.label, providerId: session.providerId, hostId: session.control.hostId, toolExecution: session.toolExecution ?? null } : null
   }))
+  const userName = useAppStore(state => presentation ? state.agentNames[presentation.id] : undefined)
+  const firstPrompt = useAppStore(useMemo(() => presentation ? createFirstPromptSelector(presentation.id) : () => null, [presentation?.id]))
+  return { name: presentation ? agentDisplayName({ userName, firstPrompt, fallbackLabel: presentation.label, providerLabel: presentation.providerId }) : null,
+    hostId: presentation?.hostId ?? null, toolExecution: presentation?.toolExecution ?? null }
 }
 
 export function useGoalAgentName(agentSessionId: string | null | undefined, hostId?: string): string | null {

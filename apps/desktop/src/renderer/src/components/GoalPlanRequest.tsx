@@ -8,6 +8,7 @@ import { applyGoalDelegationResult, beginGoalDelegationRead, refreshGoalDelegati
 import { requestAgentConversationFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
+import { agentSessionPresentationIndex } from '../lib/session-presentation'
 
 type Goal = DemandProjection
 const labels = { prepared: 'Planning request saved', delivered: 'Delivered · waiting for a saved plan', missing: 'Planning request saved · Supervisor unavailable',
@@ -27,7 +28,7 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   const presentation = useGoalAgentPresentation(original && !attempt ? null : target, attempt?.target.hostId)
   const currentPresentation = useGoalAgentPresentation(demand.supervisorSessionId)
   const currentRun = useAppStore(state => {
-    const matches = state.sessions.filter(item => item.kind === 'agent' && item.control.agentSessionId === target &&
+    const matches = (target ? agentSessionPresentationIndex(state.sessions).get(target) ?? [] : []).filter(item => item.control.agentSessionId === target &&
       (!attempt || item.control.hostId === attempt.target.hostId))
     return matches.length === 1 && matches[0]?.kind === 'agent' ? matches[0].control.run.runId : null
   })
