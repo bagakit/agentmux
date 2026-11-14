@@ -1,6 +1,6 @@
 import { Button } from '@agentmux/client-ui/components/Button'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -11,8 +11,11 @@ export function useSettingsSave() {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
+  const inFlight = useRef(false)
 
   async function run(operation: () => Promise<void>): Promise<boolean> {
+    if (inFlight.current) return false
+    inFlight.current = true
     setState('saving')
     setError('')
     setConflict(false)
@@ -26,6 +29,8 @@ export function useSettingsSave() {
       setConflict((cause as { code?: unknown } | null)?.code === 'CONFIG_CONFLICT')
       setState('error')
       return false
+    } finally {
+      inFlight.current = false
     }
   }
   /** The person chose how to resolve the conflict; the bar returns to the draft's own state. */
@@ -57,7 +62,7 @@ export function SettingsSaveBar({ save, dirty, label = 'Save changes', scopeLabe
   const choose = (pick: (resolution: SettingsConflictResolution) => void) => { pick(resolution!); save.resolve?.() }
   return (
     <div className="settings-pane-actions" data-settings-save-bar data-settings-save-blocked={reason ? '' : undefined} data-settings-conflict={resolvable ? '' : undefined}>
-      <span className={`settings-save-feedback ${save.error ? 'settings-inline-error' : ''}`} role={save.error ? 'alert' : 'status'}>
+      <span className={`agent-action-feedback settings-save-feedback ${save.error ? 'settings-inline-error' : ''}`} role={save.error ? 'alert' : 'status'} tabIndex={save.error ? 0 : undefined}>
         {save.error ? save.error : save.saving ? <><ThemeStatusLoadingIcon animation="spin" size={13} /> {scopeLabel ? `Saving ${scopeLabel}…` : 'Saving changes…'}</> : reason ? `Can’t save yet — ${reason}` : dirty ? scopeLabel ? `${scopeLabel}: unsaved changes` : 'Unsaved changes' : save.state === 'saved' ? <><ThemeStatusSavedIcon size={13} /> {scopeLabel ? `${scopeLabel} saved` : 'Changes saved'}</> : scopeLabel ? `${scopeLabel} saved` : 'All changes saved'}
       </span>
       <Button variant="primary" aria-busy={save.saving} disabled={save.saving || !dirty || Boolean(reason)} onClick={onSave}>{label}</Button>

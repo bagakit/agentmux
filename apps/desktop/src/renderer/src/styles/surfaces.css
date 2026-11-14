@@ -230,7 +230,6 @@ input[type="checkbox"][role="switch"]:disabled { cursor: default; opacity: .6; }
 }
 
 .settings-save-feedback { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
-.settings-save-feedback.settings-inline-error { color: var(--red-text); }
 .settings-appearance-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); }
 .settings-choice-radio { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .settings-appearance-choice:has(.settings-choice-radio:focus-visible), .terminal-theme-choice:has(.settings-choice-radio:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
