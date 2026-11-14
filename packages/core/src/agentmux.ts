@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readSpaceSnapshot, observeSpace } from './space-authority-stream.js'
+import type { SpaceAuthorityRef, SpaceWatch } from './space-authority.js'
 import { analyseLocalV8Profile } from './v8-profile-analysis-cli.js'
 import { mintObjectId } from './object-id.js'
 import { writeRendererDiagnosticFile } from './renderer-scene-cli.js'
@@ -112,6 +114,31 @@ async function readStdin(maxBytes?: number): Promise<string> {
     chunks.push(part)
   }
   return Buffer.concat(chunks).toString('utf8')
+}
+async function followSpace(client: AgentMuxRpcClient, input: SpaceWatch): Promise<number> {
+  const controller = new AbortController()
+  let finish!: () => void, failure: Error | undefined, cancelled = false
+  const ended = new Promise<void>(yes => { finish = yes })
+  const cancel = () => { cancelled = true; controller.abort(); finish() }
+  process.once('SIGINT', cancel); process.once('SIGTERM', cancel)
+  outputClosed.signal.addEventListener('abort', cancel, { once: true })
+  let reader: Awaited<ReturnType<typeof observeSpace>> | undefined
+  try {
+    reader = await observeSpace(client, input, { signal: controller.signal,
+      onChange: (_snapshot, change) => write({ ok: true, operation: 'space.watch', event: { type: 'change', data: change } }),
+      onError: error => { failure = error; finish() } })
+    write({ ok: true, operation: 'space.watch', event: { type: 'snapshot', data: reader.initial, gap: reader.gap } })
+    await ended
+    if (failure && !cancelled) throw failure
+    return 0
+  } catch (error) {
+    if (cancelled) return 0
+    throw error
+  } finally {
+    controller.abort(); await reader?.dispose()
+    process.off('SIGINT', cancel); process.off('SIGTERM', cancel)
+    outputClosed.signal.removeEventListener('abort', cancel)
+  }
 }
 async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod, params: AgentMuxRpcStreamParams<AgentMuxRpcStreamMethod>): Promise<number> {
   const controller = new AbortController()
@@ -256,6 +283,11 @@ async function main(): Promise<number> {
     } catch (error) {
       throw new AgentMuxError(error instanceof Error ? error.message : 'Command input is invalid.', 'INVALID_CLI_ARGUMENT')
     }
+    if (method === 'space.snapshot') {
+      const result = await readSpaceSnapshot(client, invocation.params.reference as SpaceAuthorityRef)
+      write({ ok: true, operation: method, result }); return 0
+    }
+    if (method === 'space.watch') return await followSpace(client, invocation.params as SpaceWatch)
     if (isAgentMuxRpcStream(method, invocation.params)) {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)
     }

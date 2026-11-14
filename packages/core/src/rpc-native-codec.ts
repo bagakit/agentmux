@@ -1,4 +1,5 @@
 import { parseAgentExecutionReference } from './errors.js'
+import { isSpaceAuthorityMethod, parseSpaceAuthorityParams, parseSpaceSnapshot } from './space-authority.js'
 import { parseNodeLocateParams, parseNodeLocateResult } from './node-locator.js'
 import { isNodePublishingMethod, parseNodePublishingParams, parseNodePublishingResult } from './node-publishing.js'
 import { parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordInput, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
@@ -458,6 +459,15 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'node.locate') return parseNodeLocateResult(value, parseNodeLocateParams(params)) as unknown as Record<string, unknown>
     if (isNodePublishingMethod(method)) return parseNodePublishingResult(method, value, parseNodePublishingParams(method, params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
+    if (isSpaceAuthorityMethod(method)) {
+      const input = parseSpaceAuthorityParams(method, params)
+      if (method === 'space.apply') {
+        const p = record(value, ['reference','source','revision','diskDurability'])
+        if (p.diskDurability !== 'confirmed') fail()
+        parseSpaceSnapshot({reference:p.reference,source:p.source,revision:p.revision,scope:{space:null,zones:[],tabs:[],regions:[],bindings:[]}},input.reference)
+      } else fail()
+      return value as Record<string, unknown>
+    }
     if (isTailcatKeyMethod(method)) return parseTailcatKeyResult(value, parseTailcatKeyParams(params)) as unknown as Record<string, unknown>
     if (isHostMaintenanceMethod(method)) return parseHostMaintenanceResult(method, value, parseHostMaintenanceParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentProgressMethod(method)) return parseAgentProgressResult(method, value, parseAgentProgressParams(method, params)) as unknown as Record<string, unknown>

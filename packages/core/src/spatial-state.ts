@@ -61,12 +61,14 @@ const requireNative = createRequire(import.meta.url);
 export class AgentMuxSpatialStateStore {
   private agentMembership: { stamp: string; load: Promise<SpaceAgentSnapshot> } | undefined;
   private readonly listeners = new Set<(state: AgentMuxSpatialState) => void>();
+  private readonly observationErrors = new Map<(state: AgentMuxSpatialState) => void, (error: unknown) => void>();
   private watcher: FSWatcher | null = null;
   private watching = 0;
   private announcedRevision = 0;
   private announcedNameCommit: string | null = null;
-  subscribe(listener: (state: AgentMuxSpatialState) => void): () => void {
+  subscribe(listener: (state: AgentMuxSpatialState) => void, onError?: (error: unknown) => void): () => void {
     this.listeners.add(listener);
+    if (onError) this.observationErrors.set(listener, onError);
     if (this.listeners.size === 1) {
       const generation = ++this.watching;
       void mkdir(dirname(this.path), { recursive: true, mode: 0o700 }).then(() => {
@@ -75,23 +77,27 @@ export class AgentMuxSpatialStateStore {
         this.watcher = watch(dirname(this.path), (_event, name) => {
           if (name !== null && String(name) !== basename(this.path))
             return;
-          void this.read().then(state => { if (state && generation === this.watching)
-            this.announce(state); }).catch(error => this.observationWarning(error));
+          void this.read().then(state => { if (generation === this.watching) { if (state) this.announce(state); else if (this.observationErrors.size) this.observationFailure(new AgentMuxError('The original spatial document is absent; its last confirmed observation is retained.', 'SPATIAL_STATE_ABSENT')); } }).catch(error => this.observationFailure(error));
         });
-        this.watcher.on('error', error => this.observationWarning(error));
+        this.watcher.on('error', error => this.observationFailure(error));
         // Close the read/subscribe race, including a commit from another process.
         return this.read().then(state => { if (state && generation === this.watching)
           this.announce(state); });
-      }).catch(error => this.observationWarning(error));
+      }).catch(error => this.observationFailure(error));
     }
     return () => {
       this.listeners.delete(listener);
+      this.observationErrors.delete(listener);
       if (this.listeners.size === 0) {
         this.watching++;
         this.watcher?.close();
         this.watcher = null;
       }
     };
+  }
+  private observationFailure(error: unknown): void {
+    for (const report of this.observationErrors.values()) { try { report(error); } catch { /* A reader failure cannot change the durable graph. */ } }
+    this.observationWarning(error);
   }
   private observationWarning(error: unknown): void {
     process.emitWarning('Spatial observation failed; the durable document and Runs are retained. ' + (error instanceof Error ? error.message : String(error)), { code: 'SPATIAL_PROJECTION_NOTIFICATION_FAILED' });
@@ -109,6 +115,7 @@ export class AgentMuxSpatialStateStore {
         listener(structuredClone(projection));
       }
       catch (error) {
+        try { this.observationErrors.get(listener)?.(error); } catch { /* Only this consumer failed. */ }
         this.observationWarning(error);
       }
     }

@@ -1,3 +1,6 @@
+import { spaceStreamOpening, spaceTransfer } from './space-authority-stream.js'
+import { SpaceAuthorityOwner } from './space-authority-owner.js'
+import { isSpaceAuthorityMethod, parseSpaceAuthorityParams, type SpaceApply, type SpaceWatch } from './space-authority.js'
 import { locatePublishedNodes, parseNodeLocateParams, type NodeLocatorMethod } from './node-locator.js'
 import { isNodePublishingMethod, parseNodePublishingParams, parseNodePublishingResult, type NodePublishingMethod, type NodePublishingPort } from './node-publishing.js'
 import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
@@ -365,6 +368,7 @@ const NATIVE_FIELDS = {
   'settings.appearance.watch': [],
   'notebook.scan': ['workspaceId','path','maxFiles','maxDirectories','maxBytes','query','limit'],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
+  'space.snapshot': ['reference'], 'space.apply': ['reference','expectedRevision','changes'], 'space.watch': ['reference','after'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
   'name.history': ['target','afterId','limit'],
@@ -491,9 +495,14 @@ export class AgentMuxRpcService {
   private readonly landmarks: ConversationLandmarkStore
   private readonly notebooks: AgentMuxNotebookStore
   private readonly spatial: AgentMuxSpatialStateStore
+  private readonly spaceAuthority: SpaceAuthorityOwner
   private search: ReturnType<typeof createAgentMuxSearchReader<SearchCallContext>> | undefined
   private local: Promise<AgentMuxClient> | undefined
-  constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) { this.landmarks = ports.conversationLandmarks ?? new ConversationLandmarkStore(); this.spatial = ports.spatialState ?? new AgentMuxSpatialStateStore(); this.notebooks = ports.notebookStore ?? new AgentMuxNotebookStore() }
+  constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) { this.landmarks = ports.conversationLandmarks ?? new ConversationLandmarkStore(); this.spatial = ports.spatialState ?? new AgentMuxSpatialStateStore(); this.notebooks = ports.notebookStore ?? new AgentMuxNotebookStore(); this.spaceAuthority = new SpaceAuthorityOwner(this.spatial, async () => {
+    const owner = await this.ports.hostedRuntime?.()
+    if (!owner) throw new AgentMuxError('The original Space semantic authority is unavailable. Retain its reference and last confirmed contents.', 'CONTROL_UNAVAILABLE')
+    return (await owner.call('runtime.owner.identity', {})).owner
+  }) }
 
   private async hosted(method: AgentMuxRpcMethod, params: unknown, context: AgentMuxRpcCallContext) {
     // Native SDK writes are authorized as a user/device by the transport. An
@@ -560,6 +569,7 @@ export class AgentMuxRpcService {
     return [{ hostId: 'local', client: await this.local }]
   }
   async dispose(): Promise<void> {
+    this.spaceAuthority.dispose()
     // A borrowed SDK client belongs to RuntimeController. Only close this service's
     // own SDK connection; closing a reader/connection does not stop an Agent Run.
     this.search?.dispose(); this.search = undefined
@@ -761,6 +771,15 @@ export class AgentMuxRpcService {
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
     this.assertExposed(method)
+    if (isSpaceAuthorityMethod(method)) {
+      const input = parseSpaceAuthorityParams(method, params)
+      await this.authenticated(context)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (this.ports.callOriginalCore && method === 'space.apply') return await this.ports.callOriginalCore('local', 'space.apply', input as SpaceApply, context) as AgentMuxRpcResult<M>
+      if (method !== 'space.apply') throw new AgentMuxError('Use the original Space subscription transport.', 'INVALID_CONTROL_REQUEST')
+      const result = await this.spaceAuthority.apply(input as SpaceApply, context)
+      return result as AgentMuxRpcResult<M>
+    }
     if (method === 'app.mobile.report') {
       const input = parseMobileWebReportParams(params)
       const caller = await this.authenticated(context)
@@ -3924,7 +3943,31 @@ export class AgentMuxRpcService {
     const emit = (event: unknown) => { if (!closed) return onEvent(event as AgentMuxRpcStreamEvent<M>) }
     try {
       let initial: unknown, start: (() => void | Promise<void>) | undefined
-      if (method === 'connection.metadata.watch') {
+      if (method === 'space.snapshot' || method === 'space.watch') {
+        const input = parseSpaceAuthorityParams(method, params)
+        const sendValue = async (value: import('./space-authority.js').SpaceSnapshot | import('./space-authority.js').SpaceChange) => {
+          // One admitted observation has one author/fence check. Each physical
+          // frame still observes cancellation without another forwarding round trip.
+          controller.signal.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+          for (const chunk of spaceTransfer(value)) {
+            controller.signal.throwIfAborted()
+            if (!closed) await emit({ type: 'snapshot', data: chunk })
+          }
+        }
+        if (method === 'space.snapshot') {
+          const snapshot = await this.spaceAuthority.snapshot(input.reference, controller.signal)
+          initial = spaceStreamOpening(snapshot)
+          start = async () => { try { await sendValue(snapshot); if (!closed) await emit({type:'end',data:{}}) } catch (error) { if (!closed) await emit({type:'error',error:readerError(error)}) } finally { await dispose() } }
+        } else {
+          const sub = await this.spaceAuthority.watch(input, async event => {
+            if (event.type === 'change') await sendValue(event.data)
+            else if (!closed) { await emit(event); await dispose() }
+          }, controller.signal)
+          initial = spaceStreamOpening(sub.initial.snapshot, sub.initial.gap)
+          start = async () => { try { await sendValue(sub.initial.snapshot); if (!closed) sub.start() } catch(error) { await emit({type:'error',error:readerError(error)}); await dispose() } }
+          cleanup = sub.dispose
+        }
+      } else if (method === 'connection.metadata.watch') {
         parseChannelMetadataParams(method, params)
         if (caller || !context.principal || !context.principal.id || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Host metadata observation requires its original authenticated person or device.', 'CONTROL_PERMISSION_DENIED')
         const metadata = this.ports.connections?.metadata

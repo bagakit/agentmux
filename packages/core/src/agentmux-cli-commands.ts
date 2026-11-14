@@ -1,4 +1,5 @@
 import { parseAgentExecutionReference } from './errors.js'
+import { SPACE_AUTHORITY_CLI_COMMANDS } from './space-authority-cli.js'
 import { NODE_LOCATOR_CLI_COMMAND } from './node-locator-cli.js'
 import { NODE_PUBLISHING_CLI_COMMANDS } from './node-publishing-cli.js'
 import { BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, parseBrowserProfileCookieFilePayload } from './browser-profile-cookie-files.js'
@@ -229,6 +230,7 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  ...SPACE_AUTHORITY_CLI_COMMANDS,
   ...NODE_PUBLISHING_CLI_COMMANDS,
   NODE_LOCATOR_CLI_COMMAND,
   ...AGENTMUX_CAPSULE_CLI_COMMANDS,

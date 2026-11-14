@@ -123,6 +123,9 @@ export * from './hosted-client.js'
 export { probeSocketLiveness } from './socket-liveness.js'
 
 export * from './spatial-state.js'
+export * from './space-authority.js'
+export * from './space-authority-owner.js'
+export * from './space-authority-stream.js'
 
 export { AgentMuxNotebookStore } from './notebook-store.js'
 export * from './notebook-catalog.js'
