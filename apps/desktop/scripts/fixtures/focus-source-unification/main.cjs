@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path')
 const {app,BrowserWindow}=require('electron')
 const [html,privateRoot,evidence,mode]=process.argv.slice(2)
-const primaryOnly=mode==='--primary-only'
+const primaryOnly=mode==='--primary-only',memberState=mode==='--member-state'
 app.setPath('userData',path.join(privateRoot,'user-data'));app.setPath('sessionData',path.join(privateRoot,'session-data'))
 const result={schema:'agentmux.focus-source-unification-actual.v1',passed:false,pid:process.pid,frames:[],scenes:[],rendererConsole:[],boundary:'Actual App/GlobalFocusSurface/unified source adapter/normal lane/card/Reader/filter/menu. Original source and Native IO are controlled typed preview leaves. No user Run, Runtime, restart or installation claim.'}
 let win
@@ -13,6 +13,46 @@ app.whenReady().then(async()=>{try{
  await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
  const settle=()=>read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
  const click=async selector=>{const r=await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control '+${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`);assert.equal(r.hit,true,'Actual center hit '+selector);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:r.x,y:r.y,button:'left',clickCount:1})}
+ const captureMember=async(file,label)=>{await settle();await pause(160);await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.frames.push({file,label,viewport:await read('innerWidth')})}
+ if(memberState){
+  await until('real Global original missing source card',()=>read('window.unifiedFocusProof?.ready&&document.querySelectorAll(".global-focus-main .focus-context[data-session-id]").length===5'))
+  result.before=await read('window.unifiedFocusProof.facts()')
+  const selector=await read(`(()=>{const id=JSON.stringify(['source-agent',window.unifiedFocusProof.foreignRuntime,'working']);const cards=[...document.querySelectorAll('.focus-context[data-session-id]')];const e=cards.find(e=>e.dataset.sessionId===id);if(!e)throw Error('Missing original source card: '+cards.map(e=>e.dataset.sessionId).join(','));e.dataset.memberStateCard='true';return '[data-member-state-card="true"]'})()`)
+  await click(selector)
+  const stage=()=>read(`(()=>{const e=document.querySelector('.global-session-workspace .full-page-loading');return e&&{phase:e.dataset.loadingPhase,busy:e.getAttribute('aria-busy'),text:e.textContent,draft:e.querySelector('textarea')?.value,open:e.querySelector('.mounted-space-session-draft')?.open}})()`)
+  await until('original missing shared parked page',async()=>{const s=await stage();return s?.phase==='parked'&&s.text.includes('Original session unavailable')})
+  assert.equal((await stage()).busy,'false');assert.equal((await stage()).open,false)
+  await captureMember('source-member-missing-1440-dark.png','actual missing original Session with an empty draft secondary')
+  await click('.global-session-workspace .mounted-space-session-draft summary')
+  const draft='原会话尚未确认时保留的未发送草稿。\n核对连接后再由我明确发送，不能自动补发。'
+  await read(`(()=>{const e=document.querySelector('.global-session-workspace textarea[aria-label="Mounted Space task draft"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(draft)});e.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+  for(const[width,height,theme]of[[1440,900,'dark'],[420,800,'dark'],[1440,900,'light'],[420,800,'light']]){
+   win.setContentSize(width,height);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle();assert.equal((await stage()).draft,draft);assert.equal((await stage()).open,true);assert.equal(await read('document.documentElement.scrollWidth>innerWidth+1'),false);await captureMember('source-member-draft-'+width+'-'+theme+'.png','original missing Session and preserved nonempty private draft')
+   if(width===420){
+    const point=await read(`(()=>{const r=document.querySelector('.global-session-workspace .surface-state').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:600})
+    await until('narrow original draft and details scroll into view',()=>read(`(()=>{const s=document.querySelector('.global-session-workspace .surface-state'),d=s.querySelector('textarea'),details=s.querySelector('.surface-state__details');const r=s.getBoundingClientRect();return s.scrollTop>0&&d.getBoundingClientRect().top>=r.top&&d.getBoundingClientRect().bottom<=r.bottom+1&&details.getBoundingClientRect().bottom<=r.bottom+1})()`))
+    result.narrowScroll??=[];result.narrowScroll.push(await read(`(()=>{const s=document.querySelector('.global-session-workspace .surface-state');return{width:innerWidth,scrollTop:s.scrollTop,clientHeight:s.clientHeight,scrollHeight:s.scrollHeight,draft:s.querySelector('textarea').value}})()`))
+    await captureMember('source-member-draft-420-'+theme+'-scrolled.png','actual wheel makes original draft and connection details reachable in a narrow Region')
+    await read(`document.querySelector('.global-session-workspace .surface-state').scrollTop=0`)
+   }
+
+  }
+  win.setContentSize(900,800);await read('window.unifiedFocusProof.theme("dark");window.unifiedFocusProof.holdNextCheck()');const checks=await read('window.unifiedFocusProof.sourceChecks()')
+  await click('.global-session-workspace .full-page-loading .primary-button')
+  await until('actual source check reaches typed pending',async()=>{const s=await stage();return s?.phase==='loading'&&await read('window.unifiedFocusProof.sourceChecks()')>checks})
+  assert.equal((await stage()).busy,'true');assert.equal((await stage()).draft,draft);await captureMember('source-member-pending-900-dark.png','Check again reads the original source with true typed pending')
+  await read('window.unifiedFocusProof.failCheck()')
+  await until('pending read failure becomes stationary unconfirmed',async()=>{const s=await stage();return s?.phase==='parked'&&s.text.includes('Session connection unconfirmed')})
+  assert.equal((await stage()).busy,'false');assert.equal((await stage()).draft,draft);await captureMember('source-member-check-failed-900-dark.png','pending source failure is stationary with the original draft and recheck action')
+  await click('.global-session-workspace .full-page-loading .primary-button')
+  await until('same source rechecks after failure',async()=>{const s=await stage();return s?.phase==='loading'})
+  await read('window.unifiedFocusProof.finishCheck()')
+  await until('same original target terminal after observed',()=>read('!!document.querySelector(".global-session-workspace [data-fixture-source-terminal]")'))
+  result.after=await read('window.unifiedFocusProof.facts()');assert.deepEqual(result.after.runs,result.before.runs);assert.deepEqual(result.after.drafts,result.before.drafts);assert.equal(result.after.sourceRegions,result.before.sourceRegions);assert.ok(JSON.stringify(result.after.source.drafts).includes(draft.split('\n')[0]))
+  const calls=await read('window.unifiedFocusProof.memberCalls');assert.ok(calls.length>0);assert.ok(calls.every(call=>['read','conversationRead','conversationWatch','conversationUnwatch','conversationRelease'].includes(call.method)));result.memberState={checks:await read('window.unifiedFocusProof.sourceChecks()'),calls,originalDraftKept:true,observedOriginalTarget:true}
+  await captureMember('source-member-observed-900-dark.png','original target returns without starting or sending');result.passed=true;return
+ }
  await until('five ordinary task cards',()=>read('window.unifiedFocusProof?.ready&&document.querySelectorAll(".global-focus-main .focus-context[data-session-id]").length===5&&[...document.querySelectorAll(".focus-context")].some(e=>e.textContent.includes(window.unifiedFocusProof.foreignName))'))
  result.before=await read('window.unifiedFocusProof.facts()');const localReply=await read('window.unifiedFocusProof.localReply'),foreignName=await read('window.unifiedFocusProof.foreignName'),foreignReply=await read('window.unifiedFocusProof.foreignReply')
  await until('original bounded foreign recap',()=>read('[...document.querySelectorAll(".focus-context")].some(e=>e.textContent.includes(window.unifiedFocusProof.foreignReply))'))

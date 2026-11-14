@@ -296,7 +296,10 @@ it('a failed metadata reader cannot remove a healthy original business member or
   await act(async () => { await vi.waitFor(() => expect(dom.container.querySelector('[data-source-region]')).not.toBeNull()) })
   expect(dom.container.textContent).toContain(sid)
   expect(dom.container.textContent).toContain('Original scoped metadata source unavailable')
-  expect(dom.container.textContent).toContain('Original Session metadata unconfirmed')
+  const stage = dom.container.querySelector<HTMLElement>('[data-source-region] .full-page-loading')!
+  expect(stage.textContent).toContain('Session connection unconfirmed')
+  expect(stage.dataset.loadingPhase).toBe('parked')
+  expect(stage.getAttribute('aria-busy')).toBe('false')
   expect(useAppStore.getState().sessions).toBe(originalSessions)
   expect((await source.d.core.readAgentSession(sid))!.run.runId).toBe('runtime-d-run-' + sid)
 })
