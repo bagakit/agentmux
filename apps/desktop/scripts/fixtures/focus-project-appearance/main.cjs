@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), vm = require('node:vm')
 const { app, BrowserWindow, ipcMain, nativeImage } = require('electron')
 const [html, privateRoot, evidence, mode] = process.argv.slice(2)
-const containerOrder = mode === '--container-order'
+const containerOrder = mode === '--container-order', groupDiscussion = mode === '--group-discussion'
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { schema: 'agentmux.focus-project-appearance-actual.v1', passed: false, frames: [], scenarios: [], rendererConsole: [],
   boundary: 'Actual App/GlobalFocusSurface/project preference consumer. Private image transport uses original Main projectAppearance on controlled fixture files; PTY/Monaco painting and Runtime are isolated. No user navigation, Session control, restart or installation proof.' }
@@ -27,24 +27,26 @@ app.whenReady().then(async () => { try {
   const settle = () => read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
   const geometry = async target => read(`(()=>{
     const surface=document.querySelector('.global-focus-surface'),proof=window.appearanceProof.facts();
-    const selected=${target === 'section' ? 'window.containerOrderSection' : target === 'collection' ? "[...document.querySelectorAll('[data-focus-container-key]')].find(e=>e.dataset.focusContainerKey===window.appearanceProof.collectionKey)" : target === 'search' ? "document.querySelector('.focus-search-results')" : target === 'local' ? "document.querySelector('.focus-local-inputs')" : target === 'menu' ? "document.querySelector('[data-focus-project-preferences]')" : "[...document.querySelectorAll('[data-project-group-key]')].find(e=>e.dataset.projectGroupKey===JSON.stringify(['local','alpha']))?.querySelector('.focus-project-frame__heading')"};
+    const selected=${target === 'workface' ? 'document.querySelector("[data-owner-tab=original]")' : target === 'recipient' ? 'document.querySelector(".composer-menu")' : target === 'launcher' ? 'document.querySelector(".launch-surface")' : target === 'section' ? 'window.containerOrderSection' : target === 'collection' ? "[...document.querySelectorAll('[data-focus-container-key]')].find(e=>e.dataset.focusContainerKey===window.appearanceProof.collectionKey)" : target === 'search' ? "document.querySelector('.focus-search-results')" : target === 'local' ? "document.querySelector('.focus-local-inputs')" : target === 'menu' ? "document.querySelector('[data-focus-project-preferences]')" : "[...document.querySelectorAll('[data-project-group-key]')].find(e=>e.dataset.projectGroupKey===JSON.stringify(['local','alpha']))?.querySelector('.focus-project-frame__heading')"};
     const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};
     const r=rect(selected),x=r?Math.min(innerWidth-1,Math.max(1,(r.left+r.right)/2)):0,y=r?Math.min(innerHeight-1,Math.max(1,(r.top+r.bottom)/2)):0;
-    return{mainSurface:proof.mainSurface,focusView:proof.focusView,focus:rect(surface),inert:!!surface?.closest('[inert]'),visible:!!surface&&!surface.hidden&&(surface.getAttribute('aria-hidden')!=='true'||${JSON.stringify(target)}==='local')&&getComputedStyle(surface).display!=='none'&&getComputedStyle(surface).visibility!=='hidden',target:rect(selected),targetRole:selected?.closest('[role=dialog]')?.getAttribute('role'),targetHit:!!selected&&selected.contains(document.elementFromPoint(x,y)),viewport:{width:innerWidth,height:innerHeight}};
+    return{mainSurface:proof.mainSurface,focusView:proof.focusView,appearance:document.documentElement.dataset.appearance,focus:rect(surface),inert:!!surface?.closest('[inert]'),visible:!!surface&&!surface.hidden&&(surface.getAttribute('aria-hidden')!=='true'||${JSON.stringify(target)}==='local')&&getComputedStyle(surface).display!=='none'&&getComputedStyle(surface).visibility!=='hidden',target:rect(selected),targetRole:selected?.closest('[role=dialog]')?.getAttribute('role'),targetHit:!!selected&&selected.contains(document.elementFromPoint(x,y)),viewport:{width:innerWidth,height:innerHeight}};
   })()`)
   const ensureFocus = async () => {
     if (!await read("(()=>{const e=document.querySelector('.global-focus-surface');return !!e&&!e.hidden&&!e.closest('[inert]')&&getComputedStyle(e).display!=='none'})()")) await click('button.surface-navigation__focus')
     await until('actual visible Focus surface', () => read("(()=>{const e=document.querySelector('.global-focus-surface');return window.appearanceProof.facts().mainSurface==='agents'&&!!e&&!e.hidden&&!e.closest('[inert]')&&e.getBoundingClientRect().height>0})()"))
   }
   const frame = async (file, label, target = 'group') => {
-    if (target !== 'local') await ensureFocus(); await settle()
+    if (target !== 'local' && target !== 'launcher' && target !== 'workface') await ensureFocus(); await settle()
+    if(groupDiscussion){const viewport=await read('({width:innerWidth,height:innerHeight})');await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:viewport.width-3,y:viewport.height/2});await settle()}
     const before=await geometry(target)
-    assert.equal(before.mainSurface,'agents');assert.equal(before.focusView,'list');assert.ok(before.visible&&before.focus.width>0&&before.focus.height>0,'Actual Focus or its saved-input modal '+file)
+    if(groupDiscussion) assert.equal(before.appearance,file.startsWith('light-')?'light':'dark','Actual theme matches the captured scene')
+    assert.equal(before.mainSurface,['launcher','workface'].includes(target) ? 'workbench' : 'agents');assert.equal(before.focusView,'list');if(!['launcher','workface'].includes(target))assert.ok(before.visible&&before.focus.width>0&&before.focus.height>0,'Actual Focus or its saved-input modal '+file)
     if (target === 'local') assert.equal(before.targetRole, 'dialog', 'Actual saved-input modal owns its foreground')
-    assert.ok(!before.inert || target === 'local', 'Only the actual modal may make Focus inert')
+    assert.ok(!before.inert || target === 'local' || ['launcher','workface'].includes(target), 'Only the actual modal may make Focus inert')
     assert.ok(before.target?.width>0&&before.target.height>0&&before.targetHit,'Actual visible/hit target '+file)
     await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG())
-    const after=await geometry(target);assert.equal(after.mainSurface,'agents');assert.ok(after.visible&&after.targetHit,'Focus kept throughout capture '+file)
+    const after=await geometry(target);if(groupDiscussion)assert.equal(after.appearance,before.appearance,'Theme retained throughout capture');assert.equal(after.mainSurface,before.mainSurface);assert.ok((['launcher','workface'].includes(target)||after.visible)&&after.targetHit,'Original surface kept throughout capture '+file)
     result.frames.push({file,label,before,after})
   }
   const click = async selector => {
@@ -68,7 +70,7 @@ app.whenReady().then(async () => { try {
   assert.equal(alpha.entries, 1); assert.equal(alpha.branches, 1); assert.equal(alpha.zones, 3); assert.equal(alpha.watermarks, 1)
   assert.ok(result.initial.groups.every(group => group.entries === 1 && group.watermarks <= 1))
   assert.ok(!result.initial.calls.some(id => id.startsWith('branch-') || id === 'orphan'), 'No branch is probed as a project root')
-  if (!containerOrder) {
+  if (!containerOrder && !groupDiscussion) {
   for (const theme of ['dark', 'light']) {
     await read(`window.appearanceProof.theme(${JSON.stringify(theme)})`)
     for (const width of [1440, 640, 360]) { win.setContentSize(width, 900); await ensureFocus();await read("document.querySelector('.focus-project-lanes__rows').scrollTop=0"); await frame(`${theme}-groups-${width}.png`, `${theme} full project grouping at ${width}`) }
@@ -76,7 +78,7 @@ app.whenReady().then(async () => { try {
     await click('[aria-label="Project preferences · AgentMux"]')
     await until('compact original preferences', () => read('Boolean(document.querySelector("[data-focus-project-preferences]"))'))
     const box = await read("(()=>{const r=document.querySelector('[data-focus-project-preferences]').getBoundingClientRect();return{width:r.width,height:r.height,left:r.left,right:r.right,top:r.top,bottom:r.bottom}})()")
-    assert.ok(box.width <= 260 && box.height <= 200, 'Compact menu uses a smaller surface than the old settings layout')
+    assert.ok(box.width <= 260 && box.height <= 884, 'Compact menu fits the original viewport with its lazy discussion slot')
     assert.ok(box.left >= 0 && box.right <= 1440 && box.top >= 0 && box.bottom <= 900)
     result.scenarios.push({ label: 'Compact original editor ' + theme, box })
     await frame(`${theme}-preferences.png`, `${theme} compact preferences in the full Focus surface`, 'menu')
@@ -105,8 +107,9 @@ app.whenReady().then(async () => { try {
     await read('window.appearanceProof.failSave(false)')
   }
   }
-  await require('./organization-scene.cjs')({ win, read, click, frame, until, settle, result, containerOrder })
-  if (!containerOrder) await require('./reading-scene.cjs')({ win, read, click, frame, until, settle, result })
+  if(groupDiscussion) await require('./discussion-scene.cjs')({win,read,click,frame,until,settle,result,key})
+  else await require('./organization-scene.cjs')({ win, read, click, frame, until, settle, result, containerOrder })
+  if (!containerOrder && !groupDiscussion) await require('./reading-scene.cjs')({ win, read, click, frame, until, settle, result })
   result.final = await read('window.appearanceProof.facts()'); result.imageCalls = imageCalls
   assert.ok(imageCalls.some(call => call.workspaceId === 'alpha' && call.realImage), 'Original Main recognizer actually loaded a project image')
   result.passed = true

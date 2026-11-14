@@ -1,4 +1,7 @@
 import '../focus-composable-filters/entry.mjs'
+import { folderSpaceFacts } from '@agentmux/core/space-folder'
+import { formatSpaceAddress } from '@agentmux/core/sharing'
+import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore, agentRegionLocationsKnown, agentRegionLocationBindings, agentRegionExecution } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -105,6 +108,8 @@ let preserved
 window.appearanceProof = {
   remember() { preserved = useAppStore.getState() },
   copiedInputs, collectionKey,
+  projectAddress(id) { const matches=arranged.config.workspaces.filter(p=>p.id===id);if(matches.length!==1)throw Error('Exact original fixture Project required');return formatSpaceAddress({spaceId:folderSpaceFacts(matches[0]).space.spaceId}) },
+  discussionFacts() { const state=useAppStore.getState();return {activeWorkspaceId:state.activeWorkspaceId,savedMote:useLauncherState.getState().moteTopicId,originalDraft:state.agentComposerDrafts['alpha-working'],originalTabsPreserved:Object.entries(preserved.tabs).every(([id,tab])=>state.tabs[id]===tab),launchers:Object.values(state.tabs).flatMap(tab=>Object.values(tab.regions).filter(region=>region.kind==='launcher').map(region=>({tabId:tab.id,regionId:region.regionId,workspaceId:region.workspaceId,prompt:state.agentComposerDrafts[region.regionId]??''}))),controls:window.filterProof.facts().calls} },
   selection() { return useAppStore.getState().workbenchSpaceSelection },
   preservation() { const state = useAppStore.getState(); return { sameTabs: state.tabs === preserved.tabs, sameLayouts: state.layouts === preserved.layouts,
     sameDrafts: state.agentComposerDrafts === preserved.agentComposerDrafts, sameQueues: state.agentSteerQueues === preserved.agentSteerQueues,

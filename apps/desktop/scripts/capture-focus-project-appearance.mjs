@@ -10,13 +10,13 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { productInputs, captureInputs } from './fixtures/focus-project-appearance/inputs.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
-const containerOrder = process.argv[4] === '--container-order'
-assert.ok(process.argv[2] === '--evidence' && process.argv[3] && (process.argv.length === 4 || process.argv.length === 5 && containerOrder), 'Use --evidence <private evidence directory> [--container-order]')
+const containerOrder = process.argv[4] === '--container-order', groupDiscussion = process.argv[4] === '--group-discussion'
+assert.ok(process.argv[2] === '--evidence' && process.argv[3] && (process.argv.length === 4 || process.argv.length === 5 && (containerOrder || groupDiscussion)), 'Use --evidence <private evidence directory> [--container-order|--group-discussion]')
 const evidence = resolve(process.argv[3]); await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-project-appearance-')), fixture = join(desktop, 'scripts/fixtures/focus-project-appearance')
 const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], aliases = [], logs = []
-const receipt = { schema: 'agentmux.focus-project-appearance-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', mode: containerOrder ? 'container-order' : 'appearance', userAppRunRuntimeControlled: false,
+const receipt = { schema: 'agentmux.focus-project-appearance-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', mode: groupDiscussion ? 'group-discussion' : containerOrder ? 'container-order' : 'appearance', userAppRunRuntimeControlled: false,
   boundary: 'Private Electron Renderer with actual App, GlobalFocusSurface, FocusFilters, Store and Workbench; maintained typed preview API. Only PTY/Agent and unused Monaco painting leaves isolated. No live Runtime, native Run proof, installation, user navigation or restart.' }
 try {
   assert.ok(!process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT || ['oversized-menu', 'unbounded-menu', 'search-overflow', 'wrapped-footer', 'starved-search'].includes(process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT), 'Known actual style inverse')
@@ -113,10 +113,10 @@ try {
   const html = join(out, 'index.html'); await writeFile(html, '<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script type="module" src="./app.js"></script></html>')
   receipt.compiled = { renderer: hash(await readFile(renderer)), css: hash(await readFile(join(out, 'app.css'))) }
   const env = { ...process.env, AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state') }; delete env.ELECTRON_RUN_AS_NODE
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, ...(containerOrder ? ['--container-order'] : [])], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, ...(groupDiscussion ? ['--group-discussion'] : containerOrder ? ['--container-order'] : [])], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8')); assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
-  assert.ok(receipt.frames.length >= (containerOrder ? 8 : 10), 'Actual complete App frames cover the selected bounded scenario')
+  assert.ok(receipt.frames.length >= (groupDiscussion ? 8 : containerOrder ? 8 : 10), 'Actual complete App frames cover the selected bounded scenario')
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => {
     try { return [relative(root, path), hash(await readFile(path))] }
     catch (error) { if (error.code === 'ENOENT') return [relative(root, path), null]; throw error }

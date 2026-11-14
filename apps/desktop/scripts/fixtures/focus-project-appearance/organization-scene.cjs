@@ -16,11 +16,9 @@ async function captureContainerOrder({ win, read, click, frame, until, settle, r
     result.scenarios.push({ label, ...value })
   }
   const change = async (container, label, mode) => {
-    await click(`[aria-label="${label}"]`)
-    await until('original organization editor', () => read('Boolean(document.querySelector("[data-focus-project-preferences]"))'))
-    await click(`[data-focus-project-preferences] [data-focus-zone-presentation="${mode}"]`)
-    await click(label.startsWith('Project') ? '[aria-label="Save project preferences"]' : '[aria-label="Save container preferences"]')
-    await until('authored original organization saved', () => read(`!document.querySelector('[data-focus-project-preferences]') && ${container}.dataset.focusZonePresentation === ${JSON.stringify(mode)}`))
+    const name = label.slice(label.indexOf(' · ') + 3)
+    await click(`[aria-label="${mode === 'cards' ? 'Tags' : 'Sections'} · ${name}"]`)
+    await until('authored original organization saved', () => read(`${container}.dataset.focusZonePresentation === ${JSON.stringify(mode)}`))
     const authored = await read(`(()=>{const e=${container},key=e.dataset.focusContainerKey??JSON.stringify(['project','local','alpha']);return window.appearanceProof.facts().organizationPreferences.find(p=>p.key===key)})()`)
     assert.equal(authored?.presentation, mode, 'Original ConfigOwner-backed preference is authored')
     await retained(label + ' → ' + mode)
@@ -69,12 +67,10 @@ module.exports = async function captureOrganization(options) {
   win.setContentSize(1440, 900); await read("window.appearanceProof.theme('dark')"); await settle()
   const group = "[...document.querySelectorAll('[data-project-group-key]')].find(e=>e.dataset.projectGroupKey===JSON.stringify(['local','alpha']))"
   await read(`(()=>{window.organizationCards=new Map([...${group}.querySelectorAll('button.focus-context[data-session-id]')].map(e=>[e.dataset.sessionId,e]));return true})()`)
-  const change = async (trigger, mode, save, container) => {
-    await click(trigger)
-    await until('original organization editor', () => read('Boolean(document.querySelector("[data-focus-project-preferences]"))'))
-    await click(`[data-focus-project-preferences] [data-focus-zone-presentation="${mode}"]`)
-    await click(save)
-    await until('original organization saved', () => read(`!document.querySelector('[data-focus-project-preferences]') && ${container}.dataset.focusZonePresentation === ${JSON.stringify(mode)}`))
+  const change = async (trigger, mode, _save, container) => {
+    const name = trigger.includes('Project preferences') ? 'AgentMux' : 'Research'
+    await click(`[aria-label="${mode === 'cards' ? 'Tags' : 'Sections'} · ${name}"]`)
+    await until('original organization saved', () => read(`${container}.dataset.focusZonePresentation === ${JSON.stringify(mode)}`))
   }
   await change('[aria-label="Project preferences · AgentMux"]', 'cards', '[aria-label="Save project preferences"]', group)
   const stable = await read(`(()=>{const group=${group};return{cards:group.querySelectorAll('button.focus-context[data-session-id]').length,same:[...group.querySelectorAll('button.focus-context[data-session-id]')].every(e=>window.organizationCards.get(e.dataset.sessionId)===e),tags:group.querySelectorAll('[data-focus-zone-tags]').length,sections:group.querySelectorAll('[data-focus-zone-section]').length}})()`)
