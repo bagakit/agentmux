@@ -1,9 +1,19 @@
 import { createHash } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
+import { resolve, relative } from 'node:path'
 import { mergeConfig } from 'vitest/config'
 import base from '../vitest.config'
 
 const mutations: Record<string, { file: string; before: string; after: string }> = {
+  'text-full-serialization': { file: '/src/conversation/local-drafts.ts',
+    before: 'const revision = ++saveRevision, expectedRecordId = recordId, token = {}',
+    after: 'return save(); const revision = ++saveRevision, expectedRecordId = recordId, token = {}' },
+  'text-old-full-ack': { file: '/src/conversation/local-drafts.ts',
+    before: "if (text?.intent !== capturedTextEdits.get(bucket + ':' + key)) continue", after: '// Adopt the old full text ACK.' },
+  'text-old-conflict-ack': { file: '/src/conversation/local-drafts.ts',
+    before: 'if (currentReceipt) state.conflicts = saved.conflicts ?? []', after: 'state.conflicts = saved.conflicts ?? []' },
+  'text-pending-ack': { file: '/src/conversation/local-drafts.ts',
+    before: 'return pendingSaves > 0 || saveRevision !== durableRevision', after: 'return saveRevision !== durableRevision' },
   'app-source': { file: '/src/MobileApp.tsx', before: 'moteSource={mobileMoteInputSource(objectIdentity, workface.selectedSessionId, identityRecipient)}', after: 'moteSource={undefined}' },
   'prompt-retention': { file: '/src/conversation/local-drafts.ts', before: '...(intent.moteSource ? { moteSource: structuredClone(intent.moteSource) } : {}),', after: '' },
   'prompt-retry': { file: '/src/conversation/use-mobile-prompt-controller.ts', before: '...(attempt.moteSource ? { moteSource: structuredClone(attempt.moteSource) } : {}),', after: '' },
@@ -15,7 +25,12 @@ const mutations: Record<string, { file: string; before: string; after: string }>
 const name = process.env.AGENTMUX_TEST_MOBILE_MOTE_MUTATION
 if (name && !mutations[name]) throw new Error('Unknown Mobile Mote mutation: ' + name)
 const config = mergeConfig(base, {
+  root: resolve(import.meta.dirname, '..'),
   plugins: [{ name: 'loaded-mobile-mote-input-mutation', enforce: 'pre' as const, transform(code, id) {
+    if (process.env.MOBILE_DRAFT_LOADED && /\/apps\/mobile\/(?:src\/conversation\/(?:local-drafts|mote-composer|use-mobile-prompt-controller)\.|src\/recovery\/device-workface\.|test\/device-draft-acknowledgement\.)/.test(id)) {
+      appendFileSync(process.env.MOBILE_DRAFT_LOADED, JSON.stringify({ file: relative(resolve(import.meta.dirname, '../../..'), id.split('?')[0]!),
+        sourceSHA256: createHash('sha256').update(code).digest('hex') }) + '\n')
+    }
     const mutation = name && mutations[name]
     if (!mutation || !id.split('?')[0]!.endsWith(mutation.file)) return
     const count = code.split(mutation.before).length - 1

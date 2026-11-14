@@ -1,4 +1,5 @@
 import { act } from 'react'
+import { appendFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createLocalDrafts } from '../src/conversation/local-drafts'
 import { DEVICE_WORKFACE_KEY, DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
@@ -10,7 +11,10 @@ const key = JSON.stringify(['draft', 'session-original'])
 const unknown = { operationId: 'original-unknown', runId: 'run-original', draft: 'original input', phase: 'unknown' as const,
   message: 'unknown', inputRequested: true }
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
-afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() } })
+afterEach(async () => {
+  for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
+  vi.restoreAllMocks()
+})
 
 it('retries the second draft after its write fails without treating a pending projection as committed', async () => {
   let raw: string | null = null, writes = 0
@@ -125,4 +129,109 @@ it('does not send from the mounted Mobile surface when import replaces the secon
     expect(exported.attempts).toEqual([[key, expect.objectContaining({ draft: 'original reader body',
       inputRequested: false, phase: 'rejected', manualInput: { agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, runtimeId: 'original-runtime' } })]])
   } finally { internal.exclusive = exclusive }
+})
+
+it.each(['text', 'full'] as const)('a late %s ACK cannot replace newer text after a cross-page conflict and an edit back to the original string', async mode => {
+  let raw: string | null = null
+  const page = () => ({ getItem: () => raw, setItem: (_: string, value: string) => { raw = value } })
+  const firstPage = page(), secondPage = page(), readFirst = () => firstPage, readSecond = () => secondPage
+  const owner = getDeviceWorkface(readFirst), seed = createLocalDrafts(readFirst)
+  seed.drafts.set(key, 'original base'); await seed.save()
+  const a = createLocalDrafts(readFirst), b = createLocalDrafts(readSecond)
+  b.drafts.set(key, 'canonical peer body'); await b.save()
+  const pendingKey = JSON.stringify(['draft', 'other-pending-session'])
+  a.attempts.set(pendingKey, unknown)
+  const edit = owner.editConversation.bind(owner)
+  let release!: () => void, ready!: () => void
+  const held = new Promise<void>(resolve => { release = resolve }), entered = new Promise<void>(resolve => { ready = resolve })
+  vi.spyOn(owner, 'editConversation').mockImplementationOnce(async (...args) => {
+    const committed = await edit(...args); ready(); await held; return committed
+  })
+  a.drafts.set(key, 'edited original body')
+  const first = mode === 'full' ? a.save() : a.saveText(key, 'original base')
+  try {
+    await entered
+    a.drafts.set(key, 'intermediate correction'); await a.saveText(key, 'edited original body')
+    expect(a.drafts.get(key)).toBe('canonical peer body')
+    a.drafts.set(key, 'edited original body'); await a.saveText(key, 'canonical peer body')
+    expect(JSON.parse(raw!).conversation.drafts).toContainEqual([key, 'edited original body'])
+    expect(JSON.parse(raw!).conversation.attempts.some(([id]: [string, unknown]) => id === pendingKey)).toBe(mode === 'full')
+    expect(a.hasUnconfirmedSave, 'The original held ACK is still pending after a later text receipt').toBe(true)
+    const confirmedConflicts = a.conflicts
+    release(); await first
+    expect(a.hasUnconfirmedSave).toBe(false)
+    expect(a.drafts.get(key), 'An older ACK cannot erase the later explicit edit, even after a text ABA').toBe('edited original body')
+    expect(a.conflicts, 'An older ACK cannot hide an already observed newer conflict').toBe(confirmedConflicts)
+    expect(a.attempts.get(pendingKey)).toBe(unknown)
+    await a.save() // The complete intent fence still owns persistence before dispatch.
+    const reopened = createLocalDrafts(readSecond)
+    expect(reopened.drafts.get(key)).toBe('edited original body')
+    expect(reopened.attempts.get(pendingKey)).toMatchObject({ operationId: unknown.operationId, phase: 'unknown' })
+    expect(reopened.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ bucket: 'drafts', key, value: 'intermediate correction' })]))
+  } finally { release(); await first }
+})
+
+import { MobileMoteComposer, mobileSessionComposerSource } from '../src/conversation/mote-composer'
+import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
+
+it.each(['Session', 'Mote'])('text-only %s edits keep128 unrelated question intents outside application serialization', async mode => {
+  const owner = getDeviceWorkface(), record = emptyDeviceWorkface()
+  record.conversation.questions = Array.from({ length: 128 }, (_, i) => {
+    const input = { source: { providerId: 'codex', nativeSessionId: 'held-native-' + i }, recordId: 'held-record', turnId: 'held-turn',
+      operationId: 'held-op-' + i, expectedRun: { runId: 'held-run-' + i }, afterSubmissionId: null,
+      answers: [{ questionId: 'held-question', answer: 'Original unrelated answer '.repeat(32) }] }
+    return [questionReplyKey('unrelated-session-' + i, input), { hostId: 'host-original', runtimeId: 'original-runtime', phase: 'unknown', input }]
+  })
+  await owner.replaceBackup(record)
+  const f = fixture(), platform = createBrowserPlatform(), target = { spaceId: 'original-mote', zoneId: 'original-zone',
+    expectedResource: { hostId: 'local', workspaceId: 'original-workspace', workspacePath: f.client.agentSession('session-original').workspacePath } }
+  const surface = <MobileConversationSurface client={f.client} agentSessionId="session-original"
+    connection={{ state: 'connected', message: 'Original Host' }} platform={platform} />
+  const view = await mount(mode === 'Mote' ? <MobileMoteComposer client={f.client} target={target} enabled active
+    sourceKey={mobileSessionComposerSource('session-original')} platform={platform}>{surface}</MobileMoteComposer> : surface)
+  const editing = vi.spyOn(owner, 'editConversation'), clone = structuredClone
+  const copies = { serializeQuestionRecords: 0, otherQuestionRecords: 0, fullConversationRecords: 0, fullDeviceRecords: 0 }
+  const cloning = vi.spyOn(globalThis, 'structuredClone').mockImplementation((value: any, options?: any) => {
+    if (value?.input?.operationId?.startsWith('held-op-')) {
+      if (new Error().stack?.includes('at serialize (')) copies.serializeQuestionRecords++
+      else copies.otherQuestionRecords++
+    } else if (value?.conversation?.questions?.length === 128) copies.fullDeviceRecords += 128
+    else if (value?.questions?.length === 128) copies.fullConversationRecords += 128
+    return clone(value, options)
+  })
+  const writes = vi.spyOn(localStorage, 'setItem')
+  await paste(view.element, 'x')
+  await act(async () => { await (owner as any).tail })
+  const measured = { ...copies }, transactions = editing.mock.calls.map(([edits, recordId]) => ({ edits, recordId }))
+  const physical = writes.mock.calls.filter(([name]) => name === DEVICE_WORKFACE_KEY).map(([, bytes]) => new TextEncoder().encode(bytes).byteLength)
+  cloning.mockRestore()
+  const saved = JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!)
+  if (process.env.MOBILE_DRAFT_COST_FACTS) appendFileSync(process.env.MOBILE_DRAFT_COST_FACTS, JSON.stringify({ mode, heldQuestions: 128,
+    measured, transactions, physicalWrites: physical.length, physicalBytes: physical, preservedOriginalQuestions: saved.conversation.questions.length }) + '\n')
+  expect(transactions).toHaveLength(1)
+  expect(transactions[0]!.edits.every(edit => edit.bucket === 'drafts' || edit.bucket === 'moteTextSources')).toBe(true)
+  expect(saved.conversation.questions).toEqual(record.conversation.questions)
+  expect(f.submit).not.toHaveBeenCalled()
+  expect(measured.serializeQuestionRecords, 'Text-only application path must not serialize unrelated original answers').toBe(0)
+})
+
+it('keeps the original Mote text owner when the device record changes under its live editor', async () => {
+  const owner = getDeviceWorkface(), f = fixture(), platform = createBrowserPlatform()
+  const target = { spaceId: 'original-mote', zoneId: 'original-zone',
+    expectedResource: { hostId: 'local', workspaceId: 'original-workspace', workspacePath: f.client.agentSession('session-original').workspacePath } }
+  const view = await mount(<MobileMoteComposer client={f.client} target={target} enabled active sourceKey={mobileSessionComposerSource('session-original')} platform={platform}>
+    <MobileConversationSurface client={f.client} agentSessionId="session-original" connection={{ state: 'connected', message: 'Original Host' }} platform={platform} />
+  </MobileMoteComposer>)
+  await paste(view.element, 'Original live Mote text')
+  await act(async () => { await (owner as any).tail })
+  const original = JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!), textKey = original.conversation.drafts[0][0]
+  await owner.replaceBackup({ ...emptyDeviceWorkface(), conversation: { version: 1,
+    drafts: [[textKey, 'Replacement record text']], attempts: [], responses: [] } })
+  const replacement = localStorage.getItem(DEVICE_WORKFACE_KEY)
+  await paste(view.element, ' edited after replacement')
+  await act(async () => { await (owner as any).tail })
+  expect(localStorage.getItem(DEVICE_WORKFACE_KEY), 'The old text owner never writes a newly imported record').toBe(replacement)
+  expect(editor(view.element).textContent).toContain('Original live Mote text edited after replacement')
+  expect(view.element.textContent).toContain('工作面已被替换')
+  expect(f.submit).not.toHaveBeenCalled()
 })
