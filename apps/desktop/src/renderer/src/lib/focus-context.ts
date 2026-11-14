@@ -64,9 +64,6 @@ export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusB
   return groups
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null; scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot> }
-function sameFocusInputs(previous: Inputs | undefined, input: Inputs): boolean {
-  return Boolean(previous && previous.sessions === input.sessions && previous.timelines === input.timelines && previous.agentNames === input.agentNames && previous.config === input.config && previous.scratchTopicSnapshots === input.scratchTopicSnapshots)
-}
 function focusInputs({ sessions, timelines, agentNames, config, scratchTopicSnapshots }: Inputs): Inputs {
   return { sessions, timelines, agentNames, config, scratchTopicSnapshots }
 }
@@ -142,15 +139,14 @@ export function focusTimelineStamp(timeline: AgentTimelineSnapshot | undefined):
     agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch }
 }
 function sameTimelineStamp(before: FocusTimelineStamp | undefined, timeline: AgentTimelineSnapshot | undefined): boolean {
-  const current = focusTimelineStamp(timeline)
-  return Boolean(before && Object.keys(current).every(key => before[key as keyof FocusTimelineStamp] === current[key as keyof FocusTimelineStamp]))
+  return !!before && before.items === timeline?.items && before.stream === timeline?.stream && sameConversationFacts(before, timeline)
 }
 type FocusConversationFacts = FocusTimelineStamp & {
   recap: LauncherRecap | null
   firstPrompt?: string
   latest: { detail: string; text: string; currentResult: boolean; matchesRecap: boolean } | null
 }
-function sameConversationFacts(facts: FocusConversationFacts, timeline: AgentTimelineSnapshot | undefined): boolean {
+function sameConversationFacts(facts: FocusTimelineStamp, timeline: AgentTimelineSnapshot | undefined): boolean {
   return facts.revision === timeline?.revision && facts.sourceHostId === timeline?.sourceHostId && facts.agentSessionId === timeline?.agentSessionId && facts.streamEpoch === timeline?.stream?.epoch
 }
 // Focus, its transient navigation preview and the Space directory read the same
@@ -329,13 +325,34 @@ function createFocusProjectionCache() {
       }
       return result
     }
-    if (sameFocusInputs(previous, input) && previousMode === mode && previousCoordination === coordination && (mode === undefined
-      || [...cache].every(([id, row]) => row.timeline === input.timelines[id] && sameTimelineStamp(row.stamp, input.timelines[id])))) return result
+    if (previous?.sessions === input.sessions && previous.config === input.config && previous.scratchTopicSnapshots === input.scratchTopicSnapshots
+        && previousMode === mode && previousCoordination === coordination) {
+      const sameNames = previous.agentNames === input.agentNames
+      const sameTimelines = previous.timelines === input.timelines
+      if (mode === undefined && sameNames && sameTimelines) return result
+      // Only accepted facts for held subjects can affect this projection. A
+      // published in-place Timeline revision still changes its copied stamp.
+      let subjectsChanged = false
+      for (const [id, row] of cache) {
+        const timeline = input.timelines[id]
+        if ((!sameNames && row.name !== input.agentNames[id]) || row.timeline !== timeline || (mode !== undefined
+          ? !sameTimelineStamp(row.stamp, timeline) : row.conversation && !sameConversationFacts(row.conversation, timeline))) {
+          subjectsChanged = true
+          break
+        }
+      }
+      if (!subjectsChanged) {
+        if (!sameNames || !sameTimelines) previous = focusInputs(input)
+        return result
+      }
+    }
     const rows: FocusContext[] = []
     const laneRows: FocusContext[] = []
     const pmoAttention: string[] = []
     const coordinationRows: FocusContext[] = []
     const retained = new Set<string>()
+    let orderChanged = false
+    let modelsChanged = false
     const now = Date.now()
     for (const session of input.sessions) {
       // Focus scans Agent work; plain Terminals keep their original workbench and history.
@@ -390,6 +407,8 @@ function createFocusProjectionCache() {
           key: groupKey, enteredAt: old ? now : initialEntry, sequence: groupSequence++
         }
         model = old?.model && Object.keys(next).length === Object.keys(old.model).length && Object.keys(next).every(key => next[key as keyof FocusContext] === old.model![key as keyof FocusContext]) ? old.model : next
+        orderChanged ||= group !== old?.group
+        modelsChanged ||= model !== old?.model
         rows.push(model)
         laneModel = old?.laneModel && sameLaneFacts(old.laneModel, model) ? old.laneModel : model
         laneRows.push(laneModel)
@@ -397,13 +416,24 @@ function createFocusProjectionCache() {
       cache.set(session.id, { group, session, activitySemantic, timeline, stamp: conversation ?? (mode !== undefined ? focusTimelineStamp(timeline) : undefined), deferred, conversation, name, config: input.config, workspace, topicId, lane, model, laneModel, coordinationModel })
     }
     for (const id of cache.keys()) if (!retained.has(id)) cache.delete(id)
-    // Only Focus card order changes. Lane facts keep their original input order and priorities.
-    rows.sort((a, b) => {
-      const first = cache.get(a.id)!.group!, second = cache.get(b.id)!.group!
-      return (second.enteredAt ?? -Infinity) - (first.enteredAt ?? -Infinity) || first.sequence - second.sequence
-    })
-    result = {contexts: sameItems(result.contexts, rows) ? result.contexts : rows, laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows, pmoAttention: sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention,
-      coordinationContexts: sameItems(result.coordinationContexts, coordinationRows) ? result.coordinationContexts : coordinationRows}
+    // Card detail updates keep the established group-entry order. Lane facts
+    // continue to follow the original input order and priorities.
+    let contexts = result.contexts
+    if (orderChanged || rows.length !== contexts.length) {
+      rows.sort((a, b) => {
+        const first = cache.get(a.id)!.group!, second = cache.get(b.id)!.group!
+        return (second.enteredAt ?? -Infinity) - (first.enteredAt ?? -Infinity) || first.sequence - second.sequence
+      })
+      if (!sameItems(contexts, rows)) contexts = rows
+    } else if (modelsChanged) {
+      contexts = contexts.map(row => cache.get(row.id)!.model!)
+    }
+    const laneContexts = sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows
+    const attention = sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention
+    const coordinationContexts = sameItems(result.coordinationContexts, coordinationRows) ? result.coordinationContexts : coordinationRows
+    if (contexts !== result.contexts || laneContexts !== result.laneContexts || attention !== result.pmoAttention || coordinationContexts !== result.coordinationContexts) {
+      result = { contexts, laneContexts, pmoAttention: attention, coordinationContexts }
+    }
     previous = focusInputs(input)
     previousMode = mode
     previousCoordination = coordination

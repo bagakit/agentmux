@@ -122,7 +122,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }
   const filtering = Boolean(query.trim() || filters.projects.length || filters.states.length || filters.types.length)
   const contextSelector = useMemo(createFocusProjectionSelector, [])
-  const {contexts: ordinaryRows, laneContexts: ordinaryLaneContexts, coordinationContexts, pmoAttention} = useAppStore(useShallow(state => contextSelector(state, visible, query.trim() ? 'full' : 'metadata', filtering || inspectingFilters)))
+  const {contexts: ordinaryRows, laneContexts: ordinaryLaneContexts, coordinationContexts, pmoAttention} = useAppStore(state => contextSelector(state, visible, query.trim() ? 'full' : 'metadata', filtering || inspectingFilters))
   const [sourceChoices, setSourceChoices] = useState<{ locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void } | null>(null)
   const chooseSourceLocation = useCallback((request: NonNullable<typeof sourceChoices>) => setSourceChoices(request), [])
   const observedProjectLanes = useRef<readonly FocusProjectLane[]>([])
