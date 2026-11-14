@@ -94,12 +94,13 @@ export function focusNavigationSummary(input: Pick<Inputs, 'sessions' | 'config'
   return { working, requests, errors }
 }
 export function createFocusNavigationSummarySelector() {
-  let previous: Inputs | undefined
+  type NavigationFacts = Parameters<typeof focusNavigationSummary>[0]
+  let previous: NavigationFacts | undefined
   let summary = { working: 0, requests: 0, errors: 0 }
-  return (input: Inputs) => {
-    if (sameFocusInputs(previous, input)) return summary
-    summary = focusNavigationSummary(input)
-    previous = focusInputs(input)
+  return ({ sessions, config, scratchTopicSnapshots }: NavigationFacts) => {
+    if (previous && previous.sessions === sessions && previous.config === config && previous.scratchTopicSnapshots === scratchTopicSnapshots) return summary
+    previous = { sessions, config, scratchTopicSnapshots }
+    summary = focusNavigationSummary(previous)
     return summary
   }
 }
