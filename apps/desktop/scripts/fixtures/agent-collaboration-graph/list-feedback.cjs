@@ -476,13 +476,21 @@ module.exports = async function listFeedback(ctx) {
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     try { await emit(); await pause(180); await capture(frames[7]) }
     finally { await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] }) }
-    data.policies.nativeVisibility = { focusEmulationBefore: result.conditions.focusEmulated, controls: [] }
+    const backgroundThrottlingBefore = win.webContents.getBackgroundThrottling()
+    const nativeVisibility = async () => {
+      try { return { visible: win.isVisible(), focused: win.isFocused(), backgroundThrottling: win.webContents.getBackgroundThrottling(),
+        document: await read('({hidden:document.hidden,visibility:document.visibilityState,focused:document.hasFocus()})') } }
+      catch (error) { return { unavailable: String(error) } }
+    }
+    data.policies.nativeVisibility = { focusEmulationBefore: result.conditions.focusEmulated, backgroundThrottlingBefore, controls: [] }
     await read(`(()=>{globalThis.__listVisibilityEvents=[];globalThis.__listVisibilityListener=()=>globalThis.__listVisibilityEvents.push({at:performance.now(),wall:Date.now(),hidden:document.hidden,visibility:document.visibilityState,focused:document.hasFocus()});document.addEventListener('visibilitychange',globalThis.__listVisibilityListener)})()`)
     win.webContents.setBackgroundThrottling(true); win.showInactive(); result.conditions.privateWindowShown = true
     try {
       await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: false })
       data.policies.nativeVisibility.controls.push({ focusEmulation: false, observed: await sample() })
+      data.policies.nativeVisibility.beforeHide = await nativeVisibility()
       await pause(80); win.hide()
+      data.policies.nativeVisibility.afterHide = await nativeVisibility()
       await until('actual source document becomes hidden', () => read('document.hidden&&document.visibilityState==="hidden"'))
       await until('original hidden List work owner parks', async () => { const current = await sample(); return current.hidden && ['sender', 'recipient'].every(name => !current.cards[name]?.feedback?.active) })
       await emit(); data.policies.hidden = await sample()
@@ -490,9 +498,10 @@ module.exports = async function listFeedback(ctx) {
       await until('actual source document returns visible without focus emulation', () => read('!document.hidden&&document.visibilityState==="visible"'))
       await settle(); data.policies.returned = await sample(); data.policies.nativeVisibility.focusEmulationAtReturn = false
     } finally {
+      data.policies.nativeVisibility.beforeRestore = await nativeVisibility()
       win.showInactive()
       await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
-      win.webContents.setBackgroundThrottling(false)
+      win.webContents.setBackgroundThrottling(backgroundThrottlingBefore)
       data.policies.nativeVisibility.controls.push({ focusEmulation: true, observed: await sample() })
       data.policies.nativeVisibility.events = await read(`(()=>{document.removeEventListener('visibilitychange',globalThis.__listVisibilityListener);return globalThis.__listVisibilityEvents})()`)
     }
