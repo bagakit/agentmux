@@ -34,7 +34,7 @@ export interface CapsulePresentationPorts {
   graph(): Promise<AgentMuxSpatialGraph | null>
   current(browserId: string): { url: string } | null
   ensure(browserId: string): Promise<BrowserSnapshot>
-  recordOpen(browserId: string, capsuleId: string, operationId: string): BrowserSnapshot
+  recordOpen(browserId: string, capsuleId: string, operationId: string, objectLink?: string): BrowserSnapshot
   execute(request: AgentMuxControlRequest, signal?: AbortSignal): Promise<AgentMuxControlResult>
   observe(signal?: AbortSignal): Promise<Record<string, unknown>>
   original: NonNullable<AgentMuxRpcServiceOptions['callOriginalCore']>

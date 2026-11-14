@@ -1,6 +1,12 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseAmuxObjectLink, agentSessionInspectCommand, type AgentMuxControlFocusRequest, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseAmuxObjectLink, formatAmuxObjectLink, agentSessionInspectCommand, type AgentMuxControlFocusRequest, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core'
 import type { CapsuleOpenResult } from '@agentmux/core/capsule'
+import { parseNodeLocateResult, type NodeLocateParams, type NodeLocateResult, type NodeLocatedMatch } from '@agentmux/core/node-locator'
+
+export type HostLinkPorts = {
+  locate(input: NodeLocateParams, signal: AbortSignal): Promise<NodeLocateResult>
+  openCapsule(input: { hostId: string; expectedRuntimeId: string; capsuleId: string; operationId: string; objectLink?: string }, signal: AbortSignal): Promise<CapsuleOpenResult>
+}
 
 type Execute = (request: AgentMuxControlRequest, signal: AbortSignal) => Promise<AgentMuxControlResult>
 type Opening = { target: ReturnType<typeof parseAmuxObjectLink>; finish: (issue: string | null) => void }
@@ -16,6 +22,7 @@ export class SpatialLinkIngress {
   private report: ((message: string) => void) | null = null
   private issue: string | null = null
   private openCapsule: ((capsuleId: string, operationId: string, signal: AbortSignal) => Promise<CapsuleOpenResult>) | null = null
+  private hostLinks: HostLinkPorts | null = null
 
   /** Resolves only this opening's original diagnostic; fire-and-forget consumers never reject. */
   receive(raw: string): Promise<string | null> {
@@ -37,14 +44,15 @@ export class SpatialLinkIngress {
     return result
   }
 
-  ready(execute: Execute, report: (message: string) => void, openCapsule?: (capsuleId: string, operationId: string, signal: AbortSignal) => Promise<CapsuleOpenResult>): void {
+  ready(execute: Execute, report: (message: string) => void, openCapsule?: (capsuleId: string, operationId: string, signal: AbortSignal) => Promise<CapsuleOpenResult>, hostLinks?: HostLinkPorts): void {
     this.execute = execute; this.report = report
     this.openCapsule = openCapsule ?? null
+    this.hostLinks = hostLinks ?? null
     this.drain()
   }
 
   unavailable(): void {
-    this.execute = null; this.report = null; this.openCapsule = null
+    this.execute = null; this.report = null; this.openCapsule = null; this.hostLinks = null
     const execution = this.execution
     this.execution = null
     if (execution) {
@@ -67,37 +75,58 @@ export class SpatialLinkIngress {
     const opening = this.pending
     if (!opening) return
     this.pending = null
-    const { target } = opening
+    let { target } = opening
     const controller = new AbortController(), execute = this.execute
     const execution: Execution = { ...opening, controller }
     this.execution = execution
     const navigate = async (): Promise<string | null> => {
+      let node: NodeLocatedMatch | undefined
+      let objectLink: string | undefined
+      if (target.kind === 'host') {
+        if (!this.hostLinks) throw new Error('The original Node link owner is unavailable. Configure and inspect the original Host before retrying.')
+        const input = { alias: target.alias, ...(target.runtimeId === undefined ? {} : { expectedRuntimeId: target.runtimeId }) }
+        const located = parseNodeLocateResult(await this.hostLinks.locate(input, controller.signal), input)
+        if (controller.signal.aborted || this.execution !== execution) return null
+        if (located.status !== 'unique') throw new Error(`Node location is ${located.status}. Confirmed candidates: ${JSON.stringify(located.matches.map(match => ({ hostId: match.hostId, runtimeId: match.publication.node.runtimeId, alias: match.publication.node.alias })))}. ${located.issues.map(issue => `${issue.hostId}: ${issue.message}`).join(' ')} Inspect the configured Hosts or use a link pinned to the original Runtime; no resource was opened.`)
+        node = located.matches[0]!
+        objectLink = formatAmuxObjectLink({ ...target, runtimeId: node.publication.node.runtimeId })
+        if (target.resource) target = target.resource
+      }
       if (target.kind === 'capsule') {
-        if (!this.openCapsule) throw new Error('The original Capsule presentation owner is unavailable.')
+        const local = !node || node.hostId === 'local'
+        if (local && !this.openCapsule || !local && !this.hostLinks) throw new Error('The original Capsule presentation owner is unavailable.')
         const operationId = mintObjectId()
-        const result = await this.openCapsule(target.capsuleId, operationId, controller.signal)
+        const result = local ? await this.openCapsule!(target.capsuleId, operationId, controller.signal)
+          : await this.hostLinks!.openCapsule({ hostId: node!.hostId, expectedRuntimeId: node!.publication.node.runtimeId,
+            capsuleId: target.capsuleId, operationId, ...(objectLink === undefined ? {} : { objectLink }) }, controller.signal)
         if (controller.signal.aborted || this.execution !== execution) return null
         if (result.capsuleId !== target.capsuleId || result.operationId !== operationId) throw new Error('The Capsule owner returned another object or operation.')
         return result.rendering.status === 'unavailable'
-          ? `Capsule opening is unconfirmed. ${result.rendering.reason} Inspect original operation ${operationId}; the page and current workface are kept.` : null
+          ? `Capsule opening is unconfirmed. ${result.rendering.reason} Inspect this Desktop's original Browser/Region opening ${operationId}; the page and current workface are kept.` : null
       }
       let request: AgentMuxControlFocusRequest
       const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus' as const, inputPolicy: 'preserve' as const }
-      if (target.kind === 'mote') {
+      if (target.kind === 'host') {
+        request = { ...base, target: { kind: 'settings', sectionId: 'hosts', hostId: node!.hostId } }
+      } else if (target.kind === 'mote') {
         request = { ...base, target: { kind: 'mote', spaceId: target.spaceId,
           ...(target.eventId === undefined ? {} : { eventId: target.eventId }) } }
       } else if (target.kind === 'agent') {
         const discovery = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'space.ls', target: {} }, controller.signal)
         if (controller.signal.aborted) return null
         if (discovery.operation !== 'space.ls') throw new Error('The spatial discovery owner returned another operation.')
-        const regionIds = new Set(discovery.catalog.regions.filter(region => region.kind === 'agent' && region.agentSessionId === target.agentSessionId).map(region => region.regionId))
+        const agentId = target.agentSessionId
+        const regions = discovery.catalog.regions.filter(region => region.kind === 'agent' && region.agentSessionId === agentId &&
+          (!node || region.execution !== null && node.hostIds.includes(region.execution.hostId)))
+        const regionIds = new Set(regions.map(region => region.regionId))
         const locations = discovery.catalog.locations.filter(location => regionIds.has(location.regionId))
-        if (locations.length !== 1) throw new Error(`Agent ${JSON.stringify(target.agentSessionId)} has ${locations.length} confirmed display candidates. Its existence and health are not determined by this observation. Candidates: ${JSON.stringify(locations)}. Inspect the original Session with ${agentSessionInspectCommand(target.agentSessionId)}; use amux --skill to choose its exact current position or original open/resume action.`)
+        if (locations.length !== 1) throw new Error(`Agent ${JSON.stringify(target.agentSessionId)} has ${locations.length} confirmed display candidates. Its existence and health are not determined by this observation. Candidates: ${JSON.stringify(locations)}. Inspect the original Session with ${agentSessionInspectCommand(target.agentSessionId, node?.hostId)}; use amux --skill to choose its exact current position or original open/resume action.`)
         const location = locations[0]!
         request = { ...base, target: { kind: 'space', regionId: location.regionId, tabId: location.tabId,
           displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId,
           ...(location.spaceId === null ? {} : { spaceId: location.spaceId }), ...(location.zoneId === null ? {} : { zoneId: location.zoneId }) },
-          expectedAgentSessionId: target.agentSessionId }
+          expectedAgentSessionId: target.agentSessionId,
+          ...(node ? { expectedAgentHostId: regions.find(region => region.regionId === location.regionId)!.execution!.hostId } : {}) }
       } else {
         const selector = target.kind === 'region' ? { regionId: target.regionId } : target.kind === 'tab' ? { tabId: target.tabId }
           : target.kind === 'space' ? { spaceId: target.spaceId } : { zoneId: target.zoneId }
@@ -105,12 +134,14 @@ export class SpatialLinkIngress {
       }
       if (controller.signal.aborted) return null
       const result = await execute(request, controller.signal)
-      if (result.operation === 'focus' && result.navigation.expectedAgentSessionId !== request.expectedAgentSessionId)
+      if (result.operation === 'focus' && (result.navigation.expectedAgentSessionId !== request.expectedAgentSessionId || result.navigation.expectedAgentHostId !== request.expectedAgentHostId))
         throw new Error('The original navigation owner did not confirm the requested Agent identity condition.')
       if (controller.signal.aborted || this.execution !== execution) return null
       if (result.operation !== 'focus') throw new Error('The original navigation owner returned another operation.')
-      if (result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed' ||
-        (result.presentation.state !== 'main-visible' && result.presentation.state !== 'floating')) {
+      const visible = target.kind === 'host'
+        ? result.overlays.settingsPage?.visible === true && result.overlays.settingsPage.sectionId === 'hosts' && result.overlays.settingsPage.hostId === node?.hostId
+        : result.presentation.state === 'main-visible' || result.presentation.state === 'floating'
+      if (result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed' || !visible) {
         const issue = result.issues.map(item => `${item.code}: ${item.message} ${item.recovery}${item.candidates ? ` Candidates: ${JSON.stringify(item.candidates)}` : ''}`).join('\n')
         return `Object link opening is unconfirmed. Navigation: ${result.navigation.state}; presentation: ${result.presentation.state}. ${issue} The original workface and healthy Agents are kept.`
       }

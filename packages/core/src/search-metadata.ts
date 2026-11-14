@@ -6,7 +6,7 @@ import type { AgentSessionHistoryDescriptor } from './types.js'
 type Identity = { agent: Set<string>; region: Set<string>; tab: Set<string>; space: Set<string>; zone: Set<string>; capsule: Set<string>; mote: Set<string>; ids: Set<string>; text: string[] }
 const identity = (): Identity => ({ agent: new Set(), region: new Set(), tab: new Set(), space: new Set(), zone: new Set(), capsule: new Set(), mote: new Set(), ids: new Set(), text: [] })
 const add = (set: Set<string>, ...values: (string | null | undefined)[]) => { for (const value of values) if (value) set.add(value) }
-const targetId = (target: AmuxObjectLinkTarget) => target.kind === 'agent' ? target.agentSessionId : target.kind === 'region' ? target.regionId : target.kind === 'tab' ? target.tabId : target.kind === 'space' || target.kind === 'mote' ? target.spaceId : target.kind === 'zone' ? target.zoneId : target.capsuleId
+const targetId = (target: Exclude<AmuxObjectLinkTarget, { kind: 'host' }>) => target.kind === 'agent' ? target.agentSessionId : target.kind === 'region' ? target.regionId : target.kind === 'tab' ? target.tabId : target.kind === 'space' || target.kind === 'mote' ? target.spaceId : target.kind === 'zone' ? target.zoneId : target.capsuleId
 export const agentMuxSearchSessionKey = (hostId: string, sessionId: string, kind: 'agent' | 'terminal' = 'agent') => JSON.stringify([hostId, kind, sessionId])
 export type AgentMuxSearchLocation = { reference: Pick<AgentMuxSpaceLocation, 'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'>; name: string; kind: string; address: string; sessionId: string | null }
 
@@ -35,9 +35,13 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
     for (const source of input.sources) sessions.set(JSON.stringify([source.hostId, 'agent', source.agentSessionId]), { hostId: source.hostId, kind: 'agent', agentSessionId: source.agentSessionId })
     return { sessions: [...sessions.values()], projects: input.projects.map(({hostId, projectId}) => ({hostId, projectId})), locations: [] as AgentMuxSearchLocation[], objects: [...input.objects ?? []], unplaced: [] as { kind: 'space' | 'zone' | 'tab' | 'region'; id: string; name: string }[], issue: null as string | null }
   }
-  let target: AmuxObjectLinkTarget | undefined, issue: string | null = null
+  let target: Exclude<AmuxObjectLinkTarget, { kind: 'host' }> | undefined, issue: string | null = null
   if (/^amux:/iu.test(raw)) {
-    try { target = parseAmuxObjectLink(raw); if (target.kind === 'mote' && target.eventId !== undefined) issue = 'Read this exact work event through its original Mote thread; metadata does not inspect thread records.' } catch (error) { issue = error instanceof Error ? error.message : String(error) }
+    try {
+      const parsed = parseAmuxObjectLink(raw)
+      if (parsed.kind === 'host') issue = 'Resolve this published Node through node locate; local metadata cannot establish an alias or Runtime source.'
+      else { target = parsed; if (target.kind === 'mote' && target.eventId !== undefined) issue = 'Read this exact work event through its original Mote thread; metadata does not inspect thread records.' }
+    } catch (error) { issue = error instanceof Error ? error.message : String(error) }
   }
   const matches = (fact: Identity) => !issue && (!raw || (target
     ? fact[target.kind].has(targetId(target))

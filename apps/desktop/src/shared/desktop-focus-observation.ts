@@ -33,10 +33,10 @@ export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z
   floating: z.object({ provenance, state: z.enum(['closed', 'preview', 'pinned', 'unknown']), topicId: nullableId,
     tabId: nullableId, regionId: nullableId, sessionId: nullableId, presentation: z.enum(['visible', 'hidden', 'pending', 'unknown']) }).strict(),
   overlays: z.object({ provenance, settings: z.boolean().nullable(), quickSwitcher: z.boolean().nullable(),
-    settingsPage: z.object({ sectionIds: z.array(id).min(1), sectionId: nullableId, visible: z.boolean().nullable() }).strict().superRefine((value, context) => {
+    settingsPage: z.object({ sectionIds: z.array(id).min(1), sectionId: nullableId, visible: z.boolean().nullable(), hostId: nullableId.optional() }).strict().superRefine((value, context) => {
       if (new Set(value.sectionIds).size !== value.sectionIds.length || value.sectionId !== null && !value.sectionIds.includes(value.sectionId))
         context.addIssue({ code: 'custom', message: 'Settings selection must belong to the original catalog.' })
-    }).optional() }).strict().superRefine((value, context) => {
+    }).transform(({ hostId, ...page }) => hostId === undefined ? page : { ...page, hostId }).optional() }).strict().superRefine((value, context) => {
       if (value.settingsPage?.visible === true && (value.settings !== true || value.provenance !== 'observed' || value.settingsPage.sectionId === null))
         context.addIssue({ code: 'custom', message: 'A visible Settings page requires its original observed overlay and section.' })
     }),

@@ -118,7 +118,7 @@ function DesktopApp() {
   const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInputPolicy, setSettingsInputPolicy] = useState<'preserve' | 'target'>('target')
-  const settingsObservation = useRef<{ sectionId: string; visible: boolean } | null>(null)
+  const settingsObservation = useRef<{ sectionId: string; visible: boolean; hostId?: string | null } | null>(null)
   const navigateSettings = useCallback((request: SettingsNavigationRequest, inputPolicy: 'preserve' | 'target' = 'target'): void => {
     setSettingsInputPolicy(inputPolicy)
     setSettingsRoute(request)
@@ -186,7 +186,8 @@ function DesktopApp() {
       overlays: { settings: settingsOpen, quickSwitcher: quickSwitchVisible },
       settings: { sectionIds: desktopSettingsSectionIds,
         read: () => settingsObservation.current,
-        open: sectionId => navigateSettings({ section: sectionId as SettingsPageId }, 'preserve'),
+        open: (sectionId, hostId) => navigateSettings({ section: sectionId as SettingsPageId,
+          ...(hostId === undefined ? {} : { hostId, field: 'resources' }) }, 'preserve'),
         close: () => { setSettingsInputPolicy('preserve'); closeSettings() } },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),

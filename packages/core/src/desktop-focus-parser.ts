@@ -58,8 +58,11 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
       ...(Object.hasOwn(source, 'eventId') ? { eventId: spaceControlId(source.eventId, 'Mote work event', code, true) } : {}) }
   }
   if (source.kind === 'settings') {
-    fields(source, ['kind', 'sectionId'], code)
-    return { kind: 'settings', sectionId: nullableId(source.sectionId, 'Settings section ID', code) }
+    fields(source, ['kind', 'sectionId', 'hostId'], code)
+    const sectionId = nullableId(source.sectionId, 'Settings section ID', code)
+    if (source.hostId !== undefined && sectionId !== 'hosts') fail('A Host selection requires the original Hosts page.', code)
+    return { kind: 'settings', sectionId,
+      ...(source.hostId === undefined ? {} : { hostId: spaceControlId(source.hostId, 'Settings Host ID', code) }) }
   }
   if (source.kind === 'goal') {
     fields(source, ['kind', 'goalId'], code)
@@ -83,7 +86,7 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
 }
 
 export function parseDesktopFocusRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxControlFocusRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'inputPolicy', 'expectedAgentSessionId'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'inputPolicy', 'expectedAgentSessionId', 'expectedAgentHostId'], code)
   if (source.schemaVersion !== 5 || source.operation !== 'focus') fail('Desktop focus request is invalid.', code)
   const target = parseDesktopFocusTarget(source.target, code)
   const inputPolicy = Object.hasOwn(source, 'inputPolicy')
@@ -96,8 +99,11 @@ export function parseDesktopFocusRequest(value: unknown, code: Code = 'INVALID_C
   if (expectedAgentSessionId !== undefined && (target.kind !== 'space' || !target.regionId || target.regionId === 'self')) {
     fail('An expected Agent Session requires one exact Region.', code)
   }
+  const expectedAgentHostId = source.expectedAgentHostId === undefined ? undefined : spaceControlId(source.expectedAgentHostId, 'Expected Agent Host', code)
+  if (expectedAgentHostId !== undefined && expectedAgentSessionId === undefined) fail('An expected Host requires an exact Agent Session condition.', code)
   const request = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code), operation: 'focus' as const, target, inputPolicy,
-    ...(expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId }) }
+    ...(expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId }),
+    ...(expectedAgentHostId === undefined ? {} : { expectedAgentHostId }) }
   budget(request, code)
   return request
 }
@@ -162,14 +168,15 @@ function floating(value: unknown, code: Code): AgentMuxDesktopFloating {
 }
 function overlays(value: unknown, code: Code): AgentMuxDesktopOverlays {
   const source = fields(value, ['provenance', 'settings', 'quickSwitcher', 'settingsPage'], code)
-  const page = Object.hasOwn(source, 'settingsPage') ? fields(source.settingsPage, ['sectionIds', 'sectionId', 'visible'], code) : null
+  const page = Object.hasOwn(source, 'settingsPage') ? fields(source.settingsPage, ['sectionIds', 'sectionId', 'visible', 'hostId'], code) : null
   const sectionIds = page ? list(page.sectionIds, value => spaceControlId(value, 'Settings section ID', code), code) : []
   const sectionId = page ? nullableId(page.sectionId, 'Selected Settings section', code) : null
   if (page && (!sectionIds.length || new Set(sectionIds).size !== sectionIds.length || sectionId !== null && !sectionIds.includes(sectionId) ||
     page.visible === true && (source.settings !== true || source.provenance !== 'observed' || sectionId === null))) fail('Settings catalog and selected page disagree.', code)
   return { provenance: provenance(source.provenance, code), settings: nullableBoolean(source.settings, 'Settings', code),
     quickSwitcher: nullableBoolean(source.quickSwitcher, 'Quick switcher', code),
-    ...(page ? { settingsPage: { sectionIds, sectionId, visible: nullableBoolean(page.visible, 'Settings page visible', code) } } : {}) }
+    ...(page ? { settingsPage: { sectionIds, sectionId, visible: nullableBoolean(page.visible, 'Settings page visible', code),
+      ...(page.hostId === undefined ? {} : { hostId: nullableId(page.hostId, 'Selected Settings Host', code) }) } } : {}) }
 }
 function focus(value: unknown, code: Code): AgentMuxDesktopObservation['focus'] {
   const source = fields(value, ['executionSessionId', 'pmoSessionId', 'agent'], code)
@@ -185,13 +192,14 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   const source = fields(value, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
   if (source.schemaVersion !== 5 || source.operation !== 'focus' || source.ok !== true) fail('Desktop focus receipt is invalid.', code)
   const body = fields(source.result, ['navigation', 'presentation', 'input', 'floating', 'overlays', 'focus', 'partial', 'save', 'issues'], code)
-  const nav = fields(body.navigation, ['state', 'requested', 'selection', 'expectedAgentSessionId'], code)
+  const nav = fields(body.navigation, ['state', 'requested', 'selection', 'expectedAgentSessionId', 'expectedAgentHostId'], code)
   const caret = fields(body.input, ['policy', 'outcome', 'before', 'after'], code)
   const saved = fields(body.save, ['layoutApplied', 'clientStateWritten', 'storageFlushRequested', 'diskDurability', 'reason'], code)
   const result: Omit<AgentMuxDesktopFocusResult, 'operation'> = {
     navigation: { state: member(nav.state, ['applied', 'unchanged', 'rejected', 'unconfirmed'], 'Navigation', code),
       requested: parseDesktopFocusTarget(nav.requested, code), selection: selection(nav.selection, code),
-      ...(Object.hasOwn(nav, 'expectedAgentSessionId') ? { expectedAgentSessionId: spaceControlId(nav.expectedAgentSessionId, 'Expected Agent Session ID', code) } : {}) },
+      ...(Object.hasOwn(nav, 'expectedAgentSessionId') ? { expectedAgentSessionId: spaceControlId(nav.expectedAgentSessionId, 'Expected Agent Session ID', code) } : {}),
+      ...(nav.expectedAgentHostId === undefined ? {} : { expectedAgentHostId: spaceControlId(nav.expectedAgentHostId, 'Expected Agent Host', code) }) },
     presentation: presentation(body.presentation, code), input: { policy: member(caret.policy, ['preserve', 'target'], 'Input policy', code),
       outcome: member(caret.outcome, ['preserved', 'transferred', 'unavailable', 'unconfirmed'], 'Input outcome', code), before: input(caret.before, code), after: input(caret.after, code) },
     floating: floating(body.floating, code), overlays: overlays(body.overlays, code), focus: focus(body.focus, code), partial: boolean(body.partial, 'Partial', code),
@@ -208,6 +216,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   if (navigation.expectedAgentSessionId !== undefined && (navigation.requested.kind !== 'space' || !navigation.requested.regionId || navigation.requested.regionId === 'self')) {
     fail('An expected Agent Session requires one exact Region.', code)
   }
+  if (navigation.expectedAgentHostId !== undefined && navigation.expectedAgentSessionId === undefined) fail('Agent Host condition lacks its Session.', code)
   if (observedInput.policy === 'target' && (navigation.requested.kind !== 'space' ||
     (!navigation.requested.tabId && !navigation.requested.regionId))) fail('Input target requires an exact Tab or Region.', code)
   if ((navigation.state === 'applied' || navigation.state === 'unchanged')) {
@@ -216,7 +225,8 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       result.focus.agent?.hostId !== requested.hostId || result.focus.agent.agentSessionId !== requested.agentSessionId || result.focus.agent.state !== 'visible'))
       fail('Focus Agent receipt is not visibly confirmed for the exact target.', code)
     if (requested.kind === 'settings' && (requested.sectionId === null ? result.overlays.settings !== false :
-      result.overlays.settings !== true || result.overlays.settingsPage?.sectionId !== requested.sectionId || result.overlays.settingsPage.visible !== true))
+      result.overlays.settings !== true || result.overlays.settingsPage?.sectionId !== requested.sectionId || result.overlays.settingsPage.visible !== true ||
+      requested.hostId !== undefined && result.overlays.settingsPage.hostId !== requested.hostId))
       fail('Settings receipt is not visibly confirmed for the exact registered page.', code)
     if (requested.kind === 'goal' && (actual.goalId !== requested.goalId || actual.surface !== 'goals')) fail('Goal receipt target is mismatched.', code)
     if (requested.kind === 'surface' && (actual.surface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)

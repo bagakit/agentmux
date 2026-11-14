@@ -1,4 +1,5 @@
 import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
+import { nodeAlias } from './node-publishing.js'
 
 /** Plain-text sharing. Identity fields describe objects; they never authenticate a sender. */
 export type AmuxSharingKind = 'File' | 'Browser'
@@ -17,14 +18,21 @@ export function agentSessionSendCommand(agentSessionId: string): string {
   return `amux agent send --to-session=${shellArgument(agentSessionId)} --text "..."`
 }
 
-export function agentSessionInspectCommand(agentSessionId: string): string {
-  return `amux agent inspect --session=${shellArgument(agentSessionId)}`
+export function agentSessionInspectCommand(agentSessionId: string, hostId?: string): string {
+  return `amux agent inspect${hostId === undefined ? '' : ` --host=${shellArgument(hostId)}`} --session=${shellArgument(agentSessionId)}`
 }
 
 export const AMUX_AGENT_LIST_COMMAND = 'amux agent ls'
 
+export type AmuxHostAddress = {
+  alias: string
+  runtimeId?: string
+  resource?: { kind: 'agent'; agentSessionId: string } | { kind: 'capsule'; capsuleId: string }
+}
+
 /** Semantic and spatial identities remain different object kinds. */
 export type AmuxObjectLinkTarget =
+  | ({ kind: 'host' } & AmuxHostAddress)
   | { kind: 'agent'; agentSessionId: string }
   | { kind: 'region'; regionId: string }
   | { kind: 'tab'; tabId: string }
@@ -34,6 +42,15 @@ export type AmuxObjectLinkTarget =
   | { kind: 'mote'; spaceId: string; eventId?: string }
 
 export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
+  if (target.kind === 'host') {
+    const alias = nodeAlias(target.alias)
+    if (!alias) throw new TypeError('A published Node alias is required.')
+    const resource = target.resource
+    const id = resource?.kind === 'agent' ? resource.agentSessionId : resource?.capsuleId
+    if (resource && (typeof id !== 'string' || !id)) throw new TypeError('An exact original resource identity is required.')
+    if (target.runtimeId !== undefined && (typeof target.runtimeId !== 'string' || !target.runtimeId)) throw new TypeError('An exact original Runtime identity is required.')
+    return `${AMUX_PROTOCOL_DEFINITIONS.link.tag}host/${alias}${resource ? `/${resource.kind}/${encodeURIComponent(id!)}` : ''}${target.runtimeId === undefined ? '' : `?runtime=${encodeURIComponent(target.runtimeId)}`}`
+  }
   const id = target.kind === 'agent' ? target.agentSessionId
     : target.kind === 'region' ? target.regionId
     : target.kind === 'tab' ? target.tabId
@@ -49,6 +66,16 @@ export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
 /** A Mote thread carries its original event within that exact Mote's stable Space. */
 export function parseAmuxObjectLink(raw: string): AmuxObjectLinkTarget {
   if (typeof raw !== 'string') throw new TypeError('An object link must be text.')
+  const host = /^amux:\/\/host\/([^/?#]+)(?:\/(agent|capsule)\/([^/?#]+))?(?:\?runtime=([^&#?]+))?$/u.exec(raw)
+  if (host) {
+    const target: AmuxObjectLinkTarget = { kind: 'host', alias: host[1]!,
+      ...(host[4] === undefined ? {} : { runtimeId: decodeURIComponent(host[4]) }),
+      ...(host[2] === undefined ? {} : { resource: host[2] === 'agent'
+        ? { kind: 'agent' as const, agentSessionId: decodeURIComponent(host[3]!) }
+        : { kind: 'capsule' as const, capsuleId: decodeURIComponent(host[3]!) } }) }
+    if (formatAmuxObjectLink(target) !== raw) throw new TypeError('The Node link encoding is not canonical.')
+    return target
+  }
   const match = /^amux:\/\/(agent|region|tab|space|zone|capsule|mote)\/([^/?#]+)(?:\/thread\/([^/?#]+))?$/u.exec(raw)
   if (!match || match[3] !== undefined && match[1] !== 'mote') throw new TypeError('Choose an exact amux object link or a Mote thread link.')
   const id = decodeURIComponent(match[2]!)
@@ -65,6 +92,9 @@ export function parseAmuxObjectLink(raw: string): AmuxObjectLinkTarget {
 
 export function formatSessionAddress(agentSessionId: string): string {
   return formatAmuxObjectLink({ kind: 'agent', agentSessionId })
+}
+export function formatHostAddress(target: AmuxHostAddress): string {
+  return formatAmuxObjectLink({ kind: 'host', ...target })
 }
 export function formatRegionAddress(regionId: string): string {
   return formatAmuxObjectLink({ kind: 'region', regionId })

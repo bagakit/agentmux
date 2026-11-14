@@ -7,7 +7,7 @@ export type AgentMuxDesktopMainSurface = 'workbench' | 'agents' | 'board' | 'sur
 export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
   | { kind: 'mote'; spaceId: string; eventId?: string }
-  | { kind: 'settings'; sectionId: string | null }
+  | { kind: 'settings'; sectionId: string | null; hostId?: string }
   | { kind: 'goal'; goalId: string }
   | { kind: 'focus-agent'; hostId: string; agentSessionId: string }
   | { kind: 'surface'; surface: 'focus'; view?: AgentMuxDesktopFocusView }
@@ -56,6 +56,8 @@ export type AgentMuxDesktopSettingsPage = {
   /** Actual retained Panel selection, never merely the initial navigation request. */
   sectionId: string | null
   visible: boolean | null
+  /** Actual selected Host editor, when that original page supplies the observation. */
+  hostId?: string | null
 }
 export type AgentMuxDesktopOverlays = {
   provenance: AgentMuxDesktopProvenance
@@ -81,6 +83,7 @@ export type AgentMuxDesktopFocusResult = {
     state: 'applied' | 'unchanged' | 'rejected' | 'unconfirmed'
     requested: AgentMuxDesktopFocusTarget
     expectedAgentSessionId?: string
+    expectedAgentHostId?: string
     selection: AgentMuxDesktopSelection
   }
   presentation: AgentMuxDesktopPresentation

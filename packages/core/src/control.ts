@@ -329,6 +329,7 @@ export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy
   /** Checked against the exact Region occupant before applying navigation. */
   expectedAgentSessionId?: string
+  expectedAgentHostId?: string
 }
 export type AgentMuxControlArrangeRequest = RequestBase & {
   operation: 'arrange'; target: AgentMuxTabAnchor; mode: AgentMuxArrangeMode; caller?: AgentMuxControlCaller

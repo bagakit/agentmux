@@ -8,7 +8,7 @@ import { workbenchRegionProjectionSlotId } from './workbench-projection'
 export type DesktopAppPresentationOwner = {
   loading: boolean
   overlays: { settings: boolean; quickSwitcher: boolean }
-  settings?: { sectionIds: readonly string[]; open(sectionId: string): void; close(): void; read(): { sectionId: string; visible: boolean } | null }
+  settings?: { sectionIds: readonly string[]; open(sectionId: string, hostId?: string): void; close(): void; read(): { sectionId: string; visible: boolean; hostId?: string | null } | null }
   /** The existing Space content slot may cover its retained main workface. */
   contentExpanded?: boolean
   floating: { state: 'closed' | 'preview' | 'pinned'; topicId: string | null; tabId: string | null; regionId?: string | null } | null
@@ -31,17 +31,18 @@ export function readDesktopOverlays(): AgentMuxDesktopOverlays {
   if (!owner) return unknownOverlays()
   const page = owner.settings?.read()
   return { provenance: 'observed', ...owner.overlays, ...(owner.settings ? { settingsPage: {
-    sectionIds: [...owner.settings.sectionIds], sectionId: page?.sectionId ?? null, visible: page?.visible ?? false
+    sectionIds: [...owner.settings.sectionIds], sectionId: page?.sectionId ?? null, visible: page?.visible ?? false,
+    ...(page?.hostId === undefined ? {} : { hostId: page.hostId })
   } } : {}) }
 }
 
 /** Delegate only to the original App router; catalog IDs never come from titles or DOM prose. */
-export function requestDesktopSettingsNavigation(sectionId: string | null): 'requested' | 'unknown-section' | 'unavailable' {
+export function requestDesktopSettingsNavigation(sectionId: string | null, hostId?: string): 'requested' | 'unknown-section' | 'unavailable' {
   const settings = appReader?.()?.settings
   if (!settings) return 'unavailable'
   if (sectionId === null) { settings.close(); return 'requested' }
   if (!settings.sectionIds.includes(sectionId)) return 'unknown-section'
-  settings.open(sectionId)
+  settings.open(sectionId, hostId)
   return 'requested'
 }
 

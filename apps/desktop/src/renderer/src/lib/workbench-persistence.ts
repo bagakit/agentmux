@@ -43,6 +43,7 @@ export type PersistedBrowserSurface = {
   capsuleId?: string
   capsuleOrigin?: string
   capsuleRemote?: BrowserWorkbenchSurface['capsuleRemote']
+  capsuleObjectLink?: string
   capsuleOpenOperationIds?: string[]
   url: string
   title: string
@@ -107,6 +108,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     profileId: privateMode || surface.capsuleId ? null : surface.profileId ?? '',
     ...(!privateMode && surface.capsuleId ? { capsuleId: surface.capsuleId, capsuleOrigin: surface.capsuleOrigin } : {}),
     ...(!privateMode && surface.capsuleRemote ? { capsuleRemote: structuredClone(surface.capsuleRemote) } : {}),
+    ...(!privateMode && surface.capsuleRemote && typeof surface.capsuleObjectLink === 'string' ? { capsuleObjectLink: surface.capsuleObjectLink } : {}),
     ...(!privateMode && surface.capsuleOpenOperationIds ? { capsuleOpenOperationIds: [...surface.capsuleOpenOperationIds] } : {}),
     loading: false,
     canGoBack: false,
@@ -138,6 +140,7 @@ function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): P
     ...association,
     ...(surface.capsuleId ? { capsuleId: surface.capsuleId, capsuleOrigin: surface.capsuleOrigin } : {}),
     ...(surface.capsuleRemote ? { capsuleRemote: structuredClone(surface.capsuleRemote) } : {}),
+    ...(surface.capsuleRemote && typeof surface.capsuleObjectLink === 'string' ? { capsuleObjectLink: surface.capsuleObjectLink } : {}),
     ...(surface.capsuleOpenOperationIds ? { capsuleOpenOperationIds: [...surface.capsuleOpenOperationIds] } : {}),
     ...(surface.profileId ? { profileId: surface.profileId } : {}),
     url: surface.url,

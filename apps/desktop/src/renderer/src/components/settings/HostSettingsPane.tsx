@@ -144,7 +144,9 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     setRequestedHost(id)
     setMaintenanceHosts(current => current.includes(id) ? current : [...current, id])
     setSelectedId(id)
-    setPanel('connection')
+    setPanel(navigationRequest.field === 'resources' ? 'overview' : 'connection')
+    if (navigationRequest.field === 'resources') setSectionsOpen(current => ({ ...current,
+      [sectionKey(id, 'service')]: true, [sectionKey(id, 'shared')]: true }))
     setView('editor')
     setFilter({ query: '', snapshot: [] })
     setPendingEdit({ id, select: false })
@@ -246,7 +248,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
 
   const selectedNetworkHost = hosts.find(host => host.id === selectedId)
   return (
-    <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}>
+    <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}
+      data-settings-host={active && view === 'editor' && !pendingHostNavigation && hosts.some(host => host.id === selectedId) ? selectedId ?? undefined : undefined}>
       <div className="remote-foundation"><div><strong>Connection foundation</strong><p>Connect and check your environments here. Use saved Hosts in Remote work.</p></div>{onRemoteWork ? <button type="button" className="small-button" onClick={onRemoteWork}>Remote work</button> : null}</div>
       <div className="settings-pane-toolbar remote-management__toolbar">
         {view === 'editor' && <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>}

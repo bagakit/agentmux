@@ -422,6 +422,10 @@
       "types": "./dist/note-format-metadata.d.ts",
       "import": "./dist/note-format-metadata.js"
     },
+    "./node-locator": {
+      "types": "./dist/node-locator.d.ts",
+      "import": "./dist/node-locator.js"
+    },
     "./node-publishing": {
       "types": "./dist/node-publishing.d.ts",
       "import": "./dist/node-publishing.js"

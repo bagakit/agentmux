@@ -1304,6 +1304,8 @@ export type BrowserSnapshot = {
   capsuleId?: string
   capsuleOrigin?: string
   capsuleRemote?: CapsuleRemoteSource
+  /** Container sharing hint, separate from the currently displayed objectLink and all authority. */
+  capsuleObjectLink?: string
   capsuleOpenOperationIds?: string[]
   /** Native current-document observation only; never persisted or used as page IPC authorization. */
   capsuleActive?: boolean

@@ -245,3 +245,5 @@ export * from './browser-sdk.js'
 export { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
 
 export * from './node-publishing.js'
+
+export * from './node-locator.js'

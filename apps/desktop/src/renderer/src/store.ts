@@ -7021,12 +7021,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (navigationChanged || fileNavigationSelection(get()) !== originalNavigation) throw new DesktopFocusFailure({ step: 'navigation', code: 'NAVIGATION_CHANGED',
           message: 'A newer navigation happened while the original target was being observed.', recovery: 'The later workface is kept. Inspect the client before explicitly retrying this target.' })
         if (request.target.kind === 'settings') {
-          const outcome = requestDesktopSettingsNavigation(request.target.sectionId)
+          const outcome = requestDesktopSettingsNavigation(request.target.sectionId, request.target.hostId)
           if (outcome !== 'requested') throw new DesktopFocusFailure({ step: 'target',
             code: outcome === 'unknown-section' ? 'SETTINGS_SECTION_UNKNOWN' : 'SETTINGS_OWNER_UNAVAILABLE',
             message: outcome === 'unknown-section' ? 'The exact Settings section is not registered by this client.' : 'The original Settings navigation owner is unavailable.',
             recovery: 'Keep the original page and drafts. Read app inspect overlays.settingsPage.sectionIds before choosing an exact registered section.' })
-          if (request.target.sectionId === null ? settingsBefore?.settings === false : settingsBefore?.settingsPage?.visible === true && settingsBefore.settingsPage.sectionId === request.target.sectionId) navigationState = 'unchanged'
+          if (request.target.sectionId === null ? settingsBefore?.settings === false : settingsBefore?.settingsPage?.visible === true && settingsBefore.settingsPage.sectionId === request.target.sectionId && (request.target.hostId === undefined || settingsBefore.settingsPage.hostId === request.target.hostId)) navigationState = 'unchanged'
         } else if (request.target.kind === 'goal') {
           if (!Object.hasOwn(get().demands, request.target.goalId)) throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_UNKNOWN',
             message: 'The exact Goal is not currently in the complete Demand projection.', recovery: 'List Goals and choose an existing Demand ID.' })
@@ -7040,6 +7040,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy,
             moteDiscussionEntry: { workspaceId: resolved.workspaceId, topicId: resolved.topicId!, token: moteEntryToken,
               ...(request.target.eventId === undefined ? {} : { eventId: request.target.eventId }) } })
+      const expectedAgentMatches = (regionId: string | null): boolean => {
+        const original = spatialCatalog(get(), topics).regions.find(region => region.regionId === regionId)
+        return original?.kind === 'agent' && original.agentSessionId === request.expectedAgentSessionId &&
+          (request.expectedAgentHostId === undefined || original.execution?.hostId === request.expectedAgentHostId)
+      }
         } else if (request.target.kind === 'focus-agent') {
           get().revealFocusAgent(request.target)
         } else if (request.target.kind === 'surface') {
@@ -7049,8 +7054,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } else {
           const resolved = resolveDesktopSpaceSelection(get(), catalog, request.target)
           if (request.expectedAgentSessionId !== undefined) {
-            const region = resolved.tabId && resolved.regionId ? get().tabs[resolved.tabId]?.regions[resolved.regionId] : null
-            if (!region || region.kind !== 'agent' || region.sessionId !== request.expectedAgentSessionId) throw new DesktopFocusFailure({
+            if (!expectedAgentMatches(resolved.regionId)) throw new DesktopFocusFailure({
               step: 'target', code: 'AGENT_LOCATION_CHANGED', message: 'The exact Region no longer contains the requested Agent Session.',
               recovery: 'The original workface and healthy Agents are kept. Inspect the original Session and choose its current exact Region.' })
           }
@@ -7086,7 +7090,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
         const observed = readDesktopPresentation(actual, get().tabs)
         if (request.target.kind === 'settings') return request.target.sectionId === null ? observed.overlays.settings === false :
-          observed.overlays.settingsPage?.sectionId === request.target.sectionId && observed.overlays.settingsPage.visible === true
+          observed.overlays.settingsPage?.sectionId === request.target.sectionId && observed.overlays.settingsPage.visible === true && (request.target.hostId === undefined || observed.overlays.settingsPage.hostId === request.target.hostId)
         if (request.target.kind === 'focus-agent') return get().focusAgentReveal?.requestId !== revealRequestId ||
           observed.presentation.state === 'covered' || readFocusAgentPresentation(get().focusAgentReveal)?.state === 'visible' || !get().focusAgentReveal?.pending
         return observed.presentation.state === 'covered' ||
@@ -7105,8 +7109,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (navigationState !== 'rejected' && request.expectedAgentSessionId !== undefined) {
         const selected = selection.space
-        const region = selected?.tabId && selected.regionId ? get().tabs[selected.tabId]?.regions[selected.regionId] : null
-        if (!region || region.kind !== 'agent' || region.sessionId !== request.expectedAgentSessionId) {
+        if (!expectedAgentMatches(selected?.regionId ?? null)) {
           navigationState = 'unconfirmed'
           issues.push({ step: 'presentation', code: 'AGENT_LOCATION_CHANGED', message: 'The Region content changed before the original Agent navigation was confirmed.',
             recovery: 'The later workface and healthy Agents are kept. Inspect the original Session before explicitly retrying its link.' })
@@ -7123,7 +7126,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const focusAgent = readFocusAgentPresentation(get().focusAgentReveal)
       if (navigationState !== 'rejected' && request.target.kind === 'settings' && (request.target.sectionId === null ? observed.overlays.settings !== false : observed.overlays.settings !== true ||
-        observed.overlays.settingsPage?.sectionId !== request.target.sectionId || observed.overlays.settingsPage.visible !== true)) {
+        observed.overlays.settingsPage?.sectionId !== request.target.sectionId || observed.overlays.settingsPage.visible !== true || request.target.hostId !== undefined && observed.overlays.settingsPage.hostId !== request.target.hostId)) {
         navigationState = 'unconfirmed'
         issues.push({ step: 'presentation', code: 'SETTINGS_PAGE_UNCONFIRMED', message: 'The requested Settings page has not been visibly confirmed.',
           recovery: 'The later page, drafts and input are kept. Inspect the original client before another explicit navigation.' })
@@ -7155,7 +7158,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set({ desktopNavigationNotice: null })
       }
       return { operation: 'focus', navigation: { state: navigationState, requested: request.target, selection,
-        ...(request.expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId: request.expectedAgentSessionId }) },
+        ...(request.expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId: request.expectedAgentSessionId }),
+        ...(request.expectedAgentHostId === undefined ? {} : { expectedAgentHostId: request.expectedAgentHostId }) },
         presentation: observed.presentation, input: { policy: request.inputPolicy, outcome: inputOutcome, before: before.fact, after: after.fact },
         floating: observed.floating, overlays: observed.overlays,
         focus: { executionSessionId: get().agentFocus.execution.sessionId, pmoSessionId: get().agentFocus.pmo.sessionId, agent: focusAgent }, partial, save, issues }

@@ -1,3 +1,4 @@
+import { NODE_LOCATOR_CLI_COMMAND } from './node-locator-cli.js'
 import { NODE_PUBLISHING_CLI_COMMANDS } from './node-publishing-cli.js'
 import { BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, parseBrowserProfileCookieFilePayload } from './browser-profile-cookie-files.js'
 import { parseBrowserTaskControlPayload } from './browser-task-control.js'
@@ -227,6 +228,7 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...NODE_PUBLISHING_CLI_COMMANDS,
+  NODE_LOCATOR_CLI_COMMAND,
   ...AGENTMUX_CAPSULE_CLI_COMMANDS,
   ...(['list','create','action','update'] as const).map(action => ({ method: `agent.progress.${action}` as AgentProgressMethod,
     usage: '--data <FILE|->', summary: `Read or explicitly ${action} original continuous progress. Creation, update, resume and check require an authenticated person or device; Agent callers may read, pause or stop an authorized exact target.`,
@@ -626,7 +628,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     if (tab && (f.values.has('--zone') || f.values.has('--space')) || !tab && (f.values.has('--display-workspace') || f.values.has('--group'))) invalid('Do not combine resource relations and Tab display placements.')
     return { ...operation(f), binding: tab ? { kind: 'tab-group', tabId: id(f, '--tab', true), displayWorkspaceId: id(f, '--display-workspace', true), groupId: id(f, '--group', true) } : { kind: 'zone-space', zoneId: id(f, '--zone', true), spaceId: id(f, '--space', true) } }
   })),
-  command('space.focus', '<selector> [--input preserve|target] [--expect-session SID]', 'Navigate an exact spatial object with separate presentation and input facts.', { ...SELECTOR, '--input': 'value', '--expect-session': 'data', ...OP }, f => ({ ...operation(f), target: { kind: 'space', ...selector(f) }, inputPolicy: value(f, '--input') ?? 'preserve', ...(f.values.has('--expect-session') ? { expectedAgentSessionId: id(f, '--expect-session', true) } : {}) }), 'Default --input preserve keeps eligible conversation input. --expect-session requires --region and checks that exact Region still contains the original Agent before navigating; it does not replace the spatial identity. Explicit --input target requires an exact existing Tab or Region. Partial navigation, presentation and input facts remain separate; read app inspect for current client facts.'),
+  command('space.focus', '<selector> [--input preserve|target] [--expect-session SID [--expect-host HOST]]', 'Navigate an exact spatial object with separate presentation and input facts.', { ...SELECTOR, '--input': 'value', '--expect-session': 'data', '--expect-host': 'data', ...OP }, f => {
+    if (f.values.has('--expect-host') && !f.values.has('--expect-session')) invalid('--expect-host requires the original --expect-session condition.')
+    return { ...operation(f), target: { kind: 'space', ...selector(f) }, inputPolicy: value(f, '--input') ?? 'preserve',
+      ...(f.values.has('--expect-session') ? { expectedAgentSessionId: id(f, '--expect-session', true) } : {}),
+      ...(f.values.has('--expect-host') ? { expectedAgentHostId: id(f, '--expect-host', true) } : {}) }
+  }, 'Default --input preserve keeps eligible conversation input. --expect-session requires --region and checks that exact Region still contains the original Agent; --expect-host additionally checks that original Agent Host, and requires --expect-session. These are conditions on the Region, not replacements for its spatial identity or grants of control. Explicit --input target requires an exact existing Tab or Region. Partial navigation, presentation and input facts remain separate; read app inspect for current client facts.'),
   command('space.promote', '--region ID', 'Move an existing Region into its own Tab.', { '--region': 'data', ...OP }, f => ({ ...operation(f), target: value(f, '--region', true) === 'self' ? { kind: 'self' } : { kind: 'region', regionId: id(f, '--region', true) } })),
   command('space.arrange', '--tab ID (--preset NAME|--balance|--active-first)', 'Arrange one existing Tab through the original layout owner.', { '--tab': 'data', '--preset': 'value', '--balance': 'boolean', '--active-first': 'boolean', ...OP }, f => {
     if (Number(f.values.has('--preset')) + Number(f.booleans.has('--balance')) + Number(f.booleans.has('--active-first')) !== 1) invalid('Arrange requires exactly one of --preset, --balance, --active-first.')
@@ -1065,8 +1072,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       return { ...operation(f), target: { kind: 'mote', spaceId: mote, ...(eventId === undefined ? {} : { eventId }) }, inputPolicy: value(f, '--input') ?? 'preserve' }
     }
     if (sectionId !== undefined || f.booleans.has('--close-settings')) {
-      if (sectionId !== undefined && f.booleans.has('--close-settings') || surface !== undefined || hostId !== undefined || agentSessionId !== undefined || view !== undefined) invalid('An exact Settings section cannot be combined with Surface or Agent navigation.')
-      return { ...operation(f), target: { kind: 'settings', sectionId: sectionId ?? null }, inputPolicy: value(f, '--input') ?? 'preserve' }
+      if (sectionId !== undefined && f.booleans.has('--close-settings') || surface !== undefined || hostId !== undefined && sectionId !== 'hosts' || agentSessionId !== undefined || view !== undefined) invalid('An exact Settings section cannot be combined with Surface or Agent navigation; --host selects only the Hosts page.')
+      return { ...operation(f), target: { kind: 'settings', sectionId: sectionId ?? null,
+        ...(hostId === undefined ? {} : { hostId }) }, inputPolicy: value(f, '--input') ?? 'preserve' }
     }
     if (surface === undefined) invalid('Choose --surface or an exact --settings-section from app inspect.')
     if (hostId !== undefined || agentSessionId !== undefined) {

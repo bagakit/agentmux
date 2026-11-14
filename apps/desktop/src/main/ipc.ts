@@ -600,7 +600,7 @@ export async function registerIpc(args: {
   const capsulePresentationPorts = {
     graph: async () => (await spatialState.read())?.graph ?? null,
     current: (id: string) => browsers.target(id), ensure: (id: string) => ensureBrowser(id),
-    recordOpen: (id: string, capsuleId: string, operationId: string) => browsers.recordCapsuleOpen(id, capsuleId, operationId),
+    recordOpen: (id: string, capsuleId: string, operationId: string, objectLink?: string) => browsers.recordCapsuleOpen(id, capsuleId, operationId, objectLink),
     execute: (request: AgentMuxControlRequest, signal?: AbortSignal) => executeControl(request, undefined, signal),
     observe: async (signal?: AbortSignal) => {
       const result = await controlBridge.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -1571,7 +1571,9 @@ export async function registerIpc(args: {
   handleWithEvent('ui:spatialLinksReady', event => {
     args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => contents.send('ui:spatialLinkIssue', message),
       async (capsuleId, operationId, signal) => await args.runtime.callOriginalCore('local', 'capsule.open', { capsuleId, operationId },
-        { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }))
+        { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }),
+      { locate: (input, signal) => callUserRpc('node.locate', input, { signal }),
+        openCapsule: (input, signal) => remoteCapsules.openRemoteCapsule(input, signal) })
     args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
     args.webFiles?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
@@ -2649,6 +2651,7 @@ export async function registerIpc(args: {
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
     hostTailcatKey: (input, signal) => args.runtime.callOriginalCore('local', 'settings.hosts.tailcat-key', input, { transport: 'unix', ...(signal ? { signal } : {}) }),
     hostTailcat: async (hostId, signal) => (await args.runtime.callOriginalCore(hostId, 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat,
+    nodeLocatorHosts: () => configOwner.current.hosts.map(host => host.id),
     coreClients: () => args.runtime.rpcClients(),
     callOriginalCore: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),

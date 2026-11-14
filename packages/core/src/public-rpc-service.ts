@@ -1,3 +1,4 @@
+import { locatePublishedNodes, parseNodeLocateParams, type NodeLocatorMethod } from './node-locator.js'
 import { isNodePublishingMethod, parseNodePublishingParams, parseNodePublishingResult, type NodePublishingMethod, type NodePublishingPort } from './node-publishing.js'
 import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
 import { parseAgentSessionRecordInput, deletedAgentSessionRecord, parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
@@ -256,6 +257,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   endpointPublication?(): import('./control-endpoint-state.js').AgentMuxControlEndpointState
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
   nodePublishing?: NodePublishingPort
+  /** Complete configured locator scope, including routes without a prepared client. Never starts a client. */
+  nodeLocatorHosts?(): readonly string[] | Promise<readonly string[]>
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** Borrow the configured Host's original public transport, preserving its caller and Runtime fence. */
   callOriginalCore?<M extends AgentMuxRpcMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>,
@@ -448,7 +451,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1332,6 +1335,18 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted()
       const result = await this.ports.hostTailcatKey({ role: input.role, key: input.key ?? AGENTMUX_TAILCAT_DEFAULT_KEYS[input.role] }, context.signal)
       return parseTailcatKeyResult(result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'node.locate') {
+      const input = parseNodeLocateParams(params)
+      if (!this.ports.nodeLocatorHosts && !this.ports.coreClients && !this.local) throw new AgentMuxError('This endpoint has no original configured Node scope to observe. Existing Node and Agent capabilities remain available.', 'NODE_LOCATION_SCOPE_UNAVAILABLE')
+      if (context.caller && !this.ports.coreClients && !this.local) throw new AgentMuxError('The original caller owner is unavailable for this location request. Keep the original credentials; existing Agents remain available.', 'CONTROL_UNAVAILABLE')
+      await this.authenticated(context)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const hostIds = await Promise.resolve().then(() => this.ports.nodeLocatorHosts ? this.ports.nodeLocatorHosts() : this.clients().then(scopes => scopes.map(scope => scope.hostId))).catch(() => { throw new AgentMuxError('The original configured Node scope is unavailable. Restore its Host settings and locate again; existing Agents remain available.', 'NODE_LOCATION_SCOPE_UNAVAILABLE') })
+      // One fixed published read per admitted scope. The original transport
+      // authenticates that target; A's caller is never presented as B's identity.
+      return await locatePublishedNodes(input, hostIds,
+        hostId => this.call('node.inspect', { hostId }, { ...(context.signal ? { signal: context.signal } : {}) }), context.signal) as AgentMuxRpcResult<M>
     }
     if (isNodePublishingMethod(method)) {
       const nodeMethod: NodePublishingMethod = method

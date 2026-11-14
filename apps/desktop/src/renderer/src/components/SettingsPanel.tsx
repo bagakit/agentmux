@@ -41,7 +41,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   toolId?: string | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
   inputPolicy?: 'preserve' | 'target' | undefined
-  observationRef?: { current: { sectionId: string; visible: boolean } | null } | undefined
+  observationRef?: { current: { sectionId: string; visible: boolean; hostId?: string | null } | null } | undefined
 }) {
   const config = useAppStore((state) => state.config)
   const [active, setActive] = useState<SettingsPageId>(initialSection)
@@ -64,7 +64,10 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   preserveInputRef.current = preserveInput
   useLayoutEffect(() => {
     if (!observationRef) return
-    observationRef.current = { sectionId: active, visible: Boolean(config) && visible && !showResults }
+    observationRef.current = { sectionId: active, visible: Boolean(config) && visible && !showResults,
+      // Presentation only: the original Host pane supplies its actual selection,
+      // independently of a requested route. This never grants resource access.
+      get hostId() { return active === 'hosts' ? page.current?.querySelector<HTMLElement>('[data-settings-host]')?.dataset.settingsHost ?? null : null } }
     return () => { observationRef.current = null }
   }, [active, config, observationRef, showResults, visible])
 

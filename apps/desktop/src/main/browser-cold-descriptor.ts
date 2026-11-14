@@ -17,6 +17,8 @@ export type BrowserColdDescriptor = {
   capsuleId?: string
   capsuleOrigin?: string
   capsuleRemote?: import('../shared/contracts.js').CapsuleRemoteSource
+  /** Presentation hint only. Reading it cannot change the original owner or storage. */
+  capsuleObjectLink?: string
   /** Original presentation requests associated by Main; membership is not completion evidence. */
   capsuleOpenOperationIds?: string[]
   /** Resolved by the original Host when acquiring this exact cold owner; never persisted here. */
@@ -73,6 +75,7 @@ export function browserColdDescriptor(graph: AgentMuxSpatialGraph | null, id: st
     ...(!privateMode && data.profileId ? { profileId: data.profileId as string } : {}),
     ...(data.capsuleId ? { capsuleId: data.capsuleId as string, capsuleOrigin: data.capsuleOrigin as string } : {}),
     ...(data.capsuleRemote ? { capsuleRemote: structuredClone(data.capsuleRemote) as NonNullable<BrowserColdDescriptor['capsuleRemote']> } : {}),
+    ...(data.capsuleRemote && typeof data.capsuleObjectLink === 'string' ? { capsuleObjectLink: data.capsuleObjectLink } : {}),
     ...(Array.isArray(data.capsuleOpenOperationIds) ? { capsuleOpenOperationIds: [...data.capsuleOpenOperationIds] as string[] } : {}),
     ...(data.viewport !== undefined ? { viewport: cloneBrowserViewport(data.viewport as BrowserViewport) } : {}),
     ...(source ? { source } : {}), ...(agent === undefined ? {} : { agent }), ...(warning ? { warning } : {}) }
