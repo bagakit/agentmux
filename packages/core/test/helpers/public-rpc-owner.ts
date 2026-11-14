@@ -22,7 +22,8 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
   AgentMuxClient: new (options: { store: AgentMuxAgentSessionStore }) => Client
   AgentMuxFileAgentSessionStore: new (path: string) => Store
 }, sessionFacts?: (root: string) => Partial<Pick<AgentMuxStoredAgentSession, 'providerId' | 'executorId' | 'nativeHandle'>>,
-  clientOptions?: (root: string) => Omit<AgentMuxClientOptions, 'store'>) {
+  clientOptions?: (root: string) => Omit<AgentMuxClientOptions, 'store'>,
+  initializeNamespace?: (store: Store | SourceStore, root: string) => Promise<void>) {
   const Client = ownerModule?.AgentMuxClient ?? AgentMuxClient
   const Store = ownerModule?.AgentMuxFileAgentSessionStore ?? AgentMuxFileAgentSessionStore
   const root = await mkdtemp(fixturePath("tmp/amx-rpc-owner-")), store = new Store(join(root, 'sessions.json'))
@@ -32,6 +33,7 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
   for (const [key] of Object.entries(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+  await initializeNamespace?.(store, root)
   for (const agentSessionId of ids) {
     const record: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex',
       hostId: 'local', workspacePath: root, run: { runId: 'run-' + agentSessionId }, retiredRuns: [],

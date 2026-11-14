@@ -64,6 +64,21 @@ Object.assign(client.kernel, {
     status: async id => { assert.equal(id, run.id); counts.status++; return run },
     start: forbidden('start'), stop: forbidden('stop'), resize: forbidden('resize'),
     attach: forbidden('attach'),
+    openInput: async id => {
+      assert.equal(id, run.id)
+      const { promise: closed, resolve: close } = Promise.withResolvers()
+      return {
+        snapshot: run, closed, close,
+        waitWritable: async (_bytes, signal) => signal?.throwIfAborted(),
+        async input(data) {
+          const start = run.applied_input_bytes
+          run.applied_input_bytes += Buffer.byteLength(data)
+          counts.input++
+          input.push(typeof data === 'string' ? data : Buffer.from(data).toString('utf8'))
+          return { receipt: { range: { start_byte: start, end_byte: run.applied_input_bytes } } }
+        }
+      }
+    },
     recoverableInput: async operation => {
       assert.equal(operation.runId, run.id)
       assert.equal(operation.expectedByte, run.applied_input_bytes)

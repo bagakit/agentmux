@@ -18,7 +18,13 @@ afterEach(async () => {
 })
 
 async function fixture() {
-  const original = await rpcOwnerFixture(['original-agent'], core); cleanup.push(original.close)
+  const original = await rpcOwnerFixture(['original-agent'], core, undefined, undefined, async (store, root) => {
+    const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockResolvedValueOnce(undefined)
+    try {
+      const owner = await core.startHeadlessAgentMux({ store, socketPath: join(root, 'initialize.sock') })
+      await owner.stop()
+    } finally { connect.mockRestore() }
+  }); cleanup.push(original.close)
   const native = original.inner.kernel
   await original.client.dispose()
   // Only Native's process/byte port is controlled. Real Host composition, Store,
@@ -57,7 +63,8 @@ it('compiled CLI reads complete original declarations across the actual Host wit
   const observed = JSON.parse(result.stdout).result
   expect(observed).toMatchObject({ routeHostId: 'local', runtimeId: expect.any(String), observedAt: expect.any(Number) })
   expect(observed.catalog).toEqual(f.host.client.catalog())
-  expect(observed.catalog.length).toBeGreaterThanOrEqual(2)
+  expect(observed.catalog.map((entry: core.AgentCatalogEntry) => entry.id).sort())
+    .toEqual([...core.BUILT_IN_AGENT_PROVIDER_IDS].sort())
   expect(new Set(observed.catalog.map((entry: core.AgentCatalogEntry) => JSON.stringify(entry.promptDelivery))).size).toBeGreaterThan(1)
   const posture = observed.catalog.find((entry: core.AgentCatalogEntry) => entry.postureControl)
   expect(posture.postureControl.modes.length).toBeGreaterThan(1)
