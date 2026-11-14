@@ -14,6 +14,9 @@ const files = ['packages/core/src/hosted-runtime-service.ts', 'packages/core/src
   'packages/core/src/agent-prompt-condition.ts', 'packages/core/src/hosted-client-contract.ts', 'packages/core/src/hosted-client.ts', 'packages/core/src/hosted-value.ts',
   'packages/core/src/hosted.ts', 'packages/core/src/relay-hosted.ts', 'apps/mobile/src/connection/MobileConnectionRoot.tsx',
   'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', ...Object.values(hostedSummaryTests),
+  'apps/mobile/src/conversation/mobile-agent-recovery.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/agent-session-store.ts',
+  'packages/core/test/helpers/hosted-continuity.ts', 'packages/core/test/hosted-bootstrap-cost-mutations.mjs',
+  'packages/core/test/hosted-continuity-summary-mutations.mjs',
   'apps/mobile/test/hosted-summary-mutant.config.ts', 'packages/core/test/hosted-summary-mutations.mjs', 'packages/core/test/verify-hosted-summary-mutations.mjs']
 const sha = value => createHash('sha256').update(value).digest('hex')
 const inputs = Object.fromEntries(await Promise.all(files.map(async path => [path, sha(await readFile(resolve(root, path)))])))
@@ -40,7 +43,11 @@ try {
     const tests = report.testResults.flatMap(file => file.assertionResults).filter(test => !['pending', 'skipped'].includes(test.status))
     const evaluations = (await readFile(loaded, 'utf8')).trim().split('\n').filter(Boolean).map(value => JSON.parse(value)).filter(value => value.phase === 'evaluated')
     const owners = kind === 'core' ? ['packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-session-summary.ts', 'packages/core/src/agent-prompt-condition.ts']
-      : kind === 'cost' ? ['packages/core/src/hosted-client.ts', 'packages/core/src/hosted-runtime-service.ts'] : ['apps/mobile/src/conversation/use-mobile-prompt-controller.ts']
+      : kind === 'cost' ? ['packages/core/src/hosted-client.ts', 'packages/core/src/hosted-runtime-service.ts']
+      : kind === 'continuity' || kind === 'recovery' ? ['packages/core/src/hosted-session-summary.ts', 'packages/core/src/hosted-client.ts',
+        'packages/core/src/hosted-runtime-service.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/agent-session-store.ts',
+        'packages/core/test/helpers/hosted-continuity.ts', ...(kind === 'recovery' ? ['apps/mobile/src/conversation/mobile-agent-recovery.ts'] : [])]
+      : ['apps/mobile/src/conversation/use-mobile-prompt-controller.ts']
     for (const path of [hostedSummaryTests[kind], ...owners]) assert.ok(evaluations.some(value => value.path === path), 'The real owner and bearing consumer must load: ' + path)
     if (variant) {
       assert.notEqual(run.code, 0); assert.equal(tests.length, 1); assert.equal(report.numFailedTests, 1); assert.equal(report.numPassedTests, 0)

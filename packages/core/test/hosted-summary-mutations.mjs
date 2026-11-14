@@ -1,4 +1,16 @@
 export const hostedSummaryMutations = {
+  'historical-ledger-restored': {
+    kind: 'continuity', file: 'packages/core/src/hosted-session-summary.ts',
+    before: 'const { continuityOperations: _history, ...source } = session',
+    after: 'const source = session',
+    target: 'shrinks historical continuity ledgers in actual bootstrap while retaining current continuity'
+  },
+  'cached-recovery-operation': {
+    kind: 'recovery', file: 'apps/mobile/src/conversation/mobile-agent-recovery.ts',
+    before: 'const operation = result.session.continuityOperations?.[intent.input.operationId]',
+    after: 'const operation = client.agentSession(agentSessionId).continuityOperations?.[intent.input.operationId]',
+    target: 'settles the exact pending recovery from public agent.inspect while the real summary cache omits historical operations'
+  },
   'initial-session-feedback': {
     kind: 'cost', file: 'packages/core/src/hosted-client.ts',
     before: "for (const retained of bootstrap.sessions) publisher.publish({ type: 'agent-session', session: structuredClone(retained) })",
@@ -27,6 +39,8 @@ export const hostedSummaryMutations = {
   }
 }
 export const hostedSummaryTests = {
+  continuity: 'packages/core/test/hosted-continuity-summary.test.ts',
+  recovery: 'apps/mobile/test/mobile-agent-recovery.test.tsx',
   cost: 'packages/core/test/hosted-bootstrap-cost.test.ts',
   core: 'packages/core/test/hosted-bootstrap-size.test.ts',
   mobile: 'apps/mobile/test/mobile-original-retry.test.tsx'

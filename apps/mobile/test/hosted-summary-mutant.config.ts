@@ -11,8 +11,11 @@ const variant = mutation ? hostedSummaryMutations[mutation as keyof typeof hoste
 const kind = variant?.kind ?? process.env.HOSTED_SUMMARY_TEST_KIND
 if (!kind || !Object.hasOwn(hostedSummaryTests, kind)) throw Error('Choose a Hosted summary bearing suite')
 const testKind = kind as keyof typeof hostedSummaryTests
+const mobile = kind === 'mobile' || kind === 'recovery'
 const files = new Set(['packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-session-summary.ts',
-  'packages/core/src/hosted-client.ts', 'packages/core/src/agent-prompt-condition.ts', 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', ...Object.values(hostedSummaryTests)])
+  'packages/core/src/hosted-client.ts', 'packages/core/src/agent-prompt-condition.ts', 'packages/core/src/public-rpc-service.ts',
+  'packages/core/src/agent-session-store.ts', 'packages/core/test/helpers/hosted-continuity.ts',
+  'apps/mobile/src/conversation/mobile-agent-recovery.ts', 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', ...Object.values(hostedSummaryTests)])
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 
 export default defineConfig({ root: resolve(root, 'apps/mobile'), cacheDir: resolve(root, '.tmp/hosted-summary', mutation ?? kind),
@@ -33,7 +36,7 @@ export default defineConfig({ root: resolve(root, 'apps/mobile'), cacheDir: reso
       }
       return { code, map: null }
     }
-  }], test: { environment: kind === 'mobile' ? 'happy-dom' : 'node', setupFiles: kind === 'mobile' ? ['test/device-locks.ts'] : [],
+  }], test: { environment: mobile ? 'happy-dom' : 'node', setupFiles: mobile ? ['test/device-locks.ts'] : [],
     include: [resolve(root, hostedSummaryTests[testKind])], ...(variant ? { testNamePattern: variant.target } : {}),
     restoreMocks: true, passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 30_000 }
 })

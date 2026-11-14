@@ -6,6 +6,7 @@ import { MobileAgentActions } from '../src/conversation/MobileAgentActions'
 import { emptyDeviceWorkface, getDeviceWorkface, DeviceWorkfaceStore } from '../src/recovery/device-workface'
 import { button, deferred, fixture, mount, mounted, session } from './conversation-fixture'
 import { hostedAgentSessionSummary } from '../../../packages/core/src/hosted-session-summary'
+import { continuitySession, hostedContinuityFixture } from '../../../packages/core/test/helpers/hosted-continuity'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
@@ -59,6 +60,27 @@ it('an original unknown main-entry request is only inspected on the next explici
   expect(f.client.forwardRpc).toHaveBeenLastCalledWith('agent.inspect', { target: { kind: 'agent-session', agentSessionId: f.original.agentSessionId } })
   expect(f.client.ensureAgentContinuity).toHaveBeenCalledTimes(1)
   expect(owner.snapshot().record.agentResumes).toEqual([{ ...intent, phase: 'confirmed' }])
+})
+it('settles the exact pending recovery from public agent.inspect while the real summary cache omits historical operations', async () => {
+  const original = continuitySession(), f = await hostedContinuityFixture([original])
+  try {
+    const client = await f.connect('summary'), owner = getDeviceWorkface()
+    const pending = { runtimeId: f.owner.runtimeId, deviceHostId: null, hostId: original.hostId,
+      input: { agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: original.agentSessionId + '-operation-0', trigger: 'manual' as const }, phase: 'unknown' as const }
+    await owner.retainAgentResume(pending, owner.recordIdentity())
+    expect(client.agentSession(original.agentSessionId).continuity?.operationId).not.toBe(pending.input.operationId)
+    expect(Object.hasOwn(client.agentSession(original.agentSessionId), 'continuityOperations')).toBe(false)
+    expect(f.forwardCalls).toEqual([]); expect(f.ensure).not.toHaveBeenCalled()
+    const onNotice = vi.fn()
+    await recoverMobileAgent({ client, agentSessionId: original.agentSessionId, mode: 'inspect', isCurrent: () => true, onNotice })
+    expect(f.forwardCalls).toEqual([{ method: 'agent.inspect', params: { target: { kind: 'agent-session', agentSessionId: original.agentSessionId } }, context: expect.objectContaining({ runtimeFence: { runtimeId: f.owner.runtimeId, ownerInstanceId: f.owner.ownerInstanceId } }) }])
+    expect(owner.snapshot().record.agentResumes).toEqual([{ ...pending, phase: 'confirmed' }])
+    expect(onNotice).toHaveBeenCalledWith('可以重新连回这个 Agent。')
+    expect(f.ensure).not.toHaveBeenCalled()
+    expect(Object.hasOwn(client.agentSession(original.agentSessionId), 'continuityOperations')).toBe(false)
+    expect((await f.core.readAgentSession(original.agentSessionId))!.continuityOperations).toEqual(original.continuityOperations)
+    expect(f.calls.filter(value => value.startsWith('runtime.invoke:'))).toEqual(['runtime.invoke:listRuns'])
+  } finally { await f.dispose() }
 })
 it('shares only the original client/SID flight with a newly opened menu and releases its busy state on receipt loss', async () => {
   const f = setup(), held = deferred<any>(), copyText = vi.fn().mockResolvedValue(true)
