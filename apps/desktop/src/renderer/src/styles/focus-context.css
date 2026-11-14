@@ -283,7 +283,8 @@
   .focus-workspace-resize-handle { display: none; }
   .global-focus-surface .global-session-workspace { flex: 1 1 auto; width: 100%; border-left: 0; border-top: 1px solid var(--line); }
 }
-.focused-tab-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; width: 100%; overflow: hidden; }
+.focused-tab-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; width: 100%; overflow: hidden; display: flex; flex-direction: column; }
+.focused-tab-workspace > .workspace-workbench { flex: 1; height: auto; }
 .global-focus-surface .focus-location-recovery { align-items: stretch; justify-content: flex-start; overflow-y: auto; text-align: left; padding: var(--sp-3); }
 .focus-location-recovery .service-window { flex: none; }
 .focus-location-choices { display: flex; flex-direction: column; min-width: 0; gap: var(--sp-1); }
