@@ -190,3 +190,8 @@
 .browser-profile-trash__entry label { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
 .browser-profile-trash__entry select { max-width: 100%; min-width: 0; min-height: 28px; padding: var(--sp-1) var(--sp-2); background: var(--surface-1); color: var(--text); border: 1px solid var(--line-soft); border-radius: var(--radius); font: inherit; }
 .browser-profile-trash__entry > button { justify-self: start; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.browser-profile-trash__cleanup { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.browser-profile-trash__cleanup label { flex-basis: 100%; }
+.browser-profile-trash__cleanup button, .browser-profile-trash .browser-profile-editor__confirm button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.browser-profile-trash .browser-profile-editor__confirm { display: grid; gap: var(--sp-3); }
+.browser-profile-trash .browser-profile-editor__confirm > div { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
