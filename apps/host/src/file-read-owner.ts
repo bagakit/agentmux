@@ -10,7 +10,7 @@ import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-
 import { fileUploadRevision, parseFileImportParams, type FileImportParams, type FileImportResult } from '@agentmux/core/files'
 import { parseFileStatParams, parseFileMkdirParams, parseFileMutationInspectParams, parseFileMoveParams, type FileMoveParams, type FileMoveResult, type FileStatParams,
   type FileStatResult, type FileMkdirParams, type FileMkdirResult, type FileMutationInspectParams,
-  type FileMutationInspectResult, type FilePathMutationContext } from '@agentmux/core/files'
+  type FileMutationInspectResult, type FilePathMutationContext, parseFileDeleteParams, type FileDeleteParams, type FileDeleteResult } from '@agentmux/core/files'
 import type { FilePathMutations } from './file-path-mutations.js'
 
 const publicWrite = (value: WorkspaceFileWriteResult): WorkspaceFileWriteResult => { if (value.status !== 'written') return value; const { fileWitness: _internal, ...receipt } = value; return receipt }
@@ -18,7 +18,7 @@ const publicWrite = (value: WorkspaceFileWriteResult): WorkspaceFileWriteResult 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
 export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends FileResourceOwner<W> implements AgentMuxRpcFilesOwner {
   constructor(protected override readonly ports: {
-    paths?: Pick<FilePathMutations, 'stat' | 'mkdir' | 'move' | 'inspect'>
+    paths?: Pick<FilePathMutations, 'stat' | 'mkdir' | 'move' | 'delete' | 'inspect'>
     share?: AgentMuxRpcFileShareOwner
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     /** Original closed Zone descriptor from the same durable spatial resource owner. */
@@ -40,7 +40,7 @@ export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends 
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_STAT_UNCONFIRMED', message: resolved.message } }
     if (!this.ports.paths) return { resource: resolved.resource, result: { status: 'unsupported', code: 'FILE_PATH_OWNER_UNAVAILABLE', message: 'The original Host path owner is unavailable. Existing file reads and Agents remain available.' } }
     try {
-      const observation = await this.ports.paths.stat(resolved.workspace, resolved.resource.path)
+      const observation = await this.ports.paths.stat(resolved.workspace, resolved.resource.path, params.includeRevision === true)
       const current = await this.ports.workspace(resolved.workspace.id)
       if (!current || current.hostId !== resolved.workspace.hostId || current.path !== resolved.workspace.path) throw new Error('The original Workspace mapping changed during path discovery.')
       return { resource: resolved.resource, result: { status: 'observed', observation } }
@@ -63,6 +63,13 @@ export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends 
     for (const [actual, expected] of [[source.resource, params.expectedResource], [destination.resource, params.destination.expectedResource]] as const)
       if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => actual[key as keyof FileReadResource] !== expected[key as keyof FileReadResource])) throw new AgentMuxError('The original move resource changed.', 'FILE_RESOURCE_MISMATCH')
     return this.ports.paths.move(source.workspace, params, context)
+  }
+  async delete(input: FileDeleteParams, context?: FilePathMutationContext): Promise<FileDeleteResult> {
+    const params = parseFileDeleteParams(input), resolved = await this.resolve(params)
+    if ('message' in resolved || !this.ports.paths) return { operationId: params.operationId, resource: 'message' in resolved ? null : resolved.resource,
+      result: { action: 'delete', phase: 'prepared', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_DELETE_OWNER_UNAVAILABLE', message: 'message' in resolved ? resolved.message : 'The original Host path owner is unavailable; no deletion was issued.' } }
+    if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resolved.resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The exact original deletion target changed.', 'FILE_RESOURCE_MISMATCH')
+    return this.ports.paths.delete(resolved.workspace, params, context)
   }
   async inspectMutation(input: FileMutationInspectParams, context?: FilePathMutationContext): Promise<FileMutationInspectResult> {
     const params = parseFileMutationInspectParams(input)

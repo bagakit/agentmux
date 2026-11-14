@@ -4,7 +4,7 @@ import { avatarActorIdentity, isObjectAvatarMethod, parseObjectAvatarParams, par
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod, type SpaceCloseActor } from './space-close.js'
 import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
-import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult, parseFileMoveParams, parseFileMoveResult } from './public-rpc-file-path.js'
+import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult, parseFileMoveParams, parseFileMoveResult, parseFileDeleteParams, parseFileDeleteResult } from './public-rpc-file-path.js'
 import { parseGoalActivityHistoryParams, pageGoalActivity } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, notesStorageOperationInspection, type NotesStorageMethod, type NotesStoragePort } from './public-rpc-notes-storage.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
@@ -2099,6 +2099,14 @@ export class AgentMuxRpcService {
         if (!this.ports.files?.stat && !this.ports.forwardControl) throw new AgentMuxError('The original Host Files path owner is unavailable. Existing files and Agents remain available.', 'CONTROL_UNAVAILABLE')
         const result = this.ports.files?.stat ? await this.ports.files.stat(input) : await this.ports.forwardControl!('file.stat', input, context)
         return parseFileStatResult(result, input) as AgentMuxRpcResult<M>
+      }
+      if (method === 'file.delete') {
+        const input = parseFileDeleteParams(params)
+        const provenance = { actor: caller ? { kind: 'agent' as const, id: caller.agentSessionId } : context.principal,
+          ...(caller ? { callerHostId: caller.hostId } : {}), ...(context.transport ? { transport: context.transport } : {}) }
+        if (!this.ports.files?.delete && !this.ports.forwardControl) throw new AgentMuxError('The original Host delete owner is unavailable. Keep the original request; no deletion was issued.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files?.delete ? await this.ports.files.delete(input, provenance) : await this.ports.forwardControl!('file.delete', input, context)
+        return parseFileDeleteResult(result, input) as AgentMuxRpcResult<M>
       }
       if (method === 'file.move') {
         const input = parseFileMoveParams(params)

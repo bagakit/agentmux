@@ -3,13 +3,14 @@ import { constants, mkdir, open, lstat } from 'node:fs/promises'
 import { dirname, join, isAbsolute, resolve, sep } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError, durableWriteFile, type AgentMuxClient } from '@agentmux/core'
-import { parseFileMkdirParams, parseFilePathMutationReceipt, parseFileEntryWitness, parseFileMoveParams, parseFileMoveReceipt, sameFileEntryIdentity, type FileMoveParams, type FileMoveResult, type FileMoveReceipt, type FileMkdirParams, type FileMkdirResult,
+import { parseFileMkdirParams, parseFilePathMutationReceipt, parseFileEntryWitness, parseFileMoveParams, parseFileMoveReceipt, parseFileDeleteParams, parseFileDeleteReceipt, type FileDeleteParams, type FileDeleteResult, type FileDeleteReceipt, sameFileEntryIdentity, type FileMoveParams, type FileMoveResult, type FileMoveReceipt, type FileMkdirParams, type FileMkdirResult,
   type FileMutationInspectParams, type FileMutationInspectResult, type FilePathMutationContext,
   type FilePathMutationReceipt, type FilePathObservation, type FileEntryWitness } from '@agentmux/core/files'
 import type { WorkspaceRecord } from './content-types.js'
 import { NameChangeAudit, nameChangeRequests } from './name-change-audit.js'
 import { parseNotebookFileRelocationPlan, type NotebookFileRelocationPlan } from '@agentmux/core/notebook-store'
 import type { OrdinaryWorkspaceFiles } from './ordinary-files.js'
+import type { FileDeleteHistory } from './file-delete-history.js'
 
 type Actor = NonNullable<FilePathMutationContext['actor']>
 type Locator = { root: string; path: string }
@@ -17,11 +18,13 @@ type Producer = { stage: FileEntryWitness; entry: FileEntryWitness; location: Lo
 type Base = { schema: 'agentmux.file-path-mutation.v1'; actor: Actor; callerHostId?: string; transport?: string; digest: string; stage: string; producer?: Producer }
 type MkdirOriginal = Base & { action: 'mkdir'; request: FileMkdirParams; result?: FilePathMutationReceipt }
 type MoveOriginal = Base & { action: 'move'; request: FileMoveParams; notePlan?: NotebookFileRelocationPlan; result?: FileMoveReceipt }
-type Original = MkdirOriginal | MoveOriginal
+type DeleteOriginal = Base & { action: 'delete'; request: FileDeleteParams; result?: FileDeleteReceipt }
+type Original = MkdirOriginal | MoveOriginal | DeleteOriginal
 type Admission = { schema: 'agentmux.file-path-admission.v1'; operationId: string; action: Original['action']; digest: string; actor: Actor; callerHostId?: string }
 
 const sameIdentity = sameFileEntryIdentity
 const moveUnknown = (cause: unknown, code = 'FILE_MOVE_UNCONFIRMED'): FileMoveReceipt => ({ action: 'move', phase: 'prepared', filesystem: 'unknown', durability: 'unconfirmed', code, message: 'The original move is unconfirmed. Keep its request and claim; inspect without replaying. ' + (cause instanceof Error ? cause.message : String(cause)) })
+const deleteUnknown = (cause: unknown, code = 'FILE_DELETE_UNCONFIRMED'): FileDeleteReceipt => ({ action: 'delete', phase: 'prepared', filesystem: 'unknown', durability: 'unconfirmed', code, message: 'The original deletion is unconfirmed. Keep its complete request and private claim; inspect without replaying. ' + (cause instanceof Error ? cause.message : String(cause)) })
 const MAX_RECORD_BYTES = 256 * 1024
 function actor(context: FilePathMutationContext | undefined): Actor {
   const value = context?.actor
@@ -36,7 +39,7 @@ function canonical(value: unknown): unknown {
   return value && typeof value === 'object'
     ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonical(item)])) : value
 }
-function digest(request: FileMkdirParams | FileMoveParams, original: Actor, callerHostId?: string, action: 'mkdir' | 'move' = 'mkdir'): string {
+function digest(request: FileMkdirParams | FileMoveParams | FileDeleteParams, original: Actor, callerHostId?: string, action: 'mkdir' | 'move' | 'delete' = 'mkdir'): string {
   return createHash('sha256').update(JSON.stringify(canonical({ action, request, actor: original, ...(callerHostId ? { callerHostId } : {}) }))).digest('hex')
 }
 function unknown(cause: unknown, code = 'FILE_MKDIR_UNCONFIRMED'): FilePathMutationReceipt {
@@ -47,17 +50,18 @@ const targetKeys = ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePat
 
 /** Files-path intent/effect only. Note history, names and resource mappings keep their original owners. */
 export class FilePathMutations {
-  private readonly inFlight = new Map<string, { action: 'mkdir'; digest: string; promise: Promise<FileMkdirResult> } | { action: 'move'; digest: string; promise: Promise<FileMoveResult> }>()
+  private readonly inFlight = new Map<string, { action: 'mkdir'; digest: string; promise: Promise<FileMkdirResult> } | { action: 'move'; digest: string; promise: Promise<FileMoveResult> } | { action: 'delete'; digest: string; promise: Promise<FileDeleteResult> }>()
   constructor(private readonly ports: {
     directory: string
-    files: Pick<OrdinaryWorkspaceFiles, 'statPath' | 'mkdirPath' | 'inspectPathMutation' | 'pathMutationLocation' | 'movePath' | 'inspectMovePath' | 'executionDirectoryRelated'>
+    files: Pick<OrdinaryWorkspaceFiles, 'statPath' | 'mkdirPath' | 'inspectPathMutation' | 'pathMutationLocation' | 'movePath' | 'inspectMovePath' | 'executionDirectoryRelated' | 'deletePath'>
     directoryScope?: (isRelated: (cwd: string) => Promise<boolean>) => ReturnType<AgentMuxClient['retainExecutionDirectoryMutation']>
-    retainPath?(workspace: WorkspaceRecord, path: string): Promise<void>
+    retainPaths?(workspace: WorkspaceRecord, paths: readonly string[]): Promise<(physical: readonly Locator[]) => Promise<void>>
     notes?: { plan(from: FileMoveParams['expectedResource'], to: FileMoveParams['expectedResource']): Promise<NotebookFileRelocationPlan>; apply(plan: NotebookFileRelocationPlan, operationId: string, actor: Actor): Promise<void> }
+    deleteHistory?(workspace: WorkspaceRecord, input: FileDeleteParams, digest: string, actor: Actor): Pick<FileDeleteHistory, 'snapshot' | 'confirmDeleted'>
     nameAudit?: NameChangeAudit
     noteLease<T>(work: () => Promise<T>): Promise<T>
   }) {}
-  stat(workspace: WorkspaceRecord, path: string): Promise<FilePathObservation> { return this.ports.files.statPath(workspace, path) }
+  stat(workspace: WorkspaceRecord, path: string, includeRevision = false): Promise<FilePathObservation> { return this.ports.files.statPath(workspace, path, includeRevision) }
   private operationHash(operationId: string) { return createHash('sha256').update(operationId).digest('hex') }
   private operationDirectory(operationId: string) { return join(this.ports.directory, this.operationHash(operationId)) }
   private admissionPath(operationId: string) { return join(dirname(this.ports.directory), 'file-path-admission-' + this.operationHash(operationId) + '.json') }
@@ -70,7 +74,7 @@ export class FilePathMutations {
       const info = await handle.stat()
       if (!info.isFile() || info.size < 1 || info.size > 16384) throw new Error('The original Files once-admission witness is partial or invalid. It cannot be recreated.')
       const value = JSON.parse(await handle.readFile('utf8')) as Admission
-      if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['schema', 'operationId', 'action', 'digest', 'actor', 'callerHostId'].includes(key)) || value.schema !== 'agentmux.file-path-admission.v1' || value.operationId !== operationId || !['mkdir', 'move'].includes(value.action) || typeof value.digest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.digest)) throw new Error('The original Files once-admission identity is unconfirmed.')
+      if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['schema', 'operationId', 'action', 'digest', 'actor', 'callerHostId'].includes(key)) || value.schema !== 'agentmux.file-path-admission.v1' || value.operationId !== operationId || !['mkdir', 'move', 'delete'].includes(value.action) || typeof value.digest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.digest)) throw new Error('The original Files once-admission identity is unconfirmed.')
       try { actor({ actor: value.actor, ...(value.callerHostId ? { callerHostId: value.callerHostId } : {}) }) }
       catch { throw new Error('The original Files once-admission actor or Host scope is unconfirmed.') }
       return value
@@ -104,19 +108,19 @@ export class FilePathMutations {
       const info = await handle.stat()
       if (!info.isFile() || info.size < 1 || info.size > MAX_RECORD_BYTES) throw new Error('The original Files record is not a bounded regular file.')
       const value = JSON.parse(await handle.readFile('utf8')) as Original
-      if (!value || value.schema !== 'agentmux.file-path-mutation.v1' || !['mkdir', 'move'].includes(value.action) || Object.keys(value).some(key => !['schema', 'action', 'request', 'actor', 'callerHostId', 'transport', 'digest', 'stage', 'producer', 'notePlan', 'result'].includes(key))) throw new Error('The original Files record is unreadable. Its bytes are kept.')
+      if (!value || value.schema !== 'agentmux.file-path-mutation.v1' || !['mkdir', 'move', 'delete'].includes(value.action) || Object.keys(value).some(key => !['schema', 'action', 'request', 'actor', 'callerHostId', 'transport', 'digest', 'stage', 'producer', 'notePlan', 'result'].includes(key))) throw new Error('The original Files record is unreadable. Its bytes are kept.')
       if (value.transport !== undefined && (typeof value.transport !== 'string' || !value.transport || value.transport.length > 512 || /[\0\r\n]/u.test(value.transport))) throw new Error('The original Files transport observation is invalid.')
-      const input = value.action === 'move' ? parseFileMoveParams(value.request) : parseFileMkdirParams(value.request), original = actor({ actor: value.actor, ...(value.callerHostId ? { callerHostId: value.callerHostId } : {}) })
+      const input = value.action === 'move' ? parseFileMoveParams(value.request) : value.action === 'delete' ? parseFileDeleteParams(value.request) : parseFileMkdirParams(value.request), original = actor({ actor: value.actor, ...(value.callerHostId ? { callerHostId: value.callerHostId } : {}) })
       if (input.operationId !== operationId || value.digest !== digest(input, original, value.callerHostId, value.action) || value.stage !== '.agentmux-' + value.action + '-' + value.digest) throw new Error('The original Files record belongs to another intent.')
       if (admission && (admission.action !== value.action || admission.digest !== value.digest || !isDeepStrictEqual(admission.actor, value.actor) || admission.callerHostId !== value.callerHostId)) throw new Error('The retained request and its original once-admission disagree.')
       if (value.action === 'move' && value.notePlan) parseNotebookFileRelocationPlan(value.notePlan)
       if (value.producer) this.producer(value.producer, input, value.action)
-      if (value.result) { if (value.action === 'move') parseFileMoveReceipt(value.result, value.request.expected.entry.witness); else parseFilePathMutationReceipt(value.result) }
+      if (value.result) { if (value.action === 'move') parseFileMoveReceipt(value.result, value.request.expected.entry.witness); else if (value.action === 'delete') parseFileDeleteReceipt(value.result, value.request.expected.entry.witness); else parseFilePathMutationReceipt(value.result) }
       return value
     } finally { await handle.close() }
   }
-  private producer(value: unknown, input: FileMkdirParams | FileMoveParams, action: 'mkdir' | 'move' = 'mkdir'): Producer {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['stage', 'entry', 'location', ...(action === 'move' ? ['destination', 'claimed'] : [])].includes(key))) throw new Error('The original native producer witness is invalid.')
+  private producer(value: unknown, input: FileMkdirParams | FileMoveParams | FileDeleteParams, action: 'mkdir' | 'move' | 'delete' = 'mkdir'): Producer {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['stage', 'entry', 'location', ...(action === 'move' ? ['destination', 'claimed'] : action === 'delete' ? ['claimed'] : [])].includes(key))) throw new Error('The original native producer witness is invalid.')
     const record = value as Record<string, unknown>, stage = parseFileEntryWitness(record.stage), entry = parseFileEntryWitness(record.entry)
     if (stage.device !== input.expected.parent.device || entry.device !== stage.device || stage.inode === entry.inode || stage.birthtimeNs === null || entry.birthtimeNs === null) throw new Error('The original native producer does not identify the exact private claim and original entry on this parent filesystem.')
     const location = record.location as { root: string; path: string }
@@ -129,6 +133,7 @@ export class FilePathMutations {
       const expected = (input as FileMoveParams).expected.entry.witness
       if (!sameIdentity(entry, expected)) throw new Error('The original move producer changed source identity.')
     }
+    if (action === 'delete' && (record.claimed !== undefined && record.claimed !== true || !sameIdentity(entry, (input as FileDeleteParams).expected.entry.witness))) throw new Error('The original delete producer changed source identity or phase.')
     return { stage, entry, location, ...(destination ? { destination } : {}), ...(record.claimed ? { claimed: true as const } : {}) }
   }
   private async prepare(value: Original): Promise<boolean> {
@@ -179,6 +184,8 @@ export class FilePathMutations {
     if (!original) return { operationId: input.operationId, resource: workspace ? input.expectedResource : null,
       result: { action: 'unknown', phase: 'absent', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_MUTATION_NOT_OBSERVED', message: 'No original operation record was observed. No filesystem action was replayed.' } }
     this.authorizeRead(original, context); this.sameTarget(original.request, input)
+    if (original.action === 'delete') return { operationId: input.operationId, resource: workspace ? original.request.expectedResource : null,
+      result: { ...this.observeDelete(original), original: structuredClone(original.request) } }
     if (original.action === 'move') return { operationId: input.operationId, resource: workspace ? original.request.expectedResource : null,
       result: { ...await this.observeMove(original, workspace), original: structuredClone(original.request) } }
     return { operationId: input.operationId, resource: workspace ? original.request.expectedResource : null,
@@ -281,9 +288,9 @@ export class FilePathMutations {
     } catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'FILE_MUTATION_CONFLICT') throw cause; return result(moveUnknown(cause, 'FILE_MUTATION_PREPARE_UNCONFIRMED')) }
     const apply = async (): Promise<FileMoveReceipt> => {
       if (!this.ports.directoryScope || !this.ports.nameAudit) return moveUnknown('The original Core directory admission or name owner is unavailable.', 'FILE_MOVE_OWNER_UNAVAILABLE')
-      if (this.ports.retainPath) try {
-        await this.ports.retainPath(workspace, input.expectedResource.path)
-        await this.ports.retainPath(workspace, input.destination.expectedResource.path)
+      let retained: ((physical: readonly Locator[]) => Promise<void>) | undefined
+      if (this.ports.retainPaths) try {
+        retained = await this.ports.retainPaths(workspace, [input.expectedResource.path, input.destination.expectedResource.path])
       } catch (cause) {
         const refusal = cause as { definitelyUnchanged?: boolean; code?: string; message?: string }
         if (refusal.definitelyUnchanged === true) return { action: 'move', phase: 'settled', filesystem: 'not-applied', durability: 'confirmed', code: refusal.code ?? 'FILE_MOVE_REFUSED', message: refusal.message ?? 'The original path owner refused this move before any helper was dispatched.' }
@@ -318,10 +325,7 @@ export class FilePathMutations {
                 phase === 'staged' && latest.producer || phase === 'claimed' && (!latest.producer || latest.producer.claimed || !sameIdentity(latest.producer.stage, producer.stage) || !sameIdentity(latest.producer.entry, producer.entry))) throw new Error('The original move phase changed before publication.')
             await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, producer }), { mode: 0o600, requireDirectorySync: true })
             prepared.producer = producer
-            if (this.ports.retainPath) {
-              await this.ports.retainPath(workspace, input.expectedResource.path)
-              await this.ports.retainPath(workspace, input.destination.expectedResource.path)
-            }
+            if (retained) await retained([producer.location, ...(producer.destination ? [producer.destination] : [])])
             await scope.assertUnreferenced()
           }
         }), input.expected.entry.witness)
@@ -356,6 +360,97 @@ export class FilePathMutations {
     }) } catch (cause) { receipt = moveUnknown(cause) }
     try { await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, result: receipt }), { mode: 0o600, requireDirectorySync: true }); return result(receipt) }
     catch (cause) { return result({ ...receipt, durability: 'unconfirmed', code: 'FILE_MUTATION_RESULT_UNCONFIRMED', message: 'The original move result save is unconfirmed; no action may be replayed. ' + (cause instanceof Error ? cause.message : String(cause)) }) }
+  }
+
+  private observeDelete(value: DeleteOriginal): FileDeleteReceipt {
+    if (value.result) return { ...value.result, durability: 'unconfirmed' }
+    const receipt = deleteUnknown('The original producer has no confirmed final deletion receipt. Current absence is not an earlier acknowledgement.')
+    if (!value.producer) return receipt
+    return { ...receipt, phase: value.producer.claimed ? 'claimed' : 'prepared',
+      retainedPath: join(dirname(value.producer.location.path), value.stage, 'entry') }
+  }
+  delete(workspace: WorkspaceRecord, raw: FileDeleteParams, context: FilePathMutationContext | undefined): Promise<FileDeleteResult> {
+    const input = structuredClone(parseFileDeleteParams(raw)), originalActor = actor(context)
+    if (workspace.id !== input.expectedResource.workspaceId || workspace.hostId !== input.expectedResource.hostId || workspace.path !== input.expectedResource.workspacePath) throw new AgentMuxError('The original deletion Workspace mapping changed.', 'FILE_RESOURCE_MISMATCH')
+    const fingerprint = digest(input, originalActor, context?.callerHostId, 'delete'), prior = this.inFlight.get(input.operationId)
+    if (prior) {
+      if (prior.action !== 'delete' || prior.digest !== fingerprint) return Promise.reject(new AgentMuxError('This original Files operation has different input or actor.', 'FILE_MUTATION_CONFLICT'))
+      return prior.promise
+    }
+    const promise = this.executeDelete(workspace, input, originalActor, context?.callerHostId, fingerprint)
+    this.inFlight.set(input.operationId, { action: 'delete', digest: fingerprint, promise })
+    void promise.finally(() => { if (this.inFlight.get(input.operationId)?.promise === promise) this.inFlight.delete(input.operationId) }).catch(() => {})
+    return promise
+  }
+  private async executeDelete(workspace: WorkspaceRecord, input: FileDeleteParams, originalActor: Actor, callerHostId: string | undefined, fingerprint: string): Promise<FileDeleteResult> {
+    const result = (receipt: FileDeleteReceipt): FileDeleteResult => ({ operationId: input.operationId, resource: input.expectedResource, result: receipt })
+    let prior: Original | null
+    try { prior = await this.load(input.operationId, fingerprint) } catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'FILE_MUTATION_CONFLICT') throw cause; return result(deleteUnknown(cause, 'FILE_MUTATION_RECORD_UNAVAILABLE')) }
+    if (prior) {
+      if (prior.action !== 'delete' || prior.digest !== fingerprint) throw new AgentMuxError('This original Files operation has different input or actor.', 'FILE_MUTATION_CONFLICT')
+      return result(this.observeDelete(prior))
+    }
+    const prepared: DeleteOriginal = { schema: 'agentmux.file-path-mutation.v1', action: 'delete', request: input, actor: originalActor,
+      ...(callerHostId ? { callerHostId } : {}), digest: fingerprint, stage: '.agentmux-delete-' + fingerprint }
+    try {
+      if (!await this.prepare(prepared)) {
+        const retained = await this.load(input.operationId, fingerprint)
+        if (!retained || retained.action !== 'delete' || retained.digest !== fingerprint) throw new AgentMuxError('The original Files operation belongs to different input or actor.', 'FILE_MUTATION_CONFLICT')
+        return result(this.observeDelete(retained))
+      }
+    } catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'FILE_MUTATION_CONFLICT') throw cause; return result(deleteUnknown(cause, 'FILE_MUTATION_PREPARE_UNCONFIRMED')) }
+    let receipt: FileDeleteReceipt
+    try { receipt = await this.ports.noteLease(async () => {
+      if (!this.ports.directoryScope || !this.ports.deleteHistory) return deleteUnknown('The original Core directory or Note history owner is unavailable.', 'FILE_DELETE_OWNER_UNAVAILABLE')
+      let retained: ((physical: readonly Locator[]) => Promise<void>) | undefined
+      if (this.ports.retainPaths) try { retained = await this.ports.retainPaths(workspace, [input.expectedResource.path]) }
+      catch (cause) {
+        const refusal = cause as { definitelyUnchanged?: boolean; code?: string; message?: string }
+        if (refusal.definitelyUnchanged === true) return { action: 'delete', phase: 'settled', filesystem: 'not-applied', durability: 'confirmed', code: refusal.code ?? 'FILE_DELETE_REFUSED', message: refusal.message ?? 'The original path owner refused this deletion before Native dispatch.' }
+        throw cause
+      }
+      const current = await this.ports.files.statPath(workspace, input.expectedResource.path)
+      const conflict: FileDeleteReceipt = { action: 'delete', phase: 'settled', filesystem: 'not-applied', durability: 'confirmed', code: 'FILE_DELETE_SOURCE_CONFLICT', message: 'The original source entry changed. No delete helper was dispatched.' }
+      if (current.entry.kind === 'absent' || current.entry.kind !== input.expected.entry.kind) return conflict
+      if ([current.root, current.parent, current.entry.witness, input.expected.root, input.expected.parent, input.expected.entry.witness].some(witness => witness.birthtimeNs === null)) return { ...conflict, code: 'FILE_PATH_GENERATION_UNAVAILABLE', message: 'The original source or scope generation is unavailable; files and ordinary reads remain available.' }
+      if (!sameIdentity(current.entry.witness, input.expected.entry.witness)) return conflict
+      const location = await this.ports.files.pathMutationLocation(workspace, input.expectedResource.path), sourceWitness = current.entry.witness
+      const names = [resolve(workspace.path, input.expectedResource.path), resolve(location.root, location.requested)]
+      const scope = this.ports.directoryScope(async cwd => {
+        if (!isAbsolute(cwd)) throw new AgentMuxError('The original execution directory observation is not absolute.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
+        if (names.some(name => cwd === name || cwd.startsWith(name + sep))) return true
+        const related = await this.ports.files.executionDirectoryRelated(cwd, sourceWitness)
+        if (related === 'unavailable') throw new AgentMuxError('The original execution directory relation could not be observed.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
+        return related === 'related'
+      })
+      const history = this.ports.deleteHistory(workspace, input, fingerprint, originalActor)
+      try {
+        try { await scope.assertUnreferenced() }
+        catch (cause) { if ((cause as { code?: string }).code === 'EXECUTION_DIRECTORY_REFERENCED') return { ...conflict, code: 'EXECUTION_DIRECTORY_REFERENCED', message: 'The original directory is retained by execution or recovery; no delete helper was dispatched and existing work remains available.' }; throw cause }
+        let effect: FileDeleteReceipt
+        try { effect = parseFileDeleteReceipt(await this.ports.files.deletePath(workspace, { request: input, stage: prepared.stage, spawnFileProducer: scope.spawnFileProducer,
+          retainProducer: async raw => {
+            const frame = raw as Producer & { phase: 'staged' | 'claimed' }, { phase, ...candidate } = frame
+            if (!['staged', 'claimed'].includes(phase)) throw new Error('The original delete producer phase is invalid.')
+            const producer = this.producer({ ...candidate, ...(phase === 'claimed' ? { claimed: true } : {}) }, input, 'delete'), latest = await this.load(input.operationId)
+            if (!latest || latest.action !== 'delete' || latest.digest !== fingerprint || latest.result ||
+                phase === 'staged' && latest.producer || phase === 'claimed' && (!latest.producer || latest.producer.claimed || !sameIdentity(latest.producer.stage, producer.stage) || !sameIdentity(latest.producer.entry, producer.entry))) throw new Error('The original delete phase changed before its physical effect.')
+            await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, producer }), { mode: 0o600, requireDirectorySync: true })
+            prepared.producer = producer
+            if (retained) await retained([producer.location])
+            await scope.assertUnreferenced()
+          }, snapshot: value => history.snapshot(value)
+        }), input.expected.entry.witness) }
+        catch (cause) { return { ...deleteUnknown(cause), phase: prepared.producer?.claimed ? 'claimed' : 'prepared',
+          ...(typeof (cause as { retainedPath?: unknown }).retainedPath === 'string' ? { retainedPath: (cause as { retainedPath: string }).retainedPath } : prepared.producer ? { retainedPath: join(dirname(prepared.producer.location.path), prepared.stage, 'entry') } : {}),
+          noteHistory: { status: 'unconfirmed', message: 'Any original prepared history is retained. No final Native deletion acknowledgement was received; a recorded claim address does not prove its current location or existence.' } } }
+        if (effect.filesystem !== 'deleted') return effect
+        try { await history.confirmDeleted(); return { ...effect, noteHistory: { status: 'recorded' } } }
+        catch (cause) { return { ...effect, noteHistory: { status: 'unconfirmed', message: cause instanceof Error ? cause.message : String(cause) } } }
+      } finally { scope.release() } // The original finite worker has actually closed.
+    }) } catch (cause) { receipt = deleteUnknown(cause) }
+    try { await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, result: receipt }), { mode: 0o600, requireDirectorySync: true }); return result(receipt) }
+    catch (cause) { return result({ ...receipt, durability: 'unconfirmed', code: 'FILE_MUTATION_RESULT_UNCONFIRMED', message: 'The original delete result save is unconfirmed. Keep the original request and inspect without replaying. ' + (cause instanceof Error ? cause.message : String(cause)) }) }
   }
 
 }

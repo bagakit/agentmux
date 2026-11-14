@@ -7,10 +7,11 @@ const LOCAL_WORKER_READY = 'AGENTMUX_WORKSPACE_READY'
 const LOCAL_WORKER_ERROR = 'AGENTMUX_WORKSPACE_ERROR:'
 
 export type WorkspaceFileWorkerRequest =
-  | { action: 'path-stat'; path: string }
+  | { action: 'path-stat'; path: string; includeRevision?: boolean; fault?: string }
   | { action: 'path-related'; path: string; entry: FileEntryWitness }
   | { action: 'path-move' | 'path-move-inspect'; path: string; destination: { root: string; path: string }; stage: string;
       expected: FilePathScopeWitness & { entry: FileMoveEntry }; destinationExpected: FilePathScopeWitness; claimed?: boolean; fault?: string }
+  | { action: 'path-delete'; path: string; stage: string; expected: FilePathScopeWitness & { entry: FileMoveEntry }; expectedRevision?: string; recursive?: boolean; fault?: string }
   | { action: 'path-mkdir'; path: string; stage: string; digest: string; expected: FilePathScopeWitness; fault?: string }
   | { action: 'path-inspect'; path: string; stage: string; digest: string; expected: FilePathScopeWitness; createdWitness: FileEntryWitness }
   | { action: 'read'; name: string }
@@ -39,7 +40,7 @@ export async function runWorkspaceFileWorker(
   options: { helperPath: string; workerSource: string; spawnFiniteFileProducer?: (spawn: (fd: number) => ChildProcess) => ChildProcess },
   input?: string | Uint8Array,
   signal?: AbortSignal,
-  barriers?: { before?: () => Promise<void>; after?: () => Promise<void>; stage?: (value: unknown) => Promise<void> }
+  barriers?: { before?: () => Promise<void>; after?: () => Promise<void>; stage?: (value: unknown) => Promise<void>; snapshot?: (value: unknown) => Promise<string | null> }
 ): Promise<Buffer> {
   signal?.throwIfAborted()
   const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
@@ -52,7 +53,10 @@ export async function runWorkspaceFileWorker(
       request.stage, pathWitness(request.expected.root), pathWitness(request.expected.parent), pathWitness(request.expected.entry.witness), request.expected.entry.kind,
       pathWitness(request.destinationExpected.root), pathWitness(request.destinationExpected.parent), request.claimed ? 'claimed' : 'staged', request.fault ?? ''
     ]
-    : request.action === 'path-stat' ? ['--workspace-path', 'stat', root, request.path]
+    : request.action === 'path-delete' ? ['--workspace-path', 'delete', root, request.path, request.stage,
+      pathWitness(request.expected.root), pathWitness(request.expected.parent), pathWitness(request.expected.entry.witness), request.expected.entry.kind,
+      request.expectedRevision ?? 'null', request.recursive === true ? '1' : '0', request.fault ?? '']
+    : request.action === 'path-stat' ? ['--workspace-path', request.includeRevision === true ? 'stat-revision' : 'stat', root, request.path, ...(request.fault ? [request.fault] : [])]
     : request.action === 'path-mkdir' || request.action === 'path-inspect' ? [
       '--workspace-path', request.action === 'path-mkdir' ? 'mkdir' : 'inspect', root, request.path,
       request.stage, request.digest, pathWitness(request.expected.root), pathWitness(request.expected.parent), request.action === 'path-mkdir' ? request.fault ?? '' : pathWitness(request.createdWitness)
@@ -87,7 +91,7 @@ export async function runWorkspaceFileWorker(
   })
   // Scope -> original owner borrow -> spawn is one synchronous turn. FD7 is
   // never passed to a read helper or an Agent/Terminal/Capsule Runtime Run.
-  const child = request.action === 'path-move' && options.spawnFiniteFileProducer
+  const child = (request.action === 'path-move' || request.action === 'path-delete') && options.spawnFiniteFileProducer
     ? options.spawnFiniteFileProducer(fd => start(fd)) : start()
 
   const stdout: Buffer[] = []
@@ -104,12 +108,20 @@ export async function runWorkspaceFileWorker(
       let body = '', running = false, offers = 0
       ready.on('data', (chunk: Buffer) => {
         body += chunk.toString('utf8')
-        if (Buffer.byteLength(body) > 4096) { failed(new Error('The original native phase witness exceeded its protocol budget.')); return }
+        if (Buffer.byteLength(body) > (request.action === 'path-delete' ? 32768 : 4096)) { failed(new Error('The original native phase witness exceeded its protocol budget.')); return }
         for (let end = body.indexOf('\n'); end >= 0; end = body.indexOf('\n')) {
           const line = body.slice(0, end); body = body.slice(end + 1)
-          if (running || ++offers > 2) { failed(new Error('The original native producer offered an unexpected phase.')); return }
+          if (running) { failed(new Error('The original native producer offered an unexpected concurrent phase.')); return }
           running = true
-          try { void barriers.stage!(JSON.parse(line)).then(() => { running = false; release.write('G') }, failed) }
+          try {
+            const frame = JSON.parse(line)
+            if (frame?.phase === 'snapshot' && request.action === 'path-delete' && barriers.snapshot) {
+              void barriers.snapshot(frame).then(revision => { running = false; release.write(revision === null ? 'G\n' : 'S' + revision + '\n') }, failed)
+            } else {
+              if (++offers > 2) { failed(new Error('The original native producer offered an unexpected phase.')); return }
+              void barriers.stage!(frame).then(() => { running = false; release.write('G') }, failed)
+            }
+          }
           catch (error) { failed(error) }
         }
       })
@@ -154,7 +166,7 @@ export async function runWorkspaceFileWorker(
   }
   throw Object.assign(barrierError ?? inputError ?? childError ?? new Error(
     `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
-  ), (request.action === 'write' || request.action === 'delete-exact' || request.action === 'path-mkdir' || request.action === 'path-move') && inputSent ? {
+  ), (request.action === 'write' || request.action === 'delete-exact' || request.action === 'path-mkdir' || request.action === 'path-move' || request.action === 'path-delete') && inputSent ? {
     code: 'WORKSPACE_FILE_RESULT_UNKNOWN', writeOutcomeUnknown: true,
     ...(request.action === 'delete-exact' && claimed ? { retainedPath: request.claim } : {})
   } : {})

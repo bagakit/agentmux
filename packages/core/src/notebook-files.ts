@@ -25,6 +25,12 @@ const id = (value: unknown): value is string => typeof value === 'string' && val
 const failure = (message: string) => new AgentMuxError(message + ' Original knowledge and files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
 export const notebookFileRoot = (path: string) => path.endsWith('.root.json') ? path : path.replace(/\.(?:json|sqlite)$/u, '') + '.root.json'
 const legacySqlite = (path: string) => path.slice(0, -'.root.json'.length) + '.sqlite'
+/** Original layout facts for cold composition; clients must not recreate these paths. */
+export function notebookFileAuthorityPaths(path: string, legacyInputs = false): string[] {
+  const root = notebookFileRoot(path), legacy = root.slice(0, -'.root.json'.length) + '.json'
+  return [...new Set([path, root, root + '.files', root + '.lock', legacy + '.lock', root + '.previous',
+    ...(legacyInputs ? [legacy, root + '.importing.json', legacySqlite(root), legacySqlite(root) + '.sqlite-identity'] : [])])]
+}
 const dataPath = (path: string, kind: 'catalog' | 'metadata' | 'bodies' | 'operations' | 'retired', name: string) => join(path + '.files', kind, name)
 const originalKey = (noteId: string, resource: NoteResource) => hash(JSON.stringify([noteId, noteProvenanceResourceKey(resource)]))
 async function optional(path: string): Promise<Buffer | null> { try { return await readFile(path) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error } }

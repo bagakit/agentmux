@@ -7,9 +7,10 @@ import { OrdinaryWorkspaceFiles } from './ordinary-files.js'
 import type { WorkspaceRecord, WorkspaceFiles } from './content-types.js'
 import { FileReadOwner } from './file-read-owner.js'
 import { NameChangeAudit } from './name-change-audit.js'
-import { assertPrimaryMoteRetained } from './workspace-retention.js'
+import { assertPrimaryMoteRetained, retainNotesAuthorityPaths } from './workspace-retention.js'
 import { resolve } from 'node:path'
 import { FilePathMutations } from './file-path-mutations.js'
+import { FileDeleteHistory } from './file-delete-history.js'
 import { NoteFileWriter } from './note-file-writer.js'
 import { NoteTitleFileWriter } from './note-title-file-writer.js'
 import { NotebookObservationOwner } from './notebook-observation-owner.js'
@@ -73,14 +74,23 @@ export function createHostContent(options: {
   const titleWriter: NoteTitleFileWriter = new NoteTitleFileWriter(files, notebookStore)
   const pathMutations = new FilePathMutations({ directory: join(dirname(options.configurationPath), 'file-path-mutations'), files: ordinary,
     noteLease: work => notebookStore.runWithWriteLease(work),
-    retainPath: async (workspace, path) => assertPrimaryMoteRetained(workspace, resolve(workspace.path, path), async () => {
+    retainPaths: async (workspace, paths) => {
       const current = await configuration()
       if (!current.complete) throw new AgentMuxError('The original primary Mote configuration is unconfirmed.', 'FILE_WORKSPACE_UNAVAILABLE')
       const primary = current.workspaces.filter(item => item.id === SCRATCH_WORKSPACE_ID)
       if (primary.length > 1) throw new AgentMuxError('The original primary Mote Workspace is ambiguous.', 'FILE_WORKSPACE_UNAVAILABLE')
-      return primary[0]
-    }),
+      const originalPrimary = primary[0] && structuredClone(primary[0]), logical = paths.map(path => resolve(workspace.path, path))
+      const notesRetained = await retainNotesAuthorityPaths(await storage.retainedFilePaths())
+      const assert = async (physical: readonly { root: string; path: string }[]) => {
+        const targets = [...logical, ...physical.map(value => resolve(value.root, value.path))]
+        await notesRetained(targets)
+        for (const target of targets) await assertPrimaryMoteRetained(workspace, target, async () => originalPrimary)
+      }
+      await assert([])
+      return assert
+    },
     notes: { plan: (from, to) => notebookStore.planFileRelocation(from, to), apply: (plan, operationId, actor) => notebookStore.applyFileRelocation(plan, operationId, actor) },
+    deleteHistory: (workspace, input, digest, actor) => new FileDeleteHistory(notebookStore, ordinary, workspace, input, digest, actor),
     nameAudit: new NameChangeAudit(options.spatial),
     ...(options.directoryScope ? { directoryScope: options.directoryScope } : {}) })
   const owners = async () => {
@@ -93,9 +103,10 @@ export function createHostContent(options: {
     let shared: NoteSharedBlockOwner
     const publicFiles = new FileReadOwner({
       paths: {
-        stat: (owner, path) => pathMutations.stat(local(owner), path),
+        stat: (owner, path, includeRevision) => pathMutations.stat(local(owner), path, includeRevision),
         mkdir: (owner, input, context) => pathMutations.mkdir(local(owner), input, context),
         move: (owner, input, context) => pathMutations.move(local(owner), input, context),
+        delete: (owner, input, context) => pathMutations.delete(local(owner), input, context),
         inspect: (input, context, owner) => pathMutations.inspect(input, context, owner ? local(owner) : undefined)
       },
       catalog: async () => { const state = await options.spatial.read(); return state ? spatialCatalog(state.graph) : null },
@@ -130,6 +141,7 @@ export function createHostContent(options: {
     stat: async (...args) => (await owners()).files.stat(...args),
     mkdir: async (...args) => (await owners()).files.mkdir(...args),
     move: async (...args) => (await owners()).files.move(...args),
+    delete: async (...args) => (await owners()).files.delete(...args),
     inspectMutation: async (...args) => (await owners()).files.inspectMutation(...args),
     read: async (...args) => (await owners()).files.read(...args),
     list: async (...args) => (await owners()).files.list(...args),

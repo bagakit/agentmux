@@ -202,6 +202,7 @@ export class NoteSharedUndoOwner {
       try {
       const deletionId = stageId(request.operationId!, 'delete', sharedId), previousDeletion = await this.ports.operation(deletionId)
       if (previousDeletion?.operation === 'delete') {
+        if (!previousDeletion.source?.eventId) { retain(item, 'operation-conflict', 'The original deletion has no exact shared creation source. Its request and history are retained; no shared undo deletion was issued.'); continue }
         const created = await this.ports.operation(previousDeletion.source.eventId)
         const deletionInput = { path: previousDeletion.resource.path, noteId: sharedId, expectedRevision: previousDeletion.baseRevision, witness: previousDeletion.fileWitness, operationId: deletionId, creationEventId: previousDeletion.source.eventId, undoFingerprint: naturalFingerprint }
         const expected = noteHistoryRevision(JSON.stringify(['agentmux.note.shared-delete.v1', previousDeletion.resource, deletionInput, context?.actor ?? null]))

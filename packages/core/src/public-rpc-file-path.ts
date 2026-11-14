@@ -6,19 +6,20 @@ import { parseFileReadParams, parseFileReadResource, parseFileReadResult,
 /** An observation of one original directory entry, never an authorization token. */
 export type FileEntryWitness = { device: string; inode: string; size: string; ctimeNs: string; mtimeNs: string; birthtimeNs: string | null }
 export type FilePathScopeWitness = { root: FileEntryWitness; parent: FileEntryWitness }
-export type FileStatParams = Omit<FileReadParams, 'maxBytes'>
+export type FileStatParams = Omit<FileReadParams, 'maxBytes'> & { includeRevision?: boolean }
 export type FilePathObservation = FilePathScopeWitness & {
   parentPath: string
   entry: { kind: 'absent' } | { kind: 'file' | 'directory' | 'symlink' | 'other'; witness: FileEntryWitness }
+  revision?: { status: 'observed'; revision: string } | { status: 'not-applicable' }
   implementation: { platform: 'darwin' | 'linux'; stat: 'native'; mkdir: 'native-no-replace' | 'generation-unavailable' }
 }
 export type FileStatResult = { resource: FileReadResource | null; result:
   | { status: 'observed'; observation: FilePathObservation }
   | { status: 'unknown' | 'unsupported'; code: string; message: string } }
-export type FileMkdirParams = Omit<FileStatParams, 'expectedResource'> & {
+export type FileMkdirParams = Omit<FileStatParams, 'expectedResource' | 'includeRevision'> & {
   operationId: string; expectedResource: FileReadResource; expectedAbsent: true; expected: FilePathScopeWitness
 }
-export type FileMutationInspectParams = Omit<FileStatParams, 'expectedResource'> & { operationId: string; expectedResource: FileReadResource }
+export type FileMutationInspectParams = Omit<FileStatParams, 'expectedResource' | 'includeRevision'> & { operationId: string; expectedResource: FileReadResource }
 export type FileMoveEntry = Exclude<FilePathObservation['entry'], { kind: 'absent' }>
 export type FileMoveParams = FileMutationInspectParams & {
   expected: FilePathScopeWitness & { entry: FileMoveEntry }
@@ -33,6 +34,20 @@ export type FileMoveReceipt = {
   code?: string; message?: string
 }
 export type FileMoveResult = { operationId: string; resource: FileReadResource | null; destination: FileReadResource | null; result: FileMoveReceipt }
+export type FileDeleteParams = FileMutationInspectParams & {
+  expected: FilePathScopeWitness & { entry: FileMoveEntry }
+  expectedRevision?: string; recursive?: boolean
+}
+export type FileDeleteReceipt = {
+  action: 'delete'; phase: 'prepared' | 'claimed' | 'deleted' | 'settled'
+  filesystem: 'deleted' | 'not-applied' | 'unknown'; durability: 'confirmed' | 'unconfirmed'
+  deletedWitness?: FileEntryWitness
+  /** Recorded or Native-reported claim address; current reachability is unconfirmed. */
+  retainedPath?: string
+  noteHistory?: { status: 'recorded' | 'unconfirmed'; message?: string }
+  code?: string; message?: string
+}
+export type FileDeleteResult = { operationId: string; resource: FileReadResource | null; result: FileDeleteReceipt }
 
 /** Original transport provenance is supplied by the Host, never by a JSON request. */
 export type FilePathMutationContext = FileWriteContext & { callerHostId?: string; transport?: string }
@@ -45,11 +60,13 @@ export type FileMkdirResult = { operationId: string; resource: FileReadResource 
 export type FileMutationInspectResult = { operationId: string; resource: FileReadResource | null; result:
   | (FilePathMutationReceipt & { original: FileMkdirParams })
   | (FileMoveReceipt & { original: FileMoveParams })
+  | (FileDeleteReceipt & { original: FileDeleteParams })
   | { action: 'unknown'; phase: 'absent' | 'unavailable'; filesystem: 'unknown'; durability: 'unconfirmed'; code: string; message: string } }
 
 export interface AgentMuxRpcFilePathsOwner {
   stat(params: FileStatParams): Promise<FileStatResult>
   move(params: FileMoveParams, context?: FilePathMutationContext): Promise<FileMoveResult>
+  delete(params: FileDeleteParams, context?: FilePathMutationContext): Promise<FileDeleteResult>
   mkdir(params: FileMkdirParams, context?: FilePathMutationContext): Promise<FileMkdirResult>
   inspectMutation(params: FileMutationInspectParams, context?: FilePathMutationContext): Promise<FileMutationInspectResult>
 }
@@ -75,10 +92,12 @@ export function parseFilePathScopeWitness(value: unknown, code = 'INVALID_CONTRO
   return { root: parseFileEntryWitness(p.root, code), parent: parseFileEntryWitness(p.parent, code) }
 }
 export function parseFileStatParams(value: unknown): FileStatParams {
-  const p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource'])
-  const parsed = parseFileReadParams(p)
+  const p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'includeRevision'])
+  const { includeRevision, ...read } = p
+  if (includeRevision !== undefined && typeof includeRevision !== 'boolean') invalid('Revision observation must be explicitly selected.', 'INVALID_CONTROL_REQUEST')
+  const parsed = parseFileReadParams(read)
   if (!wellFormed(parsed.path)) invalid('The original path must be well-formed Unicode; its bytes are not rewritten.', 'INVALID_CONTROL_REQUEST')
-  return parsed
+  return p as FileStatParams
 }
 function mutationParams(value: unknown, mkdir: boolean): FileMkdirParams | FileMutationInspectParams {
   const code = 'INVALID_CONTROL_REQUEST'
@@ -121,6 +140,50 @@ export function parseFileMoveParams(value: unknown): FileMoveParams {
   if (['', '.'].includes(original.expectedResource.path) || ['', '.'].includes(to.expectedResource.path) || original.expectedResource.path === to.expectedResource.path) invalid('Move requires two distinct non-root entries.', code)
   return p as FileMoveParams
 }
+export function parseFileDeleteParams(value: unknown): FileDeleteParams {
+  const code = 'INVALID_CONTROL_REQUEST'
+  const p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'operationId', 'expected', 'expectedRevision', 'recursive'], code)
+  const { expected, expectedRevision, recursive, ...scope } = p
+  const original = parseFileMutationInspectParams(scope), e = rpcRecord(expected, ['root', 'parent', 'entry'], code)
+  parseFilePathScopeWitness({ root: e.root, parent: e.parent }, code)
+  const entry = rpcRecord(e.entry, ['kind', 'witness'], code)
+  if (!['file', 'directory', 'symlink'].includes(entry.kind as string) || ['', '.'].includes(original.expectedResource.path)) invalid('Delete requires one exact non-root file, directory or symlink entry.', code)
+  parseFileEntryWitness(entry.witness, code)
+  if (entry.kind === 'file') {
+    if (typeof expectedRevision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(expectedRevision)) invalid('Regular file deletion requires its complete original body revision from file read.', code)
+    if (recursive !== undefined) invalid('Recursive authorization is only for a directory subtree.', code)
+  } else {
+    if (expectedRevision !== undefined) invalid('A file revision does not freeze a directory subtree or a symlink target.', code)
+    if (recursive !== undefined && (entry.kind !== 'directory' || typeof recursive !== 'boolean')) invalid('Choose explicit recursive authorization only for the exact original directory.', code)
+  }
+  return p as FileDeleteParams
+}
+export function parseFileDeleteReceipt(value: unknown, expected: FileEntryWitness, code = 'CONTROL_PROTOCOL_ERROR'): FileDeleteReceipt {
+  const r = rpcRecord(value, ['action', 'phase', 'filesystem', 'durability', 'deletedWitness', 'retainedPath', 'noteHistory', 'code', 'message'], code)
+  if (r.action !== 'delete' || !['prepared', 'claimed', 'deleted', 'settled'].includes(r.phase as string) || !['deleted', 'not-applied', 'unknown'].includes(r.filesystem as string) || !['confirmed', 'unconfirmed'].includes(r.durability as string)) invalid('The original delete receipt is invalid.', code)
+  if (r.filesystem === 'deleted') {
+    if (!sameFileEntryIdentity(parseFileEntryWitness(r.deletedWitness, code), expected)) invalid('The deleted object is not the original source generation. Keep the original operation and inspect without replaying.', code)
+  } else if (r.deletedWitness !== undefined) invalid('An unconfirmed deletion cannot claim an original deleted object.', code)
+  if (r.retainedPath !== undefined) pathText(r.retainedPath, code)
+  if (r.noteHistory !== undefined) {
+    const history = rpcRecord(r.noteHistory, ['status', 'message'], code)
+    if (!['recorded', 'unconfirmed'].includes(history.status as string)) invalid('The original Note history result is invalid.', code)
+    if (history.message !== undefined) message(history.message, code)
+  }
+  if (r.code !== undefined) text(r.code, code)
+  if (r.message !== undefined) message(r.message, code)
+  if (r.filesystem === 'unknown' && (r.durability !== 'unconfirmed' || !r.code || !r.message)) invalid('An unknown deletion needs its original retained-operation reason.', code)
+  return r as FileDeleteReceipt
+}
+export function parseFileDeleteResult(value: unknown, params: FileDeleteParams): FileDeleteResult {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId', 'resource', 'result'], code)
+  if (p.operationId !== params.operationId) invalid('Another original Files deletion was returned.', code)
+  const resource = resultResource(p.resource, params, code), result = parseFileDeleteReceipt(p.result, params.expected.entry.witness, code)
+  if (resource && targetResourceKeys.some(key => resource[key] !== params.expectedResource[key])) invalid('Another original deletion resource was returned.', code)
+  if (result.filesystem !== 'unknown' && !resource) invalid('A known deletion requires its original resource.', code)
+  return { operationId: params.operationId, resource, result }
+}
+const targetResourceKeys = ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'] as const
 export function sameFileEntryIdentity(left: FileEntryWitness, right: FileEntryWitness): boolean {
   return left.device === right.device && left.inode === right.inode && left.birthtimeNs !== null && left.birthtimeNs === right.birthtimeNs
 }
@@ -168,12 +231,16 @@ export function parseFileStatResult(value: unknown, params: FileStatParams): Fil
   if (r.status === 'observed') {
     rpcRecord(r, ['status', 'observation'], code)
     if (!resource) invalid('A native entry observation requires its original resource.', code)
-    const o = rpcRecord(r.observation, ['root', 'parent', 'parentPath', 'entry', 'implementation'], code)
+    const o = rpcRecord(r.observation, ['root', 'parent', 'parentPath', 'entry', 'implementation', 'revision'], code)
     parseFilePathScopeWitness({ root: o.root, parent: o.parent }, code); pathText(o.parentPath, code)
     const e = rpcRecord(o.entry, undefined, code)
     rpcRecord(e, e.kind === 'absent' ? ['kind'] : ['kind', 'witness'], code)
     if (!['absent', 'file', 'directory', 'symlink', 'other'].includes(e.kind as string)) invalid('The original entry kind is unconfirmed.', code)
     if (e.kind !== 'absent') parseFileEntryWitness(e.witness, code)
+    if (params.includeRevision === true) {
+      const revision = rpcRecord(o.revision, e.kind === 'file' ? ['status', 'revision'] : ['status'], code)
+      if (e.kind === 'file' ? revision.status !== 'observed' || typeof revision.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(revision.revision) : revision.status !== 'not-applicable') invalid('The explicitly requested exact file revision is unconfirmed.', code)
+    } else if (o.revision !== undefined) invalid('An entry-only stat cannot claim an unrequested body revision.', code)
     const implementation = rpcRecord(o.implementation, ['platform', 'stat', 'mkdir'], code)
     if (!['darwin', 'linux'].includes(implementation.platform as string) || implementation.stat !== 'native' || !['native-no-replace', 'generation-unavailable'].includes(implementation.mkdir as string)) invalid('The Files helper implementation is unconfirmed.', code)
   } else {
@@ -213,8 +280,9 @@ export function parseFileMutationInspectResult(value: unknown, params: FileMutat
     text(r.code, code); message(r.message, code)
   } else {
     const { original, ...receipt } = r
-    const input = r.action === 'move' ? parseFileMoveParams(original) : parseFileMkdirParams(original)
+    const input = r.action === 'move' ? parseFileMoveParams(original) : r.action === 'delete' ? parseFileDeleteParams(original) : parseFileMkdirParams(original)
     if (r.action === 'move') parseFileMoveReceipt(receipt, (input as FileMoveParams).expected.entry.witness, code)
+    else if (r.action === 'delete') parseFileDeleteReceipt(receipt, (input as FileDeleteParams).expected.entry.witness, code)
     else parseFilePathMutationReceipt(receipt, code)
     if (input.operationId !== params.operationId || params.spaceId !== undefined && input.spaceId !== params.spaceId || input.zoneId !== params.zoneId || input.path !== params.path ||
         ['hostId','workspaceId','workspacePath','zoneId','zonePath','path','logicalDirectory'].some(key => input.expectedResource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) invalid('The retained Files intent belongs to another target.', code)

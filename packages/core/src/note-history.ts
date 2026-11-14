@@ -26,7 +26,8 @@ export type NoteHistoryWriteRecord = NoteHistoryCommon & {
 }
 /** A deletion has no after body or revision. The former body remains independently readable history. */
 export type NoteHistoryDeleteRecord = NoteHistoryCommon & {
-  operation: 'delete'; source: { eventId: string }
+  /** An absent prior-history reference grants no source, actor or undo authority. */
+  operation: 'delete'; source?: { eventId: string }
   baseRevision: string; revision: null; beforeContent: string; content: null; retainedPath?: string
 }
 export type NoteHistoryRecord = NoteHistoryWriteRecord | NoteHistoryDeleteRecord
@@ -53,6 +54,7 @@ export function parseNoteHistorySource(operation: NoteHistoryRecord['operation']
     if (source !== undefined) invalid('An ordinary edit cannot claim a restoration source.')
     return
   }
+  if (operation === 'delete' && source === undefined) return
   if (!source || typeof source !== 'object' || Array.isArray(source)) invalid('The original history action source is required.')
   const value = source as Record<string, unknown>, fields = Object.keys(value)
   if ((operation === 'restore' || operation === 'delete') && fields.length === 1 && fields[0] === 'eventId' && id(value.eventId)) return { eventId: value.eventId }

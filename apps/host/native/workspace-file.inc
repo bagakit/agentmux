@@ -117,6 +117,7 @@ static int workspace_same_file(const struct stat *a, const struct stat *b) {
 }
 
 /* Hash the pinned object and reject concurrent writes, including a same-byte rewrite. */
+static void (*workspace_revision_after_chunk)(void) = NULL;
 static int workspace_fd_revision(int fd, char *revision, struct stat *info, off_t expected_size) {
   struct stat after;
   if (fstat(fd, info) || lseek(fd, 0, SEEK_SET) < 0) workspace_errno();
@@ -131,6 +132,7 @@ static int workspace_fd_revision(int fd, char *revision, struct stat *info, off_
     if (!count) return 0;
     native_sha256_update(&context, block, (size_t)count);
     length += (uint64_t)count;
+    if (workspace_revision_after_chunk) { void (*barrier)(void) = workspace_revision_after_chunk; workspace_revision_after_chunk = NULL; barrier(); }
   }
   ssize_t extra;
   do { extra = read(fd, block, 1); } while (extra < 0 && errno == EINTR);
@@ -150,12 +152,18 @@ static void workspace_witness(const struct stat *info) {
 }
 
 static void workspace_byte_range(const char *name, size_t offset, size_t max_bytes,
-                                 size_t max_file, const char *expected) {
+                                 size_t max_file, const char *expected, const unsigned char *expected_witness, size_t witness_size) {
   workspace_read_cost = 0;
   const int fd = workspace_regular(name);
   if (fd < 0) workspace_errno();
   struct stat before, after;
   if (fstat(fd, &before)) workspace_errno();
+  if (witness_size) {
+    char actual[256];
+    snprintf(actual, sizeof(actual), "%llu:%llu:%llu:%lld:%lld", (unsigned long long)before.st_dev, (unsigned long long)before.st_ino,
+      (unsigned long long)before.st_size, workspace_ctime(&before), workspace_mtime(&before));
+    if (witness_size != strlen(actual) || memcmp(expected_witness, actual, witness_size)) workspace_error("WORKSPACE_FILE_GENERATION_MISMATCH", "The opened file is not the exact original producer generation");
+  }
   if (before.st_size < 0 || (uint64_t)before.st_size > max_file)
     workspace_error("WORKSPACE_FILE_BYTE_LIMIT", "Workspace file exceeds the byte transfer budget");
   const size_t total = (size_t)before.st_size;
@@ -412,10 +420,15 @@ static void workspace_delete_exact(const char *root, const char *name, const cha
   printf("{\"status\":\"deleted\"}");
 }
 
-static void workspace_delete(int parent, const char *name) {
+/* Only the exact Files delete producer installs this bounded pre-unlink gate. */
+static void (*workspace_delete_before_file)(int, const char *, const char *, const struct stat *) = NULL;
+static void workspace_delete_visit(int parent, const char *name, const char *relative) {
   struct stat before;
   if (fstatat(parent, name, &before, AT_SYMLINK_NOFOLLOW)) workspace_errno();
-  if (!S_ISDIR(before.st_mode)) { if (unlinkat(parent, name, 0)) workspace_errno(); return; }
+  if (workspace_delete_before_file) workspace_delete_before_file(parent, name, relative, &before);
+  if (!S_ISDIR(before.st_mode)) {
+    if (unlinkat(parent, name, 0)) workspace_errno(); return;
+  }
   const int fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
   if (fd < 0) workspace_errno();
   struct stat opened;
@@ -430,7 +443,15 @@ static void workspace_delete(int parent, const char *name) {
     errno = 0; entry = readdir(directory);
     if (!entry) { if (errno) workspace_errno(); break; }
     if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
-    workspace_delete(fd, entry->d_name);
+    char *child = NULL;
+    if (workspace_delete_before_file) {
+      const size_t size = strlen(relative) + strlen(entry->d_name) + 2;
+      if (size > PATH_MAX) workspace_error("FILE_DELETE_PATH_UNAVAILABLE", "The original claimed child path exceeds the Files observation budget");
+      child = malloc(size); if (!child) workspace_errno();
+      snprintf(child, size, "%s%s%s", relative, *relative ? "/" : "", entry->d_name);
+    }
+    workspace_delete_visit(fd, entry->d_name, child ? child : "");
+    free(child);
   }
   struct stat current;
   if (fstatat(parent, name, &current, AT_SYMLINK_NOFOLLOW)) workspace_errno();
@@ -440,6 +461,7 @@ static void workspace_delete(int parent, const char *name) {
   closedir(directory);
   if (unlinkat(parent, name, AT_REMOVEDIR)) workspace_errno();
 }
+static void workspace_delete(int parent, const char *name) { workspace_delete_visit(parent, name, ""); }
 
 static int workspace_name_compare(const void *left, const void *right) {
   return strcmp(*(const char * const *)left, *(const char * const *)right);
@@ -574,7 +596,7 @@ static int workspace_file_operation(int argc, char **argv) {
     close(fd);
   } else if (!strcmp(action, "read-bytes")) {
     workspace_byte_range(name, (size_t)parse_identity(argv[9], "byte offset"),
-      (size_t)parse_identity(argv[10], "byte length"), (size_t)parse_identity(argv[11], "file byte limit"), argv[12]);
+      (size_t)parse_identity(argv[10], "byte length"), (size_t)parse_identity(argv[11], "file byte limit"), argv[12], input, length);
   } else if (!strcmp(action, "write")) {
     workspace_write(name, argv[5], !strcmp(argv[6], "1"), !strcmp(argv[7], "1"), argv[8], input, length, create_mode);
   #if defined(__APPLE__)

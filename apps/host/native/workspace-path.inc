@@ -121,23 +121,39 @@ static const char *path_kind(const path_info *info) {
   return S_ISREG(info->file.st_mode) ? "file" : S_ISDIR(info->file.st_mode) ? "directory" : S_ISLNK(info->file.st_mode) ? "symlink" : "other";
 }
 
-static void path_stat(const path_scope *scope) {
+static void path_stat_revision_barrier(void) { commit_barrier(1, 3, 4, "during-stat-revision"); }
+static void path_stat(const path_scope *scope, int include_revision, const char *fault) {
   path_info entry, after, parent, root;
   const int found = !path_entry_info(scope->parent, scope->name, &entry);
   if (!found && errno != ENOENT) workspace_errno();
+  int fd = -1; char revision[72];
+  if (include_revision && found && S_ISREG(entry.file.st_mode)) {
+    fd = openat(scope->parent, scope->name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    path_info opened; struct stat hashed;
+    if (fd < 0 || path_fd_info(fd, &opened)) workspace_errno();
+    if (!path_same_entry(&entry, &opened)) workspace_error("FILE_PATH_ENTRY_CHANGED", "The opened file differs from the original entry observation");
+    if (!strcmp(fault, "during-stat-revision-barrier")) workspace_revision_after_chunk = path_stat_revision_barrier;
+    if (!workspace_fd_revision(fd, revision, &hashed, entry.file.st_size) || !workspace_same_file(&entry.file, &hashed) || path_fd_info(fd, &opened) || !path_same_entry(&entry, &opened))
+      workspace_error("FILE_PATH_ENTRY_CHANGED", "The original regular file changed while computing its revision");
+  }
   char root_witness[256], parent_witness[256];
   path_witness_text(&scope->root_info, root_witness, sizeof(root_witness));
   path_witness_text(&scope->parent_info, parent_witness, sizeof(parent_witness));
   if (!path_scope_current(scope) || path_fd_info(scope->parent, &parent) || path_fd_info(scope->root, &root) ||
-      !path_witness_equal(&root, root_witness) || !path_witness_equal(&parent, parent_witness))
+      (include_revision ? !path_identity_equal(&root, &scope->root_info) || !path_identity_equal(&parent, &scope->parent_info) : !path_witness_equal(&root, root_witness) || !path_witness_equal(&parent, parent_witness)))
     workspace_error("FILE_PATH_SCOPE_CHANGED", "The original root or parent changed during stat");
   const int final_found = !path_entry_info(scope->parent, scope->name, &after);
   if ((!final_found && errno != ENOENT) || final_found != found || (found && !path_same_entry(&entry, &after)))
     workspace_error("FILE_PATH_ENTRY_CHANGED", "The original directory entry changed during stat");
+  if (fd >= 0) close(fd);
   printf("{\"root\":"); path_witness_json(&root); printf(",\"parent\":"); path_witness_json(&parent);
   printf(",\"parentPath\":"); workspace_json_string(stdout, scope->parent_path);
   if (found) { printf(",\"entry\":{\"kind\":\"%s\",\"witness\":", path_kind(&entry)); path_witness_json(&entry); printf("}"); }
   else printf(",\"entry\":{\"kind\":\"absent\"}");
+  if (include_revision) {
+    if (found && S_ISREG(entry.file.st_mode)) { printf(",\"revision\":{\"status\":\"observed\",\"revision\":"); workspace_json_string(stdout, revision); printf("}"); }
+    else printf(",\"revision\":{\"status\":\"not-applicable\"}");
+  }
 #if defined(__APPLE__)
   const char *platform = "darwin";
 #else
@@ -423,9 +439,144 @@ static void path_move_inspect(path_scope *source, path_scope *destination,
   else path_move_receipt(claimed ? "claimed" : "prepared", "unknown", 0, NULL, "FILE_MOVE_UNCONFIRMED", "The original claimed move is not confirmed at its destination. Its request and claim are retained; no action was replayed.");
 }
 
+static const path_scope *path_delete_scope = NULL;
+static int path_delete_stage = -1;
+static path_info path_delete_claim;
+static const char *path_delete_revision = NULL, *path_delete_fault = NULL;
+static int path_delete_snapshot_barrier_used = 0;
+static void path_delete_receipt(const char *phase, const char *effect, int confirmed,
+                                const path_info *entry, const char *code, const char *message) {
+  printf("{\"action\":\"delete\",\"phase\":\"%s\",\"filesystem\":\"%s\",\"durability\":\"%s\"", phase, effect, confirmed ? "confirmed" : "unconfirmed");
+  if (entry) { printf(",\"deletedWitness\":"); path_witness_json(entry); }
+  if (code) { printf(",\"code\":"); workspace_json_string(stdout, code); }
+  if (message) { printf(",\"message\":"); workspace_json_string(stdout, message); }
+  printf("}");
+}
+/* The original recursive walker calls this only for this finite exact producer.
+ * Plain recursive files need no body scan; Notes acknowledge a saved revision. */
+static void path_delete_snapshot(int parent, const char *name, const char *relative, const struct stat *before) {
+  path_info root;
+  if (!path_scope_current(path_delete_scope) || path_entry_info(path_delete_stage, "entry", &root) || !path_identity_equal(&root, &path_delete_claim))
+    workspace_error("FILE_DELETE_CLAIM_CHANGED", "The original scope or exact claimed subtree changed; remaining material is retained");
+  if (!S_ISREG(before->st_mode)) return;
+  const int fd = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+  path_info original, current; struct stat hashed; char revision[72];
+  if (fd < 0 || path_fd_info(fd, &original)) workspace_errno();
+  if (!workspace_same_file(before, &original.file)) { close(fd); workspace_error("FILE_DELETE_ENTRY_CHANGED", "The original claimed regular entry changed before history observation"); }
+  unsigned char prefix[8]; ssize_t length;
+  do { length = pread(fd, prefix, sizeof(prefix), 0); } while (length < 0 && errno == EINTR);
+  if (length < 0) workspace_errno();
+  FILE *output = fdopen(dup(3), "w"); if (!output) workspace_errno();
+  fprintf(output, "{\"phase\":\"snapshot\",\"suffix\":"); workspace_json_string(output, relative);
+  fprintf(output, ",\"entry\":"); path_witness_output(output, &original); fprintf(output, ",\"prefixHex\":\"");
+  for (ssize_t index = 0; index < length; index++) fprintf(output, "%02x", prefix[index]);
+  fprintf(output, "\"}\n"); if (fflush(output) || fclose(output)) workspace_errno();
+  char response[80]; size_t size = 0;
+  for (;;) {
+    char byte; const ssize_t count = read(4, &byte, 1);
+    if (count < 0 && errno == EINTR) continue;
+    if (count != 1 || size >= sizeof(response) - 1) workspace_error("FILE_DELETE_HISTORY_UNCONFIRMED", "The original Host did not confirm the exact claimed entry snapshot");
+    if (byte == '\n') break;
+    response[size++] = byte;
+  }
+  response[size] = 0;
+  if (strcmp(response, "G") && !(size == 72 && response[0] == 'S' && !strncmp(response + 1, "sha256:", 7) && strspn(response + 8, "0123456789abcdef") == 64))
+    workspace_error("FILE_DELETE_HISTORY_UNCONFIRMED", "The original snapshot acknowledgement is invalid");
+  if (!path_delete_snapshot_barrier_used && !strcmp(path_delete_fault, "after-delete-snapshot-barrier")) {
+    path_delete_snapshot_barrier_used = 1; commit_barrier(1, 5, 6, "after-delete-snapshot");
+  }
+  const char *expected = response[0] == 'S' ? response + 1 : !*relative ? path_delete_revision : NULL;
+  if (expected && (!workspace_fd_revision(fd, revision, &hashed, original.file.st_size) || strcmp(revision, expected))) {
+    close(fd); workspace_error("FILE_DELETE_ENTRY_CHANGED", "The original Note or requested file body changed after its snapshot; it was retained");
+  }
+  if (path_fd_info(fd, &current) || !path_same_entry(&original, &current) || path_entry_info(parent, name, &current) || !path_same_entry(&original, &current) || !path_scope_current(path_delete_scope)) {
+    close(fd); workspace_error("FILE_DELETE_ENTRY_CHANGED", "The exact original claimed entry or scope changed before unlink");
+  }
+  close(fd);
+}
+static void path_delete(path_scope *source, const char *stage_name, const char *root_witness,
+                        const char *parent_witness, const char *entry_witness, const char *kind,
+                        const char *expected_revision, int recursive, const char *fault) {
+  path_info entry;
+  if (!source->root_info.birthtime_known || !source->parent_info.birthtime_known) { path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_GENERATION_UNAVAILABLE", "The original scope generation is unavailable"); return; }
+  if (!path_original_directory(&source->root_info, root_witness) || !path_original_directory(&source->parent_info, parent_witness) || !path_scope_current(source)) { path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_SCOPE_CONFLICT", "The original root or parent changed"); return; }
+  if (path_entry_info(source->parent, source->name, &entry)) { path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_DELETE_SOURCE_CONFLICT", "The exact original source entry is unavailable"); return; }
+  if (!entry.birthtime_known) { path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_GENERATION_UNAVAILABLE", "The original source generation is unavailable"); return; }
+  if (strcmp(path_kind(&entry), kind) || (!strcmp(kind, "directory") ? !path_original_directory(&entry, entry_witness) : !path_witness_equal(&entry, entry_witness))) { path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_DELETE_SOURCE_CONFLICT", "The exact original source generation changed"); return; }
+  if (!S_ISREG(entry.file.st_mode) && !S_ISDIR(entry.file.st_mode) && !S_ISLNK(entry.file.st_mode)) { path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_DELETE_KIND_UNSUPPORTED", "Delete requires one ordinary file, directory or symlink entry"); return; }
+  if (S_ISREG(entry.file.st_mode)) {
+    const int fd = openat(source->parent, source->name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    struct stat hashed; char revision[72];
+    if (fd < 0) workspace_errno();
+    const int exact = workspace_fd_revision(fd, revision, &hashed, entry.file.st_size) && workspace_same_file(&entry.file, &hashed) && !strcmp(revision, expected_revision);
+    close(fd);
+    if (!exact) { path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_DELETE_REVISION_CONFLICT", "The original regular file body revision changed"); return; }
+  }
+  if (mkdirat(source->parent, stage_name, 0700)) workspace_errno();
+  const int stage = openat(source->parent, stage_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  path_info stage_info;
+  if (stage < 0 || path_fd_info(stage, &stage_info) || fsync(stage) || fsync(source->parent)) workspace_errno();
+  if (!stage_info.birthtime_known) { close(stage); path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_GENERATION_UNAVAILABLE", "The original private claim generation is unavailable"); return; }
+  path_offer_move("staged", &stage_info, &entry);
+  if (!strcmp(fault, "delete-after-stage-crash")) _exit(111);
+  commit_barrier(!strcmp(fault, "before-delete-claim-barrier"), 5, 6, "before-delete-claim");
+  if (!path_scope_current(source)) { close(stage); path_delete_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_SCOPE_CONFLICT", "The original scope changed before claim"); return; }
+  path_info visible;
+  if (path_entry_info(source->parent, stage_name, &visible) || !path_identity_equal(&visible, &stage_info)) workspace_error("FILE_DELETE_CLAIM_CHANGED", "The original private claim container changed");
+  if (path_move_between(source->parent, source->name, stage, "entry")) {
+    const int saved = errno; close(stage);
+    path_delete_receipt("settled", "not-applied", 1, NULL, saved == ENOSYS || saved == ENOTSUP || saved == EOPNOTSUPP ? "FILE_PATH_NATIVE_UNSUPPORTED" : "FILE_DELETE_CLAIM_REFUSED", "The original source was not claimed; no shell fallback was attempted"); return;
+  }
+  workspace_write_published = 1;
+  path_info claimed;
+  if (path_entry_info(stage, "entry", &claimed)) workspace_errno();
+  if (!path_identity_equal(&entry, &claimed) || strcmp(path_kind(&claimed), kind) || (S_ISREG(claimed.file.st_mode) && (entry.file.st_size != claimed.file.st_size || workspace_mtime(&entry.file) != workspace_mtime(&claimed.file)))) {
+    const int restored = path_return_claim(source, stage, &claimed); close(stage);
+    path_delete_receipt(restored ? "settled" : "claimed", restored ? "not-applied" : "unknown", restored, NULL, "FILE_DELETE_SOURCE_CONFLICT", "A late source replacement or edit was retained without deletion"); return;
+  }
+  if (fsync(stage) || fsync(source->parent) || path_fd_info(stage, &stage_info)) workspace_errno();
+  /* The existing error reporter can name the actual retained claim even if an
+   * external tool moves its parent after G2. This changes only this helper cwd. */
+  if (fchdir(stage)) workspace_errno();
+  workspace_retained = "entry"; workspace_claim_root = source->root_path;
+  if (!strcmp(fault, "delete-after-claim-crash")) _exit(112);
+  path_offer_move("claimed", &stage_info, &claimed);
+  if (!strcmp(fault, "delete-after-claim-ack-crash")) _exit(113);
+  commit_barrier(!strcmp(fault, "before-delete-unlink-barrier"), 5, 6, "before-delete-unlink");
+  path_delete_scope = source; path_delete_stage = stage; path_delete_claim = claimed;
+  path_delete_revision = S_ISREG(claimed.file.st_mode) ? expected_revision : NULL; path_delete_fault = fault;
+  if (S_ISDIR(claimed.file.st_mode) && !recursive) {
+    path_delete_snapshot(stage, "entry", "", &claimed.file);
+    if (unlinkat(stage, "entry", AT_REMOVEDIR)) {
+      const int saved = errno, restored = saved == ENOTEMPTY || saved == EEXIST ? path_return_claim(source, stage, &claimed) : 0;
+      if (restored) workspace_retained = NULL;
+      close(stage); if (restored) path_retire_empty_stage(source, stage_name, &stage_info);
+      path_delete_receipt(restored ? "settled" : "claimed", restored ? "not-applied" : "unknown", restored, NULL, "FILE_DELETE_DIRECTORY_NOT_EMPTY", "Only an empty original directory was authorized; remaining material is retained"); return;
+    }
+  } else {
+    workspace_delete_before_file = path_delete_snapshot;
+    workspace_delete(stage, "entry"); workspace_delete_before_file = NULL;
+  }
+  workspace_retained = NULL;
+  if (!strcmp(fault, "delete-after-unlink-crash")) _exit(114);
+  if (fsync(stage) || fsync(source->parent)) workspace_errno();
+  if (!path_scope_current(source)) { close(stage); path_delete_receipt("deleted", "unknown", 0, NULL, "FILE_PATH_SCOPE_CONFLICT", "The original entry was removed but its scope changed before confirmation"); return; }
+  close(stage); path_retire_empty_stage(source, stage_name, &stage_info);
+  path_delete_receipt("deleted", "deleted", 1, &claimed, NULL, NULL);
+}
+
 static int workspace_path_operation(int argc, char **argv) {
   if (argc < 2 || strcmp(argv[1], "--workspace-path")) return 0;
   if (argc == 5 && !strcmp(argv[2], "related")) { path_directory_relation(argv[3], argv[4]); return 1; }
+  if (argc == 13 && !strcmp(argv[2], "delete")) {
+    const char *stage = argv[5];
+    if (strlen(stage) > NAME_MAX || strncmp(stage, ".agentmux-delete-", 17) || strlen(stage + 17) != 64 || strspn(stage + 17, "0123456789abcdef") != 64) workspace_error("FILE_DELETE_INVALID_STAGE", "The exact original private claim name is required");
+    path_scope source = path_open_scope(argv[3], argv[4], 0);
+    fprintf(stderr, "AGENTMUX_WORKSPACE_READY\n"); fflush(stderr);
+    size_t length; unsigned char *input = workspace_input(STDIN_FILENO, &length); free(input);
+    path_delete(&source, stage, argv[6], argv[7], argv[8], argv[9], argv[10], !strcmp(argv[11], "1"), argv[12]);
+    path_scope_close(&source); return 1;
+  }
   if (argc == 16 && (!strcmp(argv[2], "move") || !strcmp(argv[2], "move-inspect"))) {
     validate_relative_path(argv[7]);
     if (strchr(argv[7], '/')) workspace_error("FILE_MOVE_INVALID_STAGE", "An exact direct claim name is required");
@@ -436,14 +587,14 @@ static int workspace_path_operation(int argc, char **argv) {
     else path_move_inspect(&source, &destination, argv[8], argv[9], argv[10], argv[12], argv[13], !strcmp(argv[14], "claimed"));
     path_scope_close(&destination); path_scope_close(&source); return 1;
   }
-  if (argc < 5 || (strcmp(argv[2], "stat") && strcmp(argv[2], "mkdir") && strcmp(argv[2], "inspect")))
+  if (argc < 5 || (strcmp(argv[2], "stat") && strcmp(argv[2], "stat-revision") && strcmp(argv[2], "mkdir") && strcmp(argv[2], "inspect")))
     workspace_error("FILE_PATH_INVALID_REQUEST", "Invalid original path helper action");
-  const int observe = !strcmp(argv[2], "stat"), inspect = !strcmp(argv[2], "inspect");
-  if (argc != (observe ? 5 : 10)) workspace_error("FILE_PATH_INVALID_REQUEST", "Invalid original path helper arguments");
+  const int include_revision = !strcmp(argv[2], "stat-revision"), observe = !strcmp(argv[2], "stat") || include_revision, inspect = !strcmp(argv[2], "inspect");
+  if (observe ? argc != 5 && argc != 6 : argc != 10) workspace_error("FILE_PATH_INVALID_REQUEST", "Invalid original path helper arguments");
   path_scope scope = path_open_scope(argv[3], argv[4], observe);
   fprintf(stderr, "AGENTMUX_WORKSPACE_READY\n"); fflush(stderr);
   size_t length; unsigned char *input = workspace_input(STDIN_FILENO, &length); free(input);
-  if (observe) path_stat(&scope);
+  if (observe) path_stat(&scope, include_revision, argc == 6 ? argv[5] : "");
   else {
     const char *stage = argv[5], *digest = argv[6], *root_witness = argv[7], *parent_witness = argv[8];
     if (strlen(stage) > NAME_MAX || strncmp(stage, ".agentmux-mkdir-", 16) || strchr(stage, '/') || strlen(digest) != 64 || strspn(digest, "0123456789abcdef") != 64)

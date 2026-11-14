@@ -23,7 +23,7 @@ export class NoteSharedFileDeleteOwner {
       try {
         const original = await this.history.readHistoryOperation(input.operationId)
         if (original) {
-          if (original.operation !== 'delete' || original.requestFingerprint !== fingerprint || original.noteId !== input.noteId || noteProvenanceResourceKey(original.resource) !== noteProvenanceResourceKey(resource)) return { status: 'error', code: 'NOTE_OPERATION_CONFLICT', message: 'This deletion operation belongs to another original file or intent.' }
+          if (original.operation !== 'delete' || original.source?.eventId !== input.creationEventId || original.requestFingerprint !== fingerprint || original.noteId !== input.noteId || noteProvenanceResourceKey(original.resource) !== noteProvenanceResourceKey(resource)) return { status: 'error', code: 'NOTE_OPERATION_CONFLICT', message: 'This deletion operation belongs to another original file or intent.' }
           event = original
           if (original.status === 'committed') return { status: 'deleted', noteHistory: { status: 'committed', eventId: original.eventId, batchId: original.batchId, replayed: true } }
           if (original.status === 'not-applied') return { status: 'conflict', code: 'NOTE_OPERATION_NOT_APPLIED', message: 'The original deletion was not applied.', noteHistory: { status: 'not-applied', eventId: original.eventId, batchId: original.batchId } }
@@ -38,7 +38,7 @@ export class NoteSharedFileDeleteOwner {
           operation: 'delete', source: { eventId: input.creationEventId }, requestFingerprint: fingerprint,
           parentEventId: previous?.status === 'committed' && previous.revision === input.expectedRevision ? previous.eventId : null,
           baseRevision: input.expectedRevision, beforeContent: observed.document.content, revision: null, content: null, fileWitness: input.witness })
-        if (prepared.operation !== 'delete') return unknown('The original deletion preparation returned another event kind.')
+        if (prepared.operation !== 'delete' || prepared.source?.eventId !== input.creationEventId) return unknown('The original deletion preparation returned another event kind or no exact shared source.')
         event = prepared
         const result = await this.files.deleteExact(workspace, { path: input.path, expectedRevision: input.expectedRevision, witness: input.witness, operationId: input.operationId })
         const status = result.status === 'deleted' ? 'committed' : result.status === 'conflict' || result.status === 'error' ? 'not-applied' : 'unconfirmed'

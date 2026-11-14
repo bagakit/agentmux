@@ -2,7 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { basename, dirname, relative, resolve, sep, posix } from 'node:path'
-import type { FileDocumentReadResult, FileWriteReceipt, FileNameListing, FilePathObservation, FilePathScopeWitness, FilePathMutationReceipt, FileEntryWitness, FileMoveReceipt, FileMoveParams } from '@agentmux/core/files'
+import type { FileDocumentReadResult, FileWriteReceipt, FileNameListing, FilePathObservation, FilePathScopeWitness, FilePathMutationReceipt, FileEntryWitness, FileMoveReceipt, FileMoveParams, FileDeleteParams, FileDeleteReceipt } from '@agentmux/core/files'
 import type { NoteFileWitness } from '@agentmux/core/note-history'
 import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromDirectoryName, scratchTopicDirectoryName } from './mote-topic-model.js'
 import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './mote-directories.js'
@@ -21,6 +21,11 @@ type LocalMutablePath = { root: string; parent: string; name: string }
 export type OrdinaryFileWriteInput = { path: string; content: string; expectedRevision: string | null; baseContent?: string; operationId?: string }
 export type OrdinaryFileWriteResult = FileWriteReceipt & { fileWitness?: NoteFileWitness }
 export type OrdinaryWorkspaceFilesOptions = {
+  beforeStatRevision?: () => Promise<void>
+  beforeDeleteClaim?: () => Promise<void>
+  beforeDeleteUnlink?: () => Promise<void>
+  afterDeleteSnapshot?: () => Promise<void>
+  deleteFault?: string
   beforeMoveClaim?: () => Promise<void>
   beforeMovePublish?: () => Promise<void>
   moveFault?: string
@@ -197,9 +202,12 @@ export class OrdinaryWorkspaceFiles {
     return { root: entry.root, requested: posix.join(relative(entry.root, entry.parent).split(sep).join('/'), entry.name) }
   }
   pathMutationLocation(workspace: FileWorkspace, path: string): Promise<{ root: string; requested: string }> { return this.pathScope(workspace, path) }
-  async statPath(workspace: FileWorkspace, path: string): Promise<FilePathObservation> {
+  async statPath(workspace: FileWorkspace, path: string, includeRevision = false): Promise<FilePathObservation> {
     const scope = await this.pathScope(workspace, path)
-    return JSON.parse((await this.run(scope.root, scope.root, { action: 'path-stat', path: scope.requested })).toString('utf8'))
+    const before = this.options.beforeStatRevision
+    return JSON.parse((await runWorkspaceFileWorker(scope.root, scope.root, { action: 'path-stat', path: scope.requested, includeRevision,
+      ...(before ? { fault: 'during-stat-revision-barrier' } : {}) }, { helperPath: this.options.helperPath ?? helperPath, workerSource: FILE_NAME_WORKER_SOURCE }, undefined, undefined,
+      before ? { before } : undefined)).toString('utf8'))
   }
   async mkdirPath(workspace: FileWorkspace, input: { path: string; stage: string; digest: string; expected: FilePathScopeWitness; retainProducer: (value: unknown) => Promise<void> }): Promise<FilePathMutationReceipt> {
     const scope = await this.pathScope(workspace, input.path), before = this.options.beforePathRename ?? this.options.beforePathPublish
@@ -239,6 +247,27 @@ export class OrdinaryWorkspaceFiles {
       action: 'path-move-inspect', path: input.location.path, destination: input.destination, stage: input.stage,
       expected: input.request.expected, destinationExpected: input.request.destination.expected, claimed: input.claimed
     })).toString('utf8'))
+  }
+  async deletePath(workspace: FileWorkspace, input: { request: FileDeleteParams; stage: string; retainProducer(value: unknown): Promise<void>; snapshot(value: { suffix: string; entry: FileEntryWitness; prefixHex: string; location: { root: string; path: string } }): Promise<string | null>; spawnFileProducer: (spawn: (fd: number) => ChildProcess) => ChildProcess }): Promise<FileDeleteReceipt> {
+    const scope = await this.pathScope(workspace, input.request.expectedResource.path)
+    const before = this.options.afterDeleteSnapshot ?? this.options.beforeDeleteUnlink ?? this.options.beforeDeleteClaim
+    const fault = this.options.afterDeleteSnapshot ? 'after-delete-snapshot-barrier' : this.options.beforeDeleteUnlink ? 'before-delete-unlink-barrier' : this.options.beforeDeleteClaim ? 'before-delete-claim-barrier' : this.options.deleteFault
+    const result = await runWorkspaceFileWorker(scope.root, scope.root, { action: 'path-delete', path: scope.requested, stage: input.stage,
+      expected: input.request.expected, ...(input.request.expectedRevision ? { expectedRevision: input.request.expectedRevision } : {}), ...(input.request.recursive !== undefined ? { recursive: input.request.recursive } : {}), ...(fault ? { fault } : {}) },
+      { helperPath: this.options.helperPath ?? helperPath, workerSource: FILE_NAME_WORKER_SOURCE, spawnFiniteFileProducer: input.spawnFileProducer }, undefined, undefined, {
+        stage: value => {
+          if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['phase', 'stage', 'entry'].includes(key)) || !['staged', 'claimed'].includes((value as { phase: string }).phase)) throw new Error('The original native delete phase is invalid.')
+          return input.retainProducer({ ...value, location: { root: scope.root, path: scope.requested } })
+        },
+        snapshot: value => {
+          if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['phase', 'suffix', 'entry', 'prefixHex'].includes(key))) throw new Error('The original claimed-entry observation is invalid.')
+          const frame = value as { phase: unknown; suffix: unknown; entry: FileEntryWitness; prefixHex: unknown }
+          if (frame.phase !== 'snapshot' || typeof frame.suffix !== 'string' || frame.suffix.includes('\0') || frame.suffix.startsWith('/') || frame.suffix.split('/').some(part => part === '.' || part === '..') || typeof frame.prefixHex !== 'string' || !/^(?:[a-f0-9]{2}){0,8}$/u.test(frame.prefixHex)) throw new Error('The original claimed-entry path or raw prefix is invalid.')
+          return input.snapshot({ suffix: frame.suffix, entry: frame.entry, prefixHex: frame.prefixHex,
+            location: { root: scope.root, path: posix.join(posix.dirname(scope.requested), input.stage, 'entry', frame.suffix) } })
+        }, ...(before ? { after: before } : {})
+      })
+    return JSON.parse(result.toString('utf8'))
   }
   async executionDirectoryRelated(cwd: string, entry: FileEntryWitness): Promise<'related' | 'unrelated' | 'missing' | 'unavailable'> {
     const result = JSON.parse((await this.run('/', '/', { action: 'path-related', path: cwd, entry })).toString('utf8')) as { status?: string }
@@ -374,13 +403,13 @@ export class OrdinaryWorkspaceFiles {
     return await this.readByteRange(workspace, requestedPath, { ...options, offset, maxBytes })
   }
 
-  async readByteRange(workspace: FileWorkspace, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number; maxFileBytes?: number; signal?: AbortSignal }): Promise<WorkspaceFileByteRead> {
+  async readByteRange(workspace: FileWorkspace, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number; maxFileBytes?: number; signal?: AbortSignal; expectedWitness?: FileEntryWitness }): Promise<WorkspaceFileByteRead> {
     const { offset, maxBytes } = options
     const resolved = await localExistingPathWithin(workspace, requestedPath)
     const document = JSON.parse((await this.run(dirname(resolved.target), resolved.root, {
       action: 'read-bytes', name: basename(resolved.target), offset, maxBytes, maxFileBytes: options.maxFileBytes ?? WORKSPACE_FILE_MAX_BYTES,
       ...(options.expectedRevision !== undefined ? { expectedRevision: options.expectedRevision } : {})
-    }, undefined, options.signal)).toString('utf8')) as Omit<WorkspaceFileByteRead, 'bytes'> & { data: string }
+    }, options.expectedWitness ? [options.expectedWitness.device, options.expectedWitness.inode, options.expectedWitness.size, options.expectedWitness.ctimeNs, options.expectedWitness.mtimeNs].join(':') : undefined, options.signal)).toString('utf8')) as Omit<WorkspaceFileByteRead, 'bytes'> & { data: string }
     const { data, ...result } = document
     return { ...result, bytes: Buffer.from(data, 'base64') }
   }

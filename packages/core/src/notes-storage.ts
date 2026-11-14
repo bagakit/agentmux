@@ -11,7 +11,7 @@ import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { applyNotebookChange, parseNotebookState, notebookFingerprint, type NoteResource, type NotebookState } from './notebook-catalog.js'
 import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
-import { initializeNotebookFiles, notebookFilesRetired, retireNotebookFiles, NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFilesFingerprint, publishNotebookFiles, readNotebookFiles, replaceNotebookFiles, type NotebookFileSnapshot } from './notebook-files.js'
+import { initializeNotebookFiles, notebookFilesRetired, retireNotebookFiles, NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFileAuthorityPaths, notebookFilesFingerprint, publishNotebookFiles, readNotebookFiles, replaceNotebookFiles, type NotebookFileSnapshot } from './notebook-files.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteProvenanceWrite } from './note-provenance.js'
 import { parseNoteHistoryRecord, type NoteHistoryRecord } from './note-history.js'
 export type NotesResourceChange = { noteId: string; from: NoteResource; to: NoteResource; conversion?: { sourceRevision: string; targetRevision: string } }
@@ -28,6 +28,7 @@ export type NotesConversionIssue = { noteId: string | null; resource: NoteResour
 export type NotesStorageTransfer = { source: string; destination: string; hash: string; preparedSource?: string; targetHash?: string; backup?: string }
 export type NotesStorageOperation = NotesStorageChange & { phase: 'prepared' | 'committed'; resourceChanges: NotesResourceChange[]; files: NotesStorageTransfer[]; catalog: NotebookState; sourceCatalog: string; sourceCatalogHash: string; database?: { incarnation: string; snapshotPath: string; snapshotHash: string }; kind?: 'convert' }
 export type NotesStorageSnapshot = { directory: string; catalogPath: string; resourceChanges: NotesResourceChange[]; directoryChanges: { from: string; to: string }[]; operation: NotesStorageOperation | null; conversionIssues?: NotesConversionIssue[] }
+export type NotesRetainedFilePaths = { libraryRoots: string[]; authorityPaths: string[] }
 export type NotesStorageApi = { inspect(operationId?: string): Promise<import('./public-rpc-notes-storage.js').NotesStorageInspection>; change(input: NotesStorageChange): Promise<import('./public-rpc-notes-storage.js').NotesStorageInspection>; onChange(listener: (snapshot: import('./public-rpc-notes-storage.js').NotesStorageInspection) => void): () => void }
 /** The converter stages fsynced Markdown; this original owner journals and publishes it. */
 export type NotesStorageConversion = { files: NotesStorageTransfer[]; resourceChanges: NotesResourceChange[]; provenance: NoteProvenanceWrite[]; issues?: NotesConversionIssue[] }
@@ -108,9 +109,24 @@ export class AgentMuxNotesStorage {
   async catalogEstablished(): Promise<boolean> { const location = await this.location(); return !!location.catalogEstablished || Object.keys(location.operations).length > 0 }
   async fileAuthorityEstablished(): Promise<boolean> { const location = await this.location(); return location.catalogFormat === 'files' }
   async confirmCatalog(): Promise<void> { const location = await this.location(); if (!location.catalogEstablished || location.catalogFormat !== 'files') await this.persist({ ...location, catalogEstablished: true, catalogFormat: 'files' }) }
-  async inspect(operationId?: string): Promise<NotesStorageSnapshot> { const location = await this.location(); return { directory: location.directory, catalogPath: location.pending && location.operations[location.pending]!.phase === 'prepared' ? location.operations[location.pending]!.sourceCatalog : join(location.directory, NOTEBOOK_ROOT_NAME), resourceChanges: Object.values(location.operations).filter(o => o.phase === 'committed').flatMap(o => o.resourceChanges), directoryChanges: Object.values(location.operations).filter(o => o.phase === 'committed' && o.expectedDirectory !== o.directory).map(o => ({ from: o.expectedDirectory, to: o.directory })), operation: operationId ? Object.hasOwn(location.operations, operationId) ? location.operations[operationId]! : null : location.pending ? location.operations[location.pending] ?? null : null, ...location.conversionIssues?.length ? { conversionIssues: structuredClone(location.conversionIssues) } : {} } }
+  async inspect(operationId?: string): Promise<NotesStorageSnapshot> { return this.snapshot(await this.location(), operationId) }
+  private snapshot(location: Location, operationId?: string): NotesStorageSnapshot { return { directory: location.directory, catalogPath: location.pending && location.operations[location.pending]!.phase === 'prepared' ? location.operations[location.pending]!.sourceCatalog : join(location.directory, NOTEBOOK_ROOT_NAME), resourceChanges: Object.values(location.operations).filter(o => o.phase === 'committed').flatMap(o => o.resourceChanges), directoryChanges: Object.values(location.operations).filter(o => o.phase === 'committed' && o.expectedDirectory !== o.directory).map(o => ({ from: o.expectedDirectory, to: o.directory })), operation: operationId ? Object.hasOwn(location.operations, operationId) ? location.operations[operationId]! : null : location.pending ? location.operations[location.pending] ?? null : null, ...location.conversionIssues?.length ? { conversionIssues: structuredClone(location.conversionIssues) } : {} } }
   async withLock<T>(work: () => Promise<T>): Promise<T> {
     return this.lock(this.locatorPath, work)
+  }
+  /** Read-only original-owner projection, used only by an explicit cold Files mutation. */
+  async retainedFilePaths(): Promise<NotesRetainedFilePaths> {
+    const location = await this.location(), snapshot = this.snapshot(location), operation = snapshot.operation
+    const libraryRoots = [snapshot.directory], catalogs = [snapshot.catalogPath, join(snapshot.directory, NOTEBOOK_ROOT_NAME)]
+    const authorityPaths = [this.locatorPath, this.locatorPath + '.lock']
+    if (operation) {
+      libraryRoots.push(operation.expectedDirectory, operation.directory)
+      catalogs.push(operation.sourceCatalog, join(operation.directory, NOTEBOOK_ROOT_NAME))
+      if (operation.database) authorityPaths.push(operation.database.snapshotPath)
+      for (const file of operation.files) authorityPaths.push(file.source, file.destination, ...(file.preparedSource ? [file.preparedSource] : []), ...(file.backup ? [file.backup] : []))
+    }
+    for (const path of catalogs) authorityPaths.push(...notebookFileAuthorityPaths(path, location.catalogFormat !== 'files'))
+    return { libraryRoots: [...new Set(libraryRoots)], authorityPaths: [...new Set(authorityPaths)] }
   }
   private async lock<T>(path: string, work: () => Promise<T>): Promise<T> {
     return withNotesStorageFileLock(path, work)
