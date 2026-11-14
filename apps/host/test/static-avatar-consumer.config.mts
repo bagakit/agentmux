@@ -12,6 +12,7 @@ const mutations = {
 if (mutant && !(mutant in mutations)) throw Error('Unknown static portrait mutation')
 export default defineConfig({ ...original, cacheDir: resolve(root, '.cache/static-avatar'), plugins: [{
   name: 'original-static-avatar-artwork', enforce: 'pre', resolveId(source) {
+    if (source === '@agentmux/client-ui/theme/model') return resolve(root, 'packages/client-ui/src/theme/model.ts')
     if (source === '@agentmux/client-ui/theme') return resolve(root, 'packages/client-ui/src/theme/index.ts')
     if (source.startsWith('@agentmux/client-ui/note/')) return resolve(root, 'packages/client-ui/src/note', source.slice('@agentmux/client-ui/note/'.length) + '.ts')
     if (source.startsWith('@agentmux/client-ui/components/')) return resolve(root, 'packages/client-ui/src/components', source.slice('@agentmux/client-ui/components/'.length) + '.tsx')

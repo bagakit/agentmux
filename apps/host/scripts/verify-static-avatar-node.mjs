@@ -20,7 +20,7 @@ try {
   const manifest = await readFile(join(client, 'package.json'))
   await writeFile(join(target, 'package.json'), manifest)
   await symlink(join(client, 'node_modules'), join(target, 'node_modules'))
-  const entries = ['lib/agent-avatar-svg.ts', 'lib/mote-avatar-svg.ts', 'lib/space-icon-ids.ts', 'theme/index.ts', 'components/AgentAvatarBadgeIcon.tsx']
+  const entries = ['lib/agent-avatar-svg.ts', 'lib/mote-avatar-svg.ts', 'lib/space-icon-ids.ts', 'theme/model.ts', 'components/AgentAvatarBadgeIcon.tsx']
   const program = ts.createProgram(entries.map(path => join(source, path)), { module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
     target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, strict: true, skipLibCheck: true, esModuleInterop: true,
     rootDir: source, outDir: join(target, 'dist'), noEmitOnError: true, declaration: false, sourceMap: false })
