@@ -27,7 +27,9 @@ export async function createGoalQualifiedPublicFixture(cleanup: Array<() => unkn
   await d.store.compareAndSwapMetadata(session, { ...session, nativeActor: actor, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-D-native' } })
   await d.inner.registry.load('local')
   d.inner.kernel.status = async (id: string) => ({ ...d.run(id), pid: 2345 })
-  const raw = vi.fn(async () => { throw Error('A qualified Goal must never use terminal fallback') }), stop = vi.fn(); d.inner.kernel.input = raw; d.inner.kernel.stop = stop
+  const raw = localMember ? vi.mocked(d.inner.kernel.input as (...args: unknown[]) => Promise<unknown>)
+    : vi.fn(async () => { throw Error('A qualified Goal must never use terminal fallback') })
+  const stop = vi.fn(); d.inner.kernel.input = raw; d.inner.kernel.stop = stop
   const provider = d.client.providers.get('codex'), previous = provider.prepareNativeInput
   const send = vi.fn<NonNullable<Awaited<ReturnType<NonNullable<AgentProvider['prepareNativeInput']>>>>['send']>(async () => ({ outcome: 'admitted', turnId: 'original-public-turn' }))
   provider.prepareNativeInput = async (_context, selected) => ({ plan: { kind: 'native-rpc', protocolId: actor.protocolId, actorId: actor.actorId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]), threadId: selected.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: async () => {}, send, dispose: async () => {} })
@@ -45,7 +47,7 @@ export async function createGoalQualifiedPublicFixture(cleanup: Array<() => unkn
   const configurationPath = join(b.root, 'goal-config.json'); await writeFile(configurationPath, '{}')
   let goalServer!: AgentMuxControlServer
   const runtime = { client: b.client, get server() { return goalServer }, ownerIdentity: () => bOwner } as unknown as AgentMuxHeadlessRuntime
-  const goals = createHostGoals({ configurationPath, runtime: () => runtime, clients: () => [{ hostId: 'D-current', client: configuredD }], projects: async () => [], coreCall: (hostId, method, params, context) => { if (hostId !== 'local') throw Error('No alternate target'); return goalServer.callRpc(method, params, context) } })
+  const goals = createHostGoals({ configurationPath, runtime: () => runtime, clients: () => localMember ? [] : [{ hostId: 'D-current', client: configuredD }], projects: async () => [], coreCall: (hostId, method, params, context) => { if (hostId !== 'local') throw Error('No alternate target'); return goalServer.callRpc(method, params, context) } })
   cleanup.push(() => goals.dispose())
   goalServer = new AgentMuxControlServer({ socketPath, spatialState: spatial, hostedRuntime: () => bHosted, coreClients: () => [{ hostId: 'local', client: b.client }, { hostId: 'D-in-B', client: configuredD }], goalControl: goals.execute, goalDelegations: goals.goalDelegations })
   await goalServer.start(); cleanup.push(() => goalServer.stop())
