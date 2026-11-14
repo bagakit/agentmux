@@ -67,11 +67,11 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ subscribe: () => 
   list: async () => [...bridge.goals.values()],
   recordParticipation: async (id: string) => { const goal = bridge.goals.get(id); if (!goal) throw Error('Unknown original fixture Goal'); return goal }
 }) }))
-vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } profileOfSession() { return undefined } } }))
+vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } onEnvironmentApplicationChange() { return () => {} } profileOfSession() { return undefined } } }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
+vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} async flushProfileActivity() {} } }))
 vi.mock('../../src/main/native-overlay-windows', () => ({ NativeOverlayWindows: class { resourceProcessIds() { return [] } dispose() {} } }))
 vi.mock('../../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 vi.mock('../../src/main/notes-storage-owner', async importOriginal => {
@@ -101,7 +101,7 @@ afterAll(async () => {
 
 export const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'private-agent', run: { runId: 'old-run' } }
 
-export async function owningBridge(actual?: { client: DesktopRuntimeClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[] }, options?: { filesWorkspace?: boolean }) {
+export async function owningBridge(actual?: { client: DesktopRuntimeClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[] }, options?: { filesWorkspace?: boolean; scratchWorkspace?: boolean }) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-first-execution-ipc-"))
   const previousInitializations = new Set(bridge.notesInitializations)
   isolateCoreFixtureEnvironment(actual ? dirname(actual.client.agentMessageQueuePath()) : root)
@@ -109,6 +109,7 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
   bridge.directory = root
   bridge.goals.clear(); for (const goal of actual?.goals ?? []) bridge.goals.set(goal.id, structuredClone(goal))
   await mkdir(join(root, 'Local Storage', 'leveldb'), { recursive: true })
+  if (options?.scratchWorkspace) await mkdir(join(root, 'scratch'))
   const runtime = new RuntimeController(actual?.store ?? new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector, actual?.scratchTopics)
   const durable = { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'codex', executorId: 'private',
     hostId: 'local', workspacePath: _hygiene_fixturePath("private/fixture"), run: control.run, retiredRuns: [],
@@ -131,7 +132,8 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const config: AppConfig = actual?.config ?? { ...structuredClone(DEFAULT_CONFIG), executors: {
     private: { providerId: 'codex', label: 'Private', command: _hygiene_fixturePath("private/codex"), args: [], env: {}, injectAgentMuxGuide: false }
-  }, ...(options?.filesWorkspace ? { workspaces: [{ id: 'private-files', hostId: 'local', path: root, name: 'Private', kind: 'folder' as const }] } : {}) }
+  }, ...(options?.filesWorkspace ? { workspaces: [{ id: 'private-files', hostId: 'local', path: root, name: 'Private', kind: 'folder' as const }] } : {}),
+  ...(options?.scratchWorkspace ? { workspaces: [{ id: '__scratch__', hostId: 'local', path: join(root, 'scratch'), name: 'Topics', kind: 'folder' as const }] } : {}) }
   const flush = vi.fn(() => {})
   const workbenchUserState = new WorkbenchUserStateStore(join(root, 'workbench-user-state.json'))
   const pauseTarget = vi.fn().mockResolvedValue(undefined)
@@ -154,7 +156,7 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
     try { await release?.() } catch (error) { failures.push(error) }
     try { await runtime.dispose() } catch (error) { failures.push(error) }
     try { await rm(root, { recursive: true, force: true }) } catch (error) { failures.push(error) }
-    if (failures.length) throw new AggregateError(failures, 'Private IPC owner cleanup failed')
+    if (failures.length) throw new AggregateError(failures, 'Private IPC owner cleanup failed: ' + failures.flatMap(error => error instanceof AggregateError ? error.errors : [error]).map(error => error instanceof Error ? error.message : String(error)).join('; '))
   })()
   try { release = await registerIpc({ workbenchUserState, appDocumentSources: () => ({ current: { mode: 'prod', filePath: appFilePath }, loading: null }), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,

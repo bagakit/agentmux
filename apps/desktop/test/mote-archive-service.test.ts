@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -102,7 +103,10 @@ it('archive commits inspect only the original Mote and metadata, independent of 
   const { workspace, service, id, directory, key } = await fixture()
   await rm(join(directory, '.agents'), { recursive: true })
   await rm(join(directory, '.agentmux/topic-wiki.md')); await mkdir(join(directory, '.agentmux/topic-wiki.md'))
-  await expect(service.read(workspace, id)).rejects.toThrow()
+  const partial = await service.read(workspace, id)
+  expect(partial?.readError).toContain('.agents:')
+  expect(partial?.readError).toContain('Topic Wiki:')
+  expect(partial?.moteArchive).toEqual({ state: 'active', version: 'unwritten' })
   const archived = await service.setMoteArchived(workspace, id, true, key, 'unwritten')
   expect(archived.state).toBe('archived')
   expect(JSON.parse(await readFile(join(directory, MOTE_STATE_PATH), 'utf8'))).toEqual({ archived: true, version: archived.version })
