@@ -46,8 +46,8 @@
 .focus-agent-reveal > span { min-width: 0; overflow-wrap: anywhere; }
 .focus-agent-reveal > button { flex: none; margin-left: auto; }
 .focus-agent-reveal-card { flex: none; }
-.global-focus-main[data-agent-reveal] > .focus-search-locations, .global-focus-main[data-agent-reveal] > .focus-history-search { flex-shrink: 1; min-height: 0; }
-.global-focus-main[data-agent-reveal] > .focus-search-locations > *, .global-focus-main[data-agent-reveal] > .focus-history-search > * { flex-shrink: 0; }
+.global-focus-main[data-agent-reveal] > .focus-history-search { flex-shrink: 1; min-height: 0; }
+.global-focus-main[data-agent-reveal] > .focus-history-search > * { flex-shrink: 0; }
 .global-focus-main[data-agent-reveal]:not(:has(> .focus-agent-reveal-card)) > .global-board-columns { min-height: min(50%, calc(var(--focus-card-track-height) + 40px)); }
 @container focus-filter-area (max-width: 400px) {
   .focus-source-status { flex: none; }
