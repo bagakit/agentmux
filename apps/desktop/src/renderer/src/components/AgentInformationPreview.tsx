@@ -47,9 +47,9 @@ export function AgentInformationPreviewHost() {
 
 /** Each surface retains its own primary action; only a bounded reading intent is shared. */
 export function useAgentInformationPreview(context: FocusContext | undefined, requested: boolean, identity: FocusContextIdentity | undefined, goalLinks: FocusGoalLinks | undefined,
-  openWorkface: () => void, options?: { readingKey: 'ArrowRight'; readingBranch: { attach(element: HTMLElement): () => void; retainedEscape(event: KeyboardEvent): boolean } }) {
+  openWorkface: () => void, options?: { readingKey?: 'ArrowRight'; readingBranch?: { attach(element: HTMLElement): () => void; retainedEscape(event: KeyboardEvent): boolean }; resolveContext?: () => FocusContext | undefined }) {
   const document = useWorkbenchDocument()
-  const active = useWorkbenchPresentationActive(), enabled = requested && active && Boolean(context)
+  const active = useWorkbenchPresentationActive(), enabled = requested && active && Boolean(context || options?.resolveContext)
   const previewTrigger = useAppStore(state => resolveFocusPreviewTrigger(state.config?.focus?.previewTrigger))
   const anchor = useRef<HTMLButtonElement>(null), token = useRef({}).current, gate = useContext(PointerRestGateContext)
   const invoker = useRef({ hasContext: Boolean(context), pointerInside: false })
@@ -70,12 +70,19 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
     intent.cancel(); keepOpen()
     const trigger = anchor.current
     // Only the transient peek needs an available visible invoker; Agent actions stay independent.
-    if (!enabled || !context || !trigger?.isConnected || trigger.closest('[inert]') || !workbenchDocumentVisible(document)) return false
-    return agentInformationPreview.show({ token, id, context, identity, goalLinks, anchor: trigger, openWorkface, enterReading, keepOpen, readingBranch: options?.readingBranch,
+    if (!enabled || !trigger?.isConnected || trigger.closest('[inert]') || !workbenchDocumentVisible(document)) return false
+    const currentContext = options?.resolveContext ? options.resolveContext() : context
+    if (!currentContext) return false
+    return agentInformationPreview.show({ token, id, context: currentContext, identity, goalLinks, anchor: trigger, openWorkface, enterReading, keepOpen, readingBranch: options?.readingBranch,
       restoreFocus() {
         if (!trigger.isConnected || trigger.closest('[inert]')) return
         suppressRestoredFocus(); trigger.focus({ preventScroll: true })
       } })
+  }
+  function read() {
+    const reader = document.getElementById(id)?.querySelector<HTMLElement>('.agent-information-reader__reading')
+    if (reader) { intent.cancel(); keepOpen(); reader.focus({ preventScroll: true }); return true }
+    return show(true)
   }
   function showSoon() { intent.cancel(); keepOpen(); if (enabled && previewTrigger !== 'keyboard' && agentInformationPreview.schedule(token, intent.cancel)) intent.schedule() }
   // A pointer entry on a moving surface waits for its rest, then reads this render's intent.
@@ -107,15 +114,13 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
     onPointerEnter={close} onPointerLeave={event => {
       if (event.relatedTarget && (event.relatedTarget as Node).nodeType && anchor.current?.contains(event.relatedTarget as Node)) pointerShowSoon()
     }}><WorkbenchTopology tabs={identity.tabs} interactive={false} enabled={enabled && !open} /></span> : undefined
-  return { anchor, position, describedBy: open ? id : undefined, close, suppressRestoredFocus,
+  return { anchor, position, describedBy: open ? id : undefined, close, read, suppressRestoredFocus,
     triggerEvents: { 'aria-keyshortcuts': enabled ? options?.readingKey ?? 'ArrowDown' : undefined,
       onPointerEnter: () => { invoker.current.pointerInside = true; pointerShowSoon() }, onPointerLeave: () => { invoker.current.pointerInside = false; if (anchor.current) gate.leave(anchor.current); hideSoon() },
       onFocus: () => { if (previewTrigger !== 'keyboard' && !restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close,
       onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
         if (event.key !== (options?.readingKey ?? 'ArrowDown') || !enabled) return
-        const reader = document.getElementById(id)?.querySelector<HTMLElement>('.agent-information-reader__reading')
-        if (reader) { event.preventDefault(); keepOpen(); reader.focus({ preventScroll: true }) }
-        else if (show(true)) event.preventDefault()
+        if (read()) event.preventDefault()
       } }
   }
 }

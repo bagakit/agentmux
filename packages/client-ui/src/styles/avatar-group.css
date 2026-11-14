@@ -2,6 +2,7 @@
 .avatar-group__item, .avatar-group__more { display: inline-flex; align-items: center; justify-content: center; flex: none; position: relative; width: var(--avatar-group-size); height: var(--avatar-group-size); border-radius: 50%; background: var(--avatar-group-surface, var(--surface-1)); box-shadow: 0 0 0 1.5px var(--avatar-group-surface, var(--surface-1)); }
 .avatar-group > :not(:first-child) { margin-left: -4px; }
 .avatar-group__item { animation: avatar-group-appear var(--dur-fast, 160ms) ease-out 1; }
+.avatar-group__item:focus-within, .avatar-group__item:hover, .avatar-group__more:focus-within { z-index: 1; }
 .avatar-group__more { width: auto; min-width: var(--avatar-group-size); box-sizing: border-box; padding-inline: 4px; background: var(--surface-2); color: var(--text-2); font: 600 var(--fs-meta, 11px)/1 var(--font-sans); font-variant-numeric: tabular-nums; }
 @keyframes avatar-group-appear { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .avatar-group__item { animation: none; } }

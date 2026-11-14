@@ -406,7 +406,9 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     else close(true)
   }
   useEffect(() => {
-    const outside = (event: Event) => { if (!panel.current?.contains(event.target as Node)) agentInformationPreview.dismiss(request.token) }
+    const outside = (event: Event) => {
+      if (!panel.current?.contains(event.target as Node) && !request.anchor.contains(event.target as Node)) agentInformationPreview.dismiss(request.token)
+    }
     const detachBranch = panel.current ? request.readingBranch?.attach(panel.current) : undefined
     document.addEventListener('keydown', escapeReading)
     document.addEventListener('pointerdown', outside, true)
