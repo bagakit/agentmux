@@ -76,3 +76,11 @@ Creation, input, actual work and inspection completion remain separate facts.
 
 Read amux goal create --help only when creating or promoting a Goal; that leaf owns the
 exact scope, confirmation and source contract.
+
+`goal activity` returns a limited tail plus coverage: original Goal order then append order,
+matching Goal and activity counts, limit and truncation. It never claims the tail is full history.
+For one Goal use `goal activity history --goal ID [--limit N] [--cursor FILE|-]`. Save the whole
+nextCursor unchanged. Its Goal/through/before activity IDs bind a fixed original append-order cut;
+new appends do not enter later pages. Missing anchors explicitly expire the read; begin a new read
+only when intended. Empty history is an explicit zero-count page. Original full SDK activity reads
+keep their semantics, and no history inspection appends an event or replays a business operation.
