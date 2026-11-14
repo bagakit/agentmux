@@ -5,7 +5,6 @@ import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSu
 import { FocusProjectLanes } from '../src/renderer/src/components/FocusProjectLanes'
 import { FocusScanLaneContent } from '../src/renderer/src/components/FocusScanLaneContent'
 import { FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
-import { FocusProjectPreferences } from '../src/renderer/src/components/FocusProjectPreferences'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { applyConfigEdit } from '../src/shared/config-edit'
@@ -48,18 +47,16 @@ it('actual project scan defaults to tags, shares one state rail and switches sec
  expect(frame.querySelectorAll('[data-focus-zone-section]')).toHaveLength(0)
  const a=card('task-a'), b=card('task-b'); expect(a).not.toBeNull(); expect(b).not.toBeNull()
  expect(frame.querySelector('[data-focus-zone-id] button[data-focus-project-scope-control]')).not.toBeNull()
- await click('Project preferences · Original project')
- expect(document.querySelector('button[data-focus-zone-presentation="cards"]')?.getAttribute('aria-pressed')).toBe('true')
- expect(document.querySelector('.focus-project-preferences__default')?.textContent).toContain('Tags')
- await mode('sections'); expect(frame.dataset.focusZonePresentation).toBe('cards') // Explicit Save, not autosave.
- await click('Save project preferences')
+ expect(frame.querySelector('button[data-focus-zone-presentation="cards"]')?.getAttribute('aria-pressed')).toBe('true')
+ expect(frame.querySelector('[aria-label="Default Zone layout · Original project"]')?.getAttribute('title')).toContain('Tags')
+ await mode('sections')
  expect(frame.dataset.focusZonePresentation).toBe('sections'); expect(frame.querySelector('[data-focus-zone-tags]')).toBeNull()
  expect(frame.querySelectorAll('[data-focus-zone-section]')).toHaveLength(3)
  expect(card('task-a')).toBe(a); expect(card('task-b')).toBe(b)
  expect(useAppStore.getState().config?.focus?.zonePresentations).toEqual([{key:zoneKey,presentation:'sections'}])
  expect(useAppStore.getState().config?.focus?.projects).toEqual(original.config?.focus?.projects)
  for(const key of ['sessions','tabs','layouts','agentFocus','agentComposerDrafts'] as const)expect(useAppStore.getState()[key]).toBe(original[key])
- await click('Project preferences · Original project'); await mode('cards'); await click('Save project preferences')
+ await mode('cards')
  expect(frame.dataset.focusZonePresentation).toBe('cards'); expect(card('task-a')).toBe(a)
 })
 
@@ -78,63 +75,56 @@ it('an unconfigured Collection uses sections and its original preferences presen
  expect(frame.dataset.focusZonePresentation).toBe('sections')
  expect(frame.querySelectorAll('[data-focus-topic-section]')).toHaveLength(2)
  expect(frame.querySelector('[data-focus-zone-footer]')).toBeNull()
- await click('Container preferences · Research')
- expect(document.querySelector('button[data-focus-zone-presentation="sections"]')?.getAttribute('aria-pressed')).toBe('true')
- expect(document.querySelector('.focus-project-preferences__default')?.textContent).toContain('Sections')
+ expect(frame.querySelector('button[data-focus-zone-presentation="sections"]')?.getAttribute('aria-pressed')).toBe('true')
+ expect(frame.querySelector('[aria-label="Default Zone layout · Research"]')?.getAttribute('title')).toContain('Sections')
  expect(useAppStore.getState().config?.focus?.topicPresentation).toBeUndefined()
  expect(useAppStore.getState().config?.focus?.zonePresentations).toBeUndefined()
 })
 it('actual Collection retains authored global choice, then exact override and default reset use the same original Topic cards',async()=>{
  configSave(); const frame=await collection(true,false,'cards'); expect(frame.dataset.focusZonePresentation).toBe('cards')
  const a=card('task-Alpha'); expect(a).not.toBeNull(); expect(frame.querySelectorAll('[data-focus-zone-footer]')).toHaveLength(2)
- await click('Container preferences · Research'); await mode('sections'); await click('Save container preferences')
+ await mode('sections')
  expect(frame.dataset.focusZonePresentation).toBe('sections'); expect(card('task-Alpha')).toBe(a)
  expect(frame.querySelectorAll('[data-focus-topic-id]')).toHaveLength(2)
  expect(useAppStore.getState().config?.focus?.topicPresentation).toBe('cards')
- await click('Container preferences · Research')
- const reset=[...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.startsWith('Default ·'))!; await act(async()=>reset.click()); await click('Save container preferences')
+ await click('Default Zone layout · Research')
  expect(frame.dataset.focusZonePresentation).toBe('cards'); expect(useAppStore.getState().config?.focus?.zonePresentations).toEqual([])
  expect(card('task-Alpha')).toBe(a)
 })
 it('unknown and multiple original Collections never save a guessed unique identity and keep original members available',async()=>{
  const frame=await collection(false,true)
  expect(frame.dataset.focusContainerKey).toBeUndefined(); expect(frame.dataset.focusZonePresentation).toBe('sections'); expect(card('task-Beta')).not.toBeNull()
- await click('Container preferences · Research'); expect(document.querySelector('button[data-focus-zone-presentation]')).toBeNull()
- expect(document.querySelector('[data-focus-project-preferences]')?.textContent).toContain('one confirmed Collection')
+ expect(frame.querySelector('button[data-focus-zone-presentation]')).toBeNull()
+ expect(frame.querySelector('.focus-zone-layout__unavailable')?.getAttribute('title')).toContain('one confirmed Collection')
 })
-it('real mounted project merges another container and unrelated project note while keeping same-container conflict and draft for explicit review',async()=>{
- configSave(); await scene(); await click('Project preferences · Original project'); await mode('sections')
+it('real mounted header merges another container and a concurrent project note without writing the unrelated fields',async()=>{
+ await scene()
  const state=useAppStore.getState(), other={key:focusZoneContainerKey('collection','remote','other'),presentation:'sections' as const}
- await act(async()=>useAppStore.setState({config:{...state.config!,focus:{...state.config!.focus!,zonePresentations:[other],projects:[{...state.config!.focus!.projects![0]!,note:'Concurrent note'}]}}}))
- await click('Save project preferences')
+ vi.spyOn(api.config,'save').mockImplementationOnce(async(next,expected)=>{
+  const current={...state.config!,focus:{...state.config!.focus!,zonePresentations:[other],projects:[{...state.config!.focus!.projects![0]!,note:'Concurrent note'}]}}
+  useAppStore.setState({config:current})
+  const saved=applyConfigEdit(current,expected!,next); useAppStore.setState({config:saved}); return saved
+ })
+ await mode('sections')
  expect(useAppStore.getState().config?.focus?.zonePresentations).toEqual([other,{key:zoneKey,presentation:'sections'}]); expect(useAppStore.getState().config?.focus?.projects?.[0]?.note).toBe('Concurrent note')
 })
 it('invalid identities or mode fields are refused without guessing another container',()=>{
  for(const value of [[{key:'["local","root"]',presentation:'cards'}],[{key:zoneKey,presentation:'tags'}],[{key:zoneKey,presentation:'cards',extra:1}],[{key:zoneKey,presentation:'cards'},{key:zoneKey,presentation:'sections'}]])expect(()=>parseFocusZonePresentations(value)).toThrow()
 })
 
-it('a same-container conflicting save keeps the selected draft and explicit review retries only that choice',async()=>{
- configSave(); await scene(); await click('Project preferences · Original project'); await mode('sections')
- const state=useAppStore.getState()
- await act(async()=>useAppStore.setState({config:{...state.config!,focus:{...state.config!.focus!,zonePresentations:[{key:zoneKey,presentation:'cards'}]}}}))
- await click('Save project preferences')
- expect(document.querySelector('[data-focus-project-preferences] [role="status"]')?.textContent).toContain('changed since')
- expect(document.querySelector('button[data-focus-zone-presentation="sections"]')?.getAttribute('aria-pressed')).toBe('true')
- await click('Review current project preferences'); await click('Save project preferences')
+it('a conflicting header save keeps its intent for explicit review and retry instead of silently overwriting the original container',async()=>{
+ await scene()
+ const save=configSave(), implementation=save.getMockImplementation()!
+ save.mockImplementationOnce(async(next,expected)=>{
+  const state=useAppStore.getState(); useAppStore.setState({config:{...state.config!,focus:{...state.config!.focus!,zonePresentations:[{key:zoneKey,presentation:'cards'}]}}})
+  return implementation(next,expected)
+ })
+ await mode('sections')
+ const status=dom.container.querySelector('.focus-zone-layout__status')!
+ expect(status.textContent).toContain('changed since'); expect(status.textContent).toContain('Requested: Sections')
+ expect(useAppStore.getState().config?.focus?.zonePresentations).toEqual([{key:zoneKey,presentation:'cards'}])
+ await click('Review current layout'); await click('Retry layout')
  expect(useAppStore.getState().config?.focus?.zonePresentations).toEqual([{key:zoneKey,presentation:'sections'}])
-})
-it('an older Zone save cannot close a reopened panel or overwrite its later mode and focused note',async()=>{
- let resolve!:(value:AppConfig)=>void
- const pending=new Promise<AppConfig>(done=>{resolve=done})
- vi.spyOn(api.config,'save').mockImplementation(async()=>pending)
- await scene('sections'); const before=useAppStore.getState().config!
- await click('Project preferences · Original project'); await mode('cards'); await click('Save project preferences')
- await click('Cancel'); await click('Project preferences · Original project'); await mode('sections')
- const input=document.querySelector<HTMLInputElement>('[aria-label="Project note"]')!; await act(async()=>input.focus())
- await act(async()=>resolve({...before,focus:{...before.focus!,zonePresentations:[{key:zoneKey,presentation:'cards'}]}}))
- expect(document.querySelector('[data-focus-project-preferences]')).not.toBeNull()
- expect(document.querySelector('button[data-focus-zone-presentation="sections"]')?.getAttribute('aria-pressed')).toBe('true')
- expect(document.activeElement).toBe(input)
 })
 it('one original Context in two worktree Zones keeps both exact actionable labels and another Host does not borrow the override',async()=>{
  const contexts=[agentContextForSession({...composerSession('shared'),label:'One original task',status:{state:'working',source:'native-hook',observedAt:Date.now()}},undefined,undefined,undefined,null)]

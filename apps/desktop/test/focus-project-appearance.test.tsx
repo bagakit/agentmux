@@ -31,7 +31,7 @@ async function scene() {
     status: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now() } }))
   const tabs = Object.fromEntries(workspaces.map(workspace => { const tab = createWorkbenchTab('tab-' + workspace.id,
     { kind: 'agent', phase: 'attached', regionId: 'r-' + workspace.id, workspaceId: workspace.id, sessionId: 'task-' + workspace.id }); return [tab.id, tab] }))
-  useAppStore.setState({ config: { ...composerConfig, workspaces, focus: { recentActivityHours: 48, projects: [{ key: key('root'), pinned: true, note: 'My project route', color: 'blue', collapsed: null }] } },
+  useAppStore.setState({ config: { ...composerConfig, workspaces, focus: { recentActivityHours: 48, zonePresentations: [{ key: JSON.stringify(['project', 'local', 'root']), presentation: 'sections' }], projects: [{ key: key('root'), pinned: true, note: 'My project route', color: 'blue', collapsed: null }] } },
     mainSurface: 'agents', sessions, tabs, layouts: Object.fromEntries(workspaces.map(workspace => [workspace.id, createWorkspaceLayout('g-' + workspace.id, ['tab-' + workspace.id])])),
     timelines: {}, agentNames: {}, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   vi.spyOn(api.spatial, 'read').mockImplementation(async () => ({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), []) }))
