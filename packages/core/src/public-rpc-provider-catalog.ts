@@ -1,10 +1,12 @@
+import { isAbsolute } from 'node:path'
+import { AGENT_PROVIDER_ACP_PROBE_FAILURES, type AgentProviderAcpProbe } from './agent-provider-acp-probe.js'
 import { RISK_TIERS } from './risk-tier.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import type { AgentCatalogEntry } from './types.js'
 import type { LaunchOption } from './agent-launch-option.js'
 
-export const PROVIDER_CATALOG_METHODS = { 'agent.provider.ls': 'long' } as const
+export const PROVIDER_CATALOG_METHODS = { 'agent.provider.ls': 'long', 'agent.provider.probe': 'long' } as const
 export type ProviderCatalogMethod = keyof typeof PROVIDER_CATALOG_METHODS
 export type ProviderCatalogQuery = { hostId: string; providerId?: string }
 export type ProviderCatalogObservation = {
@@ -14,12 +16,67 @@ export type ProviderCatalogObservation = {
   observedAt: number
   catalog: AgentCatalogEntry[]
 }
-export type ProviderCatalogParamsMap = { 'agent.provider.ls': ProviderCatalogQuery }
-export type ProviderCatalogResultMap = { 'agent.provider.ls': ProviderCatalogObservation }
+export type ProviderProbeTarget = { runtimeId: string; executorId: string; configRevision: string; workspacePath: string }
+export type ProviderProbeQuery = ProviderProbeTarget & { hostId: string }
+export type ProviderProbeObservation = AgentProviderAcpProbe & ProviderProbeTarget & { routeHostId: string; providerId: string }
+export type ProviderCatalogParamsMap = { 'agent.provider.ls': ProviderCatalogQuery; 'agent.provider.probe': ProviderProbeQuery }
+export type ProviderCatalogResultMap = { 'agent.provider.ls': ProviderCatalogObservation; 'agent.provider.probe': ProviderProbeObservation }
 export function parseProviderCatalogQuery(value: unknown): ProviderCatalogQuery {
   const p = rpcRecord(value, ['hostId', 'providerId'])
   return { hostId: rpcString(p.hostId, 'Exact route Host ID'),
     ...(p.providerId === undefined ? {} : { providerId: rpcString(p.providerId, 'Provider ID') }) }
+}
+
+export function parseProviderProbeQuery(value: unknown): ProviderProbeQuery {
+  const p = rpcRecord(value, ['hostId', 'runtimeId', 'executorId', 'configRevision', 'workspacePath'])
+  const workspacePath = rpcString(p.workspacePath, 'Original workspace directory')
+  if (!isAbsolute(workspacePath)) throw new AgentMuxError('Choose an absolute workspace directory on the original Host.', 'INVALID_CONTROL_REQUEST')
+  return { hostId: rpcString(p.hostId, 'Exact route Host ID'), runtimeId: rpcString(p.runtimeId, 'Original Runtime ID'),
+    executorId: rpcString(p.executorId, 'Original Executor ID'), configRevision: rpcString(p.configRevision, 'Original Executor revision'), workspacePath }
+}
+
+export function parseProviderProbeObservation(value: unknown, query: ProviderProbeQuery): ProviderProbeObservation {
+  const p = rpcRecord(value, ['routeHostId', 'runtimeId', 'executorId', 'configRevision', 'workspacePath', 'providerId', 'handshake', 'service'], 'CONTROL_PROTOCOL_ERROR')
+  if (p.routeHostId !== query.hostId || p.runtimeId !== query.runtimeId || p.executorId !== query.executorId ||
+      p.configRevision !== query.configRevision || p.workspacePath !== query.workspacePath) probeInvalid()
+  wireString(p.providerId)
+  let lists = false
+  if (p.handshake !== null) {
+    const handshake = rpcRecord(p.handshake, ['protocolVersion', 'sessions', 'prompt'], 'CONTROL_PROTOCOL_ERROR')
+    if (handshake.protocolVersion !== 1) probeInvalid()
+    const sessions = requireFlags(handshake.sessions, ['list', 'load', 'resume', 'close', 'additionalDirectories'])
+    requireFlags(handshake.prompt, ['image', 'audio', 'embeddedContext'])
+    lists = sessions.list === true
+  }
+  const service = rpcRecord(p.service, ['state', 'stage', 'reason', 'rpcCode'], 'CONTROL_PROTOCOL_ERROR')
+  switch (service.state) {
+    case 'unsupported':
+      if (service.stage !== (p.handshake === null ? 'provider' : 'session/list') || lists || Object.keys(service).length !== 2) probeInvalid()
+      break
+    case 'ready':
+      if (!lists || service.stage !== 'session/list' || Object.keys(service).length !== 2) probeInvalid()
+      break
+    case 'authentication-required':
+      if (!lists || service.stage !== 'session/list' || service.rpcCode !== -32000 || Object.keys(service).length !== 3) probeInvalid()
+      break
+    case 'unconfirmed':
+      if (p.handshake === null ? service.stage !== 'launch' && service.stage !== 'initialize' : !lists || service.stage !== 'session/list') probeInvalid()
+      if (!AGENT_PROVIDER_ACP_PROBE_FAILURES.includes(service.reason as typeof AGENT_PROVIDER_ACP_PROBE_FAILURES[number]) ||
+          (service.reason === 'rpc-error' ? !Number.isSafeInteger(service.rpcCode) : Object.hasOwn(service, 'rpcCode'))) probeInvalid()
+      break
+    default: probeInvalid()
+  }
+  return structuredClone(p) as unknown as ProviderProbeObservation
+}
+
+function requireFlags(value: unknown, keys: string[]): Record<string, unknown> {
+  const p = rpcRecord(value, keys, 'CONTROL_PROTOCOL_ERROR')
+  if (keys.some(key => typeof p[key] !== 'boolean')) probeInvalid()
+  return p
+}
+
+function probeInvalid(): never {
+  throw new AgentMuxError('The original Host returned an invalid or mismatched ACP probe observation.', 'CONTROL_PROTOCOL_ERROR')
 }
 
 /** Validate the DESCRIBE projection, never private launch/keystroke declarations. */

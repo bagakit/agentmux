@@ -64,6 +64,8 @@ import type {
   NormalizedHookEvent
 } from './types.js'
 
+import type { AgentProviderAcpProbe, AgentProviderAcpProbeContext } from './agent-provider-acp-probe.js'
+
 export type AgentExecutableProbe = {
   hasExecutable(executable: string): Promise<boolean>
   /** Optional richer Host observation. Providers keep unsupported capabilities independent of it. */
@@ -230,6 +232,8 @@ export type AgentProvider = {
   inspectHookActivation?(context: AgentProviderHookActivationContext): Promise<AgentProviderHookActivation>
   /** Pre-accept the Provider's folder-trust prompt for an AgentMux-owned home, as a person would. */
   prepareOwnedWorkspaceTrust?(context: AgentWorkspaceTrustContext): Promise<AgentWorkspaceTrustReceipt>
+  /** Observe the selected CLI’s ACP endpoint without creating or loading a Session. */
+  probeAcp?(context: AgentProviderAcpProbeContext): Promise<AgentProviderAcpProbe>
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
@@ -296,6 +300,7 @@ export type AgentProviderDefinition = {
   planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
   inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
   prepareOwnedWorkspaceTrust?: AgentProvider['prepareOwnedWorkspaceTrust']
+  probeAcp?: AgentProvider['probeAcp']
   buildResumeArgs?: (
     sessionId: string,
     transcriptPath: string | undefined,
@@ -553,6 +558,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
     ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),
+    ...(definition.probeAcp ? { probeAcp: definition.probeAcp } : {}),
     ...(definition.prepareOwnedWorkspaceTrust ? { prepareOwnedWorkspaceTrust: definition.prepareOwnedWorkspaceTrust } : {}),
     ...(definition.buildForkArgs ? { buildForkLaunch(context: AgentProviderForkContext): AgentLaunchPlan {
       const handle = context.nativeHandle

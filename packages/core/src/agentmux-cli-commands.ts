@@ -1,3 +1,4 @@
+import { parseProviderProbeQuery } from './public-rpc-provider-catalog.js'
 import { parseAgentTakeoverCancellation } from './agent-takeover-cancellation.js'
 import { parseGoalInputEpochInput } from './goal-input-epoch.js'
 import { parseBrowserProfileStoragePayload } from './browser-profile-storage.js'
@@ -422,6 +423,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.provider.ls', '--host ID [--provider ID]', 'Read pure Provider declarations from one exact Host without probing or starting Native.',
     { '--host': 'data', '--provider': 'data' }, f => ({ hostId: id(f, '--host'), ...(f.values.has('--provider') ? { providerId: id(f, '--provider') } : {}) }),
     'local means the receiving service. catalog=[] is a confirmed empty result; an unavailable source is an error. runtimeId may be null. Posture modes and launch options are declarations, not current permissions, installation or readiness. Private argv and keystrokes remain with the Provider.'),
+  command('agent.provider.probe', '--host ID --runtime ID --executor ID --config-revision REVISION --workspace PATH',
+    'Explicitly check ACP handshake and session listing on the selected Host Executor.',
+    { '--host': 'data', '--runtime': 'data', '--executor': 'data', '--config-revision': 'data', '--workspace': 'data' }, f =>
+      parseProviderProbeQuery({ hostId: id(f, '--host'), runtimeId: id(f, '--runtime'), executorId: id(f, '--executor'),
+        configRevision: id(f, '--config-revision'), workspacePath: value(f, '--workspace', true) }),
+    'Use runtimeId, executorId and configRevision from settings executors discover. The workspace must be an existing absolute directory on that Host. This starts a disposable protocol check for a transport-approved person or device. It leaves Sessions untouched, sends no prompt and returns no native records or credentials.'),
   command('agent.ls', '[--session ID] [--executor ID] [--provider ID] [--status VALUE] [--semantic VALUE] [--readiness VALUE] [--activity-since N] [--since N] [--cursor CURSOR] [--limit N]', 'Discover all original states with bounded status reads, retained unavailable identities and explicit continuation.',
     { '--session': 'data', '--executor': 'data', '--provider': 'data', '--status': 'value', '--semantic': 'value', '--readiness': 'value', '--activity-since': 'value', '--since': 'value', '--cursor': 'data', '--limit': 'value' },
     f => parseAgentDiscoveryFilters({ ...fields(f, { '--session': 'agentSessionId', '--executor': 'executorId', '--provider': 'providerId', '--status': 'status', '--semantic': 'semantic', '--readiness': 'readiness', '--cursor': 'cursor' }),

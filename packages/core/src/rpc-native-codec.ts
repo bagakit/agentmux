@@ -25,7 +25,7 @@ import { parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from '
 import { parseNotesStorageParams, parseNotesStorageInspection, parseNotesStorageOperationInspection } from './public-rpc-notes-storage.js'
 import { parsePostureInspect, parsePostureSet, parsePostureInspection, parsePostureSetResult } from './agent-posture.js'
 import { parseTerminalInspection, parseTerminalTarget, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
-import { parseProviderCatalogQuery, parseProviderCatalogObservation } from './public-rpc-provider-catalog.js'
+import { parseProviderCatalogQuery, parseProviderCatalogObservation, parseProviderProbeQuery, parseProviderProbeObservation } from './public-rpc-provider-catalog.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { hostedSessionProjection, hostedSessionIds } from './hosted-session-summary.js'
@@ -496,6 +496,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'settings.hosts.tailcat.inspect' || method === 'settings.hosts.tailcat.configure') return parseTailcatConfigurationResult(method, value, parseTailcatConfigurationParams(method, params)) as unknown as Record<string, unknown>
     if (isStorageRecoveryMethod(method)) return parseStorageRecoveryResult(method, value, parseStorageRecoveryParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'notebook.storage.inspect' || method === 'notebook.storage.change') return parseNotesStorageInspection(value, parseNotesStorageParams(method, params).operationId) as unknown as Record<string, unknown>
+    if (method === 'agent.provider.probe') return parseProviderProbeObservation(value, parseProviderProbeQuery(params)) as unknown as Record<string, unknown>
     if (method === 'agent.provider.ls') return parseProviderCatalogObservation(value, parseProviderCatalogQuery(params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'agent.open.describe') return parseAgentOpenDescription(value, parseAgentOpenDescribe(params)) as unknown as Record<string, unknown>

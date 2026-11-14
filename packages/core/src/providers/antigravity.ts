@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { readAntigravitySessionHistoryPage } from './antigravity-native-history.js'
 import { discoverAntigravityNativeSession, observeAntigravitySessionHistory } from './antigravity-native-session.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
+import { probeAntigravityAcp } from './antigravity-acp-probe.js'
 import { ANTIGRAVITY_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
@@ -85,6 +86,7 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string, e
 
 export function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    probeAcp: probeAntigravityAcp,
     discoverNativeSession: discoverAntigravityNativeSession,
     readSessionHistoryPage: readAntigravitySessionHistoryPage,
     observeSessionHistory: observeAntigravitySessionHistory,

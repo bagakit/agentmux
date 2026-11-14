@@ -692,6 +692,37 @@ export class AgentMuxClient {
       ...(input?.executorId === executor.executorId ? { creationContract: { ordinaryLaunch: 1 as const } } : {}) })) }
   }
 
+  /** Probe one saved invocation on its executing Host without touching existing Sessions or Runs. */
+  async probeHostExecutorAcp(target: import('./public-rpc-provider-catalog.js').ProviderProbeTarget,
+    options: { signal?: AbortSignal; assertCurrent?(): void | Promise<void> } = {}):
+    Promise<import('./agent-provider-acp-probe.js').AgentProviderAcpProbe & typeof target & { providerId: string }> {
+    const owner = this.hostExecutorOwner
+    if (!owner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    const assertTarget = async () => {
+      options.signal?.throwIfAborted()
+      const current = await owner.list({ executorId: target.executorId })
+      if (current.runtimeId !== target.runtimeId) throw new AgentMuxError('The original execution Host changed. Refresh its Executor inventory.', 'EXECUTOR_HOST_CHANGED')
+      if (current.executors[0]?.configRevision !== target.configRevision) throw new AgentMuxError(
+        'The selected Host Executor configuration changed. Refresh its inventory and retry the probe.', 'EXECUTOR_CONFIGURATION_CHANGED')
+    }
+    await assertTarget()
+    if (!isAbsolute(target.workspacePath) || !(await stat(target.workspacePath).catch(() => null))?.isDirectory()) {
+      throw new AgentMuxError('Choose an existing absolute workspace directory on the original Host.', 'ACP_PROBE_WORKSPACE_UNAVAILABLE')
+    }
+    await this.prepareExecutionEnvironment({ refresh: true })
+    const { config, descriptor } = await owner.resolve(target.executorId)
+    if (descriptor.configRevision !== target.configRevision) throw new AgentMuxError(
+      'The selected Host Executor configuration changed. Refresh its inventory and retry the probe.', 'EXECUTOR_CONFIGURATION_CHANGED')
+    const provider = this.providers.get(config.providerId)
+    await options.assertCurrent?.()
+    options.signal?.throwIfAborted()
+    const result = provider.probeAcp ? await provider.probeAcp({ command: config.command, args: config.args,
+      env: config.env, workspacePath: target.workspacePath, ...(options.signal ? { signal: options.signal } : {}) })
+      : { handshake: null, service: { state: 'unsupported', stage: 'provider' } } as const
+    await assertTarget()
+    return { ...result, ...target, providerId: provider.id }
+  }
+
   /** Diagnose or explicitly update the selected executing Host's saved configuration. */
   async maintainHostExecutorHooks(input: AgentHostExecutorHookTarget, update = false): Promise<AgentHostExecutorHookResult> {
     const owner = this.hostExecutorOwner

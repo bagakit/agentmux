@@ -24,7 +24,7 @@ import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlI
 import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult, parseFileMoveParams, parseFileMoveResult, parseFileDeleteParams, parseFileDeleteResult, parseFileDeleteSnapshotsParams, parseFileDeleteSnapshotsResult } from './public-rpc-file-path.js'
 import { parseGoalActivityHistoryParams, pageGoalActivity } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, notesStorageOperationInspection, type NotesStorageMethod, type NotesStoragePort } from './public-rpc-notes-storage.js'
-import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
+import { parseProviderCatalogQuery, parseProviderCatalogObservation, parseProviderProbeQuery, parseProviderProbeObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { SPACE_MEMBER_NATIVE_MAIL_CALLS } from './space-member.js'
 import { parseMessageParticipantSelection } from './agent-message-query.js'
@@ -218,6 +218,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'removeHostExecutor' | 'hostEnvironment'> & {
     maintainHostExecutorHooks?: AgentMuxClient['maintainHostExecutorHooks']
+    probeHostExecutorAcp?: AgentMuxClient['probeHostExecutorAcp']
     stopAgent?: AgentMuxClient['stopAgent']
     controlTerminal?: AgentMuxClient['controlTerminal']
     inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
@@ -2051,6 +2052,46 @@ export class AgentMuxRpcService {
         : (() => { throw new AgentMuxError('The original Notes storage owner is unavailable. Keep the original operation and Notes directory; this call did not move or convert files.', 'CONTROL_UNAVAILABLE') })()
       return parseNotesStorageInspection(result, input.operationId) as AgentMuxRpcResult<M>
     }
+    if (method === 'agent.provider.probe') {
+      const query = parseProviderProbeQuery(params)
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind)) {
+        throw new AgentMuxError('An ACP probe requires a transport-approved person or device to run the selected Executor.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const source = async () => (await this.clients(query.hostId, { signal: context.signal })).filter(entry => entry.hostId === query.hostId)
+      const targets = await source()
+      context.signal?.throwIfAborted()
+      if (!targets.length && this.ports.forwardControl) {
+        return parseProviderProbeObservation(await this.ports.forwardControl<'agent.provider.probe'>('agent.provider.probe', query, context), query) as AgentMuxRpcResult<M>
+      }
+      if (targets.length !== 1) throw new AgentMuxError('The exact ACP probe Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
+      const client = targets[0]!.client
+      const config = structuredClone(this.ports.hostConfiguration?.(query.hostId) ?? null)
+      const assertRoute = async () => {
+        const current = await source()
+        if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(config, this.ports.hostConfiguration?.(query.hostId) ?? null)) {
+          throw new AgentMuxError('The original ACP probe Host route changed. Refresh the exact Host and retry.', 'HOST_CONFIGURATION_CHANGED')
+        }
+        context.signal?.throwIfAborted()
+        await context.assertCurrent?.()
+      }
+      if (this.ports.callOriginalCore || client.forwardRpc) {
+        const original = { ...query, hostId: 'local' }
+        const originalContext = await this.inputForwardContext(context)
+        await assertRoute()
+        const result = this.ports.callOriginalCore
+          ? await this.ports.callOriginalCore(query.hostId, 'agent.provider.probe', original, originalContext)
+          : await client.forwardRpc!('agent.provider.probe', original, originalContext)
+        await assertRoute()
+        return parseProviderProbeObservation({ ...parseProviderProbeObservation(result, original), routeHostId: query.hostId }, query) as AgentMuxRpcResult<M>
+      }
+      if (!client.probeHostExecutorAcp) throw new AgentMuxError('This Host does not expose the ACP probe.', 'CONTROL_UNAVAILABLE')
+      const { hostId, ...target } = query
+      const result = await client.probeHostExecutorAcp(target, {
+        ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { await assertRoute(); await this.assertRuntimeFence(context) }
+      })
+      await assertRoute()
+      return parseProviderProbeObservation({ ...result, routeHostId: hostId }, query) as AgentMuxRpcResult<M>
+    }
     if (method === 'agent.provider.ls') {
       const query = parseProviderCatalogQuery(params)
       // A declaration read never creates the service's lazy SDK/Native connection, including caller admission.
@@ -2059,7 +2100,7 @@ export class AgentMuxRpcService {
       const targets = (await this.clients()).filter(entry => entry.hostId === query.hostId)
       context.signal?.throwIfAborted()
       if (!targets.length && this.ports.forwardControl) {
-        return parseProviderCatalogObservation(await this.ports.forwardControl<ProviderCatalogMethod>(method, query, context), query) as AgentMuxRpcResult<M>
+        return parseProviderCatalogObservation(await this.ports.forwardControl<'agent.provider.ls'>('agent.provider.ls', query, context), query) as AgentMuxRpcResult<M>
       }
       if (targets.length !== 1) throw new AgentMuxError('The exact Provider source Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       const client = targets[0]!.client
