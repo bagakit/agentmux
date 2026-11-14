@@ -94,9 +94,10 @@
  * notice owner supplies recovery and dismissal; this changes only its placement. */
 .mobile-app .mobile-page-header .mobile-avatar-notice-outlet[data-placement='header'] { position: relative; flex: none; max-height: none; overflow: visible; }
 .mobile-page-header .mobile-avatar-notice { padding: 0; background: transparent; box-shadow: none; }
+.mobile-page-header .mobile-avatar-notice > .mobile-notice__body > details { margin: 0; padding: 0; }
 .mobile-page-header .mobile-avatar-notice > .mobile-notice__body > details > summary { justify-content: center; gap: 4px; width: 44px; height: 44px; padding: 0; color: var(--amber); }
 .mobile-page-header .mobile-avatar-notice > .mobile-notice__body > details > summary > span { display: none; }
 .mobile-page-header .mobile-avatar-notice > .mobile-notice__body > details > summary::after { content: attr(data-count); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-.mobile-page-header .mobile-avatar-notice__list { position: absolute; top: 48px; right: 0; z-index: 4; width: min(304px, calc(100vw - 32px)); max-height: 55vh; overflow-y: auto; padding: 16px 40px 16px 16px; border-radius: var(--mobile-radius-group); background: var(--surface-2); box-shadow: var(--elev-3); text-align: left; }
-.mobile-page-header .mobile-avatar-notice > .mobile-notice__dismiss { display: none; position: absolute; top: 48px; right: 0; z-index: 5; }
+.mobile-page-header .mobile-avatar-notice__list { position: fixed; top: calc(max(6px, env(safe-area-inset-top)) + 50px); right: var(--mobile-gutter); z-index: 4; width: min(304px, calc(100vw - 32px)); max-height: 55vh; overflow-y: auto; padding: 16px 40px 16px 16px; border-radius: var(--mobile-radius-group); background: var(--surface-2); box-shadow: var(--elev-3); text-align: left; }
+.mobile-page-header .mobile-avatar-notice > .mobile-notice__dismiss { display: none; position: fixed; top: calc(max(6px, env(safe-area-inset-top)) + 50px); right: var(--mobile-gutter); z-index: 5; }
 .mobile-page-header .mobile-avatar-notice:has(> .mobile-notice__body > details[open]) > .mobile-notice__dismiss { display: inline-flex; }
