@@ -52,7 +52,7 @@ async function fixture() {
   const configurationPath = join(b.root, 'goal-config.json'); await writeFile(configurationPath, '{}')
   let goalServer!: AgentMuxControlServer
   const runtime = { client: b.client, get server() { return goalServer }, ownerIdentity: () => bOwner } as unknown as AgentMuxHeadlessRuntime
-  const goals = createHostGoals({ configurationPath, runtime: () => runtime, projects: async () => [], coreCall: (hostId, method, params, context) => { if (hostId !== 'local') throw Error('No alternate target'); return goalServer.callRpc(method, params, context) } })
+  const goals = createHostGoals({ configurationPath, runtime: () => runtime, clients: () => [{ hostId: 'D-current', client: configuredD }], projects: async () => [], coreCall: (hostId, method, params, context) => { if (hostId !== 'local') throw Error('No alternate target'); return goalServer.callRpc(method, params, context) } })
   cleanup.push(() => goals.dispose())
   goalServer = new AgentMuxControlServer({ socketPath, spatialState: spatial, hostedRuntime: () => bHosted, coreClients: () => [{ hostId: 'local', client: b.client }, { hostId: 'D-in-B', client: configuredD }], goalControl: goals.execute, goalDelegations: goals.goalDelegations })
   await goalServer.start(); cleanup.push(() => goalServer.stop())
@@ -60,7 +60,7 @@ async function fixture() {
   const goal = (await goals.demands.create({ id: 'original-goal', title: 'Original public Goal', description: 'Original frozen public input', assigneeSessionIds: [reference] })).demand
   const access = { source: { hostId: 'local' } }
   const bInventory = vi.spyOn(b.client, 'readAgentSessions'), dInventory = vi.spyOn(d.client, 'readAgentSessions'), bRuns = vi.spyOn(b.client, 'listRuns'), dRuns = vi.spyOn(d.client, 'listRuns')
-  return { sourceRoot: b.root, spatial, b: { inventory: bInventory, runs: bRuns }, d: { core: d.client, store: d.store, inner: d.inner, inventory: dInventory, runs: dRuns }, goal, goals, goalServer, rpc, reference, access, send, raw, stop, session }
+  return { sourceRoot: b.root, spatial, b: { inventory: bInventory, runs: bRuns }, d: { core: d.client, store: d.store, inner: d.inner, inventory: dInventory, runs: dRuns }, goal, goals, goalServer, configuredD, rpc, reference, access, send, raw, stop, session }
 }
 
 it('public Goal Start obtains the exact Source C/current Run, uses the original member input owner and explicitly rejoins the same frozen operation', async () => {
@@ -163,4 +163,51 @@ it('a normal asynchronous pending member becomes usable within the original read
     await expect.poll(async () => (await f.d.core.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, submissionId: operationId } }))?.status).toBe('admitted')
     expect(f.send).toHaveBeenCalledTimes(1); expect(f.raw).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
   } finally { release(); controller.abort(); await start }
+})
+
+
+it('original pending Check reads its canonical input through independent current Coordinator access while its Source is unavailable', async () => {
+  const f = await fixture(), operationId = 'independent-original-Check'
+  const frozen = { operationId, target: f.reference, runId: f.session.run.runId, execution: 'finite' as const, prompt: 'Frozen original Goal input', agentMuxNote: 'Independent original Goal note' }
+  await f.goals.demands.prepareDispatch(f.goal.id, frozen)
+  await f.goals.demands.recordDispatchPhase(f.goal.id, operationId, { stage: 'submitted' })
+  await f.goals.demands.recordDispatchPhase(f.goal.id, operationId, { stage: 'unknown', issue: 'Original acknowledgement unconfirmed' })
+  const key = { kind: 'prompt' as const, agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, submissionId: operationId }
+  await f.d.core.submitAgentPrompt({ agentSessionId: key.agentSessionId, expectedRun: key.expectedRun, operationId, prompt: frozen.prompt, agentMuxNote: frozen.agentMuxNote,
+    execution: 'immediate', admissionIntent: { kind: 'session-conversation' }, authorHuman: false, sourceChannel: 'api' })
+  await expect.poll(async () => (await f.d.core.inspectAgentInput({ key }))?.status).toBe('admitted')
+  expect(await f.goals.demands.inspectDispatch(f.goal.id, operationId)).toMatchObject({ ...frozen, stage: 'unknown' })
+  const source = vi.spyOn(f.goalServer, 'callRpc').mockRejectedValue(Object.assign(new Error('The original Source read is unavailable'), { code: 'SPACE_SESSION_SOURCE_UNAVAILABLE' }))
+  const result = await f.rpc.call('goal.inspect', { goalId: f.goal.id, dispatchOperationId: operationId, access: { ...f.access, coordinator: { hostId: 'D-current' } } })
+  expect(result.goal?.dispatches?.find(item => item.operationId === operationId)).toMatchObject({ target: f.reference, runId: f.session.run.runId, stage: 'confirmed', receipt: { kind: 'core-input', inputKey: key } })
+  expect(source).not.toHaveBeenCalled(); expect(f.send).toHaveBeenCalledTimes(1); expect(f.raw).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+})
+
+it('independent original Check never claims another producer canonical input with the same key but another body', async () => {
+  const f = await fixture(), operationId = 'foreign-body-original-Check'
+  await f.goals.demands.prepareDispatch(f.goal.id, { operationId, target: f.reference, runId: f.session.run.runId, execution: 'finite', prompt: 'Frozen original Goal body' })
+  await f.goals.demands.recordDispatchPhase(f.goal.id, operationId, { stage: 'submitted' })
+  const key = { kind: 'prompt' as const, agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, submissionId: operationId }
+  await f.d.core.submitAgentPrompt({ agentSessionId: key.agentSessionId, expectedRun: key.expectedRun, operationId, prompt: 'Another producer body', execution: 'immediate', admissionIntent: { kind: 'session-conversation' }, authorHuman: false, sourceChannel: 'api' })
+  await expect.poll(async () => (await f.d.core.inspectAgentInput({ key }))?.status).toBe('admitted')
+  const source = vi.spyOn(f.goalServer, 'callRpc').mockRejectedValue(Object.assign(new Error('The original Source read is unavailable'), { code: 'SPACE_SESSION_SOURCE_UNAVAILABLE' }))
+  await expect(f.rpc.call('goal.inspect', { goalId: f.goal.id, dispatchOperationId: operationId, access: { ...f.access, coordinator: { hostId: 'D-current' } } })).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+  expect(await f.goals.demands.inspectDispatch(f.goal.id, operationId)).toMatchObject({ stage: 'submitted', prompt: 'Frozen original Goal body' })
+  expect((await f.goals.demands.inspectDispatch(f.goal.id, operationId))?.receipt).toBeUndefined()
+  expect(source).not.toHaveBeenCalled(); expect(f.send).toHaveBeenCalledTimes(1); expect(f.raw).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+})
+
+it('a rejected current Coordinator Check does not switch to the Source strategy or send input', async () => {
+  const f = await fixture(), operationId = 'rejected-original-Check'
+  await f.goals.demands.prepareDispatch(f.goal.id, { operationId, target: f.reference, runId: f.session.run.runId, execution: 'finite', prompt: 'Frozen original Goal body' })
+  await f.goals.demands.recordDispatchPhase(f.goal.id, operationId, { stage: 'submitted' })
+  const originalForward = f.configuredD.forwardRpc
+  let coordinatorReads = 0
+  f.configuredD.forwardRpc = async () => { coordinatorReads++; throw Object.assign(new Error('Current original Coordinator read is denied'), { code: 'CONTROL_PERMISSION_DENIED' }) }
+  cleanup.push(() => { if (originalForward) f.configuredD.forwardRpc = originalForward; else delete f.configuredD.forwardRpc })
+  const source = vi.spyOn(f.goalServer, 'callRpc')
+  await expect(f.rpc.call('goal.inspect', { goalId: f.goal.id, dispatchOperationId: operationId, access: { ...f.access, coordinator: { hostId: 'D-current' } } })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(coordinatorReads).toBe(1); expect(source).not.toHaveBeenCalled()
+  expect(await f.goals.demands.inspectDispatch(f.goal.id, operationId)).toMatchObject({ stage: 'submitted', prompt: 'Frozen original Goal body' })
+  expect(f.send).not.toHaveBeenCalled(); expect(f.raw).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
 })
