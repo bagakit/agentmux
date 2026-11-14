@@ -50,7 +50,7 @@ try {
   assert.equal(lifecycle.native.cleanup.nativeDisposed, true); assert.equal(lifecycle.native.cleanup.windowsRemaining, 0)
   receipt.scenarios = lifecycle.native.cases; receipt.cleanup.realLifecycle = lifecycle.native.cleanup
   const toolbar = await stage('compact-toolbar', 'apps/desktop/scripts/verify-screenshot-toolbar.mjs', [], jsonReceipt)
-  assert.equal(toolbar.variants?.length, 2); assert.equal(toolbar.cleanup.temporaryBuildRemoved, true)
+  assert.equal(toolbar.variants?.length, 3); assert.equal(toolbar.cleanup.temporaryBuildRemoved, true)
   const selection = await stage('public-selection', 'apps/desktop/scripts/verify-capture-public-selection.mjs', [], jsonReceipt)
   assert.ok(selection.native?.cases?.length && selection.mutations?.length, 'The real public consumer and its mutations must execute')
   const pasted = await stage('pasted-consumers', 'apps/desktop/scripts/verify-pasted-image-persistence.mjs', [], log => log.match(/Pasted image proof: (.+)/)?.[1])
