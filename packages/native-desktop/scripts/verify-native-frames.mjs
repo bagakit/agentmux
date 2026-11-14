@@ -42,8 +42,10 @@ const production = {
   frames: slice(operations, '    static func captureDisplays(hostPID: pid_t, includeHostWindows: Bool = false) throws', '    private static func captureRect(_ rect:'),
   displayRequest: slice(main, '        case "captureDisplays":', '        case "clipboardRead":'),
   blocking: slice(main, 'private final class AsyncBox<T>:', 'private struct BoundedPNG {'),
+  responseWriter: slice(main, 'private func writeJSON(_ object: Any, to fd: Int32?)', 'let arguments = Array(CommandLine.arguments.dropFirst())'),
   lease: readFileSync(core[2], 'utf8'),
 }
+once(production.responseWriter, 'data = try? JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes])')
 function swiftc(parameters, log) {
   const result = spawnSync('swiftc', parameters, { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
   writeFileSync(log, (result.stdout ?? '') + (result.stderr ?? ''))
@@ -62,7 +64,7 @@ function build(name, mutation, forceCoreGraphics = false) {
     '-emit-module-path', join(directory, 'AgentMuxNativeMacOSCore.swiftmodule'), '-o', join(directory, 'libAgentMuxNativeMacOSCore.dylib')], join(directory, 'core.log'))
   const checks = [['/* PRODUCTION_CAPTURE_DISPATCH */', loaded.dispatch], ['/* PRODUCTION_DISPLAY_FRAMES */', loaded.frames],
     ['/* PRODUCTION_DISPLAY_REQUEST */', loaded.displayRequest],
-    ['/* PRODUCTION_BLOCKING_ASYNC */', loaded.blocking]].reduce((source, [marker, code]) => replaceOnce(source, marker, code), fixture)
+    ['/* PRODUCTION_BLOCKING_ASYNC */', loaded.blocking], ['/* PRODUCTION_RESPONSE_WRITER */', loaded.responseWriter]].reduce((source, [marker, code]) => replaceOnce(source, marker, code), fixture)
   const source = join(directory, 'CompiledDisplayFramesChecks.swift')
   writeFileSync(source, checks)
   swiftc([...options, ...(forceCoreGraphics ? ['-D', 'FORCE_CORE_GRAPHICS'] : []), '-parse-as-library', '-I', directory, '-L', directory, '-lAgentMuxNativeMacOSCore',
@@ -102,6 +104,8 @@ const mutations = [
   { name: 'included-excludes-no-windows', part: 'frames', before: 'SCContentFilter(display: display, excludingWindows: exclusions)', after: 'SCContentFilter(display: display, excludingWindows: [])', kills: 'included pixels exclude every helper window and no host or other-PID window' },
   { name: 'drop-native-timing', part: 'frames', before: '"timing": ["contentMs": contentMs, "windowListMs": windowListMs, "totalMs": captureMilliseconds(since: totalStarted)]', after: '"timing": [:]', kills: "native timing covers content, window list, total and every display's capture, PNG, base64 and total" },
   { name: 'drop-per-display-timing', part: 'frames', before: 'entry["timing"] = ', after: '_ = ', kills: "native timing covers content, window list, total and every display's capture, PNG, base64 and total" },
+  { name: 'drop-response-serialization-timing', part: 'responseWriter', before: 'timing["responseSerializationMs"] = nativeResponseSerializationMarker', after: '_ = nativeResponseSerializationMarker', kills: 'native response serialization is measured once on the real write path without re-encoding pixels' },
+  { name: 'corrupt-response-serialization-timing', part: 'responseWriter', before: 'let responseSerializationMs = Double(DispatchTime.now().uptimeNanoseconds - responseSerializationStarted) / 1_000_000', after: 'let responseSerializationMs = 0.0', kills: 'native response serialization is measured once on the real write path without re-encoding pixels' },
   { name: 'old-os-silent-coregraphics-fallback', part: 'frames', before: 'if !includeHostWindows && hostWindows.contains(where: { $0.frame.intersects(frame) }) {', after: 'if false {', kills: 'forced CoreGraphics exclusion refuses only the display containing the visible host', forceCoreGraphics: true },
   { name: 'old-os-unknown-window-list-falls-back', part: 'frames', before: 'guard allWindows != nil || includeHostWindows else {', after: 'guard true else {', kills: 'forced CoreGraphics exclusion is typed unavailable when host visibility is unknown', forceCoreGraphics: true },
   { name: 'drop-failure-stage-timing', part: 'frames', before: 'defer { milliseconds = captureMilliseconds(since: start) }\n        return try body()', after: 'let result = try body()\n        milliseconds = captureMilliseconds(since: start)\n        return result', kills: 'a failed capture records the time it actually spent' },

@@ -21,7 +21,9 @@ function check(name: string, value: unknown): asserts value {
   assert.ok(value, name)
 }
 function boundedTiming(value: any, keys: string[]): boolean {
-  return value && keys.every(key => Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 150_000)
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).every(key => keys.includes(key))
+    && keys.every(key => Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 150_000)
 }
 function colorPixels(png: string, region: { x: number; y: number; width: number; height: number }) {
   const image = nativeImage.createFromBuffer(Buffer.from(png, 'base64'))
@@ -116,10 +118,12 @@ async function run() {
     engine: excludedFrame.engine, hostListed: excludedFrame.windows.some((window: any) => window.windowId === discovered.id), timing: excluded.timing }
   check('excluded isolated-region unique color is absent', excludedPixels.area > 100 && excludedPixels.matches === 0)
   check('excluded window list omits the discovered host', excludedFrame.windows.every((window: any) => window.windowId !== discovered.id))
-  check('included native and Node timing are bounded', boundedTiming(included.timing, ['contentMs', 'windowListMs', 'totalMs', 'requestMs', 'validationMs'])
-    && boundedTiming(includedFrame.timing, ['captureMs', 'pngMs', 'base64Ms', 'totalMs']))
-  check('excluded native and Node timing are bounded', boundedTiming(excluded.timing, ['contentMs', 'windowListMs', 'totalMs', 'requestMs', 'validationMs'])
-    && boundedTiming(excludedFrame.timing, ['captureMs', 'pngMs', 'base64Ms', 'totalMs']))
+  check('included native and Node timing are closed and bounded', boundedTiming(included.timing,
+    ['contentMs', 'windowListMs', 'responseSerializationMs', 'totalMs', 'lazyConnectionMs', 'socketReadMs', 'jsonParseMs', 'requestMs', 'validationMs'])
+    && included.timing.responseSerializationMs > 0 && boundedTiming(includedFrame.timing, ['captureMs', 'pngMs', 'base64Ms', 'totalMs']))
+  check('excluded native and Node timing are closed and bounded', boundedTiming(excluded.timing,
+    ['contentMs', 'windowListMs', 'responseSerializationMs', 'totalMs', 'lazyConnectionMs', 'socketReadMs', 'jsonParseMs', 'requestMs', 'validationMs'])
+    && excluded.timing.responseSerializationMs > 0 && boundedTiming(excludedFrame.timing, ['captureMs', 'pngMs', 'base64Ms', 'totalMs']))
   receipt.hostWindowId = discovered.id
   receipt.passed = true
 }

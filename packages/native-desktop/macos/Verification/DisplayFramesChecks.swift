@@ -27,6 +27,7 @@ private func displayRequest(_ params: [String: JSONValue]) throws -> [String: An
 }
 
 /* PRODUCTION_BLOCKING_ASYNC */
+/* PRODUCTION_RESPONSE_WRITER */
 
 private enum ProviderError: Error { case coded(String, String) }
 private enum JSONValue {
@@ -193,11 +194,27 @@ private final class Controlled: @unchecked Sendable {
 }
 
 private func hasBoundedTiming(_ value: Any?, keys: [String]) -> Bool {
-    guard let timing = value as? [String: Any] else { return false }
+    guard let timing = value as? [String: Any], Set(timing.keys) == Set(keys) else { return false }
     return keys.allSatisfy { key in
         guard let milliseconds = (timing[key] as? NSNumber)?.doubleValue else { return false }
         return milliseconds.isFinite && milliseconds >= 0 && milliseconds <= 150_000
     }
+}
+
+private func serializedDisplayResult(_ result: [String: Any]) -> [String: Any] {
+    // The controlled response is only a few KiB, so the real blocking socket writer
+    // cannot fill this pipe before the fixture reads it. No pixel fixture is retained.
+    var descriptors: [Int32] = [-1, -1]
+    precondition(pipe(&descriptors) == 0)
+    let response: [String: Any] = ["id": 1, "instanceId": "fixture-instance", "ok": true, "result": result]
+    writeJSON(response, to: descriptors[1])
+    close(descriptors[1])
+    let data = FileHandle(fileDescriptor: descriptors[0]).readDataToEndOfFile()
+    close(descriptors[0])
+    let envelope = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+    guard envelope["ok"] as? Bool == true, envelope["id"] as? Int == 1,
+          envelope["instanceId"] as? String == "fixture-instance" else { return [:] }
+    return envelope["result"] as? [String: Any] ?? [:]
 }
 
 private func timingMilliseconds(_ entry: [String: Any], _ key: String) -> Double? {
@@ -238,6 +255,12 @@ private struct DisplayFramesChecks {
         check("native timing covers content, window list, total and every display's capture, PNG, base64 and total",
             hasBoundedTiming(frames?["timing"], keys: ["contentMs", "windowListMs", "totalMs"])
                 && [1, 2, 3, 4].allSatisfy { hasBoundedTiming(entry($0)["timing"], keys: ["captureMs", "pngMs", "base64Ms", "totalMs"]) })
+        let wireResult = serializedDisplayResult(frames ?? [:])
+        let wireDisplays = wireResult["displays"] as? [[String: Any]] ?? []
+        check("native response serialization is measured once on the real write path without re-encoding pixels",
+            hasBoundedTiming(wireResult["timing"], keys: ["contentMs", "windowListMs", "responseSerializationMs", "totalMs"])
+                && (timingMilliseconds(wireResult, "responseSerializationMs") ?? 0) > 0
+                && wireDisplays.count == displays.count && wireDisplays.first?["png"] as? String == displays.first?["png"] as? String)
         check("returns a captured receipt for an all-display grab", error == nil && frames?["state"] as? String == "captured")
         check("capturedAt is taken before the first grab", (frames?["capturedAt"] as? Double).map { capturedAt in
             io.observation.firstGrabAt.map { capturedAt >= before && capturedAt <= $0 } ?? false } == true)
