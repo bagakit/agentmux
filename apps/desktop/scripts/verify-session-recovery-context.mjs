@@ -19,7 +19,7 @@ const product = [
   'apps/desktop/src/renderer/src/components/SessionPane.tsx',
   'apps/desktop/src/renderer/src/styles/session-recap.css',
   'packages/core/src/types.ts', 'packages/core/src/session-history.ts',
-  'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/providers/claude-native-history.ts'
+  'packages/core/src/native-jsonl-history-reader.ts', 'packages/providers/src/claude/native-history.ts'
 ]
 async function fingerprints(paths) {
   return Object.fromEntries(await Promise.all(paths.map(async path => [path, hash(await readFile(join(root, path)))])))
@@ -88,7 +88,7 @@ if (slice === 'source') {
     ['apps/desktop/src/renderer/src/components/SessionPane.tsx', '<SessionRecap'],
     ['apps/desktop/src/renderer/src/components/SessionConnectingSurface.tsx', '<SessionRecap'],
     ['packages/core/src/client.ts', 'normalizeSessionHistoryPage'],
-    ['packages/core/src/providers/claude-native-history.ts', 'reader.sourceSizeBytes']
+    ['packages/providers/src/claude/native-history.ts', 'reader.sourceSizeBytes']
   ]
   const callers = []
   for (const [path, symbol] of callerSpecs) {
