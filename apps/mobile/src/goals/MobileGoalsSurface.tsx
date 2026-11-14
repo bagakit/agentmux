@@ -46,6 +46,7 @@ type Decisions = AgentMuxRpcResult<'goal.decisions'>['decisions']
 export function MobileGoalsSurface({ client, connected, visible, openSession, onBackChange, initialContext, context: presentedContext, onContextChange, copyText }: MobileGoalsSurfaceProps) {
   const [createOpen, setCreateOpen] = useState(false)
   const [goals, setGoals] = useState<AgentMuxRpcGoal[] | null>(null)
+  const [listStatus, setListStatus] = useState<string | null>(null)
   const [localContext, setLocalContext] = useState<MobileGoalsContext>(initialContext ?? { goalId: null, mode: 'detail', discussion: null })
   const context = presentedContext ?? localContext, contextRef = useRef(context); contextRef.current = context
   const setContext = useCallback((change: MobileGoalsContext | ((value: MobileGoalsContext) => MobileGoalsContext)) => {
@@ -94,7 +95,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
       try {
         const before = source()
         const result = await client.forwardRpc!('goal.ls', { limit: 1000, ...(status ? { status } : {}) })
-        if (live && epoch === factEpoch.current.list) { listScope.current = readScope(before); setGoals(result.goals); setIssue('') }
+        if (live && epoch === factEpoch.current.list) { listScope.current = readScope(before); setGoals(result.goals); setListStatus(status); setIssue('') }
       } catch (error) { if (live) setIssue(`读取目标失败：${message(error)}。可以刷新重试。`) }
       finally { pending = false }
     }
@@ -150,7 +151,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     if (receipt.agentSessionId && receipt.hostId === 'local' && openSession) openSession(receipt.agentSessionId, { name: '目标 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
-  const confirmedEmpty = goals?.length === 0 && !status && !query && !issue
+  const confirmedEmpty = goals?.length === 0 && listStatus === '' && !status && !query && !issue
   return <MobileNoticeScope owner={client}><section className="mobile-goals" aria-label="Goals" hidden={!visible}>
     <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(selected || discussionTab)} />{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><div className="mobile-section-actions">{!selected && !discussionTab && <><button type="button" className="mobile-icon-button mobile-goals-new" aria-label="新建目标" title="新建目标" aria-expanded={createOpen} onClick={() => setCreateOpen(value => !value)}><SemanticIcon name="action.add-item" size={20} /></button><details className="mobile-goal-lookup"><summary aria-label="按 Goal ID 打开" title="按 Goal ID 打开"><SemanticIcon name="action.search" size={18} /><span className="mobile-visually-hidden">按 Goal ID 打开</span></summary><div className="mobile-goal-lookup__panel"><form onSubmit={event => {
         event.preventDefault()
@@ -191,7 +192,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
         <ul className="mobile-goals-list">{(visibleGoals ?? []).map(goal => <li key={goal.id}>
           <button onClick={() => choose(goal)}><SemanticIcon name="object.goal" size={24} /><div className="mobile-goal-row-copy"><strong>{goal.title || '待定义目标'}</strong><span>{goal.projectName ?? goal.projectId ?? '未分配项目'} · {statuses[goal.status]}</span><small>{goal.description}</small></div><SemanticIcon name="navigation.submenu" size={16} /></button>
         </li>)}</ul>
-        {!goals.length && !confirmedEmpty && <p>{status || query ? '已读列表中没有匹配的目标。可清除搜索或筛选。' : '上次读取没有目标，可刷新核对。'}</p>}
+        {!goals.length && !confirmedEmpty && <p>{status || query ? '已读列表中没有匹配的目标。可清除搜索或筛选。' : listStatus ? '上次筛选没有匹配的目标，当前列表尚未确认。' : '上次读取没有目标，可刷新核对。'}</p>}
         {!!goals.length && !visibleGoals?.length && <p>已读列表中没有匹配的目标。可清除搜索或筛选。</p>}
       </>}
 
