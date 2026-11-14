@@ -14,7 +14,7 @@ import { goalPlanColumns, goalPlanEdgePath, goalPlanHighlight, goalPlanProjectio
 import { api } from '../src/renderer/src/lib/api'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { useAppStore } from '../src/renderer/src/store'
-import { composerDOM } from './helpers/composer-dom-fixture'
+import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 /**
  * A person sees the whole plan at a glance: dependency columns left to right, each node's
@@ -63,7 +63,7 @@ describe('Goal plan graph', () => {
     const head = detail.querySelector('.goals-detail__head')!
     expect(head.querySelector('[aria-label="Goal title"]')).not.toBeNull()
     expect(detail.querySelector('.goals-detail__reading-nav [aria-current]')?.textContent).toBe('Plan')
-    expect(head.querySelector('[data-goal-detail-stage] strong')?.textContent).toBeTruthy()
+    expect(head.querySelector('[data-goal-detail-stage]')?.textContent).toBeTruthy()
     expect(detail.querySelector('[data-goal-reading-section="activity"]')).toBeNull()
     expect([...detail.querySelectorAll('.goals-detail__reading-nav button')].some(button => button.textContent === 'Activity')).toBe(false)
     expect(main.querySelector('.goal-collaboration')).toBeNull()
@@ -128,7 +128,7 @@ describe('Goal plan graph', () => {
       .map(column => [...column.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(item => `${item.dataset.goalPlanNode}:${item.dataset.goalPlanState}`))
     expect(columns).toEqual([['api:review', 'docs:ready'], ['ui:waiting'], ['release:waiting']])
     expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 0 of 4 done')
-    expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__state')!.textContent).toBe('Waiting on dependencies')
+    expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__state')!.textContent).toBe('Waiting')
     expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node api')
     expect(graph()!.querySelector('[aria-label="Execution graph"]')?.getAttribute('tabindex')).toBe('0')
     const delivery = graph()!.querySelector('[data-goal-delivery="d-api"]')!
@@ -234,6 +234,18 @@ describe('Goal plan graph', () => {
     expect(dom.container.querySelector('[data-demand-id="goal"] [data-goal-plan-ring]')).toBeNull()
   })
 
+  it('identifies the original unsplit Goal assignee and keeps direct execution unconfirmed', async () => {
+    const record = goal({ assigneeSessionIds: ['original-member'] })
+    seed(record)
+    useAppStore.setState({ sessions: [composerSession('original-member')], agentNames: { 'original-member': 'Integration owner' } })
+    await dom.render(<GlobalBoardSurface />)
+    const card = graph()!.querySelector('[data-goal-plan-origin]')!
+    expect(card.querySelector('.goal-plan-node__who')?.textContent).toContain('Integration owner')
+    await act(async () => card.querySelector<HTMLButtonElement>('button')!.click())
+    expect(graph()!.querySelector('[data-goal-plan-detail]')?.textContent).toContain('Executor unconfirmed')
+    expect(graph()!.querySelector('[aria-label="Node assignment"]')).toBeNull()
+  })
+
   it.each([alignment, undefined])('reads the whole Goal in the ordinary graph and assignments (alignment %s)', async (alignment) => {
     const record = goal({ description: '# The original outcome\n\nKeep the same goal and original words.' })
     if (!alignment) delete record.alignment
@@ -291,7 +303,8 @@ describe('Goal plan graph', () => {
     seed(original)
     await dom.render(<GlobalBoardSurface />)
     const canvas = graph()!.querySelector('[aria-label="Execution graph"]')!
-    expect(canvas.textContent).toContain('Results not verified')
+    expect(dom.container.querySelector('[data-goal-detail-stage]')?.textContent).toBe('Results not verified')
+    expect(canvas.querySelector('[data-goal-plan-boundary="finish"]')?.textContent).toContain('Unverified')
     const root = canvas.querySelector<HTMLButtonElement>('[data-goal-plan-origin] button')!
     await act(async () => root.click())
     expect(graph()!.querySelector('[data-goal-plan-detail="goal"]')).not.toBeNull()
