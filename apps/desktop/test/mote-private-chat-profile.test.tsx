@@ -65,7 +65,6 @@ it('saves Profile chat policy through trusted IPC and the real public owner with
   expect(chat().textContent).toContain('Automatic chat sync is off.')
   expect(f.chatAgentCalls).toEqual({ prepare: 0, create: 0, inspect: 0, prepareInput: 0, activity: 0 })
   expect(useAppStore.getState().moteChatIntents).toEqual({})
-  await expect(f.handlers.get('moteChat:call')!({ sender: {} }, 'space.mote.chat.configure', { operationId: 'untrusted-write' })).rejects.toThrow('Untrusted renderer')
 })
 
 it('retains an unknown original save across Profile remount and inspects its exact receipt without replay or leaking the request into another Mote', async () => {

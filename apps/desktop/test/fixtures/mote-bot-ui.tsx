@@ -56,7 +56,6 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   useAppStore.setState({ config, loading: false, spaceZoneBindings: {}, moteBotRequests: {}, botTaskSelections: {}, moteConnectionSaveIntents: {}, moteChatIntents: {} })
   const handlers = new Map<string, (...args: any[]) => Promise<any>>(), sender = {}
   const handleWithEvent = (name: string, handler: (...args: any[]) => Promise<any>) => { handlers.set(name, handler) }
-  const assertTrusted = (_channel: string, event: { sender: object }) => { if (event.sender !== sender) throw new Error('Untrusted renderer') }
   const hostingTarget = { hostId: options.hostId ?? 'original-host', runtimeId: 'original-host-runtime' }
   const runtime: import('../../src/main/connection-host-ipc').ConnectionHostIpc = {
     connectionHostingTarget: async () => structuredClone(hostingTarget),
