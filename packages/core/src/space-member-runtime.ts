@@ -95,7 +95,7 @@ export async function spaceMemberRuntime(ports: {
   await assertCurrent()
   // These original methods already validate the exact SID/expected Run at D.
   // Re-reading it here would add a second network admission before each key.
-  const fencedInput = invocation && ['writeAgent', 'pasteAgent', 'submitAgentPrompt'].includes(String(invocation.method))
+  const fencedInput = invocation && ['writeAgent', 'pasteAgent', 'submitAgentPrompt', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'signalAgent'].includes(String(invocation.method))
   const originalReceipt = invocation && ['inspectAgentInput', 'inspectAgentPromptSubmission', 'inspectAgentInteractionOperation'].includes(String(invocation.method))
   const exactAttachment = (input.call.method === 'runtime.attachment-watch' || input.call.method === 'runtime.replay-watch') && rpcRecord(p.target).kind === 'agent-session'
   if (input.call.method !== 'runtime.owner.identity' && input.call.method !== 'runtime.release-consumer' && !fencedInput && !originalReceipt && !exactAttachment) {

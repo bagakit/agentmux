@@ -31,8 +31,8 @@ export type PinnedSpaceMemberIdentity = SpaceMemberIdentity & { expectedAdmissio
 export const SPACE_MEMBER_INVOCATIONS = [
   'readAgentSession', 'runtimeSubject', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'releaseRunAttachment', 'resizeTerminal', 'writeAgent', 'pasteAgent', 'submitAgentPrompt',
-  'inspectAgentInteractionOperation', 'inspectAgentInput', 'inspectAgentPromptSubmission',
-  'rejoinAgentInputWaiting',
+  'statusAgent', 'inspectAgentInteractionOperation', 'inspectAgentInput', 'inspectAgentPromptSubmission',
+  'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'signalAgent',
   'readAgentConversation', 'conversationCheckpoint', 'readConversationChanges', 'releaseConversationView',
 ] as const
 export type SpaceMemberInvocation = typeof SPACE_MEMBER_INVOCATIONS[number]

@@ -10,7 +10,8 @@ import type { SpaceMemberTarget } from './space-member.js'
 export type SpaceMemberClient = Pick<AgentMuxHostedClient, 'connect' | 'dispose' | 'onEvent' | 'onRunEvent' | 'runtimeOwnerIdentity' | 'runtimeIdentity' |
   'catalog' | 'providers' | 'agentSessions' | 'agentSession' | 'readAgentSession' | 'reattachAgent' | 'attachTerminal' |
   'refreshRunAttachment' | 'readRunReplay' | 'releaseRunAttachment' | 'resizeTerminal' | 'writeAgent' | 'pasteAgent' |
-  'submitAgentPrompt' | 'inspectAgentInteractionOperation' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' |
+  'submitAgentPrompt' | 'statusAgent' | 'inspectAgentInteractionOperation' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' |
+  'stopAgentInputWaiting' | 'signalAgent' |
   'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'releaseConversationView' | 'observeConversation'> & {
     /** Original exact-SID full metadata and Provider declarations, without an event lease prerequisite. */
     metadata(): Promise<import('./hosted-client-contract.js').AgentMuxHostedBootstrap>

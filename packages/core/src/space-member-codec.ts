@@ -3,7 +3,7 @@ import { rpcRecord, rpcString } from './rpc-data.js'
 import { decodeHostedValue } from './hosted-value.js'
 import { AGENTMUX_HOSTED_RPC_FIELDS } from './hosted-client-contract.js'
 import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberParams } from './space-member.js'
-import { validateAgentInputWaitRef } from './agent-input-wait.js'
+import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { parseConversationTimelineReadInput, parseConversationCheckpointInput, parseConversationChangesInput, parseConversationWatchInput, parseConversationViewReleaseInput } from './conversation-changes.js'
 
 function mismatch(): never { throw new AgentMuxError('This operation does not identify the original Space member and Run. Its Session and other controls are retained.', 'SPACE_MEMBER_TARGET_MISMATCH') }
@@ -60,6 +60,27 @@ export function assertSpaceMemberCall(target: SpaceMemberTarget, call: { method:
     if (ref.key.kind !== 'prompt' || ref.key.agentSessionId !== target.agentSessionId) mismatch()
     run(ref.key.expectedRun); return
   }
+  if (invocation.method === 'stopAgentInputWaiting') {
+    if (invocation.args.length !== 1) throw new AgentMuxError('Member waiting stop accepts only its original reference and cancel operation.', 'INVALID_CONTROL_REQUEST')
+    const input = rpcRecord(first, ['ref', 'cancelOperationId']), ref = validateAgentInputWaitRef(input.ref)
+    validateAgentInputControlId(input.cancelOperationId)
+    if (ref.key.kind !== 'prompt' || ref.key.agentSessionId !== target.agentSessionId) mismatch()
+    run(ref.key.expectedRun); return
+  }
+  if (invocation.method === 'statusAgent') {
+    if (invocation.args.length !== 1) throw new AgentMuxError('Member status accepts only its original Session.', 'INVALID_CONTROL_REQUEST')
+    if (first !== target.agentSessionId) mismatch()
+    return
+  }
+  if (invocation.method === 'signalAgent') {
+    if (invocation.args.length !== 3) throw new AgentMuxError('Member interrupt accepts only its original Session, Run and SIGINT.', 'INVALID_CONTROL_REQUEST')
+    if (first !== target.agentSessionId) mismatch()
+    run(invocation.args[1])
+    if (invocation.args[2] !== 'SIGINT') throw new AgentMuxError('This member surface exposes only the shared Composer interrupt.', 'CONTROL_PERMISSION_DENIED')
+    return
+  }
+  if (invocation.method === 'submitAgentPrompt' && invocation.args.length !== 1) throw new AgentMuxError(
+    'Member prompt submission accepts one original input. A caller cannot supply another identity.', 'INVALID_CONTROL_REQUEST')
   if (['readAgentSession', 'runtimeSubject', 'inspectAgentInput', 'inspectAgentPromptSubmission', 'inspectAgentInteractionOperation'].includes(String(invocation.method)) && invocation.args.length !== 1) throw new AgentMuxError(
     'This member read accepts one original selector. A caller cannot supply a known Runtime fact or another caller identity.', 'INVALID_CONTROL_REQUEST')
   if (invocation.method === 'readAgentSession') { if (first !== target.agentSessionId) mismatch(); return }
