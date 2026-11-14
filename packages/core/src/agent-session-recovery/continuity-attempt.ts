@@ -254,7 +254,7 @@ export async function performAgentContinuity(
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride }),
         ...(input.args === undefined ? {} : { args: [...input.args] }),
         ...(input.env === undefined ? {} : { env: { ...input.env } }) } }
-      : { ...common, source: current.creation?.executorRevision || ports.executors.hostExecutorOwner || ports.executors.sessionExecutorConfiguration ? 'host' : 'provider' }
+      : { ...common, source: current.creation?.executorInvocationDigest && !current.creation.executorRevision ? 'creation' : current.creation?.executorRevision || ports.executors.hostExecutorOwner || ports.executors.sessionExecutorConfiguration ? 'host' : 'provider' }
   }
   const retainExecutor = (value: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession => {
     if (!authoredExecutor) return value
@@ -559,7 +559,8 @@ export async function performAgentContinuity(
       if (current.creation?.executorRevision || executor.source === 'host') {
         if (!ports.executors.hostExecutorOwner && (current.creation?.executorRevision || !ports.executors.sessionExecutorConfiguration)) throw unconfirmedContinuityExecutor()
         input = await ports.executors.sessionExecutorOptions(current, originalInput)
-      } else input = executor.source === 'sdk' ? { ...originalInput, ...structuredClone(executor.options) } : originalInput
+      } else if (executor.source === 'creation') input = await ports.executors.sessionExecutorOptions(current, originalInput)
+      else input = executor.source === 'sdk' ? { ...originalInput, ...structuredClone(executor.options) } : originalInput
       const oldInput = current?.promptCompletionAdmission
       receipt.previousInput = { scope: 'typed-prompt', outcome: !oldInput ? 'none' : current && agentPromptNotApplied(current) ? 'not-applied'
         : oldInput.transport === 'launch' ? 'unknown'
@@ -594,7 +595,7 @@ export async function performAgentContinuity(
   }
   const decision = decideAgentSessionContinuity({ agentSessionId: input.agentSessionId,
     hostId: current?.hostId ?? retirement?.hostId ?? 'local', expectedRun: input.expectedRun, observedAt: now,
-    session: current ? ports.events.projectSession(current) : null, retirement: retirement ? structuredClone(retirement) : null,
+    session: current ? ports.events.projectSession(current) : null, retirement: retirement ? { agentSessionId: retirement.agentSessionId, hostId: retirement.hostId, run: { ...retirement.run }, source: retirement.source, observedAt: retirement.observedAt } : null,
     run, catalog, capability, ...(launchExecutable === undefined ? {} : { launchExecutable }), nativeConversationAbsent })
   if (decision.kind === 'reattachable' && current) {
     if (prior && (prior.errorCode === 'AGENT_NOT_FOUND' || ['provider-unavailable', 'provider-unverified'].includes(prior.reason))) {

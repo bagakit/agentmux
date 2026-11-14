@@ -128,7 +128,7 @@ type AgentMuxLifecycleReservationBase = {
 /** Prepared before start; no Run or input is invented for this durable creation seed. */
 export type AgentMuxPreparedCreation = Pick<AgentMuxStoredAgentSession,
   'kind' | 'agentSessionId' | 'providerId' | 'executorId' | 'hostId' | 'workspacePath' | 'hookBindingId' | 'hookToken' |
-  'capabilityHash' | 'createdAt' | 'updatedAt' | 'toolExecution' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions' | 'nativeActor' | 'initialInput'>
+  'capabilityHash' | 'createdAt' | 'updatedAt' | 'toolExecution' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions' | 'nativeActor' | 'initialInput' | 'executorInvocation'>
 
 /** Private exact Start material. Never project this onto a public Agent Session. */
 export type AgentMuxPreparedResumeDispatch = {
@@ -181,6 +181,8 @@ export type AgentMuxRetiredAgentSession = {
   source: 'user'
   observedAt: number
   history?: AgentSessionHistoryMetadata
+  /** Private original creation invocation retained for exact history/reopen only. */
+  executorInvocation?: unknown
   activityCommit?: AgentActivityCommit
   /** The Stop that produced this retirement. */
   stop?: AgentMuxAgentStopRecord
@@ -222,6 +224,8 @@ export type AgentMuxAgentSessionStore = {
   load(): Promise<readonly unknown[]>
   loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]>
   readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null>
+  /** Exact private original invocation only; never materializes cumulative input/recovery bodies. */
+  readExecutorInvocation(agentSessionId: string): Promise<unknown>
   /** Bounded original creation relations; never probes or restores a Run. */
   listSpawns(input: AgentMuxSpawnQuery): Promise<AgentMuxSpawnPage>
   /** Exact original admission, including its retained retirement projection. */
@@ -818,6 +822,7 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     ...(source.recordDeletion === undefined ? {} : { recordDeletion: parseAgentSessionRecordDeletion(source.recordDeletion) }),
     ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
     ...(source.history === undefined ? {} : { history: normalizeSessionHistoryMetadata(source.history) }),
+    ...(source.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(source.executorInvocation) }),
     ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) }),
     ...(source.stop === undefined ? {} : { stop: parseAgentStopRecord(source.stop) })
   }
@@ -1677,6 +1682,7 @@ export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgen
   if (typeof initialPrompt !== 'string' || !['not-requested', 'confirmed', 'unconfirmed', 'unknown'].includes(initialPrompt) ||
     creation.agentMuxContext !== undefined && (typeof creation.agentMuxContext !== 'string' || !['confirmed', 'unconfirmed', 'unknown'].includes(creation.agentMuxContext)) ||
     creation.intentDigest !== undefined && (typeof creation.intentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(creation.intentDigest)) ||
+    creation.executorInvocationDigest !== undefined && (typeof creation.executorInvocationDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(creation.executorInvocationDigest)) ||
     creation.executorRevision !== undefined && (typeof creation.executorRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(creation.executorRevision)) ||
     creation.persistence !== undefined && creation.persistence !== 'unconfirmed') throw new AgentMuxError('Invalid creation receipt.', 'INVALID_AGENT_SESSION_STORE')
   let failure: NonNullable<AgentMuxAgentSession['creation']>['failure']
@@ -1698,6 +1704,7 @@ export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgen
     ...(creation.initialMessageId === undefined ? {} : { initialMessageId: string(creation.initialMessageId, 'creation.initialMessageId') }),
     ...(creation.initialMessageOrigin === undefined ? {} : { initialMessageOrigin: parseAgentMuxCreationOrigin(creation.initialMessageOrigin) }),
     ...(creation.executorRevision === undefined ? {} : { executorRevision: creation.executorRevision as string }),
+    ...(creation.executorInvocationDigest === undefined ? {} : { executorInvocationDigest: creation.executorInvocationDigest as string }),
     ...(creation.agentMuxContext === undefined ? {} : { agentMuxContext: creation.agentMuxContext as 'confirmed' | 'unconfirmed' | 'unknown' }),
     ...(creation.intentDigest === undefined ? {} : { intentDigest: creation.intentDigest as string }),
     ...(creation.persistence === undefined ? {} : { persistence: 'unconfirmed' as const }), ...(failure ? { failure } : {}) }
@@ -1747,7 +1754,7 @@ function assertInitialInputWrite(previous: AgentMuxStoredAgentSession | null, ne
 function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
   const p = record(value, 'prepared creation')
   if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
-    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'toolExecution', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor', 'initialInput'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
+    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'toolExecution', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor', 'initialInput', 'executorInvocation'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
   const creation = parseAgentCreationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
   const initialInput = p.initialInput === undefined ? undefined : normalizeInitialInput(p.initialInput, String(p.agentSessionId))
   if (!creation.intentDigest || creation.createdRun || creation.initialInputKey || creation.persistence || creation.failure ||
@@ -1761,6 +1768,7 @@ function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
     createdAt: timestamp(p.createdAt, 'createdAt'), updatedAt: timestamp(p.updatedAt, 'updatedAt'), creation, ...(forkedFrom ? { forkedFrom } : {}),
     ...(p.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(p.nativeHandle) }),
     ...(p.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(p.nativeActor) }),
+    ...(p.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(p.executorInvocation) }),
     ...(initialInput ? { initialInput } : {}),
     ...(p.launchOptions === undefined ? {} : { launchOptions: launchOptionSelection(p.launchOptions) }) }
 }
@@ -2112,6 +2120,7 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.recoveryActivity === undefined ? {} : { recoveryActivity: recoveryActivity(source.recoveryActivity, session) }),
     ...(source.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(source.nativeActor) }),
     ...(source.continuityExecutors === undefined ? {} : { continuityExecutors: structuredClone(source.continuityExecutors) }),
+    ...(source.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(source.executorInvocation) }),
     ...(source.nativeTurnEnds === undefined ? {} : { nativeTurnEnds: nativeTurnEnds(source.nativeTurnEnds) }),
     ...(source.nativeInteractionEnds === undefined ? {} : { nativeInteractionEnds: nativeInteractionEnds(source.nativeInteractionEnds) }),
     ...(source.interactionOperations === undefined ? {} : { interactionOperations: Object.fromEntries(Object.entries(record(source.interactionOperations, 'interaction operations')).map(([id, receipt]) => {
@@ -2885,6 +2894,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const value = this.sessions.get(agentSessionId)
     return value ? structuredClone(agentSessionMetadata(value)) : null
   }
+  async readExecutorInvocation(agentSessionId: string): Promise<unknown> {
+    const active = this.sessions.get(agentSessionId)
+    return structuredClone(active ? active.executorInvocation : this.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId)?.executorInvocation)
+  }
   async listSpawns(input: AgentMuxSpawnQuery): Promise<AgentMuxSpawnPage> {
     const query = parseAgentSpawnQuery(input)
     const rows = [
@@ -3341,6 +3354,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
             source: 'user',
             observedAt: Date.now(),
             history: sessionHistoryMetadata(previous),
+            ...(previous.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(previous.executorInvocation) }),
             continuityControlReceipts: continuityControlReceipts(previous),
             ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),
             ...(stopRecord ? { stop: stopRecord } : {})
@@ -3676,6 +3690,17 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       }, undefined, true)
   }
 
+  async readExecutorInvocation(agentSessionId: string): Promise<unknown> {
+    await this.sessionWriteTails.get(agentSessionId)
+    return await this.withReadDatabase(db => {
+      const row = db.prepare("SELECT json -> '$.executorInvocation' AS value FROM sessions WHERE id=?").get(agentSessionId)
+        ?? db.prepare("SELECT json -> '$.executorInvocation' AS value FROM retired_sessions WHERE id=?").get(agentSessionId)
+      return row?.value == null ? undefined : JSON.parse(String(row.value))
+    }, document => {
+      const active = document.sessions.find(session => session.agentSessionId === agentSessionId)
+      return structuredClone(active ? active.executorInvocation : document.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId)?.executorInvocation)
+    }, undefined, true)
+  }
   async listSpawns(input: AgentMuxSpawnQuery): Promise<AgentMuxSpawnPage> {
     const query = parseAgentSpawnQuery(input)
     await this.tail
@@ -4385,6 +4410,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       source: 'user',
       observedAt: Date.now(),
       history: sessionHistoryMetadata(previous),
+            ...(previous.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(previous.executorInvocation) }),
       continuityControlReceipts: continuityControlReceipts(previous),
       ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),
       ...(record ? { stop: record } : {})

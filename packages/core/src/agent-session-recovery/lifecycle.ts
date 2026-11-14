@@ -434,6 +434,7 @@ export class AgentSessionRunLifecycle {
         ...retirement!.history!, kind: 'agent' as const, agentSessionId: retirement!.agentSessionId,
         hostId: retirement!.hostId, run: retirement!.run, retiredRuns: reopenedPriorRuns(retirement!),
         updatedAt: retirement!.observedAt,
+        ...(retirement!.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(retirement!.executorInvocation) }),
         ...(retirement!.activityCommit === undefined ? {} : { activityCommit: structuredClone(retirement!.activityCommit) }),
         ...(retirement!.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: structuredClone(retirement!.continuityControlReceipts) }),
         ...(reopening?.launchOptions === undefined ? {} : { launchOptions: reopening.launchOptions })

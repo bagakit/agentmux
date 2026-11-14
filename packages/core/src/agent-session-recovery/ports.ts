@@ -52,7 +52,7 @@ export type AgentSessionRecoveryPorts = {
     readonly hostExecutorOwner: AgentMuxHostExecutorOwner | undefined;
     readonly sessionExecutorConfiguration: ((executorId: string) => Promise<AgentExecutorConfig>) | undefined;
     sessionExecutorOptions<T extends Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'>>(
-    session: Pick<AgentMuxStoredAgentSession, 'executorId' | 'providerId' | 'creation'>, input: T, historyAgentSessionId?: string
+    session: Pick<AgentMuxStoredAgentSession, 'executorId' | 'providerId' | 'creation' | 'executorInvocation'>, input: T, historyAgentSessionId?: string
   ): Promise<T>;
   };
   hooks: {

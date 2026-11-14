@@ -173,7 +173,7 @@ function issues(value: unknown, source = false): void {
 }
 export function parseRpcAgentSession(value: unknown): ReturnType<typeof normalizeAgentSession> {
   const source = record(value)
-  if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken') || Object.hasOwn(source, 'nativeActor') || Object.hasOwn(source, 'initialInput')) fail()
+  if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken') || Object.hasOwn(source, 'nativeActor') || Object.hasOwn(source, 'initialInput') || Object.hasOwn(source, 'executorInvocation')) fail()
   try {
     const session = normalizeAgentSession(source)
     if (source.terminalFrontend !== undefined) session.terminalFrontend = parseTerminalFrontend(source.terminalFrontend, session.run)

@@ -1,3 +1,4 @@
+import { captureExecutorInvocation, readExecutorInvocation } from './agent-executor-invocation.js'
 import type { AgentMuxAgentCreateInput, AgentMuxHostAgentCreateInput, AgentMuxTerminalCreateInput, AgentMuxAgentPromptInput, AgentMuxSessionQuestionReplyInput, AgentMuxAgentMessageInput, AgentMuxAgentInteractionInput, AgentMuxAgentPostureInput, AgentMuxAgentRespawnInput, AgentMuxAgentAttachment, AgentMuxClientOptions, AgentMuxAgentRuntimeStatus } from './client-contract.js'
 import { agentSessionRetirementRevision } from './agent-session-store.js'
 import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
@@ -2336,7 +2337,8 @@ export class AgentMuxClient {
       if (createOperationId !== undefined && retired.history.creation.createOperationId !== createOperationId) throw new AgentMuxError(
         'This retired Session belongs to another original creation operation. Keep both identities and inspect the original operation.',
         'AGENT_CREATION_OPERATION_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
-      return { kind: 'retired-agent', ...retired }
+      const { executorInvocation: _invocation, ...publicRetirement } = retired
+      return { kind: 'retired-agent', ...publicRetirement }
     }
     if (durable) return this.projectSession(durable)
     const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
@@ -3309,10 +3311,18 @@ export class AgentMuxClient {
 
   /** Resolve private launch/read configuration on its executing Host, never through a client projection. */
   private async sessionExecutorOptions<T extends Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'>>(
-    session: Pick<AgentMuxStoredAgentSession, 'executorId' | 'providerId' | 'creation'>, input: T, historyAgentSessionId?: string
+    session: Pick<AgentMuxStoredAgentSession, 'executorId' | 'providerId' | 'creation' | 'executorInvocation'>, input: T, historyAgentSessionId?: string
   ): Promise<T> {
     const explicit = input.commandOverride !== undefined || input.args !== undefined || input.env !== undefined
     const targetOwned = session.creation?.executorRevision !== undefined
+    if (!targetOwned && session.creation?.executorInvocationDigest && (!explicit || historyAgentSessionId !== undefined)) {
+      let value = session.executorInvocation
+      if (value === undefined && historyAgentSessionId !== undefined) {
+        value = await this.store.readExecutorInvocation(historyAgentSessionId)
+      }
+      const original = readExecutorInvocation(session, value)!
+      return { ...input, commandOverride: original.options.commandOverride, args: original.options.args, env: original.options.env } as T
+    }
     // Native reading retains its Provider source independently of an unrelated
     // Executor registry. Host-owned creation authority survives retirement in
     // history metadata and still resolves its original private configuration.
@@ -5391,6 +5401,7 @@ export class AgentMuxClient {
       : admitted?.origin ? { agentSessionId: admitted.origin.source.agentSessionId,
         run: { runId: admitted.origin.source.runId }, owner: { kind: 'runtime', runtimeId: admitted.origin.source.runtimeId } } : undefined
     const intentDigest = admitted?.intentDigest ?? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor, creator)
+    const executorInvocation = admitted?.executorRevision ? undefined : captureExecutorInvocation(input.providerId, executorId, createOperationId, intentDigest, input)
     const contextRequested = !(nativeResumeSource && !input.prompt?.trim() && !input.agentMuxTask?.trim()) &&
       Boolean(createdBy || forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim() || input.agentMuxTask?.trim() || input.optionalContext?.length)
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
@@ -5560,8 +5571,9 @@ export class AgentMuxClient {
           workspacePath: input.workspacePath, hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}),
           ...(initialInput ? { initialInput } : {}),
+          ...(executorInvocation ? { executorInvocation: executorInvocation.value } : {}),
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
-          creation: { createOperationId, intentDigest, ...(workspaceTrust ? { workspaceTrust } : {}), ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}),
+          creation: { createOperationId, intentDigest, ...(executorInvocation ? { executorInvocationDigest: executorInvocation.digest } : {}), ...(workspaceTrust ? { workspaceTrust } : {}), ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}),
             ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
             initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}), ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
@@ -5632,11 +5644,12 @@ export class AgentMuxClient {
         hookToken: hookBinding.endpoint.token,
         ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}),
         ...(boundInitialInput ? { initialInput: boundInitialInput } : {}),
+        ...(executorInvocation ? { executorInvocation: executorInvocation.value } : {}),
         // 只存 hash：raw 凭证已随 env 进了受管进程，Core 这边不再留明文。
         capabilityHash: hashAgentCapability(invocationCapability),
         createdAt: preparedCreation?.createdAt ?? now,
         updatedAt: preparedCreation?.updatedAt ?? now,
-        creation: { createOperationId, ...(workspaceTrust ? { workspaceTrust } : {}), ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}), initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
+        creation: { createOperationId, ...(executorInvocation ? { executorInvocationDigest: executorInvocation.digest } : {}), ...(workspaceTrust ? { workspaceTrust } : {}), ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}), initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
           intentDigest, ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
           ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}), ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}),
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
@@ -5777,7 +5790,7 @@ export class AgentMuxClient {
         )
       }
       const creation: NonNullable<AgentMuxAgentSession['creation']> = {
-        createOperationId,
+        createOperationId, ...(executorInvocation ? { executorInvocationDigest: executorInvocation.digest } : {}),
         ...(workspaceTrust ? { workspaceTrust } : {}),
         ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}),
         intentDigest,

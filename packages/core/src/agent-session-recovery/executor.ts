@@ -3,7 +3,7 @@ import { AgentMuxError } from '../errors.js'
 /** Original logical SDK options only; never a RunSpec, generated credential or input carrier. */
 export type AgentContinuityExecutor = { providerId: string; executorId: string } & (
   { source: 'sdk'; options: { commandOverride?: string; args?: readonly string[]; env?: Readonly<Record<string, string>> } } |
-  { source: 'host' | 'provider' }
+  { source: 'host' | 'provider' | 'creation' }
 )
 
 export function unconfirmedContinuityExecutor(): AgentMuxError {
@@ -32,7 +32,7 @@ export function readContinuityExecutor(value: unknown, rootId: string): AgentCon
   }
   const p = record(entries[rootId], ['providerId', 'executorId', 'source', 'options'])
   const common = { providerId: text(p.providerId), executorId: text(p.executorId) }
-  if (p.source === 'host' || p.source === 'provider') {
+  if (p.source === 'host' || p.source === 'provider' || p.source === 'creation') {
     if (Object.hasOwn(p, 'options')) invalid()
     return { ...common, source: p.source }
   }

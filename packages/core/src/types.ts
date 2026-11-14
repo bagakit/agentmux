@@ -1253,7 +1253,7 @@ export type AgentLaunchPromptInputPlan = Readonly<{
 
 /** Original creation facts survive explicit retirement without becoming an active Session. */
 export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
-  ({ kind: 'retired-agent' } & import('./agent-session-store.js').AgentMuxRetiredAgentSession)
+  ({ kind: 'retired-agent' } & Omit<import('./agent-session-store.js').AgentMuxRetiredAgentSession, 'executorInvocation'>)
 
 export type AgentMuxAgentSession = {
   toolExecution?: import('./agent-tool-execution.js').AgentToolExecutionBinding
@@ -1416,6 +1416,8 @@ export type AgentMuxAgentCreationFact = {
   /** Original source admission and target trust; it does not prove an initial message exists. */
   initialMessageOrigin?: AgentMuxCreationOrigin
   executorRevision?: string
+  /** Safe reference to the original caller's private command/args/env, independent of current Host configuration. */
+  executorInvocationDigest?: string
   /** Complete authenticated creation intent hash; no raw launch secrets are persisted. */
   intentDigest?: string
   /** The actual Run is kept while its Session commit cannot be confirmed. */
@@ -1619,6 +1621,8 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
   nativeActor?: AgentPrivateNativeActor
   /** Private original invocation provenance; retained opaque and checked only at its exact root. Never public. */
   continuityExecutors?: unknown
+  /** Original SDK creation invocation; never a generated Run environment or public projection. */
+  executorInvocation?: unknown
 
   /** Original response operation index. Retained after the live request settles; never broadcast. */
   interactionOperations?: Record<string, AgentMuxInteractionOperationReceipt>
