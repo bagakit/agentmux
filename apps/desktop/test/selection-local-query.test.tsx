@@ -91,9 +91,9 @@ it('filters original Agent creation directories by description without creating 
   await dom.render(<GoalAgentPicker demand={goal()} role="assignees" onSave={save} onClose={() => {}} />); await settle()
   const createMode = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'New Agent')!
   await act(async () => createMode.click()); await settle()
-  const label = 'New Agent execution directory'
+  const label = 'Project for this arrangement'
   await key(field(label), 'ArrowDown'); await fill('choice-workspace-12')
-  expect(items().map(item => item.dataset.value)).toEqual(['project-12']); expect(field(label).dataset.value).toBe('project-3')
+  expect(items().map(item => item.dataset.value)).toEqual(['project-12']); expect(field(label).dataset.value).toBe('')
   for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) { const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...modifier }); await act(async () => input().dispatchEvent(event)); expect(event.defaultPrevented).toBe(true); expect(save).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled() }
   await key(input(), 'ArrowDown'); expect(save).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled()
   await key(document.activeElement as HTMLElement, 'Enter'); expect(field(label).dataset.value).toBe('project-12'); expect(save).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled(); expect(document.querySelector('[role=dialog]')).not.toBeNull(); expect(document.activeElement).toBe(field(label))
@@ -105,11 +105,11 @@ it('keeps the actual remote room page and explicit server search outside local o
   const page = { connectionId: config.connectionId, connectionRevision: 1, application: config.application, observation: { state: 'ready' as const }, rooms: Array.from({ length: 20 }, (_, index) => ({ externalConversationId: `room-${index}`, name: `Original room ${index}`, state: 'active' as const })), next: 'original-cursor' }
   const calls = vi.spyOn(api.connections, 'call').mockResolvedValue(page), changed = vi.fn()
   await dom.render(<ConnectorRoomSelection connection={{ revision: 1, config }} value="room-3" onChange={changed} disabled={false} />); await settle()
-  expect(calls).toHaveBeenCalledExactlyOnceWith('connection.room.ls', { connectionId: config.connectionId, expectedConnectionRevision: 1, limit: 20 })
+  expect(calls).toHaveBeenCalledExactlyOnceWith('connection.room.ls', { connectionId: config.connectionId, expectedConnectionRevision: 1, limit: 20 }, undefined)
   await key(field('Existing group'), 'ArrowDown'); expect(input()).toBeNull(); expect(items()).toHaveLength(21); await key(document.activeElement as HTMLElement, 'Escape')
   const remote = document.querySelector<HTMLInputElement>('[aria-label="Search groups"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(remote, 'Original query'); remote.dispatchEvent(new Event('input', { bubbles: true })) }); await key(remote, 'Enter')
-  expect(calls).toHaveBeenLastCalledWith('connection.room.search', { connectionId: config.connectionId, expectedConnectionRevision: 1, limit: 20, query: 'Original query' }); expect(changed).not.toHaveBeenCalled()
+  expect(calls).toHaveBeenLastCalledWith('connection.room.search', { connectionId: config.connectionId, expectedConnectionRevision: 1, limit: 20, query: 'Original query' }, undefined); expect(changed).not.toHaveBeenCalled()
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'More groups')!.click()); await settle()
-  expect(calls).toHaveBeenLastCalledWith('connection.room.search', { connectionId: config.connectionId, expectedConnectionRevision: 1, limit: 20, query: 'Original query', cursor: 'original-cursor' })
+  expect(calls).toHaveBeenLastCalledWith('connection.room.search', { connectionId: config.connectionId, expectedConnectionRevision: 1, limit: 20, query: 'Original query', cursor: 'original-cursor' }, undefined)
 })
