@@ -3,6 +3,7 @@ import { privatePackageSmokeEnvironment, preservePackageSmokeFailure } from './p
 import { updateRoute } from '../src/shared/update-policy.ts'
 import { hashRuntimeArtifact } from './update-identity.mjs'
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
   cp,
   lstat,
@@ -759,6 +760,16 @@ async function awaitUiActivation(appPath, before, runtimePlan = null) {
   throw Object.assign(lastError, { uiContinuity: { before: structuredClone(before), after: structuredClone(lastObservation) } })
 }
 
+// Cleanup evidence uses the same package and signed seals as stage adoption.
+// Failure to observe it never adds an installation qualification gate.
+async function signedSourceIdentity(appPath) {
+  const root = await lstat(appPath)
+  assert(root.isDirectory() && !root.isSymbolicLink(), 'The signed source directory is unavailable.')
+  return { dev: root.dev, ino: root.ino, package: await readPackageIdentity(appPath),
+    executable: await sha256(join(appPath, 'Contents', 'MacOS', PRODUCT_NAME)),
+    seal: await sha256(join(appPath, 'Contents', '_CodeSignature', 'CodeResources')) }
+}
+
 export async function installApplication(appPath, { intent = installIntent, homeDirectory = homedir(),
   quit = quitInstalledApplication, launch = relaunchInstalledApplication, preparedApplicationPath = null } = {}) {
   const { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime } = await import('./package-runtime-upgrade.mjs')
@@ -794,192 +805,223 @@ export async function installApplication(appPath, { intent = installIntent, home
   const trashRoot = join(homeDirectory, '.Trash')
   assert(preparedApplicationPath === null || typeof preparedApplicationPath === 'string' && preparedApplicationPath.length > 0,
     'A prepared installer stage must name its retained directory; the application was not changed.')
-  const next = preparedApplicationPath === null ? join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}.app`) : resolve(preparedApplicationPath)
-  await mkdir(applicationsRoot, { recursive: true })
-  if (preparedApplicationPath === null) {
-    await rm(next, { recursive: true, force: true })
-    const sameVolume = (await stat(appPath)).dev === (await stat(applicationsRoot)).dev
-    await run(sameVolume ? 'cp' : 'ditto', sameVolume ? ['-cRp', appPath, next] : [appPath, next], { capture: true })
-  } else {
-    // Explicit adoption requalifies the retained object; it never copies or removes it.
-    const prefix = `.${PRODUCT_NAME}.install-`, stageName = basename(next)
-    assert(dirname(next) === resolve(applicationsRoot) && stageName.startsWith(prefix) && /^[1-9]\d*\.app$/.test(stageName.slice(prefix.length)),
-      'A prepared installer stage must be an original install directory beside the canonical application; the application was not changed.')
-    const stage = await lstat(next)
-    assert(stage.isDirectory() && !stage.isSymbolicLink() && stage.uid === process.getuid(),
-      'A prepared installer stage must be a real directory owned by this user; the application was not changed.')
-    if (previouslyInstalled) {
-      const installed = await stat(destination)
-      assert(installed.dev !== stage.dev || installed.ino !== stage.ino,
-        'A prepared installer stage must be a different real directory from the canonical application; the application was not changed.')
-    }
-    assert(await realpath(next) === join(await realpath(applicationsRoot), stageName),
-      'A prepared installer stage must remain inside the canonical Applications directory; the application was not changed.')
-    assertPackageIdentity(await readPackageIdentity(next), await readPackageIdentity(appPath))
-    for (const artifact of [['Contents', 'MacOS', PRODUCT_NAME], ['Contents', '_CodeSignature', 'CodeResources']]) {
-      const [selectedHash, stageHash] = await Promise.all([sha256(join(appPath, ...artifact)), sha256(join(next, ...artifact))])
-      assert(/^[a-f0-9]{64}$/.test(selectedHash) && stageHash === selectedHash,
-        `Prepared installer stage ${artifact.at(-1)} does not match the selected signed application; the application was not changed.`)
-    }
-  }
-  await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
-  let runtimeUpgrade = null, uiRuntime = null, before = null, semanticHost = null
-  let native = { status: 'unchanged' }
-  let previousScope = await scopedProcesses(currentPath)
-  let running = previousScope.serving
+  const next = preparedApplicationPath === null ? join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}-${randomUUID()}.app`) : resolve(preparedApplicationPath)
+  let ownedStage = null, sourceBefore = null, cutoverStarted = false
   try {
-    if (previouslyInstalled) {
-      semanticHost = await prepareSemanticHostReload(currentPath, next)
-      // Admit original GUI owners only after independent namespace facts are
-      // available. A preliminary observation is not permanent ownership.
-      previousScope = await scopedProcesses(currentPath, [], semanticHost ? [semanticHost.owner] : [])
-      running = previousScope.serving
+    await mkdir(applicationsRoot, { recursive: true })
+    if (preparedApplicationPath === null) {
+      sourceBefore = await signedSourceIdentity(appPath).catch(() => null)
+      // Exclusive creation never reclaims a stage belonging to another attempt.
+      await mkdir(next)
+      ownedStage = { identity: await lstat(next).catch(() => null) }
+      const sameVolume = (await stat(appPath)).dev === (await stat(applicationsRoot)).dev
+      await run(sameVolume ? 'cp' : 'ditto', sameVolume ? ['-cRp', `${appPath}/.`, next] : [appPath, next], { capture: true })
+    } else {
+      // Explicit adoption requalifies the retained object; it never copies or removes it.
+      const prefix = `.${PRODUCT_NAME}.install-`, stageName = basename(next)
+      assert(dirname(next) === resolve(applicationsRoot) && stageName.startsWith(prefix) && /^[1-9]\d*(?:-[a-f0-9-]{36})?\.app$/.test(stageName.slice(prefix.length)),
+        'A prepared installer stage must be an original install directory beside the canonical application; the application was not changed.')
+      const stage = await lstat(next)
+      assert(stage.isDirectory() && !stage.isSymbolicLink() && stage.uid === process.getuid(),
+        'A prepared installer stage must be a real directory owned by this user; the application was not changed.')
+      if (previouslyInstalled) {
+        const installed = await stat(destination)
+        assert(installed.dev !== stage.dev || installed.ino !== stage.ino,
+          'A prepared installer stage must be a different real directory from the canonical application; the application was not changed.')
+      }
+      assert(await realpath(next) === join(await realpath(applicationsRoot), stageName),
+        'A prepared installer stage must remain inside the canonical Applications directory; the application was not changed.')
+      assertPackageIdentity(await readPackageIdentity(next), await readPackageIdentity(appPath))
+      for (const artifact of [['Contents', 'MacOS', PRODUCT_NAME], ['Contents', '_CodeSignature', 'CodeResources']]) {
+        const [selectedHash, stageHash] = await Promise.all([sha256(join(appPath, ...artifact)), sha256(join(next, ...artifact))])
+        assert(/^[a-f0-9]{64}$/.test(selectedHash) && stageHash === selectedHash,
+          `Prepared installer stage ${artifact.at(-1)} does not match the selected signed application; the application was not changed.`)
+      }
     }
-    if (running.length > 0) before = await qualifyOutgoingUi(currentPath)
-    if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
-    if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next)
-    if (intent === 'ui-only') native = { status: 'deferred', reason: uiRuntime
-      ? 'Explicit UI-only transaction; the existing Runtime is retained without a Native upgrade.'
-      : 'No existing listener was observed. No Native upgrade was attempted; ordinary GUI startup may start a Runtime.' }
-  } catch (error) {
-    await closeRuntimeUpgrade(uiRuntime)
-    throw Object.assign(error, { transaction: { intent, ui: { status: 'not-started', error: error.message,
-      ...(error.uiContinuity ? { continuity: error.uiContinuity } : {}) }, native } })
-  }
-  try {
-    // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
-    // 不该白关掉用户正在用的窗口。
-    const quitOutcome = previouslyInstalled && running.length > 0
-      ? await quit(destination, previousScope.admissions, semanticHost)
-      : { wasRunning: false, pids: [], admissions: previousScope.admissions }
+    await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
+    let runtimeUpgrade = null, uiRuntime = null, before = null, semanticHost = null
+    let native = { status: 'unchanged' }
+    let previousScope = await scopedProcesses(currentPath)
+    let running = previousScope.serving
     try {
-      if (!semanticHost && previouslyInstalled) {
+      if (previouslyInstalled) {
         semanticHost = await prepareSemanticHostReload(currentPath, next)
+        // Admit original GUI owners only after independent namespace facts are
+        // available. A preliminary observation is not permanent ownership.
+        previousScope = await scopedProcesses(currentPath, [], semanticHost ? [semanticHost.owner] : [])
+        running = previousScope.serving
       }
-      await stopSemanticHostForInstall(semanticHost)
-      if (uiRuntime) await confirmUiRuntime(uiRuntime)
+      if (running.length > 0) before = await qualifyOutgoingUi(currentPath)
+      if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
+      if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next)
+      if (intent === 'ui-only') native = { status: 'deferred', reason: uiRuntime
+        ? 'Explicit UI-only transaction; the existing Runtime is retained without a Native upgrade.'
+        : 'No existing listener was observed. No Native upgrade was attempted; ordinary GUI startup may start a Runtime.' }
     } catch (error) {
-      if (quitOutcome.wasRunning) {
-        await launch(destination)
-        await awaitUiActivation(destination, before, uiRuntime)
-      }
-      throw Object.assign(error, { transaction: { intent, ui: { status: quitOutcome.wasRunning ? 'restored' : 'not-started', error: error.message }, native } })
+      await closeRuntimeUpgrade(uiRuntime)
+      throw Object.assign(error, { transaction: { intent, ui: { status: 'not-started', error: error.message,
+        ...(error.uiContinuity ? { continuity: error.uiContinuity } : {}) }, native } })
     }
-    // A pending action in the old GUI could have started a Runtime after the
-    // first absent-listener observation. Recheck that same owner after GUI exit.
-    if (intent === 'full' && runtimeChanged && !runtimeUpgrade) {
-      try { runtimeUpgrade = await prepareRuntimeUpgrade(destination, next) }
-      catch (error) {
+    try {
+      // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
+      // 不该白关掉用户正在用的窗口。
+      const quitOutcome = previouslyInstalled && running.length > 0
+        ? await quit(destination, previousScope.admissions, semanticHost)
+        : { wasRunning: false, pids: [], admissions: previousScope.admissions }
+      try {
+        if (!semanticHost && previouslyInstalled) {
+          semanticHost = await prepareSemanticHostReload(currentPath, next)
+        }
+        await stopSemanticHostForInstall(semanticHost)
+        if (uiRuntime) await confirmUiRuntime(uiRuntime)
+      } catch (error) {
         if (quitOutcome.wasRunning) {
           await launch(destination)
           await awaitUiActivation(destination, before, uiRuntime)
-          error.transaction = { intent, ui: { status: 'restored', error: error.message }, native }
+        }
+        throw Object.assign(error, { transaction: { intent, ui: { status: quitOutcome.wasRunning ? 'restored' : 'not-started', error: error.message }, native } })
+      }
+      // A pending action in the old GUI could have started a Runtime after the
+      // first absent-listener observation. Recheck that same owner after GUI exit.
+      if (intent === 'full' && runtimeChanged && !runtimeUpgrade) {
+        try { runtimeUpgrade = await prepareRuntimeUpgrade(destination, next) }
+        catch (error) {
+          if (quitOutcome.wasRunning) {
+            await launch(destination)
+            await awaitUiActivation(destination, before, uiRuntime)
+            error.transaction = { intent, ui: { status: 'restored', error: error.message }, native }
+          }
+          throw error
+        }
+      }
+      if (running.length === 0 && (await processIdsForApplication(destination)).length > 0) {
+        throw Object.assign(new Error('A GUI appeared during cold preflight; the original application directory was not changed.'),
+          { transaction: { intent, ui: { status: 'not-started' }, native } })
+      }
+      let previousInstall
+      // From this point the candidate may become active or be retained by rollback.
+      cutoverStarted = true
+      if (previouslyInstalled) {
+        await mkdir(trashRoot, { recursive: true })
+        const trashName = `${PRODUCT_NAME}-${new Date().toISOString().replaceAll(':', '-')}-${process.pid}.app`
+        previousInstall = join(trashRoot, trashName)
+        await rename(destination, previousInstall)
+      }
+      try {
+        await rename(next, destination)
+      } catch (error) {
+        // The old installation must remain the active one if the final cutover fails. Restore it
+        // from Trash before surfacing the failure; user data is never part of this rollback.
+        if (previousInstall && await pathExists(previousInstall)) {
+          await rename(previousInstall, destination).catch((restoreError) => {
+            throw new AggregateError([error, restoreError], 'Could not install candidate or restore the previous application')
+          })
+          if (uiRuntime) await confirmUiRuntime(uiRuntime)
+          if (quitOutcome.wasRunning) {
+            await launch(destination)
+            await awaitUiActivation(destination, before, uiRuntime)
+            error.transaction = { intent, ui: { status: 'restored', error: error.message }, native }
+          }
         }
         throw error
       }
-    }
-    if (running.length === 0 && (await processIdsForApplication(destination)).length > 0) {
-      throw Object.assign(new Error('A GUI appeared during cold preflight; the original application directory was not changed.'),
-        { transaction: { intent, ui: { status: 'not-started' }, native } })
-    }
-    let previousInstall
-    if (previouslyInstalled) {
-      await mkdir(trashRoot, { recursive: true })
-      const trashName = `${PRODUCT_NAME}-${new Date().toISOString().replaceAll(':', '-')}-${process.pid}.app`
-      previousInstall = join(trashRoot, trashName)
-      await rename(destination, previousInstall)
-    }
-    try {
-      await rename(next, destination)
-    } catch (error) {
-      // The old installation must remain the active one if the final cutover fails. Restore it
-      // from Trash before surfacing the failure; user data is never part of this rollback.
-      if (previousInstall && await pathExists(previousInstall)) {
-        await rename(previousInstall, destination).catch((restoreError) => {
-          throw new AggregateError([error, restoreError], 'Could not install candidate or restore the previous application')
-        })
-        if (uiRuntime) await confirmUiRuntime(uiRuntime)
-        if (quitOutcome.wasRunning) {
+      if (runtimeUpgrade) {
+        const handoff = await finishRuntimeUpgrade(runtimeUpgrade, destination)
+        process.stdout.write(`runtime_handoff=${JSON.stringify(handoff)}\n`)
+        native = { status: handoff.status === 'upgraded' ? 'committed' : handoff.status === 'old-confirmed' ? 'unchanged' : 'unknown', handoff }
+        if (handoff.status === 'old-confirmed') {
+          // The original protocol and exact owner/Run facts are positively confirmed.
+          // Keep the candidate in next; restore the old client for that live service.
+          assert(previousInstall, 'The original application is unavailable for the confirmed old Runtime.')
+          await rename(destination, next)
+          await rename(previousInstall, destination)
+          await launch(destination)
+          await awaitUiActivation(destination, before, { ...runtimeUpgrade, newSdk: runtimeUpgrade.oldSdk })
+          throw Object.assign(new Error(`Runtime upgrade failed; the original application and healthy Runtime are restored: ${handoff.error}`),
+            { transaction: { intent, ui: { status: 'restored', error: handoff.error }, native } })
+        }
+        assert(handoff.status === 'upgraded',
+          `Runtime handoff is unknown; candidate and previous application are retained. No new GUI was started: ${handoff.error}`)
+        if (handoff.ownerReceiptError) process.stderr.write(`Runtime upgraded; ownership receipt could not be saved: ${handoff.ownerReceiptError}\n`)
+      }
+      process.stdout.write(`installed_app=${destination}\n`)
+      if (runtimeReviewPath) process.stdout.write(`runtime_review=${runtimeReviewPath}\n`)
+      if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
+      process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
+      let relaunched, observed, terminalRebindings
+      const launchBaseline = await scopedProcesses(destination)
+      try {
+        relaunched = await launch(destination)
+        const activation = await awaitUiActivation(destination, before, uiRuntime ?? runtimeUpgrade)
+        observed = activation.observation; terminalRebindings = activation.terminalRebindings
+        await confirmSemanticHostReload(semanticHost, destination)
+      } catch (error) {
+        const result = { intent, ui: { status: 'unknown', error: error.message }, native, candidate: destination, previous: previousInstall ?? null }
+        // An unobserved GUI cannot be force-quit or treated as safely rolled back.
+        if (before && native.status !== 'committed' && previousInstall && (await processIdsForApplication(destination)).length === 0) {
+          await rename(destination, next)
+          if (uiRuntime) await confirmUiRuntime(uiRuntime)
+          await rename(previousInstall, destination)
           await launch(destination)
           await awaitUiActivation(destination, before, uiRuntime)
-          error.transaction = { intent, ui: { status: 'restored', error: error.message }, native }
+          result.ui = { status: 'restored', error: error.message }
         }
+        throw Object.assign(error, { transaction: result })
       }
-      throw error
-    }
-    if (runtimeUpgrade) {
-      const handoff = await finishRuntimeUpgrade(runtimeUpgrade, destination)
-      process.stdout.write(`runtime_handoff=${JSON.stringify(handoff)}\n`)
-      native = { status: handoff.status === 'upgraded' ? 'committed' : handoff.status === 'old-confirmed' ? 'unchanged' : 'unknown', handoff }
-      if (handoff.status === 'old-confirmed') {
-        // The original protocol and exact owner/Run facts are positively confirmed.
-        // Keep the candidate in next; restore the old client for that live service.
-        assert(previousInstall, 'The original application is unavailable for the confirmed old Runtime.')
-        await rename(destination, next)
-        await rename(previousInstall, destination)
-        await launch(destination)
-        await awaitUiActivation(destination, before, { ...runtimeUpgrade, newSdk: runtimeUpgrade.oldSdk })
-        throw Object.assign(new Error(`Runtime upgrade failed; the original application and healthy Runtime are restored: ${handoff.error}`),
-          { transaction: { intent, ui: { status: 'restored', error: handoff.error }, native } })
-      }
-      assert(handoff.status === 'upgraded',
-        `Runtime handoff is unknown; candidate and previous application are retained. No new GUI was started: ${handoff.error}`)
-      if (handoff.ownerReceiptError) process.stderr.write(`Runtime upgraded; ownership receipt could not be saved: ${handoff.ownerReceiptError}\n`)
-    }
-    process.stdout.write(`installed_app=${destination}\n`)
-    if (runtimeReviewPath) process.stdout.write(`runtime_review=${runtimeReviewPath}\n`)
-    if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
-    process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
-    let relaunched, observed, terminalRebindings
-    const launchBaseline = await scopedProcesses(destination)
-    try {
-      relaunched = await launch(destination)
-      const activation = await awaitUiActivation(destination, before, uiRuntime ?? runtimeUpgrade)
-      observed = activation.observation; terminalRebindings = activation.terminalRebindings
-      await confirmSemanticHostReload(semanticHost, destination)
+      process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
+      const activatedScope = await scopedProcesses(destination)
+      const activatedOwners = confirmApplicationActivation({
+        previous: quitOutcome.admissions,
+        beforeLaunch: launchBaseline.processes, scope: activatedScope,
+        main: observed.main, intent, native, path: destination
+      })
+      process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
+      if (!before && (previouslyInstalled || intent === 'ui-only')) return { intent, ui: { status: 'unknown', path: destination, observation: observed, terminalRebindings,
+        reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
+      const unconfirmed = []
+      if (observed.workbench.survey === undefined || before && before.workbench.survey === undefined)
+        unconfirmed.push('Complete Survey continuity is unconfirmed because an original or restored stored preference observation is unavailable.')
+      const unboundRegions = before ? runningRegionsWithoutRun(before.workbench) : []
+      if (unboundRegions.length > 0)
+        unconfirmed.push(`Run continuity is unconfirmed for Regions that had no confirmed Run before the update: ${unboundRegions.join(', ')}.`)
+      if (unconfirmed.length > 0) return { intent, ui: {
+        status: 'unknown', path: destination, observation: observed, terminalRebindings,
+        reason: `The candidate GUI is active. ${unconfirmed.join(' ')}`,
+        continuity: { before: structuredClone(before), after: structuredClone(observed) } }, native }
+      return { intent, ui: { status: 'committed', main: observed.main, path: destination, observation: observed,
+        terminalRebindings }, native }
     } catch (error) {
-      const result = { intent, ui: { status: 'unknown', error: error.message }, native, candidate: destination, previous: previousInstall ?? null }
-      // An unobserved GUI cannot be force-quit or treated as safely rolled back.
-      if (before && native.status !== 'committed' && previousInstall && (await processIdsForApplication(destination)).length === 0) {
-        await rename(destination, next)
-        if (uiRuntime) await confirmUiRuntime(uiRuntime)
-        await rename(previousInstall, destination)
-        await launch(destination)
-        await awaitUiActivation(destination, before, uiRuntime)
-        result.ui = { status: 'restored', error: error.message }
-      }
-      throw Object.assign(error, { transaction: result })
+      if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }
+      if (error.ownershipDiagnostic) error.transaction.ui.ownership = error.ownershipDiagnostic
+      if (error.uiContinuity) error.transaction.ui.continuity = error.uiContinuity
+      throw error
+    } finally {
+      await closeRuntimeUpgrade(runtimeUpgrade)
+      await closeRuntimeUpgrade(uiRuntime)
     }
-    process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
-    const activatedScope = await scopedProcesses(destination)
-    const activatedOwners = confirmApplicationActivation({
-      previous: quitOutcome.admissions,
-      beforeLaunch: launchBaseline.processes, scope: activatedScope,
-      main: observed.main, intent, native, path: destination
-    })
-    process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
-    if (!before && (previouslyInstalled || intent === 'ui-only')) return { intent, ui: { status: 'unknown', path: destination, observation: observed, terminalRebindings,
-      reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
-    const unconfirmed = []
-    if (observed.workbench.survey === undefined || before && before.workbench.survey === undefined)
-      unconfirmed.push('Complete Survey continuity is unconfirmed because an original or restored stored preference observation is unavailable.')
-    const unboundRegions = before ? runningRegionsWithoutRun(before.workbench) : []
-    if (unboundRegions.length > 0)
-      unconfirmed.push(`Run continuity is unconfirmed for Regions that had no confirmed Run before the update: ${unboundRegions.join(', ')}.`)
-    if (unconfirmed.length > 0) return { intent, ui: {
-      status: 'unknown', path: destination, observation: observed, terminalRebindings,
-      reason: `The candidate GUI is active. ${unconfirmed.join(' ')}`,
-      continuity: { before: structuredClone(before), after: structuredClone(observed) } }, native }
-    return { intent, ui: { status: 'committed', main: observed.main, path: destination, observation: observed,
-      terminalRebindings }, native }
   } catch (error) {
-    if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }
-    if (error.ownershipDiagnostic) error.transaction.ui.ownership = error.ownershipDiagnostic
-    if (error.uiContinuity) error.transaction.ui.continuity = error.uiContinuity
+    if (ownedStage) {
+      let cleanup
+      try {
+        const stage = await lstat(next).catch(cause => { if (cause.code === 'ENOENT') return null; throw cause })
+        if (!stage) cleanup = { status: 'consumed', path: next }
+        else if (cutoverStarted) cleanup = { status: 'retained', path: next, reason: 'Directory cutover began; preserve the continuation candidate.' }
+        else {
+          assert(sourceBefore && isDeepStrictEqual(sourceBefore, await signedSourceIdentity(appPath)),
+            'The original signed source is not confirmed unchanged; preserve this candidate.')
+          const current = await lstat(next)
+          assert(ownedStage.identity && current.isDirectory() && !current.isSymbolicLink() && current.dev === ownedStage.identity.dev && current.ino === ownedStage.identity.ino,
+            'The installer stage changed identity; preserve the unconfirmed object.')
+          await rm(next, { recursive: true })
+          cleanup = { status: 'removed', path: next }
+        }
+      } catch (cause) { cleanup = { status: 'retained', path: next, reason: cause.message } }
+      // Maintenance never replaces the original installation error or transaction.
+      error.installStage = cleanup
+      if (error.transaction) error.transaction.installStage = cleanup
+      process.stderr.write(`install_stage_cleanup=${JSON.stringify(cleanup)}\n`)
+    }
     throw error
-  } finally {
-    await closeRuntimeUpgrade(runtimeUpgrade)
-    await closeRuntimeUpgrade(uiRuntime)
   }
 }
 
