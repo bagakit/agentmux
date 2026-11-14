@@ -37,7 +37,7 @@ import { FocusToolbar } from './FocusToolbar'
 import { FocusHistorySearch } from './FocusHistorySearch'
 import { useFocusHistorySearch } from '../lib/use-focus-history-search'
 import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
-import { FocusSearchLocations } from './FocusSearchLocations'
+import { FocusSearchLocations, focusSearchResultName } from './FocusSearchLocations'
 import { focusSearchCatalog, focusSearchContextKey, searchFocus } from '../lib/focus-search'
 import { FocusSourceStatus } from './FocusSourceStatus'
 import { projectRailNavigation } from '../lib/workspace-projects'
@@ -347,6 +347,38 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const searchCatalog = useMemo(() => searchingMetadata ? focusSearchCatalog(navigationCatalog, agentRegionExecution) : navigationCatalog,
     [searchingMetadata, navigationCatalog, executionRows])
   const searchResult = useMemo(() => searchFocus(query, { rows: filterContexts, lanes: filterLanes, catalog: searchCatalog, sources: catalogue.sources, history: executionHistory, retained: retainedProjects }), [query, filterContexts, filterLanes, searchCatalog, catalogue.sources, executionHistory, retainedProjects])
+  const searchNames = useMemo(() => {
+    if (!query.trim()) return { locations: new Map<string, string | undefined>(), sources: new Map<string, string>(), unplaced: new Map<string, string | undefined>(), descriptions: new Map<string, string>() }
+    const names = new Map(filterContexts.map(row => [focusSearchContextKey(row.hostId, row.id, row.kind), row.name]))
+    const regions = new Map(searchCatalog.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
+    const catalogTabs = new Map(searchCatalog.tabs.map(tab => [tab.tabId, tab]))
+    const zones = new Map(searchCatalog.zones.map(zone => [zone.zoneId, zone]))
+    const descriptions = new Map<string, string>()
+    const locations = new Map(searchResult.locations.map(location => {
+      const ref = location.reference, region = regions.get(JSON.stringify([ref.tabId, ref.regionId]))
+      const hostId = region?.execution?.hostId ?? zones.get(catalogTabs.get(ref.tabId)?.zoneId ?? '')?.hostId
+      const workspace = config?.workspaces.find(item => item.id === ref.displayWorkspaceId && item.hostId === hostId)
+      const host = config?.hosts.find(item => item.id === hostId), layout = layouts[ref.displayWorkspaceId]
+      const index = layout ? groupIds(layout.root).indexOf(ref.groupId) : -1
+      descriptions.set(location.address, `${workspace?.name ?? 'Original workspace'} · ${host?.label ?? hostId ?? 'Host unconfirmed'} · ${index >= 0 ? `Group ${index + 1}` : 'Group unconfirmed'}`)
+      const name = hostId && location.sessionId && (location.kind === 'agent' || location.kind === 'terminal')
+        ? names.get(focusSearchContextKey(hostId, location.sessionId, location.kind)) : undefined
+      const ids = [ref.regionId, ref.tabId, location.sessionId]
+      return [location.address, focusSearchResultName(name, ids) ?? focusSearchResultName(tabs[ref.tabId]?.name, ids)] as const
+    }))
+    const sources = new Map<string, string>()
+    for (const entry of executionHistory) if (entry.identity?.kind === 'agent') {
+      const key = JSON.stringify([entry.identity.hostId, entry.sessionId])
+      const name = focusSearchResultName(entry.identity.name, [entry.sessionId])
+      if (name && !sources.has(key)) sources.set(key, name)
+    }
+    const unplaced = new Map(searchResult.unplaced.filter(object => object.kind === 'zone').map(object => {
+      const zone = zones.get(object.id), workspace = config?.workspaces.find(item => zone && item.id === zone.workspaceId && item.hostId === zone.hostId)
+      return [object.id, zone?.branch ?? workspace?.name] as const
+    }))
+    return { locations, sources, unplaced, descriptions }
+  }, [query, searchResult, filterContexts, searchCatalog, executionHistory, tabs, config?.workspaces, config?.hosts, layouts])
+
   const lanesByContext = focusLanesByContext(filterLanes)
   // The common Region choice is independent of both the project filter and Agent MRU.
   const resourceLaneIds = new Set(currentSurface && currentSurface.kind !== 'agent' && currentSurface.kind !== 'terminal'
@@ -571,10 +603,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
             goalLinks={goalLinks} identities={contextIdentities} onSelect={() => {}} />
         </WorkbenchPresentationContext.Provider>
       </div> : null}
-      <FocusSearchLocations result={searchResult} onRead={historySearch.start} describeLocation={location => {
-        const ref = location.reference, layout = layouts[ref.displayWorkspaceId], index = layout ? groupIds(layout.root).indexOf(ref.groupId) : -1
-        return `${config?.workspaces.find(workspace => workspace.id === ref.displayWorkspaceId)?.name ?? ref.displayWorkspaceId} · ${index >= 0 ? `Group ${index + 1}` : ref.groupId}`
-      }} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
+      <FocusSearchLocations result={searchResult} onRead={historySearch.start}
+        nameLocation={location => searchNames.locations.get(location.address)}
+        nameSource={source => searchNames.sources.get(JSON.stringify([source.hostId, source.agentSessionId]))}
+        nameUnplaced={object => object.kind === 'zone' ? searchNames.unplaced.get(object.id) : undefined} describeLocation={location => searchNames.descriptions.get(location.address) ?? 'Original location'} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
       <FocusHistorySearch search={historySearch} active={visible} />
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => openMoteContext(pmoAttention[0]!)}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context</span></button> : null}
       {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">

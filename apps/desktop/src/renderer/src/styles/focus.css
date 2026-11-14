@@ -272,12 +272,31 @@
 .focus-retained-projects__row:disabled { cursor: default; }
 .focus-source-loading { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--text-3); font-size: var(--fs-micro); }
 
-.focus-search-locations { flex: 0 0 auto; max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 3px; padding: 6px; min-width: 0; }
-.focus-search-locations > small { color: var(--text-muted); }
-.focus-search-locations .focus-location-choice { min-width: 0; text-align: left; }
-.focus-search-locations .focus-location-choice strong,
-.focus-search-locations .focus-location-choice small { overflow-wrap: anywhere; white-space: normal; }
-
+.focus-search-results { display: flex; flex-direction: column; overflow: hidden; flex: 0 1 auto; min-height: 0; min-width: 0; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); }
+.focus-search-results > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; padding: 6px 8px; }
+.focus-search-results > header > strong { font-weight: 600; }
+.focus-search-results > header > span, .focus-search-results > header > small, .focus-search-results__issue { color: var(--text-3); }
+.focus-search-results__issue { margin: 4px 8px 8px; }
+.focus-search-locations { flex: 0 1 auto; min-height: 0; max-height: min(320px, 42vh); overflow: auto; min-width: 0; padding: 0 6px 6px; }
+.focus-search-section + .focus-search-section { margin-top: 8px; border-top: 1px solid var(--line); }
+.focus-search-section h3 { display: flex; gap: 6px; margin: 6px 2px 3px; font: 500 var(--fs-meta) var(--font-sans); color: var(--text-2); }
+.focus-search-section h3 > span { color: var(--text-3); font-weight: 400; }
+.focus-search-result { min-width: 0; padding: 3px 0; }
+.focus-location-choice { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; min-width: 0; padding: 5px 6px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.focus-location-choice > span:first-child { flex: 1; min-width: 0; }
+.focus-location-choice:hover, .focus-location-choice:focus-visible { background: var(--surface-2); }
+.focus-location-choice:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.focus-search-result__identity { min-width: 0; padding: 5px 6px; }
+.focus-location-choice strong, .focus-search-result__identity strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.focus-location-choice small, .focus-search-result__identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+.focus-search-result__action { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-search-details { min-width: 0; margin: 1px 6px 2px; color: var(--text-3); }
+.focus-search-details > summary { width: fit-content; cursor: pointer; font-size: var(--fs-micro); }
+.focus-search-details dl { display: grid; gap: 3px; margin: 5px 0; color: var(--text-2); }
+.focus-search-details dl > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; }
+.focus-search-details dt { color: var(--text-3); }
+.focus-search-details dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.focus-search-result__read.small-button { margin: 2px 6px; justify-content: flex-start; }
 .focus-search-history-trigger { flex: 0 0 auto; gap: 4px; }
 .focus-history-search { display: flex; flex: 0 0 auto; flex-direction: column; gap: 6px; min-width: 0; max-height: 60%; overflow: auto; padding: 8px; border-bottom: 1px solid var(--line); }
 .focus-history-search > header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -289,7 +308,7 @@
 .focus-history-hit > summary:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
 .focus-history-hit__identity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
 .focus-history-hit__identity > strong { min-width: 0; font-weight: 500; }
-.focus-history-hit small, .focus-search-locations > div > small { display: block; overflow-wrap: anywhere; }
+.focus-history-hit small { display: block; overflow-wrap: anywhere; }
 .focus-history-hit__excerpt { white-space: pre-wrap; color: var(--text-2); }
 .focus-history-hit__excerpt mark { color: var(--text); background: color-mix(in srgb, var(--green) 20%, transparent); border-radius: 2px; }
 .focus-history-hit__source { color: var(--text-3); }
@@ -368,12 +387,19 @@
 .session-record-dialog > header h2 { margin: 0; font: 600 var(--fs-body) var(--font-sans); }
 .session-record-dialog > p { color: var(--text-3); }
 .session-record-details-trigger { margin: 4px 8px; flex: none; -webkit-app-region: no-drag; }
+.focus-local-inputs-trigger { display: inline-flex; flex: none; align-items: center; justify-content: flex-start; gap: 5px; min-width: 28px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); white-space: nowrap; cursor: pointer; }
+.focus-local-inputs-trigger:hover, .focus-local-inputs-trigger:focus-visible { background: var(--surface-2); color: var(--text); }
+.focus-local-inputs-trigger svg { flex: none; }
+@container focus-filter-area (max-width: 680px) {
+  .focus-local-inputs-trigger { width: 28px; padding: 0; gap: 0; justify-content: center; }
+  .focus-local-inputs-trigger > span { display: none; }
+}
 .local-retained-inputs { min-width: 0; font-size: 12px; }
 .local-retained-inputs > p { margin: 8px 0; }
 .local-input-record { margin-top: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
-.local-input-record > summary { cursor: pointer; display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
+.local-input-record > summary { cursor: pointer; display: flex; gap: 6px; align-items: center; }
 .local-input-record > summary > span { flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.local-input-record > summary > small { width: 100%; color: var(--text-muted); overflow-wrap: anywhere; }
+.local-input-record > summary > small { flex: none; max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .local-input-record textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 70px; margin: 8px 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-1); color: var(--text); font: inherit; }
 .session-record-details { min-width: 0; }
 .session-record-details > summary, .session-record-details__body > details > summary { cursor: pointer; color: var(--text-muted); }
