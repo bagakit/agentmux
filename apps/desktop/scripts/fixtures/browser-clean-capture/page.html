@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Original clean capture page</title>
+<style>
+*{box-sizing:border-box}html{background:#f8faf8;color:#17241c;font:16px system-ui;border:8px solid #16834d;min-height:100%}body{margin:24px}
+h1{font-size:26px;margin:0 0 12px}p{max-width:580px;line-height:1.5}.calibration{width:64px;height:32px;background:#2759be;margin-bottom:12px}
+input{display:block;width:340px;padding:10px;border:2px solid #16834d;font:16px system-ui;background:white;color:#17241c}
+button{margin:16px 0;padding:8px 16px}iframe{display:block;width:420px;height:150px;border:4px solid #16834d;background:#eef7ef}
+.note{color:#42584a;font-size:13px}.below{height:400px}
+</style><body><div class="calibration" aria-label="Page blue calibration"></div>
+<h1>The page owns this green border</h1>
+<p>This original document, input and embedded document must remain in the exported PNG. Only AgentMux decorations may be excluded.</p>
+<input id="draft" aria-label="Original draft" value="Original unsubmitted page draft">
+<button id="target">Page action</button>
+<iframe title="Original embedded document" src="./frame.html"></iframe>
+<p class="note">HTTP and file use the same authored page. No generated watermark is part of the screenshot.</p>
+<div class="below"></div>
+<script>window.fixtureEvents=[];for(const type of ['input','keydown','pointermove','mousedown','mouseup','click'])document.addEventListener(type,event=>fixtureEvents.push({type,target:event.target.id,trusted:event.isTrusted}));</script>
+</body></html>

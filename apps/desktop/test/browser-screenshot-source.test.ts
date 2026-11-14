@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
+import { EventEmitter } from 'node:events'
 
 vi.mock('electron', () => ({ WebContentsView: class {}, app: { getPath: () => tmpdir() } }))
 
@@ -20,10 +21,11 @@ function png(width: number, height: number): Buffer {
 function captureOwner() {
   const bytes = png(1200, 800)
   const nativeImage = { isEmpty: () => false, getSize: () => ({ width: 1200, height: 800 }), toPNG: vi.fn(() => bytes) }
+  const viewportObservation = vi.fn(async (): Promise<unknown> => ({ width: 600, height: 400, deviceScaleFactor: 3 }))
   const contents = {
     url: 'https://example.invalid/captured', title: 'Title at capture',
     getURL() { return this.url }, getTitle() { return this.title }, isDestroyed: () => false,
-    executeJavaScriptInIsolatedWorld: vi.fn(async () => ({ width: 600, height: 400, deviceScaleFactor: 3 })),
+    executeJavaScriptInIsolatedWorld: vi.fn(async (_world: number, scripts: { code: string }[]) => scripts[0]?.code === SCREENSHOT_VIEWPORT_SCRIPT ? viewportObservation() : scripts[0]?.code.includes('hasDisplay:') ? { confirmed: true, hasDisplay: false } : true),
     capturePage: vi.fn(async () => nativeImage)
   }
   const bounds = { x: 0, y: 0, width: 1200, height: 800 }
@@ -31,7 +33,7 @@ function captureOwner() {
     navigationId: 'original-navigation', visible: true, bounds, inputLeaseId: null, initialDocument: null, resourceReads: 0 }
   const entries = new Map([['original-browser', entry]])
   const owner = Object.assign(Object.create(BrowserViewManager.prototype), { entries, require: vi.fn(() => entry), emit: vi.fn() }) as BrowserViewManager
-  return { contents, entry, entries, nativeImage, owner,
+  return { contents, entry, entries, nativeImage, owner, viewportObservation,
     capture: (transport?: Parameters<BrowserViewManager['captureScreenshot']>[1]) => BrowserViewManager.prototype.captureScreenshot.call(owner, 'original-browser', transport) }
 }
 
@@ -52,8 +54,8 @@ describe('Screenshot capture source', () => {
         viewport: { width: 600, height: 400, deviceScaleFactor: 3 }, viewportWarning: null },
       image: { width: 1200, height: 800, byteLength: 33 }
     })
-    expect(fixture.contents.executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(2)
-    for (const call of fixture.contents.executeJavaScriptInIsolatedWorld.mock.calls) {
+    expect(fixture.viewportObservation).toHaveBeenCalledTimes(2)
+    for (const call of fixture.contents.executeJavaScriptInIsolatedWorld.mock.calls.filter(call => call[1][0]?.code === SCREENSHOT_VIEWPORT_SCRIPT)) {
       expect(call).toEqual([expect.any(Number), [{ code: SCREENSHOT_VIEWPORT_SCRIPT }]])
     }
     expect(result.image.width).not.toBe(result.source.viewport!.width * result.source.viewport!.deviceScaleFactor!)
@@ -76,7 +78,7 @@ describe('Screenshot capture source', () => {
   it('keeps hidden mobile page pixels available without a system screenshot or screen permission read', async () => {
     const fixture = captureOwner()
     fixture.entry.visible = false
-    fixture.contents.executeJavaScriptInIsolatedWorld.mockResolvedValue({ width: 390, height: 844, deviceScaleFactor: 3 })
+    fixture.viewportObservation.mockResolvedValue({ width: 390, height: 844, deviceScaleFactor: 3 })
     const result = await fixture.capture()
     expect(fixture.contents.capturePage).toHaveBeenCalledOnce()
     expect(result.source.viewport).toEqual({ width: 390, height: 844, deviceScaleFactor: 3 })
@@ -94,7 +96,7 @@ describe('Screenshot capture source', () => {
 
   it('retains PNG when optional viewport reads reject', async () => {
     const fixture = captureOwner()
-    fixture.contents.executeJavaScriptInIsolatedWorld.mockRejectedValue(new Error('observation unavailable'))
+    fixture.viewportObservation.mockRejectedValue(new Error('observation unavailable'))
     const result = await fixture.capture()
     expect(fixture.contents.capturePage).toHaveBeenCalledOnce()
     expect(result.image).toMatchObject({ mimeType: 'image/png', width: 1200, height: 800 })
@@ -105,7 +107,7 @@ describe('Screenshot capture source', () => {
   it('bounds unresolved viewport observations and still returns the original PNG', async () => {
     vi.useFakeTimers()
     const fixture = captureOwner()
-    fixture.contents.executeJavaScriptInIsolatedWorld.mockImplementation(() => new Promise(() => {}))
+    fixture.viewportObservation.mockImplementation(() => new Promise(() => {}))
     const pending = fixture.capture()
     await vi.advanceTimersByTimeAsync(500)
     expect(fixture.contents.capturePage).toHaveBeenCalledOnce()
@@ -119,7 +121,7 @@ describe('Screenshot capture source', () => {
 
   it('reports viewport unknown when the original page resizes or zooms during capture', async () => {
     const fixture = captureOwner()
-    fixture.contents.executeJavaScriptInIsolatedWorld
+    fixture.viewportObservation
       .mockResolvedValueOnce({ width: 600, height: 400, deviceScaleFactor: 3 })
       .mockResolvedValueOnce({ width: 590, height: 400, deviceScaleFactor: 3 })
     const result = await fixture.capture()
@@ -158,4 +160,44 @@ describe('Screenshot capture source', () => {
       url: null, title: null, viewport, viewportWarning: null
     })
   })
+})
+
+it('[clean-capture-owner] brackets the actual original GUI pixels with both display worlds and restores even when pixels reject', async () => {
+  const f=captureOwner()
+  f.contents.capturePage.mockImplementation(async()=>{
+    const calls=f.contents.executeJavaScriptInIsolatedWorld.mock.calls
+    for(const world of [1208,1209])expect(calls.some(([id,scripts])=>id===world&&scripts[0]!.code.includes(',true)'))).toBe(true)
+    throw new Error('Original capture rejected')
+  })
+  await expect(f.capture()).rejects.toThrow('Original capture rejected')
+  for(const world of [1208,1209])expect(f.contents.executeJavaScriptInIsolatedWorld.mock.calls.some(([id,scripts])=>id===world&&scripts[0]!.code.includes(',false)'))).toBe(true)
+  expect(f.entry.resourceReads).toBe(0)
+})
+it('[clean-capture-owner] refuses only nondefault GUI options without silently capturing other pixels',async()=>{
+ const f=captureOwner()
+ await expect(f.owner.captureScreenshot('original-browser',undefined,{pixelRatio:2})).rejects.toThrow('require the original Browser program transport')
+ expect(f.contents.capturePage).not.toHaveBeenCalled();expect(f.entry.resourceReads).toBe(0)
+ const result=await f.capture();expect(result.source.hostOverlays).toBe('excluded')
+})
+
+it('[clean-capture-owner] an observation timeout restores display while the original pending native producer retains its exact resource read',async()=>{
+ vi.useFakeTimers()
+ const f=captureOwner(),events=new EventEmitter()
+ let resolvePixels!:(value:typeof f.nativeImage)=>void,present!:()=>void
+ const pixels=new Promise<typeof f.nativeImage>(resolve=>{resolvePixels=resolve})
+ Object.assign(f.contents,{beginFrameSubscription:vi.fn((_dirty:boolean,callback:()=>void)=>{present=callback}),endFrameSubscription:vi.fn(),invalidate:vi.fn(),once:events.once.bind(events),on:events.on.bind(events),removeListener:events.removeListener.bind(events)})
+ f.contents.executeJavaScriptInIsolatedWorld.mockImplementation(async(_world,scripts)=>scripts[0]?.code===SCREENSHOT_VIEWPORT_SCRIPT?f.viewportObservation():scripts[0]?.code.includes('hasDisplay:')?{confirmed:true,hasDisplay:true}:true)
+ f.contents.capturePage.mockImplementation(()=>pixels)
+ const result=f.capture().then(()=>({status:'unexpected-clean'}),error=>({status:'unconfirmed',message:String(error)}))
+ try{
+  await vi.advanceTimersByTimeAsync(0);present();await vi.advanceTimersByTimeAsync(1501)
+  expect(await result).toEqual({status:'unconfirmed',message:expect.stringContaining('observation budget')})
+  expect(f.entry.resourceReads).toBe(1)
+  expect(f.contents.capturePage).toHaveBeenCalledTimes(1)
+  expect(events.eventNames()).toEqual([])
+  for(const world of [1208,1209])expect(f.contents.executeJavaScriptInIsolatedWorld.mock.calls.some(([id,scripts])=>id===world&&scripts[0]!.code.includes(',false)'))).toBe(true)
+  await expect(f.capture()).rejects.toThrow('observation budget')
+  expect(f.contents.capturePage).toHaveBeenCalledTimes(1);expect(f.entry.resourceReads).toBe(1)
+ }finally{resolvePixels(f.nativeImage);await pixels;await Promise.resolve()}
+ expect(f.entry.resourceReads).toBe(0);expect(vi.getTimerCount()).toBe(0)
 })
