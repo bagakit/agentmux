@@ -9,10 +9,12 @@ import * as projectProjection from '../src/renderer/src/lib/workspace-projects'
 import { projectWorkspaces } from '../src/renderer/src/lib/workspace-projects'
 import { documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
-import { act } from 'react'
+import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
+import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
+import { SettingsNavigation, type SettingsNavigationRequest } from '../src/renderer/src/components/SettingsNavigation'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { EMPTY_AGENT_FOCUS } from '../src/renderer/src/lib/agent-focus'
@@ -44,7 +46,13 @@ beforeEach(async () => {
   createTopic.mockReset().mockResolvedValue(originalTopic); openTopic.mockReset().mockResolvedValue(true); request.mockReset().mockResolvedValue('original-goal-tab'); open.mockReset().mockResolvedValue('original-goal-tab')
   useAppStore.setState({ config: f.owner.current, demands: { one: goal() }, selectedDemandId: null, agentFocus: EMPTY_AGENT_FOCUS, activeWorkspaceId: null, mainSurface: 'board', sessions: [composerSession('healthy')], tabs: {}, layouts: {}, executorDetections: {}, createScratchTopic: createTopic, openScratchTopic: openTopic, requestDemandPmoTask: request, openDemandPmo: open })
 })
-async function mount() { await dom.render(<GlobalBoardSurface />) }
+function GoalsWithSettings() {
+  const [route, setRoute] = useState<SettingsNavigationRequest | null>(null), [visible, setVisible] = useState(false)
+  return <SettingsNavigation.Provider value={{ open: (section, executorId, field) => { setRoute({ section, executorId, field }); setVisible(true) }, openToolkit: () => {}, openHost: () => {}, openChannel: () => {}, channelEntries: [], channelPresentation: () => null, openMoteLark: () => {}, chooseAgent: () => {} }}>
+    <GlobalBoardSurface />{route ? <SettingsPanel visible={visible} initialSection={route.section} navigationRequest={route} onClose={() => setVisible(false)} /> : null}
+  </SettingsNavigation.Provider>
+}
+async function mount() { await dom.render(<GoalsWithSettings />) }
 function button(label: string) { const node = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label); expect(node, label).toBeDefined(); return node! }
 async function click(label: string) { await act(async () => { button(label).click(); await settleDemand() }) }
 async function fill(node: HTMLInputElement | HTMLTextAreaElement, value: string) { expect(node).toBeTruthy(); await act(async () => { Object.getOwnPropertyDescriptor(node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })) }) }
@@ -138,57 +146,57 @@ describe('Goals whole-page current facts, reading and return through mounted own
     expect([...dom.container.querySelectorAll('[data-goal-criterion-id]')].map(node => [node.getAttribute('data-goal-criterion-id'), node.getAttribute('data-goal-outcome')])).toEqual([['tabs', 'met']])
   })
 
-  it('temporarily compacts the same common instance, preserves authored body and preference, and returns focus to its editor', async () => {
-    await mount(); await click('管理'); await click('新增操作')
-    const editor = dom.container.querySelector<HTMLTextAreaElement>('[data-common-editor] textarea')!
+  it('compacts only the Goals consumer while the original Settings body and preference survive close and return', async () => {
+    await mount(); await click('Configure common actions'); await click('Add common action')
+    const editor = dom.container.querySelector<HTMLTextAreaElement>('[data-prompt-editor] textarea')!
     await fill(editor, 'A real unsaved instruction.'); editor.focus()
     const originalDirectory = f.owner.current.goalsCommonActions
-    await select()
+    await click('Close settings'); await select()
     const content = dom.container.querySelector<HTMLElement>('.goals-common__content')!
-    expect(content.hidden, 'Selected Goal compacts entry without replacing its draft owner').toBe(true)
-    expect(dom.container.querySelector('[data-common-editor] textarea')).toBe(editor)
-    expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('尚未保存')
-    await click('回到常用操作')
-    expect(content.hidden).toBe(false)
-    expect(dom.container.querySelector('[data-common-editor] textarea')).toBe(editor)
+    expect(content.hidden).toBe(true)
+    expect(dom.container.querySelector('[data-prompt-editor] textarea')).toBe(editor)
+    expect(editor.closest<HTMLElement>('.settings-page')!.hidden).toBe(true)
+    await click('回到常用操作'); await click('Configure common actions')
+    expect(content.hidden).toBe(false); expect(editor.closest<HTMLElement>('.settings-page')!.hidden).toBe(false)
+    expect(dom.container.querySelector('[data-prompt-editor] textarea')).toBe(editor)
     expect(editor.value).toBe('A real unsaved instruction.')
-    expect(document.activeElement).toBe(editor)
     expect(f.owner.current.goalsCommonActions).toEqual(originalDirectory)
     expect(api.config.save).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
     expect(useAppStore.getState().sessions.map(session => session.control)).toEqual([composerSession('healthy').control])
   })
 
-  it('shows newly arriving save failure in compact context and returns to the same editable draft', async () => {
-    await mount(); await click('管理'); await click('新增操作')
-    const editor = dom.container.querySelector<HTMLTextAreaElement>('[data-common-editor] textarea')!
-    await fill(editor, 'Keep the failed body.'); editor.focus()
+  it('keeps a newly arriving save failure in the original retained Settings editor while the Goal remains healthy', async () => {
+    await mount(); await click('Configure common actions'); await click('Add common action')
+    const editor = dom.container.querySelector<HTMLTextAreaElement>('[data-prompt-editor] textarea')!
+    await fill(editor, 'Keep the failed body.')
     let reject!: (reason: Error) => void
     f.save.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
-    await click('保存操作'); await select()
-    expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('正在保存')
+    await click('Save prompts'); await click('Close settings'); await select()
     await act(async () => reject(new Error('save receipt unconfirmed')))
-    await vi.waitFor(() => expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('保存未完成'))
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-settings-save-bar] [role="alert"]')!.textContent).toContain('save receipt unconfirmed'))
+    expect(useAppStore.getState().selectedDemandId).toBe('one')
     expect(dom.container.querySelector('.goals-common__content')!.hasAttribute('hidden')).toBe(true)
-    await click('回到常用操作')
-    expect(dom.container.querySelector('[data-common-editor] textarea')).toBe(editor)
+    await click('回到常用操作'); await click('Configure common actions')
+    expect(dom.container.querySelector('[data-prompt-editor] textarea')).toBe(editor)
     expect(editor.value).toBe('Keep the failed body.')
     expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('save receipt unconfirmed')
     expect((await f.disk()).composerShortcuts).toEqual([])
   })
 
-  it('returns to a live focus target when the previously focused save and editor are still disabled', async () => {
-    await mount(); await click('管理'); await click('新增操作')
-    const editor = dom.container.querySelector<HTMLTextAreaElement>('[data-common-editor] textarea')!
+  it('returns through an enabled Settings route while an original config save is still pending', async () => {
+    await mount(); await click('Configure common actions'); await click('Add common action')
+    const editor = dom.container.querySelector<HTMLTextAreaElement>('[data-prompt-editor] textarea')!
     await fill(editor, 'An instruction whose save is still pending.')
     let reject!: (reason: Error) => void
     f.save.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
-    button('保存操作').focus(); await click('保存操作'); await select()
-    expect(editor.disabled).toBe(true)
+    await click('Save prompts'); await click('Close settings'); await select()
     await click('回到常用操作')
-    expect(document.activeElement, 'Pending return uses a currently enabled control').toBe(button('完成'))
+    expect(button('Configure common actions').disabled).toBe(false)
+    await click('Configure common actions')
     expect(editor.value).toBe('An instruction whose save is still pending.')
+    expect(button('Save prompts').disabled).toBe(true)
     await act(async () => reject(new Error('still unconfirmed')))
-    await vi.waitFor(() => expect(editor.disabled).toBe(false))
+    await vi.waitFor(() => expect(button('Save prompts').disabled).toBe(false))
     expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('still unconfirmed')
   })
 

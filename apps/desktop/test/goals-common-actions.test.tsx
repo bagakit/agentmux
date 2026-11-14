@@ -1,11 +1,12 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp") } }))
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
-import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
+import { SettingsNavigation, type SettingsNavigationRequest } from '../src/renderer/src/components/SettingsNavigation'
+import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { EMPTY_AGENT_FOCUS } from '../src/renderer/src/lib/agent-focus'
@@ -14,7 +15,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { resolveComposerShortcuts } from '../src/shared/composer-shortcut-library'
 import { authoredConfigCarryOver } from '../src/main/config-store'
-import { configOwnerFixture } from './helpers/config-owner-fixture'
+import { configOwnerFixture, deferred } from './helpers/config-owner-fixture'
 import { composerDOM, composerConfig, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -45,16 +46,25 @@ beforeEach(async () => {
   createTopic.mockClear(); openTopic.mockReset().mockResolvedValue('owned-topic')
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => f.owner.edit(expected, next))
 })
-async function mount(open = vi.fn()) { await dom.render(<SettingsNavigation.Provider value={{ open }}><GlobalBoardSurface /></SettingsNavigation.Provider>); return open }
+function CommonActionSurface({ onNavigate }: { onNavigate: ReturnType<typeof vi.fn> }) {
+  const [route, setRoute] = useState<SettingsNavigationRequest | null>(null), [visible, setVisible] = useState(false)
+  return <SettingsNavigation.Provider value={{ open: (section, executorId, field) => { onNavigate(section, executorId, field); setRoute({ section, executorId, field }); setVisible(true) },
+    openToolkit: () => {}, openHost: () => {}, openChannel: () => {}, channelEntries: [], channelPresentation: () => null, openMoteLark: () => {}, chooseAgent: () => {} }}>
+    <GlobalBoardSurface />
+    {route ? <SettingsPanel visible={visible} initialSection={route.section} navigationRequest={route} onClose={() => setVisible(false)} /> : null}
+  </SettingsNavigation.Provider>
+}
+async function mount(open = vi.fn()) { await dom.render(<CommonActionSurface onNavigate={open} />); return open }
+async function closeSettings() { await dom.click('[aria-label="Close settings"]') }
 function button(text: string) {
   const buttons = [...dom.container.querySelectorAll<HTMLButtonElement>('button')]
-  const found = buttons.find(button => button.textContent === text)
+  const found = buttons.find(button => button.textContent?.trim() === text)
   expect(found, `Actual product button ${text}`).not.toBeUndefined()
   return found!
 }
 async function click(text: string) { await act(async () => button(text).click()) }
 const action = (key: string) => dom.container.querySelector<HTMLButtonElement>(`[data-common-action="${key}"]`)
-const body = () => dom.container.querySelector<HTMLTextAreaElement>('[data-common-editor] textarea')!
+const body = () => dom.container.querySelector<HTMLTextAreaElement>('[data-prompt-editor] textarea')!
 async function fill(value: string) {
   const node = body(); expect(node).not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })) })
@@ -62,16 +72,32 @@ async function fill(value: string) {
 async function settled() {
   for (let attempt = 0; attempt < 100; attempt++) {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
-    if (dom.container.querySelector('.goals-common')?.getAttribute('aria-busy') !== 'true') return
+    if (dom.container.querySelector('.goals-common')?.getAttribute('aria-busy') !== 'true' && !dom.container.querySelector('[data-settings-pane="prompts"] [data-settings-save-bar] [aria-busy="true"]')) return
   }
   throw new Error('Common action save did not settle')
 }
-async function manage() { await click('管理') }
-async function reference(label = '检查改动') { await click('引用已有'); await act(async () => {
-  const entry = [...dom.container.querySelectorAll<HTMLButtonElement>('.goals-common__available > button')].find(button => button.querySelector('span')?.textContent === label)
-  expect(entry).not.toBeUndefined(); entry!.click()
-}); await settled() }
-async function save() { await click('保存操作'); await settled() }
+async function manage() {
+  await dom.click('[aria-label="Configure common actions"]')
+  expect(dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="goals-common-actions"]')!.open).toBe(true)
+  expect(dom.container.querySelector('[aria-label="管理常用操作"]')).toBeNull()
+}
+async function openDirectory() {
+  const directory = dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="goals-common-actions"]')!
+  if (!directory.open) await act(async () => directory.querySelector('summary')!.click())
+  expect(directory.open).toBe(true)
+  return directory
+}
+async function reference(label = '检查改动') {
+  await openDirectory()
+  const toggle = button('Reference a prompt')
+  if (toggle.getAttribute('aria-expanded') !== 'true') await act(async () => toggle.click())
+  await act(async () => {
+    const entry = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-common-add]')].find(node => node.textContent === label)
+    expect(entry).not.toBeUndefined(); entry!.click()
+  })
+  await save()
+}
+async function save() { await dom.click('[data-settings-pane="prompts"] [data-settings-save-bar] button'); await settled() }
 async function external(patch: Partial<typeof f.owner.current>) {
   const current = f.owner.current
   await act(async () => { await f.owner.edit(current, { ...current, ...patch }) })
@@ -80,9 +106,9 @@ async function external(patch: Partial<typeof f.owner.current>) {
 describe('Goals common actions through the mounted product and durable config owner', () => {
   it('orders, removes and discloses through distinct themeable meanings in the actual directory', async () => {
     await mount(); await manage()
-    const up = dom.container.querySelector('[aria-label="上移 了解我并给我建议"]')!
-    const down = dom.container.querySelector('[aria-label="下移 了解我并给我建议"]')!
-    const remove = dom.container.querySelector('[aria-label="移出常用 了解我并给我建议"]')!
+    const up = dom.container.querySelector('[aria-label="Move up 了解我并给我建议"]')!
+    const down = dom.container.querySelector('[aria-label="Move down 了解我并给我建议"]')!
+    const remove = dom.container.querySelector('[aria-label="Remove from Goals 了解我并给我建议"]')!
     expect(up.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('action.move-up')
     expect(down.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('action.move-down')
     expect(remove.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('action.remove')
@@ -90,7 +116,8 @@ describe('Goals common actions through the mounted product and durable config ow
     expect((down as HTMLButtonElement).disabled).toBe(false)
     const collapse = dom.container.querySelector('[aria-label="收起常用操作"]')!
     expect(collapse.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('navigation.up')
-    await dom.click('[aria-label="下移 了解我并给我建议"]'); await settled()
+    expect(openTopic).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
+    await dom.click('[aria-label="Move down 了解我并给我建议"]'); await save()
     expect(f.owner.current.goalsCommonActions?.items[1]).toEqual({ kind: 'builtin', id: 'understand' })
   })
 
@@ -136,7 +163,7 @@ describe('Goals common actions through the mounted product and durable config ow
 
   it('references the original full body and uses the actual primary bot even when terminal states exclude running', async () => {
     const original = primaryClaude()
-    await mount(); await manage(); await reference(); await click('完成')
+    await mount(); await manage(); await reference(); await closeSettings()
     const node = action('prompt:review')!
     expect(node.querySelector('.goals-entry__request')!.textContent, 'Live prompt body is the complete request').toBe(prompts[0]!.body)
     expect(node.querySelector('.goals-common__facts')!.textContent, 'The visible target comes from the actual primary Session and configured provider').toBe('主 Mote · Other Claude')
@@ -149,7 +176,8 @@ describe('Goals common actions through the mounted product and durable config ow
   })
 
   it('creates one authored body and its reference atomically, generating helper fields and preserving foreign config', async () => {
-    await mount(); await manage(); await click('新增操作')
+    await mount(); await manage(); await click('Add common action')
+    expect(dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="goals-common-actions"]')!.open).toBe(false)
     const text = '  帮我检查今天的笔记。\n指出一个值得尝试的方向。  '
     await fill(text)
     await external({ appearance: { terminalTheme: 'graphite', appAppearance: 'light' } })
@@ -159,11 +187,11 @@ describe('Goals common actions through the mounted product and durable config ow
     expect(created.label).toBe('帮我检查今天的笔记。')
     expect(created.keyword).toMatch(/^action-/)
     expect(new Set(saved.composerShortcuts!.map(prompt => prompt.keyword)).size).toBe(3)
-    expect(saved.goalsCommonActions!.items.at(-1)).toEqual({ kind: 'prompt', id: created.id })
+    expect(saved.goalsCommonActions?.items.at(-1)).toEqual({ kind: 'prompt', id: created.id })
     expect(saved.appearance.appAppearance).toBe('light')
     expect(vi.mocked(api.config.save)).toHaveBeenCalledTimes(1)
     expect(createTopic, 'Management and save never start an Agent').not.toHaveBeenCalled()
-    await click('完成')
+    await closeSettings()
     expect(action(`prompt:${created.id}`)!.querySelector('.goals-entry__request')!.textContent).toBe(text)
   })
 
@@ -176,39 +204,124 @@ describe('Goals common actions through the mounted product and durable config ow
     await save()
     expect((await f.disk()).composerShortcuts, 'Shared library edit updates the original authored body').toEqual([{ ...prompts[0], label: '外部名称', body: text }, prompts[1]])
     expect(resolveComposerShortcuts(useAppStore.getState().config).find(prompt => prompt.id === 'review')!.body).toBe(text)
-    await dom.render(<ShortcutSettingsPane config={f.owner.current} onSave={vi.fn()} />)
+    await dom.render(<ShortcutSettingsPane config={f.owner.current} active={true} onSave={vi.fn()} />)
     expect(dom.container.querySelector<HTMLTextAreaElement>('[data-prompt-editor="review"] textarea')!.value).toBe(text)
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
-  it('retains unsaved body when finishing or pressing Escape and only explicit cancel drops it', async () => {
-    await mount(); await manage(); await click('新增操作'); await fill('尚未保存的点子')
-    const draftId = dom.container.querySelector<HTMLElement>('[data-common-editor]')!.dataset.commonEditor!
-    await click('返回目录')
-    expect((document.activeElement as HTMLElement).dataset.commonSelect, 'Unsaved new operation returns focus to the same stable draft').toBe(`prompt:${draftId}`)
-    await act(async () => dom.container.querySelector<HTMLButtonElement>('.goals-common__draft')!.click())
-    await act(async () => body().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-    expect(dom.container.querySelector('[aria-label="管理常用操作"]')).toBeNull()
-    await manage()
-    await act(async () => dom.container.querySelector<HTMLButtonElement>('.goals-common__draft')!.click())
-    expect(body().value).toBe('尚未保存的点子')
-    await click('完成'); await manage(); await act(async () => dom.container.querySelector<HTMLButtonElement>('.goals-common__draft')!.click())
-    expect(body().value).toBe('尚未保存的点子')
-    await click('取消编辑')
-    expect(dom.container.querySelector('.goals-common__draft')).toBeNull()
+  it('returns reading space to every explicit prompt editor entry while keeping directory references and body drafts', async () => {
+    await mount(); await manage(); await reference()
+    const directory = await openDirectory()
+    await dom.click('[data-prompt-id="review"]')
+    expect(directory.open).toBe(false)
+    await fill('One retained original body draft')
+    await openDirectory(); await dom.click('[data-common-select="prompt:review"]')
+    expect(directory.open).toBe(false); expect(body().value).toBe('One retained original body draft')
+    await openDirectory(); await click('Add common action')
+    expect(directory.open).toBe(false)
+    const added = dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!.dataset.promptEditor!
+    expect(directory.querySelector(`[data-common-ref="prompt:${added}"]`)).not.toBeNull()
+    await dom.click('[data-prompt-id="review"]')
+    expect(body().value).toBe('One retained original body draft')
+    expect(directory.querySelector('[data-common-ref="prompt:review"]')).not.toBeNull()
+    expect(api.config.save).toHaveBeenCalledTimes(1)
+    expect(openTopic).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
+  })
+
+  it('keeps an explicit common-action name even when it equals the former generated placeholder', async () => {
+    await mount(); await manage(); await click('Add common action'); await fill('Body that could otherwise generate a name')
+    const name = dom.container.querySelector<HTMLInputElement>('[data-prompt-editor] .prompt-editor__name input')!
+    const typeName = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, value)
+      name.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await typeName('Explicit intermediate name'); await typeName('新操作'); await save()
+    const added = (await f.disk()).composerShortcuts!.find(prompt => !prompts.some(original => original.id === prompt.id))!
+    expect(added.label).toBe('新操作')
+    expect(added.body).toBe('Body that could otherwise generate a name')
+    expect((await f.disk()).goalsCommonActions!.items.at(-1)).toEqual({ kind: 'prompt', id: added.id })
+    expect(openTopic).not.toHaveBeenCalled()
+  })
+
+  it('retains a name authored after automatic metadata submission even when it equals the old placeholder', async () => {
+    await mount(); await manage(); await click('Add common action'); await fill('Original helper body')
+    const id = dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!.dataset.promptEditor!
+    const pending = deferred<void>(), published = deferred<void>(), original = vi.mocked(api.config.save).getMockImplementation()!
+    vi.mocked(api.config.save).mockImplementationOnce(async (next, expected) => { const result = await original(next, expected); published.resolve(); await pending.promise; return result })
+    await dom.click('[data-settings-pane="prompts"] [data-settings-save-bar] button')
+    await act(async () => { await published.promise })
+    const name = dom.container.querySelector<HTMLInputElement>('[data-prompt-editor] .prompt-editor__name input')!
+    expect(name.value).toBe('Original helper body')
+    for (const value of ['A later explicit name', '新操作']) await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, value)
+      name.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => pending.resolve()); await settled()
+    expect(name.value).toBe('新操作')
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === id)!.label).toBe('Original helper body')
+    expect(dom.container.querySelector('[data-settings-save-bar]')!.textContent).toContain('Unsaved changes')
+    await save()
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === id)!.label).toBe('新操作')
+    expect((await f.disk()).composerShortcuts!.filter(prompt => prompt.id === id)).toHaveLength(1)
+    expect((await f.disk()).goalsCommonActions!.items.filter(ref => ref.kind === 'prompt' && ref.id === id)).toHaveLength(1)
+    expect(openTopic).not.toHaveBeenCalled()
+  })
+
+  it('keeps the current exact Project note and original primary bot frozen while navigating Settings during a request', async () => {
+    const path = _hygiene_fixturePath('repo/migration-project')
+    await external({ workspaces: [scratch, { id: 'migration-project', hostId: 'local', name: 'Migration Project', path, kind: 'folder' }] })
+    const original = primaryClaude(); useAppStore.setState({ activeWorkspaceId: 'migration-project' })
+    const request = deferred<string>(); openTopic.mockReturnValueOnce(request.promise)
+    await mount()
+    const next = action('builtin:next')!
+    expect(next.querySelector('.goals-entry__request')!.textContent).toBe('根据当前项目的情况，建议我下一步应该做什么')
+    expect(next.textContent).toContain('Migration Project'); expect(next.textContent).toContain('Other Claude')
+    await act(async () => next.click()); await manage()
+    expect(openTopic).toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, {
+      newTab: true, reveal: false, initialRequest: { prompt: '根据当前项目的情况，建议我下一步应该做什么', executorId: 'otherClaude',
+        agentMuxNote: `Project: Migration Project\nProject ID: ${JSON.stringify(['local', path])}\nHost: local\nRepository root: ${path}\nWorkspace ID: migration-project\nWorkspace path: ${path}\nThese are the project paths for this request. The PMO working directory is separate; do not substitute it or assume a host home.` }
+    })
+    expect(useAppStore.getState().sessions[0]!.control).toEqual(original.control)
+    await act(async () => request.resolve('original-request-tab')); await closeSettings()
+    expect(openTopic).toHaveBeenCalledTimes(1); expect(createTopic).not.toHaveBeenCalled()
+  })
+
+  it('retains the same one-body Settings draft across section navigation and close, and cancels only explicitly', async () => {
+    const navigate = await mount(); await manage(); await click('Add common action'); await fill('尚未保存的点子')
+    const draftId = dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!.dataset.promptEditor!, editor = body()
+    await closeSettings(); await manage()
+    expect(body()).toBe(editor); expect(editor.value).toBe('尚未保存的点子')
+    await dom.click('[data-settings-target="goals"]')
+    await dom.click('[data-settings-target="prompts"]')
+    expect(body()).toBe(editor); expect(editor.value).toBe('尚未保存的点子')
+    expect(navigate).toHaveBeenCalledWith('prompts', undefined, 'goals-common-actions')
+    await dom.click('.prompt-editor__remove button')
+    expect(dom.container.querySelector(`[data-prompt-id="${draftId}"]`)).toBeNull()
+    expect(dom.container.querySelector(`[data-common-ref="prompt:${draftId}"]`)).toBeNull()
+    expect(dom.container.querySelector<HTMLButtonElement>('[data-settings-pane="prompts"] [data-settings-save-bar] button')!.disabled).toBe(true)
     expect((await f.disk()).composerShortcuts).toEqual(prompts)
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
+  it('removes only a saved common reference while the original authored library object remains available', async () => {
+    await mount(); await manage(); await reference()
+    await dom.click('[aria-label="Remove from Goals 检查改动"]'); await save()
+    expect((await f.disk()).composerShortcuts).toEqual(prompts)
+    expect((await f.disk()).goalsCommonActions!.items.some(ref => ref.kind === 'prompt' && ref.id === 'review')).toBe(false)
+    expect(dom.container.querySelector('[data-prompt-id="review"]')).not.toBeNull()
+    await closeSettings(); expect(action('prompt:review')).toBeNull()
+    expect(openTopic).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
+  })
+
   it('keeps a failed or conflicted body draft and the original expectation without creating a half-saved reference', async () => {
-    await mount(); await manage(); await click('新增操作'); await fill('一个新的真实指令')
+    await mount(); await manage(); await click('Add common action'); await fill('一个新的真实指令')
     f.save.mockRejectedValueOnce(new Error('disk unavailable'))
     await save()
     expect(body().value).toBe('一个新的真实指令')
     expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('disk unavailable')
     expect((await f.disk()).goalsCommonActions).toBeUndefined()
     expect((await f.disk()).composerShortcuts).toEqual(prompts)
-    await save(); await click('完成'); await manage(); await reference('整理笔记')
+    await save(); await closeSettings(); await manage(); await reference('整理笔记')
     await dom.click('[data-common-select="prompt:notes"]'); await fill('我的正文')
     await external({ composerShortcuts: f.owner.current.composerShortcuts!.map(prompt => prompt.id === 'notes' ? { ...prompt, body: '他人的正文' } : prompt) })
     await save()
@@ -220,7 +333,7 @@ describe('Goals common actions through the mounted product and durable config ow
 
   it('retains the unconfirmed original primary Provider operation for management without silently launching another Agent', async () => {
     const original = primaryClaude()
-    await mount(); await manage(); await reference(); await click('完成')
+    await mount(); await manage(); await reference(); await closeSettings()
     await external({ executors: { codex: composerConfig.executors.codex! } })
     expect(action('prompt:review')!.disabled).toBe(true)
     expect(action('prompt:review')!.textContent).toContain('主 Mote 的 Agent 尚未确认，请先选择适用 claude 的 Agent。')
@@ -231,11 +344,11 @@ describe('Goals common actions through the mounted product and durable config ow
   })
 
   it('leaves a deleted library reference non-executable and removes it without reviving a second body', async () => {
-    await mount(); await manage(); await reference(); await click('完成')
+    await mount(); await manage(); await reference(); await closeSettings()
     await external({ composerShortcuts: [prompts[1]!] })
     expect(action('prompt:review')!.disabled).toBe(true)
     expect(action('prompt:review')!.textContent).toContain('原指令已从指令库删除')
-    await manage(); await dom.click('[aria-label="移出常用 指令已删除"]'); await settled()
+    await manage(); await dom.click('[aria-label="Remove from Goals 指令已删除"]'); await save()
     expect((await f.disk()).goalsCommonActions!.items).toEqual([{ kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'next' }])
     expect((await f.disk()).composerShortcuts).toEqual([prompts[1]])
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
@@ -245,10 +358,10 @@ describe('Goals common actions through the mounted product and durable config ow
     await external({ goalsCommonActions: { items: [], collapsed: false } })
     await mount()
     expect([...dom.container.querySelectorAll('[data-common-action]')]).toEqual([])
-    expect(dom.container.querySelector('.goals-common__empty')!.textContent).toContain('添加操作')
+    expect(dom.container.querySelector('.goals-common__empty')!.textContent).toContain('Configure in Settings')
     const saved = await f.disk()
     expect(authoredConfigCarryOver(saved).goalsCommonActions).toEqual({ items: [], collapsed: false })
-    await manage(); await reference('尝试一个项目'); await click('完成')
+    await manage(); await reference('尝试一个项目'); await closeSettings()
     expect([...dom.container.querySelectorAll('[data-common-action]')].map(node => (node as HTMLElement).dataset.commonAction)).toEqual(['builtin:ideas'])
     expect((await f.disk()).composerShortcuts).toEqual(prompts)
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
@@ -256,12 +369,12 @@ describe('Goals common actions through the mounted product and durable config ow
 
   it('persists reorder/removal/collapse and returns keyboard focus to the same or adjacent stable reference', async () => {
     await mount(); await manage()
-    await dom.click('[aria-label="下移 了解我并给我建议"]'); await settled()
+    await dom.click('[aria-label="Move down 了解我并给我建议"]'); await save()
     expect((await f.disk()).goalsCommonActions!.items).toEqual([{ kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'next' }])
     expect((document.activeElement as HTMLElement).dataset.commonSelect).toBe('builtin:understand')
-    await dom.click('[aria-label="移出常用 了解我并给我建议"]'); await settled()
+    await dom.click('[aria-label="Remove from Goals 了解我并给我建议"]'); await save()
     expect((document.activeElement as HTMLElement).dataset.commonSelect).toBe('builtin:next')
-    await click('完成'); await dom.click('[aria-label="收起常用操作"]'); await settled()
+    await closeSettings(); await dom.click('[aria-label="收起常用操作"]'); await settled()
     expect((await f.disk()).goalsCommonActions!.collapsed).toBe(true)
     expect(dom.container.querySelector('.goals-common__hero')).toBeNull()
     expect(dom.container.querySelector('.goals-collection')).not.toBeNull()
@@ -270,15 +383,37 @@ describe('Goals common actions through the mounted product and durable config ow
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
-  it('requires the same explicit save/cancel path before leaving unsaved bodies for Settings', async () => {
-    const open = await mount(); await manage(); await click('新增操作'); await fill('尚未提交')
-    await click('在设置中管理指令库')
-    expect(open).not.toHaveBeenCalled()
-    expect(body().value).toBe('尚未提交')
-    expect(dom.container.querySelector('[data-common-editor] [role="status"]')!.textContent).toContain('先保存或取消')
+  it('retains the original unknown save and a later body edit through a delayed acknowledgement', async () => {
+    await mount(); await manage(); await click('Add common action'); await fill('First original request')
+    const id = dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!.dataset.promptEditor!
+    const pending = deferred<void>(), published = deferred<void>(), original = vi.mocked(api.config.save).getMockImplementation()!
+    vi.mocked(api.config.save).mockImplementationOnce(async (next, expected) => { const result = await original(next, expected); published.resolve(); await pending.promise; return result })
+    await dom.click('[data-settings-pane="prompts"] [data-settings-save-bar] button')
+    await act(async () => { await published.promise })
+    await fill('Later exact body\n  still unsaved  ')
+    await closeSettings(); await manage()
+    expect(body().value).toBe('Later exact body\n  still unsaved  ')
+    await act(async () => pending.resolve()); await settled()
+    expect(body().value).toBe('Later exact body\n  still unsaved  ')
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === id)!.body).toBe('First original request')
+    expect(dom.container.querySelector('[data-settings-save-bar]')!.textContent).toContain('Unsaved changes')
     await save()
-    expect(open).toHaveBeenCalledExactlyOnceWith('prompts')
-    expect((await f.disk()).composerShortcuts!.at(-1)!.body).toBe('尚未提交')
+    expect((await f.disk()).composerShortcuts!.filter(prompt => prompt.id === id)).toHaveLength(1)
+    expect((await f.disk()).goalsCommonActions!.items.filter(ref => ref.kind === 'prompt' && ref.id === id)).toHaveLength(1)
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === id)!.body).toBe('Later exact body\n  still unsaved  ')
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
+  })
+
+  it('keeps the original body and reference after a lost config acknowledgement without an automatic save or launch', async () => {
+    await mount(); await manage(); await click('Add common action'); await fill('Original unknown receipt body')
+    const id = dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!.dataset.promptEditor!, original = vi.mocked(api.config.save).getMockImplementation()!
+    vi.mocked(api.config.save).mockImplementationOnce(async (next, expected) => { await original(next, expected); throw Error('Original config acknowledgement lost') })
+    await save(); await closeSettings(); await manage()
+    expect(body().value).toBe('Original unknown receipt body')
+    expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('Original config acknowledgement lost')
+    expect(api.config.save).toHaveBeenCalledTimes(1)
+    expect((await f.disk()).goalsCommonActions!.items.filter(ref => ref.kind === 'prompt' && ref.id === id)).toHaveLength(1)
+    expect((await f.disk()).composerShortcuts!.filter(prompt => prompt.id === id)).toHaveLength(1)
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 })

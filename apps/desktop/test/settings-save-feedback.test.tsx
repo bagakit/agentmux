@@ -71,6 +71,6 @@ it('keeps prompt edits across cloned saved arrays', async () => {
   await input('[placeholder="eli5"]', 'review')
   await dom.render(<ShortcutSettingsPane active={true} config={structuredClone(config)} onSave={async () => {}} />)
   expect(dom.container.querySelector<HTMLInputElement>('[placeholder="eli5"]')!.value).toBe('review')
-  expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Saves the whole prompt library. 1 changed.')
+  expect(dom.container.querySelector('.prompt-save-summary')!.textContent).toBe('Saves the whole prompt library. 1 changed.')
   expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(false)
 })
