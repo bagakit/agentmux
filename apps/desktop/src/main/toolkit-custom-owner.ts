@@ -793,9 +793,9 @@ export class CustomToolkitOwner {
     }
     const run = original?.observation.availability === 'retained' ? original.run : retirement?.outcome === 'retained' ? retirement.run : null
     if (!run) {
-      const originalRunUnobserved = original?.phase === 'dispatched' && original.run === null &&
-        original.observation.availability === 'not-observed' && original.observation.runtime?.runtimeId === original.runtime.runtimeId
-      const canRelease = originalRunUnobserved && (original.retirement?.native === null || original.retirementBlocker === 'agent-role-unconfirmed')
+      const canRelease = original?.phase === 'dispatched' && original.run === null &&
+        original.observation.availability === 'not-observed' && original.observation.runtime?.runtimeId === original.runtime.runtimeId &&
+        (original.retirement?.native === null || original.retirementBlocker === 'agent-role-unconfirmed')
       if (action?.kind === 'release' && canRelease) {
         action.signal.throwIfAborted()
         await this.releaseOriginalTuiLaunch(execution)
