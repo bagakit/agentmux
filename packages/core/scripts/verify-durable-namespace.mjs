@@ -54,6 +54,11 @@ if (process.argv.includes('--child')) {
   const { immutableIdentityFile } = await import('../src/immutable-identity-file.ts')
   const { readCurrentSessionDatabase } = await import('../src/agent-session-database.ts')
   const { connectAgentMuxRpc } = await import('../src/public-rpc-client.ts')
+  const { CtxmuxRunAdapter } = await import('../src/ctxmux-run-adapter.ts')
+  const { AgentMuxError } = await import('../src/errors.ts')
+  // Identity persistence needs the actual semantic Host, not a native daemon.
+  // Control only this external connection leaf; all identity/Store/RPC owners run.
+  CtxmuxRunAdapter.prototype.connect = async () => { throw new AgentMuxError('Private test Native leaf is unavailable.', 'CTXMUX_DISCONNECTED') }
   const phase = process.argv.at(-1), stateDirectory = join(root, 'state'), path = join(root, 'sessions.sqlite')
   if (phase === 'first' || phase === 'second') {
     const runtime = await startHeadlessAgentMux({ store: new AgentMuxFileAgentSessionStore(path), stateDirectory, socketPath: join(root, 'control.sock') })
