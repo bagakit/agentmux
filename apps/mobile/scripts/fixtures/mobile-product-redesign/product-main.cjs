@@ -16,7 +16,8 @@ app.whenReady().then(async () => {
   win.setContentSize(390, 844)
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
-  await win.loadFile(html, ['mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
+  if (mode === 'responsive-primary-workfaces') await win.loadURL(html)
+  else await win.loadFile(html, ['mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')
@@ -87,6 +88,9 @@ app.whenReady().then(async () => {
     await button('日常协作', '.mobile-mote-agents')
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
+  }
+  if (mode === 'responsive-primary-workfaces') {
+    await require('./responsive-primary-workfaces.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase, openGoal }); result.passed = true; return
   }
   if (mode === 'compact-navigation') {
     await require('./compact-navigation.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase, openGoal }); result.passed = true; return
@@ -903,6 +907,7 @@ app.whenReady().then(async () => {
   result.passed = true
  } catch (error) {
   result.error = { name: error.name, message: error.message, stack: error.stack }
+  if (win && mode === 'responsive-primary-workfaces') result.failureFacts = await win.webContents.executeJavaScript(`({record:mobileProductScene.facts().record,notices:[...document.querySelectorAll('[role=status]')].map(n=>n.textContent)})`).catch(() => null)
   if (win) { await fs.writeFile(path.join(evidence, 'failed.png'), (await win.webContents.capturePage()).toPNG()); result.images.push('failed.png') }
  } finally {
   await fs.writeFile(path.join(evidence, phase === 'restore' ? 'renderer-result-restored.json' : 'renderer-result.json'), JSON.stringify(result, null, 2) + '\n')

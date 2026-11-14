@@ -9,6 +9,7 @@ import { useState } from 'react'
 import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
 import { conversationRevision, projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
 import { normalizeSessionHistoryPage } from '../../../../../packages/core/src/session-history'
+import { selectSpatialCatalog } from '../../../../../packages/core/src/spatial-destination'
 import { moteNoticeCaptureFixture } from '../../../../../packages/client-ui/test/fixtures/mote-notice'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
@@ -24,6 +25,8 @@ import { DEFAULT_THEME_ID, GRAPHITE_THEME, themeValue, updateObservedTheme, type
 import '@agentmux/client-ui/styles.css'
 
 type Call = { sequence: number; observedAt: number; method: string; params: unknown }
+const responsiveFixture = new URLSearchParams(location.search).get('responsive-primary-workfaces') === '1'
+const restoreResponsiveWorkface = responsiveFixture && localStorage.getItem('mobile-product-fixture-initialized') === 'true'
 const calls: Call[] = []
 const record = (method: string, params: unknown = {}) => calls.push({ sequence: calls.length + 1, observedAt: Date.now(), method, params: structuredClone(params) })
 const original = (id: string): AgentMuxAgentSession => ({ kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'fixture-original',
@@ -103,6 +106,10 @@ let holdFileUpload = false
 let releaseFileUpload: (() => void) | null = null
 let directoryComparisons = 0, inspectFails = false
 let directoryReadFails = false, missingSessionMetadata = false
+let responsiveWorkfaces = false
+const responsiveSource = { kind: 'file' as const, hostId: 'host-original', path: fixturePath('mote-resources') + '/BEHAVIOR.md' }
+const responsiveKnowledge = () => responsiveWorkfaces ? { ...knowledge, sources: [responsiveSource] } : knowledge
+const responsiveSecondKnowledge = () => ({ ...knowledge, entryId: '33333333-3333-4333-8333-333333333333', title: '第二周的对照观察', content: '# 对照观察\n\n这是另一个准确条目的正文，左侧选择它后应回到本条阅读。', form: 'derived', sources: [] })
 let conversationStatusScene: 'active' | 'retired' | 'retired-reading' | 'unconfirmed' | 'parallel' = 'active'
 let agentMenuScene = false, densityScene = false, copyFails = false, auxiliaryDensityScene = false
 let creationUpdateScene = false, rejectUpdatePreflight: (() => void) | null = null
@@ -324,8 +331,8 @@ const client = {
     }
     if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
     if ((method === 'space.ls' || method === 'space.inspect') && directoryReadFails) throw Error('本次目录读取失败 [DIRECTORY_READ_FAILED]；已读目录仍可使用，请核对 Mac 连接后重试。')
-    if (method === 'space.ls' || method === 'space.inspect') return { catalog: { ...catalog } }
-    if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [], unavailable: [] }
+    if (method === 'space.ls' || method === 'space.inspect') return { catalog: responsiveWorkfaces ? selectSpatialCatalog(catalog, params.target as AgentMuxRpcParams<'space.ls'>['target']) : { ...catalog } }
+    if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: responsiveWorkfaces ? [{ workspaceId: 'workspace-original', hostId: 'host-original', name: '资料工作区', path: fixturePath('mote-resources'), kind: 'folder', projectId: null, repoPath: null, branch: null }] : [], unavailable: [] }
     if (method === 'agent.inspect') {
       if (inspectWait) await inspectWait
       if (inspectFails) throw Error('原生消耗读取暂不可用，原会话仍可使用。')
@@ -338,6 +345,10 @@ const client = {
     if (method === 'goal.inspect') return { goal, goalContinuations: [] }
     if (method === 'goal.decisions') return { decisions: [] }
     if (method === 'file.read') {
+      if (responsiveWorkfaces && params.zoneId === 'zone-resources') {
+        if (params.path !== 'BEHAVIOR.md' || JSON.stringify(params.expectedResource) !== JSON.stringify({ hostId: 'host-original', workspaceId: 'workspace-original', workspacePath: fixturePath('mote-resources') })) throw Error('Wrong exact responsive source scope')
+        return { resource: { hostId: 'host-original', workspaceId: 'workspace-original', workspacePath: fixturePath('mote-resources'), zoneId: 'zone-resources', zonePath: fixturePath('mote-resources'), path: 'BEHAVIOR.md' }, result: { status: 'read', document: { path: 'BEHAVIOR.md', revision: 'sha256:' + 'c'.repeat(64), content: '# 原始协作资料\n\n先核对原始证据，再决定最小实验。\n\n这份文件在 Space 和知识来源中指向同一位置。\n\n' + Array.from({ length: 18 }, (_, index) => `## 第 ${index + 1} 条观察\n\n保留来源、反例与尚未确认的结果。`).join('\n\n') } } }
+      }
       if (params.zoneId !== 'zone-mote' || params.spaceId !== 'mote-original'
         || JSON.stringify(params.expectedResource) !== JSON.stringify({ hostId: 'host-original', workspaceId: 'workspace-original', workspacePath: fixturePath("mote-original") })) throw Error('Wrong original Mote file scope')
       return { resource: { hostId: 'host-original', workspaceId: 'workspace-original', workspacePath: fixturePath("mote-original"), zoneId: 'zone-mote', zonePath: fixturePath("mote-original"), path: params.path },
@@ -347,15 +358,22 @@ const client = {
     if (method === 'topic.category.ls') return { categories: [category], unavailable: [] }
     if (method === 'topic.ls') return { topics: [topic], unavailable: [] }
     if (method === 'topic.inspect') return { topic, unavailable: [] }
-    if (method === 'topic.knowledge.ls' || method === 'topic.knowledge.search') return { entries: [knowledge], unavailable: [] }
-    if (method === 'topic.knowledge.read') return { entry: knowledge }
+    if (method === 'topic.knowledge.ls' || method === 'topic.knowledge.search') return { entries: responsiveWorkfaces ? [responsiveKnowledge(), responsiveSecondKnowledge()] : [knowledge], unavailable: [] }
+    if (method === 'topic.knowledge.read') {
+      if (responsiveWorkfaces && params.entryId === '33333333-3333-4333-8333-333333333333') return { entry: responsiveSecondKnowledge() }
+      if (responsiveWorkfaces && params.entryId !== knowledge.entryId) throw Error('Wrong exact responsive knowledge entry')
+      return { entry: responsiveKnowledge() }
+    }
     if (method === 'message.delivery.report') return { stored: true }
     throw Error('Unsupported controlled public method: ' + method)
   }
 } as unknown as AgentMuxHostedClient
 if (!localStorage.getItem('mobile-product-fixture-initialized')) {
   localStorage.setItem('agentmux-mobile-home', 'mote')
-  getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
+  if (responsiveFixture) {
+    await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
+    await getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
+  } else getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
   localStorage.setItem('mobile-product-fixture-initialized', 'true')
 }
 const browserPlatform = createBrowserPlatform()
@@ -403,6 +421,15 @@ function Scene() {
       return names
     },
     prepareWideWorkface: () => { for (const row of catalog.agentPresentation ?? []) if (row.projectGroup) row.projectGroup.hostId = 'host-original' },
+    prepareResponsiveWorkfaces: () => {
+      responsiveWorkfaces = true
+      // The persisted Knowledge parser consumes actual public Topic identities.
+      topic.topicId = 'view:topic-original'; knowledge.topicId = topic.topicId
+      category.categoryId = '22222222-2222-4222-8222-222222222222'
+      const region = catalog.regions.find(value => value.regionId === 'resource-region-1')!
+      region.file = { workspaceId: 'workspace-original', path: 'BEHAVIOR.md', zoneRelativePath: 'BEHAVIOR.md' }
+      for (const row of catalog.agentPresentation ?? []) if (row.projectGroup) row.projectGroup.hostId = 'host-original'
+    },
     prepareAgentLocations: (scene: 'multi' | 'zero' | 'one' | 'unknown' | 'long') => {
       Object.assign(catalog, structuredClone(agentLocationsOriginal))
       for (const row of catalog.agentPresentation ?? []) if (row.projectGroup) row.projectGroup.hostId = 'host-original'
@@ -647,7 +674,7 @@ function Scene() {
   } })
   if (connectScene) return <MobileApp key={'connect-' + connectScene.state + String(connectScene.paired)} client={null} connection={connectScene} platform={platform}
     connectionPanel={connectScene.paired === false ? undefined : connectScene.state === 'unavailable' ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button">重新检查连接</button></> : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
-  const app = <MobileApp key={densityMount} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
+  const app = <MobileApp key={densityMount} restoreWorkface={restoreResponsiveWorkface} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
   return webUpdateScene ? <MobileWebUpdateSafetyProvider verifyConnection={verifyWebUpdateConnection}>{app}</MobileWebUpdateSafetyProvider> : app
 }
 createRoot(document.getElementById('root')!).render(<Scene />)

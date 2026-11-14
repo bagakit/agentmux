@@ -34,7 +34,10 @@ const mounts: { root: Root; element: HTMLDivElement }[] = []
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Main Mote', hostId: 'local', path: fixturePath("private-topic-fixture"), kind: 'scratch' as const }
 const config = { ...baseline.config, version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], workspaces: [scratch], executors: {} } as any
 const proposal = { summary: 'Read real current proposal', criteria: [{ id: 'c', text: 'Original criterion' }], openQuestions: [] }
+const goalViewport = { matches: false, listeners: new Set<() => void>(), addEventListener(_type: string, listener: () => void) { this.listeners.add(listener) }, removeEventListener(_type: string, listener: () => void) { this.listeners.delete(listener) } }
+async function goalWidth(width: number) { await act(async () => { goalViewport.matches = width >= 760; for (const listener of goalViewport.listeners) listener() }) }
 beforeEach(async () => {
+  goalViewport.matches = false; vi.spyOn(window, 'matchMedia').mockReturnValue(goalViewport as unknown as MediaQueryList)
   localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
   directory = await mkdtemp(join(tmpdir(), 'mgoal-')); discussions.clear(); discussionUnavailable = false; directoryProjects = []
   const configurationPath = join(directory, 'configuration.json')
@@ -98,9 +101,9 @@ async function mount(initialContext?: import('../src/recovery/presentation-route
   const openSession = vi.fn()
   if (mobileApp) await getDeviceWorkface().updatePresentation({ selectedSessionId: null, hostUrl: '', panel: 'conversation' },
     { primary: 'goals', showSession: false, showGoalWork: false, identity: null, profile: null, ...(initialContext ? { goals: initialContext } : {}) })
-  const render = async (visible = true) => { await act(async () => root.render(mobileApp
+  const render = async (visible = true, wide = false) => { await act(async () => root.render(mobileApp
     ? <MobileApp restoreWorkface client={client} connection={{ state: 'connected', message: 'Original Host' }} platform={createBrowserPlatform()} />
-    : <MobileGoalsSurface client={client} visible={visible} connected={true} openSession={openSession} {...(initialContext ? { initialContext } : {})} />)) }
+    : <MobileGoalsSurface client={client} visible={visible} wide={wide} connected={true} openSession={openSession} {...(initialContext ? { initialContext } : {})} />)) }
   await render()
   const buttons = (text: string) => [...element.querySelectorAll('button')].filter(button => (button.getAttribute('aria-label') ?? button.textContent) === text && !button.closest('[hidden]'))
   const click = async (text: string) => { const button = buttons(text)[0]; expect(button, text).toBeDefined(); await act(async () => { button!.click() }) }
@@ -113,6 +116,112 @@ async function existingGoal() {
   await view.click('Actual goal未分配项目 · 待整理'); await view.wait(proposal.summary)
   return view
 }
+
+it('responsive Goals actual App keeps its selected owner, original editor and unsaved draft through wide and phone panes', async () => {
+  await owner.create({ id: 'responsive-original', title: 'Original responsive goal', description: 'Original owner body' })
+  await owner.update('responsive-original', { alignment: proposal })
+  await goalWidth(844)
+  const view = await mount(undefined, true)
+  await view.wait('Original responsive goal')
+  const list = view.element.querySelector<HTMLElement>('.mobile-goals-directory')
+  expect(list, 'actual Goals must expose its original navigation pane').not.toBeNull()
+  await view.click('开始新目标')
+  const createForm = view.element.querySelector<HTMLElement>('.mobile-goal-create__form')!
+  await act(async () => list!.querySelector<HTMLButtonElement>('.mobile-goals-list button')!.click())
+  await view.wait(proposal.summary)
+  expect(list!.hidden, 'wide selected Goal must keep its original list visible').toBe(false)
+  const selectedRow = list!.querySelector('[aria-current="true"]')
+  expect(selectedRow?.textContent).toContain('Original responsive goal')
+  await view.click('编辑目标正文')
+  const editor = view.element.querySelector<HTMLTextAreaElement>('article:not([hidden]) [aria-label="目标正文草稿"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(editor, '原目标未保存正文保持'); editor.dispatchEvent(new Event('input', { bubbles: true })) })
+  await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.goalDrafts?.find(draft => draft.goalId === 'responsive-original')?.description).toBe('原目标未保存正文保持'))
+  editor.focus(); editor.setSelectionRange(2, 6)
+  const pane = view.element.querySelector<HTMLElement>('.mobile-goals-work')!; pane.scrollTop = 93
+  const device = getDeviceWorkface(), original = device.exportBackup(), writes = vi.spyOn(device, 'updatePresentation')
+  for (const width of [1024, 390, 951, 669, 812]) {
+    await goalWidth(width)
+    expect(view.element.querySelector('article:not([hidden]) [aria-label="目标正文草稿"]'), 'width must keep the same original editor node').toBe(editor)
+    expect(editor.value).toBe('原目标未保存正文保持'); expect(editor.selectionStart).toBe(2); expect(editor.selectionEnd).toBe(6)
+    expect(document.activeElement).toBe(editor); expect(pane.scrollTop).toBe(93)
+    expect(list!.hidden).toBe(width < 760)
+    expect(createForm.hidden, 'width never reopens or focuses the retained creation form').toBe(true)
+    expect(device.exportBackup()).toBe(original)
+  }
+  list!.querySelector<HTMLInputElement>('[aria-label="搜索目标"]')!.focus()
+  await goalWidth(390)
+  expect(document.activeElement, 'only a newly hidden navigation target transfers focus to the retained work pane').toBe(pane)
+  expect(view.element.querySelector('[aria-label="目标正文草稿"]')).toBe(editor)
+  expect(device.exportBackup()).toBe(original)
+  expect(writes).not.toHaveBeenCalled()
+  expect(await owner.get('responsive-original')).toMatchObject({ description: 'Original owner body' })
+  expect(view.forwardRpc.mock.calls.filter(([method]) => ['goal.create', 'goal.update', 'goal.discuss', 'goal.confirm', 'goal.accept', 'goal.start'].includes(method))).toEqual([])
+  expect(view.sdk!.submit).not.toHaveBeenCalled(); expect(view.sdk!.respond).not.toHaveBeenCalled(); expect(view.sdk!.rejoinInput).not.toHaveBeenCalled(); expect(view.sdk!.signalAgent).not.toHaveBeenCalled()
+})
+
+it('responsive Goals keeps the original unknown writer ACK and its editor through both pane layouts without replay', async () => {
+  const view = await existingGoal(); await view.render(true, true)
+  await view.click('编辑目标正文'); await editBody(view, '宽窄共同保留的原未知保存正文')
+  const normal = vi.mocked(hostGoals.demands.update).getMockImplementation()!
+  vi.mocked(hostGoals.demands.update).mockImplementationOnce(async (...args) => { await normal(...args); throw new Error('Original responsive ACK lost') })
+  await saveBody(view); await view.wait('保存还没确认')
+  const editor = view.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')!, device = getDeviceWorkface()
+  const original = device.exportBackup(), request = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.update')![1]
+  for (const wide of [false, true, false, true]) {
+    await view.render(true, wide)
+    expect(view.element.querySelector('[aria-label="目标正文草稿"]')).toBe(editor)
+    expect(editor.value).toBe('宽窄共同保留的原未知保存正文')
+    expect(device.exportBackup()).toBe(original)
+    expect(device.snapshot().record.goalDrafts![0]!.operations[0]!.request).toEqual(request)
+    expect(view.element.querySelector('.mobile-goal-unknown')?.textContent).toContain('保存还没确认')
+  }
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.update')).toHaveLength(1)
+  expect((await owner.get('original-goal'))!.description).toBe('宽窄共同保留的原未知保存正文')
+})
+
+it('responsive Goals uses only its visible original list and selected detail readers, retaining filters when the phone list hides', async () => {
+  await owner.create({ id: 'reader-a', title: 'Reader A' }); await owner.create({ id: 'reader-b', title: 'Reader B' })
+  const view = await mount({ goalId: 'reader-a', mode: 'detail', discussion: null })
+  await view.wait('Reader A')
+  const count = (method: string) => view.forwardRpc.mock.calls.filter(([name]) => name === method).length
+  expect(count('goal.ls')).toBe(0); expect(count('goal.inspect')).toBe(1)
+  await view.render(true, true); await Promise.allSettled([...inFlight]); await act(async () => {})
+  expect(count('goal.ls'), 'one visible original list owner').toBe(1)
+  const list = view.element.querySelector<HTMLElement>('.mobile-goals-directory')!, search = list.querySelector<HTMLInputElement>('[aria-label="搜索目标"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Reader'); search.dispatchEvent(new Event('input', { bubbles: true })) })
+  await act(async () => { [...list.querySelectorAll<HTMLButtonElement>('.mobile-goals-list button')].find(button => button.textContent?.includes('Reader B'))!.click() })
+  await view.wait('Reader B'); await Promise.allSettled([...inFlight])
+  expect(count('goal.ls'), 'changing the selected Goal must not recreate a visible list reader').toBe(1)
+  expect(view.forwardRpc.mock.calls.filter(([name]) => name === 'goal.inspect').map(([, params]) => params.goalId)).toEqual(['reader-a', 'reader-b'])
+  await act(async () => document.dispatchEvent(new Event('visibilitychange'))); await Promise.allSettled([...inFlight])
+  expect(count('goal.ls')).toBe(2); expect(count('goal.inspect')).toBe(3)
+  await view.render(false, true)
+  const hidden = view.forwardRpc.mock.calls.length
+  await act(async () => document.dispatchEvent(new Event('visibilitychange'))); await Promise.allSettled([...inFlight])
+  expect(view.forwardRpc.mock.calls).toHaveLength(hidden)
+  await view.render(true, false); await Promise.allSettled([...inFlight])
+  expect(count('goal.ls')).toBe(2); expect(list.hidden).toBe(true); expect(search.value).toBe('Reader')
+  await view.render(true, true); await Promise.allSettled([...inFlight])
+  expect(count('goal.ls')).toBe(3); expect(list.hidden).toBe(false); expect(list.querySelector('[aria-label="搜索目标"]')).toBe(search); expect(search.value).toBe('Reader')
+  expect(count('space.ls')).toBe(0); expect(count('app.snapshot')).toBe(0)
+  expect(view.forwardRpc.mock.calls.some(([method]) => ['goal.update', 'goal.create', 'goal.discuss', 'goal.start'].includes(method))).toBe(false)
+})
+
+it('responsive Goals pauses hidden detail readers while the exact original discussion is visible', async () => {
+  const view = await existingGoal(); await view.render(true, true)
+  await view.click('打开目标讨论'); await view.wait(discussionName)
+  const inspect = view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.inspect').length
+  const list = view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.ls').length
+  await act(async () => document.dispatchEvent(new Event('visibilitychange'))); await Promise.allSettled([...inFlight])
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.inspect')).toHaveLength(inspect)
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.ls')).toHaveLength(list + 1)
+  const discussionRead = view.forwardRpc.mock.calls.find(([method]) => method === 'space.inspect')!
+  expect(discussionRead[1].target).toEqual({ tabId: 'discussion-tab:original-goal' })
+  expect(view.element.querySelector<HTMLElement>('.mobile-goals-directory')!.hidden).toBe(false)
+  await view.click('返回目标'); await view.wait(proposal.summary); await Promise.allSettled([...inFlight])
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.inspect')).toHaveLength(inspect + 1)
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.discuss')).toHaveLength(1)
+})
 
 it('retains a lost delete receipt after the real public Goal service removes the original Goal', async () => {
   const view = await existingGoal(), original = view.forwardRpc
@@ -151,7 +260,7 @@ it('published Demand dispatch persistence and strict Core Goal codec feed the mo
   expect(publicGoal.goal.dispatches).toEqual(before!.dispatches)
   const progress = view.element.querySelector('[aria-label="目标协作与输入记录"]')!
   for (const value of before!.dispatches!) expect(progress.textContent).toContain(value.operationId)
-  expect(progress.textContent).toContain('4 条输入记录 · 1 条已确认')
+  expect(progress.textContent).toContain('4 条开始请求 · 1 条输入已确认')
   expect(progress.textContent).toContain('不推断唯一当前执行')
   expect(view.forwardRpc.mock.calls.some(([method]) => ['goal.start', 'goal.update', 'goal.continuation-action'].includes(method))).toBe(false)
   expect(await owner.get('original-goal')).toEqual(before)

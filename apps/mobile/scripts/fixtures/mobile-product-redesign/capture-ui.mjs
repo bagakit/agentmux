@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createHash, randomUUID } from 'node:crypto'
+import { createServer } from 'node:http'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { runProbeProcess } from '../../../../desktop/scripts/probe-process.mjs'
@@ -17,6 +18,7 @@ const receipt = { passed: false, captureOnly: true, captureSubset: 'mobile-produ
   boundary: 'Actual MobileApp, DeviceWorkface, original ConversationSurface and shared Composer in private Electron Chromium; controlled original SDK/Space/Mote/Goal facts and acknowledgements. Real CDP touch events and browser insertText are simulation, not a physical phone, OS keyboard, live Relay/Host/model/Run, package or install claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const loadedSource = {}
+let privateServer
 try {
   const identitySource = (await bundleIdentityRuntime()).source
   const identityModule = `export const identityRuntimeSource = ${JSON.stringify(identitySource)};\n`
@@ -231,21 +233,38 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['compact-navigation', 'wide-agent-workface', 'auxiliary-density', 'agent-locations', 'conversation-status', 'brand-attention', 'brand-refinement', 'chrome-motion', 'terminal-restore', 'mature-shell', 'mote-start', 'mote-main-retention', 'quiet-run-status', 'directory-notices', 'mote-discussion-restore', 'mote-main-setup', 'mote-dialogue', 'creation-update', 'mote-notice-join', 'mote-host-boundaries', 'mote-cooperation', 'creation-recovery', 'polish-followup', 'floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'auxiliary-density', 'agent-locations', 'conversation-status', 'brand-attention', 'brand-refinement', 'chrome-motion', 'terminal-restore', 'mature-shell', 'mote-start', 'mote-main-retention', 'quiet-run-status', 'directory-notices', 'mote-discussion-restore', 'mote-main-setup', 'mote-dialogue', 'creation-update', 'mote-notice-join', 'mote-host-boundaries', 'mote-cooperation', 'creation-recovery', 'polish-followup', 'floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
   if (['brand-attention', 'brand-refinement'].includes(subset)) for (const name of ['brand-attention.cjs', ...(subset === 'brand-refinement' ? ['brand-goals.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   if (subset === 'agent-locations') receipt.source[path.relative(root, path.join(fixture, 'agent-locations.cjs'))] = sha(await fs.readFile(path.join(fixture, 'agent-locations.cjs')))
   if (subset === 'conversation-status') receipt.source[path.relative(root, path.join(fixture, 'conversation-status.cjs'))] = sha(await fs.readFile(path.join(fixture, 'conversation-status.cjs')))
   if (subset === 'chrome-motion') receipt.source[path.relative(root, path.join(fixture, 'chrome-motion.cjs'))] = sha(await fs.readFile(path.join(fixture, 'chrome-motion.cjs')))
   if (subset === 'mote-main-retention') receipt.source[path.relative(root, path.join(fixture, 'mote-main-retention.cjs'))] = sha(await fs.readFile(path.join(fixture, 'mote-main-retention.cjs')))
   if (['chat-start', 'goal-recovery', 'terminal-restore'].includes(subset)) for (const name of ['restart-chrome.cjs', ...(subset === 'terminal-restore' ? ['terminal-restore.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
+  if (subset === 'responsive-primary-workfaces') receipt.source[path.relative(root, path.join(fixture, 'responsive-primary-workfaces.cjs'))] = sha(await fs.readFile(path.join(fixture, 'responsive-primary-workfaces.cjs')))
   if (subset === 'compact-navigation') for (const name of ['compact-navigation.cjs', 'wide-agent-workface.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   if (subset === 'wide-agent-workface') receipt.source[path.relative(root, path.join(fixture, 'wide-agent-workface.cjs'))] = sha(await fs.readFile(path.join(fixture, 'wide-agent-workface.cjs')))
   if (subset) receipt.captureSubset = subset
   if (process.argv.includes('--positions-only')) receipt.captureMode = 'positions-only'
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(subset ? [subset] : []), ...(process.argv.includes('--positions-only') ? ['positions-only'] : []), ...(process.argv.includes('--quiet-status-details-only') ? ['details-only'] : []), ...(process.argv.includes('--mote-start-visual-fixes') ? ['visual-fixes'] : [])],
+  let productPage = path.join(compiled, 'index.html')
+  if (subset === 'responsive-primary-workfaces') {
+    // Knowledge drafts use the same valid local HTTP origin across both private OS processes.
+    // file:// has an opaque origin and cannot exercise the actual persisted draft contract.
+    privateServer = createServer(async (request, response) => {
+      try {
+        const file = new URL(request.url, 'http://127.0.0.1').pathname.slice(1) || 'index.html'
+        if (file !== path.basename(file)) { response.writeHead(404).end(); return }
+        const bytes = await fs.readFile(path.join(compiled, file))
+        response.writeHead(200, { 'Content-Type': file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html', 'Cache-Control': 'no-store' }).end(bytes)
+      } catch { response.writeHead(404).end() }
+    })
+    await new Promise((accept, reject) => { privateServer.once('error', reject); privateServer.listen(0, '127.0.0.1', accept) })
+    productPage = `http://127.0.0.1:${privateServer.address().port}/index.html?responsive-primary-workfaces=1`
+    receipt.privateOrigin = new URL(productPage).origin
+  }
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, ...(subset ? [subset] : []), ...(process.argv.includes('--positions-only') ? ['positions-only'] : []), ...(process.argv.includes('--quiet-status-details-only') ? ['details-only'] : []), ...(process.argv.includes('--mote-start-visual-fixes') ? ['visual-fixes'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
-  if (['compact-navigation', 'wide-agent-workface', 'spatial-resources', 'chat-start', 'goal-recovery', 'terminal-restore', 'mote-discussion-restore'].includes(subset) && !process.argv.includes('--positions-only') && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
-    receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, subset, 'restore'],
+  if (['responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'spatial-resources', 'chat-start', 'goal-recovery', 'terminal-restore', 'mote-discussion-restore'].includes(subset) && !process.argv.includes('--positions-only') && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
+    receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, subset, 'restore'],
       { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
     receipt.restoredRenderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result-restored.json'), 'utf8'))
     assert.equal(receipt.restartProcess.exitCode, 0)
@@ -269,6 +288,7 @@ try {
   assert.equal(receipt.process.exitCode, 0)
   receipt.passed = true
 } catch (error) { receipt.error = { message: error.message, stack: error.stack } }
+if (privateServer) await new Promise(resolve => privateServer.close(resolve))
 receipt.compiled = Object.fromEntries(await Promise.all((await fs.readdir(compiled)).map(async file => [file, sha(await fs.readFile(path.join(compiled, file)))])))
 await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
 await fs.rm(compiled, { recursive: true, force: true })

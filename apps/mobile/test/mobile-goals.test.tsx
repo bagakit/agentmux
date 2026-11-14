@@ -95,7 +95,7 @@ describe('Mobile Goals original owner slice', () => {
     const progress = view.element.querySelector('[aria-label="目标协作与输入记录"]')!
     expect(progress.textContent).toContain('负责人：原 Agent 名称')
     expect(progress.textContent).toContain('Supervisor：原 Agent 名称')
-    for (const text of ['4 条输入记录 · 1 条已确认', '已准备，尚未提交', '已提交，确认未到', '输入已确认', '输入未确认', '不推断唯一当前执行', '输入确认不代表工作完成或结果接受']) expect(progress.textContent).toContain(text)
+    for (const text of ['4 条开始请求 · 1 条输入已确认', '已准备，尚未提交', '已提交，确认未到', '输入已确认', '输入未确认', '不推断唯一当前执行', '输入确认不代表工作完成或结果接受']) expect(progress.textContent).toContain(text)
     for (const value of goal.dispatches) expect(progress.textContent).toContain(value.operationId)
     expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'space.ls')).toHaveLength(1)
     expect(view.forwardRpc.mock.calls.some(([method]) => ['goal.start', 'goal.update'].includes(method))).toBe(false)
