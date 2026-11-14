@@ -75,6 +75,21 @@ async function switchedTo(background: CaptureBackground) {
   await waitFor('the other already frozen source is displayed', async () => await evaluate(`document.querySelector('img')?.src===${JSON.stringify(sources.get(background + ':1')!.dataUrl)}`))
   await settle()
 }
+async function loupeMatchesSource(background: CaptureBackground): Promise<boolean> {
+  const observed = await evaluate(`(()=>{const root=document.querySelector('.image-annotation-editor__loupe');if(!root)return null;const spans=root.querySelectorAll(':scope > span');
+    return {hex:spans[0]?.firstChild?.textContent,rgb:spans[0]?.querySelector('span')?.textContent?.split(',').map(Number),
+      point:spans[2]?.textContent?.replace(/[^0-9,-]/g,'').split(',').map(Number)}})()`)
+  if (!observed) return true
+  const [x,y] = observed.point ?? []
+  if (typeof observed.hex !== 'string' || observed.rgb?.length !== 3 || !Number.isInteger(x) || !Number.isInteger(y)) return false
+  const source = sources.get(background + ':1')!, image = nativeImage.createFromDataURL(source.dataUrl), size = image.getSize()
+  if (x < 0 || y < 0 || x >= size.width || y >= size.height) return false
+  const bytes = image.toBitmap(), offset = (y * size.width + x) * 4, first = bytes[offset]!, green = bytes[offset + 1]!, third = bytes[offset + 2]!
+  if (bytes[offset + 3] !== 255) return false
+  // nativeImage's channel order is platform-owned; accept only an exact source sample in its actual order.
+  return [[first, green, third], [third, green, first]].some(rgb => observed.rgb.every((value, index) => value === rgb[index])
+    && observed.hex === '#' + rgb.map(value => value.toString(16).padStart(2, '0')).join('').toUpperCase())
+}
 async function sceneMarkPixels(): Promise<number> {
   return await evaluate(`(()=>{const c=document.querySelector('canvas'),p=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let count=0;for(let i=0;i<p.length;i+=4)if(p[i]>180&&p[i+1]<130&&p[i+2]<130&&p[i+3]>245)count++;return count})()`)
 }
@@ -193,8 +208,8 @@ async function run() {
       assert.equal(await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')`), null, 'undo restores the empty selection before testing the other geometry')
       await mouse('mouseMoved', point.x + 1, point.y); await shot('window-highlight-included')
       await switchedTo('excluded')
-      // No mouse movement after Tab: stale highlighted geometry or RGB cannot be cleared by a new hover event.
-      assert.equal(await evaluate(`document.querySelector('.image-annotation-editor__loupe')`), null, 'Tab clears the old source sample while the pointer stays still')
+      // No new CDP mouse is sent after Tab, but focus changes may deliver a native pointermove with a fresh sample.
+      await waitFor('Tab never keeps a sample from the old frozen source', () => loupeMatchesSource('excluded'))
       await shot('window-highlight-excluded')
       await clickPoint(500, 350)
       assert.equal(await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')`), null, 'the excluded background has no AgentMux window to select at that point')
