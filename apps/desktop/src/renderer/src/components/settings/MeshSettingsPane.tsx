@@ -46,7 +46,7 @@ export function MeshSettingsPane({ onSubpageChange, ...props }: React.ComponentP
     {editing ? <header className="mesh-editor-navigation"><button type="button" className="small-button" onClick={() => choose('paths')}>← Mesh overview</button></header> : null}
     <div ref={observationScroll} data-mesh-view={view === 'machines' ? 'machines' : 'paths'} hidden={!observing}
       onScroll={event => { if (view === 'paths' || view === 'machines') scrollPositions.current[view] = event.currentTarget.scrollTop }}>
-      <div hidden={view !== 'paths'}>{mounted('paths') ? <MeshPathsPane active={props.active && view === 'paths'} onGateway={() => choose('network')} /> : null}</div>
+      <div hidden={view !== 'paths'}>{mounted('paths') ? <MeshPathsPane active={props.active && view === 'paths'} hosts={props.config.hosts} onDevice={openConnection} onGateway={() => choose('network')} /> : null}</div>
       {mounted('paths') || mounted('machines') ? <ClusterMachinesPane hosts={props.config.hosts} active={props.active && observing}
         compact={view !== 'machines'} onAddDevice={addDevice} onConnections={openConnection} /> : null}
     </div>

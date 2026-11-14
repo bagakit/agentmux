@@ -8,8 +8,8 @@ export function useHostConnectionHint(hostId: string | null, label: string, home
   const hosts = useAppStore(state => state.config?.hosts)
   const host = useMemo(() => hosts?.find(item => item.id === hostId), [hosts, hostId])
   const observation = useAppStore(state => hostId ? state.hostTransports?.[hostId] : undefined)
-  const detail = hostConnectionPresentation(host, observation).detail
-  return { name: hostId ? `${label} · ${hostId}` : 'Host unknown', detail: detail + (homeAction && host?.kind !== 'local' ? '\n~ opens this device’s home.' : '') }
+  const { summary, detail } = hostConnectionPresentation(host, observation)
+  return { summary, name: hostId ? `${label} · ${hostId}` : 'Host unknown', detail: detail + (homeAction && host?.kind !== 'local' ? '\n~ opens this device’s home.' : '') }
 }
 
 export function useHostConnectionTooltip(hostId: string | null, label: string, suppressed = false) {

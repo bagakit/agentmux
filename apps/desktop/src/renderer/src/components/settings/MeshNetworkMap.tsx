@@ -65,11 +65,12 @@ function MeshGateways({ snapshot, peers, selected, stale, savedTargets, savedIss
 }
 
 /** The source's current network observation; selecting and arranging never changes network policy. */
-type MeshMapProps = { snapshot?: MeshNetworkInspection | undefined; active?: boolean; actions?: ReactNode; reading?: boolean; stale?: boolean; onGateway?: (() => void) | undefined; savedTargets?: GatewayTargets | undefined; savedIssue?: string | undefined }
-export function MeshNetworkMap({ snapshot, active = true, actions, onGateway, savedTargets, savedIssue, reading = false, stale = false }: MeshMapProps) {
-  return <MeshTopologyExplorer key={meshTopologySource(snapshot)} snapshot={snapshot} active={active} actions={actions} onGateway={onGateway} savedTargets={savedTargets} savedIssue={savedIssue} reading={reading} stale={stale} />
+type MeshMapProps = { snapshot?: MeshNetworkInspection | undefined; active?: boolean; actions?: ReactNode; sourceControl?: ReactNode; savedMap?: ReactNode; savedRouteCount?: number | undefined; reading?: boolean; stale?: boolean; onGateway?: (() => void) | undefined; savedTargets?: GatewayTargets | undefined; savedIssue?: string | undefined }
+export function MeshNetworkMap({ snapshot, active = true, actions, sourceControl, savedMap, savedRouteCount, onGateway, savedTargets, savedIssue, reading = false, stale = false }: MeshMapProps) {
+  return <MeshTopologyExplorer key={meshTopologySource(snapshot)} snapshot={snapshot} active={active} actions={actions} sourceControl={sourceControl} savedMap={savedMap} savedRouteCount={savedRouteCount} onGateway={onGateway} savedTargets={savedTargets} savedIssue={savedIssue} reading={reading} stale={stale} />
 }
-function MeshTopologyExplorer({ snapshot, active, actions, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & { active: boolean; reading: boolean; stale: boolean }) {
+function MeshTopologyExplorer({ snapshot, active, actions, sourceControl, savedMap, savedRouteCount, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & { active: boolean; reading: boolean; stale: boolean }) {
+  const showingSaved = savedRouteCount !== undefined
   const model = useMemo(() => meshTopologyModel(snapshot), [snapshot])
   const [selected, select] = useState<MeshTopologySelection>(), [view, setView] = useState<'topology' | 'list'>('topology')
   const [scope, setScope] = useState<'network' | 'selection'>('network'), [category, setCategory] = useState<'peers' | 'routes' | 'circuits'>(() => model.routes.length ? 'routes' : 'peers')
@@ -200,14 +201,22 @@ function MeshTopologyExplorer({ snapshot, active, actions, onGateway, savedTarge
         {currentPeer?.ingress.length ? <section><h5>Advertised gateway addresses</h5>{currentPeer.ingress.map(item => <code key={item.endpoint}>{item.useTls ? 'wss://' : 'ws://'}{item.endpoint}</code>)}</section> : null}
         </details>
     </aside> : null
-  const networkState = snapshot?.apply.state === 'disabled' ? 'Mesh participation is disabled' : reading ? 'Reading this Core’s network…' : 'Topology unavailable'
+  const networkState = snapshot?.apply.state === 'disabled' ? 'Mesh participation is disabled'
+    : reading ? 'Reading Mesh topology…'
+      : snapshot?.network ? 'No Mesh peers observed' : 'Mesh topology unavailable'
+  const summary = showingSaved
+    ? `${savedRouteCount} saved route${savedRouteCount === 1 ? '' : 's'}${model.peers.every(peer => peer.own) ? ' · ' + networkState : ''}`
+    : !snapshot?.network ? networkState
+      : `${model.peers.length} peers · ${model.edges.length} reciprocal link${model.edges.length === 1 ? '' : 's'} · ${model.routes.length} reachable endpoint${model.routes.length === 1 ? '' : 's'} · ${snapshot.coverage.observedOrigins}/${snapshot.coverage.configuredOrigins} origins observed`
   return <section className="mesh-network-map mesh-explorer" aria-label="Observed Mesh topology" data-mesh-topology data-mesh-overview={onGateway ? true : undefined}>
-    <header className="mesh-explorer__header"><div className="mesh-explorer__heading"><h3>Network map{snapshot?.network?.networkId ? <small>{snapshot.network.networkId}</small> : null}</h3><p>{stale ? 'Last confirmed · ' : ''}{snapshot?.network ? `${model.peers.length} peers · ${model.edges.length} reciprocal link${model.edges.length === 1 ? '' : 's'} · ${model.routes.length} reachable endpoint${model.routes.length === 1 ? '' : 's'} · ${snapshot.coverage.observedOrigins}/${snapshot.coverage.configuredOrigins} origins observed` : networkState}</p></div>{actions}</header>
-    {model.peers.length ? <div className="mesh-explorer__toolbar"><label className="mesh-explorer__search"><TextInput aria-label="Find a peer, endpoint or circuit" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a peer or path" /></label>
+    <header className="mesh-explorer__header"><div className="mesh-explorer__heading"><h3>Network map{snapshot?.network?.networkId ? <small>{snapshot.network.networkId}</small> : null}</h3><p>{stale && !showingSaved ? 'Last confirmed · ' : ''}{summary}</p></div><div className="mesh-explorer__header-actions">{sourceControl}{actions}</div></header>
+    {!showingSaved && model.peers.length ? <div className="mesh-explorer__toolbar"><label className="mesh-explorer__search"><TextInput aria-label="Find a peer, endpoint or circuit" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a peer or path" /></label>
       <div className="mesh-explorer__segments" role="group" aria-label="Network view"><button type="button" aria-pressed={view === 'topology'} onClick={() => setView('topology')}>Map</button><button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>List</button></div>
       <div className="mesh-explorer__segments" role="group" aria-label="Network scope"><button type="button" aria-pressed={scope === 'network'} onClick={() => { setScope('network'); requestViewport() }}>Network</button><button type="button" aria-pressed={scope === 'selection'} onClick={() => { setScope('selection'); requestViewport() }}>Selected path</button></div>
     </div> : null}
     <div className="mesh-explorer__body" data-empty={model.peers.length ? undefined : true}><div className="mesh-explorer__workspace">
+      {savedMap ? <div hidden={!showingSaved}>{savedMap}</div> : null}
+      <div hidden={showingSaved}>
       {view === 'list' ? directory : null}
       {model.peers.length ? <div className="mesh-explorer__graph" hidden={view !== 'topology'}>
         <div ref={canvas} className="mesh-explorer__canvas" aria-label="Network relationship canvas">{visiblePeers.length ? <ReactFlow<PeerNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onInit={value => { instance.current = value }}
@@ -222,14 +231,15 @@ function MeshTopologyExplorer({ snapshot, active, actions, onGateway, savedTarge
       </div>}
       {onGateway && model.peers.length > 0 && view === 'topology' ? directory : null}
       {!onGateway || view === 'list' ? inspector : null}
+      </div>
     </div>
     {onGateway ? <div className="mesh-explorer__companion">
       <MeshGateways snapshot={snapshot} peers={model.peers} selected={selected} stale={stale} savedTargets={savedTargets} savedIssue={savedIssue} onGateway={onGateway} onPeer={showPeer} />
-      {view === 'topology' ? inspector : null}
+      {!showingSaved && view === 'topology' ? inspector : null}
     </div> : null}
     </div>
     {!onGateway && view === 'topology' && model.peers.length > 0 ? directory : null}
 
-    <footer className="mesh-explorer__footer">{model.peers.length > 0 ? <span className="mesh-explorer__legend"><i aria-hidden="true" /> Reciprocal link <i className="mesh-explorer__legend-selected" aria-hidden="true" /> Selected path</span> : null}<span>{snapshot ? `Observed ${new Date(snapshot.observedAt).toLocaleTimeString()}${snapshot.network && !snapshot.coverage.complete ? ' · Partial network view' : ''}` : 'No observation yet'}</span><details><summary>Observation source</summary><p>Mesh network observation from Runtime <code>{snapshot?.owner.runtimeId ?? 'unconfirmed'}</code>, instance <code>{snapshot?.owner.ownerInstanceId ?? 'unconfirmed'}</code>. Peer positions are a relationship layout, not geography or a physical packet trace.</p></details></footer>
+    <footer className="mesh-explorer__footer">{!showingSaved && model.peers.length > 0 ? <span className="mesh-explorer__legend"><i aria-hidden="true" /> Reciprocal link <i className="mesh-explorer__legend-selected" aria-hidden="true" /> Selected path</span> : null}<span>{snapshot ? `${showingSaved ? 'Mesh observed' : 'Observed'} ${new Date(snapshot.observedAt).toLocaleTimeString()}${snapshot.network && !snapshot.coverage.complete ? ' · Partial network view' : ''}` : 'No observation yet'}</span><details><summary>{showingSaved ? 'Mesh observation source' : 'Observation source'}</summary><p>Mesh network observation from Runtime <code>{snapshot?.owner.runtimeId ?? 'unconfirmed'}</code>, instance <code>{snapshot?.owner.ownerInstanceId ?? 'unconfirmed'}</code>. Peer positions are a relationship layout, not geography or a physical packet trace.</p></details></footer>
   </section>
 }
