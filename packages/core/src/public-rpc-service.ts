@@ -324,6 +324,8 @@ export type AgentMuxRpcCallContext = { routeDelegation?: VerifiedHostRouteDelega
   responseId?: JSONRPCID;
   /** Only the actual Host/transport supplies this current author restriction. */
   assertCurrent?(): void | Promise<void>;
+  /** Gateway-supplied in-process custody for this exact durable input; never wire data. */
+  retainAcceptedInputAuthority?: import('./agent-input-wait.js').AgentInputCallContext['retainAcceptedInputAuthority'];
   runtimeFence?: AgentMuxRuntimeFence; afterResponse?: Array<() => void | Promise<void>>;
   /** Actual receiving hop, supplied only by the transport owner. */
   transport?: 'unix' | 'http' | 'relay' }
@@ -741,11 +743,12 @@ export class AgentMuxRpcService {
     const assertCurrent = context.assertCurrent ?? (context.principal?.kind === 'device' ? () => {
       throw new AgentMuxError('The original Host device authorization is unconfirmed; the saved input remains waiting.', 'CONTROL_UNAVAILABLE')
     } : undefined)
-    return { ...(context.signal ? { requestSignal: context.signal } : {}), ...(assertCurrent ? { assertCurrent } : {}) }
+    return { ...(context.signal ? { requestSignal: context.signal } : {}), ...(assertCurrent ? { assertCurrent } : {}),
+      ...(context.retainAcceptedInputAuthority ? { retainAcceptedInputAuthority: context.retainAcceptedInputAuthority } : {}) }
   }
   private async inputForwardContext(context: AgentMuxRpcCallContext): Promise<AgentMuxRpcCallContext> {
     await this.inputCallContext(context).assertCurrent?.()
-    const { assertCurrent: _localRestriction, ...forwarded } = context
+    const { assertCurrent: _localRestriction, retainAcceptedInputAuthority: _localIntake, ...forwarded } = context
     return forwarded
   }
   private async execute(request: AgentMuxControlRequest, context?: AgentMuxNameContext, executionContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult> {
@@ -1342,6 +1345,7 @@ export class AgentMuxRpcService {
         ...(context.principal ? { principal: context.principal } : {}),
         ...(context.signal ? { signal: context.signal } : {}),
         ...(inputContext.assertCurrent ? { assertCurrent: inputContext.assertCurrent } : {}),
+        ...(inputContext.retainAcceptedInputAuthority ? { retainAcceptedInputAuthority: inputContext.retainAcceptedInputAuthority } : {}),
         ...(this.ports.operationSource?.(context) ? { sourceDevice: this.ports.operationSource!(context) } : {}),
         ...(this.ports.recordDeviceOperation ? { recordDeviceOperation: this.ports.recordDeviceOperation } : {}),
         ...(context.afterResponse ? { afterResponse: context.afterResponse } : {})

@@ -252,6 +252,8 @@ export type AgentPromptInputAuthority = Readonly<{
   /** Structured attribution from the trusted Host context; never supplied by prompt text. */
   externalAuthor?: import('./external-author.js').AgentExternalMessageAuthor
   assertCurrent(): Promise<void>
+  /** Original input ownership, separate from a completed unary observation. */
+  retainForAcceptedInput?: import('./agent-input-wait.js').AgentInputCallContext['retainAcceptedInputAuthority']
 }>
 
 /** Private producer restrictions, never a public prompt option or reusable grant. */

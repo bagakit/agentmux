@@ -6991,12 +6991,16 @@ export class AgentMuxClient {
   private inputCallAuthority(authority?: import('./prompt-submission.js').AgentPromptInputAuthority,
     context?: AgentInputCallContext): import('./prompt-submission.js').AgentPromptInputAuthority | undefined {
     const assertCurrent = context?.assertCurrent
+    const retain = context?.retainAcceptedInputAuthority
     const inputContextSource = authority?.inputContextSource ?? (context?.inputContextSource === undefined ? undefined : parseBrowserInputContextSource(context.inputContextSource))
-    if (!assertCurrent && inputContextSource === undefined) return authority
+    if (!assertCurrent && !retain && inputContextSource === undefined) return authority
     return { ...authority, assertCurrent: async () => {
       await authority?.assertCurrent()
       await assertCurrent?.()
-    }, ...(inputContextSource === undefined ? {} : { inputContextSource }) }
+    }, ...(retain ? { retainForAcceptedInput: async (key: import('./agent-prompt-condition.js').AgentPromptInputKey) => {
+      const accepted = await retain(key)
+      return { assertCurrent: async () => { await authority?.assertCurrent(); await accepted.assertCurrent() }, release: accepted.release }
+    } } : {}), ...(inputContextSource === undefined ? {} : { inputContextSource }) }
   }
 
   private isRetainedHumanInput(intent: AgentInputJournalIntent): boolean {
@@ -7089,25 +7093,37 @@ export class AgentMuxClient {
       if (isDeepStrictEqual(saved.control.ref, ref) && (saved.control.state === 'enabled' || continueGate && saved.control.state === 'dispatch-authorized' && saved.control.handoff) && !await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control)) && !this.inputWaitingDisposed) {
         const id = agentInputJournalKey(ref.key)
         if (!this.inputWaitingContexts.has(id)) {
-          const controller = new AbortController(), context = { ref, input, producer, recipientContinuation, ...(continueGate ? { continueGate: true as const } : {}),
-            controller, runtimeWake: true, sessionWake: this.isRetainedHumanInput(saved.intent) || recipientContinuation, requested: true, active: false, sequence: saved.sequence,
-            ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(authority ? { authority } : {}) }
-          this.inputWaitingContexts.set(id, context)
-          const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId) ?? new Set<string>()
-          ids.add(id); this.inputWaitingByRecipient.set(ref.key.agentSessionId, ids)
-          controller.signal.addEventListener('abort', () => {
-            if (this.inputWaitingContexts.get(id) === context) this.inputWaitingContexts.delete(id)
-            const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId)
-            ids?.delete(id)
-            if (!ids?.size) this.inputWaitingByRecipient.delete(ref.key.agentSessionId)
-          }, { once: true })
-          if (input.signal?.aborted) controller.abort(input.signal.reason)
-          else input.signal?.addEventListener('abort', () => controller.abort(input.signal!.reason), { once: true, signal: controller.signal })
-          const cancelRequest = () => controller.abort(requestSignal!.reason)
-          if (requestSignal?.aborted) cancelRequest()
-          else if (requestSignal) {
-            requestSignal.addEventListener('abort', cancelRequest, { once: true })
-            releaseRequest = () => requestSignal.removeEventListener('abort', cancelRequest)
+          // Only this original durable input can receive the live restrictions.
+          // Completed RPC readers and persisted attribution are not grant owners.
+          const accepted = authority?.retainForAcceptedInput ? await authority.retainForAcceptedInput(ref.key) : undefined
+          const current = accepted ? await this.messageQueue.inspectInput({ key: ref.key }).catch(error => { accepted.release(); throw error }) : saved
+          if (!current || !isDeepStrictEqual(current.control.ref, ref) ||
+              current.control.state !== 'enabled' && !(continueGate && current.control.state === 'dispatch-authorized' && current.control.handoff) ||
+              this.inputWaitingDisposed || this.inputWaitingContexts.has(id)) accepted?.release()
+          else {
+            const ownedAuthority = authority && { ...authority, ...(accepted ? { assertCurrent: accepted.assertCurrent } : {}) }
+            if (ownedAuthority) delete ownedAuthority.retainForAcceptedInput
+            const controller = new AbortController(), context = { ref, input, producer, recipientContinuation, ...(continueGate ? { continueGate: true as const } : {}),
+              controller, runtimeWake: true, sessionWake: this.isRetainedHumanInput(saved.intent) || recipientContinuation, requested: true, active: false, sequence: saved.sequence,
+              ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(ownedAuthority ? { authority: ownedAuthority } : {}) }
+            this.inputWaitingContexts.set(id, context)
+            const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId) ?? new Set<string>()
+            ids.add(id); this.inputWaitingByRecipient.set(ref.key.agentSessionId, ids)
+            controller.signal.addEventListener('abort', () => {
+              accepted?.release()
+              if (this.inputWaitingContexts.get(id) === context) this.inputWaitingContexts.delete(id)
+              const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId)
+              ids?.delete(id)
+              if (!ids?.size) this.inputWaitingByRecipient.delete(ref.key.agentSessionId)
+            }, { once: true })
+            if (input.signal?.aborted) controller.abort(input.signal.reason)
+            else input.signal?.addEventListener('abort', () => controller.abort(input.signal!.reason), { once: true, signal: controller.signal })
+            const cancelRequest = () => controller.abort(requestSignal!.reason)
+            if (requestSignal?.aborted) cancelRequest()
+            else if (requestSignal) {
+              requestSignal.addEventListener('abort', cancelRequest, { once: true })
+              releaseRequest = () => requestSignal.removeEventListener('abort', cancelRequest)
+            }
           }
         }
         // The durable firstsave ACK does not wait for Native qualification or a

@@ -12,6 +12,9 @@ import { parseSpaceMemberParams } from './space-member-codec.js'
 import type { SpaceMemberParams } from './space-member.js'
 import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
+import type { AgentInputCallContext } from './agent-input-wait.js'
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { decodeHostedValue } from './hosted-value.js'
 import type { AgentMuxRpcCallContext, AgentMuxRpcServiceSubscription } from './public-rpc-service.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcStreamMethod, AgentMuxRpcStreamEvent } from './public-rpc.js'
 
@@ -175,15 +178,26 @@ export class HostRouteGateway {
       denied('Only the actual original user/device can configure policy or enter a new source route. Managed callers keep their original capabilities.', 'HOST_ROUTE_ACTOR_REQUIRED')
     return context.principal!
   }
-  private activeContext(context: AgentMuxRpcCallContext, check: (policy?: PolicyIndex) => void): { signal: AbortSignal; current(): Promise<void>; dispose(): void } {
+  private activeContext(context: AgentMuxRpcCallContext, check: (policy?: PolicyIndex) => void): { signal: AbortSignal; current(): Promise<void>; dispose(): void; retainForInput(): ReturnType<NonNullable<AgentInputCallContext['retainAcceptedInputAuthority']>> } {
     let closed = false
     const controller = new AbortController(), item: Active = { controller, check }
     const abort = () => controller.abort(context.signal?.reason)
     context.signal?.addEventListener('abort', abort, { once: true }); if (context.signal?.aborted) abort()
     this.active.add(item)
-    return { signal: controller.signal, current: async () => {
+    const current = async () => {
       controller.signal.throwIfAborted(); if (closed || this.disposed) denied('This exact route reader is closed.', 'HOST_ROUTE_READER_CLOSED')
       await context.assertCurrent?.(); check(); controller.signal.throwIfAborted()
+    }
+    return { signal: controller.signal, current, retainForInput: async () => {
+      await current()
+      // The original input owner keeps only D's current receiver restrictions.
+      // Released upstream readers are not a continuous network revocation service.
+      let released = false
+      return { assertCurrent: async () => {
+        await this.state()
+        if (released || this.disposed) denied('This accepted input restriction was released.', 'HOST_ROUTE_READER_CLOSED')
+        check()
+      }, release: () => { released = true } }
     }, dispose: () => { closed = true; context.signal?.removeEventListener('abort', abort); this.active.delete(item) } }
   }
   private async source(input: HostRouteParams['route.call'], context: AgentMuxRpcCallContext, stream: boolean) {
@@ -325,8 +339,15 @@ export class HostRouteGateway {
       }
       const token = {} as VerifiedHostRouteDelegation
       verified.set(token, { envelope: value.envelope, actor: value.envelope.statement.actor, call: value.call, stream: false, assertCurrent: value.authority.current })
+      const invocation = value.call.method === 'runtime.invoke' ? rpcRecord(decodeHostedValue(rpcRecord(value.call.params).invocation)) : undefined
+      const prompt = invocation?.method === 'submitAgentPrompt' && Array.isArray(invocation.args) ? rpcRecord(invocation.args[0]) : undefined
+      const inputKey = prompt ? validateAgentPromptInputKey({ kind: 'prompt', agentSessionId: prompt.agentSessionId, expectedRun: prompt.expectedRun, submissionId: prompt.operationId }) : undefined
+      const retain: AgentInputCallContext['retainAcceptedInputAuthority'] = inputKey ? async key => {
+        if (!isDeepStrictEqual(key, inputKey)) denied('This accepted input differs from the original routed Session, Run or operation.', 'HOST_ROUTE_TARGET_MISMATCH')
+        return await value.authority.retainForInput()
+      } : undefined
       const result = await this.options.call(value.call.method as AgentMuxRpcMethod, value.call.params as AgentMuxRpcParams<AgentMuxRpcMethod>,
-        { ...context, signal: value.authority.signal, assertCurrent: value.authority.current, routeDelegation: token })
+        { ...context, signal: value.authority.signal, assertCurrent: value.authority.current, routeDelegation: token, ...(retain ? { retainAcceptedInputAuthority: retain } : {}) })
       return { value: result, observation: this.observation(value.envelope) }
     } finally { value.authority.dispose() }
   }

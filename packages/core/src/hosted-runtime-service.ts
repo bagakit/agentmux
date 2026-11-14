@@ -28,6 +28,7 @@ import { decodeHostedValue, encodeHostedValue, hostedTransfer, parseHostedMessag
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
 type Context = { principal?: import('./public-rpc.js').AgentMuxRpcPrincipal; caller?: unknown; sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
   assertCurrent?(): void | Promise<void>;
+  retainAcceptedInputAuthority?: import('./agent-input-wait.js').AgentInputCallContext['retainAcceptedInputAuthority'];
   recordDeviceOperation?: (source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => Promise<void>; signal?: AbortSignal; afterResponse?: Array<() => void | Promise<void>> }
 type Reader = { enqueue(chunks: AgentMuxHostedTransferChunk[], metadata?: AgentMuxClientEvent): void; fail(error: unknown): void;
   start(): Promise<void>; close(): void;
@@ -461,6 +462,7 @@ export class AgentMuxHostedRuntimeService {
       }] : controlledInput ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
+        ...(context.retainAcceptedInputAuthority ? { retainAcceptedInputAuthority: context.retainAcceptedInputAuthority } : {}),
         ...(this.inputContextCaptureReader ? { captureReader: this.inputContextCaptureReader } : {}),
         ...(externalAuthor ? { externalAuthor } : {}),
         ...(externalAction ? { externalAction } : {}),

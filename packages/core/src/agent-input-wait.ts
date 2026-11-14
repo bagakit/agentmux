@@ -15,6 +15,9 @@ export type AgentInputCallContext = Readonly<{
   externalQuestion?: { identity: import('./external-author.js').AgentExternalInteractionAuthor; assertCurrent(intent: import("./client-contract.js").AgentMuxSessionQuestionReplyInput): void | Promise<void> }
   /** Restricts the original action using its current author owner; cannot mint authority. */
   assertCurrent?(): void | Promise<void>
+  /** Accepted-input owner only: retain the exact live invocation's restrict-only author checks.
+   * This function and its release handle never cross the wire or enter the journal. */
+  retainAcceptedInputAuthority?(key: AgentPromptInputKey): Promise<{ assertCurrent(): Promise<void>; release(): void }>
   /** Automatic producers may forbid steering; this restriction grants no input authority. */
   nativeIdleOnly?: true
 }>
