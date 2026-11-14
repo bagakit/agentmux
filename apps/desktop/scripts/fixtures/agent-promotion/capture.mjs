@@ -9,6 +9,8 @@ import { execFileSync } from 'node:child_process'
 import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 const fixture = import.meta.dirname, root = resolve(fixture, '../../../../..')
+const agentOnly = process.argv.includes('--agent-only'), settingsOnly = process.argv.includes('--settings-only')
+assert.ok(!agentOnly || !settingsOnly, 'Choose one exact capture subset')
 const mainRoot = dirname(resolve(root, execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: root, encoding: 'utf8' }).trim()))
 const require = createRequire(join(mainRoot, 'apps/desktop/package.json')), { build } = await import(require.resolve('vite'))
 const evidenceRoot = join(root, '.tmp/agent-mote-promotion'), evidence = join(evidenceRoot, 'visual-' + randomUUID())
@@ -16,6 +18,7 @@ const temporary = await mkdtemp(join(tmpdir(), 'amux-agent-promotion-')), compil
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = {}, mutations = [], mutant = null
 const record = async id => { const file = id.split('?')[0]; if (file.startsWith(root + '/') && !file.includes('/node_modules/') && existsSync(file)) inputs[relative(root,file)] = hash(await readFile(file)) }
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', inputs,
+ captureSubset: settingsOnly ? 'promotion-settings-only' : agentOnly ? 'agent-promotion-only' : 'agent-promotion-full',
  boundary: 'Production Agent Region Header/menu/dialog, Promotion SettingsPanel, Store and styles in a private Electron Renderer; controlled RPC/config responses. No user data, native CLI, installed App or lifecycle proof.', frames: [] }
 await mkdir(evidence, { recursive: true })
 try {
@@ -71,14 +74,15 @@ try {
     plugins: [sourceResolver], build: { target: 'esnext', outDir: compiled, emptyOutDir: true } })
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled,'index.html'), temporary,evidence,...(process.argv.includes('--agent-only')?['--agent-only']:[])],
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled,'index.html'), temporary,evidence,...(agentOnly?['--agent-only']:settingsOnly?['--settings-only']:[])],
     { temporaryRoot: temporary, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await writeFile(join(evidence,'process.log'),logs.join('\n'))
   receipt.actual = JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'))
   assert.equal(receipt.process.timedOut,false)
   assert.equal(receipt.actual.passed,true, JSON.stringify(receipt.actual))
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence,frame.file))) })))
-  assert.ok(receipt.frames.length >= 8)
+  if (settingsOnly) assert.equal(receipt.frames.length, 4, 'The four affected Settings scenes are nonempty')
+  else assert.ok(receipt.frames.length >= 8)
   for(const suffix of ['AgentRegionHeader.tsx','AgentMenuContent.tsx','AgentPromotionDialog.tsx','TopicDirectorySettingsPane.tsx','store.ts']) assert.ok(Object.keys(inputs).some(path=>path.endsWith('/'+suffix)), 'Actual consumer loaded: '+suffix)
   receipt.passed = true
 } catch(error) { receipt.error = String(error); throw error }

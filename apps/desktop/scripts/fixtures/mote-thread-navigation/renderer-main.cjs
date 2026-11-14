@@ -27,11 +27,18 @@ app.whenReady().then(async () => {
    result.images.push(file); result.operations.push({ name, facts: current, dom })
   }
   await until(panel + '.innerText.includes("把协作体验补完整")')
+  if (!restoring) {
+    await click('js:' + panel + '.querySelector("[contenteditable=true]")')
+    win.webContents.selectAll(); await win.webContents.insertText('还有一个问题先留在这里，暂不发送。')
+    await until(panel + '.querySelector("[contenteditable=true]")?.textContent.includes("还有一个问题")', 'Native input reaches the original Main draft owner')
+  }
   const before = await facts(); result.initial = before
   if (restoring) {
     assert.equal(before.bootstrap.initialization.seedApplied, false)
     assert.ok(before.bootstrap.initialization.afterOrdinaryInitialize.tabIds.includes('mote-primary-tab'))
-    assert.equal(before.drafts['mote-primary'], 'Restart retains this original draft')
+    assert.equal(before.mainDraft.prompt, 'Restart retains this original draft')
+    assert.equal(before.mainDraft.savedPrompt, 'Restart retains this original draft')
+    await until(panel + '.querySelector("[contenteditable=true]")?.textContent.includes("Restart retains this original draft")', 'The original Main draft is visible after process restart')
     await capture('12-real-process-restart-original-workface'); result.passed = true; return
   }
   await until(panel + '.querySelector("[data-mote-active-work]")')
@@ -62,9 +69,32 @@ app.whenReady().then(async () => {
   await capture('10-space-top-navigation', 'document.querySelector("[data-mote-space]")')
   result.final = await facts(); assert.deepEqual(result.final.identities, before.identities); assert.deepEqual(result.final.drafts, before.drafts)
   win.setContentSize(760, 720); await capture('11-space-narrow-light-final', 'document.querySelector("[data-mote-space]")')
+  const reassigned = await read('window.moteNavigationCapture.reassignOriginalWorker()')
+  assert.equal(reassigned.moved, true, 'The original worker now belongs to the other Club')
+  win.setContentSize(960, 720)
+  await until(panel + '.querySelector(".mote-threads-panel")')
+  await click('js:' + button('工作'))
+  await until(panel + '.querySelector(".mote-threads-panel:not([hidden]) .mote-work-event__summary")')
+  await click('js:' + panel + '.querySelector(".mote-threads-panel:not([hidden]) .mote-work-event__summary")')
+  await capture('12-former-club-original-work')
+  await click('js:' + panel + '.querySelector(".mote-threads-panel:not([hidden]) .mote-work-event__actions button")')
+  await until('window.moteNavigationCapture.facts().selection?.tabId===' + JSON.stringify(reassigned.originalTabId))
+  const continued = await facts()
+  assert.equal(continued.selection.regionId, reassigned.originalRegionId)
+  assert.deepEqual(continued.identities, before.identities)
+  assert.deepEqual(continued.runs, before.runs)
+  assert.deepEqual(continued.drafts, before.drafts)
+  assert.deepEqual(continued.mainDraft, before.mainDraft)
+  await until('document.querySelector(".global-focus-surface:not([hidden])")?.textContent.includes("请先核对准确引用")')
+  await capture('13-original-worker-after-transfer', 'document.querySelector(".global-focus-surface")')
+  await read('window.moteNavigationCapture.restore(); window.moteNavigationCapture.working()')
+  await until(panel)
+  await click('js:' + button('主对话'))
+  await until('[...document.querySelectorAll("[contenteditable=true]")].some(n=>n.checkVisibility()&&n.textContent.includes("还有一个问题"))', 'Original Main draft is visible again')
+  await capture('14-original-main-return')
   await click('js:[...document.querySelectorAll("[contenteditable=true]")].find(n=>n.checkVisibility()&&n.textContent.includes("还有一个问题"))')
   win.webContents.selectAll(); await win.webContents.insertText('Restart retains this original draft')
-  await until('JSON.stringify(localStorage.getItem("agentmux-workbench-v1")).includes("Restart retains this original draft")', 'Production durable draft writer')
+  await until('window.moteNavigationCapture.facts().mainDraft.savedPrompt==="Restart retains this original draft"', 'Production durable Main draft writer')
   result.passed = true
  } catch (error) { result.failure = { message: error.message, stack: error.stack }; if(win) { result.dom = await win.webContents.executeJavaScript('document.body.innerText').catch(()=>null); await fs.writeFile(path.join(evidence, 'failed.png'), (await win.webContents.capturePage()).toPNG()).catch(()=>{}) } }
  finally { await fs.writeFile(path.join(evidence, restoring ? 'renderer-restart-result.json' : 'renderer-result.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.quit() }

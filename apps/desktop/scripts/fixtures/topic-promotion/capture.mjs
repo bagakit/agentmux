@@ -14,8 +14,10 @@ const mainRoot = dirname(resolve(root, execFileSync('git', ['rev-parse', '--git-
 const require = createRequire(join(mainRoot, 'apps/desktop/package.json'))
 const { build } = await import(require.resolve('vite'))
 const motion = process.argv.includes('--motion')
+const surfaces = process.argv.includes('--club-surfaces')
 const mutant = process.argv.includes('--mutant=motion') ? 'motion' : process.argv.includes('--mutant=consumer') ? 'consumer' : null
-assert.ok(process.argv.slice(2).every(value => ['--motion', '--mutant=consumer', '--mutant=motion'].includes(value)), 'Use --motion and optionally --mutant=motion, or --mutant=consumer')
+assert.ok(process.argv.slice(2).every(value => ['--motion', '--club-surfaces', '--mutant=consumer', '--mutant=motion'].includes(value)), 'Use --club-surfaces, --motion and optionally --mutant=motion, or --mutant=consumer')
+assert.ok(!motion || !surfaces, 'Choose the affected Club surfaces or the original motion scenario')
 assert.ok(mutant !== 'motion' || motion, 'Motion mutation needs the motion scenario')
 assert.ok(mutant !== 'consumer' || !motion, 'Consumer mutation uses the original scenario')
 const evidenceRoot = join(root, motion ? '.tmp/topic-promotion-motion' : '.tmp/topic-promotion')
@@ -82,7 +84,8 @@ try {
   for (const suffix of ['App.tsx', 'WorkspaceTopicsPanel.tsx', 'TopicContextMenu.tsx', 'TopicPromotionDialog.tsx', 'topic-promotion.css', 'store.ts']) assert.ok(Object.keys(inputs).some(file => file.endsWith('/' + suffix)), 'Production consumer loaded: ' + suffix)
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled, 'index.html'), temporary, evidence, ...(motion ? ['motion'] : [])],
+  if (surfaces) receipt.captureSubset = 'topic-club-promotion-surfaces; Core knowledge projection is outside this scene'
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled, 'index.html'), temporary, evidence, ...(motion ? ['motion'] : surfaces ? ['club-surfaces'] : [])],
     { temporaryRoot: temporary, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await writeFile(join(evidence, 'process.log'), logs.join('\n'))
   receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8'))

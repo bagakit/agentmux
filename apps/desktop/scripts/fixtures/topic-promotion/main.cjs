@@ -33,8 +33,8 @@ app.whenReady().then(async () => { try {
   const stable = async label => { const facts=await read('topicPromotionProbe.facts()'); for(const key of ['tabs','layouts','drafts','selection']) assert.deepEqual(facts[key], report.before[key], label + ' preserves original ' + key); return facts }
   const openPromotion = async title => {
     await click('[aria-label=' + JSON.stringify('Actions for ' + title) + ']')
-    await until('Topic action menu', '[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="Promote to Mote…")')
-    await clickText('[role=menuitem]', 'Promote to Mote…')
+    await until('Topic action menu', '[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="Promote to Mote Club…")')
+    await clickText('[role=menuitem]', 'Promote to Mote Club…')
     await until('promotion dialog', 'document.querySelector(".topic-promotion-dialog")!==null')
     await until('promotion inspection', '![...document.querySelectorAll(".topic-promotion-dialog button")].some(node=>node.textContent.includes("读取")||node.textContent.includes("查看中"))')
   }
@@ -61,7 +61,7 @@ app.whenReady().then(async () => { try {
     assert.equal(notice.topicId,topicId); assert.equal(notice.previousTopicId,topicId)
     assert.equal(notice.adjacentItem,true,'Completion feedback is immediately beside its original Topic item')
     assert.equal(notice.categorySpaceId,category.spaceId); assert.equal(notice.listCategorySpaceId,category.spaceId)
-    assert.match(notice.text,/已晋升为 Mote/)
+    assert.match(notice.text,/已晋升为 Mote Club/)
     return notice
   }
   const unchanged = (before, after, label) => {
@@ -70,7 +70,7 @@ app.whenReady().then(async () => { try {
   const motionScenario = async () => {
     await read('topicPromotionProbe.next("complete");topicPromotionProbe.hold()')
     await openPromotion('示例项目 数据运维')
-    await clickText('.topic-promotion-dialog button','晋升为 Mote')
+    await clickText('.topic-promotion-dialog button','晋升为 Mote Club')
     await until('actual held write','document.querySelector(".topic-promotion-dialog")?.dataset.phase==="writing"')
     assert.equal((await noticeFact('view:quality-0')).count,0,'No success before the completion receipt')
     // Observe a real continuing wait after the one-time image transition has settled.
@@ -123,7 +123,7 @@ app.whenReady().then(async () => { try {
     win.setContentSize(560,760)
     const beforeReduced=await read('topicPromotionProbe.facts()')
     await openPromotion('产品发现与用户访谈：记录新方向里的每一次进展与重要决定')
-    await clickText('.topic-promotion-dialog button','晋升为 Mote')
+    await clickText('.topic-promotion-dialog button','晋升为 Mote Club')
     await until('reduced-motion held write','document.querySelector(".topic-promotion-dialog")?.dataset.phase==="writing"')
     await paint()
     const reducedBefore=await motionSample()
@@ -148,7 +148,7 @@ app.whenReady().then(async () => { try {
     const beforeFast=await read('topicPromotionProbe.facts()')
     await openPromotion('每周项目复盘')
     await read('topicPromotionProbe.holdRefresh()')
-    await clickText('.topic-promotion-dialog button','晋升为 Mote')
+    await clickText('.topic-promotion-dialog button','晋升为 Mote Club')
     // No held response: the click helper gives exactly two native paint frames.
     assert.equal(await read('document.querySelector(".topic-promotion-dialog")===null'),true,'Immediate completion is not delayed to play waiting motion')
     assert.ok((await read('topicPromotionProbe.facts()')).refreshWaits>0,'Original projection refresh is actually held after the completion receipt')
@@ -169,10 +169,10 @@ app.whenReady().then(async () => { try {
   if(scenario==='motion') { await motionScenario();report.passed=true;return }
   await click('[aria-label="Actions for 示例项目 数据运维"]')
   await until('original Topic actions menu opened', 'document.querySelectorAll("[role=menuitem]").length>0')
-  assert.equal(await read('[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="Promote to Mote…")'),true,'Production Topic menu exposes the promotion action')
+  assert.equal(await read('[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="Promote to Mote Club…")'),true,'Production Topic menu exposes the promotion action')
   await capture('promotion-menu-dark.png', 'Topic 的原菜单中提供晋升动作')
-  await clickText('[role=menuitem]', 'Promote to Mote…')
-  await until('light confirmation', 'document.querySelector(".topic-promotion-dialog")!==null && [...document.querySelectorAll(".topic-promotion-dialog button")].some(node=>node.textContent.trim()==="晋升为 Mote"&&!node.disabled)')
+  await clickText('[role=menuitem]', 'Promote to Mote Club…')
+  await until('light confirmation', 'document.querySelector(".topic-promotion-dialog")!==null && [...document.querySelectorAll(".topic-promotion-dialog button")].some(node=>node.textContent.trim()==="晋升为 Mote Club"&&!node.disabled)')
   assert.equal(await read('document.querySelectorAll(".topic-promotion-dialog input,.topic-promotion-dialog select,.topic-promotion-dialog textarea").length'), 0, 'No team, role or identity configuration form')
   await capture('promotion-confirm-dark.png', '深色：保留原名字，一句连续性说明与单一晋升动作')
   await read('topicPromotionProbe.theme("light")')
@@ -185,7 +185,7 @@ app.whenReady().then(async () => { try {
   report.assertions.push('Cancellation writes nothing and retains original work/draft')
   win.setContentSize(1200,760); await read('topicPromotionProbe.theme("dark")')
   await openPromotion('示例项目 数据运维')
-  await clickText('.topic-promotion-dialog button', '晋升为 Mote')
+  await clickText('.topic-promotion-dialog button', '晋升为 Mote Club')
   await until('partial original operation', '[...document.querySelectorAll(".topic-promotion-dialog button")].some(node=>node.textContent.trim()==="继续晋升")')
   await capture('promotion-partial-dark.png', '部分完成：保留同一操作，原工作可用，局部继续入口')
   await stable('Partial result')
@@ -200,7 +200,7 @@ app.whenReady().then(async () => { try {
   await until('original operation is writing', 'document.querySelector(".topic-promotion-dialog")?.dataset.phase==="writing"')
   await capture('promotion-writing-dark.png', '提交中：同一批 Agent 和资料延续为长期伙伴')
   await read('topicPromotionProbe.release()')
-  await until('confirmed completion', '!document.querySelector(".topic-promotion-dialog") && document.querySelector(".topic-promotion-notice")?.textContent.includes("已晋升为 Mote")')
+  await until('confirmed completion', '!document.querySelector(".topic-promotion-dialog") && document.querySelector(".topic-promotion-notice")?.textContent.includes("已晋升为 Mote Club")')
   await capture('promotion-complete-dark.png', '确认完成：回到原工作面，原分类保留同对象入口')
   const completed=await stable('Promotion completion'), applies=completed.calls.filter(call=>call.method==='topic.promote.apply')
   assert.equal(applies.length,2); assert.equal(applies[0].params.operationId,applies[1].params.operationId,'Continue retains the original operation')
@@ -221,7 +221,7 @@ app.whenReady().then(async () => { try {
   win.setContentSize(1200,760)
   await openPromotion('每周项目复盘')
   await read('topicPromotionProbe.hold()')
-  await clickText('.topic-promotion-dialog button', '晋升为 Mote')
+  await clickText('.topic-promotion-dialog button', '晋升为 Mote Club')
   await until('async write', 'document.querySelector(".topic-promotion-dialog")?.dataset.phase==="writing"')
   await click('.topic-promotion__cancel')
   await until('closed in-flight dialog', '!document.querySelector(".topic-promotion-dialog")')
@@ -237,6 +237,11 @@ app.whenReady().then(async () => { try {
   assert.deepEqual(afterLate.controls,[])
   report.assertions.push('Dismissing an in-flight view and navigating elsewhere retains the later selection, workfaces and draft')
   report.afterLate=afterLate
+  if (scenario === 'club-surfaces') {
+    report.captureSubset = 'Topic menu, confirmation, retained operation and local completion; no Core knowledge projection proof'
+    report.passed = true
+    return
+  }
   await read('topicPromotionProbe.showDirectory()')
   await until('promoted Mote directory entry', 'document.querySelector(".space-mote-row[data-space-nav=\'topic:view:quality-0\']")!==null')
   await click('.space-mote-row[data-space-nav="topic:view:quality-0"]')
