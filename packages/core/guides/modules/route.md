@@ -117,8 +117,12 @@ identical envelope. The route adds no replay journal or exactly-once raw input c
 
 An explicit `space.member.call` or `space.member.watch` uses the current viewer's
 exact Space/Region, original execution Runtime, SID and expected Run. The original
-Space owner verifies its actual membership and admission before signing that one
-inner call or stream; an input digest cannot be replaced under the same parent.
+Space owner verifies its actual membership and optional original `expectedAdmission`
+C/L pin before signing that one inner call or stream; the pin remains in the parent
+and derived operation, so another C cannot replace it under the same SID/Run.
+For `rejoinAgentInputWaiting({ref})`, the existing accepted-input handoff retains
+only the exact `ref.key` after the unary reader ends; current receiver restrictions
+still apply and no creator grant or new permission is introduced. An input digest cannot be replaced under the same parent.
 The receiving owner still requires its independent finite method grant. Reader
 namespaces retain the original actor and bounded member identity across actions;
 another member, Run or narrower observation cannot release that reader. This is
