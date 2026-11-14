@@ -12,7 +12,6 @@ export const savedHostId = (id: string) => `saved:host:${id}`
 export const SAVED_CLIENT_ID = 'saved:client'
 const HOST_SIZE = { width: 158, height: 64 }
 const CLIENT_SIZE = { width: 112, height: 52 }
-export const SAVED_BANK_WIDTH = 462
 
 export function MeshPorts({ type }: { type: 'source' | 'target' }) {
   return [Position.Left, Position.Right, Position.Top, Position.Bottom].map(position => <Handle
@@ -34,22 +33,19 @@ export function MeshSavedHost({ data }: NodeProps<SavedHostNode>) {
 }
 
 export function MeshSavedClient() {
-  return <div className="mesh-saved-client"><HostIcon kind="local" size={15} /><strong>This client</strong><MeshPorts type="source" /></div>
+  return <div className="mesh-saved-client"><HostIcon kind="local" size={15} /><strong>This device</strong><MeshPorts type="source" /></div>
 }
 
-/** Layout only. IDs remain disjoint from Relay peer IDs and carry no authorization. */
-export function savedConnectionNodes(hosts: readonly HostConfig[], stacked: boolean, twoBanks: boolean,
+export function savedConnectionNodes(hosts: readonly HostConfig[], twoBanks: boolean,
   selectedId: string | undefined, matches: (host: HostConfig) => boolean, onSelect: (id: string) => void): (SavedHostNode | SavedClientNode)[] {
   if (hosts.length === 0) return []
   const bank = Math.ceil(hosts.length / 2)
-  const bankHeight = twoBanks ? (bank - 1) * 80 + HOST_SIZE.height : 234
-  const offset = stacked ? -bankHeight - 54 : 0
   return [
     { id: SAVED_CLIENT_ID, type: 'savedClient', ...CLIENT_SIZE, selectable: false,
-      position: twoBanks ? { x: 175, y: offset + (bank - 1) * 40 + 6 } : { x: (bank - 1) * 88 + 23, y: offset + 91 }, data: {} },
+      position: twoBanks ? { x: 175, y: (bank - 1) * 40 + 6 } : { x: (bank - 1) * 88 + 23, y: 91 }, data: {} },
     ...hosts.map((host, index): SavedHostNode => ({
       id: savedHostId(host.id), type: 'savedHost', ...HOST_SIZE, selectable: false,
-      position: twoBanks ? { x: index < bank ? 0 : 304, y: offset + index % bank * 80 } : { x: index % bank * 176, y: offset + (index < bank ? 0 : 170) },
+      position: twoBanks ? { x: index < bank ? 0 : 304, y: index % bank * 80 } : { x: index % bank * 176, y: index < bank ? 0 : 170 },
       data: { host, selected: selectedId === host.id, dimmed: selectedId !== host.id && !matches(host), onSelect },
     })),
   ]

@@ -15,7 +15,15 @@
 .mesh-explorer__body { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--line-soft); }
 .mesh-explorer__workspace { min-width: 0; }
 .mesh-explorer__graph[hidden] { display: none; }
-.mesh-explorer__canvas { height: 410px; min-height: 280px; background: var(--surface-0); }
+.mesh-explorer__canvas { position: relative; height: 410px; min-height: 280px; background: var(--surface-0); }
+.mesh-explorer__map-outline {
+  position: absolute;
+  inset: 10px 14px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--text-3) 21%, transparent);
+  mask: url('./mesh-world.svg') center / contain no-repeat;
+}
+.mesh-explorer__canvas .react-flow { background: transparent; }
 .mesh-explorer__canvas .react-flow__pane { cursor: grab; }
 .mesh-explorer__canvas-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); background: var(--surface-0); }
 .mesh-explorer__canvas-tools > span { color: var(--text-3); font-size: var(--fs-meta); flex: 1 1 140px; }
@@ -24,16 +32,20 @@
 .mesh-explorer-node { display: grid; width: 188px; height: 64px; box-sizing: border-box; padding: 8px 10px; text-align: left; gap: 3px; color: var(--text); background: linear-gradient(160deg, var(--surface-2), var(--surface-1)); border: 1px solid var(--line-strong, var(--text-3)); border-radius: 9px; box-shadow: var(--elev-1), inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent); cursor: pointer; }
 .mesh-explorer-node[data-on-path] { border-color: color-mix(in srgb, var(--green) 65%, var(--text-3)); background: linear-gradient(160deg, color-mix(in srgb, var(--green) 11%, var(--surface-2)), var(--surface-1)); }
 .mesh-explorer-node[aria-pressed=true] { box-shadow: 0 0 0 2px var(--green), var(--elev-1); }
-.mesh-explorer-node[data-dimmed] { opacity: .45; }
+.mesh-explorer .mesh-explorer-node[data-dimmed] { background: var(--surface-1); border-color: var(--line-strong); color: var(--text-2); }
+.mesh-explorer-node[data-dimmed] .mesh-explorer-node__state { color: var(--text-3); }
 .mesh-explorer-node:hover { background: var(--surface-2); }
 .mesh-explorer-node__kind { display: flex; align-items: center; gap: 6px; font: var(--fs-micro) var(--font-mono); color: var(--text-3); letter-spacing: .06em; }
 .mesh-explorer-node__kind > span:last-child:not(:first-child) { margin-left: auto; font-size: var(--fs-body); color: var(--text); }
 .mesh-explorer-node__socket { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 2px; }
 .mesh-explorer-node[data-peer-state=local] .mesh-explorer-node__socket { background: var(--text-3); }
+.mesh-explorer-node[data-shared-local] { border-color: var(--line-strong, var(--text-3)); }
+.mesh-explorer-node[data-shared-local][data-on-path] { border-color: var(--green); }
 .mesh-explorer-node strong { font-size: var(--fs-body); font-weight: 550; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mesh-explorer-node__state { color: var(--text-2); font-size: var(--fs-micro); }
 .mesh-explorer__canvas .react-flow__handle { width: 5px; height: 5px; background: var(--text-3); border-color: var(--surface-1); }
 .mesh-explorer-edge .react-flow__edge-path { stroke: var(--text-3); stroke-width: 1.4; }
+.mesh-explorer-edge--muted .react-flow__edge-path { opacity: .55; }
 .mesh-explorer-edge--selected .react-flow__edge-path { stroke: var(--green); stroke-width: 2.4; }
 .mesh-explorer__directory { padding: 10px 14px 14px; min-width: 0; border-top: 1px solid var(--line-soft); }
 .mesh-explorer__workspace > .mesh-explorer__directory { border-top: 0; }
@@ -106,7 +118,7 @@
 
 .mesh-explorer[data-mesh-overview] .mesh-explorer__body { grid-template-columns: minmax(0, 1fr) minmax(225px, 29%); align-items: start; }
 .mesh-explorer[data-mesh-overview] .mesh-explorer__canvas { height: 252px; min-height: 0; }
-.mesh-explorer__canvas { background-image: radial-gradient(circle, color-mix(in srgb, var(--text-3) 26%, transparent) 1px, transparent 1px); background-size: 20px 20px; }
+.mesh-explorer__canvas { background-image: radial-gradient(circle, color-mix(in srgb, var(--text-3) 17%, transparent) 1px, transparent 1px); background-size: 20px 20px; }
 .mesh-explorer__companion { min-width: 0; border-left: 1px solid var(--line-soft); align-self: stretch; }
 .mesh-gateways { padding: 10px 12px; color: var(--text-2); }
 .mesh-gateways > header { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-bottom: 4px; }
@@ -159,9 +171,9 @@
 .mesh-gateways__source summary { cursor: pointer; }
 .mesh-gateways li button > strong { min-width: 0; overflow-wrap: anywhere; }
 
-.mesh-explorer .mesh-explorer__canvas[data-mixed] { height: clamp(410px, 48vh, 520px); }
+.mesh-explorer .mesh-explorer__canvas[data-mixed] { height: clamp(290px, 36vh, 395px); }
 .mesh-explorer .mesh-explorer__canvas[data-saved][data-narrow] { height: 330px; }
-.mesh-explorer .mesh-explorer__canvas[data-mixed][data-narrow] { height: clamp(470px, 58vh, 580px); }
+.mesh-explorer .mesh-explorer__canvas[data-mixed][data-narrow] { height: clamp(350px, 48vh, 470px); }
 .mesh-explorer .mesh-saved-host { width: 158px; height: 64px; border-style: dashed; border-color: var(--text-3); }
 .mesh-saved-host .mesh-explorer-node__kind { letter-spacing: 0; }
 .mesh-saved-client { display: flex; width: 112px; height: 52px; box-sizing: border-box; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--text-3); border-radius: 8px; color: var(--text-2); background: var(--surface-1); font-size: var(--fs-body); }
@@ -172,8 +184,12 @@
 .mesh-explorer__segments button:disabled { cursor: default; opacity: .5; }
 .mesh-explorer .mesh-saved-connections__details p { overflow-wrap: anywhere; margin-bottom: 8px; }
 
-.mesh-explorer .mesh-explorer__canvas[data-horizontal] { height: clamp(275px, 35vh, 360px); }
-.mesh-explorer__canvas[data-compact-peers] .mesh-explorer-node:not(.mesh-saved-host) { width: 166px; }
+.mesh-explorer__canvas[data-mixed] .mesh-explorer-node:not(.mesh-saved-host) { width: 166px; }
+.mesh-explorer__canvas[data-narrow] .mesh-explorer-node { grid-template-rows: 13px 20px 16px; gap: 2px; padding: 4px 7px; }
+.mesh-explorer__canvas[data-narrow] .mesh-explorer-node__kind { font-size: 12px; line-height: 1; letter-spacing: 0; }
+.mesh-explorer__canvas[data-narrow] .mesh-explorer-node strong { font-size: 19px; line-height: 1; font-weight: 600; }
+.mesh-explorer__canvas[data-narrow] .mesh-explorer-node__state { font-size: 14px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mesh-explorer__canvas[data-narrow] .mesh-saved-client { font-size: 15px; }
 .mesh-explorer__map-key { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 7px 12px; background: var(--surface-0); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
 .mesh-explorer__map-key > span:last-child { color: var(--text-3); }
 .mesh-explorer__companion > .mesh-explorer__detail + .mesh-gateways { border-top: 1px solid var(--line-soft); }

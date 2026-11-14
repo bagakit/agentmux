@@ -41,7 +41,7 @@ export function MeshPathsPane({ active, hosts, onGateway, onDevice }: {
   const actions = <button type="button" className="small-button" disabled={busy} onClick={() => setRevision(value => value + 1)}>{busy ? 'Reading…' : 'Refresh network'}</button>
   return <section className="mesh-paths-pane" aria-label="Mesh network overview" data-settings-field="mesh-paths">
     {issue ? <div className="mesh-paths-issue" role="status"><strong>Network observation unavailable.</strong><p>{snapshot ? 'Showing the last confirmed network.' : 'Current network state is unknown.'}</p><details><summary>Read details</summary><p>{issue}</p></details></div> : null}
-    <MeshNetworkMap snapshot={snapshot} active={active && visible} actions={actions}
+    <MeshNetworkMap snapshot={snapshot} active={active && visible} actions={actions} localClient
       hosts={savedHosts} onDevice={onDevice} onGateway={onGateway} savedTargets={savedTargets} savedIssue={savedIssue} reading={busy && !snapshot} stale={Boolean(issue && snapshot)} />
   </section>
 }
