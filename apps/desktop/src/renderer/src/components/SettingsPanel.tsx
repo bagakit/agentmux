@@ -9,6 +9,7 @@ import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { GoalsPromptDraftProvider } from './settings/GoalsPromptDrafts'
+import { NodePublicationObservation } from './settings/NodePublicationObservation'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
 import { SettingsSearchResults } from './settings/SettingsSearchResults'
 import { SettingsSidebarNavigation } from './settings/SettingsSidebarNavigation'
@@ -204,6 +205,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   }
 
   return (
+    <NodePublicationObservation hosts={config.hosts} visible={visible} section={active}>
     <div ref={page} className="settings-page" data-settings-page={active} hidden={!visible} inert={!visible}>
       <div className="window-drag-region" />
       <aside className="settings-sidebar">
@@ -265,6 +267,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
         </GoalsPromptDraftProvider>
       </main>
     </div>
+    </NodePublicationObservation>
   )
 }
 

@@ -8,6 +8,7 @@ import { nodePublicationDraftForRuntime, type NodePublicationDraft } from '../..
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { HostTailcatListenerFields } from './HostTailcatListenerFields'
 import { HostRuntimePanel } from './HostRuntimePanel'
+import { nodePublicationTarget, useNodePublicationReporter } from './NodePublicationObservation'
 import { NodeShareAddress } from './NodeShareAddress'
 import { useResourceDrafts } from './use-resource-drafts'
 import { useSettingsSave, SettingsSaveBar } from './SettingsSaveBar'
@@ -19,6 +20,7 @@ import './network-node.css'
 
 /** Selection is presentation; only the answering original Core supplies its identity. */
 export function NetworkNodeSettingsPane({ config, active, onNavigate, navigationRequest }: SettingsPaneProps) {
+  const publication = useNodePublicationReporter()
   const local = config.hosts.find(host => host.kind === 'local')
   const [selected, setSelected] = useState(navigationRequest?.hostId ?? local?.id ?? '')
   useEffect(() => { if (navigationRequest?.hostId) setSelected(navigationRequest.hostId) }, [navigationRequest])
@@ -26,6 +28,7 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate, navigation
   const route = host ? JSON.stringify((({ label: _label, ...value }) => value)(host)) : ''
   const [identity, setIdentity] = useState<{ route: string; target?: NodeOwnerTarget; error?: string }>()
   const [refresh, setRefresh] = useState(0)
+  useEffect(() => { if (active && host) publication?.select(nodePublicationTarget(host)) }, [active, route, publication])
   useEffect(() => {
     if (!active || !host) return
     const controller = new AbortController()
@@ -36,10 +39,12 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate, navigation
     void api.nodePublishing.call('node.inspect', { hostId: host.id }, controller.signal).then(observed => {
       if (controller.signal.aborted) return
       if (!observed.node.runtimeId) throw new Error('The original Node identity is not available. Refresh this saved Host; its input and Agents are kept.')
+      publication?.select(nodePublicationTarget(host, observed.node.runtimeId))
+      publication?.confirmed(nodePublicationTarget(host, observed.node.runtimeId), { runtimeId: observed.node.runtimeId, published: observed.resourcesShared || observed.roots.length > 0, checkedAt: Date.now() })
       setIdentity({ route, target: { hostId: host.id, expectedRuntimeId: observed.node.runtimeId } })
-    }).catch(cause => { if (!controller.signal.aborted) setIdentity({ route, error: cause instanceof Error ? cause.message : String(cause) }) })
+    }).catch(cause => { if (!controller.signal.aborted) { const message = cause instanceof Error ? cause.message : String(cause); setIdentity({ route, error: message }); publication?.unknown(nodePublicationTarget(host), message) } })
     return () => controller.abort()
-  }, [route, active, refresh])
+  }, [route, active, refresh, publication])
   const target = identity?.route === route ? identity.target : undefined
   return <div className="settings-pane-stack network-node-settings" data-settings-host={host?.id}>
     <div className="network-node-intro"><h3>Manage a node</h3><p>Select a saved Host to manage what its original Core publishes. Connecting and starting work stay separate.</p><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>View Host connections</button></div>
@@ -54,6 +59,26 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate, navigation
 
 /** Core owns publication. Each mounted editor retains exactly one original Runtime. */
 function NodePublicationEditor({ host, target, active }: { host: HostConfig; target: NodeOwnerTarget; active: boolean }) {
+  const publication = useNodePublicationReporter()
+  const publicationTarget = nodePublicationTarget(host, target.expectedRuntimeId)
+  const publicationRead = useRef<AbortController | null>(null)
+  const publicationVisible = useRef(active)
+  publicationVisible.current = active
+  const report = (next: NodeSettings) => {
+    publicationRead.current?.abort()
+    if (!publication) return
+    // Only Core knows which configured folders are actually published after exclusions.
+    // This display-only read neither delays nor changes the owner's editor or save.
+    if (!next.policy.shareResources && next.policy.allowedPaths.length > 0) {
+      if (!publicationVisible.current) return
+      const controller = new AbortController(); publicationRead.current = controller
+      publication.unknown(publicationTarget, 'Reading the original published folders…')
+      void api.nodePublishing.call('node.inspect', { hostId: host.id, expectedRuntimeId: target.expectedRuntimeId }, controller.signal).then(reply => {
+        if (!controller.signal.aborted) publication.confirmed(publicationTarget, { runtimeId: reply.node.runtimeId, published: reply.resourcesShared || reply.roots.length > 0, checkedAt: Date.now() })
+      }).catch(cause => { if (!controller.signal.aborted) publication.unknown(publicationTarget, cause instanceof Error ? cause.message : String(cause)) })
+    } else publication.confirmed(publicationTarget, { runtimeId: next.node.runtimeId, published: next.policy.shareResources, checkedAt: Date.now() })
+  }
+  useEffect(() => { if (!active) publicationRead.current?.abort(); return () => publicationRead.current?.abort() }, [active])
   const [observed, setObserved] = useState<NodeSettings>(), [newer, setNewer] = useState<NodeSettings>()
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const edits = useAppStore(state => state.nodePublicationDrafts)
@@ -96,6 +121,8 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
       const retained = nodePublicationDraftForRuntime(useAppStore.getState().nodePublicationDrafts, next.node.runtimeId)
       const beforeRead = nodePublicationDraftForRuntime(editsBeforeRead, next.node.runtimeId)
       loaded.current = true
+      // An independent publication read confirms current policy, separately from any old OP receipt.
+      report(next)
       if (!originalOperation && beforeRead?.pending && !retained?.pending) {
         // A completed producer may precede this initial read's older snapshot.
         void inspect(beforeRead.pending.operationId, next.node.runtimeId)
@@ -121,7 +148,7 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
         setNewer(next); setError('Saved publication changed. Your draft is kept; review the saved settings or keep your draft before saving.')
       } else if (next.operation?.status === 'unknown') setError('The original save is not confirmed. Inspect its result before saving again.')
       if (originalOperation && next.operation === null && retained?.pending?.phase !== 'in-flight') setError('The original operation was not recorded. Current publication was read again. Your draft is kept.')
-    } catch (cause) { if (request === epoch.current && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { if (request === epoch.current && !controller.signal.aborted) { const message = cause instanceof Error ? cause.message : String(cause); setError(message); publication?.unknown(publicationTarget, message) } }
     finally { if (reader.current === controller) reader.current = null; if (request === epoch.current && !controller.signal.aborted) setBusy(false) }
   }
   useEffect(() => { if (active && !loaded.current) void inspect(); if (!active && reader.current) { reader.current.abort(); reader.current = null; setBusy(false) } }, [active])
@@ -150,14 +177,18 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
       }, true)
       if (nodePublicationDraftForRuntime(useAppStore.getState().nodePublicationDrafts, runtimeId)?.pending?.operationId !== operationId) throw new Error('The original local publication intent changed before dispatch. No policy request was sent.')
       dispatched = true
+      publicationRead.current?.abort()
+      publication?.unknown(publicationTarget, 'The publication save is awaiting confirmation.')
       const next = await api.nodePublishing.owner(target, 'settings.node.configure', { expectedRevision: saved.policyRevision, operationId, policy: submitted })
       if (next.node.runtimeId !== runtimeId) throw new Error('Publication returned another Runtime. The original request and edit are retained for inspection.')
       const review = next.operation?.status === 'confirmed' ? await confirmed(runtimeId, operationId, next) : false
       if (request !== epoch.current) return
       setObserved(next); setNewer(review ? next : undefined)
+      if (next.operation?.status === 'confirmed') report(next)
       if (review) setError('Saved publication changed after the original save. Your later draft is kept; review the current saved settings before saving it.')
       else if (next.operation?.status !== 'confirmed') setError('The original save is not confirmed. Inspect its result before saving again.')
     } catch (cause) {
+      if (request === epoch.current && dispatched) publication?.unknown(publicationTarget, 'The original save needs confirmation.')
       if (request === epoch.current) setError(`${dispatched ? 'Publication save was not confirmed. Inspect the original result.' : 'Publication request was not sent. Saving its local edit failed; inspect the original request before trying again.'} ${cause instanceof Error ? cause.message : String(cause)}`)
     } finally {
       await retain(runtimeId, current => current?.pending?.operationId === operationId && current.pending.phase === 'in-flight'

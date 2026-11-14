@@ -7,7 +7,7 @@ export const mobileSettingsModule = {
   group: 'preferences',
   title: 'Mobile',
   description: 'Connect your phone or browser and manage device access.',
-  icon: semanticIconComponent('object.phone'),
+  icon: semanticIconComponent('object.mobile-access'),
   keywords: 'phone browser mobile device relay access network 手机 浏览器 设备 连接 局域网',
   savedSummary: () => 'Phone and device access',
   Pane({ active }) {

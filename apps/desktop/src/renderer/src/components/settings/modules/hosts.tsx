@@ -4,7 +4,7 @@ import { HostSettingsPane } from '../HostSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 import { saveConfigSlice } from '../save-config-slice'
 
-const ThemeObjectHostIcon = semanticIconComponent('object.host')
+const ThemeObjectHostIcon = semanticIconComponent('object.hosts')
 
 
 async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>): Promise<void> {
