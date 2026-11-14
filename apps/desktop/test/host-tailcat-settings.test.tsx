@@ -192,7 +192,7 @@ it('removes the incoming editor from local and remote Node without removing Node
 it('the local Node assistance link targets publishing while the listener stays in Connection', async () => {
   vi.spyOn(api.hosts, 'inspect').mockImplementation(async host => ({ routeHostId: host.id, configuration: host, tailcat: { state: 'disabled' } }) as never)
   const open = vi.fn()
-  await dom.render(<SettingsNavigation.Provider value={{ open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [], channelPresentation: () => null, openMoteLark: vi.fn(), chooseAgent: vi.fn() }}>
+  await dom.render(<SettingsNavigation.Provider value={{ open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [], channelPresentation: () => null, openMoteConnection: vi.fn(), chooseAgent: vi.fn() }}>
     <HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId: 'local' }} />
   </SettingsNavigation.Provider>)
   expect(visibleIncoming()).toHaveLength(1)
