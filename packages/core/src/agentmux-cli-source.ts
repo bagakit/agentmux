@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { isAbsolute } from 'node:path'
 import { rpcCount, rpcRecord, rpcString } from './rpc-data.js'
 import { connectAgentMuxRpc, type AgentMuxRpcClient } from './public-rpc-client.js'
 import { agentMuxSshEndpoint, type AgentMuxSshRuntimeTarget } from './ssh-runtime-target.js'
@@ -15,6 +16,9 @@ function savedTarget(value: Record<string, unknown>, hostId: string): { target: 
   const target: AgentMuxSshRuntimeTarget = { hostId, hostname: value.transport === 'tailcat' && value.hostname === '' ? '' : rpcString(value.hostname, 'Saved SSH hostname') }
   for (const key of ['user', 'identityFile', 'remoteCommand', 'remoteSocketPath'] as const) {
     if (value[key] !== undefined) target[key] = rpcString(value[key], `Saved SSH ${key}`)
+  }
+  if (value.transport !== 'tailcat' && target.identityFile && !isAbsolute(target.identityFile) && !/^~[^/]*\//u.test(target.identityFile)) {
+    throw new AgentMuxError('The saved SSH identity path has no confirmed configuration-owner directory. Use an absolute or SSH home-relative identity path through the original Host configuration owner; the saved configuration and other connection paths are retained.', 'SSH_IDENTITY_PATH_UNCONFIRMED')
   }
   if (value.port !== undefined) {
     target.port = rpcCount(value.port, 22, 65535)
