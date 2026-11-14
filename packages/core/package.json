@@ -250,6 +250,10 @@
       "types": "./dist/agent-prompt-condition.d.ts",
       "import": "./dist/agent-prompt-condition.js"
     },
+    "./agent-input-receipt": {
+      "types": "./dist/agent-input-receipt-codec.d.ts",
+      "import": "./dist/agent-input-receipt-codec.js"
+    },
     "./workbench-layout-preset": {
       "types": "./dist/workbench-layout-preset.d.ts",
       "import": "./dist/workbench-layout-preset.js"
