@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { chooseField } from './helpers/selection-field'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { join } from 'node:path'
@@ -49,17 +50,20 @@ async function fixture() {
 async function flush(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }) }
 async function button(text: string) {
   const matches = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent?.trim() === text)
-  expect(matches).toHaveLength(1); await act(async () => matches[0]!.click())
+  expect(matches, `Button: ${text}`).toHaveLength(1); await act(async () => matches[0]!.click())
 }
 async function field(label: string, value: string) {
-  const element = dom.container.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!
+  const element = dom.container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!
   expect(element).not.toBeNull()
+  if (element.classList.contains('selection-field')) { await chooseField(element, value); return }
   const prototype = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
   await act(async () => { Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })) })
 }
 async function newRoute(f: Awaited<ReturnType<typeof fixture>>) {
   await dom.render(<RemoteRoutesPane config={f.config} active />)
-  await flush(() => expect(dom.container.querySelectorAll('[aria-label="Next saved route connection"] option'), dom.container.textContent ?? '').toHaveLength(2))
+  await flush(() => expect(dom.container.querySelector('[aria-label="Next saved route connection"]')).not.toBeNull())
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Next saved route connection"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await flush(() => expect(document.querySelectorAll('.selection-field__menu [role="menuitemradio"]')).toHaveLength(2))
   expect(f.probes).toEqual([])
   await field('Next saved route connection', 'C'); await button('Inspect & add')
   await flush(() => expect(dom.container.querySelector('[aria-label="Route name"]')).not.toBeNull())
@@ -169,7 +173,10 @@ test('a late exact edge inspection merges into current route and grant edits wit
   const saved = await c.rpc.call('route.inspect', {})
   await c.rpc.call('route.configure', { expectedRevision: saved.revision, operationId: 'receiver-read-grant', configuration: { routes: [], grants: [{ id: 'explicit-read', delegator: b.identity,
     actor: { source: b.identity, kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, destination: c.identity, scopes: ['route.edges', 'route.edge.inspect'] }] } })
-  await button('Explore next node'); await flush(() => expect(dom.container.querySelectorAll('[aria-label="Next saved route connection"] option')).toHaveLength(2))
+  await button('Explore next node')
+  await flush(() => expect(dom.container.querySelector('[aria-label="Next saved route connection"]')).not.toBeNull())
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Next saved route connection"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await flush(() => expect(document.querySelector('.selection-field__menu [data-value="D"]')).not.toBeNull())
   await field('Next saved route connection', 'D')
   let release!: () => void, waiting = false
   const pending = new Promise<void>(done => { release = done })
@@ -190,7 +197,7 @@ test('public grant requests map to the exact receiving node and add only an expl
   expect(grantForRouteReceiver(request, c.identity, 'finite-read')).toEqual({ id: 'finite-read', delegator: b.identity, actor, destination: c.identity, scopes: ['route.edges'] })
   expect(() => grantForRouteReceiver(request, b.identity, 'wrong-owner')).toThrow('does not pass through')
   await dom.render(<RemoteRoutesPane config={f.config} active />)
-  await field('Route policy device', 'C'); await flush(() => expect(dom.container.querySelector('[aria-label="Original Core route policy"]')).not.toBeNull())
+  await field('Route policy device', 'C'); await flush(() => expect(dom.container.querySelector('.remote-work-tasks')?.textContent).toContain('Incoming access 0'))
   await button('Incoming access 0'); await field('Public route access request', JSON.stringify(request)); await button('Add to this node’s edit')
   expect(f.calls.filter(call => call.method === 'route.configure')).toEqual([])
   await button('Save policy'); await flush(() => expect(dom.container.textContent).toContain('Route policy saved'))
