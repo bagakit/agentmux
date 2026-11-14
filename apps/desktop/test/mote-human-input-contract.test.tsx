@@ -117,13 +117,15 @@ it.each(['role', 'Run'] as const)('mounted Mote refuses a changed original %s be
     await f.store.compareAndSwapMetadata(original, { ...original, run: { runId: 'a-later-original-run' } })
     await f.inner.registry.load('local')
   }
-  const operation = await f.send('Keep the original Main target')
+  // These are independent human scenarios on a reused fixture SID, not a rapid double Send.
+  const prompt = 'Keep the original Main target after ' + change + ' changes'
+  const operation = await f.send(prompt)
   await wait(() => expect(useAppStore.getState().agentSteerQueues.primary?.find(item => item.operationId === operation)?.errorCode).toBeDefined())
   expect(f.byteWrites).toEqual([]); expect(f.nativePreparation).not.toHaveBeenCalled()
   const record = useAppStore.getState().agentSteerQueues.primary!.find(item => item.operationId === operation)!
   expect(record.directInputBinding).toEqual({ expectedRun: f.session.control.run, admissionIntent: { kind: 'manual-actor' } })
   expect(record.moteMain?.expectedRoleRevision).toBe(f.snapshot.roleRevision)
-  expect(record.text).toBe('Keep the original Main target')
+  expect(record.text).toBe(prompt)
   expect(f.recover).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30_000)
 
@@ -149,10 +151,11 @@ it.each(['waiting', 'unknown'] as const)('a new mounted manual Send cannot retyp
     admissionIntent: { kind: 'manual-actor' } } })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
   expect(await f.mainRpc.call('space.mote.dialogue.input.submit', request)).toEqual(original)
   expect(f.byteWrites).toEqual([])
-  const operation = await f.send('A separate new human question')
+  const prompt = 'A separate new human question after original ' + outcome
+  const operation = await f.send(prompt)
   await wait(async () => expect((await f.client.inspectAgentInput({ key: f.inputKey(operation) }))?.status).toBe('terminal-confirmed'))
   expect(await read()).toEqual(original)
   expect(directedPreparation).toHaveBeenCalledTimes(calls); expect(f.writes).toHaveLength(nativeWrites)
-  expect(f.byteWrites.join('')).toContain('A separate new human question')
+  expect(f.byteWrites.join('')).toContain(prompt)
   expect(f.recover).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30_000)
