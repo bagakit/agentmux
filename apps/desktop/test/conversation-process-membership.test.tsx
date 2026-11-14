@@ -80,6 +80,9 @@ async function fixture(mixed: boolean) {
   const inspect = async (input = query) => desktopConversationConsumerObservationSchema.parse((await rpc.call('app.inspect', { conversation: input })).observation)
   await act(async () => root.render(<ActivityView {...props} />))
   await wait(async () => { expect(host.querySelector('.wf-head')).not.toBeNull(); expect((await inspect()).consumers[0]?.loading).toBe(false) })
+  const processHead = host.querySelector<HTMLButtonElement>('.wf-head')!
+  if (processHead.getAttribute('aria-expanded') === 'true') await act(async () => processHead.click())
+  expect(processHead.getAttribute('aria-expanded')).toBe('false')
   return { f, host, inspect, query, reads, socket: server.path }
 }
 

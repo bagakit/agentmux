@@ -31,7 +31,8 @@ it('uses the actual Activity process heading once and preserves the original res
   expect(answer.textContent).toContain('Recorded activity is part of this public answer.')
   expect(answer.querySelector('[data-process-content]')).toBeNull()
   expect(host.querySelector('.native-process-observation__issue')?.closest('[hidden]')).toBeNull()
-  await click(host.querySelector('.wf-head')!)
+  const head = host.querySelector<HTMLButtonElement>('.wf-head')!
+  if (head.getAttribute('aria-expanded') !== 'true') await click(head)
   expect(step('result').querySelector('.log-row__title')?.textContent).toBe('inspect result')
   expect(step('result').querySelector('.wf-tool-row--observation')?.textContent).not.toContain('Status not recorded')
   await click(step('result').querySelector('.wf-tool-row--observation')!)
@@ -70,7 +71,8 @@ it('keeps history status readable in the step itself with an opaque body and pre
 it('keeps the original nodes, expanded body and selection when an unrelated source update arrives', async () => {
   await render(scene())
   const head = host.querySelector<HTMLButtonElement>('.wf-head')!
-  await click(head); await click(step('result').querySelector('.wf-tool-row--observation')!)
+  if (head.getAttribute('aria-expanded') !== 'true') await click(head)
+  await click(step('result').querySelector('.wf-tool-row--observation')!)
   const result = step('result'), row = result.querySelector('.wf-tool-row--observation')!
   const pre = result.querySelector('pre')!, text = pre.firstChild!
   const selection = window.getSelection()!, range = document.createRange()

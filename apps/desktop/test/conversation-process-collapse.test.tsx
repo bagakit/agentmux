@@ -32,7 +32,8 @@ const render = async (node: ReactNode) => { await act(async () => root.render(no
 const click = async (node: HTMLElement) => { expect(node).not.toBeNull(); await act(async () => node.click()); await tick() }
 const collapse = (scope: ParentNode = host) => scope.querySelector<HTMLButtonElement>('[aria-label="收起已展开的过程详情"]')!
 async function expand(scope: ParentNode = host) {
-  await click(scope.querySelector<HTMLButtonElement>('.wf-head')!)
+  const head = scope.querySelector<HTMLButtonElement>('.wf-head')!
+  if (head.getAttribute('aria-expanded') !== 'true') await click(head)
   await click(scope.querySelector<HTMLButtonElement>('[data-observation-step-id]')!)
   const reasoning = scope.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
   await act(async () => { reasoning.open = true; reasoning.dispatchEvent(new Event('toggle')) }); await tick()
