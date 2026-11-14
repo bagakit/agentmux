@@ -1,5 +1,6 @@
 import { parseTailcatConfigurationParams, parseTailcatConfigurationResult } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
+import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult } from './public-rpc-file-path.js'
 import { parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, parseNotesStorageOperationInspection } from './public-rpc-notes-storage.js'
 import { parsePostureInspect, parsePostureSet, parsePostureInspection, parsePostureSetResult } from './agent-posture.js'
@@ -471,6 +472,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'file.share.inspect') return parseFileShareInspectResult(value, parseFileShareInspectParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.share') return parseFileShareResult(value, parseFileShareParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.import') return parseFileImportResult(value, parseFileImportParams(params)) as unknown as Record<string, unknown>
+    if (method === 'file.stat') return parseFileStatResult(value, parseFileStatParams(params)) as unknown as Record<string, unknown>
+    if (method === 'file.mkdir') return parseFileMkdirResult(value, parseFileMkdirParams(params)) as unknown as Record<string, unknown>
+    if (method === 'file.mutation.inspect') return parseFileMutationInspectResult(value, parseFileMutationInspectParams(params)) as unknown as Record<string, unknown>
     if (isFileMethod(method)) return (method === 'file.upload' || method === 'file.upload.inspect' ? parseFileUploadResult(value, method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)) : method === 'file.history' ? parseFileHistoryResult(value, parseFileHistoryParams(params)) : method === 'file.restore' ? parseFileRestoreResult(value, parseFileRestoreParams(params)) : method === 'file.undo' ? parseFileUndoResult(value, parseFileUndoParams(params)) : method === 'file.create' ? parseFileCreateResult(value, parseFileCreateParams(params)) : method === 'file.write' ? parseFileWriteResult(value, parseFileWriteParams(params)) : method === 'file.list' ? parseFileListResult(value, parseFileListParams(params)) : parseFileReadResult(value, parseFileReadParams(params))) as unknown as Record<string, unknown>
     if (isAgentLearningMethod(method)) return parseAgentLearningResult(method, value, parseAgentLearningParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteChatMethod(method)) return parseMoteChatResult(method, value, parseMoteChatParams(method, params)) as unknown as Record<string, unknown>

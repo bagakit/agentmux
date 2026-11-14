@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { basename, dirname, relative, resolve, sep, posix } from 'node:path'
-import type { FileDocumentReadResult, FileWriteReceipt, FileNameListing } from '@agentmux/core/files'
+import type { FileDocumentReadResult, FileWriteReceipt, FileNameListing, FilePathObservation, FilePathScopeWitness, FilePathMutationReceipt, FileEntryWitness } from '@agentmux/core/files'
 import type { NoteFileWitness } from '@agentmux/core/note-history'
 import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromDirectoryName, scratchTopicDirectoryName } from './mote-topic-model.js'
 import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './mote-directories.js'
@@ -20,6 +20,9 @@ type LocalMutablePath = { root: string; parent: string; name: string }
 export type OrdinaryFileWriteInput = { path: string; content: string; expectedRevision: string | null; baseContent?: string; operationId?: string }
 export type OrdinaryFileWriteResult = FileWriteReceipt & { fileWitness?: NoteFileWitness }
 export type OrdinaryWorkspaceFilesOptions = {
+  beforePathPublish?: () => Promise<void>
+  beforePathRename?: () => Promise<void>
+  pathMutationFault?: string
   beforeLocalDeleteClaim?: () => Promise<void>
   afterLocalDeleteClaim?: () => Promise<void>
   localDeleteFault?: string
@@ -122,13 +125,17 @@ export async function localReadablePath(owner: string | FileWorkspace, requested
 }
 
 
-export async function localMutablePathWithin(owner: string | FileWorkspace, requestedPath: string): Promise<LocalMutablePath> {
-  const { root, requested } = await localFileScope(owner, requestedPath)
-  assertMutableRelativePath(requested)
+async function localParentEntryWithin(root: string, requested: string): Promise<LocalMutablePath> {
   const lexicalTarget = localPathWithin(root, requested)
   const [realRoot, realParent] = await Promise.all([realpath(root), realpath(dirname(lexicalTarget))])
   assertRealPathWithin(realRoot, realParent, sep)
   return { root: realRoot, parent: realParent, name: basename(lexicalTarget) }
+}
+
+export async function localMutablePathWithin(owner: string | FileWorkspace, requestedPath: string): Promise<LocalMutablePath> {
+  const { root, requested } = await localFileScope(owner, requestedPath)
+  assertMutableRelativePath(requested)
+  return localParentEntryWithin(root, requested)
 }
 
 export function revisionFor(bytes: Uint8Array): string {
@@ -175,6 +182,37 @@ export class OrdinaryWorkspaceFiles {
   constructor(private readonly options: OrdinaryWorkspaceFilesOptions = {}, readonly scope = new WorkspaceFileWriteScope()) {}
   private run(cwd: string, root: string, request: WorkspaceFileWorkerRequest, input?: string | Uint8Array, signal?: AbortSignal) {
     return runWorkspaceFileWorker(cwd, root, request, { helperPath: this.options.helperPath ?? helperPath, workerSource: FILE_NAME_WORKER_SOURCE }, input, signal)
+  }
+  /** Public path operations run on their original Host, never through an SSH shell. */
+  private async pathScope(workspace: FileWorkspace, path: string) {
+    if (this.options.hostFor && this.options.hostFor(workspace.hostId).kind !== 'local')
+      throw Object.assign(new Error('Use the original Host Files endpoint for this path operation.'), { code: 'FILE_PATH_HOST_UNAVAILABLE' })
+    const scope = await localFileScope(workspace, path)
+    if (!scope.requested || scope.requested === '.') return { root: await realpath(scope.root), requested: '.' }
+    const entry = await localParentEntryWithin(scope.root, scope.requested)
+    return { root: entry.root, requested: posix.join(relative(entry.root, entry.parent).split(sep).join('/'), entry.name) }
+  }
+  async statPath(workspace: FileWorkspace, path: string): Promise<FilePathObservation> {
+    const scope = await this.pathScope(workspace, path)
+    return JSON.parse((await this.run(scope.root, scope.root, { action: 'path-stat', path: scope.requested })).toString('utf8'))
+  }
+  async mkdirPath(workspace: FileWorkspace, input: { path: string; stage: string; digest: string; expected: FilePathScopeWitness; retainProducer: (value: unknown) => Promise<void> }): Promise<FilePathMutationReceipt> {
+    const scope = await this.pathScope(workspace, input.path), before = this.options.beforePathRename ?? this.options.beforePathPublish
+    const { retainProducer, ...request } = input
+    const result = await runWorkspaceFileWorker(scope.root, scope.root, {
+      ...request, path: scope.requested, action: 'path-mkdir', ...(before || this.options.pathMutationFault ? { fault: this.options.beforePathRename ? 'at-publish-barrier' : before ? 'before-publish-barrier' : this.options.pathMutationFault! } : {})
+    }, { helperPath: this.options.helperPath ?? helperPath, workerSource: FILE_NAME_WORKER_SOURCE }, undefined, undefined,
+      { stage: value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => key !== 'stage' && key !== 'entry')) throw new Error('The native stage protocol is invalid.')
+        return retainProducer({ ...value, location: { root: scope.root, path: scope.requested } })
+      }, ...(before ? { after: before } : {}) })
+    return JSON.parse(result.toString('utf8'))
+  }
+  async inspectPathMutation(workspace: FileWorkspace, input: { path: string; stage: string; digest: string; expected: FilePathScopeWitness; createdWitness: FileEntryWitness; location: { root: string; path: string } }): Promise<FilePathMutationReceipt> {
+    const scope = input.location
+    // This location was captured by the original namespace resolver before its
+    // native producer was released, not reconstructed from a changed alias.
+    return JSON.parse((await this.run(scope.root, scope.root, { ...input, path: scope.path, action: 'path-inspect' })).toString('utf8'))
   }
   async read(workspace: FileWorkspace, requestedPath: string, budget?: WorkspaceFileReadBudget): Promise<FileDocumentReadResult> {
     budget?.signal?.throwIfAborted()

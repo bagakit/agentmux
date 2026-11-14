@@ -4,6 +4,8 @@ import { rpcRecord } from './rpc-data.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProvenanceSnapshot } from './note-provenance.js'
 import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
+import type { AgentMuxRpcFilePathsOwner, FileStatParams, FileStatResult, FileMkdirParams, FileMkdirResult, FileMutationInspectParams, FileMutationInspectResult } from './public-rpc-file-path.js'
+export * from './public-rpc-file-path.js'
 import type { FileShareParams, FileShareResult, FileShareInspectParams, FileShareInspectResult, FileShareUndoParams, FileShareUndoResult, AgentMuxRpcFileShareOwner } from './public-rpc-file-share.js'
 export * from './public-rpc-file-share.js'
 import type { FileImportParams, FileImportResult } from './public-rpc-file-import.js'
@@ -70,14 +72,14 @@ export interface AgentMuxRpcFileUploadsOwner {
   inspect(params: FileUploadIdentity): Promise<FileUploadResult>
   read?(identity: FileUploadIdentity, maxBytes: number): Promise<{ dataBase64: string; byteLength: number; mimeType: string; revision: string } | null>
 }
-export type FileParameterMap = { 'file.import': FileImportParams; 'file.share.undo': FileShareUndoParams; 'file.share': FileShareParams; 'file.share.inspect': FileShareInspectParams; 'file.read': FileReadParams; 'file.list': FileListParams; 'file.history': FileHistoryParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams; 'file.restore': FileRestoreParams; 'file.undo': FileUndoParams;
+export type FileParameterMap = { 'file.stat': FileStatParams; 'file.mkdir': FileMkdirParams; 'file.mutation.inspect': FileMutationInspectParams; 'file.import': FileImportParams; 'file.share.undo': FileShareUndoParams; 'file.share': FileShareParams; 'file.share.inspect': FileShareInspectParams; 'file.read': FileReadParams; 'file.list': FileListParams; 'file.history': FileHistoryParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams; 'file.restore': FileRestoreParams; 'file.undo': FileUndoParams;
   'file.upload': FileUploadParams; 'file.upload.inspect': FileUploadIdentity }
-export type FileResultMap = { 'file.import': FileImportResult; 'file.share.undo': FileShareUndoResult; 'file.share': FileShareResult; 'file.share.inspect': FileShareInspectResult; 'file.read': FileReadResult; 'file.list': FileListResult; 'file.history': FileHistoryResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult; 'file.restore': FileRestoreResult; 'file.undo': FileUndoResult;
+export type FileResultMap = { 'file.stat': FileStatResult; 'file.mkdir': FileMkdirResult; 'file.mutation.inspect': FileMutationInspectResult; 'file.import': FileImportResult; 'file.share.undo': FileShareUndoResult; 'file.share': FileShareResult; 'file.share.inspect': FileShareInspectResult; 'file.read': FileReadResult; 'file.list': FileListResult; 'file.history': FileHistoryResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult; 'file.restore': FileRestoreResult; 'file.undo': FileUndoResult;
   'file.upload': FileUploadResult; 'file.upload.inspect': FileUploadResult }
 export type FileMethod = keyof FileParameterMap
-export interface AgentMuxRpcFilesOwner extends Partial<AgentMuxRpcFileShareOwner> { import?(params: FileImportParams): Promise<FileImportResult>; read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; history?(params: FileHistoryParams): Promise<FileHistoryResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; create(params: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult>;
+export interface AgentMuxRpcFilesOwner extends Partial<AgentMuxRpcFileShareOwner>, Partial<AgentMuxRpcFilePathsOwner> { import?(params: FileImportParams): Promise<FileImportResult>; read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; history?(params: FileHistoryParams): Promise<FileHistoryResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; create(params: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult>;
   restore?(params: FileRestoreParams, context?: FileWriteContext): Promise<FileRestoreResult>; undo?(params: FileUndoParams, context?: FileWriteContext): Promise<FileUndoResult> }
-export const AGENTMUX_RPC_FILE_METHODS = { 'file.import': 'long', 'file.share.undo': 'long', 'file.share': 'long', 'file.share.inspect': 'long', 'file.read': 'short', 'file.list': 'long', 'file.history': 'long', 'file.write': 'long', 'file.create': 'long', 'file.restore': 'long', 'file.undo': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
+export const AGENTMUX_RPC_FILE_METHODS = { 'file.stat': 'short', 'file.mkdir': 'long', 'file.mutation.inspect': 'short', 'file.import': 'long', 'file.share.undo': 'long', 'file.share': 'long', 'file.share.inspect': 'long', 'file.read': 'short', 'file.list': 'long', 'file.history': 'long', 'file.write': 'long', 'file.create': 'long', 'file.restore': 'long', 'file.undo': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
 export function isFileMethod(value: unknown): value is FileMethod { return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_FILE_METHODS, value) }
 
 const uploadFields = ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'name', 'mimeType', 'byteLength', 'revision'] as const
@@ -124,13 +126,21 @@ function invalid(message: string, code: string): never { throw new AgentMuxError
 function string(value: unknown, code: string): asserts value is string {
   if (typeof value !== 'string' || !value.length || value.length > 16384 || /[\0\r\n]/u.test(value)) invalid('An exact File identity or path is required.', code)
 }
+function pathString(value: unknown, code: string): asserts value is string {
+  if (typeof value !== 'string' || !value.length || value.length > 16384 || /\0/u.test(value)) invalid('An exact File identity or path is required.', code)
+}
 function revision(value: unknown, code: string): void {
   if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value)) invalid('The complete original File revision is required.', code)
 }
 function resource(value: unknown, code: string, read = false): FileResource | FileReadResource {
   const p = rpcRecord(value, ['hostId', 'workspaceId', 'workspacePath', ...(read ? ['zoneId', 'zonePath', 'path', 'logicalDirectory'] : [])], code)
-  for (const key of ['hostId', 'workspaceId', 'workspacePath', ...(read ? ['zoneId', 'zonePath', 'path'] : [])]) string(p[key], code)
+  for (const key of ['hostId', 'workspaceId', ...(read ? ['zoneId'] : [])]) string(p[key], code)
+  for (const key of ['workspacePath', ...(read ? ['zonePath', 'path'] : [])]) pathString(p[key], code)
   return p as FileResource | FileReadResource
+}
+/** Reuse the original Files descriptor validation without fabricating a write body. */
+export function parseFileReadResource(value: unknown, code = 'INVALID_CONTROL_REQUEST'): FileReadResource {
+  return resource(value, code, true) as FileReadResource
 }
 export function parseFileReadParams(value: unknown): FileReadParams {
   const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'maxBytes'], code)

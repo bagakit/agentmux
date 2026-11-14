@@ -460,8 +460,10 @@ static void file_publication(int object_fd, const char *object_path, char **argv
 }
 
 #include "workspace-file.inc"
+#include "workspace-path.inc"
 
 int main(int argc, char **argv) {
+  if (workspace_path_operation(argc, argv)) return 0;
   if (workspace_file_operation(argc, argv)) return 0;
   const int alias_swap = argc > 1 && strcmp(argv[1], "--alias-swap") == 0;
   const int file_publish = argc > 1 && strcmp(argv[1], "--file-publish") == 0;

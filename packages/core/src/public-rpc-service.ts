@@ -1,5 +1,6 @@
 import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
+import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult } from './public-rpc-file-path.js'
 import { parseGoalActivityHistoryParams, pageGoalActivity } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, notesStorageOperationInspection, type NotesStorageMethod, type NotesStoragePort } from './public-rpc-notes-storage.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
@@ -1964,6 +1965,27 @@ export class AgentMuxRpcService {
         if (!this.ports.files?.import && !this.ports.forwardControl) throw new AgentMuxError('The original Files import owner is unavailable. Original files and Agents remain available.', 'CONTROL_UNAVAILABLE')
         const result = this.ports.files?.import ? await this.ports.files.import(input) : await this.ports.forwardControl!('file.import', input, context)
         return parseFileImportResult(result, input) as AgentMuxRpcResult<M>
+      }
+
+      if (method === 'file.stat') {
+        const input = parseFileStatParams(params)
+        if (!this.ports.files?.stat && !this.ports.forwardControl) throw new AgentMuxError('The original Host Files path owner is unavailable. Existing files and Agents remain available.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files?.stat ? await this.ports.files.stat(input) : await this.ports.forwardControl!('file.stat', input, context)
+        return parseFileStatResult(result, input) as AgentMuxRpcResult<M>
+      }
+      if (method === 'file.mkdir' || method === 'file.mutation.inspect') {
+        const provenance = { actor: caller ? { kind: 'agent' as const, id: caller.agentSessionId } : context.principal,
+          ...(caller ? { callerHostId: caller.hostId } : {}) }
+        if (method === 'file.mkdir') {
+          const input = parseFileMkdirParams(params)
+          if (!this.ports.files?.mkdir && !this.ports.forwardControl) throw new AgentMuxError('The original Host directory owner is unavailable. Existing files and Agents remain available.', 'CONTROL_UNAVAILABLE')
+          const result = this.ports.files?.mkdir ? await this.ports.files.mkdir(input, provenance) : await this.ports.forwardControl!('file.mkdir', input, context)
+          return parseFileMkdirResult(result, input) as AgentMuxRpcResult<M>
+        }
+        const input = parseFileMutationInspectParams(params)
+        if (!this.ports.files?.inspectMutation && !this.ports.forwardControl) throw new AgentMuxError('The original Host mutation inspector is unavailable. Keep the original operation and request.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files?.inspectMutation ? await this.ports.files.inspectMutation(input, provenance) : await this.ports.forwardControl!('file.mutation.inspect', input, context)
+        return parseFileMutationInspectResult(result, input) as AgentMuxRpcResult<M>
       }
 
       if (method === 'file.create') {

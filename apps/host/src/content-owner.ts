@@ -5,6 +5,7 @@ import type { NoteResource } from '@agentmux/core/notebook-catalog'
 import { OrdinaryWorkspaceFiles } from './ordinary-files.js'
 import type { WorkspaceRecord, WorkspaceFiles } from './content-types.js'
 import { FileReadOwner } from './file-read-owner.js'
+import { FilePathMutations } from './file-path-mutations.js'
 import { NoteFileWriter } from './note-file-writer.js'
 import { NoteTitleFileWriter } from './note-title-file-writer.js'
 import { NotebookObservationOwner } from './notebook-observation-owner.js'
@@ -78,6 +79,8 @@ export function createHostContent(options: {
     }
   } })
   const titleWriter: NoteTitleFileWriter = new NoteTitleFileWriter(files, notebookStore)
+  const pathMutations = new FilePathMutations({ directory: join(dirname(options.configurationPath), 'file-path-mutations'), files: ordinary,
+    noteLease: work => notebookStore.runWithWriteLease(work) })
   const owners = async () => {
     // One original metadata observation per operation, never a competing configuration owner.
     const current = await configuration()
@@ -87,6 +90,11 @@ export function createHostContent(options: {
     const guarded = <T>(owner: WorkspaceRecord, input: { path: string }, save: (workspace: WorkspaceRecord) => Promise<T>) => writeOriginalNoteResource(storage, owner, input, save)
     let shared: NoteSharedBlockOwner
     const publicFiles = new FileReadOwner({
+      paths: {
+        stat: (owner, path) => pathMutations.stat(local(owner), path),
+        mkdir: (owner, input, context) => pathMutations.mkdir(local(owner), input, context),
+        inspect: (input, context, owner) => pathMutations.inspect(input, context, owner ? local(owner) : undefined)
+      },
       catalog: async () => { const state = await options.spatial.read(); return state ? spatialCatalog(state.graph) : null },
       retiredZone: async id => (await options.spatial.read())?.graph.resources['zone:' + id],
       workspace,
@@ -116,6 +124,9 @@ export function createHostContent(options: {
     return { files: publicFiles, observation, workspace }
   }
   const publicFiles: AgentMuxRpcFilesOwner = {
+    stat: async (...args) => (await owners()).files.stat(...args),
+    mkdir: async (...args) => (await owners()).files.mkdir(...args),
+    inspectMutation: async (...args) => (await owners()).files.inspectMutation(...args),
     read: async (...args) => (await owners()).files.read(...args),
     list: async (...args) => (await owners()).files.list(...args),
     write: async (...args) => (await owners()).files.write(...args),

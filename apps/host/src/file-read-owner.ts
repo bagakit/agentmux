@@ -8,12 +8,17 @@ import type { WorkspaceFiles } from './content-types.js'
 import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult, parseFileRestoreParams, parseFileUndoParams, type FileRestoreParams, type FileRestoreResult, type FileUndoParams, type FileUndoResult } from '@agentmux/core/files'
 import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-history'
 import { fileUploadRevision, parseFileImportParams, type FileImportParams, type FileImportResult } from '@agentmux/core/files'
+import { parseFileStatParams, parseFileMkdirParams, parseFileMutationInspectParams, type FileStatParams,
+  type FileStatResult, type FileMkdirParams, type FileMkdirResult, type FileMutationInspectParams,
+  type FileMutationInspectResult, type FilePathMutationContext } from '@agentmux/core/files'
+import type { FilePathMutations } from './file-path-mutations.js'
 
 const publicWrite = (value: WorkspaceFileWriteResult): WorkspaceFileWriteResult => { if (value.status !== 'written') return value; const { fileWitness: _internal, ...receipt } = value; return receipt }
 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
 export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends FileResourceOwner<W> implements AgentMuxRpcFilesOwner {
   constructor(protected override readonly ports: {
+    paths?: Pick<FilePathMutations, 'stat' | 'mkdir' | 'inspect'>
     share?: AgentMuxRpcFileShareOwner
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     /** Original closed Zone descriptor from the same durable spatial resource owner. */
@@ -30,6 +35,38 @@ export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends 
       undo?(workspace: W, input: WorkspaceFileUndoInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
     }
   }) { super(ports) }
+  async stat(input: FileStatParams): Promise<FileStatResult> {
+    const params = parseFileStatParams(input), resolved = await this.resolve(params)
+    if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_STAT_UNCONFIRMED', message: resolved.message } }
+    if (!this.ports.paths) return { resource: resolved.resource, result: { status: 'unsupported', code: 'FILE_PATH_OWNER_UNAVAILABLE', message: 'The original Host path owner is unavailable. Existing file reads and Agents remain available.' } }
+    try {
+      const observation = await this.ports.paths.stat(resolved.workspace, resolved.resource.path)
+      const current = await this.ports.workspace(resolved.workspace.id)
+      if (!current || current.hostId !== resolved.workspace.hostId || current.path !== resolved.workspace.path) throw new Error('The original Workspace mapping changed during path discovery.')
+      return { resource: resolved.resource, result: { status: 'observed', observation } }
+    } catch (cause) { return { resource: resolved.resource, result: { status: 'unknown', code: 'FILE_STAT_UNCONFIRMED', message: cause instanceof Error ? cause.message : String(cause) } } }
+  }
+  async mkdir(input: FileMkdirParams, context?: FilePathMutationContext): Promise<FileMkdirResult> {
+    const params = parseFileMkdirParams(input), resolved = await this.resolve(params)
+    if ('message' in resolved || !this.ports.paths) return { operationId: params.operationId, resource: 'message' in resolved ? null : resolved.resource,
+      result: { action: 'mkdir', phase: 'prepared', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_MKDIR_OWNER_UNAVAILABLE', message: 'message' in resolved ? resolved.message : 'The original Host path owner is unavailable. Keep the exact request; no directory action was issued.' } }
+    if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resolved.resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource]))
+      throw new AgentMuxError('The original directory target changed before mkdir.', 'FILE_RESOURCE_MISMATCH')
+    return this.ports.paths.mkdir(resolved.workspace, params, context)
+  }
+  async inspectMutation(input: FileMutationInspectParams, context?: FilePathMutationContext): Promise<FileMutationInspectResult> {
+    const params = parseFileMutationInspectParams(input)
+    if (!this.ports.paths) return { operationId: params.operationId, resource: null,
+      result: { action: 'mkdir', phase: 'unavailable', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_PATH_OWNER_UNAVAILABLE', message: 'The original Host mutation record owner is unavailable. Keep the original request; no action was replayed.' } }
+    // Retained actor+target records remain readable after the live Zone mapping
+    // disappears. A native probe still requires the exact current original map.
+    let workspace: W | undefined
+    try {
+      const resolved = await this.resolve(params)
+      if (!('message' in resolved) && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].every(key => resolved.resource[key as keyof FileReadResource] === params.expectedResource[key as keyof FileReadResource])) workspace = resolved.workspace
+    } catch { /* The retained record is checked against this exact original target and actor. */ }
+    return this.ports.paths.inspect(params, context, workspace)
+  }
   async share(input: FileShareParams, context?: FileWriteContext): Promise<FileShareResult> {
     if (!this.ports.share) throw new AgentMuxError('The original shared Markdown owner is unavailable; ordinary files remain available.', 'CONTROL_UNAVAILABLE')
     return this.ports.share.share(input, context)

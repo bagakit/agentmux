@@ -1,11 +1,15 @@
 import { spawn } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
 import type { NoteFileWitness } from '@agentmux/core/note-history'
+import type { FilePathScopeWitness, FileEntryWitness } from '@agentmux/core/files'
 import type { WorkspaceFileByteRead } from './workspace-file-bytes.js'
 const LOCAL_WORKER_READY = 'AGENTMUX_WORKSPACE_READY'
 const LOCAL_WORKER_ERROR = 'AGENTMUX_WORKSPACE_ERROR:'
 
 export type WorkspaceFileWorkerRequest =
+  | { action: 'path-stat'; path: string }
+  | { action: 'path-mkdir'; path: string; stage: string; digest: string; expected: FilePathScopeWitness; fault?: string }
+  | { action: 'path-inspect'; path: string; stage: string; digest: string; expected: FilePathScopeWitness; createdWitness: FileEntryWitness }
   | { action: 'read'; name: string }
   | { action: 'read-bytes'; name: string; offset: number; maxBytes: number; maxFileBytes: number; expectedRevision?: string }
   | { action: 'list' }
@@ -32,13 +36,18 @@ export async function runWorkspaceFileWorker(
   options: { helperPath: string; workerSource: string },
   input?: string | Uint8Array,
   signal?: AbortSignal,
-  deleteBarriers?: { before?: () => Promise<void>; after?: () => Promise<void> }
+  barriers?: { before?: () => Promise<void>; after?: () => Promise<void>; stage?: (value: unknown) => Promise<void> }
 ): Promise<Buffer> {
   signal?.throwIfAborted()
   const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   delete environment.NODE_OPTIONS
   const native = request.action !== 'observe' && request.action !== 'list-files'
-  const args = request.action === 'delete-exact' ? [
+  const pathWitness = (w: FilePathScopeWitness['root']) => [w.device, w.inode, w.size, w.ctimeNs, w.mtimeNs, w.birthtimeNs ?? 'unavailable'].join(':')
+  const args = request.action === 'path-stat' ? ['--workspace-path', 'stat', root, request.path]
+    : request.action === 'path-mkdir' || request.action === 'path-inspect' ? [
+      '--workspace-path', request.action === 'path-mkdir' ? 'mkdir' : 'inspect', root, request.path,
+      request.stage, request.digest, pathWitness(request.expected.root), pathWitness(request.expected.parent), request.action === 'path-mkdir' ? request.fault ?? '' : pathWitness(request.createdWitness)
+    ] : request.action === 'delete-exact' ? [
     '--workspace-file', request.action, root, request.name, request.expectedRevision,
     request.witness.device, request.witness.inode, request.witness.size, request.witness.ctimeNs,
     request.witness.mtimeNs, request.claim, request.fault
@@ -63,8 +72,8 @@ export async function runWorkspaceFileWorker(
   const child = spawn(native ? options.helperPath : process.execPath, args, {
     cwd,
     env: environment,
-    stdio: deleteBarriers ? ['pipe', 'pipe', 'pipe', deleteBarriers.before ? 'pipe' : 'ignore',
-      deleteBarriers.before ? 'pipe' : 'ignore', deleteBarriers.after ? 'pipe' : 'ignore', deleteBarriers.after ? 'pipe' : 'ignore'] : ['pipe', 'pipe', 'pipe'],
+    stdio: barriers ? ['pipe', 'pipe', 'pipe', barriers.before || barriers.stage ? 'pipe' : 'ignore',
+      barriers.before || barriers.stage ? 'pipe' : 'ignore', barriers.after ? 'pipe' : 'ignore', barriers.after ? 'pipe' : 'ignore'] : ['pipe', 'pipe', 'pipe'],
     ...(signal ? { signal } : {})
   })
   const stdout: Buffer[] = []
@@ -72,15 +81,26 @@ export async function runWorkspaceFileWorker(
   let inputSent = false
   let inputError: Error | undefined
   let barrierError: Error | undefined, claimed = false
-  for (const [index, hook] of [[3, deleteBarriers?.before], [5, deleteBarriers?.after]] as const) {
+  for (const [index, hook] of [[3, barriers?.stage ?? barriers?.before], [5, barriers?.after]] as const) {
     if (!hook) continue
     const ready = child.stdio.at(index) as Readable, release = child.stdio.at(index + 1) as Writable
-    release.on('error', error => { barrierError ??= error })
-    ready.once('data', () => {
-      if (index === 5) claimed = true
-      void hook().then(() => release.end('G'), error => {
-        barrierError = error instanceof Error ? error : new Error(String(error)); child.kill('SIGTERM')
+    const failed = (error: unknown) => { barrierError ??= error instanceof Error ? error : new Error(String(error)); child.kill('SIGTERM') }
+    release.on('error', failed)
+    if (index === 3 && barriers?.stage) {
+      let body = '', consumed = false
+      ready.on('data', (chunk: Buffer) => {
+        if (consumed) return
+        body += chunk.toString('utf8')
+        if (Buffer.byteLength(body) > 4096) { consumed = true; failed(new Error('The original native stage witness exceeded its protocol budget.')); return }
+        const end = body.indexOf('\n')
+        if (end < 0) return
+        consumed = true
+        try { void barriers.stage!(JSON.parse(body.slice(0, end))).then(() => release.end('G'), failed) }
+        catch (error) { failed(error) }
       })
+    } else ready.once('data', () => {
+      if (index === 5) claimed = true
+      void (hook as () => Promise<void>)().then(() => release.end('G'), failed)
     })
   }
   // Cancellation or an early worker exit can close this pipe before READY is consumed.
@@ -116,7 +136,7 @@ export async function runWorkspaceFileWorker(
   }
   throw Object.assign(barrierError ?? inputError ?? new Error(
     `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
-  ), (request.action === 'write' || request.action === 'delete-exact') && inputSent ? {
+  ), (request.action === 'write' || request.action === 'delete-exact' || request.action === 'path-mkdir') && inputSent ? {
     code: 'WORKSPACE_FILE_RESULT_UNKNOWN', writeOutcomeUnknown: true,
     ...(request.action === 'delete-exact' && claimed ? { retainedPath: request.claim } : {})
   } : {})
