@@ -119,35 +119,61 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(state.tabs[originalTab.id]).toEqual({ ...originalWork, space: { spaceId: directoryIdentity('local', config.workspaces[0]!.path), zoneId: workspaceZoneId(directoryIdentity('local', config.workspaces[0]!.path), 'repo') } }); expect(state.layouts.repo).toEqual(originalLayout)
     expect(state.agentComposerDrafts.healthy).toBe('Original unsent draft'); expect(state.agentFocus.execution).toEqual(originalFocus.execution)
     expect(state.sessions.find(value => value.id === 'healthy')).toEqual(session('healthy')); expect(api.sessions.stop).not.toHaveBeenCalled()
-    await click('Board view'); expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
+    await click('Back to goals'); await click('Board view'); expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
     await act(async () => useAppStore.getState().updateDemand(saved.id, { alignment: { summary: 'A real discussed goal', criteria: [{ id: 'observable', text: 'An observable result' }], openQuestions: [] } }))
     expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(false)
     expect((await owner.list()).map(value => value.id)).toEqual([saved.id]); expect(creates()).toHaveLength(1)
   })
 
   it('owns one click across duplicate activation and a mounted board unload/return before the save receipt', async () => {
+    const original = useAppStore.getState(), originalWork = original.tabs[originalTab.id], originalLayout = original.layouts.repo
     const held = holdCreateReceipt()
     await mount(); const newGoal = button('New Goal')
     await act(async () => { newGoal.click(); newGoal.click() })
     const saved = await held.committed
     if (saved.operation !== 'demand.create') throw new Error('The held receipt belongs to another operation.')
-    expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(useAppStore.getState().demands).toEqual({})
+    expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(starts()).toBe(0)
+    expect(directGoalRequest()).toMatchObject({ id: saved.demand.id, phase: 'save', pending: true })
+    const projected = useAppStore.getState().demands
+    // The actual goal.watch publication may independently read the owner's commit before the held ACK.
+    expect(Object.keys(projected)).toEqual(projected[saved.demand.id] ? [saved.demand.id] : [])
+    if (projected[saved.demand.id]) {
+      expect(projected[saved.demand.id]).toMatchObject({ id: saved.demand.id, title: saved.demand.title, description: saved.demand.description,
+        status: saved.demand.status, creationOrigin: saved.demand.creationOrigin })
+      const reads = host.execute.mock.calls.flatMap(([request], index) => request.operation === 'demand.show' && request.demandId === saved.demand.id ? [host.execute.mock.results[index]!.value] : [])
+      expect(reads.length).toBeGreaterThan(0)
+      // Creation publishes before its decision append; compare the exact observed owner cut, not a later ACK.
+      const originalReads = await Promise.all(reads)
+      expect(originalReads.some(result => result.operation === 'demand.show' && result.demand?.id === saved.demand.id && result.demand.updatedAt === projected[saved.demand.id]!.updatedAt)).toBe(true)
+    }
     await act(async () => root.render(null)); await mount(); expect(button('New Goal').disabled).toBe(true)
     await act(async () => held.release()); await eventually(() => expect(directGoalRequest()).toBeNull())
     expect((await owner.list()).map(value => value.id)).toEqual([saved.demand.id]); expect(starts()).toBe(1)
+    expect(creates()).toHaveLength(1)
+    const current = useAppStore.getState()
+    expect(current.tabs[originalTab.id]).toEqual({ ...originalWork, space: { spaceId: directoryIdentity('local', config.workspaces[0]!.path), zoneId: workspaceZoneId(directoryIdentity('local', config.workspaces[0]!.path), 'repo') } })
+    expect(current.layouts.repo).toEqual(originalLayout); expect(current.agentFocus.execution).toEqual(original.agentFocus.execution)
+    expect(current.agentComposerDrafts.healthy).toBe('Original unsent draft'); expect(current.sessions.find(value => value.id === 'healthy')).toEqual(session('healthy'))
+    expect(api.sessions.stop).not.toHaveBeenCalled()
   })
 
   it('recovers an actually saved but lost creation receipt only by reading the exact frozen ID', async () => {
     const lost = host.once('demand.create', { kind: 'lose-receipt', error: new Error('Saved IPC receipt missing') })
     // The exact frozen-ID read (demand.show) fails once before reaching the original owner.
     host.once('demand.show', { kind: 'reject', error: new Error('Owner read unavailable') })
-    await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
-    const id = directGoalRequest()!.id
-    expect((await lost.committed).operation).toBe('demand.create')
-    expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(useAppStore.getState().demands).toEqual({})
-    expect(container.querySelector('.goals-creation')?.textContent).toContain('目标保存结果尚未确认'); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
-    expect(container.querySelector('.goals-empty')?.textContent).toBe('')
-    await act(async () => root.render(null)); await mount(); await click('重新读取目标')
+    await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending ?? false).toBe(false))
+    const committed = await lost.committed
+    if (committed.operation !== 'demand.create') throw new Error('Expected the original creation receipt')
+    const id = committed.demand.id
+    expect((await owner.list()).map(value => value.id)).toEqual([id])
+    // An original owner publication may already have supplied the saved record.
+    // Otherwise the unknown receipt still exposes only its exact readback action.
+    if (directGoalRequest()) {
+      expect(directGoalRequest()!.id).toBe(id)
+      expect(container.querySelector('.goals-creation')?.textContent).toContain('Goal save is unconfirmed')
+      expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+      await act(async () => root.render(null)); await mount(); await click('Read goal again')
+    } else expect(useAppStore.getState().demands[id]).toMatchObject({ id, title: committed.demand.title })
     await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(creates()).toHaveLength(1); expect(host.bodies('demand.show').filter(read => read.demandId === id).length).toBeGreaterThanOrEqual(2)
     expect(useAppStore.getState().selectedDemandId).toBe(id); expect(starts()).toBe(1)
@@ -160,10 +186,10 @@ describe('Goals direct PMO creation and reading surface', () => {
     const id = directGoalRequest()!.id
     expect(await owner.list()).toEqual([]); expect(useAppStore.getState().demands).toEqual({}); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
     expect(directGoalRequest()?.notSaved).toBe(true)
-    expect(container.querySelector('.goals-creation')?.textContent).toContain('已确认目标尚未保存')
+    expect(container.querySelector('.goals-creation')?.textContent).toContain('The goal is not saved')
     expect(container.querySelector('button[data-new-goal]')?.hasAttribute('disabled')).toBe(true)
-    expect(button('保存这个目标').querySelector('[data-semantic-icon]')).toBeNull()
-    await act(async () => root.render(null)); await mount(); await click('保存这个目标')
+    expect(button('Save this goal').querySelector('[data-semantic-icon]')).toBeNull()
+    await act(async () => root.render(null)); await mount(); await click('Save this goal')
     await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(creates().map(request => request.demandId)).toEqual([id, id])
     expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(starts()).toBe(1)
@@ -176,12 +202,12 @@ describe('Goals direct PMO creation and reading surface', () => {
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     const id = directGoalRequest()!.id
     expect(directGoalRequest()?.notSaved).toBe(false)
-    await click('重新读取目标'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
+    await click('Read goal again'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     expect(directGoalRequest()?.id).toBe(id); expect(creates()).toHaveLength(1)
     expect(host.bodies('demand.show').map(read => read.demandId)).toEqual([id, id]); expect(await owner.list()).toEqual([])
     expect(useAppStore.getState().demands).toEqual({}); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
-    expect(container.querySelector('.goals-creation')?.textContent).toContain('不会重复创建')
-    expect([...container.querySelectorAll('button')].filter(node => node.textContent === '保存这个目标')).toEqual([])
+    expect(container.querySelector('.goals-creation')?.textContent).toContain('Read this same goal before continuing')
+    expect([...container.querySelectorAll('button')].filter(node => node.textContent === 'Save this goal')).toEqual([])
   })
 
   it('retains the same Goal, Tab and Agent after a lost dedicated discussion receipt and reconciles without another launch', async () => {
@@ -193,7 +219,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(directGoalRequest()?.error).toBe('Original discussion receipt missing')
     expect(tab.regions[original.regionId]?.kind).toBe('agent')
     expect(useAppStore.getState().agentComposerDrafts.healthy).toBe('Original unsent draft')
-    await act(async () => root.render(null)); await mount(); await click('重试专属讨论'); await eventually(() => expect(directGoalRequest()).toBeNull())
+    await act(async () => root.render(null)); await mount(); await click('Retry goal discussion'); await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(binding(id)).toEqual(original); expect(creates()).toHaveLength(1); expect(starts()).toBe(1)
     expect((await discussionInput(id))?.systemContext).toContain(`existing Goal ${id}`)
   })
@@ -212,7 +238,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(useAppStore.getState().sessions.some(session => session.id === 'primary')).toBe(true)
     expect(useAppStore.getState().agentComposerDrafts.healthy).toBe('Original unsent draft')
     useAppStore.setState({ config: configured })
-    await click('重试专属讨论'); await eventually(() => expect(directGoalRequest()).toBeNull())
+    await click('Retry goal discussion'); await eventually(() => expect(directGoalRequest()).toBeNull())
     expect((await owner.list()).map(goal => goal.id)).toEqual([id]); expect(creates()).toHaveLength(1); expect(starts()).toBe(1)
   })
 
@@ -221,7 +247,10 @@ describe('Goals direct PMO creation and reading surface', () => {
     async function choose(label: string, value: string) { await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value) }
     const projectId = workspaceProjectId(config.workspaces[0]!)
     await choose('Filter project', projectId); await choose('Filter work status', 'backlog'); await choose('Filter routing', 'unassigned')
-    await edit('Search goals', 'untitled'); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
+    await edit('Search goals', 'untitled'); await click('New Goal')
+    // Observe only the already pending finite flight; a failed/nonpending request is never retried here.
+    if (directGoalRequest()?.pending) await act(async () => retryDirectGoal())
+    expect(directGoalRequest(), JSON.stringify(directGoalRequest())).toBeNull()
     const saved = (await owner.list())[0]!
     expect(saved).toMatchObject({ projectId, projectName: 'Repo' })
     expect((container.querySelector('[aria-label="Search goals"]') as HTMLInputElement).value).toBe('untitled')
@@ -229,6 +258,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(container.querySelector('[aria-label="Filter work status"]')?.getAttribute('data-value')).toBe('backlog')
     expect(container.querySelector('[aria-label="Filter routing"]')?.getAttribute('data-value')).toBe('unassigned')
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual([saved.id])
+    expect(creates()).toHaveLength(1); expect(creates()[0]?.demandId).toBe(saved.id); expect(host.executed('demand.discuss')).toHaveLength(1)
+    expect(starts()).toBe(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
   })
 
   it('clears only conditions that would hide the newly created Goal', async () => {
@@ -288,12 +319,15 @@ describe('Goals direct PMO creation and reading surface', () => {
     await mount(); expect([...container.querySelectorAll('[data-demand-id]')].map((node) => node.getAttribute('data-demand-id'))).toEqual(['goal:one'])
     expect(container.querySelector('.goals-list')).toBeTruthy(); expect(container.querySelector('.goals-filters')).toBeNull()
     await act(async () => (container.querySelector('[data-demand-id]') as HTMLElement).click()); expect(useAppStore.getState().selectedDemandId).toBe('goal:one')
-    await click('Board view'); expect(container.querySelector('.goals-board')).toBeTruthy(); expect(container.querySelector('[data-demand-id="goal:one"]')?.getAttribute('aria-pressed')).toBe('true')
+    await click('Back to goals'); await click('Board view'); expect(container.querySelector('.goals-board')).toBeTruthy()
+    await act(async () => (container.querySelector('[data-demand-id="goal:one"]') as HTMLElement).click())
+    expect(container.querySelector('[data-demand-id="goal:one"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(container.querySelector('.goals-board')).toBeNull()
     expect(useAppStore.getState().selectedDemandId).toBe('goal:one')
     await click('Show finished'); expect([...container.querySelectorAll('[data-demand-id]')].map((node) => node.getAttribute('data-demand-id'))).toEqual(['goal:one', 'goal:done'])
     await edit('Search goals', 'previously'); expect([...container.querySelectorAll('[data-demand-id]')].map((node) => node.getAttribute('data-demand-id'))).toEqual(['goal:done'])
     expect(useAppStore.getState().selectedDemandId).toBe('goal:one')
-    await click('Clear search'); await click('List view'); expect(container.querySelectorAll('[data-demand-id]')).toHaveLength(2)
+    await click('Clear search'); await click('Back to goals'); await click('List view'); expect(container.querySelectorAll('[data-demand-id]')).toHaveLength(2)
   })
 
   it('keeps durable selection during an empty startup projection and recovers its same detail', async () => {

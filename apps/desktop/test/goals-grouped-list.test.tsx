@@ -5,6 +5,7 @@ import type { DemandAlignment, DemandGrounding } from '@agentmux/demand/goals'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { goalNextStepFact } from '../src/renderer/src/lib/goal-presentation'
+import { GOAL_GROUP_LABELS } from '../src/renderer/src/lib/goal-groups'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
@@ -82,7 +83,7 @@ describe('Goals list grouped by whose turn it is', () => {
 
   it('does not repeat the absent-execution placeholder on every row', async () => {
     seed(); await dom.render(<GlobalBoardSurface />)
-    expect(dom.container.querySelector('.goals-list')!.textContent).not.toContain('尚无确认执行绑定')
+    expect(dom.container.querySelector('.goals-list')!.textContent).not.toContain('No confirmed execution binding')
   })
 
   it('keeps the regrouped list when the person picks one work status', async () => {
@@ -94,8 +95,10 @@ describe('Goals list grouped by whose turn it is', () => {
   it('opens a Goal on the same stage and next step its row showed', async () => {
     seed(); useAppStore.setState({ selectedDemandId: 'confirm' }); await dom.render(<GlobalBoardSurface />)
     const stage = dom.container.querySelector<HTMLElement>('.goals-detail [data-goal-detail-stage]')!
-    expect(stage.querySelector<HTMLElement>('[data-goal-stage]')!.dataset.goalStage).toBe('you')
-    expect(stage.textContent).toBe('Needs you · Goal ready for confirmation')
+    const fact = goalNextStepFact(goals[0]!)
+    expect(stage.querySelector<HTMLElement>('[data-goal-stage]')!.dataset.goalStage).toBe(fact.stage)
+    expect(stage.querySelector('small')?.textContent).toBe(GOAL_GROUP_LABELS[fact.stage])
+    expect(stage.querySelector('strong')?.textContent).toBe(fact.text)
   })
 
   it('does no grouping render work for unrelated Session output', async () => {
@@ -124,7 +127,7 @@ describe('Goal detail reading', () => {
     seed(); useAppStore.setState({ selectedDemandId: 'agent' }); await dom.render(<GlobalBoardSurface />)
     const detail = dom.container.querySelector('.goals-detail')!
     expect(detail.querySelector('.goal-collaboration')).not.toBeNull()
-    expect(detail.textContent).not.toContain('尚无确认执行绑定')
+    expect(detail.textContent).not.toContain('No confirmed execution binding')
     expect(detail.querySelector('.goal-responsibility__heading')).toBeNull()
   })
 })
@@ -158,13 +161,25 @@ describe('Goals brand start', () => {
 
 describe('Goal detail reading', () => {
   it('marks a related Session that failed from its Core state, not from its label', async () => {
-    const failed = { ...composerSession('failed-agent'), status: { state: 'error' as const, source: 'run-process' as const, observedAt: 1 } }
-    useAppStore.setState({ sessions: [failed] })
-    seed([goal('linked', { alignment: agreed(), sessionIds: ['failed-agent'] })]); useAppStore.setState({ selectedDemandId: 'linked' })
+    const failed = { ...composerSession('failed-agent'), status: { state: 'error' as const, source: 'run-process' as const, observedAt: 1 } }, healthy = composerSession('healthy-agent')
+    useAppStore.setState({ sessions: [failed, healthy], agentNames: { [failed.id]: 'A healthy-looking label', [healthy.id]: 'Failed is only this name' } })
+    seed([goal('linked', { alignment: agreed(), sessionIds: [failed.id, healthy.id], participations: [failed, healthy].map(session => ({
+      id: 'original-discussion-' + session.id, operationId: 'original-discussion-' + session.id, kind: 'discussion',
+      hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, entryPoint: 'goal.discuss', recordedAt: 1
+    })) })]); useAppStore.setState({ selectedDemandId: 'linked' })
     await dom.render(<GlobalBoardSurface />)
-    const member = [...dom.container.querySelectorAll<HTMLElement>('.goal-collaboration__member')].find(node => node.textContent?.includes('Failed'))!
-    expect(member.dataset.sessionState).toBe('error')
-    expect([...member.children].filter(node => node.hasAttribute('data-semantic-icon')).map(node => node.getAttribute('data-semantic-icon'))).toEqual(['navigation.space'])
+    const member = dom.container.querySelector<HTMLButtonElement>('.goal-team button.focus-context[data-session-id="failed-agent"]')
+    const neighbour = dom.container.querySelector<HTMLButtonElement>('.goal-team button.focus-context[data-session-id="healthy-agent"]')
+    expect(member).not.toBeNull(); expect(neighbour).not.toBeNull()
+    expect(member?.dataset.state).toBe(failed.status.state)
+    expect(member?.querySelector('.focus-context__identity strong')?.textContent).toBe('A healthy-looking label')
+    expect(member?.querySelector('.focus-context__state small')?.textContent).toBe('Failed')
+    expect(member?.querySelector('[data-focus-state-icon]')?.getAttribute('data-focus-state-icon')).toBe('error')
+    expect(neighbour?.dataset.state).toBe(healthy.status.state)
+    expect(neighbour?.querySelector('.focus-context__identity strong')?.textContent).toBe('Failed is only this name')
+    expect(neighbour?.querySelector('[data-focus-state-icon]')?.getAttribute('data-focus-state-icon')).toBe('unknown')
+    expect(neighbour?.querySelector('.focus-context__state small')?.textContent).not.toBe('Failed')
+    expect(member?.disabled).toBe(false); expect(neighbour?.disabled).toBe(false)
   })
 
   it('keeps the clarify request on the same line as the stage primary', async () => {
