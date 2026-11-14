@@ -6,7 +6,7 @@
 
 采图包括 dark/light × 1280/620 × 零目标、一项目标、连续目标、可靠 recent、current-only；320 light 的长项目名；320 light 同时报告减少动态、减少透明度、增强对比偏好；620 dark 的真实 keyboard Tab focus、hover、mousePressed 和 preparation。
 
-preparation 从真实第三个 CTA click 进入原 startGoalExploration/createScratchTopic owner。fixture 只延迟 preview ensureMote 的回应，随后点击实际 Goals 导航返回，读取原 finite pending boolean。正常完成该 preview 回应后检查控件可用，不 seed 第二份请求或 pending 状态。原三句 textContent、准确相邻项目、完整行命中与本文宽窄可读性均从实际挂载 DOM/computed style/geometry 断言。
+preparation 从真实第三个 CTA click 进入原 `startGoalExploration` / `openScratchTopic` owner。fixture 延迟同批 preview `ensureMote` 的全部回应，避免浮层与原打开流程的并发调用互相覆盖释放器；后台准备保留原 Goals 页面并打开真实 Mote 浮层，随后通过实际 `Close Mote` 返回，读取原 finite pending boolean。正常完成该批 preview 回应后检查控件可用，不 seed 第二份请求或 pending 状态。原三句 textContent、准确相邻项目、完整行命中与本文宽窄可读性均从实际挂载 DOM/computed style/geometry 断言。
 
 模拟边界：Project、Goal、Session 与 Runtime 来自原 preview API；这份证据证明真实 Renderer 接线与可见控件，不证明真实 CLI 首轮理解、Native 发送、Main durable 保存或重启。没有操作用户 App 或 Run。Native 首发/失败草稿/普通重启证据沿旧合格 owner 消费，由此次 Source 接缝审查明确适用范围。
 
