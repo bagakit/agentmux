@@ -16,6 +16,8 @@ const changes = {
     'onPointerMove={audioOnly ? undefined : () => { wake(); setFacts(previous => ({ ...previous })) }}'],
   'pointing-bare-track': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', "getPropertyValue('--media-thumb')) || 0", "getPropertyValue('--media-thumb')) * 0 || 0"],
   'pointing-unstepped': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'Math.round(along * TIMELINE_STEPS) / TIMELINE_STEPS * span', 'along * span'],
+  'wake-while-awake': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'if (activeNow.current === next) return; ', ''],
+  'thumb-read-every-move': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'thumbWidth.current ??= ', ''],
   'drag-keeps-playing': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'if (hold.resume) { quiet.current.pause = true; element.pause() }', 'if (hold.resume) { quiet.current.pause = false }'],
   'drag-stays-paused': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'quiet.current.play = true; void element.play().catch(() => { quiet.current.play = false })', 'quiet.current.play = false'],
   'drag-bypasses-queue': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'if (holding.current?.follow) seeks.current!.request(time)', 'if (holding.current?.follow) media.current!.currentTime = time'],

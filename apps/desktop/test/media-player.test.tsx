@@ -532,17 +532,22 @@ describe('mounted player', () => {
     expect(container.querySelector('.media-player__failure .small-button')).toBeNull()
   })
 
-  it('pointing along the timeline re-renders the timeline only, never the player around it', async () => {
+  it('pointing along the timeline re-renders the timeline only, never the player around it, and reads the thumb once', async () => {
     await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { duration: 600 })
     await act(async () => { media().dispatchEvent(new Event('durationchange')) })
     layout()
-    // The first move may let React re-run the player once to confirm its idle timer state is unchanged.
-    await point(260)
-    const renders = vi.mocked(formatFileBytes).mock.calls.length
-    for (const x of [320, 380, 440, 500]) await point(x)
+    const renders = () => vi.mocked(formatFileBytes).mock.calls.length
+    // The count does see a player render: a changed media fact renders the player.
+    const before = renders()
+    define(media(), { volume: 0.5 })
+    await act(async () => { media().dispatchEvent(new Event('volumechange')) })
+    expect(renders()).toBeGreaterThan(before)
+    const settled = renders(), reads = vi.spyOn(CSSStyleDeclaration.prototype, 'getPropertyValue')
+    for (let x = 210; x <= 500; x += 10) await point(x)
     expect(bubble()!.textContent).toBe('5:00')
-    expect(vi.mocked(formatFileBytes).mock.calls.length).toBe(renders)
+    expect(renders()).toBe(settled)
+    expect(reads.mock.calls.filter(([name]) => name === '--media-thumb')).toHaveLength(1)
   })
 
   it('the pointed time is the one a press there lands on: over the thumb’s travel and on the native step', async () => {
