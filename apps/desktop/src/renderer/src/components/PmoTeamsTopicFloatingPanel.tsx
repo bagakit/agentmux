@@ -296,13 +296,28 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     const panel = panelRef.current
     return panel?.matches(':popover-open') ? panel.querySelector<HTMLButtonElement>('[data-mote-topic-id="' + actionTopicId.current + '"]') ?? null : null
   }, [])
-  const positionRef = useRef<(() => Promise<void>) | undefined>(undefined)
+  const positionRef = useRef<(() => void) | undefined>(undefined)
+  const geometryRevision = useRef(0)
   const availableSize = useRef<PmoTeamsTopicFloatingSize>({ width: 0, height: 0 })
-  const drag = useRef<{ pointerId: number; handle: HTMLElement; x: number; y: number;
+  const drag = useRef<{ pointerId: number; handle: HTMLElement; x: number; y: number; left: number; bottom: number;
     start: PmoTeamsTopicFloatingSize; preferred: PmoTeamsTopicFloatingSize; size: PmoTeamsTopicFloatingSize;
     changedX: boolean; changedY: boolean; cursor: string; userSelect: string } | null>(null)
   const frame = useRef<number | null>(null)
   const [resizing, setResizing] = useState(false)
+  const paintResize = useCallback((gesture: NonNullable<typeof drag.current>) => {
+    const panel = panelRef.current
+    if (!panel) return
+    geometryRevision.current++
+    Object.assign(panel.style, { width: gesture.size.width + 'px', height: gesture.size.height + 'px',
+      left: gesture.left + 'px', top: gesture.bottom - gesture.size.height + 'px' })
+  }, [])
+  const updateResize = useCallback((x: number, y: number) => {
+    const gesture = drag.current
+    if (!gesture) return
+    gesture.changedX = x !== gesture.x; gesture.changedY = y !== gesture.y
+    gesture.size = resolvePmoTeamsTopicFloatingSize({ width: gesture.start.width + x - gesture.x,
+      height: gesture.start.height + gesture.y - y }, availableSize.current, floatingRef.current.railMode ?? 'cards', window.innerWidth)
+  }, [])
   const endResize = useCallback((commit: boolean) => {
     const gesture = drag.current
     if (!gesture) return
@@ -312,6 +327,10 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     if (gesture.handle.hasPointerCapture(gesture.pointerId)) gesture.handle.releasePointerCapture(gesture.pointerId)
     document.body.style.cursor = gesture.cursor; document.body.style.userSelect = gesture.userSelect
     setResizing(false)
+    // Flush the final pointer before committing; a pending RAF must not leave
+    // the released window waiting for asynchronous placement to catch up.
+    paintResize(commit ? gesture : { ...gesture, size: resolvePmoTeamsTopicFloatingSize(gesture.preferred,
+      availableSize.current, floatingRef.current.railMode ?? 'cards', window.innerWidth) })
     const widthChanged = gesture.changedX && gesture.size.width !== gesture.start.width
     const heightChanged = gesture.changedY && gesture.size.height !== gesture.start.height
     if (commit && (widthChanged || heightChanged)) setFloating({ size: {
@@ -319,7 +338,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       height: heightChanged ? gesture.size.height : gesture.preferred.height
     } })
     void positionRef.current?.()
-  }, [setFloating])
+  }, [setFloating, paintResize])
   useEffect(() => {
     const cancel = () => endResize(false)
     const escape = (event: KeyboardEvent) => {
@@ -393,27 +412,51 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     if (!visible) { if (panel.matches(':popover-open')) panel.hidePopover(); return }
     if (!anchor) return
     if (!panel.matches(':popover-open')) {
+      panel.style.visibility = 'hidden'
       ;(panel.showPopover as (options: { source: HTMLButtonElement }) => void).call(panel, { source: anchor })
     }
     let disposed = false
-    const position = async () => {
-      const result = await computePosition(anchor, panel, { placement: 'top-start', strategy: 'fixed', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
-        apply({ availableWidth, availableHeight }) {
-          if (disposed) return
-          availableSize.current = { width: availableWidth, height: availableHeight }
-          const dimensions = resolvePmoTeamsTopicFloatingSize(drag.current?.size ?? floatingRef.current.size,
-            availableSize.current, floatingRef.current.railMode ?? 'cards', window.innerWidth)
-          panel.style.width = dimensions.width + 'px'
-          panel.style.height = dimensions.height + 'px'
+    let pending: number | null = null, computing = false, dirty = false
+    const position = () => {
+      dirty = true
+      if (disposed || computing || pending !== null) return
+      pending = requestAnimationFrame(async () => {
+        pending = null
+        if (disposed) return
+        dirty = false; computing = true
+        const revision = geometryRevision.current
+        try {
+          const result = await computePosition(anchor, panel, { placement: 'top-start', strategy: 'fixed', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
+              apply({ availableWidth, availableHeight }) {
+                if (disposed) return
+                availableSize.current = { width: availableWidth, height: availableHeight }
+                if (revision !== geometryRevision.current) return
+                const dimensions = resolvePmoTeamsTopicFloatingSize(drag.current?.size ?? floatingRef.current.size,
+                  availableSize.current, floatingRef.current.railMode ?? 'cards', window.innerWidth)
+                if (panel.style.width !== dimensions.width + 'px') panel.style.width = dimensions.width + 'px'
+                if (panel.style.height !== dimensions.height + 'px') panel.style.height = dimensions.height + 'px'
+              }
+            })] })
+          if (!disposed && !dirty && revision === geometryRevision.current) {
+            Object.assign(panel.style, { left: result.x + 'px', top: result.y + 'px', visibility: 'visible' })
+            if (drag.current) { drag.current.left = result.x; drag.current.bottom = result.y + drag.current.size.height }
+          }
+        } finally {
+          computing = false
+          if (!disposed && dirty) position()
         }
-      })] })
-      if (!disposed) Object.assign(panel.style, { left: result.x + 'px', top: result.y + 'px', visibility: 'visible' })
+      })
     }
-    panel.style.visibility = 'hidden'
     positionRef.current = position
-    const stop = autoUpdate(anchor, panel, () => { void position() })
-    return () => { disposed = true; stop(); if (positionRef.current === position) positionRef.current = undefined }
-  }, [visible, floating.size?.width, floating.size?.height, railMode, scratch, topics])
+    // The window owns its size. Observing that same size as a new placement
+    // request feeds each drag frame back into a second layout calculation.
+    const stop = autoUpdate(anchor, panel, position, { elementResize: false })
+    const anchorResize = new ResizeObserver(position)
+    anchorResize.observe(anchor)
+    return () => { disposed = true; stop(); anchorResize.disconnect(); if (pending !== null) cancelAnimationFrame(pending)
+      if (positionRef.current === position) positionRef.current = undefined }
+  }, [visible, railMode, scratch, topics])
+  useLayoutEffect(() => { positionRef.current?.() }, [floating.size?.width, floating.size?.height])
   useEffect(() => {
     if (!floating.preview) return
     const dismiss = (event: KeyboardEvent) => {
@@ -658,9 +701,10 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       onPointerDown={event => {
         if (drag.current || event.button !== 0 || !panelRef.current) return
         event.preventDefault()
+        geometryRevision.current++
         const rect = panelRef.current.getBoundingClientRect()
         event.currentTarget.setPointerCapture(event.pointerId)
-        drag.current = { pointerId: event.pointerId, handle: event.currentTarget, x: event.clientX, y: event.clientY,
+        drag.current = { pointerId: event.pointerId, handle: event.currentTarget, x: event.clientX, y: event.clientY, left: rect.left, bottom: rect.bottom,
           start: { width: rect.width, height: rect.height }, size: { width: rect.width, height: rect.height },
           preferred: floatingRef.current.size ?? { width: rect.width, height: rect.height }, changedX: false, changedY: false,
           cursor: document.body.style.cursor, userSelect: document.body.style.userSelect }
@@ -669,12 +713,10 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       onPointerMove={event => {
         const gesture = drag.current
         if (!gesture || event.pointerId !== gesture.pointerId) return
-        gesture.changedX = event.clientX !== gesture.x; gesture.changedY = event.clientY !== gesture.y
-        gesture.size = resolvePmoTeamsTopicFloatingSize({ width: gesture.start.width + event.clientX - gesture.x,
-          height: gesture.start.height + gesture.y - event.clientY }, availableSize.current, railMode, window.innerWidth)
-        if (frame.current === null) frame.current = requestAnimationFrame(() => { frame.current = null; void positionRef.current?.() })
+        updateResize(event.clientX, event.clientY)
+        if (frame.current === null) frame.current = requestAnimationFrame(() => { frame.current = null; if (drag.current === gesture) paintResize(gesture) })
       }}
-      onPointerUp={event => { if (event.pointerId === drag.current?.pointerId) endResize(true) }}
+      onPointerUp={event => { if (event.pointerId === drag.current?.pointerId) { updateResize(event.clientX, event.clientY); endResize(true) } }}
       onPointerCancel={event => { if (event.pointerId === drag.current?.pointerId) endResize(false) }}
       onLostPointerCapture={event => { if (event.pointerId === drag.current?.pointerId) endResize(false) }}
       onKeyDown={event => {
