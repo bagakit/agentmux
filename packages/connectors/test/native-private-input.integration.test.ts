@@ -21,7 +21,7 @@ async function fixture() {
   const originalTarget = Reflect.get(f.services.ingress!, 'options').inputTarget
   // A retained input from the previous installed producer. Restore the production
   // admission port before new input; no saved Binding or old input is rewritten.
-  Reflect.get(f.services.ingress!, 'options').inputTarget = undefined
+  Reflect.get(f.services.ingress!, 'options').inputTarget = () => ({ kind: 'manual-actor' })
   await f.wire.post(f.message('old')); const old = await f.claimed('old')
   await expect.poll(async () => (await f.services.ingress!.inspect({ ingressId: old.ingressId })).inputReceipt?.status, { timeout: 10000 }).toBe('terminal-confirmed')
   Reflect.get(f.services.ingress!, 'options').inputTarget = originalTarget
@@ -134,6 +134,13 @@ it('a Provider without native input contribution keeps real private PTY delivery
   await f.wire.post(f.message('unsupported')); const q = await f.claimed('unsupported')
   expect(Reflect.get(f.client, 'providers').get('grok').prepareNativeInput).toBeUndefined()
   expect(q.input?.admissionIntent?.kind).toBe('session-conversation')
+  // The fixture's selected native handle alone is not a live input-ready fact.
+  // Complete this exact Run's native-start witness before expecting PTY delivery.
+  const current = (await f.store.readMetadata(q.input!.agentSessionId))!, at = current.updatedAt + 1
+  await f.store.compareAndSwapMetadata(current, { ...current,
+    nativeBinding: { source: 'native-hook', run: current.run, observedAt: at }, updatedAt: at })
+  const inner = f.client as any
+  await inner.registry.refresh(current.agentSessionId, current.run); inner.publishSession(inner.registry.get(current.agentSessionId))
   await expect.poll(async () => (await f.services.ingress!.inspect({ ingressId: q.ingressId })).inputReceipt?.status).toBe('terminal-confirmed')
   const store = new MoteChatStore(f.services.database!), binding = store.generation(store.admissionByIngress(q.ingressId)!.generationId)!.binding!
   expect(f.services.publication!.store.list(binding).filter(row => row.queryFeedback).every(row => !['started', 'completed'].includes(row.queryFeedback!.stage))).toBe(true)

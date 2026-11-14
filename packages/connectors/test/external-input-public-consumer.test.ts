@@ -1,10 +1,14 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import * as core from '../../core/dist/index.js'
+import { externalConversationAuthor } from '../../core/src/external-conversation.js'
+import { messageInputWireMatches } from '../../core/src/agent-message-input.js'
+import { parseUserMessageHistoryPage } from '../../core/src/session-history-read-codec.js'
 import { ingressFixture } from './fixtures/ingress.js'
 import { config, context } from './fixtures/room-binding.js'
-import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
+import { objectCliEnvironment } from '../../core/test/helpers/object-cli-rpc.js'
+import { runSourceObjectCli } from '../../core/test/helpers/source-object-cli.js'
 import { conversationAxis, speaksAsHuman } from '../../../apps/desktop/src/renderer/src/lib/conversation-axis.js'
 import { externalIngressMailbox } from '../../../apps/desktop/test/helpers/external-ingress-mailbox.js'
 
@@ -12,21 +16,24 @@ const mountedMailbox = externalIngressMailbox(), cleanup: Array<() => Promise<vo
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllEnvs() })
 
 it('public Host admission uses the original Core queue and Desktop reader with structured external attribution', async () => {
-  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const f = await ingressFixture(true); cleanup.push(() => f.close())
-  // rpcOwnerFixture clears transport environment; restore the compiled binary override for happy-dom.
-  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const accepted = await f.receive(), dispatched = await f.ingress.dispatch(accepted.ingress.ingressId), input = dispatched.ingress!.input!
   let timeline = await f.client.sessionTimeline(f.input.agentSessionId)
   await vi.waitFor(async () => {
     timeline = await f.client.sessionTimeline(f.input.agentSessionId)
-    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(input.author)
+    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(externalConversationAuthor(input.author))
   }, { timeout: 4000 })
   const original = await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).readByOperationId(input.operationId)
   expect(original!.envelope.sender).toEqual(input.author)
   expect(original!.envelope.body).toBe(f.event().body)
   expect(original!.envelope.senderSessionId).toBeNull(); expect(original!.envelope.senderRunId).toBeNull()
-  expect((await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).inspectInput({ kind: 'message-control', originalControlOperationId: input.operationId }))!.intent.source).toEqual({ kind: 'message', messageId: input.messageId, originalControlOperationId: input.operationId })
+  const source = (await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).inspectInput({ kind: 'message-control', originalControlOperationId: input.operationId }))!.intent.source
+  expect(source.kind).toBe('message')
+  if (source.kind !== 'message') throw new Error('The original external message source is missing')
+  const { promptWire, representation, ...identity } = source
+  expect(identity).toEqual({ kind: 'message', messageId: input.messageId, originalControlOperationId: input.operationId })
+  expect(representation).toBeDefined()
+  expect(messageInputWireMatches(original!.envelope, { promptWire, representation })).toBe(true)
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
   const recorded = timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)!
   expect(conversationAxis(timeline.items, speaksAsHuman).map(mark => mark.item)).toContain(recorded)
@@ -41,7 +48,7 @@ it('public Host admission uses the original Core queue and Desktop reader with s
   const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'ingress.sock'), connections: f.connections, coreClients: f.coreClients })
   await server.start(); cleanup.push(() => server.stop())
   const submissions = vi.spyOn(f.client, 'submitAgentMessage')
-  const env = objectCliEnvironment(f.root), cli = (args: string[]) => runCompiledObjectCli(['--endpoint', 'unix:' + server.path, ...args], env)
+  const env = objectCliEnvironment(f.root), cli = (args: string[]) => runSourceObjectCli(['--endpoint', 'unix:' + server.path, ...args], env)
   const list = await cli(['connection', 'ingress', 'ls', '--connection', config.connectionId, '--limit', '1'])
   expect(list.code, list.stderr).toBe(0)
   const found = JSON.parse(list.stdout).result.ingresses[0]
@@ -53,7 +60,26 @@ it('public Host admission uses the original Core queue and Desktop reader with s
   expect(receipt.ingress.body).toBe(f.event().body); expect(JSON.stringify(receipt)).not.toContain('adapter-private-witness')
   const history = await cli(['agent', 'history', '--host', 'local', '--session', f.input.agentSessionId, '--source', 'captured', '--kind', 'user-message'])
   expect(history.code, history.stderr).toBe(0)
-  expect(JSON.parse(history.stdout).result.userMessages.find((message: { rawId: string }) => message.rawId === recorded.id).author).toEqual(input.author)
+  const page = JSON.parse(history.stdout).result
+  const query = { hostId: 'local', agentSessionId: f.input.agentSessionId, source: 'captured' as const, kind: 'user-message' as const }
+  expect(parseUserMessageHistoryPage(structuredClone(page), query)).toEqual(page)
+  const position = page.userMessages.findIndex((message: { rawId: string }) => message.rawId === recorded.id)
+  expect(position).toBeGreaterThanOrEqual(0)
+  expect(page.userMessages[position].author).toEqual(externalConversationAuthor(input.author))
+  expect(page.userMessages[position].inputRef).toEqual(recorded.inputRef)
+  const rejects = (change: (message: Record<string, unknown>) => void) => {
+    const invalid = structuredClone(page)
+    change(invalid.userMessages[position])
+    expect(() => parseUserMessageHistoryPage(invalid, query)).toThrow()
+  }
+  rejects(message => { message.inputRef = { kind: 'prompt', agentSessionId: f.input.agentSessionId,
+    expectedRun: input.expectedRun, submissionId: input.messageId } })
+  rejects(message => { message.inputRef = { ...page.userMessages[position].inputRef, agentSessionId: 'foreign-session' } })
+  rejects(message => { message.author = { kind: 'unknown' } })
+  rejects(message => { message.author = { kind: 'agent', agentSessionId: 'unrelated-agent' } })
+  for (const field of ['status', 'observation']) rejects(message => {
+    message.inputSubmission = { ...page.userMessages[position].inputSubmission, [field]: 'invalid-observation' }
+  })
   const sdk = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => sdk.dispose())
   for (const field of ['sender', 'externalAuthor', 'authenticated']) await expect(sdk.call('agent.send', { target: { kind: 'agent-session', agentSessionId: f.input.agentSessionId }, text: 'Payload cannot authenticate itself', operationId: 'forged-' + field, [field]: field === 'authenticated' ? true : input.author } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   expect(submissions).not.toHaveBeenCalled()
@@ -66,9 +92,9 @@ it('public Host admission uses the original Core queue and Desktop reader with s
   expect(local.code, local.stderr).toBe(0)
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(originalWrites + 1))
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
-  const help = await runCompiledObjectCli(['connection', 'ingress', 'inspect', '--help'], env)
+  const help = await runSourceObjectCli(['connection', 'ingress', 'inspect', '--help'], env)
   expect(help.code).toBe(0); expect(help.stdout).toContain('--ingress')
-  const skill = await runCompiledObjectCli(['connection', '--skill'], env)
+  const skill = await runSourceObjectCli(['connection', '--skill'], env)
   expect(skill.code).toBe(0); expect(skill.stdout).toContain('name: amux-connection'); expect(skill.stdout).toContain('amux connection --help')
 }, 20_000)
 
@@ -111,7 +137,9 @@ it.each(['recipient', 'body', 'operation'] as const)('a trusted Host context ref
     const envelope = { ...input.envelope, ...(changed === 'body' ? { body: 'Cannot replace authenticated body' } : changed === 'operation' ? { operationId: 'replacement-operation', messageId: 'replacement-message' } : { recipient: { kind: 'agent-session' as const, agentSessionId: 'different-session' }, recipientSessionId: 'different-session' }) }
     return original({ ...input, envelope, ...(changed === 'recipient' ? { agentSessionId: 'different-session' } : {}) }, context)
   })
-  const accepted = await f.receive(), result = await f.ingress.dispatch(accepted.ingress.ingressId)
+  const accepted = await f.receive()
+  await expect(f.ingress.dispatch(accepted.ingress.ingressId)).rejects.toMatchObject({ code: 'INGRESS_INPUT_MISMATCH' })
+  const result = await f.ingress.inspect({ ingressId: accepted.ingress.ingressId })
   expect(result.ingress!.state).toBe('claimed'); expect(result.inputReceipt).toBeNull()
   expect(await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).listAfter(0)).toEqual([])
   expect(submit).toHaveBeenCalledOnce()

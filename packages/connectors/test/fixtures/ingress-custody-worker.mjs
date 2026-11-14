@@ -31,6 +31,9 @@ const services = await createConnectionServices({ directory: join(state, 'connec
     // Exact history protocol fixture is supplied before bind, separate from the real PTY input witness.
     checkpoint: async () => JSON.parse(readFileSync(join(state, 'checkpoint.json'), 'utf8')) },
   ingress: { core: host => host === 'local' ? owner?.client : undefined } })
+// Fixture-only raw PTY witness: this caller explicitly requests terminal input;
+// it provides no native conversation protocol and does not qualify semantic input.
+Reflect.get(services.ingress, 'options').inputTarget = () => ({ kind: 'manual-actor' })
 const credential = await services.secrets.store({ operationId: 'custody-private-secret', secret: 'private-credential' })
 await services.connections.configure({ operationId: 'custody-configure', expectedRevision: null, connection: {
   connectionId: 'sample-connection', adapterId: 'sample', application: { domain: 'chat.example', appId: 'original-app' },

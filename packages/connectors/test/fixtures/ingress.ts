@@ -17,9 +17,16 @@ export async function ingressFixture(running = false, config: ConnectionConfig =
   await writeFile(transcript, JSON.stringify({ type: 'user', sessionId: 'ingress-native', uuid: 'native-before-binding', message: { role: 'user', content: 'Existing original work' } }) + '\n')
   if (!running) { h.inner.connected = false; h.inner.kernel.isConnected = () => false }
   else {
-    // Controlled Provider transport plan: this fixture proves Core/journal consumption, not a live TUI render ACK.
-    const provider = (h.client as unknown as { providers: { get(id: string): { planPromptInput(text: string): unknown } } }).providers.get('claude')
-    vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
+    // This known-started source has only the fixture's PTY port. Do not advertise a
+    // native input transport whose actor/channel this journal fixture never supplies.
+    const provider = h.client.providers.get('claude')
+    const { nativeConversationInput: _native, asyncQuestionReply: _reply, ...capabilities } = provider.catalog.capabilities
+    h.client.providers.replace({ ...provider, catalog: { ...provider.catalog, capabilities }, prepareNativeInput: undefined,
+      planPromptInput: text => ({ kind: 'single-phase', data: text + '\r' }) })
+    const current = (await h.store.readMetadata('original-agent'))!
+    await h.store.compareAndSwapMetadata(current, { ...current,
+      nativeBinding: { source: 'native-hook', run: current.run, observedAt: current.updatedAt } })
+    await (h.client as any).registry.refresh(current.agentSessionId, current.run)
   }
   const spatial = new core.AgentMuxSpatialStateStore(join(h.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph: {
