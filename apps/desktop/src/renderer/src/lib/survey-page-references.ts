@@ -113,6 +113,17 @@ export function surveyPageOwner(tabs: Readonly<Record<string, WorkbenchTab>>, pa
   return owner?.surface.kind === 'browser' && owner.surface.browserId === page.browserId ? owner : null
 }
 
+function surveyOccurrenceCatalog(catalog: AgentMuxSpaceCatalog, scope: SurveyCatalogScope, reference: WorkbenchProjectionSelection) {
+  const { displayWorkspaceId, groupId, tabId } = reference
+  const key = JSON.stringify([displayWorkspaceId, groupId, tabId])
+  let selected = scope.projectionCatalogs.get(key)
+  if (!selected) {
+    selected = selectSpatialCatalog(catalog, { displayWorkspaceId, groupId, tabId })
+    scope.projectionCatalogs.set(key, selected)
+  }
+  return selected
+}
+
 export function surveyPageProjection(page: Page & Pick<SurveyPageSelection, 'presentation'>, catalog: AgentMuxSpaceCatalog | null, tabs: Readonly<Record<string, WorkbenchTab>>,
   onSelect: WorkbenchProjection['onSelect'], preferred: WorkbenchProjectionSelection | null = null): WorkbenchProjection | null {
   if (!catalog) return null
@@ -129,7 +140,7 @@ export function surveyPageProjection(page: Page & Pick<SurveyPageSelection, 'pre
       !scope.occurrencesByRegion.get(reference.regionId)?.some(location => sameWorkbenchProjectionSelection(location, reference))) return null
     return { entity: { kind: 'tab', tabId: reference.tabId }, presentationId: 'survey-workbench',
       displayWorkspaceId: reference.displayWorkspaceId,
-      catalog: selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }),
+      catalog: surveyOccurrenceCatalog(catalog, scope, reference),
       selection: [reference], onSelect }
   }
   const choices = (scope.occurrencesByRegion.get(page.regionId) ?? []).filter(reference => reference.tabId === owner.tab.id)
@@ -142,15 +153,9 @@ export function surveyPageProjection(page: Page & Pick<SurveyPageSelection, 'pre
     retained.length === 1 && retained[0] || original.length === 1 && original[0] || choices.length === 1 && choices[0]
   if (!chosen) return null
   const reference = { ...chosen }
-  const key = JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId])
-  let selected = scope.projectionCatalogs.get(key)
-  if (!selected) {
-    selected = selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId })
-    scope.projectionCatalogs.set(key, selected)
-  }
   return {
     entity: { kind: 'region', regionId: page.regionId }, presentationId: 'survey-workbench', displayWorkspaceId: reference.displayWorkspaceId,
-    catalog: selected,
+    catalog: surveyOccurrenceCatalog(catalog, scope, reference),
     selection: [reference], onSelect
   }
 }
