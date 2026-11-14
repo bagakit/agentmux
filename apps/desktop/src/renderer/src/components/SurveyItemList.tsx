@@ -1,5 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { DndContext, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type KeyboardCoordinateGetter } from '@dnd-kit/core'
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type KeyboardCoordinateGetter } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -21,6 +21,12 @@ const groupKey = (id: string) => `survey-group:${id}`
 const ungroupedKey = 'survey-ungrouped'
 
 type Target = { kind: 'item'; zoneId: string; groupId: string | null } | { kind: 'group'; groupId: string } | { kind: 'ungrouped' }
+
+/** A container is a destination only across containers; ordering uses an exact row. */
+function acceptsContainer(from: Target | undefined, groupId: string | null): boolean {
+  return from?.kind === 'item' ? from.groupId !== groupId
+    : from?.kind === 'group' && groupId !== null && from.groupId !== groupId
+}
 
 /** List organization alone owns drag behavior; each original row retains its existing content/actions. */
 export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId }: {
@@ -60,6 +66,8 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
       void model.commit({ ...baseline.editable, groups: arrayMove(groups, groups.findIndex(group => group.groupId === from.groupId), groups.findIndex(group => group.groupId === to.groupId)) }, baseline.expected)
     } else if (from.kind === 'item') {
       const target = to.kind === 'ungrouped' ? null : to.groupId
+      // The surrounding container also covers the picked-up row and its gaps; it is not an end insertion.
+      if (to.kind !== 'item' && !acceptsContainer(from, target)) return
       const members = target === null ? baseline.editable.ungrouped : baseline.editable.groups.find(group => group.groupId === target)?.zoneIds
       if (!members) return
       if (to.kind === 'item' && from.groupId === target) {
@@ -102,8 +110,9 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
 }
 
 function Ungrouped({ children, hasGroups }: { children: ReactNode; hasGroups: boolean }) {
+  const { active } = useDndContext()
   const { setNodeRef, isOver } = useDroppable({ id: ungroupedKey, data: { kind: 'ungrouped' } satisfies Target })
-  return <div ref={setNodeRef} className="survey-list-ungrouped" data-survey-list-group="ungrouped" data-drop-over={isOver || undefined}>
+  return <div ref={setNodeRef} className="survey-list-ungrouped" data-survey-list-group="ungrouped" data-drop-over={isOver && acceptsContainer(active?.data.current as Target | undefined, null) || undefined}>
     {hasGroups ? <span className="survey-list-label">Ungrouped</span> : null}{children}
   </div>
 }
@@ -116,6 +125,7 @@ function SortableItem({ zoneId, groupId, title, visible, render }: { zoneId: str
 }
 
 function SurveyListGroup({ group, model, children, visible, selected }: { group: AgentMuxSurveyOrganization['groups'][number]; model: SurveyListOrganizationModel; children: ReactNode; visible: boolean; selected: boolean }) {
+  const { active } = useDndContext()
   const { setNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id: groupKey(group.groupId), data: { kind: 'group', groupId: group.groupId } satisfies Target, disabled: !visible })
   const [menuOpen, setMenuOpen] = useState(false)
   const menuBaseline = useRef({ expected: model.stored, editable: model.editable })
@@ -129,7 +139,7 @@ function SurveyListGroup({ group, model, children, visible, selected }: { group:
   }, [model.renamingGroupId, group.groupId, group.name, model.stored, model.editable, edit])
   useEffect(() => { if (!visible) setMenuOpen(false) }, [visible])
   const cancel = () => { ++generation.current; setEdit(null); model.setRenamingGroupId(null) }
-  return <section ref={setNodeRef} className="survey-list-group" data-survey-list-group={group.groupId} data-collapsed={group.collapsed} data-selected={selected || undefined} data-dragging={isDragging || undefined} data-drop-over={isOver || undefined} style={{ transform: CSS.Transform.toString(transform), transition }}>
+  return <section ref={setNodeRef} className="survey-list-group" data-survey-list-group={group.groupId} data-collapsed={group.collapsed} data-selected={selected || undefined} data-dragging={isDragging || undefined} data-drop-over={isOver && acceptsContainer(active?.data.current as Target | undefined, group.groupId) || undefined} style={{ transform: CSS.Transform.toString(transform), transition }}>
     <div className="survey-list-group-heading" data-survey-group-header={group.groupId}>
       <button type="button" className="survey-drag-handle" {...attributes} {...listeners} aria-label={`Move survey group: ${group.name}`} title="Drag group"><DragIcon size={12} /></button>
       {edit ? <form className="survey-group-name" onSubmit={async event => {
