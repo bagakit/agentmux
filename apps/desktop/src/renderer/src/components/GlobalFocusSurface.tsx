@@ -665,10 +665,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       </div> : projection
         ? <div className="focused-tab-workspace" data-focus-tab-id={selectedTab?.id}
           data-focus-zone-id={projection.entity.kind === 'zone' ? projection.entity.zoneId : undefined}>
-          {directoryIssue || presentation?.issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+          {directoryIssue || presentation?.issue ? <ServiceWindowNotice
+            disclosure={{ scope: JSON.stringify([projection.presentationId, projection.displayWorkspaceId, projection.entity, projection.selection]),
+              id: 'focus-workface-directory', cause: JSON.stringify([directoryIssue, presentation?.issue]), visible }}
+            title="Workface location unconfirmed" notice={{ kind: 'indeterminate', notice: {
               step: 'Focus work surface directory', mode: [directoryIssue, presentation?.issue].filter(Boolean).join('\n'),
               restore: 'The original work surface remains available. Recheck its current location to confirm the Space and Zone.'
-            } }} actions={presentation?.issue && projection.selection[0] ? <button type="button" className="small-button"
+            } }} inlineActions={presentation?.issue && projection.selection[0] ? <button type="button" className="small-button"
               onClick={() => (onSelectLocation ?? projection.onSelect)(projection.selection[0]!)}>Use current location</button> : null} /> : null}
           <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection}
             viewOwnership="projection" viewTargets={viewTargets} visible={visible} />
