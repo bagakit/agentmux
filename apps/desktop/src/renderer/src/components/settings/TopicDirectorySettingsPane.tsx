@@ -71,7 +71,7 @@ export function TopicDirectorySettingsPane({ config, onClose, promotion = false 
     {promotion ? <PromotionSettings config={config} /> : <TopicInitialViewSettings config={config} />}
     {promotion ? <section className="settings-group" data-settings-field="agent-promotion">
       <header><span>Promote from an Agent</span></header>
-      <p className="settings-workflows__note">Choose “晋升为 Mote…” from that Agent’s menu. The same Agent and conversation continue in a Mote with its own space; its project and working directory stay in place.</p>
+      <p className="settings-workflows__note">Choose “Promote to Mote…” from that Agent’s menu. The same Agent and conversation continue in a Mote with its own space; its project and working directory stay in place.</p>
     </section> : null}
     <section className="settings-group" data-settings-field="topic-directory">
       <header><span>{promotion ? 'Promote from a Topic' : 'Topic directory'}</span></header>

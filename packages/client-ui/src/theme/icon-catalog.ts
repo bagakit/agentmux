@@ -19,7 +19,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'status.node-publication-unknown': { label: 'Unknown publication', glyph: 'node-unobserved' },
   'object.settings-channels': { label: 'Conversation Channels group', glyph: 'settings-channels' },
   'object.settings-mods': { label: 'Mods group', glyph: 'settings-mods' },
-  'object.promotion': { label: 'Topic promotion', glyph: 'promotion-rise' },
+  'object.promotion': { label: 'Promotion', glyph: 'promotion-rise' },
   'object.tool-library': { label: 'Toolkit Library', glyph: 'library-tools' },
   'action.fork-conversation': { label: 'Fork current conversation', glyph: 'git-fork' },
   'action.take-over': { label: 'Take over the work', glyph: 'handoff-agent' },

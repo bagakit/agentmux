@@ -75,7 +75,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
     {links ? <Menu.Separator className="tab-context-menu__separator" /> : null}
     <Menu.Group aria-label="Conversation">
       {extensions.identityActions}
-      {canControl && onPromote ? <Menu.Item className="tab-context-menu__item" data-agent-promotion onSelect={onPromote}><Promotion size={14} /><span>晋升为 Mote…</span></Menu.Item> : null}
+      {canControl && onPromote ? <Menu.Item className="tab-context-menu__item" data-agent-promotion onSelect={onPromote}><Promotion size={14} /><span>Promote to Mote…</span></Menu.Item> : null}
       {onHistory ? <Menu.Item className="tab-context-menu__item" onSelect={onHistory}><History size={14} /><span>Conversation history</span></Menu.Item> : null}
       <WorkbenchMenuSubmenu label={sessionKind === 'agent' ? 'Session details' : 'Terminal details'} icon={<Information size={14} />}
         Sub={Menu.Sub} SubTrigger={Menu.SubTrigger} SubContent={Menu.SubContent} Portal={Menu.Portal}
