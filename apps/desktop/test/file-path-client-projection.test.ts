@@ -22,6 +22,8 @@ import type { AppConfig } from '../src/shared/contracts.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => '/private-unused' } }))
 const native = process.env.AGENTMUX_TEST_FILE_CLIENT_NATIVE === '1'
+const restartMode = process.env.AGENTMUX_TEST_FILE_CLIENT_RESTART
+const business = native && !restartMode
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals() })
 it.runIf(!native)('runs the shipping UserState consumer in its own private process', async () => {
@@ -33,9 +35,9 @@ it.runIf(!native)('runs the shipping UserState consumer in its own private proce
   expect(code, log).toBe(0); expect(log).toMatch(/[1-9]\d* passed/)
 }, 180000)
 
-async function fixture(options: { sharedProject?: boolean } = {}) {
+async function fixture(options: { sharedProject?: boolean } = {}, existing?: Awaited<ReturnType<typeof sourceFilesHosts>>) {
   vi.resetModules(); window.localStorage.clear(); vi.stubGlobal('crypto', webcrypto)
-  const f = await sourceFilesHosts(cleanup, options), source = f.sources[1]!, bridge = sourceFilesIpcBridge(f.runtime, cleanup)
+  const f = existing ?? await sourceFilesHosts(cleanup, options), source = f.sources[1]!, bridge = sourceFilesIpcBridge(f.runtime, cleanup)
   const { api } = await import('../src/renderer/src/lib/api.js'), { useAppStore: store } = await import('../src/renderer/src/store.js')
   const { desktopSpatialGraph } = await import('../src/renderer/src/lib/desktop-spatial-state.js')
   const workspace = { id: 'display-files', hostId: source.id, path: source.project, name: 'Source Files', kind: 'folder' as const }
@@ -43,7 +45,7 @@ async function fixture(options: { sharedProject?: boolean } = {}) {
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } } as AppConfig
   store.setState({ config, tabs: {}, documents: {}, layouts: { [workspace.id]: createWorkspaceLayout('file-group', []) }, activeWorkspaceId: workspace.id })
   const spatial = new AgentMuxSpatialStateStore(join(f.root, 'desktop-spatial.json'))
-  await spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph(store.getState(), []) })
+  if (!await spatial.read()) await spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph(store.getState(), []) })
   const user = new WorkbenchUserStateStore(join(f.root, 'desktop-user.json'))
   vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => user.read())
   vi.spyOn(api.ui, 'importWorkbenchState').mockImplementation(value => user.importIfAbsent(value))
@@ -94,7 +96,7 @@ async function connectCloseOwner(f: Awaited<ReturnType<typeof fixture>>) {
   return owner
 }
 
-it.runIf(native)('original Files UI checkpoints the directory packet before registration and CLI delete retains a clean body in actual UserState', async () => {
+it.runIf(business)('original Files UI checkpoints the directory packet before registration and CLI delete retains a clean body in actual UserState', async () => {
   const f = await fixture(), { SourceFilesAccess } = await import('../src/renderer/src/components/SourceFilesAccess.js')
   const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
   cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
@@ -160,7 +162,7 @@ async function connectFolder(f: Awaited<ReturnType<typeof fixture>>) {
   expect((await f.store.getState().useFilesSourceFolder(f.workspace.id, original.registration)).status).toBe('located')
 }
 
-it.runIf(native)('original GUI mkdir, file creation, directory move and delete consume Source receipts once while keeping the same draft and View identities', async () => {
+it.runIf(business)('original GUI mkdir, file creation, directory move and delete consume Source receipts once while keeping the same draft and View identities', async () => {
   const f = await fixture(); await connectFolder(f)
   await mkdir(join(f.source.project, 'drafts')); await writeFile(join(f.source.project, 'drafts', 'child.txt'), 'Original nested body')
   await f.store.getState().openFile('drafts/child.txt', 'file-group', undefined, f.workspace.id)
@@ -196,7 +198,7 @@ it.runIf(native)('original GUI mkdir, file creation, directory move and delete c
   expect(f.store.getState().sourceFilesInputs.creations).toEqual({})
 }, 60000)
 
-it.runIf(native)('a lost directory registration reply keeps the original packet across read-only reconciliation and never registers twice', async () => {
+it.runIf(business)('a lost directory registration reply keeps the original packet across read-only reconciliation and never registers twice', async () => {
   const f = await fixture(), original = await f.store.getState().resolveFilesSource(f.workspace.id)
   if (original.status !== 'registration-required') throw new Error('Original packet missing')
   const call = f.bridge.spaces.call; let registrations = 0
@@ -216,7 +218,7 @@ it.runIf(native)('a lost directory registration reply keeps the original packet 
   expect(JSON.parse((await f.user.read())!).state.sourceFilesInputs.selections[f.workspace.id]).toMatchObject({ registration: original.registration, registrationStatus: 'unknown' })
 }, 60000)
 
-it.runIf(native)('consecutive Source saves keep their original binding and refresh same-FD identity; another Runtime sharing the physical file cannot receive the old draft', async () => {
+it.runIf(business)('consecutive Source saves keep their original binding and refresh same-FD identity; another Runtime sharing the physical file cannot receive the old draft', async () => {
   const f = await fixture({ sharedProject: true }); await connectFolder(f)
   const other = f.sources[0]!, candidate = await f.bridge.files.resolve({ hostId: other.id, expectedRuntimeId: other.identity.runtimeId }, { kind: 'directory', path: other.project })
   if (candidate.status !== 'registration-required') throw new Error('The other original Source must register itself')
@@ -249,7 +251,7 @@ it.runIf(native)('consecutive Source saves keep their original binding and refre
   expect(nativeWrites).not.toHaveBeenCalled()
 }, 60000)
 
-it.runIf(native)('unknown write checks the captured old Source even after selecting a new Runtime with identical bytes on the same physical file', async () => {
+it.runIf(business)('unknown write checks the captured old Source even after selecting a new Runtime with identical bytes on the same physical file', async () => {
   const f = await fixture({ sharedProject: true }); await connectFolder(f)
   await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
   const key = f.workspace.id + '\0original.txt', tab = Object.values(f.store.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
@@ -280,7 +282,7 @@ it.runIf(native)('unknown write checks the captured old Source even after select
   expect(f.store.getState().documents[key]?.readSource?.target).toEqual(pending.attempted.source!.target)
 }, 60000)
 
-it.runIf(native)('two real Notes owners with the same Note ID keep their creators and history separate while Source edit, restore and undo use their own owner', async () => {
+it.runIf(business)('two real Notes owners with the same Note ID keep their creators and history separate while Source edit, restore and undo use their own owner', async () => {
   const f = await fixture(), path = 'same.note.md', noteId = 'same-note', blockId = 'same-block'
   const original = serializeNoteDocument(newNoteDocument('Original Source Note body', noteId, blockId, 'Original Note'))
   await writeFile(join(f.source.project, path), original)
@@ -346,7 +348,7 @@ it.runIf(native)('two real Notes owners with the same Note ID keep their creator
   expect(await main.readProvenance({ noteId, resource: mainResource, revision: noteHistoryRevision(original), blockIds: [blockId] })).toEqual(mainProvenance)
 }, 60000)
 
-it.runIf(native)('Source text saves keep older sharing requests and cleanup separate; new promotions and late-bound Main retries never dispatch', async () => {
+it.runIf(business)('Source text saves keep older sharing requests and cleanup separate; new promotions and late-bound Main retries never dispatch', async () => {
   const f = await fixture(), path = 'references.note.md', note = newNoteDocument('Original ordinary text', 'reference-note', 'reference-block', 'References')
   note.content.content!.push({ type: 'noteInclude', attrs: { noteId: 'saved-shared-note', path: 'saved-shared.note.md', referenceId: 'saved-reference' } })
   const original = serializeNoteDocument(note)
@@ -376,7 +378,7 @@ it.runIf(native)('Source text saves keep older sharing requests and cleanup sepa
   expect(await readFile(join(f.source.project, path), 'utf8')).toContain('Another ordinary Source save')
   expect(f.store.getState().documents[key]?.noteEditing?.shareUndo?.params).toEqual(params)
   const { stageNoteShare, pendingNoteShares } = await import('../src/renderer/src/lib/note-share-staging.js')
-  const include = stageNoteShare(key, { version: 1, source: { hostId: f.workspace.hostId, workspaceId: f.workspace.id, workspacePath: f.workspace.path, path, noteId: 'reference-note' },
+  const include = stageNoteShare(key, { version: 1, source: { hostId: f.workspace.hostId, workspaceId: f.workspace.id, workspacePath: f.workspace.path, path: 'original-legacy-source.note.md', noteId: 'reference-note' },
     read: binding.query, block: { path: [0], fingerprint: 'frozen-copy', blockId: 'reference-block' } })
   const staged = newNoteDocument('Staged draft kept', 'reference-note', 'reference-block', 'References')
   staged.content.content!.push({ type: 'noteInclude', attrs: include })
@@ -401,7 +403,7 @@ it.runIf(native)('Source text saves keep older sharing requests and cleanup sepa
   expect(f.store.getState().documents[key]?.content).toContain('Staged draft kept')
 }, 60000)
 
-it.runIf(native)('GUI Source Note creation waits on the original Notes lease while an ordinary file remains writable', async () => {
+it.runIf(business)('GUI Source Note creation waits on the original Notes lease while an ordinary file remains writable', async () => {
   const f = await fixture(); await connectFolder(f)
   const notes = new AgentMuxNotebookStore(undefined, new AgentMuxNotesStorage(join(f.source.state, 'notes-location.json')))
   let release!: () => void, entered!: () => void
@@ -416,7 +418,7 @@ it.runIf(native)('GUI Source Note creation waits on the original Notes lease whi
   expect(await readFile(join(f.source.project, 'late.note.md'), 'utf8')).toBe('')
 }, 60000)
 
-it.runIf(native)('GUI directory move and Note deletion borrow the same original Source Notes lease', async () => {
+it.runIf(business)('GUI directory move and Note deletion borrow the same original Source Notes lease', async () => {
   const f = await fixture(); await connectFolder(f)
   const note = serializeNoteDocument(newNoteDocument('Original Note body', 'lease-note', 'lease-block', 'Lease Note'))
   await mkdir(join(f.source.project, 'original')); await writeFile(join(f.source.project, 'original', 'inside.note.md'), note)
@@ -451,7 +453,7 @@ it.runIf(native)('GUI directory move and Note deletion borrow the same original 
   await expect(readFile(join(f.source.project, 'deleted.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
 }, 60000)
 
-it.runIf(native)('Source file creation returns its captured display Workspace across a late active Workspace switch', async () => {
+it.runIf(business)('Source file creation returns its captured display Workspace across a late active Workspace switch', async () => {
   const f = await fixture(); await connectFolder(f)
   const other = { ...f.workspace, id: 'other-display', name: 'Other display' }
   f.store.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, other] }, layouts: { ...state.layouts, [other.id]: createWorkspaceLayout('other-group', []) } }))
@@ -468,4 +470,211 @@ it.runIf(native)('Source file creation returns its captured display Workspace ac
   expect(f.store.getState().documents[f.workspace.id + '\0created-here.txt']?.content).toBe('')
   expect(await readFile(join(f.source.project, 'created-here.txt'), 'utf8')).toBe('')
   await expect(readFile(join(f.sources[0]!.project, 'created-here.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+}, 60000)
+
+async function originalRestartSources() {
+  const { AgentMuxFileAgentSessionStore, connectAgentMuxRpc } = await import('@agentmux/core')
+  const { configuredDesktopAgentMuxHost } = await import('../src/main/desktop-host.js')
+  const { RuntimeController } = await import('../src/main/runtime-controller.js')
+  const saved = JSON.parse(await readFile(process.env.AGENTMUX_TEST_FILE_CLIENT_MANIFEST!, 'utf8'))
+  const sources = []
+  for (const original of saved.sources) {
+    vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(original.directory, 'runtime')); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', original.state)
+    vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(original.state, 'messages.ndjson')); vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(original.state, 'spatial.json'))
+    const store = new AgentMuxFileAgentSessionStore(join(original.state, 'sessions.json'))
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: original.socketPath } }); cleanup.push(() => rpc.dispose())
+    expect((await rpc.call('runtime.owner.identity', {})).owner).toEqual(original.identity)
+    const client = await configuredDesktopAgentMuxHost(original.configurationPath, join(original.state, 'connectors'))({ id: 'local', kind: 'local', label: original.id }, store)
+    cleanup.push(() => client.dispose()); sources.push({ ...original, store, rpc, client })
+  }
+  const routes = new Map(sources.map(source => [source.id, { client: source.client }]))
+  return { saved, original: { root: saved.root, sources, routes, runtime: Object.assign(Object.create(RuntimeController.prototype), { hosts: routes, hostReconfigurationReservations: new Map() }) } as Awaited<ReturnType<typeof sourceFilesHosts>> }
+}
+
+it.runIf(Boolean(restartMode))('private Source workface worker preserves the original draft, clean deleted body and pending operation', async () => {
+  const { original, saved } = await originalRestartSources(), f = await fixture({}, original)
+  const key = f.workspace.id + '\0original.txt', dirtyKey = f.workspace.id + '\0unsaved.txt', cleanKey = f.workspace.id + '\0clean.txt'
+  if (restartMode === 'writer') {
+    await connectFolder(f)
+    await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+    await writeFile(join(f.source.project, 'clean.txt'), 'Original clean Source body')
+    await f.store.getState().openFile('clean.txt', 'file-group', undefined, f.workspace.id)
+    await writeFile(join(f.source.project, 'unsaved.txt'), 'Original disk baseline')
+    await f.store.getState().openFile('unsaved.txt', 'file-group', undefined, f.workspace.id)
+    const dirtyTab = Object.values(f.store.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'unsaved.txt'))!
+    f.store.getState().updateDocument(dirtyTab.id, 'Original unsaved body across OS restart', Object.values(dirtyTab.regions).find(region => region.kind === 'file')!.regionId)
+    const release = await f.store.getState().observeFilesSource(f.workspace.id); cleanup.push(release)
+    const locator = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!.locator!, r = locator.resource
+    const query = { zoneId: r.zoneId, path: 'original.txt', expectedResource: { hostId: r.hostId, workspaceId: r.workspaceId, workspacePath: r.workspacePath }, includeRevision: true }
+    const observed = (await f.bridge.files.call({ hostId: locator.mount.hostId, reference: locator.mount.reference }, 'file.stat', query)).result
+    if (observed.result.status !== 'observed' || !observed.resource || observed.result.observation.revision?.status !== 'observed') throw Error('Original revision unavailable')
+    const o = observed.result.observation, { includeRevision: _include, ...target } = query
+    const request = { ...target, operationId: 'restart-cli-delete', expectedResource: observed.resource, expected: { root: o.root, parent: o.parent, entry: o.entry }, expectedRevision: o.revision.revision }
+    const result = await runCompiledObjectCli(['--endpoint', 'unix:' + f.source.socketPath, 'file', 'delete', '--input', '-'], objectCliEnvironment(f.source.state), JSON.stringify(request))
+    expect(result.code, result.stdout + result.stderr).toBe(0)
+    await vi.waitFor(() => expect(f.store.getState().documentIssues[key]?.kind).toBe('deleted'))
+    const call = f.bridge.files.call
+    vi.mocked(f.api.sourceFiles.call).mockImplementation(async (target, method, params, signal) => { const reply = await call(target, method, params, signal); if (method === 'file.mkdir') throw Error('Private lost mkdir reply'); return reply })
+    await expect(f.store.getState().createPath({ path: 'original-pending-dir', kind: 'directory' }, f.workspace.id)).rejects.toThrow('Private lost mkdir reply')
+    const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
+    const state = f.store.getState()
+    expect(state.dirtyDocuments[key]).not.toBe(true); expect(state.documents[key]?.content).toBe('source-b original body')
+    const pending = Object.values(state.sourceFilesInputs.pending)
+    expect(pending).toHaveLength(1)
+    expect(JSON.parse((await f.user.read())!).state.documents[cleanKey]).toBeUndefined()
+    await writeFile(join(f.root, 'source-workface-writer.json'), JSON.stringify({ pid: process.pid, documents: { [key]: state.documents[key], [dirtyKey]: state.documents[dirtyKey] }, tabs: state.tabs,
+      layouts: state.layouts, pending: state.sourceFilesInputs.pending, inputs: state.sourceFilesInputs, issue: state.documentIssues[key], run: saved.healthy }))
+  } else {
+    const writer = JSON.parse(await readFile(join(f.root, 'source-workface-writer.json'), 'utf8')), state = f.store.getState()
+    expect(process.pid).not.toBe(writer.pid)
+    expect(state.documents[key]).toEqual(writer.documents[key]); expect(state.documentIssues[key]).toEqual(writer.issue)
+    expect(state.dirtyDocuments[key]).not.toBe(true)
+    expect(state.documents[dirtyKey]?.content).toBe('Original unsaved body across OS restart'); expect(state.dirtyDocuments[dirtyKey]).toBe(true)
+    expect(state.layouts).toEqual(writer.layouts)
+    for (const [id, tab] of Object.entries(writer.tabs)) expect(state.tabs[id]).toMatchObject({ id, regions: (tab as any).regions })
+    expect(state.sourceFilesInputs).toMatchObject(writer.inputs)
+    await expect(readFile(join(f.source.project, 'original.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const directory = await stat(join(f.source.project, 'original-pending-dir'), { bigint: true }), calls: string[] = [], call = f.bridge.files.call
+    vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { calls.push(args[1]); return await call(...args) })
+    const operationId = Object.keys(writer.pending)[0]!
+    await f.store.getState().inspectFilesMutation(operationId)
+    expect(calls).toEqual(['file.mutation.inspect'])
+    expect((await stat(join(f.source.project, 'original-pending-dir'), { bigint: true })).ino).toBe(directory.ino)
+    expect(f.store.getState().documents[key]?.content).toBe('source-b original body')
+    expect(f.store.getState().documents[dirtyKey]?.content).toBe('Original unsaved body across OS restart')
+    const mainRead = vi.spyOn(f.api.files, 'read').mockResolvedValue({ status: 'read', document: { path: 'clean.txt', content: 'Wrong later Main body', revision: 'wrong-main-revision' } }), mainWrite = vi.spyOn(f.api.files, 'write')
+    const beforeOffline = f.bridge.files.call
+    vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { if (args[1] === 'file.read') throw Error('Private original Source temporarily unavailable'); return await beforeOffline(...args) })
+    await f.store.getState().openFile('clean.txt', 'file-group', undefined, f.workspace.id)
+    // The shipping EditorPane invokes this owner when a restored File Tab has no body yet.
+    await f.store.getState().attachPersistedFileDocument(f.workspace.id, 'clean.txt')
+    expect(f.store.getState().documents[cleanKey]).toBeUndefined()
+    expect(f.store.getState().documentIssues[cleanKey]?.kind).toBe('read-error')
+    expect(Object.values(f.store.getState().tabs).some(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'clean.txt'))).toBe(true)
+    expect(mainRead).not.toHaveBeenCalled(); expect(mainWrite).not.toHaveBeenCalled()
+    const healthy = await f.source.rpc.call('terminal.inspect', { target: { hostId: 'local', runtimeId: saved.healthyRuntime.runtimeId, run: { runId: writer.run.runId } } })
+    expect(healthy.run.runId).toBe(writer.run.runId); expect(healthy.run.state).toEqual(writer.run.state)
+    await writeFile(join(f.root, 'source-workface-reader.json'), JSON.stringify({ writerPid: writer.pid, readerPid: process.pid, restored: true, noCreateReplay: true,
+      originalRun: healthy.run, deletedBuffer: f.store.getState().documents[key], pendingBefore: writer.pending, pendingAfter: f.store.getState().sourceFilesInputs.pending }))
+  }
+}, 60000)
+
+it.runIf(!native)('two original OS processes reopen Source workfaces without recreating files or replacing the healthy Native Run', async () => {
+  const f = await sourceFilesHosts(cleanup), source = f.sources[1]!
+  const healthy = await source.client.createTerminal({ command: process.execPath, args: ['-e', 'process.stdin.resume();setInterval(()=>{},1000)'], workspacePath: source.project, createOperationId: 'source-workface-healthy-run' })
+  const manifest = join(f.root, 'source-process-manifest.json')
+  const catalog = await source.rpc.call('terminal.ls', { hostId: 'local', limit: 20 })
+  expect(catalog.items.some(item => item.run.runId === healthy.runId)).toBe(true)
+  await writeFile(manifest, JSON.stringify({ root: f.root, healthy, healthyRuntime: catalog.runtime, sources: f.sources.map(({ id, directory, state, project, socketPath, identity, configurationPath }) => ({ id, directory, state, project, socketPath, identity, configurationPath })) }))
+  for (const mode of ['writer', 'reader']) {
+    const child = spawn(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'apps/desktop/test/vitest.file-path-client.config.mts', '--maxWorkers=1', '-t', 'private Source workface worker'], {
+      cwd: resolve(import.meta.dirname, '../../..'), env: { ...process.env, AGENTMUX_TEST_FILE_CLIENT_NATIVE: '1', AGENTMUX_TEST_FILE_CLIENT_RESTART: mode, AGENTMUX_TEST_FILE_CLIENT_MANIFEST: manifest }, stdio: ['ignore', 'pipe', 'pipe'] })
+    let output = ''; child.stdout.on('data', bytes => { output += bytes }); child.stderr.on('data', bytes => { output += bytes })
+    const code = await new Promise<number | null>((yes, no) => { child.once('error', no); child.once('close', yes) })
+    if (process.env.AGENTMUX_TEST_FILE_CLIENT_EVIDENCE) await writeFile(join(process.env.AGENTMUX_TEST_FILE_CLIENT_EVIDENCE, 'source-two-os-' + mode + '-' + (process.env.AGENTMUX_TEST_FILE_CLIENT_ATTEMPT ?? 'unqualified') + '.log'), output)
+    expect(code, output).toBe(0); expect(output).toMatch(/1 passed/)
+  }
+  const proof = JSON.parse(await readFile(join(f.root, 'source-workface-reader.json'), 'utf8'))
+  expect(proof).toMatchObject({ restored: true, noCreateReplay: true }); expect(proof.writerPid).not.toBe(proof.readerPid)
+  expect((await source.rpc.call('terminal.inspect', { target: { hostId: 'local', runtimeId: catalog.runtime.runtimeId, run: { runId: healthy.runId } } })).run.runId).toBe(healthy.runId)
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_EVIDENCE) await writeFile(join(process.env.AGENTMUX_TEST_FILE_CLIENT_EVIDENCE, 'source-two-os-proof-' + (process.env.AGENTMUX_TEST_FILE_CLIENT_ATTEMPT ?? 'unqualified') + '.json'), JSON.stringify(proof, null, 2))
+}, 180000)
+
+it.runIf(business)('a bound Source read failure never replaces its body or later save with a different-revision Main fallback', async () => {
+  const f = await fixture({ sharedProject: true }); await connectFolder(f)
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  const key = f.workspace.id + '\0original.txt', original = f.store.getState().documents[key]!, call = f.bridge.files.call
+  const mainRead = vi.spyOn(f.api.files, 'read').mockResolvedValue({ status: 'read', document: { path: 'original.txt', content: 'Wrong later Main body', revision: 'wrong-later-revision' } })
+  const mainWrite = vi.spyOn(f.api.files, 'write')
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => {
+    if (args[1] === 'file.read') return { carrierCurrent: true, result: { resource: original.readSource!.resource, result: { status: 'unknown', code: 'PRIVATE_SOURCE_READ_UNAVAILABLE', message: 'Private Source read unavailable' } } } as never
+    return await call(...args)
+  })
+  await f.store.getState().refreshDocument(f.workspace.id, 'original.txt')
+  expect(f.store.getState().documents[key]?.content).toBe(original.content)
+  expect(f.store.getState().documents[key]?.readSource).toEqual(original.readSource)
+  expect(f.store.getState().documentIssues[key]?.kind).toBe('read-error')
+  const tab = Object.values(f.store.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
+  f.store.getState().updateDocument(tab.id, 'Original Source draft retained', Object.values(tab.regions).find(region => region.kind === 'file')!.regionId)
+  await f.store.getState().saveDocument(tab.id)
+  expect(mainRead).not.toHaveBeenCalled(); expect(mainWrite).not.toHaveBeenCalled()
+  expect(await readFile(join(f.source.project, 'original.txt'), 'utf8')).toBe(original.content)
+}, 60000)
+
+it.runIf(business)('Source reference copying cannot serialize a Main capability, including existing includes before the source View closes', async () => {
+  const f = await fixture(), path = 'copy-source.note.md', noteId = 'copy-source-note'
+  await writeFile(join(f.source.project, path), serializeNoteDocument(newNoteDocument('Original Source copy body', noteId, 'source-copy-block', 'Copy Source')))
+  await connectFolder(f); await f.store.getState().openFile(path, 'file-group', undefined, f.workspace.id)
+  const key = f.workspace.id + '\0' + path, source = { hostId: f.workspace.hostId, workspaceId: f.workspace.id, workspacePath: f.workspace.path, path, noteId }
+  expect(f.store.getState().documents[key]?.readSource).toBeTruthy()
+  const { copyNoteBlock, writeNoteShareClipboard, readNoteShareClipboard } = await import('../src/renderer/src/lib/note-share-staging.js')
+  if (!document.execCommand) Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
+  const command = vi.spyOn(document, 'execCommand').mockReturnValue(true), target = f.store.getState().documents[key]!.readSource!
+  expect(() => copyNoteBlock({} as never, 0, source, target.query)).toThrow('shared reference is not confirmed')
+  const { NoteSharedFileEditing } = await import('../src/renderer/src/components/NoteSharedFileEditing.js')
+  const { NoteSharedContext } = await import('../src/renderer/src/lib/note-shared-context.js')
+  const { noteKnowledge } = await import('@agentmux/client-ui/note/note-knowledge')
+  let context: any
+  const node = document.createElement('div'), root = createRoot(node); document.body.append(node)
+  cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
+  await act(async () => root.render(createElement(NoteSharedFileEditing, { target: source, include: { noteId: 'original-shared', path: 'original-shared.note.md', referenceId: 'original-include' },
+    occurrence: 'source-copy-occurrence', active: true, knowledge: noteKnowledge([]), hasIncludes: false, onOpen: () => {}, children:
+      createElement(NoteSharedContext.Consumer, null, value => { context = value; return null }) })))
+  await expect(context.copyBlock({ view: { dom: node }, getText: () => 'Original Source copy body' }, 0)).rejects.toThrow('shared reference is not confirmed')
+  // The details copy path can point at an embedded legacy Main file; its host occurrence remains Source-bound.
+  expect(() => writeNoteShareClipboard(document, { version: 1, source: { ...source, path: 'embedded-main.note.md' },
+    block: { path: [], fingerprint: '' }, include: { noteId: 'original-shared', path: 'embedded-main.note.md', referenceId: 'original-include' } }, 'Original text', source)).toThrow('shared reference is not confirmed')
+  expect(command).not.toHaveBeenCalled()
+  f.store.setState(state => ({ documents: Object.fromEntries(Object.entries(state.documents).filter(([id]) => id !== key)), tabs: {}, layouts: { [f.workspace.id]: createWorkspaceLayout('file-group', []) } }))
+  const plain = new DataTransfer(); plain.setData('text/plain', 'Ordinary text remains usable')
+  expect(readNoteShareClipboard(new ClipboardEvent('paste', { clipboardData: plain }), document)).toBeNull()
+  expect(plain.getData('text/plain')).toBe('Ordinary text remains usable')
+  const mainRoot = join(f.root, 'legacy-paste-target'); await mkdir(mainRoot)
+  const main = { id: 'legacy-paste', hostId: 'local', path: mainRoot, name: 'Original Main target', kind: 'folder' as const }
+  const body = serializeNoteDocument(newNoteDocument('Original Main target body', 'main-paste-note', 'main-paste-block', 'Main target'))
+  await writeFile(join(mainRoot, 'target.note.md'), body)
+  const writer = new NoteFileWriter(new OrdinaryWorkspaceFiles(), undefined, new AgentMuxNotebookStore(join(f.root, 'legacy-paste-notes', 'notebooks.root.json')))
+  const read = await writer.read(main, 'target.note.md'); if (read.status !== 'read') throw Error('Actual original Main body unavailable')
+  f.store.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, main] }, documents: { ...state.documents, [main.id + '\0target.note.md']: read.document } }))
+  await act(async () => root.render(createElement(NoteSharedFileEditing, { target: { hostId: main.hostId, workspaceId: main.id, workspacePath: main.path, path: 'target.note.md', noteId: 'main-paste-note' },
+    occurrence: 'legacy-paste-occurrence', active: true, knowledge: noteKnowledge([]), hasIncludes: false, onOpen: () => {}, children:
+      createElement(NoteSharedContext.Consumer, null, value => { context = value; return null }) })))
+  const sharing = vi.spyOn(f.api.files, 'sharePublic')
+  expect(context.paste({ view: { dom: node } }, new ClipboardEvent('paste', { clipboardData: plain }))).toBe(false)
+  const { pendingNoteShares } = await import('../src/renderer/src/lib/note-share-staging.js')
+  expect(pendingNoteShares(main.id + '\0target.note.md').size).toBe(0)
+  expect(sharing).not.toHaveBeenCalled(); expect(await readFile(join(mainRoot, 'target.note.md'), 'utf8')).toBe(body)
+  expect(command).not.toHaveBeenCalled()
+}, 60000)
+
+it.runIf(business)('a confirmed Source move cannot rebind an editor while its original composition is active', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  const key = f.workspace.id + '\0original.txt', original = f.store.getState().documents[key]!, tabs = f.store.getState().tabs
+  const { setNoteComposition } = await import('../src/renderer/src/lib/note-live-merge.js')
+  setNoteComposition(key, 'original-source-editor-composition', true); cleanup.push(() => setNoteComposition(key, 'original-source-editor-composition', false))
+  await f.store.getState().renamePath('original.txt', 'moved-composing.txt', f.workspace.id)
+  expect(await readFile(join(f.source.project, 'moved-composing.txt'), 'utf8')).toBe(original.content)
+  expect(f.store.getState().documents[key]).toEqual(original)
+  expect(f.store.getState().documents[f.workspace.id + '\0moved-composing.txt']).toBeUndefined()
+  expect(f.store.getState().tabs).toEqual(tabs)
+  expect(f.store.getState().documentIssues[key]).toMatchObject({ kind: 'read-error', code: 'FILE_EFFECT_SOURCE_UNCONFIRMED' })
+}, 60000)
+
+it.runIf(business)('late input after a real Native move keeps its old workface and an exact projection service window', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  const key = f.workspace.id + '\0original.txt', initial = f.store.getState(), tab = Object.values(initial.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
+  let ready!: () => void, release!: () => void
+  const obtained = new Promise<void>(resolve => { ready = resolve }), gate = new Promise<void>(resolve => { release = resolve }), call = f.bridge.files.call
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { const reply = await call(...args); if (args[1] === 'file.move') { ready(); await gate } return reply })
+  const moving = f.store.getState().renamePath('original.txt', 'moved-late-input.txt', f.workspace.id)
+  await obtained
+  f.store.getState().updateDocument(tab.id, 'Later input after the real Native move', Object.values(tab.regions).find(region => region.kind === 'file')!.regionId)
+  release(); await moving
+  expect(await readFile(join(f.source.project, 'moved-late-input.txt'), 'utf8')).toBe(initial.documents[key]!.content)
+  expect(f.store.getState().documents[key]?.content).toBe('Later input after the real Native move')
+  expect(f.store.getState().dirtyDocuments[key]).toBe(true)
+  expect(f.store.getState().tabs[tab.id]?.regions).toEqual(tab.regions)
+  expect(f.store.getState().documentIssues[key]).toMatchObject({ kind: 'read-error', code: 'FILE_EFFECT_PROJECTION_CHANGED', message: expect.stringContaining('Check original operation') })
 }, 60000)
