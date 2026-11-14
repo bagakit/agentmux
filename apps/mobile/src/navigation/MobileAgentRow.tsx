@@ -8,14 +8,14 @@ import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProvider
 import { formatMobileClock } from '../presentation/time'
 import { mobileAgentStateLabel } from './mobile-agent-status'
 import { mobileNeedsYouReason } from './needs-you'
-import type { AgentMuxSpaceAddress, AgentMuxSpaceCatalog } from '@agentmux/core/control'
-import type { MobileAgentLocations } from './mobile-agent-locations'
+import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import type { MobileAgentLocationChoice, MobileAgentLocations } from './mobile-agent-locations'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { MobileObjectIdentity } from './MobileIdentity'
 import type { MobileAgentPresentation } from './mobile-agent-status'
 
 export type MobileAgentMenuLocation = { catalog: AgentMuxSpaceCatalog | null; group: MobileAgentLocations | undefined;
-  onChoose(place: AgentMuxSpaceAddress): void; current?(): boolean }
+  onChoose(choice: MobileAgentLocationChoice): void; current?(): boolean }
 export type MobileAgentMenuTarget = { agentSessionId: string; identity: MobileObjectIdentity; beforeAction?: () => boolean
   location?: MobileAgentMenuLocation | undefined; presentation?: MobileAgentPresentation | undefined; refreshStatus?: (() => boolean | void) | undefined }
 /** Presentation only. The App owns disclosure; a row never selects or inspects an Agent. */

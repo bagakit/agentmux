@@ -822,7 +822,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
           <Dialog.Description id="mobile-sheet-description">{menuTarget.identity.project}</Dialog.Description>
           {menuIssue && <MobileNotice owner={client} identity={[menuTarget.agentSessionId, menuIssue]} role="status">{menuIssue}</MobileNotice>}
           {menuTarget.location && <MobileAgentLocations client={client} catalog={menuTarget.location.catalog} locations={menuTarget.location.group} agentSessionId={menuTarget.agentSessionId} name={menuTarget.identity.name} visible={sheet === 'agent'} open={positionOverlay} onOpenChange={setPositionOverlay}
-            beforeChoose={() => validateMenuSource() && (menuTarget.location?.current?.() ?? false)} onChoose={place => { menuTarget.location?.onChoose(place); setSheet(null) }} />}
+            beforeChoose={() => validateMenuSource() && (menuTarget.location?.current?.() ?? false)} onChoose={choice => { menuTarget.location?.onChoose(choice); setSheet(null) }} />}
           <MobileAgentActions key={menuTarget.agentSessionId} client={menuMember.client} agentSessionId={menuTarget.agentSessionId} connected={connected} copyText={platform.copyText} beforeAction={validateMenuSource} statusSource={menuTarget} />
           <button className="mobile-menu-row" onClick={() => { if (validateMenuSource()) { openSession(menuTarget.agentSessionId, menuTarget.identity); setSheet(null) } }}><ThemeObjectConversationIcon size={18} /><span>打开对话</span></button>
         </> : sheet === 'actions' ? <>

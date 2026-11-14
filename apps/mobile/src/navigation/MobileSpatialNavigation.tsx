@@ -16,7 +16,7 @@ import '@agentmux/client-ui/styles/agent-avatar-face.css'
 import { FocusStateMark } from '@agentmux/client-ui/components/FocusStateMark'
 import { MobileIdentity, type MobileObjectIdentity } from './MobileIdentity'
 import { MobileRegionContent } from './MobileRegionContent'
-import { agentLocationKey, mobileAgentLocations } from './mobile-agent-locations'
+import { agentLocationKey, mobileAgentLocations, type MobileAgentLocationChoice } from './mobile-agent-locations'
 import type { MobileHome } from './home-preference'
 import { MobileSpaceDirectory } from './MobileSpaceDirectory'
 import { MobileDirectoryNotice } from './MobileDirectoryNotice'
@@ -277,7 +277,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const locationGroup = (id: string, hostId?: string | null) => {
     const groups = directory.locationIndex.bySession.get(id) ?? []
     return hostId ? directory.locationIndex.byAgent.get(agentLocationKey(hostId, id)) ??
-      (groups.some(group => group.hostId === null) ? undefined : { hostId, agentSessionId: id, addresses: [], count: 0 }) : groups.length === 1 ? groups[0] : undefined
+      (groups.some(group => group.hostId === null) ? undefined : { hostId, agentSessionId: id, addresses: [], summary: { state: 'confirmed' as const, count: 0 } }) : groups.length === 1 ? groups[0] : undefined
   }
   const locations = (id: string) => locationGroup(id, sessionById.get(id)?.hostId ?? directory.rows.get(id)?.projectGroup?.hostId)?.addresses ?? []
   const moteIdentity = (owner: Catalog['spaces'][number]): NonNullable<MobileObjectIdentity['mote']> => {
@@ -289,11 +289,11 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   }
   const spaceIdentity = (owner: Catalog['spaces'][number]): MobileObjectIdentity => ({ name: owner.name, project: owner.name,
     ...(owner.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) })
-  const identity = (session: SessionReference, occurrence?: AgentMuxSpaceAddress | null, row = directory.rows.get(session.agentSessionId)): MobileObjectIdentity => {
+  const identity = (session: SessionReference, occurrence?: AgentMuxSpaceAddress | null, row = directory.rows.get(session.agentSessionId), choice?: MobileAgentLocationChoice): MobileObjectIdentity => {
     const candidates = locations(session.agentSessionId)
-    const context = occurrence === null ? undefined : occurrence ?? (candidates.length === 1 ? candidates[0] : undefined)
+    const context = choice?.place ?? (occurrence === null ? undefined : occurrence ?? (candidates.length === 1 ? candidates[0] : undefined))
     const owner = context?.spaceId ? directory.owners.get(context.spaceId) : undefined
-    const member = catalog ? mobileMemberSelection(client, catalog, session.agentSessionId, context,
+    const member = choice ? choice.member : catalog ? mobileMemberSelection(client, catalog, session.agentSessionId, context,
       sessionById.get(session.agentSessionId)?.hostId ?? row?.projectGroup?.hostId ?? undefined) : undefined
     return { name: row?.name ?? '名称未确认', project: row?.project ?? owner?.name ?? '项目未确认',
       ...(context ? { context } : {}), ...(member ? { member } : {}), ...(owner?.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) }
@@ -311,7 +311,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const attention = mobileNeedsYouReason(row)
     const title = object.name !== '名称未确认' ? object.name : tabName || object.name
     return <li key={key} className="mobile-agent-row" data-current={isCurrent || undefined} {...(attention ? { 'data-needs-you': attention === 'error' ? 'error' : 'waiting' } : {})}
-      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} selected={isCurrent} location={{ catalog, group, current: currentScope, onChoose: place => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, identity(session, place, row)) }} onOpen={() => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, object)}>
+      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} selected={isCurrent} location={{ catalog, group, current: currentScope, onChoose: choice => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, identity(session, undefined, row, choice)) }} onOpen={() => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, object)}>
       <MobileAgentRowContent title={title} presentation={row} providerId={providerId} detail={tabName && tabName !== title ? tabName : undefined} />
     </MobileAgentRow></li>
   }
