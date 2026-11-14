@@ -6,7 +6,7 @@ import base from '../vitest.config'
 const root = resolve(import.meta.dirname, '../../..'), variant = process.env.RESPONSIVE_SPATIAL_MUTATION, trace = process.env.RESPONSIVE_SPATIAL_LOADED
 const spatial = 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx'
 const mutations: Record<string, { file: string; before: string; after: string; target: string }> = {
-  'space-navigation-lost': { file: spatial, before: 'hidden={Boolean(context.regionId) && !wideSpace}', after: 'hidden={Boolean(context.regionId)}', target: 'responsive Space keeps its original tree' },
+  'space-navigation-lost': { file: spatial, before: 'presentation={panes.navigation}', after: 'presentation={{ ...panes.navigation, presented: !context.regionId }}', target: 'responsive Space keeps its original tree' },
   'space-reader-remount': { file: spatial, before: '<div key={target.key} hidden={home', after: '<div key={target.key + String(wide)} hidden={home', target: 'responsive Space keeps its original tree' },
   'focus-project-remount': { file: spatial, before: '<div className="mobile-focus-projects">', after: '<div key={String(wide)} className="mobile-focus-projects">', target: 'responsive Focus keeps 20 original project rows' },
   'foreign-file-receipt': { file: 'apps/mobile/src/navigation/MobileRegionContent.tsx', before: 'if (!confirmsOriginalResource(result.resource, params, file.path, previous?.read.resource))', after: 'if (false)', target: 'responsive Space preserves the exact original binding' }

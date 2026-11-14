@@ -21,6 +21,8 @@ import { fixture, session } from './conversation-fixture'
 import { openPrimary } from './mobile-root-navigation'
 import { getDeviceWorkface, emptyDeviceWorkface, DEVICE_WORKFACE_KEY, DeviceWorkfaceStore } from '../src/recovery/device-workface'
 import { freezeMobileGoalUpdateRequest } from '../src/recovery/goal-drafts'
+import { mobileWorkfaceLayout } from '../src/layout/workface-presentation'
+import { bindMobileViewport, readMobileViewport } from '../src/platform/native/device'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const baseline = useAppStore.getState()
@@ -116,6 +118,66 @@ async function existingGoal() {
   await view.click('Actual goal未分配项目 · 待整理'); await view.wait(proposal.summary)
   return view
 }
+
+it('workface Goal consumes the original viewport budget and retains its editor and presented background while observation pauses', async () => {
+  const view = await existingGoal()
+  await view.click('编辑目标正文')
+  const editor = view.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(editor, 'Workface original unsaved body')
+    editor.dispatchEvent(new Event('input', { bubbles: true })); editor.focus(); editor.setSelectionRange(3, 8)
+  })
+  await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.goalDrafts?.some(value => value.description === editor.value)).toBe(true))
+  const draft = getDeviceWorkface().exportBackup(), list = view.element.querySelector<HTMLElement>('.mobile-goals-directory')!
+  const content = view.element.querySelector<HTMLElement>('.mobile-goals-work')!, reading = view.element.querySelector('article[aria-label="目标详情"]')!
+  content.scrollTop = 71
+  const originalWidth = window.innerWidth, originalHeight = window.innerHeight
+  const release = bindMobileViewport(window, document.documentElement)
+  try {
+    for (const [width, height] of [[667, 375], [812, 375], [390, 844], [320, 700], [1024, 768]]) {
+      await act(async () => {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: height })
+        window.dispatchEvent(new Event('resize'))
+        await new Promise(resolve => window.requestAnimationFrame(resolve))
+      })
+      await view.render(true, mobileWorkfaceLayout(readMobileViewport(window)).split)
+      expect(list.hidden, 'A usable phone landscape budget must present the original Goal navigation.').toBe(width < 600)
+      expect(view.element.querySelector('.mobile-goals-layout')?.classList.contains('mobile-workface-frame')).toBe(true)
+      expect(view.element.querySelector('[aria-label="目标正文草稿"]')).toBe(editor)
+      expect(view.element.querySelector('article[aria-label="目标详情"]')).toBe(reading)
+      expect(editor.value).toBe('Workface original unsaved body')
+      expect([editor.selectionStart, editor.selectionEnd]).toEqual([3, 8])
+      expect(document.activeElement).toBe(editor); expect(content.scrollTop).toBe(71)
+    }
+    const calls = view.forwardRpc.mock.calls.length
+    await view.render(false, true)
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(list.hidden, 'Inactive observation must keep the original Goal background presented.').toBe(false)
+    expect(content.hidden).toBe(false); expect(reading.closest('[hidden]')).toBeNull()
+    expect(view.forwardRpc.mock.calls).toHaveLength(calls)
+    expect(getDeviceWorkface().exportBackup()).toBe(draft)
+    expect((await owner.get('original-goal'))!.description).not.toBe(editor.value)
+  } finally {
+    release(); Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth }); Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight })
+  }
+})
+
+it('workface Goal preserves the original create form outside the shared panes while an inactive overlay pauses reads', async () => {
+  const view = await mount()
+  await view.click('开始新目标')
+  const form = view.element.querySelector<HTMLElement>('.mobile-goal-create__form')!
+  const frame = view.element.querySelector('.mobile-workface-frame')!
+  expect(frame.contains(form)).toBe(false)
+  const calls = view.forwardRpc.mock.calls.length
+  await view.render(false, true)
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  expect(view.element.querySelector('.mobile-goal-create__form')).toBe(form)
+  expect(form.closest('[hidden]')).toBeNull()
+  expect(view.element.querySelector('[aria-label="目标工坊"]')).not.toBeNull()
+  expect(view.forwardRpc.mock.calls).toHaveLength(calls)
+  expect(await owner.list()).toEqual([])
+})
 
 it('responsive Goals actual App keeps its selected owner, original editor and unsaved draft through wide and phone panes', async () => {
   await owner.create({ id: 'responsive-original', title: 'Original responsive goal', description: 'Original owner body' })

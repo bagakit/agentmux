@@ -6,7 +6,7 @@ import base from '../vitest.config'
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.RESPONSIVE_GOALS_MUTATION, trace = process.env.RESPONSIVE_GOALS_LOADED
 const owner = 'apps/mobile/src/goals/MobileGoalsSurface.tsx'
 const variants = {
-  'hide-wide-goal-list': { before: 'const listVisible = visible && (wide || selected === null && !discussionTab)', after: 'const listVisible = visible && (selected === null && !discussionTab)', target: 'responsive Goals actual App' },
+  'hide-wide-goal-list': { before: 'split: wide,', after: 'split: false,', target: 'responsive Goals actual App' },
   'remount-width-goal-editor': { before: '<GoalDetail key={id}', after: '<GoalDetail key={id + (wide ? ":wide" : ":phone")}', target: 'responsive Goals actual App' },
   'recreate-list-on-selection': { before: '[client, connected, listVisible, revision, status]', after: '[client, connected, listVisible, revision, status, selected]', target: 'responsive Goals uses only its visible original list' }
 } as const
