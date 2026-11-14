@@ -1429,6 +1429,8 @@ export type AgentPromptSubmissionRecord = {
   run: AgentMuxRunRef
   admission?: NonNullable<AgentMuxAgentSession['promptCompletionAdmission']>
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
+  /** Earlier acknowledged redraws of this same frozen input, before its current phase. Never input authority. */
+  ptyRefreshHistory?: NonNullable<NonNullable<AgentMuxAgentSession['promptCompletionAdmission']>['frameRefresh']>[]
 }
 
 /** Original requested position, never a placement ACK or a role/permission grant. */

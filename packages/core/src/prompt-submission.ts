@@ -10,7 +10,7 @@ import { hasCurrentNativeMainBinding, hasSelectedNativeTarget } from './agent-na
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
-import { normalizePromptInputIntent } from './prompt-submission-record.js'
+import { normalizePromptInputIntent, terminalPromptPhaseOperationIdentity } from './prompt-submission-record.js'
 import { inputChunkBytes, retainedInputFits } from './recoverable-input-frame.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import type { AgentCapabilityBinding } from './agent-capability.js'
@@ -175,24 +175,6 @@ function promptReadinessDetail(
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `${key}=${String(value)}`)
     .join(' ')
-}
-
-function terminalPromptPhaseOperationIdentity(
-  session: AgentMuxAgentSession,
-  submissionId: string,
-  phase: 'refresh' | 'interrupt' | 'payload' | 'submit',
-  data: string
-): string {
-  return createHash('sha256')
-    .update(JSON.stringify([
-      'agentmux-terminal-prompt-v1',
-      session.agentSessionId,
-      session.run.runId,
-      submissionId,
-      phase,
-      data
-    ]))
-    .digest('base64url')
 }
 
 function terminalPromptChunkIdentity(operationId: string, startByte: number, endByte: number): string {

@@ -11,7 +11,8 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { dequal } from 'dequal'
 import { nativeInputCorrelationKey } from './native-input-correlation.js'
-import type { AgentMuxRunRef, AgentMuxStoredAgentSession, AgentPromptInputPlan, AgentPromptSubmissionRecord, AgentTerminalPromptReadinessSource } from './types.js'
+import { createHash } from 'node:crypto'
+import type { AgentMuxRunRef, AgentMuxStoredAgentSession, AgentPromptInputPlan, AgentPromptSubmissionRecord, AgentTerminalInputPhaseState, AgentTerminalPromptReadinessSource } from './types.js'
 
 /** Pure original-input record decoding, shared by durable storage and public receipts. */
 export const MAX_STORED_TEXT_BYTES = 1024 * 1024
@@ -162,7 +163,165 @@ export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissi
         correlation: correlation as Extract<NonNullable<AgentPromptSubmissionRecord['nativeResult']>, { state: 'completed' | 'failed' | 'interrupted' }>['correlation'] }
     }
   }
+  if (r.ptyRefreshHistory !== undefined) {
+    if (!Array.isArray(r.ptyRefreshHistory) || !parsed.admission || parsed.admission.intent?.plan.kind !== 'render-then-submit' ||
+        !parsed.admission.intent.plan.prepare?.refresh || ['native', 'launch'].includes(parsed.admission.transport ?? 'pty'))
+      throw new AgentMuxError('Original redraw history requires its PTY claim.', 'INVALID_AGENT_SESSION_STORE')
+    const ids = new Set<string>()
+    parsed.ptyRefreshHistory = r.ptyRefreshHistory.map(value => {
+      const refresh = normalizePromptCompletionAdmission({ ...parsed.admission, frameRefresh: value }).frameRefresh!
+      if (!refresh.acknowledged || refresh.notApplied || ids.has(refresh.operationId) || refresh.operationId === parsed.admission!.frameRefresh?.operationId)
+        throw new AgentMuxError('Original redraw history changed its acknowledged phase.', 'INVALID_AGENT_SESSION_STORE')
+      ids.add(refresh.operationId)
+      return refresh
+    })
+    validatePtyPlan(parsed)
+  }
   return parsed
+}
+
+/** The original machine identity used by both phase dispatch and its retained receipt. */
+export function terminalPromptPhaseOperationIdentity(session: { agentSessionId: string; run: AgentMuxRunRef }, submissionId: string,
+  phase: 'refresh' | 'interrupt' | 'payload' | 'submit', data: string): string {
+  return createHash('sha256').update(JSON.stringify(['agentmux-terminal-prompt-v1', session.agentSessionId,
+    session.run.runId, submissionId, phase, data])).digest('base64url')
+}
+
+const ptyConflict = (): never => { throw new AgentMuxError('The original PTY input claim or phase receipt changed.', 'AGENT_PROMPT_OPERATION_CONFLICT') }
+type PtyAdmission = Extract<NonNullable<AgentPromptSubmissionRecord['admission']>, { transport?: 'pty' }>
+type Refresh = NonNullable<PtyAdmission['frameRefresh']>
+
+/** Missing observations preserve evidence. Existing IDs/timestamps are not renewed by a late projection. */
+function retainPtyEvidence<T>(before: T | undefined, after: T | undefined): T | undefined {
+  if (before === undefined) return after
+  if (after === undefined || dequal(before, after)) return before
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after)) return ptyConflict()
+  const result = { ...before } as Record<string, unknown>
+  for (const [name, value] of Object.entries(after)) result[name] = retainPtyEvidence(result[name], value)
+  return result as T
+}
+
+function mergePtyPhase<T extends AgentTerminalInputPhaseState>(before: T | undefined, after: T | undefined): T | undefined {
+  if (!before) return after
+  if (!after) return before
+  const { acknowledged: oldAck, notApplied: oldRefusal, chunks: oldChunks, ...original } = before
+  const { acknowledged: newAck, notApplied: newRefusal, chunks: newChunks, ...incoming } = after
+  if (!dequal(original, incoming) || oldAck && newRefusal || oldRefusal && newAck) return ptyConflict()
+  let chunks = oldChunks ?? newChunks
+  if (oldChunks && newChunks) {
+    if (oldChunks.length !== newChunks.length) return ptyConflict()
+    chunks = oldChunks.map((chunk, index) => mergePtyPhase(chunk, newChunks[index])!)
+  }
+  if ((oldRefusal || newRefusal) && chunks?.some(chunk => chunk.acknowledged)) return ptyConflict()
+  return { ...after, acknowledged: oldAck || newAck,
+    ...(oldRefusal || newRefusal ? { notApplied: true } : {}), ...(chunks ? { chunks } : {}) }
+}
+
+function ptyClaim(value: PtyAdmission) {
+  const { acknowledged, notApplied, chunks, frameRefresh, operationId, startByte, endByte, outputCursorBytes, uncertainTurn, transport, ...claim } = value
+  return claim
+}
+
+function refreshClaim(value: PtyAdmission, terminal: AgentPromptSubmissionRecord['terminalPromptSubmission']): value is PtyAdmission & { frameRefresh: Refresh } {
+  const refresh = value.frameRefresh
+  return !terminal && !!refresh && value.operationId === refresh.operationId && value.startByte === refresh.inputByteRange.startByte &&
+    value.endByte === refresh.inputByteRange.endByte && !value.acknowledged && !value.notApplied
+}
+
+function validatePtyPlan(value: AgentPromptSubmissionRecord): void {
+  const admission = value.admission as PtyAdmission | undefined, plan = admission?.intent?.plan
+  if (!admission || !plan || plan.kind === 'native-rpc' || plan.kind === 'runtime-launch') return
+  const terminal = value.terminalPromptSubmission
+  if (plan.kind === 'single-phase') {
+    if (terminal || admission.endByte - admission.startByte !== Buffer.byteLength(plan.data)) return ptyConflict()
+  } else if (terminal) {
+    const first = terminal.prepare?.interrupt ?? terminal.payload
+    if (terminal.run.runId !== value.run.runId || terminal.submissionId !== admission.submissionId ||
+        terminal.promptDigest !== createHash('sha256').update(admission.intent!.prompt).digest('base64url') ||
+        terminal.payload.operationId !== terminalPromptPhaseOperationIdentity(value, terminal.submissionId, 'payload', plan.payload) ||
+        terminal.submit.operationId !== terminalPromptPhaseOperationIdentity(value, terminal.submissionId, 'submit', plan.submit) ||
+        first.operationId !== admission.operationId || first.inputByteRange.startByte !== admission.startByte ||
+        terminal.submit.inputByteRange.endByte !== admission.endByte ||
+        terminal.payload.inputByteRange.endByte !== terminal.submit.inputByteRange.startByte ||
+        terminal.payload.inputByteRange.endByte - terminal.payload.inputByteRange.startByte !== Buffer.byteLength(plan.payload) ||
+        terminal.submit.inputByteRange.endByte - terminal.submit.inputByteRange.startByte !== Buffer.byteLength(plan.submit) ||
+        terminal.prepare?.interrupt && (plan.kind !== 'render-then-submit' || !plan.prepare ||
+          terminal.prepare.interrupt.operationId !== terminalPromptPhaseOperationIdentity(value, terminal.submissionId, 'interrupt', plan.prepare.interrupt) ||
+          terminal.prepare.interrupt.inputByteRange.endByte !== terminal.payload.inputByteRange.startByte ||
+          terminal.prepare.interrupt.inputByteRange.endByte - terminal.prepare.interrupt.inputByteRange.startByte !== Buffer.byteLength(plan.prepare.interrupt))) return ptyConflict()
+  }
+  const refreshes = [...(value.ptyRefreshHistory ?? []), ...(admission.frameRefresh ? [admission.frameRefresh] : [])]
+  for (let index = 0; index < refreshes.length; index++) {
+    const refresh = refreshes[index]!, previous = refreshes[index - 1]
+    if (plan.kind !== 'render-then-submit' || !plan.prepare?.refresh || !admission.submissionId ||
+        refresh.operationId !== terminalPromptPhaseOperationIdentity(value, admission.submissionId, 'refresh',
+          JSON.stringify([plan.prepare.refresh, refresh.nativeSourceId, refresh.resizeRevision])) ||
+        refresh.inputByteRange.endByte - refresh.inputByteRange.startByte !== Buffer.byteLength(plan.prepare.refresh) ||
+        previous && (previous.nativeSourceId !== refresh.nativeSourceId || previous.resizeRevision >= refresh.resizeRevision ||
+          previous.inputByteRange.endByte > refresh.inputByteRange.startByte) ||
+        !refreshClaim(admission, terminal) && refresh.inputByteRange.endByte > admission.startByte) return ptyConflict()
+  }
+}
+
+/** One frozen logical input; physical redraw/main phases retain their own immutable operation and byte range. */
+export function mergePtyPromptRecord(before: AgentPromptSubmissionRecord, incoming: AgentPromptSubmissionRecord, settlement = false): AgentPromptSubmissionRecord {
+  if (before.agentSessionId !== incoming.agentSessionId || !dequal(before.run, incoming.run) ||
+      before.launch || incoming.launch || before.admission && ['native', 'launch'].includes(before.admission.transport ?? 'pty') ||
+      incoming.admission && ['native', 'launch'].includes(incoming.admission.transport ?? 'pty')) return ptyConflict()
+  const oldClaim = before.admission as PtyAdmission | undefined, newClaim = incoming.admission as PtyAdmission | undefined
+  if (!!oldClaim !== !!newClaim || oldClaim && newClaim && !dequal(ptyClaim(oldClaim), ptyClaim(newClaim))) return ptyConflict()
+  const result = { ...incoming }
+  if (oldClaim && newClaim) {
+    const samePhase = oldClaim.operationId === newClaim.operationId && oldClaim.startByte === newClaim.startByte && oldClaim.endByte === newClaim.endByte
+    let history = before.ptyRefreshHistory
+    if (incoming.ptyRefreshHistory && !dequal(incoming.ptyRefreshHistory, history)) {
+      const prefix = Math.min(history?.length ?? 0, incoming.ptyRefreshHistory.length)
+      if (!dequal((history ?? []).slice(0, prefix), incoming.ptyRefreshHistory.slice(0, prefix))) return ptyConflict()
+      if (incoming.ptyRefreshHistory.length > (history?.length ?? 0)) {
+        if (!settlement) return ptyConflict()
+        history = incoming.ptyRefreshHistory
+      }
+    }
+    let refresh: Refresh | undefined
+    if (oldClaim.frameRefresh && newClaim.frameRefresh && oldClaim.frameRefresh.operationId !== newClaim.frameRefresh.operationId) {
+      if (!refreshClaim(oldClaim, before.terminalPromptSubmission) || !oldClaim.frameRefresh.acknowledged ||
+          !refreshClaim(newClaim, incoming.terminalPromptSubmission)) return ptyConflict()
+      history = [...(history ?? []), oldClaim.frameRefresh]
+      refresh = newClaim.frameRefresh
+    } else refresh = mergePtyPhase(oldClaim.frameRefresh, newClaim.frameRefresh)
+    if (!samePhase) {
+      if (!refreshClaim(oldClaim, before.terminalPromptSubmission) || !oldClaim.frameRefresh.acknowledged ||
+          newClaim.startByte < oldClaim.endByte || (!refreshClaim(newClaim, incoming.terminalPromptSubmission) && !incoming.terminalPromptSubmission)) return ptyConflict()
+    }
+    const phase = samePhase ? mergePtyPhase({ operationId: oldClaim.operationId,
+      inputByteRange: { startByte: oldClaim.startByte, endByte: oldClaim.endByte }, acknowledged: oldClaim.acknowledged ?? false,
+      ...(oldClaim.notApplied ? { notApplied: true } : {}), ...(oldClaim.chunks ? { chunks: oldClaim.chunks } : {}) },
+    { operationId: newClaim.operationId, inputByteRange: { startByte: newClaim.startByte, endByte: newClaim.endByte },
+      acknowledged: newClaim.acknowledged ?? false, ...(newClaim.notApplied ? { notApplied: true } : {}), ...(newClaim.chunks ? { chunks: newClaim.chunks } : {}) })! : undefined
+    result.admission = { ...newClaim, ...(phase && (oldClaim.acknowledged !== undefined || newClaim.acknowledged !== undefined) ? { acknowledged: phase.acknowledged } : {}),
+      ...(phase?.notApplied ? { notApplied: true } : {}), ...(phase?.chunks ? { chunks: phase.chunks } : {}),
+      ...(refresh ? { frameRefresh: refresh } : {}), ...(oldClaim.uncertainTurn ? { uncertainTurn: true } : {}),
+      ...(oldClaim.outputCursorBytes === undefined ? {} : { outputCursorBytes: Math.max(oldClaim.outputCursorBytes, newClaim.outputCursorBytes ?? 0) }) }
+    if (history) result.ptyRefreshHistory = history
+  } else if (before.ptyRefreshHistory || incoming.ptyRefreshHistory) return ptyConflict()
+  const oldTerminal = before.terminalPromptSubmission, nextTerminal = incoming.terminalPromptSubmission
+  if (oldTerminal && nextTerminal) {
+    const { payload: oldPayload, submit: oldSubmit, prepare: oldPrepare, outputCursorBytes: oldCursor, ...original } = oldTerminal
+    const { payload, submit, prepare, outputCursorBytes, ...next } = nextTerminal
+    const oldInterrupt = oldPrepare?.interrupt, interrupt = prepare?.interrupt
+    const oldPreparation = oldPrepare && { ...oldPrepare }, preparation = prepare && { ...prepare }
+    delete oldPreparation?.interrupt; delete preparation?.interrupt
+    const retainedPrepare = retainPtyEvidence(oldPreparation, preparation)
+    result.terminalPromptSubmission = { ...retainPtyEvidence(original, next)!, outputCursorBytes: Math.max(oldCursor, outputCursorBytes),
+      payload: mergePtyPhase(oldPayload, payload)!, submit: mergePtyPhase(oldSubmit, submit)!,
+      ...(retainedPrepare ? { prepare: { ...retainedPrepare, ...(oldInterrupt || interrupt ? { interrupt: mergePtyPhase(oldInterrupt, interrupt)! } : {}) } } : {}) }
+  } else if (oldTerminal) result.terminalPromptSubmission = oldTerminal
+  // Validate newly introduced physical evidence; old incomplete records are not backfilled or reinterpreted on reads.
+  if (!dequal(result.terminalPromptSubmission, oldTerminal) || !dequal(result.ptyRefreshHistory, before.ptyRefreshHistory) ||
+      !oldClaim?.acknowledged && result.admission?.acknowledged ||
+      oldClaim?.operationId !== result.admission?.operationId || oldClaim?.frameRefresh?.operationId !== result.admission?.frameRefresh?.operationId) validatePtyPlan(result)
+  parsePromptSubmissionRecord(result)
+  return result
 }
 
 function terminalInputPhase(

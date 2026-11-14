@@ -17,7 +17,7 @@ import { parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-recovery/control-contract.js'
 import { normalizeAgentContinuityOperation, normalizeAgentContinuityLaunchInput, normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation } from './agent-session-recovery/continuity-contract.js'
 import { agentPromptInputId, validateAgentPromptInputKey } from './agent-prompt-condition.js'
-import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource } from './prompt-submission-record.js'
+import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource, mergePtyPromptRecord } from './prompt-submission-record.js'
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
@@ -277,7 +277,7 @@ export type AgentMuxAgentSessionStore = {
   readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null>
   /** Exact original claim; history is never loaded into ordinary Session metadata. */
   readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null>
-  /** Original outcome CAS. A late receipt cannot move the latest projection back. */
+  /** Original outcome CAS. PTY evidence stays in the original record, including after retirement; it never rewrites current Session facts. */
   settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void>
   /** Resolve one original active/retired source and its reopen correlation, without catalog discovery. */
   readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null>
@@ -465,6 +465,12 @@ function samePromptReceiptClaim(original: AgentPromptSubmissionRecord | null | u
 }
 
 function assertPromptSettlement(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord): void {
+  if (!expected.launch && !next.launch && !['native', 'launch'].includes(expected.admission?.transport ?? 'pty') &&
+      !['native', 'launch'].includes(next.admission?.transport ?? 'pty')) {
+    if (!isDeepStrictEqual(mergePtyPromptRecord(expected, next, true), next)) throw new AgentMuxError(
+      'An original PTY settlement cannot discard retained evidence.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    return
+  }
   const { nativeResult: _oldResult, ...oldInput } = expected, { nativeResult: _newResult, ...newInput } = next
   if (isDeepStrictEqual(oldInput, newInput)) return
   const { acknowledged: _ack, notApplied: _notApplied, native: _native, launch: _launch, ...originalClaim } = expected.admission ?? {}
@@ -504,7 +510,10 @@ function assertPromptRecordWrite(original: AgentPromptSubmissionRecord | undefin
   }
   if (!original || isDeepStrictEqual(original, next)) return
   if (original.launch || next.launch) throw new AgentMuxError('An original Runtime launch input cannot be replaced by another carrier or body.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-  if (!['native', 'launch'].includes(original.admission?.transport ?? 'pty') && !['native', 'launch'].includes(next.admission?.transport ?? 'pty')) return
+  if (!['native', 'launch'].includes(original.admission?.transport ?? 'pty') && !['native', 'launch'].includes(next.admission?.transport ?? 'pty')) {
+    Object.assign(next, mergePtyPromptRecord(original, next, receipt))
+    return
+  }
   if (!receipt || next.admission?.native?.outcome === 'claimed' || next.admission?.launch?.outcome === 'claimed') throw new AgentMuxError(
     'The original input record can only be changed by its exact receipt owner.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   assertPromptSettlement(original, next)
@@ -3022,6 +3031,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   }
 
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
+    expected = structuredClone(expected); next = structuredClone(next)
     this.assertMemoryRecordReadable(expected.agentSessionId)
 
     signal?.throwIfAborted()
@@ -3030,7 +3040,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     assertPromptRecordWrite(current, next, true); assertPromptSettlement(current, next)
     const latest = this.sessions.get(expected.agentSessionId), projected = promptAdmissionRecord(latest)
     this.saveMemoryPromptAdmission(structuredClone(next))
-    if (latest && projected && this.promptRecordKey(projected) === key) {
+    if (next.admission && ['native', 'launch'].includes(next.admission.transport ?? 'pty') && latest && projected && this.promptRecordKey(projected) === key) {
       this.sessions.set(latest.agentSessionId, { ...latest, promptCompletionAdmission: structuredClone(next.admission!),
         updatedAt: Math.max(latest.updatedAt, Date.now()) })
     }
@@ -4039,13 +4049,15 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
+    expected = structuredClone(expected); next = structuredClone(next)
     await this.enqueue(async () => {
-      const id = expected.admission!.submissionId!
+      const id = expected.admission?.submissionId ?? expected.terminalPromptSubmission?.submissionId ?? expected.admission?.operationId
+      if (!id) throw new AgentMuxError('The original input has no retained settlement identity.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const original = this.promptAdmission(this.db, expected.agentSessionId, expected.run, id)
       if (!samePromptReceiptClaim(original, expected)) throw new AgentMuxError('The original Native receipt changed.', 'STALE_AGENT_SESSION')
       assertPromptRecordWrite(original, next, true); assertPromptSettlement(original, next)
       const latest = this.sessionMetadata(this.db, expected.agentSessionId), projected = promptAdmissionRecord(latest)
-      if (latest && projected && projected.run.runId === expected.run.runId && promptRecordId(projected) === promptRecordId(expected)) {
+      if (next.admission && ['native', 'launch'].includes(next.admission.transport ?? 'pty') && latest && projected && projected.run.runId === expected.run.runId && promptRecordId(projected) === promptRecordId(expected)) {
         this.saveSession(this.db, { ...latest, promptCompletionAdmission: structuredClone(next.admission!),
           updatedAt: Math.max(latest.updatedAt, Date.now()) }, false, true)
       }
