@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { AgentMuxEvidence, AgentMuxNativeService } from '@agentmux/core'
 import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
 
@@ -31,6 +31,23 @@ export function createRunServiceProjection() {
     const changed = !previous || previous.health !== health
     entries.set(key, { service, evidence, health, version: changed ? version + 1 : previous.version })
     if (changed) notify(key)
+  }
+  const healthVersion = (key: string | null): number => key === null ? 0 : entries.get(key)?.version ?? 0
+  const subscribe = (key: string | null, seed: AgentMuxNativeService | null, listener: Listener): (() => void) => {
+    if (key === null) return () => {}
+    let subscribers = listeners.get(key)
+    if (!subscribers) listeners.set(key, subscribers = new Set())
+    subscribers.add(listener)
+    // A mounted terminal can belong to a host tool rather than a workbench Tab.
+    // Its explicit reader retains the same Core service projection, without a fake Session entry.
+    update(key, seed)
+    return () => {
+      subscribers.delete(listener)
+      if (!subscribers.size) {
+        listeners.delete(key)
+        if (!collectionKeys.has(key)) { entries.delete(key); notify(key) }
+      }
+    }
   }
   return {
     observeSnapshot(session: SessionSnapshot): void {
@@ -67,24 +84,19 @@ export function createRunServiceProjection() {
       return entries.get(targetKey(session))?.evidence ?? null
     },
     healthVersion(session?: SessionSnapshot): number {
-      return session ? entries.get(targetKey(session))?.version ?? 0 : 0
+      return healthVersion(session ? targetKey(session) : null)
     },
     globalVersion: (): number => version,
     subscribe(session: SessionSnapshot | undefined, listener: Listener): () => void {
-      if (!session || session.hostId !== session.control.hostId) return () => {}
-      const key = targetKey(session)
-      let subscribers = listeners.get(key)
-      if (!subscribers) listeners.set(key, subscribers = new Set())
-      subscribers.add(listener)
-      // A mounted terminal can belong to a host tool rather than a workbench Tab.
-      // Its explicit reader retains the same Core service projection, without a fake Session entry.
-      update(key, session.nativeService ?? null)
-      return () => {
-        subscribers.delete(listener)
-        if (!subscribers.size) {
-          listeners.delete(key)
-          if (!collectionKeys.has(key)) { entries.delete(key); notify(key) }
-        }
+      return subscribe(session && session.hostId === session.control.hostId ? targetKey(session) : null, session?.nativeService ?? null, listener)
+    },
+    reader(session: SessionSnapshot | undefined) {
+      const key = session ? targetKey(session) : null
+      // Stable hook callbacks retain only this exact key and its original seed.
+      // A callback handed to the previous Run must never target a later Run.
+      return {
+        subscribe: subscribe.bind(null, session && session.hostId === session.control.hostId ? key : null, session?.nativeService ?? null),
+        snapshot: healthVersion.bind(null, key)
       }
     },
     subscribeAll(listener: Listener): () => void {
@@ -102,9 +114,8 @@ export const runServiceProjection = createRunServiceProjection()
 
 export function useRunService(session: SessionSnapshot | undefined): AgentMuxNativeService | null {
   const key = session ? targetKey(session) : null
-  const subscribe = useCallback((listener: Listener) => runServiceProjection.subscribe(session, listener), [key])
-  const snapshot = useCallback(() => runServiceProjection.healthVersion(session), [key])
-  useSyncExternalStore(subscribe, snapshot)
+  const reader = useMemo(() => runServiceProjection.reader(session), [key])
+  useSyncExternalStore(reader.subscribe, reader.snapshot)
   useEffect(() => { if (session) runServiceProjection.observeSnapshot(session) }, [key, session?.nativeService])
   return session ? runServiceProjection.read(session) : null
 }
