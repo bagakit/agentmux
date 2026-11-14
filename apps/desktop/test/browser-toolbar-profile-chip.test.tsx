@@ -105,7 +105,7 @@ describe('Browser toolbar Profile chip', () => {
   })
 
   it('a refused switch returns to the original Profile, and Retry asks again for the same target', async () => {
-    port.switchProfile.mockRejectedValueOnce(new Error('Take control first'))
+    port.switchProfile.mockRejectedValueOnce(Object.assign(new Error('Take control first'), { code: 'BROWSER_AGENT_CONTROL_ACTIVE' }))
     await mount()
     await openMenu()
     await act(async () => items()[0]!.click())
@@ -148,4 +148,55 @@ describe('Browser toolbar Profile chip', () => {
     expect(container.querySelector('.browser-profile-chip--unknown')?.textContent).toBe('Profile unknown')
     expect(container.querySelector('.browser-profile-chip--unknown')?.getAttribute('title')).toContain('EACCES')
   })
+})
+
+it('metadata-only recovery stays visible when the original Profile directory legitimately narrows to the one remaining current Profile', async () => {
+  const reference = { regionId: 'r1', browserId: 'b1' }
+  const register = vi.fn()
+    .mockResolvedValueOnce({ reference, outcome: 'partial', save: null, issues: [{ step: 'save', code: 'SURVEY_PAGE_SAVE_UNCONFIRMED',
+      message: 'Original metadata save unconfirmed', recovery: 'Retry only the original reference' }] })
+    .mockResolvedValue({ reference, outcome: 'registered', save: null, issues: [] })
+  useAppStore.setState({ registerSurveyBrowserPage: register })
+  await mount(); await openMenu()
+  await act(async () => items()[0]!.click())
+  expect(container.querySelector('[data-survey-profile-registration="b1"]')).not.toBeNull()
+  await act(async () => {
+    const next = { revision: 2, sequence: 2, folders: [], views: [], profiles: [personal] }
+    port.set(next)
+    for (const listener of port.listeners) listener(next)
+  })
+  expect(useAppStore.getState().tabs.t1!.regions.r1).toMatchObject({ profileId: 'p-personal' })
+  expect(port.switchProfile).toHaveBeenCalledExactlyOnceWith('b1', 'p-personal')
+  const notice = container.querySelector('[data-survey-profile-registration="b1"]')
+  expect(notice, 'A smaller directory can hide the identity picker, but cannot remove recovery for the already accepted binding').not.toBeNull()
+  const retry = [...notice!.querySelectorAll('button')].find(button => button.textContent === 'Retry Survey registration')!
+  await act(async () => retry.click())
+  expect(register).toHaveBeenCalledTimes(2)
+  expect(port.switchProfile).toHaveBeenCalledTimes(1)
+})
+
+it('a lost switch ACK before the exact Main update retains metadata recovery after that delayed update without replaying Native', async () => {
+  const reference = { regionId: 'r1', browserId: 'b1' }
+  const confirmedMain = { id: 'b1', profileId: 'p-personal', mode: 'normal' as const, url: 'https://generic.invalid/', title: 'Original committed Main page',
+    navigationId: 'main-committed-before-delayed-event', canGoBack: false, canGoForward: false, loading: false, viewport: 'responsive' as const,
+    error: null, driving: false, appLinkPrompt: null }
+  const register = vi.fn().mockResolvedValue({ reference, outcome: 'registered', save: null, issues: [] })
+  useAppStore.setState({ registerSurveyBrowserPage: register })
+  port.switchProfile.mockImplementationOnce(async () => { throw new Error('Switch reply lost after original Main commit, before Renderer updated event') })
+  await mount(); await openMenu()
+  await act(async () => items()[0]!.click())
+  const afterCatch = useAppStore.getState().tabs.t1!.regions.r1
+  expect(afterCatch).toMatchObject({ profileId: 'p-client' })
+  expect(container.textContent).toContain('Switch reply unconfirmed')
+  expect(container.textContent).not.toContain('current environment observed')
+  // Deliver the original Main's exact updated event only after the rejected ACK
+  // has reached the real Chip/Store. This is a controlled protocol boundary,
+  // while the separate Native attempt proves the corresponding physical Main commit.
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: confirmedMain }))
+  const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => ['Retry', 'Retry Survey registration'].includes(button.textContent ?? ''))
+  expect(retry, 'The original unknown switch operation needs an explicit recovery action').toBeTruthy()
+  await act(async () => retry!.click())
+  expect(port.switchProfile).toHaveBeenCalledExactlyOnceWith('b1', 'p-personal')
+  expect(useAppStore.getState().tabs.t1!.regions.r1).toMatchObject({ profileId: 'p-personal' })
+  expect(register, 'After Main confirms the original target, explicit recovery must reach metadata repair rather than become an inert same-Profile Native retry').toHaveBeenCalledTimes(1)
 })

@@ -161,3 +161,22 @@ it('the actual view owner clears only an incompatible Survey selection and expos
   expect(presentation.catalog.survey?.profileView).toEqual({ kind: 'profile', profileId: b })
   expect(create).not.toHaveBeenCalled(); expect(switchProfile).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
 })
+
+it('a missing ACK before the later Main update retains the original membership generation across remove/add/remove and metadata repair', async () => {
+  const reference = await originalBoundPage(), original = useAppStore.getState().surveyPageReferences
+  let fail!: (error: Error) => void
+  switchProfile.mockImplementationOnce(async () => await new Promise((_resolve, reject) => { fail = reject }))
+  const pending = useAppStore.getState().switchBrowserProfileForSurvey(reference, b)
+  await useAppStore.getState().setSurveyPageCollected(reference, true)
+  await useAppStore.getState().setSurveyPageCollected(reference, false)
+  fail(Error('Switch reply lost before the original Main updated event'))
+  const receipt = await pending
+  expect(receipt.switchOutcome).toBe('unconfirmed')
+  expect(receipt.membership).toBe(original)
+  expect(useAppStore.getState().tabs[tabId]!.regions[regionIdA]).toMatchObject({ profileId: a })
+  useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...snapshot(reference.browserId, b), navigationId: 'later-exact-Main-update' } })
+  const repaired = await useAppStore.getState().repairSurveyProfileAdmission(receipt)
+  expect(repaired.admission.issues[0]?.code).toBe('SURVEY_PAGE_MEMBERSHIP_SUPERSEDED')
+  expect(useAppStore.getState().surveyPageReferences).toEqual([])
+  expect(switchProfile).toHaveBeenCalledTimes(1); expect(create).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
+})
