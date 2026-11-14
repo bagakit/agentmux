@@ -3,6 +3,8 @@ import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import { parseHostedAgentSessionRead, decodeHostedValue } from './hosted-value.js'
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { validateAgentInputWaitRef } from './agent-input-wait.js'
 import { executionRouteRpc } from './host-route-rpc.js'
 import { resolveSpaceMember } from './space-member-owner.js'
 import type { AgentMuxSpatialStateStore } from './spatial-state.js'
@@ -23,11 +25,31 @@ export async function spaceMemberRuntime(ports: {
   store: AgentMuxSpatialStateStore; local: RuntimePort; clients(): Promise<readonly AgentMuxRpcCoreClient[]>; gateway?: HostRouteGateway
 }, input: SpaceMemberParams[keyof SpaceMemberParams], original: AgentMuxRpcCallContext) {
   const initial = await resolveSpaceMember(ports.store, input.target)
-  const assertCurrent = async () => {
-    original.signal?.throwIfAborted(); await original.assertCurrent?.()
+  const assertPlacementCurrent = async () => {
     if (!isDeepStrictEqual(await resolveSpaceMember(ports.store, input.target), initial)) throw new AgentMuxError('The original member placement or route changed. Keep the original input and inspect that source.', 'SPACE_MEMBER_TARGET_MISMATCH')
   }
-  const context = { ...original, assertCurrent }, key = createHash('sha256').update(JSON.stringify(input.target)).digest('hex')
+  const assertCurrent = async () => {
+    original.signal?.throwIfAborted(); await original.assertCurrent?.()
+    await assertPlacementCurrent()
+  }
+  const p = rpcRecord(input.call.params)
+  const invocation = input.call.method === 'runtime.invoke' ? rpcRecord(decodeHostedValue(p.invocation)) : undefined
+  const prompt = invocation?.method === 'submitAgentPrompt' && Array.isArray(invocation.args) ? rpcRecord(invocation.args[0]) : undefined
+  const rejoin = invocation?.method === 'rejoinAgentInputWaiting' && Array.isArray(invocation.args) ? rpcRecord(invocation.args[0]) : undefined
+  const inputKey = prompt?.admissionIntent ? validateAgentPromptInputKey({ kind: 'prompt', agentSessionId: prompt.agentSessionId, expectedRun: prompt.expectedRun, submissionId: prompt.operationId })
+    : rejoin ? validateAgentInputWaitRef(rejoin.ref).key : undefined
+  const context: AgentMuxRpcCallContext = { ...original, assertCurrent, ...(inputKey ? { retainAcceptedInputAuthority: async key => {
+    if (!isDeepStrictEqual(key, inputKey)) throw new AgentMuxError('This accepted input differs from the original member Session, Run or operation.', 'SPACE_MEMBER_TARGET_MISMATCH')
+    await assertCurrent()
+    const accepted = await original.retainAcceptedInputAuthority?.(key)
+    // The original Core owns accepted waiting. Retain the member/author checks,
+    // while this reply reader keeps only its own cancellation lifetime.
+    return { assertCurrent: async () => {
+      if (accepted) await accepted.assertCurrent()
+      else await original.assertCurrent?.()
+      await assertPlacementCurrent()
+    }, release: () => { accepted?.release() } }
+  } } : {}) }, key = createHash('sha256').update(JSON.stringify(input.target)).digest('hex')
   const ended = (emit: (event: AgentMuxHostedStreamEvent) => void | Promise<void>) => (error?: Error) => {
     if (error && !original.signal?.aborted) return emit({ type: 'error', error: {
       code: error instanceof AgentMuxError ? error.code : 'SPACE_MEMBER_OBSERVATION_UNAVAILABLE', message: error.message } })
@@ -70,8 +92,6 @@ export async function spaceMemberRuntime(ports: {
     }
   }
   await assertCurrent()
-  const p = rpcRecord(input.call.params)
-  const invocation = input.call.method === 'runtime.invoke' ? rpcRecord(decodeHostedValue(p.invocation)) : undefined
   // These original methods already validate the exact SID/expected Run at D.
   // Re-reading it here would add a second network admission before each key.
   const fencedInput = invocation && ['writeAgent', 'pasteAgent', 'submitAgentPrompt'].includes(String(invocation.method))
