@@ -11,6 +11,7 @@
 .image-annotation-editor .image-annotation-toolbar__compact { display: none; }
 .tab-context-menu.image-annotation-tools-menu { min-width: 190px; max-height: min(70vh, 480px, var(--radix-dropdown-menu-content-available-height, 70vh)); overflow-y: auto; }
 .image-annotation-tools-menu [data-state="checked"] { color: var(--green-text); background: var(--wash-2); }
+.image-annotation-tools-menu__selection { flex: 0 0 12px; display: inline-flex; }
 .image-annotation-editor .image-annotation-toolbar__tools button, .image-annotation-editor .image-annotation-toolbar__history button { min-width: 28px; width: 28px; height: 28px; padding-inline: 4px; }
 .image-annotation-toolbar__history button:last-child { width: auto; min-width: 34px; }
 .image-annotation-toolbar__group { flex: none; }
@@ -18,12 +19,10 @@
 .image-annotation-toolbar__output { flex-wrap: wrap; padding-left: 5px; border-left: 1px solid var(--line); }
 .image-annotation-toolbar__history { flex: none; margin-left: auto; border-left: 1px solid var(--line); padding-left: 8px; }
 .image-annotation-toolbar__actions { flex: none; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
-.image-annotation-editor button { position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 5px; min-width: 30px; height: 30px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-2); font: inherit; font-size: 11px; cursor: pointer; }
-.image-annotation-editor button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
-.image-annotation-editor button:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
-.image-annotation-editor button:disabled { opacity: .38; cursor: default; }
-.image-annotation-toolbar__tools button.selected { border-color: var(--line); background: var(--surface-3); color: var(--text); }
-.image-annotation-toolbar__tools button.selected::after { position: absolute; content: ''; bottom: 2px; left: 9px; right: 9px; height: 2px; background: currentColor; border-radius: 1px; }
+.image-annotation-editor button:where(:not(.agent-icon-button)) { position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 5px; min-width: 30px; height: 30px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-2); font: inherit; font-size: 11px; cursor: pointer; }
+.image-annotation-editor button:where(:not(.agent-icon-button)):hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.image-annotation-editor button:where(:not(.agent-icon-button)):focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.image-annotation-editor button:where(:not(.agent-icon-button)):disabled { opacity: .38; cursor: default; }
 .image-annotation-toolbar__actions button { border-color: var(--line); background: var(--surface-2); }
 .image-annotation-toolbar__actions .primary-button { color: var(--bg); background: var(--green); border-color: transparent; font-weight: 600; }
 .image-annotation-toolbar__actions .primary-button:hover:not(:disabled) { color: var(--bg); background: var(--green-text); }

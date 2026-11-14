@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
-import { RovingToolbar, RovingToolbarButton } from '../RovingToolbar'
+import { RovingToolbar, RovingToolbarButton, RovingToolbarItem } from '../RovingToolbar'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ScreenshotTool } from './drawing-model'
 
@@ -28,6 +29,7 @@ export const ANNOTATION_TOOLS: Array<{ id: AnnotationTool; label: string; key: s
   { id: 'erase', label: 'Erase', key: 'X', icon: icon('action.erase') }
 ]
 const DownIcon = icon('navigation.down')
+const SelectionIcon = icon('status.selected')
 const UndoIcon = icon('action.undo'), RedoIcon = icon('action.redo'), DeleteIcon = icon('action.remove')
 const TOOL_GROUPS: ReadonlyArray<{ label: string; tools: readonly AnnotationTool[] }> = [
   { label: 'View and select', tools: ['select', 'pan'] },
@@ -52,15 +54,21 @@ export function AnnotationToolbar({ active = true, tool, busy, undoable, redoabl
         onCloseAutoFocus={event => { if (!active) event.preventDefault() }}
         onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault(); else event.stopPropagation() }}>
         <DropdownMenu.RadioGroup value={tool}>{ANNOTATION_TOOLS.map(item => <DropdownMenu.RadioItem className="tab-context-menu__item" key={item.id} value={item.id} aria-label={item.label} aria-keyshortcuts={item.key}
-          disabled={busy && item.id !== 'pan'} onSelect={() => onTool(item.id)}><item.icon size={16} /><span>{item.label}</span><kbd>{item.key}</kbd></DropdownMenu.RadioItem>)}</DropdownMenu.RadioGroup>
+          disabled={busy && item.id !== 'pan'} onSelect={() => onTool(item.id)}><item.icon size={16} /><span>{item.label}</span><kbd>{item.key}</kbd>
+          <span className="image-annotation-tools-menu__selection" aria-hidden="true"><DropdownMenu.ItemIndicator asChild><SelectionIcon size={12} /></DropdownMenu.ItemIndicator></span>
+        </DropdownMenu.RadioItem>)}</DropdownMenu.RadioGroup>
       </DropdownMenu.Content></DocumentOverlayPortal>
     </DropdownMenu.Root>
     <div className="image-annotation-toolbar__tools">{TOOL_GROUPS.map(group => <div key={group.label} className="image-annotation-toolbar__group" role="group" aria-label={group.label}>
-      {ANNOTATION_TOOLS.filter(item => group.tools.includes(item.id)).map(item => <RovingToolbarButton key={item.id} type="button"
-      aria-label={item.label} title={item.label + ' (' + item.key + ')'} aria-keyshortcuts={item.key}
-      aria-pressed={tool === item.id} className={tool === item.id ? 'selected' : ''} disabled={busy && item.id !== 'pan'} onClick={() => onTool(item.id)}>
-      <item.icon size={16} />
-    </RovingToolbarButton>)}</div>)}</div>
+      {ANNOTATION_TOOLS.filter(item => group.tools.includes(item.id)).map(item => {
+        const current = tool === item.id
+        const disabled = busy && item.id !== 'pan'
+        return <RovingToolbarItem key={item.id} asChild active={current} focusable={!disabled}>
+          <IconButton aria-label={item.label} title={item.label + ' (' + item.key + ')'} aria-keyshortcuts={item.key}
+            aria-pressed={current} disabled={disabled} onClick={() => onTool(item.id)}><item.icon size={16} /></IconButton>
+        </RovingToolbarItem>
+      })}
+    </div>)}</div>
     <div className="image-annotation-toolbar__history">
       <RovingToolbarButton type="button" aria-label="Undo" title="Undo" disabled={busy || !undoable} onClick={onUndo}><UndoIcon size={15} /></RovingToolbarButton>
       <RovingToolbarButton type="button" aria-label="Redo" title="Redo" disabled={busy || !redoable} onClick={onRedo}><RedoIcon size={15} /></RovingToolbarButton>
