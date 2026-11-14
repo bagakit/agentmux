@@ -30,7 +30,7 @@ async function settled(assertion: () => void) { await vi.waitFor(async () => { a
 function rpc(f: ReturnType<typeof fixture>, read: () => AgentMuxSpaceCatalog = catalog) {
   return vi.fn(async (method: string, params: any) => method === 'app.snapshot' ? { agents: [] }
     : method === 'agent.inspect' ? { session: f.client.agentSession(params.target.agentSessionId), displayName: { override: null, availability: 'observed' } }
-    : { catalog: read() })
+    : { catalog: structuredClone(read()) })
 }
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
@@ -38,7 +38,7 @@ afterEach(async () => { for (const item of mounted.splice(0)) { await act(async 
 it('mobile locations actual App folds aliases without folding context or cross-Host SID and retains original unknown input', async () => {
   localStorage.setItem('agentmux-mobile-home', 'focus')
   await getDeviceWorkface().replaceBackup({ ...emptyDeviceWorkface(), selectedSessionId: 'session-original' })
-  const f = fixture(); f.client.forwardRpc = rpc(f)
+  const f = fixture(), value = catalog(); f.client.forwardRpc = rpc(f, () => value)
   f.submit.mockRejectedValueOnce(Object.assign(new Error('original ACK unavailable'), { code: 'TRANSPORT_LOST', controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } }))
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
   await waitForElement(view.element, '[contenteditable="true"]')
@@ -72,6 +72,16 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   await click(spaceEntry); expect(choices()).toHaveLength(3); await click(choices()[2]!)
   await settled(() => expect(getDeviceWorkface().snapshot().record.presentation?.identity?.context).toEqual(second))
   expect(editor(view.element)).toBe(input); expect(attempts()).toEqual(retained)
+  await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, '返回 Space'))
+  await openPrimary(view.element, 'Focus')
+  for (const region of value.regions) if (region.execution?.hostId === 'host-original') region.execution = null
+  const focus = [...view.element.querySelectorAll<HTMLElement>('.mobile-spatial-panel')].find(panel => !panel.closest('[hidden]'))!
+  await click(button(focus, '刷新空间目录'))
+  expect(focus.querySelector('.mobile-agent-locations-entry')?.getAttribute('aria-label')).toBe('Original Agent · 位置待确认')
+  await click(focus.querySelector('.mobile-agent-locations-entry')!)
+  expect(sheet().textContent).toContain('位置事实还没确认')
+  await click(button(sheet(), '关闭位置选择')); await click(focus.querySelector('.mobile-agent-row__open')!)
+  expect(editor(view.element)).toBe(input); expect(attempts()).toEqual(retained)
   expect(f.submit).toHaveBeenCalledTimes(1); expect(f.signalAgent).not.toHaveBeenCalled(); expect(f.rejoinInput).not.toHaveBeenCalled()
   expect(f.client.forwardRpc.mock.calls.some(([method]) => method === 'space.focus' || /agent\.(start|resume|stop)/.test(method))).toBe(false)
 })
@@ -97,7 +107,7 @@ it('mobile locations Zone uses the original exact tuple and keeps a failed selec
 })
 
 it('mobile locations rejects late exact reads after client SID Runtime or canceled intent changes while retaining the picker', async () => {
-  for (const change of ['client', 'sid', 'runtime', 'cancel'] as const) {
+  for (const change of ['client', 'sid', 'runtime', 'runtime-reject', 'cancel'] as const) {
     const f = fixture(), other = fixture(), value = catalog(), open = vi.fn(), pending = deferred<{ catalog: AgentMuxSpaceCatalog }>()
     let owner = 'runtime-original'
     f.client.runtimeOwnerIdentity = () => ({ runtimeId: owner, ownerInstanceId: 'original-instance' })
@@ -109,13 +119,14 @@ it('mobile locations rejects late exact reads after client SID Runtime or cancel
     await click(choices()[0]!)
     if (change === 'client') await view.render(render(other.client))
     if (change === 'sid') { value.regions[0]!.agentSessionId = 'other'; await view.render(render()); await click(button(view.element, '刷新讨论')) }
-    if (change === 'runtime') owner = 'runtime-replaced'
+    if (change === 'runtime' || change === 'runtime-reject') owner = 'runtime-replaced'
     if (change === 'cancel') { await click(button(sheet(), '关闭位置选择')); await click(view.element.querySelector('.mobile-agent-locations-entry')!) }
-    await act(async () => pending.resolve({ catalog: catalog() }))
+    await act(async () => change === 'runtime-reject' ? pending.reject(new Error('old-runtime rejection body')) : pending.resolve({ catalog: catalog() }))
     expect(open, `Late ${change} read cannot retarget local navigation`).not.toHaveBeenCalled()
     expect(sheet()).not.toBeNull()
     if (change !== 'cancel') expect(sheet().textContent).toContain('这次没有打开')
     else expect(sheet().querySelector('[aria-busy]')?.getAttribute('aria-busy')).toBe('false')
+    expect(sheet().textContent).not.toContain('old-runtime rejection body')
     await act(async () => mounted.pop()!.root.unmount()); view.element.remove()
   }
 })

@@ -6,6 +6,10 @@ export const mobileAgentLocationOwners = [
   'apps/mobile/test/mobile-agent-locations.test.tsx'
 ]
 export const mobileAgentLocationMutations = {
+  'unknown-as-zero': { file: mobileAgentLocationOwners[0], target: 'actual App folds aliases',
+    before: "(groups.some(group => group.hostId === null) ? undefined : { hostId, agentSessionId: id, addresses: [], count: 0 })", after: '{ hostId, agentSessionId: id, addresses: [], count: 0 }' },
+  'silent-runtime-failure': { file: mobileAgentLocationOwners[2], target: 'rejects late exact reads',
+    before: "? '读取期间连接已改变，这次没有打开；请在当前目录重新选择。'", after: "? ''" },
   'count-aliases': { file: mobileAgentLocationOwners[3], target: 'actual App folds aliases',
     before: 'group.count = positions.size', after: 'group.count = group.addresses.length' },
   'inline-list': { file: mobileAgentLocationOwners[2], target: 'actual App folds aliases', edits: [
