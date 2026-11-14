@@ -48,6 +48,7 @@ Use these exact import paths under `@agentmux/client-ui/`. Each example imports 
 | --- | --- | --- |
 | Actions | `components/Button`, `components/IconButton` | `styles/buttons.css`. [Toggle, disabled action and pending save](examples/actions.tsx). |
 | Fields | `input`, `components/FormRow` | `input/styles.css`. [Label, help, error and multiline draft](examples/fields.tsx). |
+| Selection | `components/Tabs`, `components/SegmentedControl` | `styles/segmented-control.css`. [Panel navigation and a single setting](examples/selection.tsx). |
 | Overlays | `components/Modal`, `components/DropdownMenu`, `components/HoverDropdownMenu`, `overlay-host` | `styles/overlays.css` for the stack and attachment slots. [Host document, panel layout and focus](examples/overlays.tsx). |
 | Readable feedback | `components/ActionFeedback`, `components/InlineRenameField` | `styles/buttons.css` for bounded feedback. `input/styles.css`, `styles/semantic-icons.css` and `styles/inline-rename-field.css` for [rename, pending receipt and retryable error](examples/feedback.tsx). |
 | Work location | `patterns/agent-work-location` | `patterns/agent-work-location.css` and `styles/semantic-icons.css`. [Shared summary and distinct routes](examples/locations.tsx). |
@@ -176,6 +177,12 @@ export function ItemActions({ canRename, onRename, onDuplicate }: {
 Use `components/HoverDropdownMenu` for commands that run when a menu item is activated. Use `components/SelectionField` for an existing value selected from a list of options. Supply the value, labels and disabled facts. Import `styles/selection-field.css` and the shared input styles when the field needs a query. The current value stays separate from keyboard focus.
 
 Use `components/SearchChoiceDialog` when someone needs to read or type a query before explicitly choosing an action. The dialog takes a named trigger, an editable query and a render function for the currently visible results. Render result buttons with `data-choice`, and call the supplied `choose` callback for explicit activation. The host owns filtering, pending or failed reads and the action. Import `styles/search-choice.css`. The existing overlay host provides the original document and Portal container.
+
+## Tabs and segmented controls
+
+Use `Tabs` for navigating between panels. Supply the panel ID and a stable trigger ID for each option, and connect each panel with `aria-labelledby`. The caller chooses how to keep panels mounted and styles the triggers with `[aria-selected]`.
+
+Use `SegmentedControl` to edit a single value across a few visible choices. Its stylesheet provides equal-width options, a shared selection indicator and reduced-motion support. The caller owns the selected value and any save or navigation action.
 
 ## Inputs
 
