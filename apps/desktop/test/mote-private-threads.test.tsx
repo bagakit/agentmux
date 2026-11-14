@@ -200,7 +200,13 @@ it('narrow private reading takes one row click and returns directly to its origi
   await act(async () => row.closest<HTMLButtonElement>('button')!.click())
   await wait(() => expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('小脏手的原完整回复'))
   expect(app.container.querySelector('.mote-conversation-browser__list')?.hasAttribute('hidden')).toBe(true)
-  const scroll = app.container.querySelector<HTMLElement>('.mote-conversation-browser__reading')!;scroll.scrollTop=73
+  const scroll = app.container.querySelector<HTMLElement>('.mote-session-conversation__scroll')!
+  Object.defineProperties(scroll, { clientHeight: { configurable: true, value: 100 }, scrollHeight: { configurable: true, value: 700 } })
+  const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+    return this.hasAttribute('data-mote-conversation-tail') ? new DOMRect(0, 700 - scroll.scrollTop, 400, 0) : bounds.call(this)
+  })
+  await act(async () => { scroll.scrollTop = 600; scroll.dispatchEvent(new Event('scroll')); scroll.scrollTop = 73; scroll.dispatchEvent(new Event('scroll')) })
   await act(async () => app.container.querySelector<HTMLButtonElement>('[aria-label="返回对话列表"]')!.click())
   expect(app.container.querySelector('.mote-conversation-browser__list')?.hasAttribute('hidden')).toBe(false)
   expect(app.container.querySelector('.mote-conversation-browser__detail')?.hasAttribute('hidden')).toBe(true)
