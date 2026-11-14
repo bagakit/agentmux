@@ -126,7 +126,10 @@ module.exports = async function dispatchMotion({ win, result, read, click, key, 
     await read('window.graphCapture.appearance("dark")'); await settle(); await stages('dispatch-narrow-dark', 4)
     win.setContentSize(1440, 900); await settle(); await locate('fixture-core'); await depart()
     if (refresh) {
-      for (let index = 0; index < 4; index++) await click('[aria-label="Zoom out"]')
+      for (let index = 0; index < 4; index++) {
+        await click('[aria-label="Zoom out"]')
+        await waitCamera('frame', 'dispatch-low-zoom-step-' + index)
+      }
       await waitCamera('frame', 'dispatch-low-zoom-middle'); await depart(); await pause(3300)
       const events = await emit(), start = events[0].at
       await waitFrom(start, 460)
