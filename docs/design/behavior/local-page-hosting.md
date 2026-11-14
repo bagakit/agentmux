@@ -1,8 +1,8 @@
 # AgentMux Capsule：持久交互页面 PRD
 
-本文定义 AgentMux 页面托管模块的产品目标、身份与恢复、存储和运行模式，以及主题继承与人机交互（HITL）的行为边界。模块及托管进程应独立于 App 和 Core，由原 Run 承载，可在无 UI 的本机或远程 Core 运行环境使用；本文是目标需求，不表示现有文件预览、Browser 恢复或对象链接已经交付这些能力。
+本文定义 AgentMux 页面托管模块的产品目标、身份与恢复、存储和运行模式，以及主题继承与人机交互（HITL）的行为边界。模块及托管进程应独立于 App 和 Core，由原 Run 承载，可在无 UI 的本机或远程 Core 运行环境使用。本文是目标需求；当前实现位于 `@agentmux/capsule`、Core 的 `capsule.*` 公共方法以及 Desktop 的 Settings、对话卡与 Toolkit 入口，实际支持范围以源码、运行时发现与真实验证为准，本文不代签交付或验收。
 
-模块名为 **AgentMux Capsule**（胶囊，独立封装的持久交互成果），下文的托管页面即 Capsule。首个交付采用浏览器级容器，页面 origin、存储和 DOM 与宿主及无关页面隔离；不引入 Docker 或 OS 级容器。独立包为 `@agentmux/capsule`，公共命令为 `amux capsule`，运行时 skill 由同一公共注册生成。
+模块名为 AgentMux Capsule（胶囊，独立封装的持久交互成果），下文的托管页面即 Capsule。首版采用浏览器级容器，页面 origin、存储和 DOM 与宿主及无关页面隔离；不引入 Docker 或 OS 级容器。独立包为 `@agentmux/capsule`，公共命令为 `amux capsule`，运行时 skill 由同一公共注册生成。
 
 [返回交互合同](../agentmux-desktop-interaction.md) · [同主题呈现](../presentation/local-page-hosting.md) · [公共接入原则](public-control.md#对象优先-cli-与统一公共业务服务) · [Browser 工作面](browser-workface.md)
 
@@ -19,7 +19,7 @@ Agent 临时开发的页面应成为可持续定位、展示和交互的本地�
 | 页面需要贴合 App 外观并请人做选择或反馈 | 使用注入模式，显式复用主题／样式和受控 HITL 通道，保留人工来源与准确 Agent 目标 |
 | 重启、内容不可读取、服务或通道暂不可用 | 原页面和未完成请求仍可定位，能区分已知失败与未知，沿原身份恢复，不重建空页面或重复发送答案 |
 
-首个交付覆盖全托管和路径配置、隔离和注入四种组合，支持静态 HTML／资源、已有构建产物及 SPA。SPA 的有效客户端路由能直接打开并在刷新后返回同一页面，资源路径仍按真实文件解析，缺失资源不伪装成已加载的 HTML。托管构建产物不自动执行构建，遇到动态后台或常驻进程需求时明确实际支持范围，不隐式启动进程或建立代理后台；后续执行能力仍须沿原 Runtime 合同确认。
+首版覆盖全托管和路径配置、隔离和注入四种组合，支持静态 HTML／资源、已有构建产物及 SPA。SPA 的有效客户端路由能直接打开并在刷新后返回同一页面，资源路径仍按真实文件解析，缺失资源不伪装成已加载的 HTML。托管构建产物不自动执行构建，遇到动态后台或常驻进程需求时明确实际支持范围，不隐式启动进程或建立代理后台；后续执行能力仍须沿原 Runtime 合同确认。
 
 ## 实体、身份与唯一 owner
 
@@ -94,7 +94,14 @@ Settings 提供独立的 **Capsule** 资源管理模块，复用现有[编译期
 - **Core／App 退出只 detach。** Core 关闭管理连接、App 关闭展示只释放各自观察和适配，不能 stop 健康服务 Run；HTTP 不依赖 Core／App 进程继续存活。Core 恢复后先核对准确原 Run 与领域绑定，接回仍健康的服务，不重放启动。
 - **显式 stop 尊重持久意图。** 停止服务先保留准确管理操作与持久 stopped 意图，保活不能将其重新拉起。停止、停止结果未知和已确认停止分别表达；停止不删除页面、配置、内容或未完成交互，恢复运行须经明确管理意图。
 - **原操作结果独立于观察等待。** 管理 owner 必须保存准确原 Start／Stop 的明确未应用、已确认结果及原失败原因；观察取消或超时不能丢弃之后到达的原回执。存活 owner 明确知道本次尚未调用 Native 时，保留该事实及持久确认的恢复动作。晚到结果只结算准确原意图和代次，不覆盖后来的管理选择；原操作查询、CLI 与 Settings 消费同一结果。明确未应用后，用户可用新操作 ID 和当前 revision 发起新的显式意图；读取、保活及查询旧操作不自动重试。Native 未保留创建映射、缺少回执或派发窗口内进程崩溃均不自行证明未应用，继续保留原身份与未知状态。
-- **未知创建的显式结清沿原 Native owner。** 原创建长期未知时，可在现有 `capsule.runtime.start` 显式附带准确 recovery 目标，绑定原 revision、management operation、creation key、完整 frozen launch 摘要及 Native Runtime 身份，不新增同义恢复入口。Core 先在原管理操作 journal 持久保存本次 retirement 调用意图；Native 返回匹配完整 frozen launch 的 retained Run 时只接回原 Run，不 Stop、不重复 Start。仅准确原 key 的持久 retired 回执可授权在同一 namespace 准备新 launch key；先保存 retired 回执，再保存新意图。retirement 的 unknown 后，纯读取只查询原 fence；仅显式同 operation／同完整 target 的 runtime Start 可沿同一 retry-safe、单调未来 fence 意图续办，由 Native 原 actor 收敛 KnownOld／Unknown，不能换 ID 或重放旧 Start。`not_retired` 不证明历史未应用；原 unknown Start、原 launch 与历史操作保全，不改签为 `not_applied`。原操作 inspect 提供准确目标与 retirement 结果，仅观察，不 retire、Start 或保存绑定。Runtime 活 owner 更换后，只能沿原持久 Runtime lineage 核对同一 fence；另一 Runtime 或目标必须明确拒绝本次操作并保留健康 Run。
+- **原创建结果长期未知时，显式结清沿原 Native owner。** 不新增同义恢复入口，而是在现有 `capsule.runtime.start` 上显式附带准确的恢复目标（代码名 `recovery`），绑定原配置 revision、原管理操作、原创建键（creation key）、完整冻结的启动描述摘要（frozen launch）及 Native Runtime 身份。结清按以下边界进行：
+  1. Core 先在原管理操作的 journal 中持久保存本次"退役原创建"（retirement）的调用意图，然后才调用 Native。
+  2. Native 返回一个与完整冻结启动描述匹配、仍保留的 Run 时，只接回该 Run，不 Stop，也不重复 Start。
+  3. 只有准确原创建键的持久"已退役"（retired）回执，才允许在同一 namespace 准备新的启动键；先保存 retired 回执，再保存新的启动意图。
+  4. 退役调用结果未知时，纯读取只查询原退役栅栏（fence）。只有对同一操作、同一完整目标再次显式发起的 runtime Start，可以沿同一个可安全重试、只向前推进的栅栏意图继续，由 Native 原 actor 收敛"已知旧代"（`KnownOld`）与"未知"（`Unknown`）两种结果；不能换操作 ID，也不重放旧的 Start。
+  5. `not_retired` 不证明原创建从未生效：原未知的 Start、原启动描述与历史操作都保留，不改记为 `not_applied`。
+  6. 原操作的 inspect 返回准确目标与退役结果，只观察，不退役、不 Start，也不保存绑定。
+  7. Runtime 的存活 owner 更换后，只能沿原持久 Runtime 谱系（lineage）核对同一栅栏；指向另一 Runtime 或另一目标的请求明确拒绝本次操作，并保留健康 Run。
 - **新代 Run 只由权威终局推进。** 仅 ctxmux 对原 Run 的权威终局事实，或上一条准确 creation key 的持久 retired 回执，允许沿同一领域和页面恢复新代服务 Run，并明确 Run 与服务实例已变化；保活继续守已保存的运行意图。Core 重启、连接断开、探测失败、空观察或 unknown 都不等于 Run 死亡，保原绑定和操作，不重复创建、不改投另一环境。
 
 执行环境或 Runtime 退出期间不承诺 HTTP 在线；重新可用后仍按原领域、页面及固定 origin 恢复，不能把新进程冒称原 Run。远程服务的 loopback 只在远端执行 Host 可达，内容根、状态和路径也属于该环境；本地 Browser 访问须沿原受权连接或明确授权的隧道，不把远端 localhost 当成本机，不自动公网 bind。旧 HTTP 地址与稳定对象链接不同，后者按原页面及准确来源解析当前能力；没有可用访问路径时保对象并如实报告。原 Browser 的持久工作面、按需恢复与失败出口沿[Browser 合同](browser-workface.md#browser-工作面-1)。
@@ -119,7 +126,7 @@ Desktop 的同一 Capsule 使用专属持久 Browser partition，与普通 Profi
 
 主题和样式能力与 HITL 通信能力分别表达，选择跟随主题不隐含可以发消息。主题变化在原页面内更新已授权投影，保留内容、表单草稿、阅读、请求与原授权，不因换主题重建页面或提交输入。页面局部样式不能污染 App 或无关页面；App 主题也不能改变请求资格、状态含义、可访问名称或人工来源。
 
-首个投影只提供原主题 owner 已解析的浅／深色模式与 CSS 语义变量；不导入 App DOM、组件实现、全部内部 CSS 或设置。页面显式使用这些变量组织自己的控件。无 UI Host、外部 Browser 或主题提供者不可用时，公开说明实际可用范围；页面自身可运行的内容和原交互记录保留，不能把没有主题通道解释成页面损坏。
+首版主题投影只提供原主题 owner 已解析的浅／深色模式与 CSS 语义变量；不导入 App DOM、组件实现、全部内部 CSS 或设置。页面显式使用这些变量组织自己的控件。无 UI Host、外部 Browser 或主题提供者不可用时，公开说明实际可用范围；页面自身可运行的内容和原交互记录保留，不能把没有主题通道解释成页面损坏。
 
 ## HITL 请求、人工来源与恢复
 
@@ -138,7 +145,7 @@ HITL 让托管页面展示 Agent 需要人查看、选择、填写或确认的�
 
 选择与编辑只更新答案草稿；人的明确提交才创建本次答复意图。可信输入 owner 保留原请求引用、准确目标、答案及操作身份，Core／Provider 沿原输入入口处理，不为页面绕过队列、pending interaction、权限或恢复条件。页面上的“同意”仅回答获授权的那一项请求，不自动批准其他动作。
 
-首个页面 SDK 提供能力与主题读取、建立文本问题、读取原问题、保存草稿及查询原操作，不提供答复提交、任意 RPC 或目标改写；能力读取中的交互项只在页面有接收者时成立。准确接收者由原页面 owner 保存。人的确认入口在可信 App Browser chrome，明确显示页面、原问题、答案及准确接收 Session；提交在原 Capsule owner 中先保存答案及准备结果，冻结原 Run 和输入操作 ID，再沿原 Core 输入 owner 提交。公共 CLI 的答复请求或页面脚本不能自行建立这份原生人工确认。准备后未跨执行边界的原操作，只能在同一 Run 上经新的明确人工确认继续；已跨边界或结果未知只查询原输入，不能借重启、重试或当前 Session 换 Run 重发。
+首版页面 SDK 提供能力与主题读取、建立文本问题、读取原问题、保存草稿及查询原操作，不提供答复提交、任意 RPC 或目标改写；能力读取中的交互项只在页面有接收者时成立。准确接收者由原页面 owner 保存。人的确认入口在可信 App Browser chrome，明确显示页面、原问题、答案及准确接收 Session；提交在原 Capsule owner 中先保存答案及准备结果，冻结原 Run 和输入操作 ID，再沿原 Core 输入 owner 提交。公共 CLI 的答复请求或页面脚本不能自行建立这份原生人工确认。准备后未跨执行边界的原操作，只能在同一 Run 上经新的明确人工确认继续；已跨边界或结果未知只查询原输入，不能借重启、重试或当前 Session 换 Run 重发。
 
 确认后的答复以 Core 登记的 [Capsule 答复信封](../../specs/amux-protocol.md#capsule-答复)作为原 prompt 投递，携带原页面、问题身份、问题与答案；信封只是可读格式，人工来源仍由可信确认和原输入回执成立。
 
@@ -146,7 +153,7 @@ HITL 让托管页面展示 Agent 需要人查看、选择、填写或确认的�
 
 ### 重启、未知与多个消费者
 
-页面须在调用写操作前通过 `createOperationId()` 取得并保留原操作 ID，显式传给 `request(question, draft, operationId)` 或 `saveDraft(interactionId, expectedRevision, draft, operationId)`；没有初始草稿时传 `undefined`。需要跨页面重载恢复时，页面先持久保存该 ID。缺失 ID 的调用在派发前拒绝，不在 preload 内隐式铸造，也不依赖异常自定义字段或错误文案把身份带回页面。回执未知时只用已保留的 ID 查询 `inspectOperation`，不重新生成 ID 或重复写入。
+页面在调用每个写操作（建立问题、保存草稿）前，必须先取得并保留原操作 ID，再显式传给该写操作；需要跨页面重载恢复时，页面先持久保存该 ID。缺失 ID 的调用在派发前拒绝，宿主不替页面隐式铸造 ID，也不依赖异常的自定义字段或错误文案把身份带回页面。回执未知时只用已保留的 ID 查询原操作，不重新生成 ID 或重复写入。页面 SDK 的准确函数与参数见 Core 指南[《capsule：Page script on injected pages》](../../../packages/core/guides/modules/capsule.md#page-script-on-injected-pages)。
 
 请求和答复的原身份、内容、目标条件及已确认回执跨页面重载、容器释放、Host 重启和模式切换保留。恢复时重新读取原请求及操作，不自动重复发布问题、重发答案、改投当前 Agent 或创建替代 Run；旧请求的迟到结果不能改变新请求或后来编辑的答案。
 
@@ -162,7 +169,7 @@ Browser 中的 Capsule 对象地址与实际文档加载地址分别表达。当
 
 当前页面路径、查询和 fragment 仍属于原 Browser 导航，刷新、释放后回接及冷恢复保留原路由、Browser／Region、页面存储和未完成操作；通过对象入口重新打开同一页面时复用原工作面，不用入口页覆盖已有路由。显式书签文件打开继续由[原 File owner](files-and-git.md)消费请求的位置、后台导航和同次展示回执；请求新位置时可为同一 Capsule 建立准确新展示，保留已有 Browser 与原路由，不用全局对象聚焦代替文件请求。对象链接按原协议只携带页面 ID，不为携带路由私自扩展 URI，也不冒称单独复制的对象引用包含具体路由。Browser 离开原 Capsule 页面后显示和复制真实新目标，保留的容器关联不把新文档冒称为该 Capsule；返回原页面时恢复其对象地址。显式在外部浏览器访问服务端点是独立动作，须保准确 Host 与实际可达性，不把 loopback 地址当作可跨环境的页面引用。显示或复制的地址不授予文档注入、输入或执行资格；解析、服务或路由不可用保原页面和当前输入，提供准确恢复出口，不替换为新对象。
 
-对象链接格式、[`AmuxObjectLinkTarget`](../../../packages/core/src/sharing.ts) 及公共 formatter／parser 由原协议 owner 在同一能力交付中扩展并验证，不能让 GUI 或 Toolkit 私自识别另一种 Capsule URI。此处定义目标链接，实际支持仍以源码、运行时发现和真实消费验证为准，不以 PRD 中出现链接代签已安装能力。
+对象链接格式、[`AmuxObjectLinkTarget`](../../../packages/core/src/sharing.ts) 及公共 formatter／parser 由原协议 owner 在同一能力交付中扩展并验证，不能让 GUI 或 Toolkit 私自识别另一种 Capsule URI。此处定义目标链接，实际支持仍以源码、运行时发现和真实消费验证为准，不以本文出现链接代签已安装能力。
 
 公共接入按[统一公共业务服务](public-control.md#对象优先-cli-与统一公共业务服务)与[公共能力贡献约定](../../guides/public-capability-contributions.md)提供同源合同，目标覆盖以下能力：
 
@@ -229,7 +236,7 @@ Toolkit TUI custom kit 可薄封装同一 Core 管理 CLI，沿原工具配置�
 
 ## 验收结果
 
-以下定义模块完成时必须能证明的结果，不是本批已通过证据；实施时按确认范围拆成可证伪任务，遵守[测试策略](../../testing/strategy.md#任务验收与假绿防护)。
+以下定义模块完成时必须能证明的结果，不是已通过的证据；实施时按确认范围拆成可证伪任务，遵守[测试策略](../../testing/strategy.md#任务验收与假绿防护)。
 
 | 验收问题 | 必须取得的真实证明 |
 | --- | --- |
@@ -249,7 +256,7 @@ Toolkit TUI custom kit 可薄封装同一 Core 管理 CLI，沿原工具配置�
 | TUI custom kit 是否薄封装 | 实际工具经同一 Core 管理 CLI 消费原服务，保工具及执行来源；工具 Run 与服务 Run 分别可查，关闭视图或停止工具不另建或停止服务，不产生第二个保活 owner |
 | 故障与成本是否保全正常使用 | 内容缺失、路径不可读、通道／诊断失败均有准确出口；原工作面与健康 Agent 保留。相关页面增加工作，无关页面和 Session 增加不放大热路径成本 |
 
-实现验收包括真实产品调用链与有针对性的变异证明；构建成功、进程启动、一次 HTTP 访问、截图采集或普通测试全绿不能互相代签。原布局／Browser 生命周期发生变化时，必须验证真实重启后的原工作面；视觉验收只针对实际呈现改动，不由本 PRD 代签。
+实现验收包括真实产品调用链与有针对性的变异证明；构建成功、进程启动、一次 HTTP 访问、截图采集或普通测试全绿不能互相代签。原布局／Browser 生命周期发生变化时，必须验证真实重启后的原工作面；视觉验收只针对实际呈现改动，不由本文代签。
 
 ## 非目标与待定边界
 
@@ -257,6 +264,6 @@ Toolkit TUI custom kit 可薄封装同一 Core 管理 CLI，沿原工具配置�
 
 以下仍未确定，不应因本文存在而当作实现决定：
 
-- 后续动态后端、构建执行和任意用户常驻进程能力；首个交付只运行明确管理的固定 Capsule 服务，不隐式运行这些用户进程。
+- 后续动态后端、构建执行和任意用户常驻进程能力；首版只运行明确管理的固定 Capsule 服务，不隐式运行这些用户进程。
 - 超出文本问题／答案的 typed 业务表单和更丰富的样式组件；现有可信人工输入能力不足的 Host 必须如实表达，不以页面声明补造。
 - 局域网或公网开放；服务在准确执行 Host 仅绑定 `127.0.0.1`，已确认的远程 Core 运行不自动授权新隧道、公开端口或其他监听地址，既有 Capsule 设置、Browser 与 Toolkit 入口不因此扩大访问授权。

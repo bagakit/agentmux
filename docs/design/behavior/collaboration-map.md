@@ -2,6 +2,8 @@
 
 本文是 Focus Map 的行为需求 owner。它定义地图的用途、实体、层级、关系、阅读和交互边界；视觉语言见[地图呈现](../presentation/collaboration-map.md)，空间身份见[统一概念与空间寻址](spaces-and-layout.md#统一概念与空间寻址)，消息事实见[A2A 协作](a2a-collaboration.md)。需求描述目标，不代签当前实现或安装资格。
 
+[返回交互合同](../agentmux-desktop-interaction.md) · [同主题呈现](../presentation/collaboration-map.md) · [Focus List 视图](focus-context.md)
+
 ## 用途与第一性原理
 
 Map 帮助人建立协作的空间心智模型：辨认工作上下文及其包含关系，沿真实通信找到协作邻域，看到值得关注的变化，并进入准确 Agent 或原工作面。List 适合依状态扫描和处理，Map 适合看结构、关系与局部动态；两者消费同一事实，不能成为两套名册。
