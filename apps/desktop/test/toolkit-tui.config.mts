@@ -10,7 +10,9 @@ const changes: Record<string, [string, string, string]> = {
   'raw-ownership': ['apps/desktop/src/main/runtime-controller.ts', "if (output === 'raw') this.toolkitRuns.set", 'if (true) this.toolkitRuns.set'],
   'repeat-load': [owner, 'const added = [...enabled].filter(id => !this.autoStartingTools.has(id))', 'const added = [...enabled]'],
   'runner-environment': [owner, '      delete env.ELECTRON_RUN_AS_NODE\n', ''],
-  'missing-intent': [owner, 'if (retained && !intent) throw new AgentMuxError', 'if (false) throw new AgentMuxError'],
+  'skip-original-read': [owner, 'const original = await this.args.inspectTuiCreation(this.tuiPreparation(execution))', 'const original = null'],
+  'skip-first-failure-save': [owner, 'if (!execution.admission.run) await this.saveTuiLaunchFailure(execution)', 'void execution.admission.run'],
+  'missing-intent': [owner, 'const prepared = retained ? this.tuiPreparation(execution) : await execution.port.prepare', 'const prepared = await execution.port.prepare'],
   'dispose-stop': [owner, '// The durable Run outlives this host owner; closing its observer is not Stop.', 'await execution.port?.stop(ref(execution))'],
   'service-membership': ['apps/desktop/src/renderer/src/lib/run-service-projection.ts', '!retained.has(key) && !listeners.has(key)', '!retained.has(key)']
 }

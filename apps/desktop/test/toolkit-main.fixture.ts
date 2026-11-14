@@ -20,16 +20,27 @@ vi.mock('electron', () => ({ app: Object.defineProperties(new EventEmitter(), Ob
     off: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler),
     removeListener: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler) },
   clipboard: {}, dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })) }, nativeImage: {}, shell: {},
+  globalShortcut: { register: () => false, unregister() {} },
   safeStorage: { isAsyncEncryptionAvailable: async () => false },
   nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }) }))
 vi.mock('node:os', async original => ({ ...await original(), homedir: () => fixture.directory }))
-vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class {
+  storage = { setConfirmationHandler() {} }
+  cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }
+  extensions = { setConfirmationHandler() {} }
+  onChange() { return () => {} }
+  onEnvironmentApplicationChange() { return () => {} }
+  async cleanupApprovedTrash() {}
+  async initialize() {}
+  async dispose() {}
+} }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class {
   setPresentationWindowOwner() {}
   release() {}
+  async flushProfileActivity() {}
   resourceProcessIds() { return [] } resourceOwnerCounts() { return { browserViews: 0, releasedBrowserViews: 0 } } dispose() {}
 } }))
 vi.mock('../src/main/native-overlay-windows.js', () => ({ NativeOverlayWindows: class {
@@ -95,6 +106,12 @@ export async function nativeMain(options: { beforeRegister?(directory: string): 
     isDestroyed(){return false} isLoadingMainFrame(){return false}
     send(channel:string,value:any){this.events.push({channel,value})}
   }()
+  const makeFiles = () => ({
+    dispose: async () => {},
+    read() { throw Error('Unrelated file read outside Toolkit fixture') },
+    listFiles() { throw Error('Unrelated file list outside Toolkit fixture') },
+    readDirectory() { throw Error('Unrelated directory read outside Toolkit fixture') }
+  })
   let sender=makeSender(), detachRenderer=runtime.attach(sender as any)
   const sdk=owned.activation.client
   let dispose: (()=>Promise<void>) | undefined, rpc: AgentMuxRpcClient | undefined
@@ -143,7 +160,7 @@ export async function nativeMain(options: { beforeRegister?(directory: string): 
   cleanups.push(async()=>{await close()})
   await options.beforeRegister?.(directory)
   dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender),initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{},windowForDocument:()=>({id:7})} as any,
-    progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
+    progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:makeFiles() as any})
   expect(owned.activation.spawned).toBe(true)
   expect(await sdk.daemonInstance()).toBe(owned.activation.runtime.daemonInstanceId)
   await record('fixture-startup',{directory,phase:'registered',protocol:PROTOCOL_VERSION,runtimeIdentity:await sdk.runtimeInfo(),
@@ -160,7 +177,7 @@ export async function nativeMain(options: { beforeRegister?(directory: string): 
     // Reopen the actual durable stores and same private Native. Never recreate defaults or the daemon.
     store=new ConfigStore(join(directory,'config.json'));config=await store.get();sender=makeSender();detachRenderer=runtime.attach(sender as any)
     dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender),initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{}} as any,
-      progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
+      progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:makeFiles() as any})
     rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:controlPath}})
     expect(await sdk.daemonInstance()).toBe(owned.activation.runtime.daemonInstanceId)
     await record('fixture-restart',{directory,phase:'registered',runtimeInstance:await sdk.daemonInstance()})

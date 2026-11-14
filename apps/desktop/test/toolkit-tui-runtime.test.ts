@@ -13,15 +13,47 @@ async function stop(main: Awaited<ReturnType<typeof nativeMain>>, executionId: s
   await oneCli('toolkit', 'stop', 'interactive', '--input', input)
 }
 const inspect = async (id = 'interactive'): Promise<ToolkitScriptSnapshot> => (await oneCli('toolkit', 'inspect', id)).result.snapshot
-async function add(main: Awaited<ReturnType<typeof nativeMain>>, id = 'interactive') {
+async function add(main: Awaited<ReturnType<typeof nativeMain>>, id = 'interactive', waitForRun = true) {
   const fields: ToolkitToolFields = { name: 'Interactive tool', icon: 'terminal', mode: 'tui', enabled: true,
     statusBar: 'label', workspacePath: join(main.directory, 'work'), script: program, args: [process.execPath] }
   const input = join(main.directory, `${id}.json`)
   await writeFile(input, JSON.stringify(fields))
   const definition = (await oneCli('toolkit', 'create', id, '--input', input)).result.definition
-  await until(async () => expect(await inspect(id)).toMatchObject({ state: 'running', admission: { definition: { mode: 'tui' } } }))
+  if (waitForRun) await until(async () => expect(await inspect(id)).toMatchObject({ state: 'running', admission: { definition: { mode: 'tui' } } }))
   return definition
 }
+
+it('uses the original Native receipt through the Desktop Toolkit CLI after a lost launch reply', async () => {
+  const main = await nativeMain()
+  const start = main.core.createPreparedTerminal.bind(main.core), inspectOriginal = main.core.inspectTerminalCreation.bind(main.core)
+  let originalRun: Awaited<ReturnType<typeof start>> | undefined
+  let visible = false
+  const creation = vi.spyOn(main.core, 'createPreparedTerminal').mockImplementation(async input => {
+    originalRun = await start(input)
+    throw new Error('Private first Start reply was lost')
+  })
+  const observation = vi.spyOn(main.core, 'inspectTerminalCreation').mockImplementation(async input => {
+    const receipt = await inspectOriginal(input)
+    if (!visible && receipt.admission) return { ...receipt,
+      admission: { ...receipt.admission, observation: { availability: 'unavailable', runtime: null } } }
+    return receipt
+  })
+  await add(main, 'interactive', false)
+  await until(async () => expect(await inspect()).toMatchObject({ state: 'unknown', reason: 'Private first Start reply was lost', admission: { run: null } }))
+  const pending = (await inspect()).admission!
+  expect(originalRun?.runId).toBeTruthy()
+  expect(observation).toHaveBeenCalledWith({ hostId: 'local', operationId: pending.executionId })
+  visible = true
+  const adopted = await inspect()
+  expect(adopted).toMatchObject({ state: 'running',
+    admission: { executionId: pending.executionId, invocationId: pending.invocationId, run: { hostId: 'local', runId: originalRun!.runId } } })
+  expect(creation).toHaveBeenCalledOnce()
+  const ref = adopted.admission!.run!
+  const control = { kind: 'terminal' as const, hostId: ref.hostId, runId: ref.runId, run: { runId: ref.runId } }
+  expect(await main.invoke('sessions:refresh', control)).toMatchObject({ kind: 'terminal', control, processState: 'running' })
+  await stop(main, pending.executionId)
+  await record('tui-lost-launch-receipt', { executionId: pending.executionId, run: ref, starts: creation.mock.calls.length })
+})
 
 it('loads a real TUI through public CLI and shares the ordinary terminal attachment, input and replay', async () => {
   const main = await nativeMain()
