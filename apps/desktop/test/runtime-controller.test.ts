@@ -3574,6 +3574,81 @@ describe('tool execution Desktop boundary', () => {
     return { controller, config, request, create, clients, launch, resource }
   }
 
+  it.each(['local', 'remote'])('creates on the exact %s Hosted owner while general observation rejects', async hostId => {
+    const f = await fixture(hostId)
+    const request = { ...f.request, agentSessionId: 'original-targeted-session' }
+    for (const client of Object.values(f.clients)) {
+      Object.assign(client, { runtimeOwnerIdentity: () => null })
+      client.connect.mockClear()
+      client.connect.mockRejectedValue(new Error('General Host observation unavailable'))
+    }
+    try {
+      const result = await f.controller.launchAgent(request, f.config, undefined, { create: f.create })
+      expect(result.created.agentSessionId).toBe(request.agentSessionId)
+      expect(f.create).toHaveBeenCalledOnce()
+      expect(f.create.mock.calls[0]![0].agent).toMatchObject({ agentSessionId: request.agentSessionId, createOperationId: request.createOperationId })
+      for (const client of Object.values(f.clients)) expect(client.connect).not.toHaveBeenCalled()
+    } finally { await f.controller.dispose() }
+  })
+
+  it('does not join an already pending general Hosted observation when creating', async () => {
+    const f = await fixture('remote')
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    for (const client of Object.values(f.clients)) Object.assign(client, { runtimeOwnerIdentity: () => null })
+    f.clients.remote!.connect.mockClear()
+    f.clients.remote!.connect.mockImplementation(() => pending)
+    const observation = f.clients.remote!.connect()
+    try {
+      let created = false
+      const launch = f.controller.launchAgent({ ...f.request, agentSessionId: 'same-pending-session' }, f.config, undefined, { create: f.create })
+        .then(result => { created = true; return result })
+      await vi.waitFor(() => expect(created).toBe(true))
+      expect((await launch).created.agentSessionId).toBe('same-pending-session')
+      expect(f.clients.remote!.connect).toHaveBeenCalledOnce()
+      expect(f.create).toHaveBeenCalledOnce()
+    } finally { release(); await observation; await f.controller.dispose() }
+  })
+
+  it('retains the Direct Core connection before targeted creation', async () => {
+    const f = await fixture('local')
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    f.clients.local!.connect.mockClear()
+    f.clients.local!.connect.mockImplementation(() => pending)
+    const launch = f.controller.launchAgent(f.request, f.config, undefined, { create: f.create })
+    try {
+      await vi.waitFor(() => expect(f.clients.local!.connect).toHaveBeenCalledOnce())
+      expect(f.clients.local!.listHostExecutors).not.toHaveBeenCalled()
+      expect(f.create).not.toHaveBeenCalled()
+      release()
+      expect((await launch).created.agentSessionId).toBe('original-agent')
+      expect(f.create).toHaveBeenCalledOnce()
+    } finally { release(); await launch.catch(() => {}); await f.controller.dispose() }
+  })
+
+  it.each(['inventory', 'authority', 'creation', 'direct-connect'])('retains the original targeted creation on %s failure without replay', async stage => {
+    const f = await fixture('remote'), failure = new AgentMuxError('Original ' + stage + ' unavailable', 'CONTROL_UNAVAILABLE')
+    const request = { ...f.request, agentSessionId: 'retained-targeted-session' }
+    for (const client of Object.values(f.clients)) {
+      if (stage === 'direct-connect') Reflect.deleteProperty(client, 'runtimeOwnerIdentity')
+      else Object.assign(client, { runtimeOwnerIdentity: () => null })
+    }
+    if (stage === 'inventory') f.clients.remote!.listHostExecutors.mockRejectedValue(failure)
+    if (stage === 'authority') f.clients.local!.agentCreationAuthority.mockRejectedValue(failure)
+    if (stage === 'creation') f.create.mockRejectedValue(failure)
+    if (stage === 'direct-connect') f.clients.remote!.connect.mockRejectedValue(failure)
+    try {
+      await expect(f.controller.launchAgent(request, f.config, undefined, { create: f.create })).rejects.toBe(failure)
+      expect(request).toMatchObject({ agentSessionId: 'retained-targeted-session', createOperationId: f.request.createOperationId })
+      expect(f.create).toHaveBeenCalledTimes(stage === 'creation' ? 1 : 0)
+      for (const client of Object.values(f.clients)) {
+        expect(client.stopAgent).not.toHaveBeenCalled()
+        expect(client.stopTerminal).not.toHaveBeenCalled()
+      }
+    } finally { await f.controller.dispose() }
+  })
+
   it.each(['local', 'remote'])('uses the exact %s Core inventory with independently authorized tool owner', async hostId => {
     const f = await fixture(hostId)
     try {
