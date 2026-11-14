@@ -73,3 +73,8 @@ select[aria-invalid='true']:focus-visible { outline-color: var(--red-line); }
   .ui-input-group--prompt:focus-within { border-color: Highlight; }
   .ui-input-group--prompt > button:disabled { color: GrayText; }
 }
+
+.ui-form-row--stacked { display: grid; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
+.ui-form-row--stacked > strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
+.ui-form-row--stacked > small { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.45; }
+.ui-form-row--stacked > small[role='alert'] { color: var(--red-text); }
