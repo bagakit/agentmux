@@ -506,6 +506,9 @@ importers:
       '@radix-ui/react-dropdown-menu':
         specifier: 2.1.20
         version: 2.1.20(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-roving-focus':
+        specifier: 1.1.15
+        version: 1.1.15(patch_hash=1bb741197a55de7696737b96f40411ebd6c32d428c47a586eb41200a2d936667)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tiptap/core':
         specifier: ^3.31.3
         version: 3.31.3(@tiptap/pm@3.31.3)

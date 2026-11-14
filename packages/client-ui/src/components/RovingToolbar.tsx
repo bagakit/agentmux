@@ -1,6 +1,6 @@
 import * as RovingFocus from '@radix-ui/react-roving-focus'
 import type { ComponentPropsWithoutRef } from 'react'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 
 export const RovingToolbarItem = RovingFocus.Item
 

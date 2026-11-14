@@ -1,7 +1,7 @@
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { RovingToolbar, RovingToolbarButton } from '../RovingToolbar'
+import { RovingToolbar, RovingToolbarButton } from '@agentmux/client-ui/components/RovingToolbar'
 import { ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 
 const icon = semanticIconComponent
