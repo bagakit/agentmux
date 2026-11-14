@@ -16,9 +16,11 @@ import { parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '@agent
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
 import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxDesktopFocusResult, AgentMuxDesktopFocusTarget } from '@agentmux/core/control'
-import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
+import type { AppConfig, SessionSnapshot, AgentMuxPreloadApi, DesktopControlRequest, DesktopControlCancellation, DesktopControlResponse } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
+import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge'
+import { createRendererControlApi } from '../src/renderer/src/lib/control-api'
 import { callPublicGoalControl } from '@agentmux/core'
 import { publicGoalRecord } from '@agentmux/host/goal-projection'
 import { goalLinkBuildPlugin, goalLinkOwnerFixture } from './helpers/goal-link-owner'
@@ -202,6 +204,73 @@ afterEach(async () => {
 })
 
 describe('actual Desktop navigation and content-free observation owners', () => {
+  it.each([false, true])('keeps the original focus receipt through its exact checkpoint ACK (held past the observer budget: %s)', async held => {
+    const before = useAppStore.getState()
+    const lifecycle = [vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'stop')]
+    let deliverRequest!: (request: DesktopControlRequest) => void
+    let deliverCancellation!: (cancellation: DesktopControlCancellation) => void
+    const cancellations: DesktopControlCancellation[] = [], responses: DesktopControlResponse[] = [], ownerResults: AgentMuxControlResult[] = []
+    let release!: () => void, entered!: () => void
+    const checkpoint = new Promise<void>(resolve => { release = resolve })
+    const checkpointEntered = new Promise<void>(resolve => { entered = resolve })
+    vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => { entered(); if (held) await checkpoint })
+    const bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
+      sendRequest: request => deliverRequest(request),
+      sendCancellation: cancellation => { cancellations.push(cancellation); deliverCancellation(cancellation) } })
+    const preload: AgentMuxPreloadApi['control'] = {
+      onRequest: listener => { deliverRequest = listener; return () => {} },
+      onCancellation: listener => { deliverCancellation = listener; return () => {} },
+      respond: response => { responses.push(response); bridge.accept(response) }
+    }
+    let ownerFinished!: () => void
+    const finished = new Promise<void>(resolve => { ownerFinished = resolve })
+    const stop = createRendererControlApi(preload).onRequest(async (request, signal) => {
+      try {
+        const result = await useAppStore.getState().executeControl(request as AgentMuxControlRequest, signal)
+        ownerResults.push(result); return result
+      } finally { ownerFinished() }
+    })
+    const request = parseAgentMuxControlRequest({ schemaVersion: 5, requestId: held ? 'held-original-focus' : 'normal-original-focus',
+      operation: 'focus', target: { kind: 'space', regionId: 'target-region' }, inputPolicy: 'preserve' })
+    let pending!: Promise<AgentMuxControlResult>
+    let outcome: { value?: AgentMuxControlResult; error?: unknown }
+    let readerSettled = false
+    try {
+      await act(async () => { pending = bridge.execute(request); await Promise.resolve() })
+      const observed = pending.then(value => { readerSettled = true; return { value } }, error => { readerSettled = true; return { error } })
+      await checkpointEntered
+      expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: 'target-tab', regionId: 'target-region' })
+      if (held) {
+        // Release independently of the defect: a corrected reader must not need
+        // its own timeout in order for this test to let the original ACK return.
+        await act(async () => {
+          await new Promise(resolve => setTimeout(resolve, 2_100))
+          expect(readerSettled).toBe(false); expect(cancellations).toEqual([])
+          expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: 'target-tab', regionId: 'target-region' })
+          expect(document.activeElement).toBe(outside); expect(useAppStore.getState().sessions).toBe(before.sessions)
+          release(); await finished; await Promise.resolve()
+        })
+      }
+      outcome = await observed
+      expect(ownerResults).toHaveLength(1)
+      expect(ownerResults[0]).toMatchObject({ operation: 'focus', navigation: { state: 'applied', selection: { space: { regionId: 'target-region' } } },
+        input: { policy: 'preserve', outcome: 'preserved' }, save: { clientStateWritten: true, storageFlushRequested: true } })
+      expect(useAppStore.getState().sessions).toBe(before.sessions)
+      expect(useAppStore.getState().sessions.map(session => session.control.run)).toEqual(before.sessions.map(session => session.control.run))
+      expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+      expect(document.activeElement).toBe(outside)
+      expect([outside.value, outside.selectionStart, outside.selectionEnd]).toEqual(['Keep user input', 2, 5])
+      for (const call of lifecycle) expect(call).not.toHaveBeenCalled()
+      console.info('FOCUS_ACK_SOURCE', JSON.stringify({ held, requestId: request.requestId,
+        selection: useAppStore.getState().workbenchSpaceSelection, cancellations, responses,
+        ownerResults, reader: outcome.error instanceof Error ? { name: outcome.error.name, message: outcome.error.message,
+          code: (outcome.error as Error & { code?: string }).code } : outcome.value }))
+      // The admitted navigation and exact save have finished at the original owner.
+      // An observation deadline must not make this original reply disappear.
+      expect({ cancellations, responses, outcome }).toMatchObject({ cancellations: [],
+        responses: [{ requestId: request.requestId, ok: true }], outcome: { value: ownerResults[0] } })
+    } finally { await act(async () => { release(); if (pending) await finished; await Promise.resolve() }); bridge.dispose(); stop() }
+  })
   it('retains Focus List and Map owners, exact original workface and input across actual App navigation', async () => {
     installCollaborationCanvasGeometry(); installCollaborationLayoutLoopback()
     vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
