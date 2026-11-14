@@ -73,7 +73,7 @@ const mutations = [
     from: '{ source: outcome.source, initialState: { shapes: outcome.handoff.shapes, crop: outcome.handoff.crop }, initialTool: outcome.handoff.tool,', to: '{ source: outcome.source,',
     test: 'screen-capture.test.ts', expected: '⌘E opens the window editor on the full frozen frame with the marks' },
   { id: 'surface-shares-focus-return', file: source + 'main/ipc.ts',
-    from: '    copyText: copyScreenshotText, returnFocus: returnScreenshotFocus })', to: '    copyText: copyScreenshotText, returnFocus: () => {} })',
+    from: '    copyText: copyScreenshotText, returnFocus: returnScreenshotFocus, recordTiming:', to: '    copyText: copyScreenshotText, returnFocus: () => {}, recordTiming:',
     test: 'screenshot-shortcut-wiring.test.ts', expected: 'focus return is the app-wide macOS' },
   { id: 'shortcut-presents-surface', file: source + 'main/ipc.ts',
     from: 'present: session => captureSurface.present(session),', to: "present: async () => ({ state: 'cancelled' }),",
