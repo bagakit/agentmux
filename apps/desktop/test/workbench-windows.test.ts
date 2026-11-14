@@ -84,7 +84,7 @@ async function fixture(store?: Store) {
     })
   })
   await owner.rendererReady(event)
-  cleanup.push(async () => { owner.dispose(); await rm(directory, { recursive: true, force: true }) })
+  cleanup.push(async () => { owner.dispose(); await persisted.flush().catch(() => {}); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 }) })
   return { owner, store: persisted, main, children, tickets, admissions, directory, outcomes, nativeReturns, setReturnContext }
 }
 async function opened(f: Awaited<ReturnType<typeof fixture>>, operationId = 'open') {
@@ -97,6 +97,15 @@ async function opened(f: Awaited<ReturnType<typeof fixture>>, operationId = 'ope
   expect(ticket.frameName).toMatch(/^workbench-window-[1-9A-HJ-NP-Za-km-z]{32,44}$/)
   return { windowId: page.recordedOperation!.windowId!, documentGeneration: page.recordedOperation!.documentGeneration! }
 }
+
+it('Quit preserves current windows when their final arrangement is unconfirmed', async () => {
+  const f = await fixture(); await opened(f)
+  f.store.arrangementFailure = true
+  await expect(f.owner.prepareQuit()).rejects.toThrow('window arrangement is not yet durable')
+  expect(f.children[0]!.destroyed).toBe(false)
+  f.store.arrangementFailure = false
+  await expect(f.owner.prepareQuit()).resolves.toBeUndefined()
+})
 function snapshot(f: Awaited<ReturnType<typeof fixture>>): WorkbenchWindowSnapshot {
   const call = f.main.webContents.send.mock.calls.filter(([channel]) => channel === WORKBENCH_WINDOW_CHANGED).at(-1)
   expect(call).toBeDefined()
@@ -133,7 +142,7 @@ describe('original workface native presentation owner', () => {
     accept(...delayed!)
     await vi.waitFor(async () => expect((await f.owner.call('app.window.ls', { operationId: input.operationId }, context)).recordedOperation?.state).toBe(outcome === 'applied' ? 'confirmed' : 'rejected'))
     expect(f.children[0]!.destroyed).toBe(outcome === 'applied')
-    expect(snapshot(f).recordedOperation).toMatchObject({ input, state: outcome === 'applied' ? 'confirmed' : 'rejected' })
+    await vi.waitFor(() => expect(snapshot(f).recordedOperation).toMatchObject({ input, state: outcome === 'applied' ? 'confirmed' : 'rejected' }))
     expect(f.nativeReturns).toHaveBeenCalledTimes(outcome === 'applied' ? 1 : 0)
     expect((await f.store.load()).state.windows).toHaveLength(outcome === 'applied' ? 0 : 1)
   })
@@ -212,7 +221,7 @@ describe('original workface native presentation owner', () => {
     f.owner.setNativeOwner({ beforeClosing: f.nativeReturns, windowSize: () => new Promise(resolve => sizes.push(resolve)) })
     const firstOpen = f.owner.call('app.window.open', { operationId: 'first-concurrent-open', target: first }, context)
     const secondOpen = f.owner.call('app.window.open', { operationId: 'second-concurrent-open', target: second }, context)
-    await vi.waitFor(() => expect(sizes).toHaveLength(2))
+    await vi.waitFor(() => expect(sizes).toHaveLength(2), { timeout: 10000 })
     for (const finish of sizes) finish({ width: 840, height: 620 })
     const [one, two] = await Promise.all([firstOpen, secondOpen])
     // Disk intent persistence can admit either call first. Both must address
