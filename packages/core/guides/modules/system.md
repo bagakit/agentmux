@@ -118,6 +118,20 @@ native liveSize (decoded_size), not live/unused memory. Neither predicts RSS sav
 Missing before/after counters do not undo a completed native call. Unknown receipts are never
 automatically retried; a later inspect reads current counters without reconstructing the old ACK.
 
+For bounded related dedicated-worker counters, read system metrics memory workers inspect --help.
+Use the original five-field Renderer target from metrics get/watch. This explicit diagnostic may
+include private native Worker URLs, paths and titles; keep its bounded receipt private. It observes
+root/nested dedicated-worker relations with a200ms settle after the initial auto-attach attempt
+within the original observation deadline, at most16 relations and64 read/discovery commands
+with2 concurrent child reads. These are reader budgets, not limits on Workers or Agent capacity.
+A completed query only confirms this bounded window and cleanup; zero observed is not absence.
+Known child/discovery failure or omitted work is partial, source loss/cancellation/unconfirmed
+release is unknown. Isolate IDs preserve root and related aliases without an aggregate byte total;
+relatedness does not prove a child's OS PID. Metadata explicitly distinguishes absent, empty,
+truncated and omitted fields. No global target scan, evaluation, objects, pause, Worker termination,
+GC, snapshot, profiling or memory-infra is performed. Default memory inspect and Scene remain
+main-isolate v1. Existing DevTools/debuggers stay owned; only this exact read is refused.
+
 For explicit Renderer heap/backing counters, use system metrics memory inspect --help;
 that original command defines exact target, unknown coverage and debugger ownership boundaries.
 Crash-log reveal is a separate presentation action, not a recovery. Missing diagnostics
