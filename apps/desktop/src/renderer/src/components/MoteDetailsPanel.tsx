@@ -23,6 +23,7 @@ import { useWorkspaceFileTree } from './file-tree/useWorkspaceFileTree'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { MoteRenameDialog } from './MoteRenameDialog'
+import { MoteProfileDialog } from './MoteProfileDialog'
 import { MoteIdeaControls, MoteIdeaFeedbackControl } from './MoteIdeaControls'
 import { MoteFirstCooperation } from './MoteFirstCooperation'
 import { MoteCurrentWork } from './MoteCurrentWork'
@@ -58,6 +59,8 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   const section = space && space.section !== 'discussion' && space.section !== 'threads' ? space.section : localSection
   const setSection = (next: MoteSection) => { setLocalSection(next); space?.select(next) }
   const [nameOpen, setNameOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const profileInvoker = useRef<HTMLButtonElement | null>(null)
   const [introductionOpen, setIntroductionOpen] = useState(false)
   const [calendarRequest, setCalendarRequest] = useState<{ scheduleId: string }>()
   const showCalendar = (scheduleId?: string) => {
@@ -104,9 +107,11 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
       </div> : null}
       <div className="mote-details__profile-facts">
         <dl><div><dt>Workspace</dt><dd>{scope.workspace.name}</dd></div></dl>
-        <button type="button" className="mote-details__edit-profile" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}><ThemeActionEditIcon size={12} />Edit profile</button>
+        <button type="button" className="mote-details__edit-profile" onClick={event => { profileInvoker.current = event.currentTarget; setProfileOpen(true) }}><ThemeActionEditIcon size={12} />Edit profile</button>
       </div>
     </header>
+    {profileOpen ? <MoteProfileDialog key={JSON.stringify([scope.workspace.hostId, scope.workspace.id, scope.topic.id, scope.rootPath])} scope={scope} reference={reference} onOpenPath={onOpenPath}
+      onClose={() => setProfileOpen(false)} returnFocus={() => profileInvoker.current?.isConnected ? profileInvoker.current : null} /> : null}
     <div className="mote-details__main">
     {space ? <div className="mote-details__discussion-directory" hidden={!discussion}>
       <MoteDiscussions scope={scope} active={active && !!discussion} />

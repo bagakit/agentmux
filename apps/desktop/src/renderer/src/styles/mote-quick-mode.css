@@ -17,3 +17,6 @@
 .mote-quick-mode__presence input[type=number] { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-0); color: var(--text); padding: 8px; font: inherit; }
 .mote-quick-mode__presence pre { max-height: 160px; overflow: auto; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mote-quick-mode__presence p, .mote-quick-mode__presence details { margin: 0; font-size: var(--fs-meta, 12px); line-height: 1.65; }
+.mote-quick-mode__welcome { margin: 4px 0; font-size: 12px; line-height: 1.65; color: var(--text-2); }
+.mote-quick-mode__advanced { margin-top: 6px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.mote-quick-mode__advanced > summary { cursor: pointer; color: var(--text-2); font-size: 12px; }

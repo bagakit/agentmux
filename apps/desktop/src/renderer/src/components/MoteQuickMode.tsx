@@ -20,6 +20,7 @@ import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
+import { useMoteSpace } from './MoteSpaceFrame'
 
 const ThemeActionQuickModeIcon = semanticIconComponent('action.quick-mode')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
@@ -61,11 +62,13 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   </section>
 }
 
-export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocus }: {
+export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocus, onContinue }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
   onOpenPath(path: string): Promise<unknown>; onClose(): void; returnFocus(): HTMLElement | null
+  onContinue?: (() => void) | undefined
 }) {
   const ownerDocument = useWorkbenchDocument()
+  const space = useMoteSpace()
   const draftKey = JSON.stringify(moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings) ?? [scope.workspace.hostId, scope.workspace.path, scope.topic.id])
   const restored = useRef(retainedQuickDrafts.get(draftKey))
   const [saved, setSaved] = useState<SavedMoteQuickMode | null>(restored.current?.saved ?? null), [draft, setDraft] = useState<MoteQuickDefaults>(() => restored.current?.draft ?? (scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.defaults : {}))
@@ -145,6 +148,8 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
     finally { if (lifetime.current === epoch) setResuming(false) }
   }
+  const continueToConversation = onContinue ?? (space?.topicId === scope.topic.id ? () => space.select('discussion') : undefined)
+  const firstConversation = !draft.conversation && Boolean(draft.executorId) && Boolean(continueToConversation)
   async function save() {
     if (busy || !saved) return
     if (moteMinutesToMs(minutes, { wholeMinutes: true }) === null) {
@@ -156,7 +161,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     const submitted = form.current, epoch = lifetime.current
     const current = () => lifetime.current === epoch && form.current === submitted
     setBusy(true); setIssue(null)
-    try { await saveMoteQuickDefaults(scope, submitted, saved, onOpenPath, current, reference); if (current()) { latestDraft.current.accepted = true; retainedQuickDrafts.delete(draftKey); onClose() } }
+    try { await saveMoteQuickDefaults(scope, submitted, saved, onOpenPath, current, reference); if (current()) { latestDraft.current.accepted = true; retainedQuickDrafts.delete(draftKey); onClose(); if (firstConversation) continueToConversation?.() } }
     catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
     finally { if (lifetime.current === epoch) setBusy(false) }
   }
@@ -172,11 +177,14 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
         <AgentExecutorPicker presentation="field" id={id + '-agent'} label="Executor for new chat"
           selected={draft.executorId ?? null} executors={executors} unsetLabel="Use normal Launcher choice"
           onSelect={value => { const { executorId: _, ...rest } = form.current; update(value ? { ...rest, executorId: value } : rest) }} />
+        {!choices.length && !selected ? <p className="mote-quick-mode__welcome">Choose an Executor, then save and continue. Your first message will create the main Agent for this Mote.</p> : <>
         <label htmlFor={id + '-conversation'}><ThemeActionPinIcon size={16} /><span>Main Agent<small>Your usual contact. Coordinates work with the other Agents.</small></span></label>
         <SelectionField id={id + '-conversation'} label="Main Agent" value={selected}
           onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
           options={[{ value: '', label: 'No main Agent yet' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Saved location · unconfirmed' }] : []),
             ...choices.map(choice => ({ value: JSON.stringify(choice), label: facts.tabs[choice.tabId]?.name?.trim() || conversationLabels[choice.sessionId] || choice.sessionId, description: `${conversationLabels[choice.sessionId]} · ${choice.hostId} / ${choice.sessionId} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / ${1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}` }))]} />
+        </>}
+        <details className="mote-quick-mode__advanced"><summary>Heartbeat & conversation settings</summary>
         <fieldset className="mote-quick-mode__presence"><legend>Conversation rollover</legend>
           <label htmlFor={id + '-rollover'}>Automatic rollover policy</label>
           <SelectionField id={id + '-rollover'} label="Automatic rollover policy" value={rolloverKind}
@@ -209,11 +217,11 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
           {resumeRequest.current || maintenance?.schedule?.status === 'paused' && presence.enabled ? <button type="button" className="small-button" disabled={resuming}
             onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button> : null}
         </fieldset>
-        {!choices.length ? <p className="mote-details__hint">Start an original conversation in this Mote, then choose it here.</p> : null}
+        </details>
         {loading ? <p role="status" className="mote-details__hint">Reading MOTE.md…</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<button className="small-button" type="button" onClick={() => setAttempt(value => value + 1)}>Reread</button></div> : null}
       </div>
-      <footer className="mote-quick-mode-dialog__footer"><button className="icon-button" type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><ThemeFileTextIcon size={15} /></button><span>Saving sends no message.</span><button type="button" className="small-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={loading || busy || !saved || Boolean(saved.issue)} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button></footer>
+      <footer className="mote-quick-mode-dialog__footer"><button className="icon-button" type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><ThemeFileTextIcon size={15} /></button><span>Saving sends no message.</span><button type="button" className="small-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={loading || busy || !saved || Boolean(saved.issue)} onClick={() => void save()}>{busy ? 'Saving…' : firstConversation ? 'Save and continue' : 'Save'}</button></footer>
     </Dialog.Content>
   </DocumentOverlayPortal></Dialog.Root>
 }

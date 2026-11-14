@@ -217,7 +217,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
       {scope ? <MoteThreadsPanel scope={scope} requestedEvent={sharedFrame?.threadEvent} active={visible && section === 'threads' && !memberIntent && presentation !== 'workface'} onSelect={showThread} /> : null}
       {scope && section === 'discussion' && !showOriginal && !currentMain && main?.current ? <p role="status" className="mote-conversation__issue">原主对话的角色或位置尚未确认，原身份、工作和输入仍保留。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={showThreads}>查看 Threads</button></p> : null}
       <div className="mote-workface__original" hidden={!showOriginal} inert={!showOriginal}>{children}</div>
-      {settings && scope ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)} onClose={() => setSettings(false)} returnFocus={() => settingsInvoker.current?.isConnected ? settingsInvoker.current : null} /> : null}
+      {settings && scope ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)} onClose={() => setSettings(false)} onContinue={showDiscussion} returnFocus={() => settingsInvoker.current?.isConnected ? settingsInvoker.current : null} /> : null}
     </div>
   </MoteWorkfaceContext.Provider>
 }

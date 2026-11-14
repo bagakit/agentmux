@@ -14,7 +14,9 @@ export const DEFAULT_LAUNCHER_SECTIONS: Record<LauncherSection, LauncherSectionM
   agents: 'expanded', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'
 }
 export type MoteIdeaDraft = { direction: string; includeDiscussion: boolean; feedback: Record<string, { vote: '' | 'useful' | 'less-useful'; comment: string }>; arrangement?: MoteIdeaSchedulePreparation }
+export type MoteProfileDraft = { source: import('@agentmux/core').FileDocument; name: string; body: string }
 export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt; moteIdea?: MoteIdeaDraft; schedule?: ScheduleDraft;
+  moteProfile?: MoteProfileDraft | undefined;
   progressUpdate?: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined;
   progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
   unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
@@ -39,6 +41,7 @@ type LauncherState = {
   /** End this exact held message: a delivered one is dropped; an undelivered one returns before any newer typing. */
   settleHeldPrompt(launcherId: string, operationId: string, delivered: boolean): boolean
   setMoteIdeaDraft(launcherId: string, value: MoteIdeaDraft): boolean
+  setMoteProfileDraft(launcherId: string, value: MoteProfileDraft | undefined): boolean
   setScheduleDraft(launcherId: string, patch: Partial<ScheduleDraft>): boolean
   setProgressUpdate(launcherId: string, request: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined): boolean
   setProgressDraft(launcherId: string, patch: Partial<NonNullable<LauncherDraft['progressDraft']>> | undefined): boolean
@@ -65,6 +68,10 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
   reportStorageIssue = message => { try { save({ persistenceIssue: storageReadConfirmed ? message : 'Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.' }) } catch { /* The in-memory warning is already retained. */ } }
   return {
   persistenceIssue: null, sections: {}, drafts: {}, executors: {}, moteTopicId: null,
+  setMoteProfileDraft(launcherId, value) {
+    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), moteProfile: value } } })); return true }
+    catch { reportStorageIssue('Your profile draft could not be saved on this device. Current input remains available.'); return false }
+  },
   setProgressUpdate(launcherId, request) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), progressUpdate: request } } })); return true }
     catch { reportStorageIssue('The original configuration request could not be saved. Your current input is kept.'); return false }
