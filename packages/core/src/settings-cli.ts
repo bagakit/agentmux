@@ -1,3 +1,4 @@
+import { parseSettingsHostMaintenanceCommand } from './settings-host-maintenance-cli.js'
 import { AgentMuxError } from './errors.js'
 import { readControlJsonInput } from './cli-json-input.js'
 
@@ -6,6 +7,8 @@ const input = (path: string) => readControlJsonInput(path, 'Settings')
 
 /** Parse carriers only. Resource fields, CAS and save semantics belong to the service. */
 export async function parseSettingsCommand(args: readonly string[]): Promise<Record<string, unknown>> {
+  const maintenance = await parseSettingsHostMaintenanceCommand(args)
+  if (maintenance) return maintenance
   const [resource, action, id] = args
   if (resource === 'inspect' && args.length <= 2) {
     if (action?.startsWith('-')) invalid('settings inspect accepts a target, not options.')
@@ -52,7 +55,13 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Rec
     return invalid('Use settings applications --help for exact configuration, plan, apply and original operation query commands.')
   }
   if (resource === 'hosts') {
-    if (action === 'update' && args.length === 5 && id?.length && args[3] === '--input') {
+    if (action === 'create' && args.length === 5 && id?.length && args[3] === '--input') return { id, value: await input(args[4]!) }
+    if (action === 'delete' && args.length === 5 && id?.length && args[3] === '--input') {
+      const body = await input(args[4]!)
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'expected')) invalid('Host delete input requires the complete expected Host record.')
+      return { ...body as Record<string, unknown>, id }
+    }
+    if ((action === 'update' || action === 'configure') && args.length === 5 && id?.length && args[3] === '--input') {
       const body = await input(args[4]!)
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['expected', 'candidate'].includes(key))) invalid('Host update input requires complete expected and candidate Host records.')
       return { ...body as Record<string, unknown>, id }

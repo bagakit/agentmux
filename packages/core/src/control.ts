@@ -381,6 +381,9 @@ export type AgentMuxControlSettingsExecutorRefreshResult = {
 /** Host configuration belongs to the client; Core transports bounded JSON and diagnostic facts. */
 export type AgentMuxControlSettingsHostsRequest = RequestBase & (
   | { operation: 'settings.hosts.list' }
+  | { operation: 'settings.hosts.create'; id: string; value: AgentMuxControlSettingsResourceFields }
+  | { operation: 'settings.hosts.configure'; id: string; expected: AgentMuxControlSettingsResourceFields; candidate: AgentMuxControlSettingsResourceFields }
+  | { operation: 'settings.hosts.delete'; id: string; expected: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.hosts.update'; id: string; expected: AgentMuxControlSettingsResourceFields; candidate: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.hosts.test'; id: string; input?: never }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; id?: never }
@@ -396,6 +399,9 @@ export type AgentMuxControlSettingsHostsRequest = RequestBase & (
 export type AgentMuxHostCheckOutcome = 'ready' | 'unsupported' | 'check-failed'
 export type AgentMuxControlSettingsHostsResult =
   | { operation: 'settings.hosts.list'; hosts: AgentMuxControlSettingsResourceFields[] }
+  | { operation: 'settings.hosts.create'; host: AgentMuxControlSettingsResourceFields }
+  | { operation: 'settings.hosts.configure'; host: AgentMuxControlSettingsResourceFields }
+  | { operation: 'settings.hosts.delete'; id: string; removed: true }
   | { operation: 'settings.hosts.update'; host: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; outcome: AgentMuxHostCheckOutcome; detail: string }
   | { operation: 'settings.hosts.install-check'; check: import('./remote-core-install.js').RemoteCoreInstallCheck }
@@ -1176,6 +1182,9 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'diagnostics.crash-log.get': 'short',
   'diagnostics.crash-log.reveal': 'short',
   'settings.hosts.list': 'short',
+  'settings.hosts.create': 'long',
+  'settings.hosts.configure': 'long',
+  'settings.hosts.delete': 'long',
   'settings.hosts.update': 'long',
   'settings.hosts.test': 'long',
   'settings.hosts.install-check': 'long',

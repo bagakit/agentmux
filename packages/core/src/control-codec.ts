@@ -408,7 +408,17 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return source.operation === 'settings.hosts.upgrade' ? { ...base, operation: source.operation, expected: parseRemoteCoreUpgradeExpected(source.expected) }
       : { ...base, operation: source.operation }
   }
-  if (source.operation === 'settings.hosts.update') {
+  if (source.operation === 'settings.hosts.create' || source.operation === 'settings.hosts.delete') {
+    const code = 'INVALID_CONTROL_REQUEST', field = source.operation === 'settings.hosts.create' ? 'value' : 'expected'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'id', field], code)
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, id: text(source.id, 'Host ID', code) }
+    const request = source.operation === 'settings.hosts.create'
+      ? { ...base, operation: source.operation, value: settingsResourceRecord(source.value, code) }
+      : { ...base, operation: source.operation, expected: settingsResourceRecord(source.expected, code) }
+    settingsResourceBudget(request, code)
+    return request
+  }
+  if (source.operation === 'settings.hosts.update' || source.operation === 'settings.hosts.configure') {
     const code = 'INVALID_CONTROL_REQUEST'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'id', 'expected', 'candidate'], code)
     const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
@@ -1439,7 +1449,14 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     settingsResourceEnvelope(fields, ['receipt'], code)
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { receipt: fields.receipt === null ? null : parseRemoteCoreUpgradeReceipt(fields.receipt) } }
   }
-  if (operation === 'settings.hosts.update') {
+  if (operation === 'settings.hosts.delete') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
+    const fields = settingsResourceEnvelope(result, ['id', 'removed'], code)
+    if (fields.removed !== true) throw new AgentMuxError('Host removal receipt is invalid.', code)
+    return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { id: text(fields.id, 'Host ID', code), removed: true } })
+  }
+  if (operation === 'settings.hosts.update' || operation === 'settings.hosts.create' || operation === 'settings.hosts.configure') {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
     const fields = settingsResourceEnvelope(result, ['host'], code)

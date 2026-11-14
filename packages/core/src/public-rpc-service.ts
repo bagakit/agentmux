@@ -154,6 +154,7 @@ import { observeRead } from './observation-read.js'
 import { observeHostNetwork } from './host-network-observation.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_TAILCAT_DEFAULT_KEYS, isTailcatKeyMethod, parseTailcatKeyParams, parseTailcatKeyResult } from './public-rpc-tailcat-key.js'
+import { isHostMaintenanceMethod, parseHostMaintenanceParams, parseHostMaintenanceResult, type HostMaintenanceActor, type HostMaintenanceParamsMap } from './public-rpc-host-maintenance.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
   type AgentMuxRpcSnapshotParams, type AgentMuxRpcSnapshot, type AgentMuxRpcStreamMethod,
@@ -247,6 +248,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   hostConfiguration?(hostId: string): import('./control.js').AgentMuxControlSettingsResourceFields | null
   /** Read the selected Host's original listener owner. Missing observation remains unknown. */
   hostTailcat?(hostId: string, signal?: AbortSignal): import('./host-runtime-observation.js').TailcatListenerObservation | undefined | Promise<import('./host-runtime-observation.js').TailcatListenerObservation | undefined>
+  /** Original configuration owner's exact maintenance requests; this grants no standing Agent authority. */
+  hostMaintenance?: import('./public-rpc-host-maintenance.js').HostMaintenanceAdministration
   /** This Host's own saved-key owner: create only a missing key through the official CLI, never overwrite. */
   hostTailcatKey?(input: { role: import('./public-rpc-tailcat-key.js').TailcatKeyRole; key: string }, signal?: AbortSignal): Promise<import('./public-rpc-tailcat-key.js').TailcatKeyPreparation>
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
@@ -445,7 +448,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1293,6 +1296,29 @@ export class AgentMuxRpcService {
       }
       // A later routing change does not erase an already acquired original capture.
       return parseRuntimeV8ProfileResult(result, input) as AgentMuxRpcResult<M>
+    }
+    if (isHostMaintenanceMethod(method)) {
+      const input = parseHostMaintenanceParams(method, params)
+      const caller = await this.authenticated(context)
+      if (method === 'settings.hosts.maintenance-review' && context.caller !== undefined) throw new AgentMuxError(
+        'Maintenance review requires a transport-approved person or device without a managed Agent caller. The request and healthy Runs remain available.', 'CONTROL_PERMISSION_DENIED')
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
+        'Maintenance requests require their original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
+      const sourceRuntimeId = caller?.client.runtimeOwnerIdentity?.()?.runtimeId
+      const actor: HostMaintenanceActor = caller ? { kind: 'agent', id: caller.agentSessionId, hostId: caller.hostId, ...(sourceRuntimeId ? { runtimeId: sourceRuntimeId } : {}), ...(caller.session.run ? { runId: caller.session.run.runId } : {}) }
+        : { kind: context.principal!.kind as 'user' | 'device', id: rpcString(context.principal!.id, 'Original transport principal') }
+      const assertCurrent = async () => {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        if (context.caller) await this.authenticated(context)
+      }
+      await assertCurrent()
+      if (!this.ports.hostMaintenance) throw new AgentMuxError('The original Host configuration service has no maintenance review owner. Existing checks, operations and healthy Runs remain available.', 'CONTROL_UNAVAILABLE')
+      const record = method === 'settings.hosts.maintenance-request'
+        ? await this.ports.hostMaintenance.request(input as HostMaintenanceParamsMap['settings.hosts.maintenance-request'], actor, assertCurrent)
+        : method === 'settings.hosts.maintenance-review'
+          ? await this.ports.hostMaintenance.review(input as HostMaintenanceParamsMap['settings.hosts.maintenance-review'], actor, assertCurrent)
+          : await this.ports.hostMaintenance.inspect(input.operationId, actor)
+      return parseHostMaintenanceResult(method, { record }, input) as AgentMuxRpcResult<M>
     }
     if (isTailcatKeyMethod(method)) {
       const input = parseTailcatKeyParams(params)

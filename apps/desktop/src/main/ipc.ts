@@ -269,6 +269,7 @@ import { resolveBrowserAgentControl } from '../shared/browser-agent-control.js'
 import { registerThemeBootstrap, themeBootstrap } from './theme-bootstrap.js'
 import { resolveTheme } from '@agentmux/client-ui/theme'
 import { executeSettingsControl } from './settings-control.js'
+import { SettingsHostsMaintenanceOwner } from './settings-hosts-maintenance.js'
 import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
 import { readHostCreationTrust, approveHostCreationTrust } from './settings-host-creation-trust.js'
 import { readHostMessageTrust, approveHostMessageTrust } from './settings-host-message-trust.js'
@@ -435,6 +436,7 @@ export async function registerIpc(args: {
   const hostInstalls = new SettingsHostsInstallOwner(new RemoteCoreInstallManager({
     stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades'), artifact: () => maintenance.artifact()
   }), configOwner, args.runtime, join(app.getPath('userData'), 'remote-core-install-adoptions.json'))
+  const hostMaintenance = new SettingsHostsMaintenanceOwner(join(app.getPath('userData'), 'host-maintenance-requests'), configOwner, hostInstalls, hostUpgrades)
   toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
     config: configOwner, receiptPath: join(app.getPath('userData'), 'toolkit-receipts.json'),
     enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
@@ -821,7 +823,7 @@ export async function registerIpc(args: {
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner, notesStorageOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
-    if (request.operation === 'settings.hosts.install-check' || request.operation === 'settings.hosts.install' || request.operation === 'settings.hosts.install-inspect' || request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.update' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' || request.operation === 'settings.hosts.upgrade-reconnect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades, hostInstalls)
+    if (request.operation === 'settings.hosts.install-check' || request.operation === 'settings.hosts.install' || request.operation === 'settings.hosts.install-inspect' || request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.create' || request.operation === 'settings.hosts.configure' || request.operation === 'settings.hosts.delete' || request.operation === 'settings.hosts.update' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' || request.operation === 'settings.hosts.upgrade-reconnect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades, hostInstalls)
     if (request.operation === 'settings.executors.refresh') return await executeSettingsExecutorRefreshControl(request, configOwner, runtimeIncidents ?? args.runtime)
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
@@ -2618,6 +2620,7 @@ export async function registerIpc(args: {
     goalChanges: desktopGoalChanges(args.runtime),
     goalControl: (request, _name, originalContext) => executeGoal(request, originalContext),
     applicationAccess: args.applicationAccess,
+    hostMaintenance,
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
     hostTailcatKey: (input, signal) => args.runtime.callOriginalCore('local', 'settings.hosts.tailcat-key', input, { transport: 'unix', ...(signal ? { signal } : {}) }),
     hostTailcat: async (hostId, signal) => (await args.runtime.callOriginalCore(hostId, 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat,

@@ -2479,8 +2479,19 @@ export class RuntimeController {
   private async assertConfigurable(nextSignatures: ReadonlyMap<string, string>, launcherHostIds: ReadonlySet<string>): Promise<void> {
     for (const [hostId, host] of this.hosts) {
       if (nextSignatures.get(hostId) === this.hostSignatures.get(hostId) || launcherHostIds.has(hostId)) continue
+      // A never-bound SSH draft has no adopted Runtime to detach. Removing its
+      // unused route must not require installing/connecting that remote Core.
+      // Any retained identity or Session still belongs to the original path below.
+      if (!nextSignatures.has(hostId) && host.config.kind === 'ssh' && !host.config.runtimeId &&
+          runtimeOwner(host.client) === null && host.client.agentSessions().length === 0) continue
       await host.client.connect()
-      if ((await host.client.listRuns()).some(run => run.state === 'running')) {
+      const runs = await host.client.listRuns()
+      if (!nextSignatures.has(hostId)) {
+        const sessions = await host.client.readAgentSessions()
+        if (sessions.length || runs.length) throw new AgentMuxError(
+          'Host ' + hostId + ' retains durable Sessions or Runs; its route and all original work were kept.', 'SETTING_RESOURCE_IN_USE')
+      }
+      if (runs.some(run => run.state === 'running')) {
         throw new Error(`Stop sessions on ${hostId} before changing that host`)
       }
     }

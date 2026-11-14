@@ -32,6 +32,44 @@ export async function executeSettingsHostsControl(
   if (request.operation === 'settings.hosts.list') {
     return { operation: request.operation, hosts: structuredClone(owner.current.hosts) as AgentMuxControlSettingsResourceFields[] }
   }
+  if (request.operation === 'settings.hosts.create' || request.operation === 'settings.hosts.configure' || request.operation === 'settings.hosts.delete') {
+    const fail = (code: string, message: string): never => { throw Object.assign(new Error(message), { code }) }
+    const read = (value: unknown): HostConfig => {
+      const parsed = hostSchema.safeParse(value)
+      if (!parsed.success || parsed.data.id !== request.id) return fail('INVALID_SETTING_VALUE', 'A complete valid Host record with the exact requested ID is required.')
+      return parsed.data as HostConfig
+    }
+    const candidate = request.operation === 'settings.hosts.create' ? read(request.value)
+      : request.operation === 'settings.hosts.configure' ? read(request.candidate) : undefined
+    const expected = request.operation === 'settings.hosts.create' ? undefined : read(request.expected)
+    if (request.operation === 'settings.hosts.create' && (candidate?.kind !== 'ssh' || request.id === 'local' || candidate.runtimeId !== undefined)) {
+      fail('SETTING_IDENTITY_IMMUTABLE', 'Register a new SSH Host without a Runtime binding. Only the authenticated connection learns that identity.')
+    }
+    const saved = await owner.update(current => {
+      const actual = current.hosts.find(host => host.id === request.id)
+      if (request.operation === 'settings.hosts.create') {
+        if (actual) return fail('SETTING_RESOURCE_EXISTS', 'This Host ID already exists. Read hosts ls before choosing an explicit edit.')
+        return { ...current, hosts: [...current.hosts, candidate!] }
+      }
+      if (!actual) return fail('SETTING_RESOURCE_NOT_FOUND', 'This Host is not registered; configuration changes never create an identity.')
+      if (!configValuesEqual(actual, expected)) return fail('CONFIG_CONFLICT', 'The Host changed. Read hosts ls and review the original draft before another explicit edit.')
+      if (request.operation === 'settings.hosts.delete') {
+        if (actual.kind === 'local') return fail('SETTING_IDENTITY_IMMUTABLE', 'The original local Host cannot be removed.')
+        const references = current.workspaces.filter(workspace => workspace.hostId === request.id)
+        if (references.length) return fail('SETTING_RESOURCE_IN_USE', 'Host is referenced by Workspaces: ' + references.map(workspace => workspace.id).join(', ') + '. Their original work was retained.')
+        // Runtime preparation checks original durable Sessions and Runs before removing its route.
+        return { ...current, hosts: current.hosts.filter(host => host.id !== request.id) }
+      }
+      if (candidate!.kind !== actual.kind || (actual.kind === 'ssh' && candidate!.kind === 'ssh' && candidate!.runtimeId !== actual.runtimeId) ||
+          (actual.kind === 'local' && candidate!.kind === 'local' && !configValuesEqual(candidate!.tailcat, actual.tailcat))) {
+        return fail('SETTING_IDENTITY_IMMUTABLE', 'Keep the original Host type, Runtime binding and local ingress authorization. Use their explicit original owners for sensitive changes.')
+      }
+      return { ...current, hosts: current.hosts.map(host => host.id === request.id ? candidate! : host) }
+    })
+    return request.operation === 'settings.hosts.delete'
+      ? { operation: request.operation, id: request.id, removed: true }
+      : { operation: request.operation, host: structuredClone(saved.hosts.find(host => host.id === request.id)!) as AgentMuxControlSettingsResourceFields }
+  }
   if (request.operation === 'settings.hosts.update') {
     const expected = hostSchema.safeParse(request.expected), candidate = hostSchema.safeParse(request.candidate)
     if (!expected.success || !candidate.success || expected.data.id !== request.id || candidate.data.id !== request.id ||

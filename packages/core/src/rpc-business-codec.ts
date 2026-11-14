@@ -316,6 +316,15 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'inspect.region': if (request.target.kind === 'region' && (actual.region as Record<string, unknown>).regionId !== request.target.regionId) fail(); break
     case 'inspect.tab': case 'arrange': if (request.target.kind === 'tab' && (actual.tab as Record<string, unknown>).tabId !== request.target.tabId) fail(); break
     case 'settings.set': if ((actual.entry as Record<string, unknown>).key !== request.key || actual.requestId !== undefined && actual.requestId !== request.requestId) fail(); break
+    case 'settings.hosts.create': case 'settings.hosts.configure': {
+      const host = actual.host as Record<string, unknown>, expected = request.operation === 'settings.hosts.create' ? request.value : request.candidate
+      // The original connection may learn a Runtime binding while saving; caller fields stay exact.
+      const { runtimeId: _learned, ...fields } = host
+      const { runtimeId: binding, ...requested } = expected
+      if (host.id !== request.id || !isDeepStrictEqual(fields, requested) || binding !== undefined && host.runtimeId !== binding) fail()
+      break
+    }
+    case 'settings.hosts.delete': if (actual.id !== request.id || actual.removed !== true) fail(); break
     case 'settings.hosts.update': if (!isDeepStrictEqual(actual.host, request.candidate) || (actual.host as Record<string, unknown>).id !== request.id) fail(); break
     case 'settings.hosts.install-check': case 'settings.hosts.upgrade-check': {
       const check = actual.check as { input: Record<string, unknown> }
