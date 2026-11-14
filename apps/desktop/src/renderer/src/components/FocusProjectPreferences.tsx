@@ -91,7 +91,7 @@ export function FocusProjectPreferences({ projectKey, name, actions, discussion,
       {error ? <div role="status" className="focus-project-preferences__error">{error}<button type="button" className="small-button" onClick={reviewCurrent} aria-label={`Review current ${subject.toLowerCase()} preferences`}>Review current settings</button></div> : null}
       {notice ? <p role="status">{notice}</p> : null}
       {projectKey ? <>
-        <button type="button" className="tab-context-menu__item tab-context-menu__item--quiet focus-project-menu-action" aria-expanded={appearanceOpen} aria-label="Project appearance" disabled={pending} onClick={() => setAppearanceOpen(value => !value)}><SemanticIcon name="navigation.disclosure" size={12} /><span>Project appearance</span></button>
+        <button type="button" className="tab-context-menu__item tab-context-menu__item--quiet focus-project-menu-action" aria-expanded={appearanceOpen} aria-label="Project appearance" aria-busy={pending || undefined} onClick={() => setAppearanceOpen(value => !value)}><SemanticIcon name="navigation.disclosure" size={12} /><span>{pending ? 'Project appearance · Saving…' : 'Project appearance'}</span></button>
         {appearanceOpen ? <div className="focus-project-preferences__editor" data-focus-project-appearance="">
           <label className="focus-project-preferences__pin"><input type="checkbox" aria-label="Pin project" checked={draft.pinned} onChange={event => edit({ ...draft, pinned: event.target.checked })} />Pin project</label>
           <label className="focus-project-preferences__note"><span>Note</span><input aria-label="Project note" value={draft.note} placeholder="A familiar reminder" onChange={event => edit({ ...draft, note: event.target.value })} /></label>
