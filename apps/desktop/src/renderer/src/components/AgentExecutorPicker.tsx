@@ -53,7 +53,7 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
     disabled={disabled} onValueChange={onSelect} options={[
       { value: '', label: props.unsetLabel },
       ...(selected && !executors.some(executor => executor.id === selected)
-        ? [{ value: selected, label: selected, description: 'Configuration unavailable' }] : []),
+        ? [{ value: selected, label: selected, description: 'Configuration unavailable', disabled: true }] : []),
       ...executors.map(executor => ({ value: executor.id, label: executor.label,
         description: `${agentProviderLabel(executor.providerId)} · ${executorDetectionLabel(executor.detection)}`,
         icon: <AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={18} /> }))
