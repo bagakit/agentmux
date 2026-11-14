@@ -1,4 +1,10 @@
 export const hostedSummaryMutations = {
+  'initial-session-feedback': {
+    kind: 'cost', file: 'packages/core/src/hosted-client.ts',
+    before: "for (const retained of bootstrap.sessions) publisher.publish({ type: 'agent-session', session: structuredClone(retained) })",
+    after: "for (const retained of bootstrap.sessions) emit({ type: 'agent-session', session: structuredClone(retained) })",
+    target: 'initial bootstrap costs stay linear for actual 200 and 2000 summary consumers'
+  },
   'full-session-projection': {
     kind: 'core', file: 'packages/core/src/hosted-runtime-service.ts',
     before: "sessions: projection === 'summary' ? sessions.map(hostedAgentSessionSummary) : sessions,",
@@ -21,6 +27,7 @@ export const hostedSummaryMutations = {
   }
 }
 export const hostedSummaryTests = {
+  cost: 'packages/core/test/hosted-bootstrap-cost.test.ts',
   core: 'packages/core/test/hosted-bootstrap-size.test.ts',
   mobile: 'apps/mobile/test/mobile-original-retry.test.tsx'
 }
