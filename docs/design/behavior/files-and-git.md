@@ -48,6 +48,8 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 ### 准确路径发现与变更
 
 - 原 Host Files owner 统一持有路径变更；公共 API、CLI 与 GUI 消费同一边界。路径先经原 Zone／Host／Workspace 映射，展示 Tab、焦点与 Session cwd 不授予文件权限，也不被 mkdir 改动。普通配置变更不因此引入操作记录；这里的记录只承担真实文件系统效果与丢失回执的恢复。
+- client 保存的 Host 连接别名只选择 carrier，原 Source 的 Runtime／Space／Zone／Workspace／resource 保持原 namespace。目录发现只读原 Source 的目录观察、注册与空间快照；完整零注册才给显式注册候选，多候选须选择，未知不能自动注册、改用本机路径或捏造 Zone。注册是明确的 Source 配置动作，发送前由原工作面存储确认完整请求 custody；原 OP 查询只验证保存的 carrier／Runtime，不要求旧路径或 Zone 仍存在。
+- Main 借原 configured transport 与准确 Runtime／ownerInstance fence，不为 Files 先读取无关 Agent 全量 metadata。宿主没有 semantic owner 时只借原 Core 验真，保原 caller／device context，不持有第二 Runtime 状态或授权。发送前检查 carrier；已取得的原注册／文件效果回执不得被迟到配置变化吞掉，原 Renderer 仍按请求、文档与工作面最终 CAS 决定采用。订阅保原 fence，opening 与每帧核原 carrier，换代／取消只终止该 reader，不影响其他能力；不新增事件历史 Store。
 - `file stat` 只观察准确 root、parent 与 entry／absence，不读正文或遍历子树。目录 scope witness 固定原对象的 device、inode 与真实 birth generation，不冻结目录内所有成员；完整元数据快照不能冒充子树内容 CAS。文件正文 revision 继续沿原 `file read`。symlink 只观察原 entry，不沿它越过写边界。
 - 大普通文件可显式请求同一 `file stat` 的 revision 观察（CLI `--revision`／JSON `includeRevision:true`）；默认仍不打开正文或 hash。原 Native 在同一 held FD 上以固定块串行 hash，前后核准确 entry／scope，不回传全文、不建 Store；regular 返回准确 sha256，目录／symlink／absence 明确不适用，请求了却无法观察时保 unknown。revision 与通用 entry witness 分开；此入口不放宽 Note 正文保全预算，也不授跨资源或无 revision 的删除资格。
 - `file mkdir` 只创建准确、明确应缺席的一个直接目录，不补父目录，不覆盖后来占位的 entry。actor 与调用方 Host scope 来自原 transport，不能从请求 JSON、目录名或展示位置构造。物理操作仍由原 native helper 持有的 root／parent fd、原目录代次与原子 no-replace 发布承担；目录操作借用原 Note 写 lease，普通文件读写不因此等待无关 Note 操作。
