@@ -38,8 +38,13 @@ delegation receipt before acting and never resend that delivery. criteria: the n
 criterion, names one the current proposal no longer has, or one whose text changed since its
 attempt was sent; revise the plan or the proposal. Changed or missing criteria keep the old
 review readable without completing the current work; unchanged criteria keep their accepted
-work. Continuous progress on this Goal reports open nodes each check and pauses when every
-node passed review; a person still accepts the Goal results. A node review or plan
+work. Each new continuous-progress input on this Goal freezes the same owner snapshot that
+qualified the check: plan revision, every ready, working, review, changes or unknown node,
+its named executor, original delegation/source/thread and all unknown reasons. Read node
+outcomes and checks through goal plan; manage this work as Supervisor rather than taking
+over every node. An unconfirmed input keeps that frozen handoff and manager guidance even
+after the plan changes. Progress pauses when every node passed review; a person still
+accepts the Goal results. A node review or plan
 completion never accepts the Goal.
 
 The plan's executor Host can differ from the Supervisor's Host. A delegation intent.hostId
