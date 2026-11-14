@@ -1,9 +1,11 @@
 .goal-supervisor-rail { display: grid; gap: var(--sp-3); min-width: 0; color: var(--text); }
-.goal-supervisor-rail__heading h2 { align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-2); font-size: var(--fs-title); font-weight: 650; }
-.goal-supervisor-rail__identity { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); }
+.goal-supervisor-rail__heading h2 { display: flex; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-2); font-size: var(--fs-title); font-weight: 650; }
+.goal-supervisor-rail__identity { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); }
+.goal-supervisor-rail__person { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.goal-supervisor-rail__assign { align-self: start; font-size: var(--fs-meta); }
 .goal-supervisor-rail__identity strong { font-weight: 550; }
 .goal-supervisor-rail__source, .goal-supervisor-rail__empty, .goal-supervisor-rail__issue { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
-.goal-supervisor-rail__next { display: grid; gap: var(--sp-1); padding: var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
+.goal-supervisor-rail__next { display: grid; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); border-inline-start: 2px solid var(--line); background: var(--surface-1); }
 .goal-supervisor-rail__next > span { color: var(--text-3); font-size: var(--fs-meta); }
 .goal-supervisor-rail__next p { margin: 0; font-size: var(--fs-body); line-height: 1.5; overflow-wrap: anywhere; }
 .goal-supervisor-rail__review { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; min-width: 0; padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); text-align: start; font: 600 var(--fs-body)/1.45 var(--font-sans); cursor: pointer; }

@@ -81,8 +81,10 @@ function coordinationEntries(demand: DemandProjection): CoordinationEntry[] {
 }
 
 /** A reading rail over the Goal owner's existing records. It performs no Agent or Goal writes. */
-export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, discussionBusy = false, onRevealAttempt }: {
+export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, currentDelivery, onOpenDiscussion, discussionBusy = false, onRevealAttempt }: {
   demand: DemandProjection
+  onChooseSupervisor?: () => void
+  onAddAssignee?: () => void
   currentDelivery?: AttemptTarget | undefined
   onOpenDiscussion?: (() => void) | undefined
   discussionBusy?: boolean
@@ -101,32 +103,38 @@ export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, 
     ?? rows.find(row => row.nextOwner.kind === 'manager' && row.phase !== 'closed')
     ?? rows.find(row => row.alert !== null) ?? rows.find(row => row.phase !== 'closed')
   const nextOwner = next ? { manager: 'Supervisor', worker: 'Executor', human: 'Human', external: 'External' }[next.nextOwner.kind] : undefined
+  const needsAssignee = !supervisor && !demand.assigneeSessionIds?.length
   const shown = all ? entries : entries.slice(0, RECENT)
   return <section className="goal-supervisor-rail" aria-label="Goal Supervisor" data-goal-supervisor-rail={demand.id}>
     <header className="goal-supervisor-rail__heading"><h2><SupervisorIcon size={17} aria-hidden="true" />Supervisor</h2></header>
     <div className="goal-supervisor-rail__identity">
-      {supervisor ? typeof supervisor !== 'string' || hosts.length === 1
+      <div className="goal-supervisor-rail__person">{supervisor ? typeof supervisor !== 'string' || hosts.length === 1
         ? <GoalContinuationAgent agentSessionId={supervisor} {...(typeof supervisor === 'string' ? { hostId: hosts[0]! } : {})} active={active} size={32} />
         : <strong title={demandAgentReferenceLabel(supervisor)}>{hosts.length ? 'Supervisor Host is conflicting' : 'Supervisor Host is unconfirmed'}</strong>
-        : <strong>No Supervisor assigned</strong>}
+        : <strong>No Supervisor assigned</strong>}</div>
+      {needsAssignee && onAddAssignee
+        ? <Button type="button" className="goal-supervisor-rail__assign" onClick={onAddAssignee}>Add assignee</Button>
+        : onChooseSupervisor ? <Button type="button" className="goal-supervisor-rail__assign" onClick={onChooseSupervisor}>
+          {supervisor ? 'Change' : 'Assign'}<span className="goals-visually-hidden"> Supervisor</span>
+        </Button> : null}
     </div>
     {showDiagnostic ? <p className="goal-supervisor-rail__issue" role="status">{diagnostic}</p> : null}
+    {currentDelivery ? <button type="button" className="goal-supervisor-rail__review" onClick={event => onRevealAttempt(currentDelivery.nodeId, currentDelivery.operationId, event.currentTarget)}>
+      <ReviewIcon size={16} aria-hidden="true" /><span>Awaiting review<small>{currentDelivery.title}</small></span><ForwardIcon size={14} aria-hidden="true" />
+    </button> : null}
+    {next && next.execution.operationId !== currentDelivery?.operationId ? <div className="goal-supervisor-rail__next" data-goal-supervisor-next={next.execution.operationId}>
+      <span>{next.nextOwner.kind === 'manager' ? 'Supervisor’s next step' : `Waiting on · ${nextOwner}`}</span><p>{next.nextOwner.action}</p>
+    </div> : !currentDelivery && (rows.length || demand.dispatches?.length || demand.delegations?.length) ? <p className="goal-supervisor-rail__empty">{demand.responsibility ? 'No open execution responsibility recorded.' : 'Current execution responsibility is unconfirmed.'}</p> : null}
+    {demand.delegationObservationIssue ? <p className="goal-supervisor-rail__issue" role="status">{demand.delegationObservationIssue}</p> : null}
+    {onOpenDiscussion ? <Button type="button" className="goal-supervisor-rail__discussion" disabled={discussionBusy} onClick={onOpenDiscussion}><DiscussionIcon size={13} aria-hidden="true" />Open goal discussion</Button> : null}
     {typeof supervisor === 'string' || diagnostic ? <details className="goal-supervisor-rail__detail" data-goal-supervisor-source>
       <summary>Supervisor source</summary>
       {typeof supervisor === 'string' ? <p className="goal-supervisor-rail__source">{hosts.length === 1 ? `Host ${hosts[0]}` : hosts.length ? 'Supervisor Host is conflicting' : 'Supervisor Host is unconfirmed'} · Session {supervisor}</p> : null}
       {diagnostic ? <p>{observation?.reason}</p> : null}
     </details> : null}
-    {currentDelivery ? <button type="button" className="goal-supervisor-rail__review" onClick={event => onRevealAttempt(currentDelivery.nodeId, currentDelivery.operationId, event.currentTarget)}>
-      <ReviewIcon size={16} aria-hidden="true" /><span>Awaiting review<small>{currentDelivery.title}</small></span><ForwardIcon size={14} aria-hidden="true" />
-    </button> : null}
-    {next && next.execution.operationId !== currentDelivery?.operationId ? <div className="goal-supervisor-rail__next" data-goal-supervisor-next={next.execution.operationId}>
-      <span>Next · {nextOwner}</span><p>{next.nextOwner.action}</p>
-    </div> : !currentDelivery && (rows.length || demand.dispatches?.length || demand.delegations?.length) ? <p className="goal-supervisor-rail__empty">{demand.responsibility ? 'No open execution responsibility recorded.' : 'Current execution responsibility is unconfirmed.'}</p> : null}
-    {demand.delegationObservationIssue ? <p className="goal-supervisor-rail__issue" role="status">{demand.delegationObservationIssue}</p> : null}
-    {onOpenDiscussion ? <Button type="button" className="goal-supervisor-rail__discussion" disabled={discussionBusy} onClick={onOpenDiscussion}><DiscussionIcon size={13} aria-hidden="true" />Open goal discussion</Button> : null}
-    <section className="goal-supervisor-rail__coordination" aria-label="Coordination history">
+    {entries.length ? <section className="goal-supervisor-rail__coordination" aria-label="Coordination history">
       <h3>Coordination timeline</h3>
-      {entries.length ? <ol className="goal-supervisor-rail__timeline">{shown.map(entry => <li key={entry.key} data-goal-coordination={entry.key}>
+      <ol className="goal-supervisor-rail__timeline">{shown.map(entry => <li key={entry.key} data-goal-coordination={entry.key}>
         <details className="goal-supervisor-rail__detail goal-supervisor-rail__record">
           <summary><strong className="goal-supervisor-rail__event-title">{entry.label}</strong></summary>
           {entry.detail ? <p>{entry.detail}</p> : null}
@@ -138,8 +146,8 @@ export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, 
         {entry.attempt ? <button type="button" className="goal-supervisor-rail__attempt" data-goal-coordination-node={entry.attempt.nodeId} data-goal-coordination-attempt={entry.attempt.operationId}
           aria-label={`Read ${entry.attempt.title} · ${entry.label}`} onClick={event => onRevealAttempt(entry.attempt!.nodeId, entry.attempt!.operationId, event.currentTarget)}>{entry.attempt.title}<span aria-hidden="true">↗</span></button> : null}
 
-      </li>)}</ol> : <p className="goal-supervisor-rail__empty">No coordination records yet.</p>}
+      </li>)}</ol>
       {entries.length > RECENT ? <Button type="button" aria-expanded={all} onClick={() => setAll(value => !value)}>{all ? 'Show recent only' : `Show ${entries.length - RECENT} earlier`}</Button> : null}
-    </section>
+    </section> : null}
   </section>
 }

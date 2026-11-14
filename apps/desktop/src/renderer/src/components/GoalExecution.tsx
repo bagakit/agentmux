@@ -27,9 +27,13 @@ const roleNames = { supervisor: 'Supervisor', assignees: 'Assignee', related: 'R
 
 
 /** The full Agent directory and topology mount only in their explicit editors. */
-export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; onUpdate: GoalRelationSave }) {
+export function GoalExecution({ demand, onUpdate, onChooseSupervisor }: { demand: DemandProjection; onUpdate: GoalRelationSave; onChooseSupervisor?: () => void }) {
   const active = useWorkbenchPresentationActive()
   const [role, setRole] = useState<GoalAgentRole | null>(null), [arrangementOpen, setArrangementOpen] = useState(false)
+  function chooseRole(next: GoalAgentRole) {
+    if (next === 'supervisor' && onChooseSupervisor) onChooseSupervisor()
+    else setRole(next)
+  }
   const [issue, setIssue] = useState<string | null>(null)
   const refs = useMemo(() => goalTeamIdentities(demand), [demand.id, demand.participations, demand.dispatches, demand.delegations,
     demand.progressUpdates, demand.plan, demand.creationOrigin, demand.supervisorSessionId])
@@ -48,14 +52,14 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
   }
   return <section className="goal-collaboration goal-team" aria-label="Goal collaboration">
     <header className="goal-team__heading"><h2>Team</h2><details className="goal-team__edit"><summary>Edit relationships</summary><div className="goal-team__editors">
-      <Button type="button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Supervisor</Button>
+      <Button type="button" onClick={() => chooseRole('supervisor')} aria-label="Choose Goal Supervisor">Supervisor</Button>
       <Button type="button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Assignees</Button>
       <Button type="button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Related</Button>
     </div></details></header>
     <div className="goal-team__actors">{team.groups.map(group => {
       const unresolved = group.identities.length === 0
       const roles = group.unconfirmedRoles.map(role => <span key={role} data-goal-team-role={role} data-role-host="unconfirmed">{roleNames[role]}</span>)
-      const review = group.unconfirmedRoles.length ? <Button type="button" onClick={() => setRole(group.unconfirmedRoles[0]!)}>Review relationship</Button> : null
+      const review = group.unconfirmedRoles.length ? <Button type="button" onClick={() => chooseRole(group.unconfirmedRoles[0]!)}>Review relationship</Button> : null
       return <div className="goal-team__group" key={group.id} data-goal-team-reference={group.id}>
         {group.actors.map(actor => <GoalTeamActorCard key={actor.key} actor={actor} onRecommend={recommend} />)}
         {group.identities.filter(identity => !group.actors.some(actor => actor.key === JSON.stringify([identity.subject.hostId, identity.subject.agentSessionId]))).map(identity => {

@@ -7,6 +7,8 @@ const Check = semanticIconComponent('control.checkbox-checked')
 const sections = [
   { id: 'plan', label: 'Execution plan', Icon: semanticIconComponent('object.tree') },
   { id: 'overview', label: 'Goal brief', Icon: semanticIconComponent('object.document') },
+  { id: 'results', label: 'Criteria & results', Icon: semanticIconComponent('action.review-source') },
+  { id: 'execution', label: 'Execution records', Icon: semanticIconComponent('object.workflow') },
   { id: 'activity', label: 'Activity', Icon: semanticIconComponent('object.activity') },
 ] as const
 

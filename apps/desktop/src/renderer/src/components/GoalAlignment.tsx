@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, useState } from 'react'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isCurrentGroundingAccepted, type DemandGroundingCheck } from '@agentmux/demand/goals'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
@@ -23,10 +23,25 @@ const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 type Acknowledgement = { kind: 'confirm'; revision: number } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean; finish?: boolean }
 export type GoalAcknowledgementFeedback = { pending: boolean; failure: { attempt: Acknowledgement; message: string } | null; reloadError: string | null }
 export const EMPTY_GOAL_ACKNOWLEDGEMENT: GoalAcknowledgementFeedback = { pending: false, failure: null, reloadError: null }
-export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding, onOpenMote, motePending = null, feedback, onFeedbackChange }: { demand: DemandProjection; emphasis?: 'definition' | 'results' | null; children?: ReactNode; onGrill: () => void; onGrounding: () => void; onOpenMote: () => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void }) {
+export function GoalAcknowledgementRecovery({ goalId, feedback, onFeedbackChange }: {
+  goalId: string; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void
+}) {
+  const refreshDemand = useAppStore(state => state.refreshDemand)
+  const { failure, pending, reloadError } = feedback
+  const acknowledgementPending = useRef(false)
+  async function reload() {
+    if (pending || acknowledgementPending.current) return
+    acknowledgementPending.current = true; onFeedbackChange({ pending: true, reloadError: null })
+    try { await refreshDemand(goalId); onFeedbackChange({ failure: null }) }
+    catch (error) { onFeedbackChange({ reloadError: error instanceof Error ? error.message : String(error) }) }
+    finally { acknowledgementPending.current = false; onFeedbackChange({ pending: false }) }
+  }
+  return failure ? <div className="goals-service" role="status" data-goal-acknowledgement-failure>{failure.attempt.kind === 'confirm' ? 'Goal confirmation' : 'Result acceptance'} is unconfirmed. Your goal and current work are kept. <span>{failure.message}</span><Button type="button" variant="primary" disabled={pending} onClick={() => void reload()}>Reload current proposal</Button>{reloadError ? <span>Reload failed: {reloadError}</span> : null}</div> : null
+}
+
+export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, onOpenMote, motePending = null, feedback, onFeedbackChange }: { demand: DemandProjection; emphasis?: 'definition' | 'results' | null; onGrill: () => void; onGrounding: () => void; onOpenMote: () => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void }) {
   const confirmDemandGoal = useAppStore((state) => state.confirmDemandGoal)
   const acceptDemandResult = useAppStore((state) => state.acceptDemandResult)
-  const refreshDemand = useAppStore((state) => state.refreshDemand)
   const recipient = useGoalDiscussionRecipient(demand.id)
   const alignment = demand.alignment, grounding = demand.grounding
   const active = useWorkbenchPresentationActive()
@@ -38,7 +53,7 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
   const stale = Boolean(alignment && grounding && grounding.alignmentRevision !== alignment.revision)
   const accepted = isCurrentGroundingAccepted(alignment, grounding)
   const hasGaps = Boolean(grounding?.checks.some(check => check.outcome === 'gap'))
-  const { pending, failure, reloadError } = feedback
+  const { pending, failure } = feedback
   const acknowledgementPending = useRef(false)
   async function acknowledge(attempt: Acknowledgement) {
     if (failure || pending || acknowledgementPending.current) return
@@ -54,13 +69,6 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
       }
       else await acceptDemandResult(demand.id, attempt.revision, attempt.submissionId, attempt.gaps, attempt.finish)
     } catch (error) { onFeedbackChange({ failure: { attempt, message: error instanceof Error ? error.message : String(error) } }) }
-    finally { acknowledgementPending.current = false; onFeedbackChange({ pending: false }) }
-  }
-  async function reload() {
-    if (pending || acknowledgementPending.current) return
-    acknowledgementPending.current = true; onFeedbackChange({ pending: true, reloadError: null })
-    try { await refreshDemand(demand.id); onFeedbackChange({ failure: null }) }
-    catch (error) { onFeedbackChange({ reloadError: error instanceof Error ? error.message : String(error) }) }
     finally { acknowledgementPending.current = false; onFeedbackChange({ pending: false }) }
   }
   const checks = new Map(grounding?.checks.map(check => [check.criterionId, check]) ?? [])
@@ -131,7 +139,6 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
     <div className="goals-inline-actions">{alignment?.confirmedAt ? <Button type="button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</Button> : null}{resultRequest}</div>
   </div>
   return <>
-    {failure ? <div className="goals-service" role="status" data-goal-acknowledgement-failure>{failure.attempt.kind === 'confirm' ? 'Goal confirmation' : 'Result acceptance'} is unconfirmed. Your goal and current work are kept. <span>{failure.message}</span><Button type="button" variant="primary" disabled={pending} onClick={() => void reload()}>Reload current proposal</Button>{reloadError ? <span>Reload failed: {reloadError}</span> : null}</div> : null}
     {currentReport ? report : alignment ? <section className={`goals-alignment goal-review${compactAgreement ? ' goal-review--compact' : ''}`} aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
       <details className="goal-review__disclosure" open={!compactAgreement}>
       <summary className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} />Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? `Confirmed by you · ${alignment.criteria.length} success criteria${compactAgreement ? ' · No report yet' : ''}` : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></summary>
@@ -148,7 +155,6 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
       {useBrief ? null : <p className="goals-muted">Clarify the outcome and what success looks like with the agent.</p>}
       <div className="goals-inline-actions">{goalRequestButton}{goalRequestNote}</div>
     </div>}
-    {children}
     {grounding && !currentReport ? report : !grounding && !compactAgreement && alignment?.confirmedAt ? noResults : null}
   </>
 
