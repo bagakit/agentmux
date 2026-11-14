@@ -23,6 +23,22 @@ For a shared business Space, keep its original {runtimeId,spaceId} and select an
 already authorized RPC endpoint to that authority. Host labels, a current local route,
 and an identical Space ID on another Runtime are not replacements.
 
+For an already configured Folder on the selected authority, explicitly register its
+original Space/Zone before mounting it. Read that Host's original Workspace metadata
+and freeze {hostId,workspacePath,projectRootPath}; a later resource change rejects this
+registration rather than substituting another directory. Labels are not resource identity.
+
+<!-- amux:generated command:space.folder.register -->
+
+The answering Host reads its own configuration and only adds the exact Folder Space,
+Workspace Zone and binding to its original spatial document. This operation neither
+registers a new directory nor saves a copy in the observing client. The receipt returns
+the original reference, Zone, resource witness and durability. If its reply is unknown,
+keep the complete original request. Read the same endpoint with space ls and match the
+exact Folder/resource, Workspace Zone and binding before reading that original snapshot;
+do not repeat registration automatically or use the current configuration to choose a
+replacement target. Existing conflicting entities, names, layout and Runs remain intact.
+
 <!-- amux:generated command:space.snapshot -->
 <!-- amux:generated command:space.watch -->
 <!-- amux:generated command:space.apply -->
