@@ -65,7 +65,8 @@ export type AgentMuxHostOptions = {
 export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const path = options.socketPath ?? defaultAgentMuxControlSocketPath()
   const desktopPath = options.desktopSocketPath ?? `${path}.desktop`
-  const connectionOwner = options.connections ? createHostConnectionOwner(options.connections) : undefined
+  let moteMain: import('@agentmux/core/mote-dialogue').MoteMainReader | undefined
+  const connectionOwner = options.connections ? createHostConnectionOwner({ ...options.connections, moteMain: () => moteMain }) : undefined
   const fileUploads = options.fileUploads ?? new FileUploadOwner()
   let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
   let authority: DeviceAuthority | undefined
@@ -156,7 +157,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       if (!client || !('forwardRpc' in client) || !client.forwardRpc) throw new AgentMuxError('The exact original Goal message Host is unavailable or ambiguous. Original messages and Agents are retained.', 'CONTROL_UNAVAILABLE')
       return await client.forwardRpc(method, params, context)
     } })
-  const moteMain = configurationPath && content?.files ? createHostMoteMainReader({ configurationPath, spatial: spatialState, files: content.files }) : undefined
+  moteMain = configurationPath && content?.files ? createHostMoteMainReader({ configurationPath, spatial: spatialState, files: content.files }) : undefined
   const moteDialogue = moteMain && options.store instanceof AgentMuxFileAgentSessionStore ? createHostMoteDialogue({
     main: moteMain, spatial: spatialState, store: new MoteDialogueStore(join(dirname(options.store.path), 'mote-dialogue.sqlite')),
     clientForHost: hostId => {

@@ -36,7 +36,9 @@ export type ConnectionDeliveryCoverage = {
   origins: ConnectionOriginRepresentation[]
 }
 
-export type ConnectionDeliveryReference = ConversationItemRef | { hostId: string; agentSessionId: string; source: { kind: 'ingress'; ingressId: string } } | { hostId: string; agentSessionId: string; source: { kind: 'binding-operation'; operationId: string; event: import('./room-binding-contract.js').RoomBindingNoticeEvent } } | { hostId: string; agentSessionId: string; source: { kind: 'interaction'; runId: string; requestId: string; requestDigest: string } }
+/** An explicit reply operation, independent of any Main conversation output. */
+export type MoteChatReplyDeliveryReference = { hostId: string; agentSessionId: string; source: { kind: 'mote-chat-reply'; operationId: string; ingressId: string } }
+export type ConnectionDeliveryReference = MoteChatReplyDeliveryReference | ConversationItemRef | { hostId: string; agentSessionId: string; source: { kind: 'ingress'; ingressId: string } } | { hostId: string; agentSessionId: string; source: { kind: 'binding-operation'; operationId: string; event: import('./room-binding-contract.js').RoomBindingNoticeEvent } } | { hostId: string; agentSessionId: string; source: { kind: 'interaction'; runId: string; requestId: string; requestDigest: string } }
 
 export type ConnectionDeliveryState = 'pending' | 'dispatching' | 'unknown' | 'confirmed' | 'not-applied' | 'cancelled' | 'superseded'
 export type ConnectionDeliveryReceiptReason = 'effect-unconfirmed' | 'platform-rejected' | 'adapter-unavailable' | 'platform-unavailable' | 'rate-limited' | 'thread-unavailable' | 'unsupported-format'

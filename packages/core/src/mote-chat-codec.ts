@@ -1,14 +1,15 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseMoteConnectionValues, parseMotePreferencesTarget, sameMotePreferencesTarget } from './mote-preferences.js'
-import { parseConnectionActor } from './room-binding-codec.js'
+import { parseConnectionDelivery } from './connection-delivery-codec.js'
+import { parseConnectionActor, parseRoomBinding } from './room-binding-codec.js'
 import { parseMoteChatDiagnosis } from './mote-chat-diagnosis.js'
 import type { MoteChatConfiguration, MoteChatEvent, MoteChatGeneration, MoteChatMethod, MoteChatOperation, MoteChatParamsMap, MoteChatPerson, MoteChatResultMap, MoteChatReviewMark, MoteChatValues } from './mote-chat-contract.js'
 
 export const MOTE_CHAT_RPC_METHODS = {
   'space.mote.chat.configure': 'long', 'space.mote.chat.inspect': 'short', 'space.mote.chat.history': 'short',
   'space.mote.chat.audience': 'short', 'space.mote.chat.allocate': 'short', 'space.mote.chat.diagnose': 'short',
-  'space.mote.chat.events': 'short', 'space.mote.chat.review': 'short'
+  'space.mote.chat.reply': 'long', 'space.mote.chat.events': 'short', 'space.mote.chat.review': 'short'
 } as const
 /** Unreviewed events are counted only this far, so the count costs the same however large the backlog is. */
 export const MOTE_CHAT_UNREVIEWED_BOUND = 99
@@ -67,6 +68,13 @@ export function parseMoteChatGeneration(v: unknown, code: Code = 'CONTROL_PROTOC
     executionHostId: text(p.executionHostId, code), agentSessionId: text(p.agentSessionId, code), createOperationId: text(p.createOperationId, code), phase: p.phase as 'preparing' | 'ready',
     createdAt: count(p.createdAt, code), lastActivityAt: count(p.lastActivityAt, code) }
 }
+function replyDeliveryMatches(o: Extract<MoteChatOperation, { action: 'reply' }>, delivery: import('./connection-delivery-contract.js').ConnectionDelivery): boolean {
+  const binding = o.binding, source = delivery.reference.source
+  return o.deliveryOperationIds[delivery.fragment.ordinal] === delivery.operationId && delivery.fragment.count === o.deliveryOperationIds.length && delivery.bindingId === binding.bindingId && delivery.bindingRevision === binding.revision &&
+    source.kind === 'mote-chat-reply' && source.operationId === o.operationId && source.ingressId === o.ingressId &&
+    delivery.reference.hostId === binding.executionHostId && delivery.reference.agentSessionId === binding.agentSessionId &&
+    delivery.target.connectionId === binding.connectionId && delivery.target.externalConversationId === binding.externalConversationId && JSON.stringify(delivery.target.application) === JSON.stringify(binding.application)
+}
 const nullable = <T>(v: unknown, read: (value: unknown) => T): T | null => v === null ? null : read(v)
 function list(v: unknown, code: Code): unknown[] {
   if (!Array.isArray(v) || Object.getPrototypeOf(v) !== Array.prototype || Reflect.ownKeys(v).length !== v.length + 1) fail(code)
@@ -85,11 +93,12 @@ function reviewMark(v: unknown, code: Code): MoteChatReviewMark {
 }
 export function parseMoteChatEvent(v: unknown, code: Code = 'CONTROL_PROTOCOL_ERROR'): MoteChatEvent {
   const keys = ['sequence', 'ingressId', 'receivedAt', 'application', 'conversationKind', 'externalConversationId', 'conversationName', 'author', 'authorName',
-    'externalMessageId', 'addressing', 'replyToMessageId', 'externalText', 'state', 'code', 'handledBy']
-  const p = fields(v, keys, keys.filter(key => key !== 'conversationName' && key !== 'authorName'), code), author = actor(p.author, code), app = application(p.application, code)
+    'externalMessageId', 'addressing', 'replyToMessageId', 'externalText', 'state', 'code', 'noticeCode', 'handledBy']
+  const p = fields(v, keys, keys.filter(key => key !== 'conversationName' && key !== 'authorName' && key !== 'noticeCode'), code), author = actor(p.author, code), app = application(p.application, code)
   if (JSON.stringify(author.application) !== JSON.stringify(app) || p.conversationKind !== 'direct' && p.conversationKind !== 'group' ||
     !['mention', 'reply', 'message'].includes(p.addressing as string) || !['received', 'refused', 'claimed'].includes(p.state as string) ||
     p.externalText !== null && typeof p.externalText !== 'string') fail(code)
+  if (p.noticeCode !== undefined && !['MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE', 'MOTE_CHAT_MAIN_UNCONFIRMED', 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED'].includes(p.noticeCode as string)) fail(code)
   const handledBy = nullable(p.handledBy, value => {
     const h = fields(value, ['executionHostId', 'agentSessionId'], ['executionHostId', 'agentSessionId'], code)
     return { executionHostId: text(h.executionHostId, code), agentSessionId: text(h.agentSessionId, code) }
@@ -99,18 +108,31 @@ export function parseMoteChatEvent(v: unknown, code: Code = 'CONTROL_PROTOCOL_ER
     ...(p.conversationName === undefined ? {} : { conversationName: text(p.conversationName, code) }), author,
     ...(p.authorName === undefined ? {} : { authorName: text(p.authorName, code) }), externalMessageId: text(p.externalMessageId, code),
     addressing: p.addressing as MoteChatEvent['addressing'], replyToMessageId: nullable(p.replyToMessageId, value => text(value, code)), externalText: p.externalText as string | null,
-    state: p.state as MoteChatEvent['state'], code: nullable(p.code, value => text(value, code)), handledBy }
+    state: p.state as MoteChatEvent['state'], code: nullable(p.code, value => text(value, code)), ...(p.noticeCode === undefined ? {} : { noticeCode: p.noticeCode as NonNullable<MoteChatEvent['noticeCode']> }), handledBy }
 }
 function operation(v: unknown, code: Code): MoteChatOperation {
-  const p = fields(v, ['operationId', 'action', 'configuration', 'person'], ['operationId', 'action', 'configuration'], code)
-  const base = { operationId: text(p.operationId, code), configuration: parseMoteChatConfiguration(p.configuration, code) }
+  const p = fields(v, ['operationId', 'action', 'configuration', 'person', 'ingressId', 'deliveryOperationIds', 'binding', 'target'], ['operationId', 'action'], code)
+  const operationId = text(p.operationId, code)
+  if (p.action === 'reply') {
+    if (p.person !== undefined || p.configuration !== undefined) return fail(code)
+    const ids = list(p.deliveryOperationIds, code).map(value => text(value, code)), binding = parseRoomBinding(p.binding)
+    if (!ids.length || new Set(ids).size !== ids.length || !binding.inputOnly) return fail(code)
+    return { operationId, action: 'reply', target: target(p.target, code), ingressId: text(p.ingressId, code), deliveryOperationIds: ids, binding }
+  }
+  if (p.ingressId !== undefined || p.deliveryOperationIds !== undefined || p.binding !== undefined || p.target !== undefined) return fail(code)
+  const base = { operationId, configuration: parseMoteChatConfiguration(p.configuration, code) }
   if (p.action === 'configure') { if (Object.hasOwn(p, 'person')) fail(code); return { ...base, action: 'configure' } }
-  if (p.action !== 'allocate') fail(code)
+  if (p.action !== 'allocate') return fail(code)
   return { ...base, action: 'allocate', person: parseMoteChatPerson(p.person, code) }
 }
 export function parseMoteChatParams<M extends MoteChatMethod>(method: M, value: unknown): MoteChatParamsMap[M] {
   const code: Code = 'INVALID_CONTROL_REQUEST'
   if (!isMoteChatMethod(method)) fail(code)
+  if (method === 'space.mote.chat.reply') {
+    const p = fields(value, ['operationId', 'ingressId', 'body'], ['operationId', 'ingressId', 'body'], code)
+    if (typeof p.body !== 'string' || !p.body.trim()) fail(code)
+    return { operationId: text(p.operationId, code), ingressId: text(p.ingressId, code), body: p.body } as MoteChatParamsMap[M]
+  }
   if (method === 'space.mote.chat.diagnose') {
     const p = fields(value, ['target'], ['target'], code)
     return { target: target(p.target, code) } as MoteChatParamsMap[M]
@@ -146,18 +168,28 @@ export function parseMoteChatResult<M extends MoteChatMethod>(method: M, value: 
   const code: Code = 'CONTROL_PROTOCOL_ERROR'
   if (!isMoteChatMethod(method)) fail(code)
   if (method === 'space.mote.chat.diagnose') return parseMoteChatDiagnosis(value, input as MoteChatParamsMap['space.mote.chat.diagnose'] | undefined) as MoteChatResultMap[M]
+  if (method === 'space.mote.chat.reply') {
+    const p = fields(value, ['operation', 'deliveries'], ['operation', 'deliveries'], code), o = operation(p.operation, code)
+    if (o.action !== 'reply') return fail(code)
+    const deliveries = list(p.deliveries, code).map(parseConnectionDelivery), i = input as MoteChatParamsMap['space.mote.chat.reply'] | undefined
+    if (i && (o.operationId !== i.operationId || o.ingressId !== i.ingressId) || deliveries.some(delivery => !replyDeliveryMatches(o, delivery)) || new Set(deliveries.map(d => d.operationId)).size !== deliveries.length) fail(code)
+    return { operation: o, deliveries } as MoteChatResultMap[M]
+  }
   if (method === 'space.mote.chat.configure' || method === 'space.mote.chat.allocate') {
     const o = operation(value, code), i = input as MoteChatParamsMap['space.mote.chat.configure'] | MoteChatParamsMap['space.mote.chat.allocate'] | undefined
+    if (o.action === 'reply') return fail(code)
     if (o.action !== (method === 'space.mote.chat.configure' ? 'configure' : 'allocate') || i && (o.operationId !== i.operationId || !sameMotePreferencesTarget(o.configuration.target, i.target))) fail(code)
     if (i && 'values' in i && JSON.stringify(o.configuration.values) !== JSON.stringify(i.values)) fail(code)
     if (i && 'total' in i && (o.action !== 'allocate' || JSON.stringify(o.person.actor) !== JSON.stringify(i.actor) || o.person.total !== i.total)) fail(code)
     return o as MoteChatResultMap[M]
   }
   if (method === 'space.mote.chat.inspect') {
-    const p = fields(value, ['configuration', 'operation'], ['configuration', 'operation'], code), i = input as MoteChatParamsMap['space.mote.chat.inspect'] | undefined
+    const p = fields(value, ['configuration', 'operation', 'deliveries'], ['configuration', 'operation'], code), i = input as MoteChatParamsMap['space.mote.chat.inspect'] | undefined
     const configuration = p.configuration === null ? null : parseMoteChatConfiguration(p.configuration, code), o = p.operation === null ? null : operation(p.operation, code)
     if (i?.target && configuration && !sameMotePreferencesTarget(configuration.target, i.target) || i?.operationId && o && o.operationId !== i.operationId) fail(code)
-    return { configuration, operation: o } as MoteChatResultMap[M]
+    const deliveries = p.deliveries === undefined ? undefined : list(p.deliveries, code).map(parseConnectionDelivery)
+    if (deliveries && (o?.action !== 'reply' || deliveries.some(delivery => !replyDeliveryMatches(o, delivery)) || new Set(deliveries.map(d => d.operationId)).size !== deliveries.length)) fail(code)
+    return { configuration, operation: o, ...(deliveries ? { deliveries } : {}) } as MoteChatResultMap[M]
   }
   if (method === 'space.mote.chat.review') {
     const p = fields(value, ['reviewed'], ['reviewed'], code), reviewed = reviewMark(p.reviewed, code), i = input as MoteChatParamsMap['space.mote.chat.review'] | undefined

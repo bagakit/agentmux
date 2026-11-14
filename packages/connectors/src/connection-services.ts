@@ -37,7 +37,7 @@ export type ConnectionServices = {
 }
 type LiveServices = { lease?: number; database: DatabaseSync; connections: ConnectionHost; secrets: ConnectionSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
-export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; speaker?: PublicationSpeakerReader; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void>; member?: MoteChatHostOptions['member'] } }): Promise<ConnectionServices> {
+export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; speaker?: PublicationSpeakerReader; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: { main?: MoteChatHostOptions['main']; replyAtOriginalOwner?: MoteChatHostOptions['replyAtOriginalOwner']; agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void>; member?: MoteChatHostOptions['member'] } }): Promise<ConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   let backingUp: Promise<ConnectionBackupReceipt> | undefined, closing: Promise<void> | undefined
@@ -68,7 +68,8 @@ export async function createConnectionServices(options: { directory: string | un
         connections.onChannelMetadataChanged(relayMetadata)
         const publicationStore: PublicationStore | undefined = options.publication ? new PublicationStore(database, { readExact: (id, revision) => bindings?.readExact(id, revision) ?? null }) : undefined
         const bindings: RoomBindingHost | undefined = options.bindings ? new RoomBindingHost({ ...options.bindings, connections, ...(publicationStore ? { lifecycle: publicationStore } : {}) }) : undefined
-        const moteChat = options.moteChat ? new MoteChatHost({ connections, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget,
+        const moteChat = options.moteChat ? new MoteChatHost({ connections, sharedAudience: reference => { if (!bindings) throw new Error('Original publication owner unavailable'); return bindings.listCurrent(reference) }, ...(options.bindings?.executionRuntimeId ? { executionRuntimeId: options.bindings.executionRuntimeId } : {}), publication: () => publication, ...(options.moteChat.replyAtOriginalOwner ? { replyAtOriginalOwner: options.moteChat.replyAtOriginalOwner } : {}), ...(options.moteChat.main ? { main: options.moteChat.main } : {}),
+          session: async (hostId, sessionId, executionRuntimeId) => options.ingress?.core(hostId, executionRuntimeId)?.readAgentSession(sessionId, executionRuntimeId) ?? null, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget,
           ...(options.moteChat.assertReady ? { assertReady: options.moteChat.assertReady } : {}), ...(options.moteChat.member ? { member: options.moteChat.member } : {}), ingress: () => ingress }) : undefined
         const routing = bindings && moteChat ? composeMoteChatBindings(bindings, moteChat) : bindings
         if (bindings) connections.bindings = moteChat ? {
@@ -84,7 +85,7 @@ export async function createConnectionServices(options: { directory: string | un
             if ('bindingId' in input && input.bindingId) {
               const current = moteChat.readCurrent(input.bindingId)
               if (current) { const binding = input.revision === undefined ? current : moteChat.readExact(input.bindingId, input.revision)
-                return { binding, current, operation: null, grants: binding ? moteChat.grants(binding.bindingId, binding.revision) : [] } }
+                return { binding, current, operation: null, grants: binding ? moteChat.grants(binding.bindingId, binding.revision) : [], ...(current.inputOnly ? { inputOnly: true as const } : {}) } }
             }
             return await bindings.inspect(input)
           }
@@ -102,13 +103,13 @@ export async function createConnectionServices(options: { directory: string | un
         if (rooms) connections.rooms = { ...connections.rooms, create: (input, context) => rooms.create(input, context), inspect: input => rooms.inspect(input) }
         ingress = routing && options.ingress ? new DurableIngressHost({ connections, bindings: routing, authenticators: connections.ingressAuthenticators(), core: options.ingress.core, ...(options.ingress.authoritySource ? { authoritySource: options.ingress.authoritySource } : {}),
           ...(publicationStore ? { contextPublications: publicationStore, queryReceived: (binding, record) => publication?.receiveQuery(binding, record) } : {}),
-          ...(moteChat ? { inputTarget: (record, binding) => record.conversationKind === 'direct' && moteChat.hasAdmission(record.ingressId, binding.bindingId, record.actor)
+          ...(moteChat ? { inputRoute: record => moteChat.inputRoute(record.ingressId), inputTarget: (record, binding) => record.conversationKind === 'direct' && moteChat.hasAdmission(record.ingressId, binding.bindingId, record.actor)
             ? { kind: 'session-conversation' as const } : undefined,
           prepareInput: async (record: import('@agentmux/core/connections').ConnectionIngressMessage) => {
             if (record.conversationKind === 'direct') {
               try {
                 const binding = await moteChat.prepareIncoming({ ...record, conversationKind: 'direct' })
-                if (binding) {
+                if (binding && !binding.inputOnly) {
                   publication?.refresh()
                   publication?.receiveQuery(binding, record, () => moteChat.hasAdmission(record.ingressId, binding.bindingId, record.actor))
                 }
@@ -171,6 +172,7 @@ export async function createConnectionServices(options: { directory: string | un
       })().finally(() => { backingUp = undefined })
     },
     ...(options.moteChat ? { moteChat: {
+      reply: async (input, context) => (await ensure()).moteChat!.reply(input, context),
       configure: async (input, context) => {
         const owner = (await ensure()).moteChat!
         if (input.values.enabled && !(await owner.inspect({ operationId: input.operationId }, context)).operation) await options.moteChat!.assertReady?.(input.target)

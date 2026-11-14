@@ -1,6 +1,7 @@
 import type { MoteConnectionRef, MotePreferencesTarget } from './mote-preferences.js'
 import type { ConnectionActor, ConnectionApplication } from './connections-contract.js'
 import type { ConnectionEnrollmentCallContext } from './connection-enrollment-contract.js'
+import type { ConnectionDelivery } from './connection-delivery-contract.js'
 import type { MoteChatDiagnosis, MoteChatDiagnosisInput } from './mote-chat-diagnosis.js'
 
 /** Chat policy is owned once by the connector Host, separately from MOTE.md group defaults. */
@@ -48,11 +49,16 @@ export type MoteChatAllocate = {
   /** New total allowance. Allocating never resets the already admitted count. */
   total: number
 }
+export type MoteChatReplyReference = { ingressId: string; route: 'original-owner' | 'unconfirmed' }
+export type MoteChatReplyInput = Pick<MoteChatReplyReference, 'ingressId'> & { operationId: string; body: string }
+export type MoteChatReplyOperation = { operationId: string; action: 'reply'; target: MoteChatTarget; ingressId: string; deliveryOperationIds: string[]; binding: import('./room-binding-contract.js').RoomBinding }
+export type MoteChatReplyResult = { operation: MoteChatReplyOperation; deliveries: ConnectionDelivery[] }
 export type MoteChatOperation =
+  | MoteChatReplyOperation
   | { operationId: string; action: 'configure'; configuration: MoteChatConfiguration }
   | { operationId: string; action: 'allocate'; configuration: MoteChatConfiguration; person: MoteChatPerson }
 export type MoteChatInspect = { target: MoteChatTarget; operationId?: never } | { operationId: string; target?: never }
-export type MoteChatInspection = { configuration: MoteChatConfiguration | null; operation: MoteChatOperation | null }
+export type MoteChatInspection = { configuration: MoteChatConfiguration | null; operation: MoteChatOperation | null; deliveries?: ConnectionDelivery[] }
 export type MoteChatGeneration = {
   generationId: string
   target: MoteChatTarget
@@ -91,7 +97,9 @@ export type MoteChatEvent = {
   externalText: string | null
   state: 'received' | 'refused' | 'claimed'
   code: string | null
-  /** The exact Agent this message was given to, or null when no Agent received it. */
+  /** Current original-owner guidance, independent of the retained intake code and input receipt. */
+  noticeCode?: 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' | 'MOTE_CHAT_MAIN_UNCONFIRMED' | 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED'
+  /** Original handling target, or null before one was frozen; never proof of delivered input. */
   handledBy: { executionHostId: string; agentSessionId: string } | null
 }
 export type MoteChatReviewMark = { through: number; revision: number; reviewedAt: number; actor: MoteChatCallContext['actor'] }
@@ -111,6 +119,7 @@ export type MoteChatEventsPage = {
 export type MoteChatReviewInput = { target: MoteChatTarget; through: number }
 export type MoteChatReviewResult = { reviewed: MoteChatReviewMark }
 export type MoteChatParamsMap = {
+  'space.mote.chat.reply': MoteChatReplyInput
   'space.mote.chat.configure': MoteChatConfigure
   'space.mote.chat.inspect': MoteChatInspect
   'space.mote.chat.history': MoteChatHistoryInput
@@ -121,6 +130,7 @@ export type MoteChatParamsMap = {
   'space.mote.chat.review': MoteChatReviewInput
 }
 export type MoteChatResultMap = {
+  'space.mote.chat.reply': MoteChatReplyResult
   'space.mote.chat.configure': Extract<MoteChatOperation, { action: 'configure' }>
   'space.mote.chat.inspect': MoteChatInspection
   'space.mote.chat.history': MoteChatHistoryPage
@@ -135,8 +145,11 @@ export type MoteChatMethod = keyof MoteChatParamsMap
 export type MoteChatCallContext = ConnectionEnrollmentCallContext & {
   /** The Host that authenticated an Agent caller; Session ids are unique only within one Host. */
   agentHostId?: string
+  /** Exact current Run and native semantic predecessors, supplied by authenticating Core. */
+  agentSourceRuns?: readonly string[]
 }
 export interface MoteChatPort {
+  reply(input: MoteChatReplyInput, context: MoteChatCallContext): Promise<MoteChatReplyResult>
   configure(input: MoteChatConfigure, context: MoteChatCallContext): Promise<MoteChatResultMap['space.mote.chat.configure']>
   inspect(input: MoteChatInspect, context?: MoteChatCallContext): Promise<MoteChatInspection>
   history(input: MoteChatHistoryInput, context?: MoteChatCallContext): Promise<MoteChatHistoryPage>

@@ -41,6 +41,10 @@ function mapping(value: unknown): ConnectionDeliveryMapping {
 function reference(value: unknown): import('./connection-delivery-contract.js').ConnectionDeliveryReference {
   const p = object(value, ['hostId', 'agentSessionId', 'source']), source = object(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId', 'runId', 'requestId', 'requestDigest', 'operationId', 'event', 'ingressId'])
   const ref = { hostId: text(p.hostId), agentSessionId: text(p.agentSessionId) }
+  if (source.kind === 'mote-chat-reply') {
+    object(source, ['kind', 'operationId', 'ingressId'])
+    return { ...ref, source: { kind: 'mote-chat-reply', operationId: text(source.operationId), ingressId: text(source.ingressId) } }
+  }
   if (source.kind === 'ingress') {
     object(source, ['kind', 'ingressId'])
     return { ...ref, source: { kind: 'ingress', ingressId: text(source.ingressId) } }

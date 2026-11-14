@@ -26,7 +26,7 @@ export const moteChatDiagnosisCodes = [...connectionDiagnosisIntakeCodes, ...con
   'MOTE_CHAT_EXECUTOR_REQUIRED', 'MOTE_CHAT_EXECUTOR_UNAVAILABLE', 'MOTE_CHAT_EXECUTOR_UNCONFIRMED',
   'MOTE_CHAT_TARGET_UNCONFIRMED', 'MOTE_CHAT_AGENT_RETIRED', 'MOTE_CHAT_CONTEXT_UNCONFIRMED',
   'MOTE_CHAT_RECOVERY_PENDING', 'MOTE_CHAT_RECOVERY_UNAVAILABLE',
-  'MOTE_CHAT_STORAGE_UNCONFIRMED', 'CONTROL_UNAVAILABLE',
+  'MOTE_CHAT_STORAGE_UNCONFIRMED', 'INGRESS_RECOVERY_PENDING', 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED', 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE', 'MOTE_CHAT_MAIN_REQUIRED', 'MOTE_CHAT_MAIN_UNCONFIRMED', 'MOTE_MAIN_CHANGED', 'CONTROL_UNAVAILABLE',
   'CONNECTION_SERVICE_DISABLED', 'CONNECTION_SERVICE_UNCONFIRMED', 'INGRESS_PREPARATION_UNAVAILABLE'
 ] as const
 export type MoteChatDiagnosisCode = typeof moteChatDiagnosisCodes[number]
@@ -50,6 +50,8 @@ export type MoteChatDiagnosisIntake = {
   state: 'received' | 'refused' | 'claimed'
   code: MoteChatDiagnosisCode | null
   codeRecorded: boolean
+  /** Current owner-scoped guidance, never a retained intake failure or delivery receipt. */
+  noticeCode?: 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' | 'MOTE_CHAT_MAIN_UNCONFIRMED' | 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED'
   preparation: 'not-admitted' | 'reserved' | 'prepared' | 'creation-dispatched' | 'ready' | 'other-route'
   input: { status: AgentInputSubmissionReceipt['status'] | null; observation: 'not-started' | 'observed' | 'unavailable'
     controlState: AgentInputSubmissionReceipt['control']['state'] | null
@@ -89,7 +91,7 @@ export type MoteChatDiagnosisPublication = {
   coverage: { state: ConnectionDeliveryCoverage['state']; gaps: Array<{
     reason: ConnectionDeliveryCoverage['gaps'][number]['reason']; code: typeof connectionDiagnosisSourceCodes[number] | null; codeRecorded: boolean
   }>; more: boolean; originCount: number } | null
-  effects: Array<{ kind: 'conversation' | 'interaction' | 'binding-notice' | 'query-feedback'; effect: ConnectionDelivery['effect']; state: ConnectionDelivery['state'];
+  effects: Array<{ kind: 'conversation' | 'interaction' | 'binding-notice' | 'query-feedback' | 'mote-chat-reply'; effect: ConnectionDelivery['effect']; state: ConnectionDelivery['state'];
     receipt: { state: 'confirmed' | 'unknown' | 'not-applied'; reason: ConnectionDeliveryReceiptReason | null } | null;
     resourceUpload: NonNullable<ConnectionDelivery['resourceUpload']>['state'] | null }> | null
   more: boolean
@@ -168,7 +170,10 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
   const incoming = nullable(p.incoming, value => {
     const page = fields(value, ['rows', 'more'])
     const rows = array(page.rows, value => {
-      const row = fields(value, ['key', 'state', 'code', 'codeRecorded', 'preparation', 'input']), i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'preparationReason', 'failureCode', 'runtime'])
+      const row = rpcRecord(value, ['key', 'state', 'code', 'codeRecorded', 'noticeCode', 'preparation', 'input'], 'CONTROL_PROTOCOL_ERROR');
+      if (['key', 'state', 'code', 'codeRecorded', 'preparation', 'input'].some(name => !Object.hasOwn(row, name))) fail()
+      const noticeCode = row.noticeCode === undefined ? undefined : member(row.noticeCode, ['MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE', 'MOTE_CHAT_MAIN_UNCONFIRMED', 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED'] as const)
+      const i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'preparationReason', 'failureCode', 'runtime'])
       const code = nullable(row.code, value => member(value, moteChatDiagnosisCodes)), codeRecorded = bool(row.codeRecorded)
       const preparation = member(row.preparation, ['not-admitted', 'reserved', 'prepared', 'creation-dispatched', 'ready', 'other-route'] as const)
       const observation = member(i.observation, ['not-started', 'observed', 'unavailable'] as const)
@@ -196,7 +201,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
           status !== null && status !== 'waiting' && receiptObservation !== 'closed') fail()
       if ((preparationReason !== null || failureCode !== null) && waiting === null) fail()
       if (preparationReason !== null && failureCode !== null) fail()
-      return { key: key(row.key), state: member(row.state, ['received', 'refused', 'claimed'] as const), code, codeRecorded,
+      return { key: key(row.key), state: member(row.state, ['received', 'refused', 'claimed'] as const), code, codeRecorded, ...(noticeCode === undefined ? {} : { noticeCode }),
         preparation, input: { status, observation, controlState, receiptObservation, waiting, preparationReason, failureCode, runtime } }
     }, moteChatDiagnosisWindowLimit)
     if (new Set(rows.map(row => row.key)).size !== rows.length) fail()
@@ -223,7 +228,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
         if ((state === 'confirmed') !== (reason === null)) fail()
         return { state, reason }
       })
-      return { kind: member(e.kind, ['conversation', 'interaction', 'binding-notice', 'query-feedback'] as const), effect: member(e.effect, ['upsert', 'withdraw'] as const),
+      return { kind: member(e.kind, ['conversation', 'interaction', 'binding-notice', 'query-feedback', 'mote-chat-reply'] as const), effect: member(e.effect, ['upsert', 'withdraw'] as const),
         state: member(e.state, CONNECTION_DELIVERY_STATES), receipt, resourceUpload: nullable(e.resourceUpload, value => member(value, ['pending', 'dispatching', 'unknown', 'confirmed'] as const)) }
     }, moteChatDiagnosisWindowLimit))
     const coverage = nullable(v.coverage, value => {

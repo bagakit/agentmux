@@ -16,6 +16,8 @@ export type RoomBindingTarget = { executionHostId: string; agentSessionId: strin
 export type RoomBindingInputTarget = Omit<Extract<import('./agent-prompt-condition.js').AgentDirectedPromptTarget, { kind: 'native-conversation' }>, 'expectedTurnId'>
 /** An immutable authorized audience snapshot. A Region is navigation, never an execution route. */
 export type RoomBinding = Omit<RoomBindingTarget, 'regionAnchor'> & {
+  /** The original intake owner admits input only. This relationship grants no publication or API identity. */
+  inputOnly?: true
   /** Confirmed by the original target owner at this revision, never caller-supplied. */
   executionRuntimeId?: string
   /** Optional original presentation; background conversations do not require a Region. */
@@ -47,13 +49,14 @@ export function sameRoomPublication(left: Omit<RoomBinding, 'state' | 'authorize
   return dequal(roomPublicationReference(left), roomPublicationReference(right)) &&
     left.connectionId === right.connectionId && dequal(left.application, right.application) &&
     left.externalConversationId === right.externalConversationId && left.executionHostId === right.executionHostId &&
-    left.executionRuntimeId === right.executionRuntimeId && left.agentSessionId === right.agentSessionId &&
+    left.executionRuntimeId === right.executionRuntimeId && left.inputOnly === right.inputOnly && left.agentSessionId === right.agentSessionId &&
     left.scope.publication === right.scope.publication && dequal(left.inputTarget, right.inputTarget) &&
     dequal(left.sourceCheckpoints, right.sourceCheckpoints) && dequal(left.sourceFrontier, right.sourceFrontier) &&
     dequal(left.publicationOrigin, right.publicationOrigin)
 }
 /** Resolve the owner's direct original row; references never form a historical chain. */
 export function readRoomPublicationBinding(owner: Pick<RoomBindingReadPort, 'readExact'>, binding: RoomBinding): RoomBinding | null {
+  if (binding.inputOnly) return null
   const ref = roomPublicationReference(binding), original = owner.readExact(ref.bindingId, ref.revision)
   return original && !original.publicationBoundary && sameRoomPublication(original, binding) ? original : null
 }
@@ -96,7 +99,9 @@ export type RoomBindingMappingConflict = {
     differences: RoomBindingMappingDifference[]
   }>
 }
-export type RoomBindingInspection = { binding: RoomBinding | null; current: RoomBinding | null; operation: RoomBindingOperation | null; grants: ConnectionGrant[]; access?: ConnectionMemberAccess[]; mappingConflict?: RoomBindingMappingConflict }
+export type RoomBindingInspection = { binding: RoomBinding | null; current: RoomBinding | null; operation: RoomBindingOperation | null; grants: ConnectionGrant[]; access?: ConnectionMemberAccess[]; mappingConflict?: RoomBindingMappingConflict;
+  /** Its grantees’ replies reach the Agent, but nothing the Agent says is published through it. */
+  inputOnly?: true }
 export type RoomBindingListInput = { connectionId?: string; executionHostId?: string; agentSessionId?: string }
 export type RoomBindingCallContext = { actor: RoomBindingAuthority; assertCurrent?(): void | Promise<void> }
 export interface RoomBindingsPort {
@@ -113,7 +118,7 @@ export interface RoomBindingsPort {
 export type RoomPublicationAuthority = {
   binding: RoomBinding | null
   authorized: boolean
-  reason?: 'missing' | 'binding-revised' | 'paused' | 'connection-disabled' | 'publication-not-granted' | 'service-disabled'
+  reason?: 'missing' | 'binding-revised' | 'paused' | 'connection-disabled' | 'publication-not-granted' | 'service-disabled' | 'input-only'
 }
 /** Synchronous reads can join the original connector database transaction. They never query a Region occupant. */
 export interface RoomBindingReadPort {

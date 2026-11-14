@@ -36,6 +36,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
       CREATE TABLE IF NOT EXISTS room_binding_revision (binding_id TEXT NOT NULL, revision INTEGER NOT NULL, snapshot_json TEXT NOT NULL, PRIMARY KEY(binding_id, revision));
       CREATE TABLE IF NOT EXISTS room_binding_head (binding_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, connection_id TEXT NOT NULL, domain TEXT NOT NULL, app_id TEXT NOT NULL, room_id TEXT NOT NULL, host_id TEXT NOT NULL, session_id TEXT NOT NULL, UNIQUE(domain, app_id, room_id), UNIQUE(connection_id, host_id, session_id));
       CREATE INDEX IF NOT EXISTS room_binding_session ON room_binding_head(host_id,session_id,binding_id);
+      CREATE INDEX IF NOT EXISTS room_binding_session_identity ON room_binding_head(session_id,binding_id);
       CREATE TABLE IF NOT EXISTS room_binding_operation (operation_id TEXT PRIMARY KEY, intent_json TEXT NOT NULL, result_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS room_grant_revision (grant_id TEXT NOT NULL, revision INTEGER NOT NULL, snapshot_json TEXT NOT NULL, PRIMARY KEY(grant_id, revision));
       CREATE INDEX IF NOT EXISTS room_grant_subject ON room_grant_revision(json_extract(snapshot_json,'$.bindingId'));
@@ -82,7 +83,9 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     return this.safe(() => this.database.prepare('SELECT binding_id FROM room_binding_head' + (entries.length ? ' WHERE ' + entries.map(([key]) => columns[key] + '=?').join(' AND ') : '') + ' ORDER BY binding_id').all(...entries.map(([, value]) => value)).map(row => this.readCurrent(String(row.binding_id))!).filter(b => !activeOnly || b.state === 'active'))
   }
   listActive(input: RoomBindingListInput = {}): RoomBinding[] { return this.heads(input, true) }
-  async list(input: RoomBindingListInput): Promise<{ bindings: RoomBinding[] }> { return { bindings: this.heads(input, false) } }
+  /** Exact current relationships, including paused ones whose publication can resume. */
+  listCurrent(input: RoomBindingListInput = {}): RoomBinding[] { return this.heads(input, false) }
+  async list(input: RoomBindingListInput): Promise<{ bindings: RoomBinding[] }> { return { bindings: this.listCurrent(input) } }
   publicationAuthority(bindingId: string, revision: number): RoomPublicationAuthority {
     const binding = this.readExact(bindingId, revision), current = this.readCurrent(bindingId)
     const result = (reason: NonNullable<RoomPublicationAuthority['reason']>): RoomPublicationAuthority => ({ binding, authorized: false, reason })

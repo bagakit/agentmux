@@ -1,18 +1,22 @@
+import { publicationSpeechFragments } from './publication-store.js'
+import type { PublicationHost, PublicationBindingsPort, MoteReplyPublication } from './publication-host.js'
 import { connectionApplicationScope } from '@agentmux/core/connections'
 import { effectiveRoomGrant } from './effective-grant.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from '@agentmux/core'
+import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
+import type { AgentMuxAgentSession } from '@agentmux/core'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { MOTE_CHAT_UNREVIEWED_BOUND, parseMoteChatConfiguration, parseMoteChatParams, parseMoteChatPerson, parseMoteChatResult,
-  type MoteChatAllocate, type MoteChatAudienceInput, type MoteChatCallContext, type MoteChatConfiguration, type MoteChatConfigure, type MoteChatEvent, type MoteChatEventsInput,
+  type MoteChatReplyInput, type MoteChatReplyOperation, type MoteChatAllocate, type MoteChatAudienceInput, type MoteChatCallContext, type MoteChatConfiguration, type MoteChatConfigure, type MoteChatEvent, type MoteChatEventsInput,
   type MoteChatGeneration, type MoteChatHistoryInput, type MoteChatInspect, type MoteChatOperation, type MoteChatPort, type MoteChatReviewInput, type MoteChatTarget } from '@agentmux/core/mote-chat'
 import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, type ConnectionActor, type ConnectionIngressMessage,
   type RoomBinding, type RoomBindingListInput, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { DurableIngressHost, IngressApplicationMessage } from './durable-ingress.js'
-import { MoteChatStore, type MoteChatGenerationRow, type MoteChatPersonRow, type MoteChatPreparedLaunch } from './mote-chat-store.js'
+import { MoteChatStore, type MoteChatGenerationRow, type MoteChatPersonRow, type MoteChatPreparedLaunch, type MoteChatMainAdmission, type MoteChatReplySource } from './mote-chat-store.js'
 import { readMoteChatDiagnosis, type MoteChatDiagnosisOwner } from './mote-chat-diagnosis.js'
 
 export type { MoteChatPreparedLaunch } from './mote-chat-store.js'
@@ -31,9 +35,18 @@ export interface MoteChatAgentPort {
 export type MoteChatHostOptions = {
   connections: ConnectionHost
   agents: MoteChatAgentPort
+  /** The exact role writer/reader used by this Host's dialogue and preferences. */
+  main?: () => MoteMainReader | undefined
+  /** Current sharing facts in this original Connector owner; never a global export inventory. */
+  sharedAudience?(reference: { agentSessionId: string }): readonly RoomBinding[]
+  executionRuntimeId?(hostId: string): string | undefined
+  /** Default execution endpoint reachability only; never an input or explicit reply authorization. */
+  replyAtOriginalOwner?(hostId: string): boolean
+  session?(hostId: string, agentSessionId: string, executionRuntimeId?: string): Promise<AgentMuxAgentSession | null>
   assertTarget(target: MoteChatTarget): Promise<void>
   assertReady?: NonNullable<MoteChatDiagnosisOwner['assertReady']>
-  ingress?(): Pick<DurableIngressHost, 'listDirect' | 'inspect' | 'inspectInputRuntime' | 'listApplication' | 'countApplication' | 'newestApplication'> | undefined
+  publication?(): PublicationHost | undefined
+  ingress?(): Pick<DurableIngressHost, 'readMessage' | 'queryAuthorized' | 'listDirect' | 'inspect' | 'inspectInputRuntime' | 'listApplication' | 'countApplication' | 'newestApplication'> | undefined
   /** Host spatial fact: this exact Host Session is one of the Mote's own Agents. Unknown is refusal, never membership. */
   member?(target: MoteChatTarget, agent: { hostId: string; agentSessionId: string }): Promise<boolean>
   now?: () => number
@@ -115,16 +128,99 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     })
   }
   async inspect(value: MoteChatInspect, context?: MoteChatCallContext) {
-    const input = parseMoteChatParams('space.mote.chat.inspect', value); management(context); await context?.assertCurrent?.()
+    const input = parseMoteChatParams('space.mote.chat.inspect', value); await context?.assertCurrent?.()
     const operation = input.operationId === undefined ? null : this.store.operation(input.operationId)?.operation ?? null
-    const current = input.target ? this.exact(input.target) : operation ? this.store.configuration(operation.configuration.target.spaceId) : null
-    const configuration = operation && current && !sameMotePreferencesTarget(current.target, operation.configuration.target) ? null : current
-    return parseMoteChatResult('space.mote.chat.inspect', { configuration, operation }, input)
+    if (context?.actor.kind === 'agent') {
+      const source = operation?.action === 'reply' ? this.store.reply(operation.operationId)?.source : undefined
+      if (!source) fail('CONTROL_PERMISSION_DENIED', 'An Agent may inspect only its own original reply operation.')
+      this.assertReplyCaller(source, context)
+    }
+    const originalTarget = operation?.action === 'reply' ? operation.target : operation?.configuration.target
+    const current = context?.actor.kind === 'agent' ? null : input.target ? this.exact(input.target) : originalTarget ? this.store.configuration(originalTarget.spaceId) : null
+    const configuration = originalTarget && current && !sameMotePreferencesTarget(current.target, originalTarget) ? null : current
+    return parseMoteChatResult('space.mote.chat.inspect', { configuration, operation, ...(operation?.action === 'reply' ? { deliveries: this.replyDeliveries(operation) } : {}) }, input)
+  }
+  private replySource(record: ConnectionIngressMessage | null): MoteChatReplySource {
+    const input = record?.input, admission = record && this.store.admissionByIngress(record.ingressId)
+    if (!record || record.state !== 'claimed' || record.conversationKind !== 'direct' || !input || admission?.kind !== 'main' || !this.intake().queryAuthorized(record) ||
+      input.author.bindingId !== admission.binding.bindingId || !same(input.author.actor, admission.actor) || input.author.externalMessageId !== record.externalMessageId ||
+      input.author.connectionId !== admission.binding.connectionId || input.agentSessionId !== admission.reference.sessionId || input.hostId !== admission.reference.hostId ||
+      !same(record.application, admission.application) || !same(record.actor, admission.actor) || record.externalConversationId !== admission.externalConversationId ||
+      input.author.externalConversationId !== record.externalConversationId || !this.mainActive(admission))
+      return fail('MOTE_CHAT_REPLY_SOURCE_UNCONFIRMED', 'This original admitted private input is unconfirmed or paused. Keep its exact reference; no reply was sent.')
+    return { ingressId: record.ingressId, application: record.application, actor: record.actor, externalConversationId: record.externalConversationId,
+      externalMessageId: record.externalMessageId, input }
+  }
+  private replyProof(source: MoteChatReplySource, proof: Pick<import('@agentmux/core').AgentInputSubmissionReceipt, 'key' | 'status'> | null | undefined): void {
+    if (!proof || !['admitted', 'terminal-confirmed', 'launch-carried'].includes(proof.status) || !same(proof.key,
+      { kind: 'message', agentSessionId: source.input.agentSessionId, expectedRun: source.input.expectedRun, messageId: source.input.messageId }))
+      fail('MOTE_CHAT_REPLY_INPUT_UNDELIVERED', 'The original Core input has no confirmed delivery to this recipient. Keep this ingress and operation ID; inspect its original input before replying. Main remains available.')
+  }
+  private assertReplyCaller(source: MoteChatReplySource, context: MoteChatCallContext, sending = false): void {
+    if (context.actor.kind !== 'agent' || context.actor.id !== source.input.agentSessionId || context.agentHostId !== source.input.hostId ||
+      sending && !context.agentSourceRuns?.includes(source.input.expectedRun.runId))
+      fail('CONTROL_PERMISSION_DENIED', 'Only the original recipient Session or its confirmed native recovery may reply to this exact private input. Other work remains available.')
+  }
+  private replyDeliveries(operation: MoteChatReplyOperation) {
+    const outbox = this.options.publication?.()?.store
+    return operation.deliveryOperationIds.flatMap(id => { const effect = outbox?.inspect(id); return effect ? [outbox!.delivery(effect)] : [] })
+  }
+  /** Synchronous exact provenance used at every original Outbox preparation/dispatch boundary. */
+  readMoteReply(operationId: string): MoteReplyPublication | null {
+    const operation = this.store.operation(operationId)?.operation, original = this.store.reply(operationId)
+    if (operation?.action !== 'reply' || !original) return null
+    try {
+      this.replyProof(original.source, original.proof)
+      const current = this.replySource(this.intake().readMessage(original.source.ingressId))
+      if (!same(current, original.source)) return null
+      return { bindingId: current.input.author.bindingId, ingressId: current.ingressId, deliveryOperationIds: operation.deliveryOperationIds, payloads: original.payloads }
+    } catch (error) {
+      if (error instanceof AgentMuxError && ['MOTE_CHAT_REPLY_SOURCE_UNCONFIRMED', 'MOTE_CHAT_REPLY_INPUT_UNDELIVERED', 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED'].includes(error.code)) return null
+      throw error
+    }
+  }
+  async reply(value: MoteChatReplyInput, context: MoteChatCallContext) {
+    const input = parseMoteChatParams('space.mote.chat.reply', value); await context.assertCurrent?.()
+    const intent = encode({ method: 'reply', input, actor: context.actor, hostId: context.agentHostId })
+    const inspectOriginal = () => {
+      const original = this.originalOperation(input.operationId, intent)
+      if (!original) return null
+      if (original.action !== 'reply') return fail('MOTE_CHAT_OPERATION_CONFLICT', 'This operation already belongs to another original intent.')
+      const source = this.store.reply(original.operationId)?.source
+      if (!source) return fail('MOTE_CHAT_STORAGE_UNCONFIRMED', 'The original reply source could not be read. Keep this operation ID and inspect it.')
+      this.assertReplyCaller(source, context)
+      return { operation: original, deliveries: this.replyDeliveries(original) }
+    }
+    const original = inspectOriginal()
+    if (original) return parseMoteChatResult('space.mote.chat.reply', original, input)
+    const source = this.replySource(this.intake().readMessage(input.ingressId))
+    this.assertReplyCaller(source, context, true)
+    const delivery = await this.intake().inspect({ ingressId: input.ingressId })
+    if (delivery.observation !== 'observed' || !same(delivery.ingress?.input, source.input)) return fail('MOTE_CHAT_REPLY_INPUT_UNDELIVERED', 'The original Core input delivery is unconfirmed. Keep this ingress and operation ID; no reply was queued.')
+    this.replyProof(source, delivery.inputReceipt)
+    const proof = { key: delivery.inputReceipt!.key, status: delivery.inputReceipt!.status }
+    const publication = this.options.publication?.(), admission = this.store.admissionByIngress(input.ingressId)!
+    const adapter = this.options.connections.publicationAdapter(source.input.author.connectionId)
+    if (!publication || !adapter || admission.kind !== 'main') return fail('MOTE_CHAT_REPLY_UNAVAILABLE', 'The original publication owner is unavailable. Keep this input and operation ID; no reply was queued.')
+    const binding = this.mainBinding(admission), payloads = publicationSpeechFragments(input.body,
+      { connectionId: binding.connectionId, application: binding.application, externalConversationId: binding.externalConversationId }, adapter)
+    await context.assertCurrent?.()
+    const result = this.store.transaction(() => {
+      const retained = inspectOriginal()
+      if (retained) return retained
+      if (!same(source, this.replySource(this.intake().readMessage(input.ingressId)))) return fail('MOTE_CHAT_REPLY_SOURCE_UNCONFIRMED', 'The original private input changed before its reply was queued. Its request is retained.')
+      const deliveryOperationIds = publication.store.queueMoteReply(input.operationId, input.ingressId, binding, payloads)
+      const operation: MoteChatReplyOperation = { operationId: input.operationId, action: 'reply', target: admission.target, ingressId: input.ingressId, deliveryOperationIds, binding }
+      this.store.saveReply(input.operationId, { source, payloads, proof }); this.store.saveOperation(intent, operation)
+      return { operation, deliveries: this.replyDeliveries(operation) }
+    })
+    publication.wakeNotices()
+    return parseMoteChatResult('space.mote.chat.reply', result, input)
   }
   async diagnose(value: { target: MoteChatTarget }, context?: MoteChatCallContext) {
     const input = parseMoteChatParams('space.mote.chat.diagnose', value)
     await context?.assertCurrent?.()
-    const report = await readMoteChatDiagnosis(input.target, { ...this.options, store: this.store })
+    const report = await readMoteChatDiagnosis(input.target, { ...this.options, store: this.store, inputNoticeCode: id => this.inputNoticeCode(id) })
     await context?.assertCurrent?.()
     return parseMoteChatResult('space.mote.chat.diagnose', report, input)
   }
@@ -217,16 +313,19 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     if (conversationKind === 'group' && !names.has(key)) names.set(key, this.options.connections.metadata.get({ connectionId: record.connectionId, subject: { kind: 'conversation', externalConversationId: record.externalConversationId } })
       .then(result => displayName(result.entry.observation.profile?.name), () => undefined))
     const conversationName = conversationKind === 'group' ? await names.get(key) : undefined
+    const noticeCode = this.inputNoticeCode(record.ingressId)
     return { sequence: row.sequence, ingressId: record.ingressId, receivedAt: record.receivedAt ?? null, application: record.application, conversationKind,
       externalConversationId: record.externalConversationId, ...(conversationName ? { conversationName } : {}), author: record.actor, ...(authorName ? { authorName } : {}),
       externalMessageId: record.externalMessageId, addressing: row.selection, replyToMessageId: row.replyToMessageId,
-      externalText: record.code === 'INGRESS_CONTENT_UNSUPPORTED' ? null : record.body, state: record.state, code: record.code ?? null, handledBy: this.handledBy(record) }
+      externalText: record.code === 'INGRESS_CONTENT_UNSUPPORTED' ? null : record.body, state: record.state, code: record.code ?? null, ...(noticeCode ? { noticeCode } : {}), handledBy: this.handledBy(record) }
   }
   private handledBy(record: ConnectionIngressMessage): MoteChatEvent['handledBy'] {
     if (record.input) return { executionHostId: record.input.hostId, agentSessionId: record.input.agentSessionId }
     const target = record.group?.target
     if (target) return { executionHostId: target.hostId, agentSessionId: target.agentSessionId }
-    const admission = this.store.admissionByIngress(record.ingressId), row = admission ? this.store.generation(admission.generationId) : null
+    const admission = this.store.admissionByIngress(record.ingressId)
+    if (admission?.kind === 'main') return { executionHostId: admission.reference.hostId, agentSessionId: admission.reference.sessionId }
+    const row = admission ? this.store.generation(admission.generationId) : null
     return row ? { executionHostId: row.generation.executionHostId, agentSessionId: row.generation.agentSessionId } : null
   }
   private active(row: MoteChatGenerationRow): boolean {
@@ -252,12 +351,13 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     const saved = this.store.admission(incoming.application, incoming.externalMessageId)
     if (saved) {
       if (!same(saved.actor, incoming.actor) || saved.externalConversationId !== incoming.externalConversationId || saved.ingressId !== incoming.ingressId) fail('MOTE_CHAT_ADMISSION_CONFLICT', 'This original message already belongs to another chat admission. Keep its original intake identity.')
-      return await this.ready(saved.generationId)
+      return saved.kind === 'main' ? this.mainBinding(saved) : await this.ready(saved.generationId)
     }
     const configuration = this.store.route(incoming.application)
     if (!configuration) return null
     this.assertService(configuration.values.connection!.connectionId)
     await this.options.assertTarget(configuration.target)
+    if (same(configuration.creator, incoming.actor)) return await this.prepareMain(incoming, configuration)
     const key = laneKey(configuration.target.spaceId, incoming), observed = this.store.latest(key)
     let activity: number | null = null
     if (observed?.generation.phase === 'ready') {
@@ -266,7 +366,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     }
     const selected = this.store.transaction(() => {
       const duplicate = this.store.admission(incoming.application, incoming.externalMessageId)
-      if (duplicate) return { generationId: duplicate.generationId }
+      if (duplicate) { if (duplicate.kind === 'main') fail('MOTE_CHAT_ADMISSION_CONFLICT', 'This original input already has its immutable Main admission.'); return { generationId: duplicate.generationId } }
       const current = this.store.route(incoming.application)
       if (!current || current.revision !== configuration.revision || !sameMotePreferencesTarget(current.target, configuration.target)) fail('MOTE_CHAT_ROUTE_CHANGED', 'This exact Mote chat route changed while preparing the message. The original intake is retained.')
       const connection = this.options.connections.readConfiguration(current.values.connection!.connectionId)
@@ -292,6 +392,92 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     })
     if ('refused' in selected) fail('MOTE_CHAT_QUOTA_EXHAUSTED', 'This person has no remaining Mote chat messages. The creator can allocate an allowance in this Mote Profile; no Agent was started.')
     return await this.ready(selected.generationId)
+  }
+  /** Main intake owns one immutable role snapshot per original input, never a current-role registry. */
+  private assertMainInputAudience(hostId: string, agentSessionId: string, executionRuntimeId?: string): void {
+    let shared: RoomBinding | undefined
+    try {
+      if (!this.options.sharedAudience) throw Error('The original publication owner is unavailable')
+      const candidates = [...this.options.sharedAudience({ agentSessionId })]
+      const lane = this.store.generationBySession(agentSessionId)
+      if (lane?.binding && lane.binding.state !== 'detached') candidates.push(lane.binding)
+      shared = candidates.find(binding => {
+        if (binding.inputOnly || binding.state === 'detached') return false
+        const runtimeId = binding.executionRuntimeId ?? this.options.executionRuntimeId?.(binding.executionHostId)
+        if (executionRuntimeId && runtimeId) return executionRuntimeId === runtimeId
+        if (binding.executionHostId === hostId) return true
+        throw Error('A same-Session sharing relationship has an unconfirmed original Runtime')
+      })
+    } catch { return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'This Connector owner’s exact Main sharing relationships could not be read. The incoming message is retained; Main and its current work remain available.') }
+    if (shared) fail('MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE', `This Connector owner has external relationship ${shared.bindingId} (${shared.state}), whose publication can expose a private input. Inspect that exact relationship with connection binding inspect, then explicitly resolve it before retrying this original message. Main and the relationship remain available.`)
+  }
+  private mainInputAudienceCode(admission: MoteChatMainAdmission): 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' | 'MOTE_CHAT_MAIN_UNCONFIRMED' | undefined {
+    try { this.assertMainInputAudience(admission.reference.hostId, admission.reference.sessionId, admission.binding.executionRuntimeId) }
+    catch (error) { return error instanceof AgentMuxError && error.code === 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' ? error.code : 'MOTE_CHAT_MAIN_UNCONFIRMED' }
+  }
+  private async prepareMain(incoming: MoteChatIncoming, configuration: MoteChatConfiguration): Promise<RoomBinding> {
+    const main = this.options.main?.()
+    if (!main?.withRole || !this.options.session) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main role owner is unavailable. This message is retained; no private-chat Agent was created.')
+    return await main.withRole(configuration.target, async () => {
+      const saved = this.store.admissionByIngress(incoming.ingressId)
+      if (saved) return saved.kind === 'main' ? this.mainBinding(saved) : await this.ready(saved.generationId)
+      const source = await main.readCurrentMoteMain(configuration.target)
+      if (source.status !== 'ready' || !source.identity || !source.roleRevision) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main role is unconfirmed. Keep this incoming message and restore its original Mote settings.')
+      if (!source.current) return fail('MOTE_CHAT_MAIN_REQUIRED', 'Establish this Mote’s main conversation in the App. This original message is retained; no separate private chat was created.')
+      // This exact Session read can discover an unheated client's original owner.
+      // Freeze only after the same route has supplied its Runtime fence and re-read.
+      let session = await this.options.session!(source.current.hostId, source.current.sessionId)
+      const executionRuntimeId = this.options.executionRuntimeId?.(source.current.hostId)
+      if (this.options.executionRuntimeId && !executionRuntimeId) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The exact Main execution Runtime is unconfirmed. This original message is retained; reconnect its original Host. Main itself remains available.')
+      if (executionRuntimeId) session = await this.options.session!(source.current.hostId, source.current.sessionId, executionRuntimeId)
+      if (!session || session.agentSessionId !== source.current.sessionId || session.hostId !== 'local' && session.hostId !== source.current.hostId)
+        return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main Session is unavailable. This message and Main reference are retained.')
+      if (executionRuntimeId !== this.options.executionRuntimeId?.(source.current.hostId)) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main execution owner changed during this read. Its message and Agent are retained.')
+      await main.assertCurrent(source)
+      this.assertMainInputAudience(source.current.hostId, source.current.sessionId, executionRuntimeId)
+      return this.store.transaction(() => {
+        const original = this.store.admissionByIngress(incoming.ingressId)
+        if (original) { if (original.kind !== 'main') return fail('MOTE_CHAT_ADMISSION_CONFLICT', 'The original input already has a private-chat admission.'); return this.mainBinding(original) }
+        const current = this.store.route(incoming.application)
+        if (!current || current.revision !== configuration.revision || !sameMotePreferencesTarget(current.target, configuration.target) || !same(current.creator, incoming.actor))
+          return fail('MOTE_CHAT_ROUTE_CHANGED', 'The original creator chat policy changed before this input was admitted. Its incoming message is retained.')
+        this.assertService(current.values.connection!.connectionId)
+        if (executionRuntimeId !== this.options.executionRuntimeId?.(source.current!.hostId)) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main execution owner changed before admission. This incoming message is retained.')
+        this.assertMainInputAudience(source.current!.hostId, source.current!.sessionId, executionRuntimeId)
+        const binding = parseRoomBinding({ bindingId: `mote-main-input:${incoming.ingressId}`, revision: 1, state: 'active', inputOnly: true,
+          connectionId: current.values.connection!.connectionId, application: incoming.application, externalConversationId: incoming.externalConversationId,
+          executionHostId: source.current!.hostId, ...(executionRuntimeId ? { executionRuntimeId } : {}), agentSessionId: source.current!.sessionId, regionAnchor: { regionId: source.current!.regionId },
+          scope: { input: 'all-messages', publication: 'future-native-user-facing' }, sourceCheckpoints: [], authorizedBy: this.configurationAuthority(current) })
+        const grant = parseConnectionGrant({ grantId: `mote-main-grant:${incoming.ingressId}`, revision: 1, state: 'active', bindingId: binding.bindingId,
+          bindingRevision: binding.revision, connectionId: binding.connectionId, externalConversationId: binding.externalConversationId, actor: incoming.actor, capabilities: ['input'] })
+        const admission: MoteChatMainAdmission = { ...incoming, kind: 'main', target: current.target, identity: source.identity!, roleRevision: source.roleRevision!,
+          reference: source.current!, binding, grant }
+        const person = this.person(current, incoming.actor)
+        this.store.savePerson({ ...person, person: parseMoteChatPerson({ ...person.person, revision: person.person.revision + 1, used: person.person.used + 1 }) })
+        this.store.saveAdmission(admission)
+        return binding
+      })
+    })
+  }
+  private mainActive(admission: MoteChatMainAdmission): boolean {
+    const current = this.store.configuration(admission.target.spaceId), connection = this.options.connections.readConfiguration(admission.binding.connectionId)
+    return !!current?.values.enabled && sameMotePreferencesTarget(current.target, admission.target) && same(current.values.connection?.application, admission.application) &&
+      current.values.connection?.connectionId === admission.binding.connectionId && same(current.creator, admission.actor) &&
+      !!connection?.config.enabled && same(connection.config.application, admission.application)
+  }
+  private mainBinding(admission: MoteChatMainAdmission): RoomBinding {
+    return { ...admission.binding, state: this.mainActive(admission) ? 'active' : 'paused' }
+  }
+  inputRoute(ingressId: string): { binding: RoomBinding; moteReply: import('@agentmux/core/mote-chat').MoteChatReplyReference; unavailable?: { code: 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' | 'MOTE_CHAT_MAIN_UNCONFIRMED' } } | undefined {
+    const admission = this.store.admissionByIngress(ingressId)
+    if (admission?.kind !== 'main') return undefined
+    const confirmed = this.options.replyAtOriginalOwner?.(admission.reference.hostId) === true
+    const code = this.mainInputAudienceCode(admission)
+    return { binding: this.mainBinding(admission), moteReply: { ingressId, route: confirmed ? 'original-owner' : 'unconfirmed' }, ...(code ? { unavailable: { code } } : {}) }
+  }
+  private inputNoticeCode(ingressId: string): 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' | 'MOTE_CHAT_MAIN_UNCONFIRMED' | 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED' | undefined {
+    const route = this.inputRoute(ingressId)
+    return route?.unavailable?.code ?? (route?.moteReply.route === 'unconfirmed' ? 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED' : undefined)
   }
   private configurationAuthority(configuration: MoteChatConfiguration): MoteChatCallContext['actor'] {
     const actor = this.store.configurationAuthority(configuration)
@@ -348,8 +534,8 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
       this.store.saveGeneration({ ...current, generation: { ...current.generation, phase: 'ready' }, binding, grant }); return binding
     })
   }
-  readExact(bindingId: string, revision: number): RoomBinding | null { const row = this.store.generationByBinding(bindingId); return revision === 1 ? row?.binding ?? null : null }
-  readCurrent(bindingId: string): RoomBinding | null { const row = this.store.generationByBinding(bindingId); return row?.binding ? { ...row.binding, state: this.active(row) ? 'active' : 'paused' } : null }
+  readExact(bindingId: string, revision: number): RoomBinding | null { const main = this.store.mainAdmission(bindingId, 'binding'); if (main) return revision === 1 ? main.binding : null; const row = this.store.generationByBinding(bindingId); return revision === 1 ? row?.binding ?? null : null }
+  readCurrent(bindingId: string): RoomBinding | null { const main = this.store.mainAdmission(bindingId, 'binding'); if (main) return this.mainBinding(main); const row = this.store.generationByBinding(bindingId); return row?.binding ? { ...row.binding, state: this.active(row) ? 'active' : 'paused' } : null }
   /** On-demand identity authority comes from the current lane/policy, independently of automatic traffic. */
   apiBinding(bindingId: string): RoomBinding | null {
     const row = this.store.generationByBinding(bindingId)
@@ -371,6 +557,8 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   }
   listActive(input: RoomBindingListInput = {}): RoomBinding[] { return this.listBindings(input).filter(binding => binding.state === 'active') }
   publicationAuthority(bindingId: string, revision: number) {
+    const main = this.store.mainAdmission(bindingId, 'binding')
+    if (main) return { binding: revision === 1 ? main.binding : null, authorized: false, reason: 'input-only' as const }
     const binding = this.readExact(bindingId, revision), row = this.store.generationByBinding(bindingId)
     if (!binding || !row) return { binding, authorized: false, reason: 'missing' as const }
     const connection = this.options.connections.readConfiguration(row.connectionId)
@@ -378,8 +566,8 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     if (!this.options.connections.automaticTrafficEnabled(connection.config.adapterId)) return { binding, authorized: false, reason: 'service-disabled' as const }
     return this.active(row) ? { binding, authorized: true } : { binding, authorized: false, reason: 'paused' as const }
   }
-  readGrant(grantId: string, revision?: number) { const row = this.store.generationByGrant(grantId); return row?.grant && (revision === undefined || revision === row.grant.revision) ? { ...row.grant, state: this.active(row) ? 'active' as const : 'revoked' as const } : null }
-  grants(bindingId: string, revision: number) { const row = this.store.generationByBinding(bindingId); const grant = row?.grant ? this.readGrant(row.grant.grantId) : null; return revision === 1 && grant ? [grant] : [] }
+  readGrant(grantId: string, revision?: number) { const main = this.store.mainAdmission(grantId, 'grant'); if (main) return revision === undefined || revision === 1 ? { ...main.grant, state: this.mainActive(main) ? 'active' as const : 'revoked' as const } : null; const row = this.store.generationByGrant(grantId); return row?.grant && (revision === undefined || revision === row.grant.revision) ? { ...row.grant, state: this.active(row) ? 'active' as const : 'revoked' as const } : null }
+  grants(bindingId: string, revision: number) { const main = this.store.mainAdmission(bindingId, 'binding'); if (main) { const grant = this.readGrant(main.grant.grantId); return revision === 1 && grant ? [grant] : [] }; const row = this.store.generationByBinding(bindingId); const grant = row?.grant ? this.readGrant(row.grant.grantId) : null; return revision === 1 && grant ? [grant] : [] }
   effectiveGrant(bindingId: string, revision: number, actor: ConnectionActor) { const grant = this.grants(bindingId, revision).find(g => same(g.actor, actor)); return grant ? effectiveRoomGrant(grant) : null }
   effectiveGrants(bindingId: string, revision: number) { return { grants: this.grants(bindingId, revision).map(effectiveRoomGrant), issue: null } }
   findGrant(input: { connectionId: string; externalConversationId: string; actor: ConnectionActor }) {
@@ -390,17 +578,20 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   }
   /** The original quota decision survives exhaustion and rollover; explicit route shutdown still applies. */
   hasAdmission(ingressId: string, bindingId: string, actor: ConnectionActor): boolean {
-    const a = this.store.admissionByIngress(ingressId), row = a ? this.store.generation(a.generationId) : null
+    const a = this.store.admissionByIngress(ingressId)
+    if (a?.kind === 'main') return a.binding.bindingId === bindingId && same(a.actor, actor) && this.mainActive(a)
+    const row = a ? this.store.generation(a.generationId) : null
     return !!row?.binding && row.binding.bindingId === bindingId && same(a!.actor, actor) && this.active(row) &&
       this.store.configuration(row.generation.target.spaceId)?.values.connection?.connectionId === row.connectionId
   }
 }
 
 /** Exact native IDs do not fall through to another owner after a known Mote binding is paused. */
-export function composeMoteChatBindings(groups: RoomBindingReadPort, chat: MoteChatHost): RoomBindingReadPort {
+export function composeMoteChatBindings(groups: RoomBindingReadPort, chat: MoteChatHost): PublicationBindingsPort {
   return {
     effectiveGrant: (id, revision, actor) => chat.readExact(id, revision) ? chat.effectiveGrant(id, revision, actor) : groups.effectiveGrant(id, revision, actor),
     effectiveGrants: (id, revision) => chat.readExact(id, revision) ? chat.effectiveGrants(id, revision) : groups.effectiveGrants(id, revision),
+    readMoteReply: id => chat.readMoteReply(id),
     readOperation: id => groups.readOperation?.(id) ?? null,
     readExact: (id, revision) => chat.readExact(id, revision) ?? groups.readExact(id, revision),
     readCurrent: id => chat.readCurrent(id) ?? groups.readCurrent(id),

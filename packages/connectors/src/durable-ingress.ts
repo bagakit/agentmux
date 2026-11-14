@@ -60,6 +60,8 @@ export type DurableIngressOptions = {
   authenticators: readonly IngressAuthenticator[]
   /** Resolve only an authenticated, retained, unclaimed input before borrowing Core. */
   prepareInput?(record: ConnectionIngressMessage): Promise<{ state: 'ready' } | { state: 'refused'; code: string }>
+  /** Original immutable logical Main Session admission. The input owner freezes its Run after preparation. */
+  inputRoute?(record: ConnectionIngressMessage): { binding: RoomBinding; moteReply?: import('@agentmux/core/mote-chat').MoteChatReplyReference; unavailable?: { code: string } } | undefined
   /** Original admission owner may address its durable conversation for future input. */
   inputTarget?(record: ConnectionIngressMessage, binding: RoomBinding): import('@agentmux/core').AgentDirectedPromptTarget | undefined
   /** Optional publication feedback follows authorized intake, never owns Agent input. */
@@ -188,6 +190,11 @@ export class DurableIngressHost implements ConnectionIngressPort {
       catch (error) { try { this.database.exec('ROLLBACK') } catch { /* A lost commit ACK keeps original intake identities. */ } throw error }
     })
   }
+  /** Original local source read for an exact authored reply; no Core or platform effect. */
+  readMessage(ingressId: string): ConnectionIngressMessage | null {
+    const record = this.read(ingressId)
+    return record && record.kind !== 'action' ? record : null
+  }
   private read(ingressId: string): ConnectionIngressRecord | null {
     return this.safe(() => { const row = this.database.prepare('SELECT record_json FROM connection_ingress_message WHERE ingress_id=? UNION ALL SELECT record_json FROM connection_ingress_event WHERE ingress_id=? AND record_json IS NOT NULL').get(ingressId, ingressId); return row ? parseConnectionIngressRecord(JSON.parse(String(row.record_json))) : null })
   }
@@ -310,7 +317,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
   }
   private binding(record: ConnectionIngressMessage): RoomBinding | null {
     if (record.conversationKind === 'group') return record.group?.target ? this.options.bindings.readExact(record.group.target.bindingId, record.group.target.bindingRevision) : null
-    return this.options.bindings.findActiveAudience({ application: record.application, externalConversationId: record.externalConversationId })
+    return this.options.inputRoute?.(record)?.binding ?? this.options.bindings.findActiveAudience({ application: record.application, externalConversationId: record.externalConversationId })
   }
   private authorize(record: ConnectionIngressMessage, expected?: ConnectionIngressMessage['input'], allowPendingReply = false) {
     this.assertService(record.connectionId)
@@ -380,10 +387,16 @@ export class DurableIngressHost implements ConnectionIngressPort {
       return this.write({ ...current, addressing })
     })
   }
+  /** Qualified private input cannot advance into a newly shared Session. Existing reply intents use original author policy independently. */
+  private assertInputAudience(record: ConnectionIngressMessage): void {
+    const issue = this.options.inputRoute?.(record)?.unavailable
+    if (issue) fail(issue.code)
+  }
   private context(record: ConnectionIngressMessage): AgentInputCallContext {
     const ref = record.input!
     return { externalAuthor: { identity: ref.author, assertCurrent: intent => {
       if (intent.agentSessionId !== ref.agentSessionId || !equal(intent.expectedRun, ref.expectedRun) || intent.operationId !== ref.operationId || intent.messageId !== ref.messageId || intent.body !== record.body || !ref.admissionIntent || !isDeepStrictEqual(intent.admissionIntent, ref.admissionIntent) || !isDeepStrictEqual(intent.channelQuote, ref.channelQuote)) fail('INGRESS_INPUT_MISMATCH')
+      this.assertInputAudience(record)
       this.safe(() => this.authorize(record, ref))
     } } }
   }
@@ -599,6 +612,11 @@ export class DurableIngressHost implements ConnectionIngressPort {
     let record: ConnectionIngressMessage = intake
     let original: ReturnType<DurableIngressHost['authorize']>
     try {
+      const issue = this.options.inputRoute?.(record!)?.unavailable
+      if (issue) {
+        this.transaction(() => { const current = this.read(ingressId)!; if (current.kind !== 'action' && current.state === 'received') this.write({ ...current, code: issue.code }) })
+        return await this.inspect({ ingressId })
+      }
       original = this.safe(() => this.authorize(record!, undefined, true))
       if (original.binding.scope.input === 'mentions-and-replies' && original.event.selection === 'message' && original.event.replyToMessageId) {
         record = await this.qualifyReply(record, original.event)
@@ -615,7 +633,14 @@ export class DurableIngressHost implements ConnectionIngressPort {
     this.options.queryReceived?.(original.binding, record)
     const client = this.options.core(original.binding.executionHostId, original.author.authoritySource?.executionRuntimeId)
     if (!client) fail('INGRESS_CORE_UNAVAILABLE')
-    const exact = await this.prepareRecipient(record, client)
+    const exact = await this.prepareRecipient(record, client).catch(error => {
+      if (original.binding.inputOnly) this.transaction(() => {
+        const current = this.read(ingressId)
+        if (current?.kind !== 'action' && current?.state === 'received') this.write({ ...current,
+          code: error instanceof AgentMuxError ? error.code : 'INGRESS_RECOVERY_PENDING' })
+      })
+      throw error
+    })
     const expectedRun = { ...exact.run }
     const contextSource = this.nativeContextSource(original.binding, exact)
     let channelQuote = record.conversationKind === 'group' ? await this.prepareQuote(record, original.binding, client, exact.run, contextSource, receiverSignal, work) : undefined
@@ -636,6 +661,8 @@ export class DurableIngressHost implements ConnectionIngressPort {
       const current = this.read(ingressId)!
       if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
       if (current.state !== 'received') return { record: current, own: false as const }
+      const issue = this.options.inputRoute?.(current)?.unavailable
+      if (issue) return { record: this.write({ ...current, code: issue.code }), own: false as const }
       const channelProfile = this.options.connections.readChannelActor(current.connectionId, current.actor)
       const target = this.options.inputTarget?.(current, original.binding) ?? original.binding.inputTarget ?? { kind: 'manual-actor' as const }
       const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), createdAt: Date.now(), author: original.author, channelProfile, ...(channelQuote ? { channelQuote, ...(contextSource ? { contextSource } : {}), ...(contextObservation ? { contextObservation } : {}) } : {}), admissionIntent: { ...target, expectedRun } }
@@ -670,7 +697,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     let refusal: AgentMuxError | undefined
     try {
       await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message',
-        ...(retained.conversationKind ? { conversationKind: retained.conversationKind } : {}) }, this.context(retained))
+        ...(retained.conversationKind ? { conversationKind: retained.conversationKind } : {}), ...(this.options.inputRoute?.(retained)?.moteReply ? { moteReply: this.options.inputRoute(retained)!.moteReply } : {}) }, this.context(retained))
     } catch (error) {
       // No reply proves neither absence nor a new effect right. Inspect this exact operation.
       // A local transport absence never reached Core and stays unknown, as in the public RPC service; other AgentMuxErrors are stated outcomes.
@@ -692,7 +719,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const original = this.authorize(record, record.input)
     const session = await client.readAgentSession(original.binding.agentSessionId, original.author.authoritySource?.executionRuntimeId)
     if (!session || session.agentSessionId !== original.binding.agentSessionId || session.hostId !== original.binding.executionHostId) fail('INGRESS_TARGET_UNCONFIRMED')
-    if (!messageInputRef) return session
+    if (!messageInputRef) return original.binding.inputOnly ? await this.prepareInputOnlyRecipient(record, client, session) : session
     const originalOperation = session.continuityOperations?.[recoveryOperationId(messageInputRef)]
     const current = originalOperation ?? session.continuity
     const pending = current && ['pending', 'starting'].includes(current.kind) &&
@@ -715,6 +742,31 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const result = await client.ensureAgentContinuity({ agentSessionId: session.agentSessionId, expectedRun,
       operationId: originalOperation?.operationId ?? pending?.operationId ?? recoveryOperationId(messageInputRef), trigger: 'input', messageInputRef }, this.context(record))
     this.authorize(record, record.input)
+    if (result.kind !== 'resumed' && result.kind !== 'reattachable') fail('INGRESS_RECOVERY_PENDING')
+    if (result.session.agentSessionId !== session.agentSessionId || result.session.hostId !== session.hostId) fail('INGRESS_TARGET_UNCONFIRMED')
+    return result.session
+  }
+  /** A new qualified input may recover this same Session before its first Run/key claim.
+   * The immutable relationship keeps its role/Session; old claims keep their original Run. */
+  private async prepareInputOnlyRecipient(record: ConnectionIngressMessage, client: DurableIngressCore,
+    session: NonNullable<Awaited<ReturnType<DurableIngressCore['readAgentSession']>>>) {
+    const operationId = 'mote-input-recovery-' + createHash('sha256').update(record.ingressId).digest('hex')
+    const prior = session.continuityOperations?.[operationId]
+    if (!prior && client.runtimeSubject) {
+      try {
+        const subject = await client.runtimeSubject({ kind: 'terminal-run', runId: session.run.runId })
+        if (subject.run.runId !== session.run.runId || subject.run.workspacePath !== session.workspacePath) fail('INGRESS_TARGET_UNCONFIRMED')
+        if (subject.run.state === 'running') return session
+      } catch (error) {
+        if (error instanceof AgentMuxError && ['INGRESS_TARGET_UNCONFIRMED', 'RUNTIME_OWNER_MISMATCH', 'CONTROL_PERMISSION_DENIED'].includes(error.code)) throw error
+        // An observation gap is no evidence of a dead Run. The original Core input remains usable.
+        if (!(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) return session
+      }
+    } else if (!prior && !client.runtimeSubject) return session
+    this.authorize(record)
+    const result = await client.ensureAgentContinuity({ agentSessionId: session.agentSessionId, expectedRun: prior?.previousRun ?? session.run,
+      operationId, trigger: 'input', policy: { continuationEnabled: false, reminderMode: 'off' } })
+    this.authorize(record)
     if (result.kind !== 'resumed' && result.kind !== 'reattachable') fail('INGRESS_RECOVERY_PENDING')
     if (result.session.agentSessionId !== session.agentSessionId || result.session.hostId !== session.hostId) fail('INGRESS_TARGET_UNCONFIRMED')
     return result.session
@@ -878,7 +930,11 @@ export class DurableIngressHost implements ConnectionIngressPort {
         ingress = row ? this.read(String(row.ingress_id)) : null
         if (!ingress?.input || ingress.state !== 'claimed') return { ingress: null, authority: 'refused', code: 'INGRESS_CLAIM_UNAVAILABLE' }
         if (ingress.kind === 'action') { this.assertService(ingress.connectionId); this.permissions.authorize(ingress); this.permissions.originalInput(ingress) }
-        else this.authorize(ingress, ingress.input)
+        else {
+          const issue = this.options.inputRoute?.(ingress)?.unavailable
+          if (issue) return { ingress, authority: issue.code === 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' ? 'refused' : 'unavailable', code: issue.code === 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' ? 'INGRESS_INPUT_OUTSIDE_SCOPE' : 'INGRESS_TARGET_UNCONFIRMED' }
+          this.authorize(ingress, ingress.input)
+        }
         return { ingress, authority: 'current' }
       })
     } catch (error) {

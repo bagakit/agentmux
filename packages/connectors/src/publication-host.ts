@@ -40,7 +40,9 @@ export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
 type SourceRead = { observation: ConnectionDeliverySourceObservation; checkpoint: ConversationCheckpoint | null }
 type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceRead?: SourceRead; gapAfter?: number; nativeRecoveryWork?: Promise<void> | undefined; nativeScan?: { view?: string | undefined; cursor?: string; pending?: ConversationWindowAssembly } | undefined; view?: string | undefined; viewId?: string | undefined; read?: { view?: string | undefined; after: ConversationCheckpoint; cursor?: string; recover?: ConversationCheckpoint; pending?: ConversationWindowAssembly | undefined } | undefined }
-export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
+export type MoteReplyPublication = { bindingId: string; ingressId: string; deliveryOperationIds: string[]; payloads: Array<Extract<import('./publication-store.js').PublicationPayload, { kind: 'speech' }>> }
+export type PublicationBindingsPort = RoomBindingReadPort & { readMoteReply?(operationId: string): MoteReplyPublication | null }
+export type PublicationHostOptions = { connections: ConnectionHost; bindings: PublicationBindingsPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 // Optional display observation only: expiry leaves the original author/body usable.
 const OPTIONAL_DISPLAY_WAIT_MS = 750
@@ -189,10 +191,21 @@ export class PublicationHost implements ConnectionDeliveryPort {
   private authorized(binding: RoomBinding): boolean { return !this.closed && this.authority(binding)?.authorized === true }
   /** Explicit lifecycle authority is narrower than ordinary publication and does not enable synchronization. */
   private noticeAuthorized(notice: PublicationOperation): boolean {
-    if (this.closed || notice.payload.kind !== 'binding-lifecycle' || notice.reference.source.kind !== 'binding-operation') return false
+    if (this.closed) return false
     const source = notice.reference.source
+    if (source.kind === 'mote-chat-reply') {
+      const original = this.options.bindings.readMoteReply?.(source.operationId), ordinal = notice.fragment.ordinal
+      if (!original || original.bindingId !== notice.bindingId || original.ingressId !== source.ingressId || original.deliveryOperationIds[ordinal] !== notice.operationId ||
+        JSON.stringify(original.payloads[ordinal]) !== JSON.stringify(notice.payload)) return false
+      const current = this.options.bindings.readCurrent(notice.bindingId), connection = this.options.connections.readConfiguration(notice.target.connectionId)
+      return current?.state === 'active' && current.revision === notice.bindingRevision && !!connection && this.options.connections.automaticTrafficEnabled(connection.config.adapterId) && this.noticeTarget(notice)
+    }
+    if (notice.payload.kind !== 'binding-lifecycle' || source.kind !== 'binding-operation') return false
     const original = this.options.bindings.readOperation?.(source.operationId)
     if (original?.state !== 'applied' || !original.notices?.some(item => item.deliveryOperationId === notice.operationId && item.event === source.event)) return false
+    return this.noticeTarget(notice)
+  }
+  private noticeTarget(notice: PublicationOperation): boolean {
     const binding = this.options.bindings.readExact(notice.bindingId, notice.bindingRevision)
     const connection = this.options.connections.readConfiguration(notice.target.connectionId)
     return !!binding && connection?.config.enabled === true && binding.connectionId === notice.target.connectionId &&
@@ -202,7 +215,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
   }
   private refreshNotices(): void {
     let pending: PublicationOperation[]
-    try { pending = this.store.pendingBindingNotices() } catch { for (const lane of this.notices.values()) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; return }
+    try { pending = [...this.store.pendingBindingNotices(), ...this.store.pendingMoteReplies()] } catch { for (const lane of this.notices.values()) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; return }
     const ids = new Set(pending.map(item => item.operationId))
     for (const [id, lane] of this.notices) if (!ids.has(id)) { lane.abort.abort(); this.notices.delete(id) }
     for (const notice of pending) {
@@ -217,6 +230,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
       this.wake(lane)
     }
   }
+  /** Wake only original committed authored/lifecycle effects; never a Main history reader. */
+  wakeNotices(): void { if (!this.closed) this.refreshNotices() }
   private wake(lane: Lane): void {
     if (this.closed || lane.abort.signal.aborted) return
     lane.dirty = true
@@ -234,6 +249,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const adapter = this.options.connections.publicationAdapter(lane.notice.target.connectionId)
       if (!adapter) { lane.observation = { state: 'unavailable', reason: 'adapter-unavailable' }; return }
       if (!this.noticeAuthorized(lane.notice)) { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
+      if (lane.notice.reference.source.kind === 'mote-chat-reply') for (const original of this.store.rateLimitSources(lane.binding, undefined, 25).operations) {
+        if (original.projectionId === lane.notice.projectionId && original.rateLimit) this.store.retry({ operationId: original.operationId, source: original.rateLimit.source }, () => this.noticeAuthorized(lane.notice!))
+      }
       this.reconcile(lane, adapter, lane.notice.projectionId)
       const observation = await this.drain(lane, adapter, lane.notice.projectionId)
       if (observation) lane.observation = observation
@@ -695,7 +713,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (original.state === 'dispatching') original = this.store.settle(original.operationId, original.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
     const retained = original
     if (!adapter.inspect || !retained.prepared) return
-    const authorized = () => lane.notice ? this.noticeAuthorized(lane.notice) : this.authorized(lane.binding)
+    const authorized = () => lane.notice ? this.noticeAuthorized(retained) : this.authorized(lane.binding)
     lane.inspection = Promise.resolve().then(async () => {
       if (!authorized() || lane.abort.signal.aborted) return
       let credential: string | null
@@ -832,15 +850,16 @@ export class PublicationHost implements ConnectionDeliveryPort {
   }
   private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string, authorityObservation?: PublicationObservation): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
-    const authorized = () => lane.notice ? this.noticeAuthorized(lane.notice) : this.authorized(binding)
+    const laneAuthorized = () => lane.notice ? this.noticeAuthorized(lane.notice) : this.authorized(binding)
     const accepted = new Map<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, ResolvedPublicationPart> }>()
     const qualified = new Set<string>() // One frozen representation is verified once in this bounded drain.
     let after = projectionId === undefined ? lane.querySkipAfter : undefined
     if (projectionId === undefined) lane.querySkipAfter = undefined
     for (let count = 0; count < 16; count++) {
-      if (signal.aborted || !authorized()) return
+      if (signal.aborted || !laneAuthorized()) return
       let original = this.store.next(binding, projectionId, after)
       if (!original) return authorityObservation ?? this.effectObservation(binding, projectionId)
+      const authorized = () => lane.notice ? this.noticeAuthorized(original!) : this.authorized(binding)
       // Authority belongs to this one query; keep its original pending effect
       // and continue independent projections without turning feedback into a lane gate.
       if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
@@ -1087,7 +1106,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (this.closed) throw new AgentMuxError('The original publication owner closed during authorization. Its original outcome is retained.', 'PUBLICATION_OWNER_UNAVAILABLE')
     const original = this.store.inspect(input.operationId)
     if (!original) throw new AgentMuxError('The original publication operation is unknown.', 'UNKNOWN_PUBLICATION_OPERATION')
-    const result = this.store.retry(input, () => !this.closed && (original.payload.kind === 'binding-lifecycle' ? this.noticeAuthorized(original) : this.options.bindings.publicationAuthority(original.bindingId, original.bindingRevision).authorized))
+    const result = this.store.retry(input, () => !this.closed && (original.payload.kind === 'binding-lifecycle' || original.reference.source.kind === 'mote-chat-reply' ? this.noticeAuthorized(original) : this.options.bindings.publicationAuthority(original.bindingId, original.bindingRevision).authorized))
     if (result.accepted) this.refresh()
     return { delivery: this.store.delivery(result.operation), continuation: result.continuation }
   }

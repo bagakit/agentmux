@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { MoteChatOperation } from '@agentmux/core/mote-chat'
+import type { MoteChatIntentOperation } from '../lib/mote-chat-intent'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -8,7 +8,7 @@ import { inspectMoteChatIntent, submitMoteChatIntent } from '../lib/mote-chat-re
 import type { MoteChatIntent } from '../lib/mote-chat-intent'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 
-export function MoteChatRequests({ target, onConfirmed }: { target: MotePreferencesTarget; onConfirmed(operation: MoteChatOperation, hostingTarget?: ConnectionHostingTarget): void }) {
+export function MoteChatRequests({ target, onConfirmed }: { target: MotePreferencesTarget; onConfirmed(operation: MoteChatIntentOperation, hostingTarget?: ConnectionHostingTarget): void }) {
   const intents = useAppStore(state => state.moteChatIntents)
   const retained = Object.values(intents).filter(intent => sameMotePreferencesTarget(intent.input.target, target))
   const [busy, setBusy] = useState<string | null>(null), [results, setResults] = useState<Record<string, { message: string; absent: boolean }>>({})

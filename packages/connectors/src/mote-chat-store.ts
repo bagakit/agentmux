@@ -1,7 +1,9 @@
 import { connectionApplicationScope } from '@agentmux/core/connections'
 import { AgentMuxError, type AgentMuxAgentCreateInput } from '@agentmux/core'
 import { parseMoteChatConfiguration, parseMoteChatGeneration, parseMoteChatPerson, parseMoteChatResult, type MoteChatConfiguration, type MoteChatGeneration, type MoteChatOperation, type MoteChatPerson, type MoteChatReviewMark } from '@agentmux/core/mote-chat'
-import { parseConnectionGrant, parseRoomBinding, type ConnectionActor, type ConnectionApplication, type ConnectionEnrollmentCallContext, type ConnectionGrant, type RoomBinding, type RoomBindingListInput } from '@agentmux/core/connections'
+import { parseConnectionGrant, parseRoomBinding, type ConnectionActor, type ConnectionApplication, type ConnectionEnrollmentCallContext, type ConnectionGrant, type RoomBinding, type ConnectionIngressMessage, type RoomBindingListInput } from '@agentmux/core/connections'
+import type { MoteDialogueIdentity } from '@agentmux/core/mote-dialogue'
+import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
 import type { DatabaseSync } from 'node:sqlite'
 
 /** Prior frozen full launches retain their exact operation. New Host launches use its saved Executor. */
@@ -23,8 +25,12 @@ export type MoteChatGenerationRow = {
   binding: RoomBinding | null
   grant: ConnectionGrant | null
 }
+export type MoteChatReplySource = Pick<ConnectionIngressMessage, 'ingressId' | 'application' | 'actor' | 'externalConversationId' | 'externalMessageId'> & { input: NonNullable<ConnectionIngressMessage['input']> }
+export type MoteChatReplyRecord = { source: MoteChatReplySource; proof: Pick<import('@agentmux/core').AgentInputSubmissionReceipt, 'key' | 'status'>; payloads: Array<Extract<import('./publication-store.js').PublicationPayload, { kind: 'speech' }>> }
 export type MoteChatPersonRow = { key: string; spaceId: string; person: MoteChatPerson }
-export type MoteChatAdmission = { ingressId: string; application: ConnectionApplication; externalMessageId: string; actor: ConnectionActor; externalConversationId: string; generationId: string }
+type MoteChatAdmissionSource = { ingressId: string; application: ConnectionApplication; externalMessageId: string; actor: ConnectionActor; externalConversationId: string }
+export type MoteChatMainAdmission = MoteChatAdmissionSource & { kind: 'main'; target: MoteChatConfiguration['target']; identity: MoteDialogueIdentity; roleRevision: string; reference: MoteDefaultConversation; binding: RoomBinding; grant: ConnectionGrant }
+export type MoteChatAdmission = (MoteChatAdmissionSource & { kind?: never; generationId: string }) | MoteChatMainAdmission
 const json = JSON.stringify
 function assertPrepared(value: MoteChatPreparedLaunch | null): void {
   if (value === null) return
@@ -64,6 +70,9 @@ export class MoteChatStore {
       DROP INDEX IF EXISTS mote_chat_generation_native_audience;
       CREATE INDEX IF NOT EXISTS mote_chat_generation_connection ON mote_chat_generation(json_extract(snapshot_json,'$.connectionId'),sequence);
       CREATE TABLE IF NOT EXISTS mote_chat_admission (domain TEXT NOT NULL, app_id TEXT NOT NULL, message_id TEXT NOT NULL, ingress_id TEXT NOT NULL UNIQUE, snapshot_json TEXT NOT NULL, PRIMARY KEY(domain,app_id,message_id));
+      CREATE UNIQUE INDEX IF NOT EXISTS mote_chat_main_binding ON mote_chat_admission(json_extract(snapshot_json,'$.binding.bindingId')) WHERE json_extract(snapshot_json,'$.kind')='main';
+      CREATE UNIQUE INDEX IF NOT EXISTS mote_chat_main_grant ON mote_chat_admission(json_extract(snapshot_json,'$.grant.grantId')) WHERE json_extract(snapshot_json,'$.kind')='main';
+      CREATE TABLE IF NOT EXISTS mote_chat_reply (operation_id TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS mote_chat_review (space_id TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL);
     `))
   }
@@ -101,6 +110,12 @@ export class MoteChatStore {
   }
   operation(operationId: string): { intent: string; operation: MoteChatOperation } | null {
     return this.safe(() => { const row = this.database.prepare('SELECT intent_json,result_json FROM mote_chat_operation WHERE operation_id=?').get(operationId); return row ? { intent: String(row.intent_json), operation: parseMoteChatResult('space.mote.chat.inspect', { configuration: null, operation: JSON.parse(String(row.result_json)) }).operation! } : null })
+  }
+  reply(operationId: string): MoteChatReplyRecord | null {
+    return this.safe(() => { const row = this.database.prepare('SELECT snapshot_json FROM mote_chat_reply WHERE operation_id=?').get(operationId); return row ? JSON.parse(String(row.snapshot_json)) : null })
+  }
+  saveReply(operationId: string, record: MoteChatReplyRecord): void {
+    this.database.prepare('INSERT INTO mote_chat_reply(operation_id,snapshot_json) VALUES(?,?)').run(operationId, json(record))
   }
   saveOperation(intent: string, operation: MoteChatOperation): void {
     this.database.prepare('INSERT INTO mote_chat_operation(operation_id,intent_json,result_json) VALUES(?,?,?)').run(operation.operationId, intent, json(operation))
@@ -159,6 +174,15 @@ export class MoteChatStore {
   }
   admissionByIngress(ingressId: string): MoteChatAdmission | null {
     return this.safe(() => { const row = this.database.prepare('SELECT snapshot_json FROM mote_chat_admission WHERE ingress_id=?').get(ingressId); return row ? JSON.parse(String(row.snapshot_json)) : null })
+  }
+  mainAdmission(id: string, selector: 'binding' | 'grant'): MoteChatMainAdmission | null {
+    return this.safe(() => {
+      const column = selector === 'binding' ? "$.binding.bindingId" : "$.grant.grantId"
+      const row = this.database.prepare(`SELECT snapshot_json FROM mote_chat_admission WHERE json_extract(snapshot_json,'$.kind')='main' AND json_extract(snapshot_json,'${column}')=?`).get(id)
+      if (!row) return null
+      const value = JSON.parse(String(row.snapshot_json)) as MoteChatMainAdmission
+      return { ...value, binding: parseRoomBinding(value.binding), grant: parseConnectionGrant(value.grant) }
+    })
   }
   saveAdmission(a: MoteChatAdmission): void {
     this.database.prepare('INSERT INTO mote_chat_admission(domain,app_id,message_id,ingress_id,snapshot_json) VALUES(?,?,?,?,?)').run(connectionApplicationScope(a.application), a.application.appId, a.externalMessageId, a.ingressId, json(a))

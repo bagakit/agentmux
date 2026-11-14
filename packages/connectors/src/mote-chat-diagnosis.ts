@@ -12,6 +12,7 @@ export type MoteChatDiagnosisOwner = {
   store: MoteChatStore
   connections: ConnectionHost
   assertTarget(target: MoteChatTarget): Promise<void>
+  inputNoticeCode?(ingressId: string): 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' | 'MOTE_CHAT_MAIN_UNCONFIRMED' | 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED' | undefined
   assertReady?(target: MoteChatTarget): Promise<void>
   ingress?(): Pick<DurableIngressHost, 'listDirect' | 'inspect' | 'inspectInputRuntime'> | undefined
 }
@@ -29,7 +30,7 @@ async function publication(target: MoteChatTarget, generation: MoteChatGeneratio
       coverage: page.coverage ? { state: page.coverage.state, more: page.coverage.nextContent !== null || page.coverage.gaps.length > moteChatDiagnosisWindowLimit, originCount: page.coverage.origins.length,
         gaps: page.coverage.gaps.slice(0, moteChatDiagnosisWindowLimit).map(gap => ({ reason: gap.reason, code: connectionDiagnosisSourceCode(gap.code), codeRecorded: gap.code !== undefined })) } : null,
       effects: page.deliveries.map(effect => ({ kind: effect.queryFeedback ? 'query-feedback' : effect.reference.source.kind === 'interaction' ? 'interaction'
-      : effect.reference.source.kind === 'binding-operation' ? 'binding-notice' : 'conversation', effect: effect.effect, state: effect.state,
+      : effect.reference.source.kind === 'binding-operation' ? 'binding-notice' : effect.reference.source.kind === 'mote-chat-reply' ? 'mote-chat-reply' : 'conversation', effect: effect.effect, state: effect.state,
       receipt: effect.receipt ? { state: effect.receipt.state, reason: effect.receipt.state === 'confirmed' ? null : effect.receipt.reason } : null,
       resourceUpload: effect.resourceUpload?.state ?? null })), more: page.next !== null }
   } catch { /* Preserve original input/runtime facts when its publication owner cannot be read. */ }
@@ -90,7 +91,8 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
     for (const record of page.ingresses) {
       let preparation: NonNullable<MoteChatDiagnosis['incoming']>['rows'][number]['preparation'] = 'not-admitted'
       const admission = owner.store.admissionByIngress(record.ingressId)
-      if (admission) {
+      if (admission?.kind === 'main') preparation = sameMotePreferencesTarget(admission.target, target) ? 'ready' : 'other-route'
+      else if (admission) {
         const retained = generations.get(admission.generationId), generation = retained?.row ?? owner.store.generation(admission.generationId)
         if (!generation) throw new AgentMuxError('The original private-chat preparation cannot be observed.', 'MOTE_CHAT_STORAGE_UNCONFIRMED')
         if (!sameMotePreferencesTarget(generation.generation.target, target)) preparation = 'other-route'
@@ -124,8 +126,9 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
           }
         } catch { /* The original saved input remains visible without claiming its Core outcome. */ }
       }
+      const routeCode = preparation === 'other-route' ? undefined : owner.inputNoticeCode?.(record.ingressId)
       rows.push({ key: moteChatDiagnosisKey(target, record.ingressId), state: record.state,
-        code: moteChatDiagnosisCode(record.code), codeRecorded: record.code !== undefined, preparation, input })
+        code: moteChatDiagnosisCode(record.code), codeRecorded: record.code !== undefined, ...(routeCode ? { noticeCode: routeCode } : {}), preparation, input })
     }
     report.incoming = { rows, more: page.more }
     report.publications = await Promise.all([...generations.values()].map(generation => publication(target, generation.row, generation.intakeKeys, owner.connections)))

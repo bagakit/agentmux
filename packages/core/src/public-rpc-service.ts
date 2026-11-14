@@ -1,3 +1,4 @@
+import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
 import { parseAgentSessionRecordInput, deletedAgentSessionRecord, parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsageInput, parseAgentSessionUsagePage } from './agent-session-usage.js'
 import { parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent } from './agent-message-federation.js'
@@ -891,9 +892,9 @@ export class AgentMuxRpcService {
     if (isMoteChatMethod(method)) {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Mote chat requires its original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
-      if (caller && !(['space.mote.chat.history', 'space.mote.chat.diagnose', 'space.mote.chat.events', 'space.mote.chat.review'] as string[]).includes(method)) throw new AgentMuxError('Managed Agents may read redacted diagnosis, their own chat history, or their own Mote\'s events; chat settings and audience administration require the original person or device.', 'CONTROL_PERMISSION_DENIED')
+      if (caller && !(['space.mote.chat.history', 'space.mote.chat.diagnose', 'space.mote.chat.events', 'space.mote.chat.review', 'space.mote.chat.reply', 'space.mote.chat.inspect'] as string[]).includes(method)) throw new AgentMuxError('Managed Agents may read redacted diagnosis, their own chat history, or their own Mote\'s events; chat settings and audience administration require the original person or device.', 'CONTROL_PERMISSION_DENIED')
       const input = parseMoteChatParams(method, params), owner = this.ports.moteChat
-      if (method === 'space.mote.chat.diagnose') await this.assertRuntimeFence(context)
+      await this.assertRuntimeFence(context)
       if (!owner) {
         if (this.ports.forwardControl) {
           context.signal?.throwIfAborted(); await context.assertCurrent?.()
@@ -902,9 +903,10 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('The original Mote chat owner is unavailable. Existing conversations are retained.', 'CONTROL_UNAVAILABLE')
       }
       const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id }
-      const administration = { actor, ...(caller ? { agentHostId: caller.hostId } : {}), ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (method === 'space.mote.chat.diagnose') await this.assertRuntimeFence(context); if (caller) await this.authenticated(context) } }
+      const administration = { actor, ...(caller ? { agentHostId: caller.hostId, agentSourceRuns: sessionSemanticResumeSourceRuns(caller.session) } : {}), ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context); if (caller) await this.authenticated(context) } }
       await administration.assertCurrent()
-      const result = method === 'space.mote.chat.configure' ? await owner.configure(parseMoteChatParams(method, params), administration)
+      const result = method === 'space.mote.chat.reply' ? await owner.reply(parseMoteChatParams(method, params), administration)
+        : method === 'space.mote.chat.configure' ? await owner.configure(parseMoteChatParams(method, params), administration)
         : method === 'space.mote.chat.inspect' ? await owner.inspect(parseMoteChatParams(method, params), administration)
         : method === 'space.mote.chat.history' ? await owner.history(parseMoteChatParams(method, params), administration)
         : method === 'space.mote.chat.audience' ? await owner.audience(parseMoteChatParams(method, params), administration)

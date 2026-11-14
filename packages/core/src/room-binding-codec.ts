@@ -40,17 +40,18 @@ export function parseConnectionGrant(value: unknown): ConnectionGrant {
   return { grantId: id(p.grantId), revision: revision(p.revision), bindingId: id(p.bindingId), bindingRevision: revision(p.bindingRevision), connectionId: id(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), state: p.state as ConnectionGrant['state'], capabilities: parseConnectionGrantCapabilities(p.capabilities) }
 }
 export function parseRoomBinding(value: unknown): RoomBinding {
-  const p = object(value, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'scope', 'inputTarget', 'executionHostId', 'executionRuntimeId', 'agentSessionId', 'regionAnchor', 'sourceCheckpoints', 'sourceFrontier', 'publicationOrigin', 'publicationBoundary', 'authorizedBy'])
+  const p = object(value, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'scope', 'inputTarget', 'executionHostId', 'executionRuntimeId', 'agentSessionId', 'regionAnchor', 'sourceCheckpoints', 'sourceFrontier', 'publicationOrigin', 'publicationBoundary', 'authorizedBy', 'inputOnly'])
   const origin = p.publicationOrigin === undefined ? undefined : { createOperationId: id(object(p.publicationOrigin, ['createOperationId']).createOperationId) }
   const boundary = p.publicationBoundary === undefined ? undefined : { revision: revision(object(p.publicationBoundary, ['revision']).revision) }
   if (boundary && (origin || boundary.revision >= revision(p.revision) || scope(p.scope).publication !== 'future-shared-conversation')) fail()
+  if (p.inputOnly !== undefined && (p.inputOnly !== true || origin || boundary || p.sourceFrontier !== undefined || !Array.isArray(p.sourceCheckpoints) || p.sourceCheckpoints.length !== 0)) fail()
   if (p.state !== 'active' && p.state !== 'paused' && p.state !== 'detached' || !Array.isArray(p.sourceCheckpoints) || p.sourceCheckpoints.length > 32 ||
-    (origin ? p.sourceCheckpoints.length !== 0 || p.sourceFrontier !== undefined || scope(p.scope).publication !== 'future-native-user-facing' : p.sourceCheckpoints.length < 1)) fail()
+    (!p.inputOnly && (origin ? p.sourceCheckpoints.length !== 0 || p.sourceFrontier !== undefined || scope(p.scope).publication !== 'future-native-user-facing' : p.sourceCheckpoints.length < 1))) fail()
   const t = { executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId), ...(p.regionAnchor === undefined ? {} : { regionAnchor: target(p).regionAnchor }) }, checkpoints = (p.sourceCheckpoints as unknown[]).map(parseNativeConversationCheckpoint)
   if (checkpoints.some(c => c.agentSessionId !== t.agentSessionId) || new Set(checkpoints.map(c => JSON.stringify(c.source))).size !== checkpoints.length) fail()
   const frontier = p.sourceFrontier === undefined ? undefined : parseConversationCheckpoint(p.sourceFrontier, { hostId: t.executionHostId, agentSessionId: t.agentSessionId })
   if (frontier && (frontier.frontier.cuts.filter(c => c.kind === 'native').length !== checkpoints.length || checkpoints.some(c => !frontier.frontier.cuts.some(cut => cut.kind === 'native' && JSON.stringify(cut.checkpoint) === JSON.stringify(c))))) fail()
-  return { ...t, ...(p.executionRuntimeId === undefined ? {} : { executionRuntimeId: id(p.executionRuntimeId) }), bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: parseConnectionApplication(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), ...(p.inputTarget === undefined ? {} : { inputTarget: inputTarget(p.inputTarget) }), sourceCheckpoints: checkpoints, ...(frontier ? { sourceFrontier: frontier } : {}), ...(origin ? { publicationOrigin: origin } : {}), ...(boundary ? { publicationBoundary: boundary } : {}), authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
+  return { ...t, ...(p.inputOnly ? { inputOnly: true as const } : {}), ...(p.executionRuntimeId === undefined ? {} : { executionRuntimeId: id(p.executionRuntimeId) }), bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: parseConnectionApplication(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), ...(p.inputTarget === undefined ? {} : { inputTarget: inputTarget(p.inputTarget) }), sourceCheckpoints: checkpoints, ...(frontier ? { sourceFrontier: frontier } : {}), ...(origin ? { publicationOrigin: origin } : {}), ...(boundary ? { publicationBoundary: boundary } : {}), authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
 }
 export function parseRoomBindingOperation(value: unknown): RoomBindingOperation {
   const p = object(value, ['operationId', 'action', 'state', 'binding', 'grant', 'inherited', 'reused', 'code', 'notices'])
@@ -148,7 +149,7 @@ export function parseRoomBindingResult<M extends RoomBindingMethod>(method: M, v
     return { bindings } as RoomBindingResultMap[M]
   }
   if (method === 'connection.binding.inspect') {
-    const p = object(value, ['binding', 'current', 'operation', 'grants', 'access', 'mappingConflict']), expected = input as RoomBindingParamsMap['connection.binding.inspect']
+    const p = object(value, ['binding', 'current', 'operation', 'grants', 'access', 'mappingConflict', 'inputOnly']), expected = input as RoomBindingParamsMap['connection.binding.inspect']
     const binding = p.binding === null ? null : parseRoomBinding(p.binding), current = p.current === null ? null : parseRoomBinding(p.current), operation = p.operation === null ? null : parseRoomBindingOperation(p.operation)
     if (!Array.isArray(p.grants)) fail(); const grants = (p.grants as unknown[]).map(parseConnectionGrant)
     if (expected.operationId ? operation && operation.operationId !== expected.operationId || binding && (operation?.state !== 'applied' || JSON.stringify(binding) !== JSON.stringify(operation.binding)) : operation !== null || binding && (binding.bindingId !== expected.bindingId || expected.revision !== undefined && binding.revision !== expected.revision)) fail()
@@ -157,7 +158,8 @@ export function parseRoomBindingResult<M extends RoomBindingMethod>(method: M, v
     if (access && (expected.operationId !== undefined || expected.revision !== undefined || !binding || access.some(a => !dequal(a.actor.application, binding.application) || a.local.kind !== 'none' && a.local.grant.bindingId !== binding.bindingId) || new Set(access.map(a => JSON.stringify(a.actor))).size !== access.length)) fail()
     const mappingConflict = p.mappingConflict === undefined ? undefined : parseMappingConflict(p.mappingConflict)
     if (mappingConflict && (!expected.operationId || operation?.state !== 'refused' || operation.code !== 'ROOM_BINDING_MAPPING_CONFLICT' || !['bind', 'relink'].includes(operation.action))) fail()
-    return { binding, current, operation, grants, ...(access ? { access } : {}), ...(mappingConflict ? { mappingConflict } : {}) } as RoomBindingResultMap[M]
+    if (p.inputOnly !== undefined && (p.inputOnly !== true || !current?.inputOnly || expected.operationId !== undefined || access || mappingConflict)) fail()
+    return { binding, current, operation, grants, ...(access ? { access } : {}), ...(mappingConflict ? { mappingConflict } : {}), ...(p.inputOnly ? { inputOnly: true as const } : {}) } as RoomBindingResultMap[M]
   }
   const op = parseRoomBindingOperation(value), expected = input as RoomBindingParamsMap['connection.bind'] & RoomBindingParamsMap['connection.grant'] & RoomBindingParamsMap['connection.binding.relink']
   const action = method === 'connection.bind' ? 'bind' : method === 'connection.binding.member.inherit' ? 'inherit' : method === 'connection.grant' ? 'grant' : method === 'connection.binding.pause' ? 'pause' : method === 'connection.binding.resume' ? 'resume' : method === 'connection.binding.detach' ? 'detach' : 'relink'

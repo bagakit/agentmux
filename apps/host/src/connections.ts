@@ -33,6 +33,7 @@ function groupSpeakerMote(graph: AgentMuxSpatialGraph, reference: { hostId: stri
 }
 
 export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServices>[0], 'directory' | 'adapters' | 'moteChat'> & {
+  moteMain?: () => import('@agentmux/core/mote-dialogue').MoteMainReader | undefined
   spatial?: AgentMuxSpatialStateStore
   /** Original profile/workspace configuration; read on demand, never a copied Host snapshot. */
   moteConfigurationPath?: string
@@ -88,7 +89,7 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
   const services = async () => {
     if (closed || !runtime) throw new AgentMuxError('The original Host connection owner is not available. Original records and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
     const target = runtime.ownerIdentity()
-    return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat } : {}),
+    return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat: { ...moteChat, replyAtOriginalOwner: hostId => { const exact = clients().filter(entry => entry.hostId === hostId); return !!runtime && !closed && exact.length === 1 && exact[0]!.client === runtime.client }, ...(options.moteMain ? { main: options.moteMain } : {}) } } : {}),
       bindings: {
         spatial,
         executionRuntimeId: hostId => authoritySource(hostId)?.executionRuntimeId,

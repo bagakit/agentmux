@@ -7787,7 +7787,7 @@ export class AgentMuxClient {
       ...(admissionIntent.kind !== 'exact-condition' ? { admissionIntent } : {}),
       ...(input.execution === undefined ? {} : { execution: input.execution }) },
       admissionIntent.kind !== 'exact-condition' && !originalAdmission ? { inputEnvironment: recovered?.environment ?? this.inputSavedEnvironment(recipient),
-        originalClaimAbsent: claimsAbsent, ...(input.conversationKind === undefined ? {} : { conversationKind: input.conversationKind }) } : undefined)
+        originalClaimAbsent: claimsAbsent, ...(input.conversationKind === undefined ? {} : { conversationKind: input.conversationKind }), ...(input.moteReply ? { moteReply: input.moteReply } : {}) } : undefined)
     if (admissionIntent.kind === 'exact-condition' && queued.promptCondition &&
         !isDeepStrictEqual(queued.promptCondition, admissionIntent.condition)) throw new AgentMuxError(
       'The caller condition conflicts with the original saved message condition.', 'AGENT_PROMPT_OPERATION_CONFLICT')

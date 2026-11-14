@@ -140,6 +140,8 @@ export type AgentMuxAgentMessageSubmission = {
   caller?: { agentSessionId: string; capability: string }
   /** The external chat's original conversation kind; it only selects the reply note of a new input, never authorship, permission or input eligibility. */
   conversationKind?: import('./ingress-contract.js').ConnectionIngressMessage['conversationKind']
+  /** Original Host-selected reply capability; frozen guidance never routes or authorizes an effect. */
+  moteReply?: import('./mote-chat-contract.js').MoteChatReplyReference
 } & ({ condition?: never; admissionIntent?: never; execution?: 'default' } |
   { condition: AgentPromptCondition; admissionIntent?: never } |
   { condition?: never; admissionIntent: Exclude<AgentPromptAdmissionIntent, { kind: 'exact-condition' }>; execution: 'immediate' })

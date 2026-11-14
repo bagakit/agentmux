@@ -3,7 +3,8 @@ import { useContext, useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { MOTE_CHAT_DEFAULT_VALUES, type MoteChatConfiguration, type MoteChatOperation, type MoteChatValues } from '@agentmux/core/mote-chat'
+import { MOTE_CHAT_DEFAULT_VALUES, type MoteChatConfiguration, type MoteChatValues } from '@agentmux/core/mote-chat'
+import type { MoteChatIntentOperation } from '../lib/mote-chat-intent'
 import type { ConnectionRecord, ConnectionServiceState } from '@agentmux/core/connections'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
@@ -88,7 +89,7 @@ function MotePrivateChatPanel({ scope, target: initialTarget, active, reference,
   // A local page switch retains the original read/save lifecycle. The explicit
   // Refresh action reads newer settings; only removing this owner retires it.
   useEffect(() => () => { lifetime.current++; inspected.current = false }, [])
-  const confirmed = (operation: MoteChatOperation, owner: ConnectionHostingTarget | null | undefined) => {
+  const confirmed = (operation: MoteChatIntentOperation, owner: ConnectionHostingTarget | null | undefined) => {
     if (!owner || JSON.stringify(owner) !== JSON.stringify(currentHosting.current)) { setNotice('The original request was confirmed on its own hosting Host. Current settings are kept.'); return }
     setConfiguration(current => current && current.revision > operation.configuration.revision ? current : operation.configuration)
     if (operation.action === 'allocate') setAudienceRevision(value => value + 1)

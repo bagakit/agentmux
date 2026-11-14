@@ -1,12 +1,14 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { readConnectionHostingTarget } from '../../../shared/connection-hosting-target'
-import { parseMoteChatParams, type MoteChatAllocate, type MoteChatConfigure } from '@agentmux/core/mote-chat'
+import { parseMoteChatParams, type MoteChatAllocate, type MoteChatConfigure, type MoteChatResultMap } from '@agentmux/core/mote-chat'
 
 /** Original client input only; configuration, quota and receipts stay with the public chat owner. */
 export type MoteChatIntent = (
   | { method: 'space.mote.chat.configure'; input: MoteChatConfigure }
   | { method: 'space.mote.chat.allocate'; input: MoteChatAllocate }
 ) & { phase: 'not-dispatched' | 'may-have-dispatched'; hostingTarget?: ConnectionHostingTarget }
+
+export type MoteChatIntentOperation = MoteChatResultMap[MoteChatIntent['method']]
 
 export function restoredMoteChatIntents(value: unknown): Record<string, MoteChatIntent> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}

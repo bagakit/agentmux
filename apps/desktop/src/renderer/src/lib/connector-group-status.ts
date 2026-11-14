@@ -179,7 +179,7 @@ function outgoingFacts(out: GroupDiagnosis['outgoing']['value'] | undefined) {
   const accessUnconfirmed = out?.observation?.reason === 'access-unconfirmed'
   const sourceUnconfirmed = !!out && out.sourceObservation?.state !== 'ready'
   const counts = { confirmed: 0, unconfirmed: 0, pending: 0, notApplied: 0 }
-  const confirmed = { conversation: 0, permission: 0, 'binding-notice': 0, 'query-feedback': 0 }
+  const confirmed = { conversation: 0, permission: 0, 'binding-notice': 0, 'query-feedback': 0, 'mote-chat-reply': 0 }
   for (const delivery of out?.deliveries ?? []) {
     if (delivery.receipt === 'confirmed') { counts.confirmed++; confirmed[delivery.kind]++ }
     else if (delivery.receipt === 'unknown' || delivery.state === 'unknown') counts.unconfirmed++
@@ -188,7 +188,7 @@ function outgoingFacts(out: GroupDiagnosis['outgoing']['value'] | undefined) {
   }
   const effects = [[counts.confirmed, 'confirmed'], [counts.unconfirmed, 'unconfirmed'], [counts.pending, 'pending'], [counts.notApplied, 'not applied']]
     .filter(([count]) => count).map(([count, label]) => `${count} ${label}`).join(' · ')
-  const confirmedText = [[confirmed.conversation, 'conversation update', 'delivered'], [confirmed.permission, 'permission request', 'delivered'], [confirmed['binding-notice'], 'connection notice', 'delivered'], [confirmed['query-feedback'], 'message status update', 'confirmed']]
+  const confirmedText = [[confirmed.conversation, 'conversation update', 'delivered'], [confirmed.permission, 'permission request', 'delivered'], [confirmed['binding-notice'], 'connection notice', 'delivered'], [confirmed['query-feedback'], 'message status update', 'confirmed'], [confirmed['mote-chat-reply'], 'private reply', 'delivered']]
     .filter(([count]) => count).map(([count, label, result]) => `${count} ${label}${count === 1 ? '' : 's'} ${result}`).join(' · ')
   return { gapCount, contentGap, sourceUnconfirmed, accessUnconfirmed, counts, effects, confirmedText }
 }

@@ -1,6 +1,6 @@
-import { parseMoteChatResult, type MoteChatOperation } from '@agentmux/core/mote-chat'
+import { parseMoteChatResult } from '@agentmux/core/mote-chat'
 import { api } from './api'
-import type { MoteChatIntent } from './mote-chat-intent'
+import type { MoteChatIntent, MoteChatIntentOperation } from './mote-chat-intent'
 import { clearMoteChatIntent, retainMoteChatIntent, useAppStore } from '../store'
 
 /** Explicit pre-write owner refusals do not strand a draft as an unknown effect. */
@@ -8,7 +8,7 @@ const refusedBeforeWrite = new Set(['MOTE_CHAT_TARGET_CHANGED', 'MOTE_CHAT_CONNE
   'MOTE_CHAT_CREATOR_UNCONFIRMED', 'MOTE_CHAT_REVISION_CONFLICT', 'MOTE_CHAT_APPLICATION_IN_USE', 'MOTE_CHAT_CREATOR_UNLIMITED',
   'MOTE_CHAT_EXECUTOR_REQUIRED', 'MOTE_CHAT_EXECUTOR_UNCONFIRMED', 'MOTE_CHAT_EXECUTOR_UNAVAILABLE', 'MOTE_CHAT_HOST_UNAVAILABLE', 'MOTE_CHAT_TARGET_UNCONFIRMED'])
 
-export async function submitMoteChatIntent(input: MoteChatIntent): Promise<MoteChatOperation> {
+export async function submitMoteChatIntent(input: MoteChatIntent): Promise<MoteChatIntentOperation> {
   const intent = structuredClone(input), previous = useAppStore.getState().moteChatIntents[intent.input.operationId]
   if (previous && !previous.hostingTarget) throw Error('The original bot hosting owner is unconfirmed. This request is kept without sending it to the current Host.')
   intent.hostingTarget ??= previous?.hostingTarget ?? await api.connections.hostingTarget()
@@ -34,7 +34,7 @@ export async function submitMoteChatIntent(input: MoteChatIntent): Promise<MoteC
 }
 
 /** A current configuration read is never an acknowledgement of this original input. */
-export async function inspectMoteChatIntent(intent: MoteChatIntent): Promise<MoteChatOperation | null> {
+export async function inspectMoteChatIntent(intent: MoteChatIntent): Promise<MoteChatIntentOperation | null> {
   if (!intent.hostingTarget) throw Error('The original bot hosting owner is unconfirmed. This request is kept without querying another Host.')
   const result = await api.moteChat.call('space.mote.chat.inspect', { operationId: intent.input.operationId }, intent.hostingTarget)
   if (!result.operation) return null

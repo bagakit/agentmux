@@ -31,7 +31,7 @@ export type ConnectionDiagnosisTarget = {
 }
 export type ConnectionDiagnosisAssociation = { sourceKey: string | null; recordKey: string | null; eventKey: string | null; partKey: string | null }
 export type ConnectionDiagnosisDelivery = {
-  kind: 'conversation' | 'permission' | 'binding-notice' | 'query-feedback'
+  kind: 'conversation' | 'permission' | 'binding-notice' | 'query-feedback' | 'mote-chat-reply'
   association: ConnectionDiagnosisAssociation
   operationId: string; state: ConnectionDelivery['state']; receipt: NonNullable<ConnectionDelivery['receipt']>['state'] | null
   platformMessageId: string | null; reason: ConnectionDelivery['reason'] | null; resourceUpload: NonNullable<ConnectionDelivery['resourceUpload']>['state'] | null

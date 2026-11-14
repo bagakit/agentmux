@@ -41,6 +41,13 @@ function intakeLabel(row: MoteChatDiagnosisIntake): { title: string; detail: str
   return { title: 'Message received', detail: 'Agent input has not started yet.' }
 }
 
+function currentNotice(row: MoteChatDiagnosisIntake): string | null {
+  if (row.noticeCode === 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE') return 'This Connector owner currently has a sharing relationship for Main. New private inputs wait until you inspect and explicitly resolve that sharing; earlier input receipts are unchanged.'
+  if (row.noticeCode === 'MOTE_CHAT_MAIN_UNCONFIRMED') return 'This Connector owner’s current Main sharing relationships could not be checked. Original messages and Main remain available.'
+  if (row.noticeCode === 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED') return 'The default execution endpoint has no confirmed return path to the original Connector owner. Main input remains available; an explicit reply through the original hosting endpoint keeps its own authorization and receipt.'
+  return null
+}
+
 export function MoteChatActivity({ target, hostingTarget, active, revision }: {
   target: MoteChatTarget; hostingTarget: ConnectionHostingTarget; active: boolean; revision: number | null
 }) {
@@ -59,11 +66,11 @@ export function MoteChatActivity({ target, hostingTarget, active, revision }: {
   const rows = report?.incoming?.rows ?? [], latest = rows[0], status = latest ? intakeLabel(latest) : null
   return <section className="mote-chat-activity" aria-label="Private chat message activity" aria-busy={reading}>
     <header><span><ChatIcon size={13} />Recent messages</span><button type="button" className="icon-button" aria-label="Refresh private chat activity" title="Refresh private chat activity" disabled={reading} onClick={() => void read()}><RefreshIcon size={13} animation={reading ? 'spin' : undefined} /></button></header>
-    {status ? <div className="mote-chat-activity__latest" role="status"><strong>{status.title}</strong><p>{status.detail}</p></div>
+    {status ? <div className="mote-chat-activity__latest" role="status"><strong>{status.title}</strong><p>{status.detail}</p>{latest && currentNotice(latest) ? <p><strong>Current route notice</strong> · {currentNotice(latest)}</p> : null}</div>
       : <p role="status">{reading ? 'Checking recent messages…' : !report ? 'Recent messages could not be checked.' : report.incoming ? 'No private messages in the current reading window.' : report.configuration?.connection ? 'Recent message records are unavailable.' : 'Choose a bot and save to start receiving private messages.'}</p>}
     {issue ? <p className="mote-details__issue" role="status">{report ? 'Previously read status is kept. ' : ''}{issue}</p> : null}
     {report ? <details><summary>Message details{reading ? ' · refreshing' : ''}</summary>
-      {rows.length ? <ol>{rows.map((row, index) => { const view = intakeLabel(row); return <li key={row.key}><strong>{index === 0 ? 'Latest' : 'Earlier'} · {view.title}</strong><p>{view.detail}</p>{row.input.failureCode || row.code ? <code>{row.input.failureCode ?? row.code}</code> : null}</li> })}</ol> : null}
+      {rows.length ? <ol>{rows.map((row, index) => { const view = intakeLabel(row); return <li key={row.key}><strong>{index === 0 ? 'Latest' : 'Earlier'} · {view.title}</strong><p>{view.detail}</p>{currentNotice(row) ? <p><strong>Current route notice</strong> · {currentNotice(row)}</p> : null}{row.input.failureCode || row.code ? <code>{row.input.failureCode ?? row.code}</code> : null}</li> })}</ol> : null}
       {report.readiness.state === 'unavailable' ? <p>New conversation preparation is unavailable{report.readiness.code ? <code> · {report.readiness.code}</code> : '.'}</p> : null}
       {report.issues.length ? <p>Some observations are unavailable: {report.issues.join(', ')}.</p> : null}
       <p>Only the latest {report.limit} recorded intakes are checked. Saved settings do not confirm delivery.</p>

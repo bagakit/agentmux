@@ -190,6 +190,11 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
     ...(index !== selected.length - 1 || payload.replyMetadata === undefined ? {} : { replyMetadata: payload.replyMetadata }) }))
 }
 
+/** One original adapter-owned speech representation, with the same UTF-8 and native cuts as conversation publication. */
+export function publicationSpeechFragments(text: string, target: PublicationTarget, adapter: Pick<import('./publication-adapter.js').PublicationAdapter, 'fragmentBytes' | 'fragmentBytesFor' | 'fragmentText'>): Array<Extract<PublicationPayload, { kind: 'speech' }>> {
+  return fragments({ kind: 'speech', text }, adapter.fragmentBytesFor?.(target) ?? adapter.fragmentBytes, adapter.fragmentText ? payload => adapter.fragmentText!(payload, target) : undefined)
+    .flatMap(payload => payload.kind === 'speech' ? [payload] : [])
+}
 type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage; file?: PublicationFile; segments?: Array<{ text: string; image?: PublicationImage }> }
 type ContentPayload = Exclude<PublicationPayload, FailurePublicationPayload | PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | QueryFeedbackPayload>
 type RepresentationPayload = FailurePublicationPayload | Extract<PublicationPayload, { kind: 'speech' }> | { kind: 'sequence'; parts: ContentPayload[] }
@@ -227,6 +232,7 @@ function representationFragments(value: RepresentationPayload | QuestionRepresen
 // Query and derived index use the same original recovery qualification.
 const recoverableGapPredicate = "json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.reason') IN ('resource-unavailable','version-unavailable') AND json_type(decision_json,'$.gap.anchor')='object' AND (json_extract(decision_json,'$.gap.code')='PUBLICATION_A2A_ORIGINAL_UNAVAILABLE' OR (json_type(decision_json,'$.gap.part')='object' AND json_type(decision_json,'$.gap.event')='object'))"
 const rateLimitSourcePredicate = "state='not-applied' AND json_extract(operation_json,'$.reason')='rate-limited' AND json_type(operation_json,'$.prepared')='object' AND json_extract(operation_json,'$.rateLimit.source.kind')='message' AND json_extract(operation_json,'$.rateLimit.source.attempt')=json_extract(operation_json,'$.attempt')"
+const moteReplyOpen = `json_extract(operation_json,'$.reference.source.kind')='mote-chat-reply' AND (state IN ('pending','dispatching','unknown') OR (${rateLimitSourcePredicate}))`
 const rateLimitOtherScope = "CASE WHEN json_extract(operation_json,'$.rateLimit.scopeKey')=json_extract(operation_json,'$.rateLimitScopes.request') THEN COALESCE(json_extract(operation_json,'$.rateLimitScopes.conversation'),'') ELSE json_extract(operation_json,'$.rateLimitScopes.request') END"
 export type NativePublicationRecovery = {
   id: string; phase: 'clearing' | 'qualifying' | 'scanning' | 'validating' | 'awaiting-review' | 'replaying' | 'complete' | 'blocked'; reviewOperationId?: string; reviewApproved?: true; effectAfter: number; validatedAfter: number; nativeScanned?: true; original: ConversationCheckpoint;
@@ -348,6 +354,7 @@ export class PublicationStore {
         ON connector_publication_operation(ordinal)
         WHERE json_extract(operation_json,'$.payload.kind')='binding-lifecycle'
           AND state IN ('pending','dispatching','unknown');
+      CREATE INDEX IF NOT EXISTS connector_publication_mote_reply ON connector_publication_operation(ordinal) WHERE ${moteReplyOpen};
     `)
     // Preserve T2 in-flight rows; its complete preflight qualified public identities.
     if (!database.prepare('PRAGMA table_info(connector_publication_native_recovery_record)').all().some(column => column.name === 'identity_qualified'))
@@ -586,6 +593,24 @@ export class PublicationStore {
   pendingBindingNotices(): PublicationOperation[] {
     return this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE json_extract(operation_json,'$.payload.kind')='binding-lifecycle' AND state IN ('pending','dispatching','unknown') ORDER BY ordinal")
       .all().map(row => this.read(row)!)
+  }
+  /** Explicit authored speech joins the original Outbox; it creates no conversation reader. */
+  queueMoteReply(replyOperationId: string, ingressId: string, relationship: RoomBinding, payloads: Array<Extract<PublicationPayload, { kind: 'speech' }>>): string[] {
+    const projectionId = 'mote-reply-' + digest([replyOperationId]), sourceRevision = digest([replyOperationId, ingressId, payloads])
+    return payloads.map((payload, ordinal) => {
+      const operationId = 'publication-' + digest([projectionId, ordinal]), existing = this.inspect(operationId)
+      if (existing) return existing.operationId
+      const operation: PublicationOperation = { operationId, projectionId, sourceRevision, bindingId: relationship.bindingId, bindingRevision: relationship.revision,
+        reference: { ...ref(relationship), source: { kind: 'mote-chat-reply', operationId: replyOperationId, ingressId } },
+        target: { connectionId: relationship.connectionId, application: relationship.application, externalConversationId: relationship.externalConversationId },
+        publicationScope: relationship.scope.publication, presentationTime: Date.now(), payload, effect: 'upsert', fragment: { ordinal, count: payloads.length }, state: 'pending' }
+      this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+        .run(operationId, projectionId, sourceRevision, ordinal, relationship.bindingId, relationship.revision, encode(operation), 'pending')
+      return operationId
+    })
+  }
+  pendingMoteReplies(): PublicationOperation[] {
+    return this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation INDEXED BY connector_publication_mote_reply WHERE ${moteReplyOpen} AND ordinal IN (SELECT MIN(ordinal) FROM connector_publication_operation WHERE ${moteReplyOpen} GROUP BY projection_id) ORDER BY ordinal`).all().map(row => this.read(row)!)
   }
   list(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, limit = 30, after?: string, order: 'oldest' | 'newest' = 'oldest'): PublicationOperation[] {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError('Publication pages require a limit from 1 to 100.', 'INVALID_PUBLICATION_REQUEST')
