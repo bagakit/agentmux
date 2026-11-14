@@ -163,7 +163,7 @@ describe('the original initial Browser document',()=>{
       const report = await firstConsumer
       expect(report.outcome.kind).toBe('completed')
       expect(report.result).toMatchObject({ url })
-      expect(contents.setZoomFactor).toHaveBeenCalledWith(0.9)
+      expect(contents.setZoomFactor).not.toHaveBeenCalled()
       if (viewport === 'responsive') {
         expect(contents.disableDeviceEmulation).toHaveBeenCalledOnce()
         expect(contents.enableDeviceEmulation).not.toHaveBeenCalled()
@@ -229,7 +229,7 @@ describe('the original initial Browser document',()=>{
         await vi.waitFor(()=>expect(f.sendCommand).toHaveBeenCalledOnce(),{timeout:250,interval:10})
         const report=await pending
         expect(report.outcome.kind,resource).toBe('completed');expect(report.result).toMatchObject({url})
-        expect(contents.setZoomFactor).toHaveBeenCalledWith(0.9);expect(contents.enableDeviceEmulation).toHaveBeenCalled()
+        expect(contents.setZoomFactor).not.toHaveBeenCalled();expect(contents.enableDeviceEmulation).toHaveBeenCalled()
         expect(f.entry().initialDocument).toBeNull()
       } finally { held.resolve();await pending }
     }
