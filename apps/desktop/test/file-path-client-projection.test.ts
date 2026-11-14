@@ -8,6 +8,7 @@ import { act, createElement, Fragment, useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
@@ -39,7 +40,7 @@ it.runIf(!native)('runs the shipping UserState consumer in its own private proce
   expect(code, log).toBe(0); expect(log).toMatch(/[1-9]\d* passed/)
 }, 180000)
 
-async function fixture(options: { sharedProject?: boolean } = {}, existing?: Awaited<ReturnType<typeof sourceFilesHosts>>) {
+async function fixture(options: { sharedProject?: boolean; scratch?: boolean } = {}, existing?: Awaited<ReturnType<typeof sourceFilesHosts>>) {
   vi.resetModules(); window.localStorage.clear(); vi.stubGlobal('crypto', webcrypto)
   const f = existing ?? await sourceFilesHosts(cleanup, options), source = f.sources[1]!, bridge = sourceFilesIpcBridge(f.runtime, cleanup)
   const { api } = await import('../src/renderer/src/lib/api.js'), { useAppStore: store } = await import('../src/renderer/src/store.js')
@@ -974,4 +975,34 @@ it.runIf(business)('a dirty Source baseline refresh adopts only physical identit
   expect(f.store.getState().documents[key]?.readIdentity?.entry.inode).toBe(String((await stat(join(f.source.project, path), { bigint: true })).ino))
   expect(f.store.getState().documents[key]?.noteEditing).toEqual(input)
   expect(f.store.getState().dirtyDocuments[key]).toBe(true); expect(f.store.getState().documentGenerations[key]).toBe(generation)
+}, 60000)
+
+it.runIf(business)('literal Unix candidates continue through actual CLI reads, Source GUI opens and nested Topic Zone directory names without escaping the original scope', async () => {
+  const f = await fixture({ scratch: true }); await connectFolder(f)
+  const name = 'literal\nback\\slash.txt', content = 'Exact literal Unix file body'
+  await writeFile(join(f.source.project, name), content)
+  const locator = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!.locator!, r = locator.resource
+  const flags = ['--endpoint', 'unix:' + f.source.socketPath], resourceFlags = ['--zone', r.zoneId, '--host', r.hostId, '--workspace', r.workspaceId, '--workspace-path', r.workspacePath]
+  const listed = await runCompiledObjectCli([...flags, 'file', 'ls', ...resourceFlags], objectCliEnvironment(f.source.state))
+  expect(listed.code, listed.stdout + listed.stderr).toBe(0); expect(JSON.parse(listed.stdout).result.result.files).toContain(name)
+  const read = await runCompiledObjectCli([...flags, 'file', 'read', ...resourceFlags, '--path', name], objectCliEnvironment(f.source.state))
+  expect(read.code, read.stdout + read.stderr).toBe(0); expect(JSON.parse(read.stdout).result.result.document).toMatchObject({ path: name, content })
+  await f.store.getState().openFile(name, 'file-group', undefined, f.workspace.id)
+  expect(f.store.getState().documents[f.workspace.id + '\0' + name]).toMatchObject({ path: name, content, readSource: { resource: { path: name } } })
+  const created = await f.source.rpc.call('topic.create', { topicId: mintObjectId(), title: 'Literal nested Source Zone' })
+  const directory = 'inside\nfolder\\part'; await mkdir(join(created.topic.directoryPath, directory)); await writeFile(join(created.topic.directoryPath, directory, name), content)
+  const mount = { hostId: f.source.id, reference: { runtimeId: f.source.identity.runtimeId, spaceId: created.topic.categorySpaceIds[0]! }, zoneId: created.topic.zoneId!, workspaceId: created.topic.workspaceId }
+  const mapped = await f.runtime.resolveSourceFiles({ hostId: f.source.id, expectedRuntimeId: f.source.identity.runtimeId }, { kind: 'mount', mount })
+  if (mapped.status !== 'located') throw new Error('An actual nested Topic Zone locator is required')
+  const topic = mapped.locator.resource, nestedFlags = ['--zone', topic.zoneId, '--host', topic.hostId, '--workspace', topic.workspaceId, '--workspace-path', topic.workspacePath]
+  const entries = await runCompiledObjectCli([...flags, 'file', 'ls', ...nestedFlags, '--directory', '--path', directory], objectCliEnvironment(f.source.state))
+  expect(entries.code, entries.stdout + entries.stderr).toBe(0)
+  const entry = JSON.parse(entries.stdout).result.result.entries.find((entry: { name: string }) => entry.name === name)
+  expect(entry).toBeTruthy(); expect(entry.path).not.toBe(directory + '/' + name)
+  const continuation = await runCompiledObjectCli([...flags, 'file', 'read', ...nestedFlags, '--path', directory + '/' + entry.name], objectCliEnvironment(f.source.state))
+  expect(continuation.code, continuation.stdout + continuation.stderr).toBe(0); expect(JSON.parse(continuation.stdout).result.result.document.content).toBe(content)
+  const native = vi.spyOn(OrdinaryWorkspaceFiles.prototype, 'read'), count = native.mock.calls.length
+  for (const path of ['../escaped.txt', '/absolute.txt', 'inside/../../escaped.txt', 'bad\0name']) await expect(f.source.rpc.call('file.read', { zoneId: r.zoneId, path,
+    expectedResource: { hostId: r.hostId, workspaceId: r.workspaceId, workspacePath: r.workspacePath } })).rejects.toBeTruthy()
+  expect(native).toHaveBeenCalledTimes(count)
 }, 60000)

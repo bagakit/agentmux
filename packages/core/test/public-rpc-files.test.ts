@@ -2,6 +2,16 @@ import { fixturePath } from './helpers/fixture-values.js'
 import { expect, it } from 'vitest'
 import { parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type FileReadParams, type FileReadResult } from '../src/public-rpc-files'
 const params:FileReadParams={zoneId:'original-zone',path:'saved.txt',expectedResource:{hostId:'local',workspaceId:'workspace',workspacePath:fixturePath("workspace")}}
+it('literal Unix path data survives discovery/read codecs while confinement and machine IDs remain strict', () => {
+  const name = 'literal\nback\\slash.txt', directory = 'inside\nfolder\\part', input = { ...params, path: name }
+  expect(parseFileReadParams(input)).toEqual(input)
+  const resource = { ...params.expectedResource, zoneId: params.zoneId, zonePath: params.expectedResource.workspacePath + '/' + directory, path: directory + '/' + name }
+  const result = { resource, result: { status: 'read', document: { path: resource.path, content: 'Original bytes', revision: 'sha256:' + 'a'.repeat(64) } } }
+  expect(parseFileReadResult(result, input)).toEqual(result)
+  expect(parseFileListResult({ resource, result: { status: 'listed', files: [name], complete: true, omitted: 'none', partialReason: null } }, input).result.status).toBe('listed')
+  for (const path of ['../escaped', 'inside/../../escaped', '/absolute', 'C:\\absolute', 'bad\0name']) expect(() => parseFileReadParams({ ...params, path })).toThrow()
+  expect(() => parseFileReadParams({ ...input, zoneId: 'bad\nzone' })).toThrow()
+})
 it('one-level discovery preserves directory facts and rejects mismatched modes or escaped children', () => {
   const input = { ...params, path: '.', mode: 'directory' as const, limit: 2 }, resource = { ...params.expectedResource, zoneId: params.zoneId, zonePath: params.expectedResource.workspacePath, path: '.' }
   const row = { name: 'empty\nfolder\\name', path: 'empty\nfolder\\name', isDirectory: true, isSymlink: false, mtimeMs: -1, ignored: false }
