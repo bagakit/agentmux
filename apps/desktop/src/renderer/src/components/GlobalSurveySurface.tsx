@@ -545,7 +545,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-        <SurveyProfilePicker value={profileView} profiles={profiles} unknown={Boolean(profileViewRecovery)} collapsed={sidebarCollapsed} onExpand={() => setSidebarCollapsed(false)}
+        <SurveyProfilePicker active={visible && !controlsCoverPage} value={profileView} profiles={profiles} unknown={Boolean(profileViewRecovery)} collapsed={sidebarCollapsed} onExpand={() => setSidebarCollapsed(false)}
           onChange={view => { intent.current += 1; setError(null); void useAppStore.getState().setSurveyProfileView(view).then(save => { if (save.reason) setError('The environment view is kept; saving is unconfirmed. ' + save.reason) }).catch(cause => setError(presentError(cause))) }}
           onRefresh={() => void browserProfiles.refresh()} />
         {profileViewRecovery ? <p role="status" className="survey-relation-notice">{profileViewRecovery.issue}</p> : null}

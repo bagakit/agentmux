@@ -1,24 +1,36 @@
-import { useContext, useLayoutEffect, useRef } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import * as Menu from '@radix-ui/react-dropdown-menu'
 import type { SurveyProfileView } from '../lib/survey-profile-view'
 import type { BrowserProfilesState } from '../lib/browser-profiles'
+import { useBrowserDirectory } from '../lib/use-browser-directory'
+import { browserProfileEnvironmentDescription, browserProfileUseCounts, browserProfileUseDescription } from '../lib/browser-profile-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { ProfileMark } from './ProfileMark'
+import { ProfileMark, assignProfileHues } from './ProfileMark'
+import { SelectionField, type SelectionOption } from './SelectionField'
 import { SettingsNavigation } from './SettingsNavigation'
+import '../styles/survey-profile-picker.css'
 const RefreshIcon = semanticIconComponent('action.refresh')
 const BrowserIcon = semanticIconComponent('object.browser')
+const SettingsIcon = semanticIconComponent('object.settings')
 
-export function SurveyProfilePicker({ value, profiles, collapsed, unknown = false, onExpand, onChange, onRefresh }: {
+export function SurveyProfilePicker({ value, profiles, collapsed, active = true, unknown = false, onExpand, onChange, onRefresh }: {
   value: SurveyProfileView
   profiles: BrowserProfilesState
   collapsed: boolean
+  active?: boolean
   unknown?: boolean
   onExpand(): void
   onChange(view: SurveyProfileView): void
   onRefresh(): void
 }) {
   const settings = useContext(SettingsNavigation)
-  const select = useRef<HTMLSelectElement>(null), focusAfterExpand = useRef(false)
-  useLayoutEffect(() => { if (!collapsed && focusAfterExpand.current) { focusAfterExpand.current = false; select.current?.focus() } }, [collapsed])
+  const picker = useRef<HTMLDivElement>(null), focusAfterExpand = useRef(false)
+  const [open, setOpen] = useState(false)
+  const directory = useBrowserDirectory(open && active && !collapsed)
+  const usage = useMemo(() => browserProfileUseCounts(directory.rows, directory.coverage), [directory.rows, directory.coverage])
+  const assignment = useMemo(() => assignProfileHues(profiles.profiles ?? []), [profiles.profiles])
+  useEffect(() => { if (!active || collapsed) setOpen(false) }, [active, collapsed])
+  useLayoutEffect(() => { if (!collapsed && focusAfterExpand.current) { focusAfterExpand.current = false; picker.current?.querySelector<HTMLButtonElement>('.selection-field')?.focus() } }, [collapsed])
   const currentDefault = profiles.profiles?.find(profile => profile.isDefault)
   const shown = value.kind === 'profile' ? profiles.profiles?.find(profile => profile.id === value.profileId) : currentDefault
   const selected = unknown ? 'unconfirmed' : value.kind === 'default' ? 'default' : 'profile:' + value.profileId
@@ -30,24 +42,36 @@ export function SurveyProfilePicker({ value, profiles, collapsed, unknown = fals
   for (const profile of profiles.profiles ?? []) nameCounts.set(profile.label, (nameCounts.get(profile.label) ?? 0) + 1)
   const label = shown?.label ?? (value.kind === 'default' ? 'Default environment' : 'Unavailable environment')
   const detail = unknown ? 'The saved environment view is unconfirmed. Choose an environment for a new page.' : value.kind === 'profile' ? `${label}\nProfile ID: ${value.profileId}` : `${label}\nUses Main’s current persistent default environment.`
+  const option = (profile: NonNullable<BrowserProfilesState['profiles']>[number], optionValue: string): SelectionOption => ({
+    value: optionValue,
+    label: profile.label + ((nameCounts.get(profile.label) ?? 0) > 1 ? ` · ${profile.id.slice(0, 6)}` : ''),
+    icon: <ProfileMark profile={profile} assignment={assignment} />,
+    description: [profile.isDefault ? 'Default environment' : profile.notes?.split('\n')[0],
+      browserProfileUseDescription(usage.counts.get(profile.id), usage.complete)].filter(Boolean).join(' · ') + '\n' + browserProfileEnvironmentDescription(profile)
+  })
+  const options: SelectionOption[] = [
+    ...(unknown ? [{ value: 'unconfirmed', label: 'Choose an environment…', description: 'Saved environment view unconfirmed', disabled: true }] : []),
+    currentDefault ? option(currentDefault, defaultValue) : { value: defaultValue, label: 'Default environment', icon: <BrowserIcon size={16} />, description: 'Uses the persistent default sign-in environment' },
+    ...(profiles.profiles ?? []).filter(profile => !profile.isDefault).map(profile => option(profile, 'profile:' + profile.id)),
+    ...(missing && value.kind === 'profile' ? [{ value: selected, label: 'Unavailable environment', description: `Profile ${value.profileId}\nIts saved pages are kept.` }] : [])
+  ]
   if (collapsed) return <button type="button" className="survey-profile-collapsed" aria-label="Choose Survey environment" title={detail}
-    onClick={() => { focusAfterExpand.current = true; onExpand() }}>{shown ? <ProfileMark profile={shown} /> : <BrowserIcon size={16} />}</button>
-  return <div className="survey-profile-picker">
-    <label title={detail}>{shown ? <ProfileMark profile={shown} /> : <BrowserIcon size={14} />}
-      <select ref={select} aria-label="Survey environment" title={detail} value={selected} onChange={event => onChange(event.target.value === 'default'
-        ? { kind: 'default' } : { kind: 'profile', profileId: event.target.value.slice('profile:'.length) })}>
-        {unknown ? <option value="unconfirmed" disabled>Choose an environment…</option> : null}
-        <option value={defaultValue} data-profile-id={currentDefault?.id}>{currentDefault ? `${currentDefault.label} · Default` : 'Default environment'}</option>
-        {profiles.profiles?.filter(profile => !profile.isDefault).map(profile => <option key={profile.id} value={'profile:' + profile.id} data-profile-id={profile.id}>
-          {profile.label}{(nameCounts.get(profile.label) ?? 0) > 1 ? ` · ${profile.id.slice(0, 6)}` : ''}
-        </option>)}
-        {missing && value.kind === 'profile' ? <option value={selected}>Unavailable environment · {value.profileId.slice(0, 6)}</option> : null}
-      </select>
-    </label>
-    <div className="survey-profile-options">
-      {settings ? <button type="button" onClick={() => settings.open('browser-profiles')}>Manage environments…</button> : null}
-      <details><summary>Details</summary><span>{detail}</span></details>
-    </div>
+    onClick={() => { focusAfterExpand.current = true; onExpand() }}>{shown ? <ProfileMark profile={shown} assignment={assignment} /> : <BrowserIcon size={16} />}</button>
+  return <div ref={picker} className="survey-profile-picker" title={detail}>
+    <SelectionField label="Survey environment" value={selected} options={options} searchable open={open && active && !collapsed} onOpenChange={setOpen}
+      className="survey-profile-picker__trigger" menuClassName="survey-profile-picker__menu"
+      onValueChange={next => onChange(next === 'default' ? { kind: 'default' } : { kind: 'profile', profileId: next.slice('profile:'.length) })}
+      footer={settings || directory.notice ? <>
+        {directory.notice ? <>
+          <p className="survey-profile-picker__observation" role="status">{directory.notice}</p>
+          <Menu.Item className="tab-context-menu__item survey-profile-picker__manage" onSelect={event => { event.preventDefault(); void directory.refresh() }}>
+            <RefreshIcon size={14} /><span>Refresh browser use</span>
+          </Menu.Item>
+        </> : null}
+        {settings ? <Menu.Item className="tab-context-menu__item survey-profile-picker__manage" onSelect={() => settings.open('browser-profiles')}>
+          <SettingsIcon size={14} /><span>Manage environments…</span>
+        </Menu.Item> : null}
+      </> : undefined} />
     {profiles.error ? <p role="status">Environment list unconfirmed. Default browsing is available.
       <button type="button" className="survey-icon-button" aria-label="Refresh Survey environments" onClick={onRefresh}><RefreshIcon size={13} /></button>
     </p> : missing ? <p role="status">This environment has no confirmed directory entry. Its saved pages are kept.</p> : null}

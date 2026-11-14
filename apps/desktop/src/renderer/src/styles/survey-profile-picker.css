@@ -1,0 +1,14 @@
+.survey-profile-picker__trigger { min-height: 34px; padding: var(--sp-2) var(--sp-3); border-color: var(--line-soft); background: var(--wash-1); border-radius: var(--radius); }
+.survey-profile-picker__trigger .selection-field__choice > span:last-child { font-weight: 550; }
+.survey-profile-picker__trigger .profile-mark { flex: none; }
+.survey-profile-picker__menu.selection-field__menu[data-searchable] { width: max(var(--radix-dropdown-menu-trigger-width), 320px); max-height: min(460px, var(--radix-dropdown-menu-content-available-height)); padding: var(--sp-2); }
+.survey-profile-picker__menu .selection-field__search { margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) var(--sp-2); padding: var(--sp-3); }
+.survey-profile-picker__menu .selection-field__option { align-items: flex-start; padding: var(--sp-3); }
+.survey-profile-picker__menu .selection-field__mark { padding-top: 3px; }
+.survey-profile-picker__menu .selection-field__choice { align-items: flex-start; gap: var(--sp-3); width: 100%; }
+.survey-profile-picker__menu .selection-field__icon { padding-top: 1px; }
+.survey-profile-picker__menu .selection-field__choice > span:last-child { flex: 1; font-weight: 550; }
+.survey-profile-picker__menu .selection-field__description { white-space: pre-line; line-height: 1.55; margin-top: 3px; color: var(--text-3); font-size: var(--fs-meta); }
+.survey-profile-picker__menu .selection-field__footer { flex: none; }
+.survey-profile-picker__observation { margin: var(--sp-2) var(--sp-3); max-width: 45ch; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.survey-profile-picker__manage { gap: var(--sp-3); color: var(--text-2); }

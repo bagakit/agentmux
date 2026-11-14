@@ -8,6 +8,7 @@ export function useBrowserDirectory(active: boolean) {
   const [rows, setRows] = useState<BrowserDirectoryRow[]>([])
   const [pending, setPending] = useState(false)
   const [notice, setNotice] = useState('')
+  const [coverage, setCoverage] = useState<'complete' | 'partial' | null>(null)
   const observation = useRef<{ active: boolean; reading: boolean; reread: boolean; revision: number } | null>(null)
   const refresh = useCallback(async () => {
     const owner = observation.current
@@ -23,6 +24,7 @@ export function useBrowserDirectory(active: boolean) {
           const result = await api.browser.listTargets()
           if (!owner.active || observation.current !== owner) return
           if (issued !== owner.revision) continue
+          setCoverage(result.coverage)
           setRows(previous => {
             const old = new Map(previous.map(row => [row.target.id, row]))
             const next = result.coverage === 'partial'
@@ -44,6 +46,7 @@ export function useBrowserDirectory(active: boolean) {
           if (!owner.active || observation.current !== owner) return
           if (issued !== owner.revision) continue
           setRows(previous => previous.map(row => ({ ...row, current: false })))
+          setCoverage(null)
           setNotice(`Refresh failed. Existing pages are kept. ${presentError(error)}`)
         }
       } while (owner.active && observation.current === owner && owner.reread)
@@ -53,7 +56,7 @@ export function useBrowserDirectory(active: boolean) {
     }
   }, [])
   useEffect(() => {
-    if (!active) { setRows(previous => previous.map(row => ({ ...row, current: false }))); setPending(false); return }
+    if (!active) { setRows(previous => previous.map(row => ({ ...row, current: false }))); setPending(false); setCoverage(null); return }
     const owner = { active: true, reading: false, reread: false, revision: 0 }
     observation.current = owner
     const release = api.browser.onTargetsChanged(() => { void refresh() })
@@ -65,6 +68,6 @@ export function useBrowserDirectory(active: boolean) {
     setRows(previous => previous.map(row => row.target.id === id ? { ...row, current: false } : row))
   }, [])
   const observedIds = useMemo(() => new Set(rows.filter(row => row.current).map(row => row.target.id)), [rows])
-  return { rows, observedIds, pending, notice, refresh, invalidate }
+  return { rows, observedIds, pending, notice, coverage, refresh, invalidate }
 }
 

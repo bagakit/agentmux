@@ -14,15 +14,18 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 export interface SelectionOption { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
 
 /** Controlled presentation only. The caller owns options, saved identity and domain actions. */
-export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary, triggerLabel, searchable }: {
+export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary, triggerLabel, searchable, open: controlledOpen, onOpenChange, footer }: {
   id?: string | undefined; label: string; value: string; options: readonly SelectionOption[]
   onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string; menuBoundary?: HTMLElement | null; triggerLabel?: string | undefined; searchable?: boolean
+  open?: boolean; onOpenChange?(open: boolean): void; footer?: ReactNode
 }) {
   const ownerDocument = useWorkbenchDocument()
   const descriptionId = useId(), trigger = useRef<HTMLButtonElement>(null)
-  const [query, setQuery] = useState(''), [open, setOpen] = useState(false), [searchSession, setSearchSession] = useState(false)
+  const [query, setQuery] = useState(''), [localOpen, setLocalOpen] = useState(false), [searchSession, setSearchSession] = useState(false)
+  const open = controlledOpen ?? localOpen
   const search = useRef<HTMLInputElement>(null), menu = useRef<HTMLDivElement>(null)
   const canSearch = searchable !== false && (open ? searchSession : searchable ?? options.length > 8)
+  useEffect(() => { if (!open) { setQuery(''); setSearchSession(false) } }, [open])
   useEffect(() => {
     if (!open || !canSearch) return
     const ownerWindow = ownerDocument.defaultView!
@@ -40,7 +43,8 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
   const currentLabel = selected?.label ?? 'Saved selection · not in current options'
   const currentDescription = selected?.description ? `${currentLabel} · ${selected.description}` : currentLabel
   return <Menu.Root open={open} onOpenChange={open => {
-    setOpen(open)
+    if (controlledOpen === undefined) setLocalOpen(open)
+    onOpenChange?.(open)
     if (open) { setSearchSession(searchable ?? options.length > 8) }
     else { setQuery(''); setSearchSession(false) }
   }}>
@@ -86,6 +90,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
         </Menu.RadioGroup>
         {canSearch && !visibleOptions.length ? <p className="selection-field__empty" role="status">No matching options.</p> : null}
         </div>
+        {footer ? <div className="selection-field__footer"><Menu.Separator className="tab-context-menu__separator" />{footer}</div> : null}
       </Menu.Content></div>
     </DocumentOverlayPortal>
   </Menu.Root>
