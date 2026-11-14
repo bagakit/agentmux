@@ -18,6 +18,7 @@ export function browserTaskStepSummary(step: BrowserTaskStep): string {
     const subject = fact.kind === 'url-is' ? fact.url : fact.kind === 'text-present' ? `"${fact.text}"` : element(fact.target)
     return `Assert ${ASSERT_LABEL[fact.kind]} · ${subject}`
   }
+  if (step.kind === 'subflow' && step.subflow) return `${step.subflow.iteration === 'each' ? 'Each item' : 'Call once'} · ${step.subflow.target.kind === 'local' ? `saved v${step.subflow.target.version}` : 'local version needed'}`
   const target = step.target?.name ?? 'Target needs location'
   if (step.kind === 'upload') return `Upload · ${target} · ${(step.parameterKeys ?? []).join(', ') || 'Fresh files needed'}`
   if (step.kind === 'click' && step.dialog) return `Click · ${target} · ${step.dialog.action} ${step.dialog.type}`

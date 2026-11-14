@@ -1712,6 +1712,7 @@ function BrowserPaneContent({
           <BrowserTaskAssetEditor
             dialogTypes={tab.dialogTypes}
             asset={taskAsset}
+            assets={tab.taskAssets?.assets ?? []}
             {...(taskAssetReview ? { reviewRequest: taskAssetReview } : {})}
             onReviewRequestConsumed={() => setTaskAssetReview(null)}
             recording={tab.demonstration?.draft ?? null}

@@ -67,3 +67,21 @@
 .browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) :is(input, select) { box-sizing: border-box; max-width: 100%; }
 .browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) .browser-task-step-failure { display: flex; flex-wrap: wrap; }
 .browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) .browser-task-step-failure .browser-task-asset__field { flex: 1 1 150px; }
+
+.browser-task-asset li[data-task-kind="subflow"] { grid-template-columns: 20px minmax(0, 1fr); align-items: start; }
+.browser-task-asset li[data-task-kind="subflow"] > .browser-task-asset__step-actions { grid-column: 2; justify-self: end; }
+.browser-task-subflow__definition { display: grid; gap: var(--sp-1); min-width: 0; }
+.browser-task-subflow__definition .browser-task-asset__field { padding-inline: 0; }
+.browser-task-subflow__definition > small { white-space: normal; line-height: 1.45; }
+.browser-task-subflow__inputs { min-width: 0; margin-block: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-inline-start: 2px solid var(--line-soft); }
+.browser-task-subflow__inputs > small { display: block; color: var(--text-3); line-height: 1.45; margin-block: var(--sp-1); }
+.browser-task-subflow__inputs .browser-task-asset__field { padding-inline: 0; }
+.browser-task-subflow__item { min-width: 0; margin-block: var(--sp-2); }
+.browser-task-subflow__item > div:first-child { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.browser-task-subflow__item > div:first-child strong { color: var(--text-2); font-weight: 500; }
+.browser-task-subflow__progress { display: grid; gap: var(--sp-2); color: var(--text-2); }
+.browser-task-subflow__progress ol { display: grid; gap: var(--sp-2); list-style: none; margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-3); border-inline-start: 1px solid var(--line-soft); }
+.browser-task-subflow__progress li { display: grid; gap: var(--sp-1); min-width: 0; }
+.browser-task-subflow__progress small { color: var(--text-3); }
+.browser-task-subflow__progress li[data-run-status="waiting-human"] > span { color: var(--amber-text); }
+.browser-task-subflow__progress li[data-run-status="failed"] > span { color: var(--red-text); }
