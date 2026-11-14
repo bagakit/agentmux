@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { connectCdp, preparePrivateNotesIsolation } from './fixtures/settings-cli/desktop.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+import { createNativeFocusReadProof } from './fixtures/focus-project-appearance/native-focus-read.mjs'
 
 // Consume existing ordinary product bundles. This producer never builds, packages or installs.
 // The public Provider starts the repository CLI fixture; no DTO Run or guessed native identity.
@@ -19,6 +20,8 @@ const require = createRequire(join(desktopRoot, 'package.json')), ts = require('
 const exec = promisify(execFile)
 const rulerJoin = process.argv.includes('--ruler-join'), collectionLayoutJoin = process.argv.includes('--collection-layout-join')
 const projectRoutesJoin = process.argv.includes('--project-routes-join'), workfaceJoin = collectionLayoutJoin || projectRoutesJoin
+const focusReadJoin = process.argv.includes('--focus-read-join')
+assert.ok(!focusReadJoin || projectRoutesJoin, 'Focus public reads join the original Project workface restart')
 assert.ok([rulerJoin, collectionLayoutJoin, projectRoutesJoin].filter(Boolean).length <= 1, 'Choose one bounded restart join mode')
 const core = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
 const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')).href)
@@ -51,6 +54,7 @@ const receipt = { schema: projectRoutesJoin ? 'agentmux.focus-stable-routes-rest
   mode: projectRoutesJoin ? 'project-routes-join' : collectionLayoutJoin ? 'collection-layout-join' : rulerJoin ? 'ruler-join' : 'name-width',
   boundary: 'Existing ordinary production Main/preload/Renderer, public Core Provider and real private PTY. Controlled first-hydrate Focus timestamps are visit inputs, not execution duration. Repository CLI fixture, not vendor Writer or user installation. First process receives one initial seed; second receives none. No HOME environment reassignment, package, build or user Runtime.' }
 let client, session, originalRun, hostProcess, hostBirth, hostRpc, failure, interruption, stage = 'prepare'
+let focusReadProof
 const retainUnconfirmedPrivateWork = () => receipt.runtimeConnection?.confirmed === false || Boolean(receipt.createOperationId && !session)
 const abort = signal => {
   interruption ??= new Error(`Private width restart interrupted: ${signal}`)
@@ -76,7 +80,7 @@ async function files(directory, prefix) {
 }
 async function binding() {
   const names = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/desktop/package.json', 'apps/host/package.json',
-    'apps/desktop/scripts/verify-focus-timeline-name-width-restart.mjs', ...(projectRoutesJoin ? ['apps/desktop/scripts/verify-focus-stable-routes-restart.mjs', 'apps/desktop/resources/icon.png'] : []), 'apps/desktop/scripts/probe-process.mjs',
+    'apps/desktop/scripts/verify-focus-timeline-name-width-restart.mjs', ...(focusReadJoin ? ['apps/desktop/scripts/fixtures/focus-project-appearance/native-focus-read.mjs'] : []), ...(projectRoutesJoin ? ['apps/desktop/scripts/verify-focus-stable-routes-restart.mjs', 'apps/desktop/resources/icon.png'] : []), 'apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/scripts/fixtures/settings-cli/desktop.mjs', 'packages/core/test/fixtures/fake-codex-cli.mjs', 'packages/core/bin/amux',
     ...await files(join(desktopRoot, 'resources/toolkit'), 'apps/desktop/resources/toolkit'),
     ...await files(join(desktopRoot, 'src'), 'apps/desktop/src'), ...await files(join(desktopRoot, 'out'), 'apps/desktop/out'),
@@ -301,9 +305,9 @@ function originalWorkfaceScope(graph) {
     tab, regions, layout: graph.layouts[choice.workspaceId], tabLayout: graph.tabLayouts[choice.tabId], titleRegionId: tabResource.titleRegionId,
     regionResources: Object.fromEntries(regions.map(region => [region.regionId, graph.resources[`region:${region.regionId}`]])) }
 }
-async function collectionCommand(args, operation, expectedOk = true) {
+async function collectionCommand(args, operation, expectedOk = true, input) {
   const cli = join(repositoryRoot, 'packages/core/bin/amux'), endpoint = `unix:${join(runtimeDirectory, 'control.sock')}`
-  const captured = { args: ['--endpoint', endpoint, ...args], operation, startedAt: Date.now() }
+  const captured = { args: ['--endpoint', endpoint, ...args], operation, startedAt: Date.now(), ...(input === undefined ? {} : { input }) }
   const key = projectRoutesJoin ? 'projectCli' : 'collectionCli'
   receipt[key] ??= []; receipt[key].push(captured)
   let result
@@ -311,6 +315,7 @@ async function collectionCommand(args, operation, expectedOk = true) {
     const execution = exec(process.execPath, [cli, ...captured.args], { cwd: repositoryRoot, timeout: 10_000,
       env: { ...process.env, ...environment, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } })
     children.add(execution.child)
+    if (input !== undefined) execution.child.stdin.end(JSON.stringify(input))
     try { result = { code: 0, ...await execution } } finally { children.delete(execution.child) }
   } catch (error) { result = { code: error.code ?? null, signal: error.signal ?? null, stdout: error.stdout ?? '', stderr: error.stderr ?? '' } }
   Object.assign(captured, result, { elapsedMs: Date.now() - captured.startedAt })
@@ -540,6 +545,11 @@ try {
   }
   stage = 'first-original-run-input-ready'
   await waitFor('first original Run is input ready', async () => { const value = await inspectRegion(first); return value.terminalView?.liveReady && value.terminalView.acceptsInput ? value : null })
+  if (focusReadJoin) {
+    stage = 'original-public-focus-read'
+    focusReadProof = createNativeFocusReadProof({ command: collectionCommand, session, spaceId, regionId: agentRegionId, receipt, run })
+    await focusReadProof.first(first)
+  }
   const widthRunBefore = await run()
   const originalTerminal = await actualTerminal(first), edited = projectRoutesJoin ? await setProjectPreferences(first) : collectionLayoutJoin ? await setCollectionPresentation(first) : await adjust(first, 244), laterTerminal = await actualTerminal(first)
   const same = await first.cdp.call('Runtime.callFunctionOn', { objectId: originalTerminal, arguments: [{ objectId: laterTerminal }], functionDeclaration: 'function(current){return this===current}', returnByValue: true })
@@ -558,6 +568,7 @@ try {
   receipt[projectRoutesJoin ? 'projectInputBoundary' : collectionLayoutJoin ? 'collectionInputBoundary' : 'widthInputBoundary'] = { beforeByte: widthRunBefore.acceptedInputBytes, afterByte: widthRunAfter.acceptedInputBytes, permitsOriginalAttachProtocol: true }
   stage = 'first-normal-quit'
   receipt.processes.push({ pid: first.child.pid, seedWrites: 1, before, after: edited, exit: await normalQuit(first) })
+  if (focusReadJoin) { stage = 'original-public-focus-unavailable'; await focusReadProof.unavailable() }
   const preservedAfterQuit = await run(); stage = 'second-launch-without-seed'
   const second = await launch('second'), restored = projectRoutesJoin ? await waitFor('original project preferences render after restart', async()=>{const value=await surface(second);return projectRendered(value)?value:null}) : await surface(second)
   const secondProcess = { pid: second.child.pid, seedWrites: 0, before: restored }
@@ -581,6 +592,7 @@ try {
   if(rulerJoin){assert.deepEqual(restored.ruler,joinPreferences);assert.equal(restored.mode,'uniform');assert.equal(restored.zone,joinPreferences.timeZone);assert.equal(restored.hours,4);receipt.rulerPreferencesRestored=true;receipt.hoursBoundary={firstEdited:6,firstBeforeQuit:4,second:restored.hours,changedHourDurable:false};await joinShot(second,'ordinary-second-restored-prefs-width')}
   stage = 'restored-original-run-input-ready'
   const inspected = await waitFor('restored same Run is input ready', async () => { const value = await inspectRegion(second); return value.terminalView?.liveReady && value.terminalView.acceptsInput ? value : null })
+  if (focusReadJoin) { stage = 'restored-public-focus-read'; await focusReadProof.restored(second) }
   receipt.restoredRegion = { kind: inspected.kind, agentSessionId: inspected.agentSessionId,
     terminalView: { runId: inspected.terminalView.runId, liveReady: inspected.terminalView.liveReady, acceptsInput: inspected.terminalView.acceptsInput } }
   await writeFile(join(output, 'second-process-ready-checkpoint.json'), JSON.stringify(receipt, null, 2) + '\n')
