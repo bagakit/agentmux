@@ -23,8 +23,103 @@ export async function resolvePackageRoot(sourcePackage, packageName, stopDirecto
   throw Object.assign(new Error(`Could not resolve package root for ${packageName} from ${sourcePackage}.`), { code: 'PACKAGE_DEPENDENCY_UNAVAILABLE' })
 }
 
+/** Lockfile optional native metadata: name@version -> { os, cpu, integrity }. */
+export function inspectLockfilePackagePlatforms(text) {
+  const packages = new Map()
+  let inPackages = false, current = null
+  for (const line of text.split(/\r?\n/u)) {
+    if (line === 'packages:') { inPackages = true; current = null; continue }
+    if (inPackages && line !== '' && !line.startsWith(' ') && !line.startsWith('\t')) { inPackages = false; current = null }
+    if (!inPackages) continue
+    const header = line.match(/^ {2}(?:'([^']+)'|([^:]+)):$/)
+    if (header) {
+      current = header[1] ?? header[2]
+      if (!packages.has(current)) packages.set(current, { os: [], cpu: [], integrity: null })
+      continue
+    }
+    if (!current) continue
+    const entry = packages.get(current)
+    const integrity = line.match(/integrity: (sha512-[A-Za-z0-9+/=]+)/)
+    if (integrity) entry.integrity = integrity[1]
+    const cpu = line.match(/^\s+cpu: \[([^\]]*)\]/)
+    if (cpu) entry.cpu = cpu[1].split(',').map(value => value.trim()).filter(Boolean)
+    const os = line.match(/^\s+os: \[([^\]]*)\]/)
+    if (os) entry.os = os[1].split(',').map(value => value.trim()).filter(Boolean)
+  }
+  return packages
+}
+
+function matchesPackageTarget(platform, target) {
+  if (platform.os.length && !platform.os.includes(target.os)) return false
+  if (platform.cpu.length && !platform.cpu.includes(target.cpu)) return false
+  return true
+}
+
+async function lockfilePlatforms(options) {
+  if (options.lockfilePlatforms) return options.lockfilePlatforms
+  if (!options.lockfilePath) return new Map()
+  if (!options._lockfilePlatforms) {
+    options._lockfilePlatforms = inspectLockfilePackagePlatforms(await readFile(options.lockfilePath, 'utf8'))
+  }
+  return options._lockfilePlatforms
+}
+
+async function describeOptionalPlatform(name, declaredVersion, installed, options) {
+  if (installed) {
+    const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
+    const os = Array.isArray(manifest.os) ? manifest.os : []
+    const cpu = Array.isArray(manifest.cpu) ? manifest.cpu : []
+    if (os.length || cpu.length) return { os, cpu, version: manifest.version, integrity: null }
+    declaredVersion = manifest.version ?? declaredVersion
+  }
+  const version = typeof declaredVersion === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(declaredVersion) ? declaredVersion : null
+  if (!version) return null
+  const entry = (await lockfilePlatforms(options)).get(`${name}@${version}`)
+  if (!entry) return null
+  return { os: entry.os, cpu: entry.cpu, version, integrity: entry.integrity }
+}
+
+function unavailableTargetOptional(name, detail) {
+  return Object.assign(new Error(`The ${name} optional native required by the selected target is unavailable: ${detail}. No installed App or Run is changed.`), {
+    code: 'PACKAGE_TARGET_OPTIONAL_UNAVAILABLE', dependency: name })
+}
+
+async function materializeTargetOptional(name, platform, options) {
+  if (typeof options.materializeOptionalPackage === 'function') {
+    const selected = await options.materializeOptionalPackage(name, platform)
+    if (!selected) throw unavailableTargetOptional(name, 'the supplied materializer returned no package')
+    return await realpath(selected)
+  }
+  let integrity = platform.integrity
+  if (!integrity) integrity = (await lockfilePlatforms(options)).get(`${name}@${platform.version}`)?.integrity ?? null
+  if (!integrity) throw unavailableTargetOptional(name, 'pnpm-lock.yaml has no integrity for this package')
+  if (!options.optionalCache) throw unavailableTargetOptional(name, 'no cache directory was provided for the target optional')
+  const filename = `${name.split('/').pop()}-${platform.version}.tgz`
+  const url = `https://registry.npmjs.org/${name}/-/${filename}`
+  const response = await fetch(url)
+  if (!response.ok) throw unavailableTargetOptional(name, `downloading ${url} failed: HTTP ${response.status}`)
+  const bytes = Buffer.from(await response.arrayBuffer())
+  const digest = `sha512-${createHash('sha512').update(bytes).digest('base64')}`
+  if (digest !== integrity) throw unavailableTargetOptional(name, 'the downloaded tarball does not match the lockfile integrity')
+  const directory = await mkdtemp(join(options.optionalCache, 'optional-'))
+  const archive = join(directory, filename)
+  await writeFile(archive, bytes)
+  await exec('tar', ['-xzf', archive, '-C', directory])
+  const extracted = join(directory, 'package')
+  if (!await lstat(extracted).then(() => true, () => false)) throw unavailableTargetOptional(name, 'the tarball did not contain package/')
+  return await realpath(extracted)
+}
+
+async function qualifyOptionalForTarget(name, declaredVersion, installed, options) {
+  const platform = await describeOptionalPlatform(name, declaredVersion, installed, options)
+  if (!platform || (!platform.os.length && !platform.cpu.length)) return installed
+  if (!matchesPackageTarget(platform, options.target)) return null
+  if (installed) return installed
+  return await materializeTargetOptional(name, platform, options)
+}
+
 /** Resolve every installed runtime edge in the package's own physical Node context. */
-export async function inspectPackageDependencies(directory, manifest) {
+export async function inspectPackageDependencies(directory, manifest, options = {}) {
   const sourceDirectory = await realpath(directory)
   manifest ??= JSON.parse(await readFile(join(sourceDirectory, 'package.json'), 'utf8'))
   const dependencies = [], required = manifest.dependencies ?? {}, optional = manifest.optionalDependencies ?? {}, peers = manifest.peerDependencies ?? {}
@@ -36,13 +131,16 @@ export async function inspectPackageDependencies(directory, manifest) {
     let dependency
     try { dependency = await resolvePackageRoot(sourceDirectory, name) }
     catch (error) { if (!canBeAbsent || error.code !== 'PACKAGE_DEPENDENCY_UNAVAILABLE') throw error }
+    if (options.target && canBeAbsent) {
+      dependency = await qualifyOptionalForTarget(name, optional[name] ?? peers[name], dependency ?? null, options)
+    }
     dependencies.push({ name, optional: canBeAbsent, peer: Object.hasOwn(peers, name), sourceDirectory: dependency ?? null })
   }
   return dependencies
 }
 
 /** Local inventory only: no copying, install, lifecycle scripts or archive construction. */
-export async function inspectPackageClosure(packageRoot) {
+export async function inspectPackageClosure(packageRoot, options = {}) {
   const packages = [], visited = new Map()
   const visit = async directory => {
     const sourceDirectory = await realpath(directory)
@@ -53,7 +151,7 @@ export async function inspectPackageClosure(packageRoot) {
     const entry = { id, name: manifest.name, version: manifest.version,
       manifestSha256: createHash('sha256').update(bytes).digest('hex'), sourceDirectory, dependencies: [] }
     packages.push(entry)
-    for (const dependency of await inspectPackageDependencies(sourceDirectory, manifest)) entry.dependencies.push({
+    for (const dependency of await inspectPackageDependencies(sourceDirectory, manifest, options)) entry.dependencies.push({
       name: dependency.name, optional: dependency.optional, peer: dependency.peer,
       packageId: dependency.sourceDirectory === null ? null : await visit(dependency.sourceDirectory) })
     return id
@@ -67,8 +165,8 @@ export async function inspectPackageClosure(packageRoot) {
 }
 
 /** Plan all roots and sibling slots before copying; peers retain their original module object. */
-export async function visitRuntimePackageClosure(roots, copy) {
-  const closure = await inspectPackageClosure(roots.map(value => value.sourceDirectory)), targets = new Map(), expanded = new Set(), copies = []
+export async function visitRuntimePackageClosure(roots, copy, options = {}) {
+  const closure = await inspectPackageClosure(roots.map(value => value.sourceDirectory), options), targets = new Map(), expanded = new Set(), copies = []
   const unavailable = (entry, dependency, detail) => Object.assign(new Error(`The runtime candidate cannot preserve the original ${dependency.name} from ${entry.name}: ${detail}. No installed App or Run is changed.`), {
     code: 'PACKAGE_RUNTIME_GRAPH_UNSUPPORTED', owner: entry.sourceDirectory, dependency: dependency.name,
     sourceDirectory: closure.packages[dependency.packageId].sourceDirectory })
@@ -258,7 +356,7 @@ async function workspacePublications(roots) {
  * dependency-free manifest, release identity, and every dependency's runtime files under
  * nested node_modules. The portable remote Core and the Linux release are built from it.
  */
-export async function materializeRuntimeCore(repositoryRoot, destination, release) {
+export async function materializeRuntimeCore(repositoryRoot, destination, release, options = {}) {
   const core = join(repositoryRoot, 'packages/core')
   const manifest = JSON.parse(await readFile(join(core, 'package.json'), 'utf8'))
   const files = await runtimePackageSelection(['capsule', 'demand', 'diagnostic-evidence', 'git', 'identity', 'relay']
@@ -270,13 +368,24 @@ export async function materializeRuntimeCore(repositoryRoot, destination, releas
       for (const entry of await readdir(source)) await copyTree(join(source, entry), join(target, entry))
     } else if (!DEVELOPMENT_FILE.test(source)) { await mkdir(dirname(target), { recursive: true }); await copyFile(source, target); await chmod(target, info.mode & 0o777) }
   }
-  for (const name of ['dist', 'vendor', 'bin']) await copyTree(join(core, name), join(destination, name))
-  await copyTree(join(core, 'src/ctxmux-artifact-contract.json'), join(destination, 'src/ctxmux-artifact-contract.json'))
-  const { name, version, type, main, exports, engines, os, cpu, license, repository, bin } = manifest
-  await writeFile(join(destination, 'package.json'), JSON.stringify({ name, version, type, main, exports, engines, os, cpu, license, repository, bin }, null, 2) + '\n')
-  await writeFile(join(destination, 'release.json'), JSON.stringify(release) + '\n')
-  await visitRuntimePackageClosure([{ sourceDirectory: core, target: destination }], async (source, target) => {
-    if (target !== destination) for (const file of await files(source)) await copyTree(join(source, file), join(target, file))
-  })
-  return destination
+  const resolved = {
+    ...options,
+    lockfilePath: options.lockfilePath ?? join(repositoryRoot, 'pnpm-lock.yaml')
+  }
+  let cache = resolved.optionalCache
+  if (resolved.target && !cache) cache = await mkdtemp(join(tmpdir(), 'amux-target-optional-'))
+  resolved.optionalCache = cache
+  try {
+    for (const name of ['dist', 'vendor', 'bin']) await copyTree(join(core, name), join(destination, name))
+    await copyTree(join(core, 'src/ctxmux-artifact-contract.json'), join(destination, 'src/ctxmux-artifact-contract.json'))
+    const { name, version, type, main, exports, engines, os, cpu, license, repository, bin } = manifest
+    await writeFile(join(destination, 'package.json'), JSON.stringify({ name, version, type, main, exports, engines, os, cpu, license, repository, bin }, null, 2) + '\n')
+    await writeFile(join(destination, 'release.json'), JSON.stringify(release) + '\n')
+    await visitRuntimePackageClosure([{ sourceDirectory: core, target: destination }], async (source, target) => {
+      if (target !== destination) for (const file of await files(source)) await copyTree(join(source, file), join(target, file))
+    }, resolved)
+    return destination
+  } finally {
+    if (resolved.target && !options.optionalCache && cache) await rm(cache, { recursive: true, force: true })
+  }
 }

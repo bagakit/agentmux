@@ -71,7 +71,7 @@ export async function buildLinuxRelease({ out, nodeArchive: supplied, release = 
   const scratch = await mkdtemp(join(out, '.assembling-'))
   try {
     // The same runtime Core the App bundles: one owner decides which dependency files ship.
-    const runtime = await materializeRuntimeCore(resolve(packageRoot, '../..'), join(scratch, 'runtime-core'), release ?? await sourceRelease())
+    const runtime = await materializeRuntimeCore(resolve(packageRoot, '../..'), join(scratch, 'runtime-core'), release ?? await sourceRelease(), { target: { os: 'linux', cpu: 'x64' } })
     const artifact = await createPortableCoreArtifact(join(scratch, 'artifact'), runtime)
     const root = join(scratch, name)
     await mkdir(join(root, 'core'), { recursive: true })
