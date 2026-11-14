@@ -1,8 +1,18 @@
 import { mintCapabilityToken } from '@agentmux/core/object-id'
-import { Menu, webContents, type BrowserWindow, type ContextMenuParams, type WebContents, type WebFrameMain } from 'electron'
+import { Menu, webContents, type BrowserWindow, type ContextMenuParams, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 
 type EditAction = 'copy' | 'cut' | 'paste' | 'selectAll'
-type MenuOwner = { isCurrent(): boolean; origin?(): { x: number; y: number } }
+type MenuOwner = { isCurrent(): boolean; origin?(): { x: number; y: number }; copyAddress?(address: string): Promise<void> }
+
+function pageAddresses(params: ContextMenuParams): Array<{ label: string; address: string }> {
+  const addresses = []
+  if (params.linkURL) addresses.push({ label: 'Copy Link Address', address: params.linkURL })
+  if (params.mediaType === 'image' && params.srcURL) addresses.push({ label: 'Copy Image Address', address: params.srcURL })
+  if (!params.linkURL && params.mediaType === 'none' && !params.isEditable && !params.selectionText && params.pageURL) {
+    addresses.push({ label: 'Copy Page Address', address: params.pageURL })
+  }
+  return addresses
+}
 
 // Only a pending menu owns this closure. It retains node/selection identity, never text or values.
 // WebFrameMain has no isolated-world/edit-command API: native commands stay on the original contents.
@@ -49,21 +59,24 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
           { action: 'selectAll', label: 'Select All', enabled: params.editFlags.canSelectAll }]
       : params.selectionText.length > 0 && params.editFlags.canCopy
         ? [{ action: 'copy', label: 'Copy', enabled: true }] : []
-    if (actions.length === 0) return
+    const addresses = owner.copyAddress ? pageAddresses(params) : []
+    if (actions.length === 0 && addresses.length === 0) return
     const ancestors: Array<{ frame: WebFrameMain; token: string }> = []
     for (let current: WebFrameMain | null = frame; current; current = current.parent) ancestors.push({ frame: current, token: current.frameToken })
     const key = `__agentmuxTextEdit_${mintCapabilityToken()}`
     let ended = false, chosen = false, menu: Menu | undefined
     const cleanup: Array<() => void> = []
-    const current = () => focused(window) && contents.focusedFrame === frame && ancestors.every((original, index) =>
+    const currentFrame = () => focused(window) && ancestors.every((original, index) =>
       !original.frame.isDestroyed() && !original.frame.detached && original.frame.frameToken === original.token && original.frame.parent === (ancestors[index + 1]?.frame ?? null))
+    const current = () => currentFrame() && contents.focusedFrame === frame
+    let captureStarted = false
     const finish = () => {
       if (ended) return
       ended = true
       for (const remove of cleanup) remove()
       if (pending === finish) pending = undefined
       if (menu) { try { menu.closePopup(window) } catch { /* Only this menu is being released. */ } }
-      if (!frame.isDestroyed() && !frame.detached) void frame.executeJavaScript(`globalThis[${JSON.stringify(key)}]?.dispose()`).catch(() => {})
+      if (captureStarted && !frame.isDestroyed() && !frame.detached) void frame.executeJavaScript(`globalThis[${JSON.stringify(key)}]?.dispose()`).catch(() => {})
     }
     pending = finish
     const navigation = (event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>) => {
@@ -98,21 +111,36 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
       } catch { console.warn('Text editing menu is unavailable; the original input and native keyboard editing remain available.') }
     }
     try {
-      const captured = await evaluate(captureTargetScript(key, params.isEditable))
-      if (ended) return
-      if (!captured || !current()) { finish(); notice(); return }
-      menu = Menu.buildFromTemplate(actions.map(item => ({ label: item.label, enabled: item.enabled, click: () => {
-        if (chosen || ended || !item.enabled) return
+      const items: MenuItemConstructorOptions[] = addresses.map(({ label, address }) => ({ label, click: () => {
+        if (chosen || ended || !currentFrame()) { finish(); return }
         chosen = true
-        void (async () => {
-          try {
-            const sameTarget = await evaluate(`globalThis[${JSON.stringify(key)}]?.check() === true`)
-            if (!sameTarget || ended || !current()) { finish(); notice(); return }
-            contents[item.action]()
-            finish()
-          } catch { finish(); notice() }
-        })()
-      } })))
+        finish()
+        void owner.copyAddress?.(address).catch(() => console.warn('The Browser address copy result could not be reported.'))
+      } }))
+      if (actions.length > 0) {
+        captureStarted = true
+        let captured = false
+        try { captured = await evaluate(captureTargetScript(key, params.isEditable)) } catch { /* The address actions use the original native hit. */ }
+        if (ended) return
+        if (captured && current()) {
+          if (items.length > 0) items.push({ type: 'separator' })
+          items.push(...actions.map(item => ({ label: item.label, enabled: item.enabled, click: () => {
+            if (chosen || ended || !item.enabled) return
+            chosen = true
+            void (async () => {
+              try {
+                const sameTarget = await evaluate(`globalThis[${JSON.stringify(key)}]?.check() === true`)
+                if (!sameTarget || ended || !current()) { finish(); notice(); return }
+                contents[item.action]()
+                finish()
+              } catch { finish(); notice() }
+            })()
+          } })))
+        } else if (items.length === 0) { finish(); notice(); return }
+        else items.push({ type: 'separator' }, { label: 'Text target changed or unavailable. Open its menu again.', enabled: false })
+      }
+      if (!currentFrame()) { finish(); return }
+      menu = Menu.buildFromTemplate(items)
       const origin = owner.origin?.() ?? { x: 0, y: 0 }
       menu.popup({ window, frame, x: Math.round(origin.x + params.x), y: Math.round(origin.y + params.y),
         callback: () => { if (!chosen) finish() } })

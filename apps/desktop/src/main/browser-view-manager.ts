@@ -75,6 +75,7 @@ import { BrowserControlFeedback } from './browser-control-feedback.js'
 import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
+import { getDesktopNativeUiOwner } from './native-desktop-owner.js'
 import { BrowserCdpSession, DESKTOP_BROWSER_DIALOG_TYPES } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
@@ -332,6 +333,7 @@ const INPUT_SHIELD_CLEANUP_WARNING = 'The original Browser input surface could n
 const INPUT_ISOLATION_WARNING = 'Native Browser input isolation is unconfirmed. The original page and Agent remain available. Use Take control before editing manually, or submit a fresh Agent program to retry isolation.'
 const INPUT_ISOLATION_HISTORY = 'Native input isolation was unconfirmed during this operation.'
 const ASSOCIATION_OPERATOR_NOTICE = 'This program started with a different operator from the Browser’s associated Agent. The original association and message recipient were retained.'
+const ADDRESS_COPY_WARNING = 'Could not confirm the address was copied. Right-click the original target to try again.'
 function appendWarning(current: string | undefined, warning: string): string {
   return current && (`\n${current}\n`).includes(`\n${warning}\n`) ? current : [current, warning].filter(Boolean).join('\n')
 }
@@ -5053,9 +5055,22 @@ export class BrowserViewManager {
       } })
     // A Profile candidate does not own this Browser until the prepared view commits.
     if (entry.view === view) entry.controlFeedback = controlFeedback
+    let addressCopyRevision = 0
     installTextEditContextMenu(contents, () => this.windowForView(view), {
       isCurrent: () => this.nativeOwner(entry.id)?.view === view && !this.agentOwnsInput(entry),
-      origin: () => view.getBounds()
+      origin: () => view.getBounds(),
+      copyAddress: async address => {
+        const revision = ++addressCopyRevision, navigationId = entry.navigationId
+        let copied = false
+        try { await getDesktopNativeUiOwner().writeClipboardText(address); copied = true }
+        catch { /* Show uncertainty without including the address or touching the page. */ }
+        if (revision !== addressCopyRevision || !this.owns(entry, view) || entry.navigationId !== navigationId) return
+        const { warning, ...activity } = entry.activity
+        const next = copied ? removeWarning(warning, ADDRESS_COPY_WARNING) : appendWarning(warning, ADDRESS_COPY_WARNING)
+        if (next === warning) return
+        entry.activity = { ...activity, ...(next ? { warning: next } : {}) }
+        this.emit(entry)
+      }
     })
     contents.on('input-event', (_event, input) => {
       // Main's own Agent input is trusted and emits this event too. Only its receipt says who sent it.
