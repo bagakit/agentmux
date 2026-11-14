@@ -167,7 +167,9 @@ it('shows the selected first frame before the deferred exposure settles, then de
   }
   expect(electron.windows.every(window => window.showInactive.mock.calls.length === 1), 'show overlaps the pending alternate exposure').toBe(true)
   expect(ports.recordTiming).toHaveBeenCalledOnce()
+  const initialShownMs = ports.recordTiming.mock.calls[0]![0].shownMs
   expect(ports.recordTiming).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: loaded.requestId, final: false, includedMs: null, excludedMs: expect.any(Number) }))
+  await vi.advanceTimersByTimeAsync(25)
   const second = frames(); second.capturedAt += 100
   included.resolve(second)
   await vi.advanceTimersByTimeAsync(0)
@@ -178,7 +180,7 @@ it('shows the selected first frame before the deferred exposure settles, then de
     expect(overlay.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'snapshot', requestId: loaded.requestId, revision: 2, background: 'included' }))
   }
   expect(ports.recordTiming, 'the deferred exposure adds exactly one final record for the same request').toHaveBeenCalledTimes(2)
-  expect(ports.recordTiming).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: loaded.requestId, final: true, includedMs: expect.any(Number), excludedMs: expect.any(Number),
+  expect(ports.recordTiming).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: loaded.requestId, final: true, shownMs: initialShownMs, includedMs: expect.any(Number), excludedMs: expect.any(Number),
     nativeIncluded: expect.objectContaining({ response: expect.objectContaining({ lazyConnectionMs: 1, requestMs: 4 }), displays: expect.arrayContaining([expect.objectContaining({ displayId: 1, timing: displayTiming })]) }),
     nativeExcluded: expect.objectContaining({ response: expect.objectContaining({ socketReadMs: 1, validationMs: 1 }) }) }))
   await handler(loadEvent(window), 'cancel', { requestId: loaded.requestId })
@@ -195,12 +197,15 @@ it('a late deferred snapshot cannot revise a replacement capture or write its ol
   const oldRequest = old.overlays[0]!.input.requestId
   expect(ports.recordTiming).toHaveBeenCalledWith(expect.objectContaining({ requestId: oldRequest, final: false }))
   await old.overlays[0]!.call('cancel'); await old.outcome
-  const replacement = await opened()
+  const replacementPending = opened()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(captureDisplays, 'the replacement waits for the old deferred producer').toHaveBeenCalledTimes(2)
+  late.resolve({ ...frames(), capturedAt: 0 })
+  const replacement = await replacementPending
+  await vi.advanceTimersByTimeAsync(0)
   const replacementIds = replacement.overlays.map(overlay => overlay.input.requestId)
   expect(replacementIds.every(id => id !== oldRequest)).toBe(true)
   const oldFinalWrites = () => ports.recordTiming.mock.calls.filter(([timing]) => timing.requestId === oldRequest && timing.final).length
-  late.resolve({ ...frames(), capturedAt: 0 })
-  await vi.advanceTimersByTimeAsync(0)
   expect(oldFinalWrites(), 'a cancelled request has no late final write').toBe(0)
   for (const overlay of replacement.overlays) {
     const latest = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(overlay.window), 'load')
@@ -251,6 +256,52 @@ it('a deferred exposure with a changed safeTop updates no ready geometry and ato
   }
 })
 
+async function assertReplacementWaitsForProducer(publicCapture: boolean, deferred: boolean) {
+  const held = pending<ReturnType<typeof frames>>()
+  const captureDisplays = deferred
+    ? vi.fn().mockResolvedValueOnce(frames()).mockImplementationOnce(() => held.promise).mockResolvedValue(frames())
+    : vi.fn().mockImplementationOnce(() => held.promise).mockResolvedValue(frames())
+  ports.native.mockReturnValue({ captureDisplays })
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  const oldOutcome = publicCapture ? surface.captureSelection(false) : surface.present(session())
+  void oldOutcome.catch(() => {})
+  await vi.advanceTimersByTimeAsync(0)
+  const oldCount = electron.windows.length
+  expect(oldCount).toBe(2)
+  if (deferred) {
+    for (const window of electron.windows) await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(window), 'load')
+  }
+  expect(captureDisplays).toHaveBeenCalledTimes(deferred ? 2 : 1)
+  electron.windows[0]!.destroy()
+  expect(await oldOutcome, 'the old UI cancels immediately without awaiting its producer').toEqual({ state: 'cancelled' })
+  const callsBeforeReplacement = captureDisplays.mock.calls.length
+  const replacement = publicCapture ? surface.captureSelection(false) : surface.present(session())
+  void replacement.catch(() => {})
+  await vi.advanceTimersByTimeAsync(0)
+  expect(captureDisplays, 'replacement native work waits for the old producer, while new hidden overlays can prepare').toHaveBeenCalledTimes(callsBeforeReplacement)
+  expect(electron.windows).toHaveLength(oldCount + 2)
+  held.resolve(frames())
+  await vi.advanceTimersByTimeAsync(0)
+  expect(captureDisplays.mock.calls.length, 'the real producer settlement releases the next native exposure').toBeGreaterThan(callsBeforeReplacement)
+  const replacements = electron.windows.slice(oldCount)
+  for (const window of replacements) {
+    const input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(window), 'load') as CaptureSurfaceInput
+    expect(input.background).toBe(publicCapture ? 'excluded' : 'included')
+    expect(input.backgrounds[input.background].status).toBe('ready')
+  }
+  const first = replacements[0]!, input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(first), 'load') as CaptureSurfaceInput
+  await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(first), 'cancel', { requestId: input.requestId })
+  expect(await replacement).toEqual({ state: 'cancelled' })
+}
+
+it.each([['selected', false], ['deferred', true]] as const)('Esc during the %s producer keeps GUI replacement native work sequential', async (_phase, deferred) => {
+  await assertReplacementWaitsForProducer(false, deferred)
+})
+
+it.each([['selected', false], ['deferred', true]] as const)('Esc during the %s producer keeps public excluded replacement native work sequential', async (_phase, deferred) => {
+  await assertReplacementWaitsForProducer(true, deferred)
+})
+
 it('cancel releases an early load and a late result cannot grab, revive or replace the next capture', async () => {
   const late = pending<ReturnType<typeof frames>>()
   const captureDisplays = vi.fn().mockImplementationOnce(() => late.promise).mockResolvedValue(frames())
@@ -266,11 +317,15 @@ it('cancel releases an early load and a late result cannot grab, revive or repla
   expect(released, 'cancel releases load before the old native producer returns').toBe(true)
   expect(await loaded).toContain('no longer current')
   expect(await outcome).toEqual({ state: 'cancelled' })
-  const next = await opened()
-  const count = electron.windows.length, nativeCalls = captureDisplays.mock.calls.length
-  expect(nativeCalls, 'the cancelled request used one exposure and the visible-host replacement used two').toBe(3)
-  late.resolve({ ...frames(), capturedAt: 0 })
+  const nextPending = opened()
   await vi.advanceTimersByTimeAsync(0)
+  const count = electron.windows.length
+  expect(captureDisplays, 'the replacement cannot enter native before the cancelled producer settles').toHaveBeenCalledOnce()
+  late.resolve({ ...frames(), capturedAt: 0 })
+  const next = await nextPending
+  await vi.advanceTimersByTimeAsync(0)
+  const nativeCalls = captureDisplays.mock.calls.length
+  expect(nativeCalls, 'the cancelled request used one exposure and the queued replacement then used two').toBe(3)
   expect(captureDisplays, 'the cancelled request cannot start another native exposure').toHaveBeenCalledTimes(nativeCalls)
   expect(electron.windows, 'the old producer creates no late overlay').toHaveLength(count)
   expect(next.overlays.every(overlay => !overlay.window.dead && overlay.input.backgrounds.included.capturedAt !== 0)).toBe(true)
