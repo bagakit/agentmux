@@ -12,7 +12,7 @@ import type { ConfigOwner } from './config-owner.js'
 
 export function toolkitTools(config: AppConfig): ToolkitToolConfiguration[] { return config.toolkit?.tools ?? [] }
 export function toolkitFields({ id: _id, revision: _revision, ...fields }: ToolkitConfigurationFields & { id?: string; revision?: string }): ToolkitConfigurationFields {
-  return 'kind' in fields ? fields : { ...fields, mode: fields.mode ?? 'script', actions: fields.actions ?? [] }
+  return 'kind' in fields ? { ...fields, autoStart: fields.autoStart ?? true } : { ...fields, autoStart: fields.autoStart ?? true, mode: fields.mode ?? 'script', actions: fields.actions ?? [] }
 }
 export function findToolkitTool(config: AppConfig, id: string): ToolkitToolConfiguration {
   return toolkitTools(config).find(tool => tool.id === id) ?? fail('SETTING_RESOURCE_NOT_FOUND', `Tool “${id}” does not exist.`)

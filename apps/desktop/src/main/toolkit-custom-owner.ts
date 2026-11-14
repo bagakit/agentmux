@@ -40,7 +40,7 @@ const ref = (execution: Execution) => {
 /** User scripts share the existing RawRun port; closing a reader never changes execution admission. */
 export class CustomToolkitOwner {
   private readonly tools = new Map<string, Tool>()
-  private enabledTuis = new Set<string>()
+  private autoStartingTools = new Set<string>()
   private loadWork: Promise<void> = Promise.resolve()
   private closed = false
   constructor(private readonly args: { config: ConfigOwner; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>
@@ -118,12 +118,12 @@ export class CustomToolkitOwner {
     }
     void this.loadConfigured()
   }
-  /** Each owner load and disabled-to-enabled transition admits at most one TUI intent. */
+  /** Each owner load and inactive-to-active transition admits at most one configured intent. */
   loadConfigured(): Promise<void> {
     if (this.closed) return this.loadWork
-    const enabled = new Set(this.configurations().filter(tool => !('kind' in tool) && tool.mode === 'tui' && tool.enabled).map(tool => tool.id))
-    const added = [...enabled].filter(id => !this.enabledTuis.has(id))
-    this.enabledTuis = enabled
+    const enabled = new Set(toolkitTools(this.args.config.current).filter(tool => tool.enabled && tool.autoStart !== false).map(tool => tool.id))
+    const added = [...enabled].filter(id => !this.autoStartingTools.has(id))
+    this.autoStartingTools = enabled
     const work = Promise.all(added.map(async id => {
       let tool: Tool | undefined
       try {
@@ -133,16 +133,16 @@ export class CustomToolkitOwner {
         if (tool.live?.starting) { await tool.live.starting; return }
         if (tool.admission) {
           if (tool.admission.run && !tool.live) await this.recover(tool)
-          return
+          if (tool.admission) return
         }
-        const record = this.configuration(id)
-        if ('kind' in record || record.mode !== 'tui' || !record.enabled) return
-        await this.admit(id, { invocationId: mintObjectId(), expectedRevision: record.revision,
+        const { definition } = await this.resolve(tool)
+        if (!definition.enabled || definition.autoStart === false || this.closed) return
+        await this.admit(id, { invocationId: mintObjectId(), expectedRevision: definition.revision,
           expectedLatestExecutionId: tool.latest?.executionId ?? null }, null, new AbortController().signal)
       } catch (error) {
         // A concurrent explicit admission owns its own state, including any unknown outcome.
         if (tool && !tool.admission && this.configurations().some(value => value.id === id)) {
-          tool.loadError = 'TUI loading is unconfirmed: ' + message(error)
+          tool.loadError = 'Tool startup is unconfirmed: ' + message(error)
           this.publish(tool)
         }
       }

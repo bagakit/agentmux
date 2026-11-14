@@ -87,6 +87,7 @@ export async function captureToolkitPackage(record: ToolkitPackageConfiguration)
   const revision = sha(`${record.revision}\0${contentSHA256}`), icon = iconOf(manifest)
   const definition = parseToolkitToolDefinition({ id: record.id, revision,
     name: manifest.name, icon: icon.icon, enabled: record.enabled, statusBar: record.statusBar,
+    ...(record.autoStart !== undefined ? { autoStart: record.autoStart } : {}),
     workspacePath: record.workspacePath, script: script(entry), args: record.args,
     actions: (manifest.actions ?? []).map((action, i) => ({ id: action.id, label: action.label, script: script(actionEntries[i]!.entry), args: action.args ?? [] })),
     ...(displayEntry ? { display: { script: script(displayEntry), args: manifest.display!.args } } : {}),

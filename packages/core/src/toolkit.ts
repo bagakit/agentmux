@@ -33,6 +33,8 @@ export type ToolkitDisplayProgram = { script: string; args: string[] }
 export type ToolkitAction = { id: string; label: string; script: string; args: string[] }
 export type ToolkitToolFields = {
   name: string; icon: string; enabled: boolean; statusBar: 'icon' | 'label'
+  /** Defaults to true; enabled tools load once at Host startup or activation. */
+  autoStart?: boolean
   /** Omitted means a finite JavaScript ESM result; TUI scripts are shell commands. */
   mode?: 'script' | 'tui'
   workspacePath: string; script: string; args: string[]; actions?: ToolkitAction[]; display?: ToolkitDisplayProgram | null
@@ -40,6 +42,7 @@ export type ToolkitToolFields = {
 export type ToolkitToolInput = ToolkitToolFields & { id: string }
 export type ToolkitPackageFields = {
   kind: 'package'; packagePath: string; enabled: boolean; statusBar: 'icon' | 'label'
+  autoStart?: boolean
   workspacePath: string; args: string[]
 }
 /** Only creation may omit cwd; the Host fills it before saving a configuration. */
@@ -102,9 +105,9 @@ export type ToolkitSnapshot = ToolkitMetricsSnapshot | ToolkitScriptSnapshot | T
 export type ToolkitDescriptor =
   | { kind: 'metrics'; toolId: 'performance'; name: string; readonly: true }
   | { kind: 'script'; toolId: string; name: string; readonly: boolean; revision: string
-      icon: string; enabled: boolean; statusBar: 'icon' | 'label'; display?: boolean; mode?: 'script' | 'tui' }
+      icon: string; enabled: boolean; statusBar: 'icon' | 'label'; autoStart?: boolean; display?: boolean; mode?: 'script' | 'tui' }
   | { kind: 'package'; toolId: string; readonly: false; configRevision: string; path: string
-      enabled: boolean; statusBar: 'icon' | 'label'; name: string | null; icon: string | null
+      enabled: boolean; statusBar: 'icon' | 'label'; autoStart?: boolean; name: string | null; icon: string | null
       availability: 'available' | 'unavailable'; reason: string | null; display?: boolean }
 export type ToolkitScript = { toolId: string; path: string | null; sha256: string; text: string }
 export const TOOLKIT_OPERATIONS = ['toolkit.list', 'toolkit.get', 'toolkit.script', 'toolkit.run',
@@ -173,7 +176,7 @@ function nullable(v: unknown, check: (v: unknown) => void) { if (v !== null) che
 function runRef(v: unknown) {
   if (v !== null) { const r = record(v, ['hostId', 'runId']); identity(r.hostId); identity(r.runId) }
 }
-const TOOL_FIELDS = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions', 'display', 'mode'] as const
+const TOOL_FIELDS = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions', 'display', 'mode', 'autoStart'] as const
 function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string, allowBlankScript = false) {
   if (key === 'mode') { if (value !== 'script' && value !== 'tui') invalid(code); return }
   if (key === 'display') {
@@ -196,7 +199,7 @@ function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string, al
     }
     return
   }
-  if (key === 'enabled') { if (typeof value !== 'boolean') invalid(code); return }
+  if (key === 'enabled' || key === 'autoStart') { if (typeof value !== 'boolean') invalid(code); return }
   if (key === 'statusBar') { if (value !== 'icon' && value !== 'label') invalid(code); return }
   if (key === 'args') {
     if (!Array.isArray(value) || value.length > 32) invalid(code)
@@ -214,16 +217,16 @@ function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string, al
 }
 /** Pure data validation; the host owns paths, icon choices, persistence and revision issuance. */
 export function parseToolkitToolFields(value: unknown, partial = false, code = 'CONTROL_PROTOCOL_ERROR'): ToolkitToolFields | Partial<ToolkitToolFields> {
-  const r = record(value, partial ? [] : TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display' && key !== 'mode'), partial ? TOOL_FIELDS : ['actions', 'display', 'mode'], code)
+  const r = record(value, partial ? [] : TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display' && key !== 'mode' && key !== 'autoStart'), partial ? TOOL_FIELDS : ['actions', 'display', 'mode', 'autoStart'], code)
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_TOOL_FIELDS_MAX_BYTES) invalid(code)
   for (const key of Object.keys(r)) field(key as typeof TOOL_FIELDS[number], r[key], code, partial || r.mode === 'tui')
   if (r.mode === 'tui' && ((r.actions as ToolkitAction[] | undefined)?.length || r.display != null)) invalid(code)
   return r as ToolkitToolFields | Partial<ToolkitToolFields>
 }
-const PACKAGE_FIELDS = ['kind', 'packagePath', 'enabled', 'statusBar', 'workspacePath', 'args'] as const
+const PACKAGE_FIELDS = ['kind', 'packagePath', 'enabled', 'statusBar', 'workspacePath', 'args', 'autoStart'] as const
 export function parseToolkitPackageFields(value: unknown, partial = false, code = 'CONTROL_PROTOCOL_ERROR', allowMissingWorkspacePath = false): ToolkitPackageFields | Partial<ToolkitPackageFields> | ToolkitPackageCreateFields {
-  const r = record(value, partial ? [] : PACKAGE_FIELDS.filter(key => !allowMissingWorkspacePath || key !== 'workspacePath'),
-    partial ? PACKAGE_FIELDS : allowMissingWorkspacePath ? ['workspacePath'] : [], code)
+  const r = record(value, partial ? [] : PACKAGE_FIELDS.filter(key => key !== 'autoStart' && (!allowMissingWorkspacePath || key !== 'workspacePath')),
+    partial ? PACKAGE_FIELDS : allowMissingWorkspacePath ? ['workspacePath', 'autoStart'] : ['autoStart'], code)
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_TOOL_FIELDS_MAX_BYTES) invalid(code)
   for (const key of Object.keys(r)) {
     if (key === 'kind') { if (r.kind !== 'package') invalid(code) }
@@ -239,7 +242,7 @@ export function parseToolkitConfigurationFields(value: unknown, partial = false,
     : parseToolkitToolFields(r, partial, code)
 }
 export function parseToolkitPackageConfiguration(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): ToolkitPackageConfiguration {
-  const r = record(value, [...PACKAGE_FIELDS, 'id', 'revision'], [], code)
+  const r = record(value, [...PACKAGE_FIELDS.filter(key => key !== 'autoStart'), 'id', 'revision'], ['autoStart'], code)
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_DEFINITION_MAX_BYTES) invalid(code)
   const { id, revision, ...fields } = r
   identity(id, code); identity(revision, code)
@@ -290,7 +293,7 @@ function packageSource(value: unknown, actions: ToolkitAction[] | undefined, dis
   return r as ToolkitPackageSource
 }
 export function parseToolkitToolDefinition(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): ToolkitToolDefinition {
-  const r = record(value, [...TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display' && key !== 'mode'), 'id', 'revision'], ['actions', 'display', 'mode', 'package'], code)
+  const r = record(value, [...TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display' && key !== 'mode' && key !== 'autoStart'), 'id', 'revision'], ['actions', 'display', 'mode', 'autoStart', 'package'], code)
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_DEFINITION_MAX_BYTES) invalid(code)
   const { id, revision, package: source, ...fields } = r
   identity(id, code); identity(revision, code)
@@ -428,9 +431,10 @@ export function parseToolkitResult(operation: ToolkitOperation, value: unknown):
     for (const value of r.tools) {
       const source = settingsResourceRecord(value, 'CONTROL_PROTOCOL_ERROR')
       const tool = source.kind === 'package'
-        ? record(source, ['kind', 'toolId', 'name', 'readonly', 'icon', 'enabled', 'statusBar', 'configRevision', 'path', 'availability', 'reason'], ['display'])
-        : record(source, ['kind', 'toolId', 'name', 'readonly'], ['revision', 'icon', 'enabled', 'statusBar', 'display', 'mode'])
+        ? record(source, ['kind', 'toolId', 'name', 'readonly', 'icon', 'enabled', 'statusBar', 'configRevision', 'path', 'availability', 'reason'], ['display', 'autoStart'])
+        : record(source, ['kind', 'toolId', 'name', 'readonly'], ['revision', 'icon', 'enabled', 'statusBar', 'display', 'mode', 'autoStart'])
       identity(tool.toolId)
+      if (Object.hasOwn(tool, 'autoStart')) field('autoStart', tool.autoStart, 'CONTROL_PROTOCOL_ERROR')
       if (Object.hasOwn(tool, 'display') && typeof tool.display !== 'boolean') invalid()
       if (tool.kind === 'package') nullable(tool.name, value => field('name', value, 'CONTROL_PROTOCOL_ERROR'))
       else field('name', tool.name, 'CONTROL_PROTOCOL_ERROR')
@@ -439,7 +443,7 @@ export function parseToolkitResult(operation: ToolkitOperation, value: unknown):
         if (tool.toolId !== 'performance' || tool.readonly !== true || Object.keys(tool).length !== 4) invalid()
         builtin++
       } else if (tool.kind === 'script') {
-        if (tool.toolId === 'performance' || typeof tool.readonly !== 'boolean' || Object.keys(tool).length !== 8 + (Object.hasOwn(tool, 'display') ? 1 : 0) + (Object.hasOwn(tool, 'mode') ? 1 : 0)) invalid()
+        if (tool.toolId === 'performance' || typeof tool.readonly !== 'boolean' || Object.keys(tool).length !== 8 + (Object.hasOwn(tool, 'display') ? 1 : 0) + (Object.hasOwn(tool, 'mode') ? 1 : 0) + (Object.hasOwn(tool, 'autoStart') ? 1 : 0)) invalid()
         identity(tool.revision); field('icon', tool.icon, 'CONTROL_PROTOCOL_ERROR'); field('enabled', tool.enabled, 'CONTROL_PROTOCOL_ERROR'); field('statusBar', tool.statusBar, 'CONTROL_PROTOCOL_ERROR')
         if (Object.hasOwn(tool, 'mode')) field('mode', tool.mode, 'CONTROL_PROTOCOL_ERROR')
         if (tool.mode === 'tui' && tool.display === true) invalid()

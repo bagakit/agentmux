@@ -681,9 +681,9 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
       ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.mode ? { mode: tool.mode } : {}), ...(tool.display ? { display: true } : {}) })),
       ...await Promise.all(toolkitTools(this.args.config.current).map(async tool => {
         if (!('kind' in tool)) return { kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: false as const,
-          revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.mode ? { mode: tool.mode } : {}), ...(tool.display ? { display: true } : {}) }
+          revision: tool.revision, icon: tool.icon, enabled: tool.enabled, autoStart: tool.autoStart !== false, statusBar: tool.statusBar, ...(tool.mode ? { mode: tool.mode } : {}), ...(tool.display ? { display: true } : {}) }
         const base = { kind: 'package' as const, toolId: tool.id, readonly: false as const, configRevision: tool.revision,
-          path: tool.packagePath, enabled: tool.enabled, statusBar: tool.statusBar }
+          path: tool.packagePath, enabled: tool.enabled, autoStart: tool.autoStart !== false, statusBar: tool.statusBar }
         try {
           const metadata = await readToolkitPackageMetadata(tool)
           return { ...base, availability: 'available' as const, name: metadata.manifest.name, icon: metadata.icon, reason: metadata.warning,

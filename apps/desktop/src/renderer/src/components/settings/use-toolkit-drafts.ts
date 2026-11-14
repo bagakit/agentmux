@@ -3,10 +3,10 @@ import { AgentMuxError, TOOLKIT_WORKSPACE_PATH_ERROR_DETAIL, type ToolkitToolCon
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { configValuesEqual } from '../../../../shared/config-edit'
 
-const inlineFields = ['mode', 'name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions', 'display'] as const
-const packageFields = ['kind', 'packagePath', 'enabled', 'statusBar', 'workspacePath', 'args'] as const
+const inlineFields = ['mode', 'name', 'icon', 'enabled', 'autoStart', 'statusBar', 'workspacePath', 'script', 'args', 'actions', 'display'] as const
+const packageFields = ['kind', 'packagePath', 'enabled', 'autoStart', 'statusBar', 'workspacePath', 'args'] as const
 const fieldsFor = (value: ToolkitConfigurationFields) => 'kind' in value ? packageFields : inlineFields
-const fieldValue = (value: ToolkitConfigurationFields, key: string): unknown => Object.getOwnPropertyDescriptor(value, key)?.value
+const fieldValue = (value: ToolkitConfigurationFields, key: string): unknown => key === 'autoStart' ? value.autoStart ?? true : Object.getOwnPropertyDescriptor(value, key)?.value
 function assignField(value: ToolkitConfigurationFields, key: string, source: ToolkitConfigurationFields) {
   if ((key === 'mode' || key === 'actions' || key === 'display') && !Object.hasOwn(source, key)) Reflect.deleteProperty(value, key)
   else Object.assign(value, { [key]: fieldValue(source, key) })
@@ -20,8 +20,8 @@ export type ToolkitDraftWriter = {
 export function isPackageDraft(entry: ToolkitDraft): entry is ToolkitDraft<ToolkitPackageFields, ToolkitPackageConfiguration> { return 'kind' in entry.value && entry.value.kind === 'package' }
 export function isInlineDraft(entry: ToolkitDraft): entry is ToolkitDraft<ToolkitToolFields, ToolkitInlineToolConfiguration> { return !('kind' in entry.value) }
 export function toolkitFields(tool: ToolkitConfigurationFields): ToolkitConfigurationFields {
-  if ('kind' in tool) return { kind: 'package', packagePath: tool.packagePath, enabled: tool.enabled, statusBar: tool.statusBar, workspacePath: tool.workspacePath, args: [...tool.args] }
-  return { ...(tool.mode ? { mode: tool.mode } : {}), name: tool.name, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, workspacePath: tool.workspacePath, script: tool.script, args: [...tool.args], ...(tool.display ? { display: { ...tool.display, args: [...tool.display.args] } } : Object.hasOwn(tool, 'display') ? { display: null } : {}), ...(tool.actions ? { actions: tool.actions.map(action => ({ ...action, args: [...action.args] })) } : {}) }
+  if ('kind' in tool) return { kind: 'package', packagePath: tool.packagePath, enabled: tool.enabled, autoStart: tool.autoStart ?? true, statusBar: tool.statusBar, workspacePath: tool.workspacePath, args: [...tool.args] }
+  return { ...(tool.mode ? { mode: tool.mode } : {}), name: tool.name, icon: tool.icon, enabled: tool.enabled, autoStart: tool.autoStart ?? true, statusBar: tool.statusBar, workspacePath: tool.workspacePath, script: tool.script, args: [...tool.args], ...(tool.display ? { display: { ...tool.display, args: [...tool.display.args] } } : Object.hasOwn(tool, 'display') ? { display: null } : {}), ...(tool.actions ? { actions: tool.actions.map(action => ({ ...action, args: [...action.args] })) } : {}) }
 }
 export function toolkitDraftDirty(entry: ToolkitDraft): boolean {
   return entry.expected === null || fieldsFor(entry.value).some(key => !configValuesEqual(fieldValue(entry.value, key), fieldValue(entry.expected!, key)))
