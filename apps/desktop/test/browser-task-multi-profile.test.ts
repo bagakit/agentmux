@@ -173,6 +173,19 @@ describe('original task orchestration over explicit Browser/Profile targets', ()
     expect(() => parseBrowserTaskParallelInspection({ ...inspected, targets: [{ ...inspected.targets[0], run: undefined }] })).toThrow()
   })
 
+  it('retains readable original facts when only restart bookkeeping cannot be saved', async () => {
+    const f = await fixture(1); f.hold('browser-a')
+    await f.start('restored-read', [target('a', 'shared'), target('b', 'shared')])
+    await vi.waitFor(async () => expect((await f.inspect('restored-read'))?.targets[0]?.run?.operationCount).toBe(1))
+    const originalRunId = (await f.inspect('restored-read'))!.targets[0]!.run!.id
+    f.store.fault = 'before'; await f.reload().ready()
+    const restored = await f.inspect('restored-read')
+    expect(restored).toMatchObject({ run: { operationId: 'restored-read', status: 'interrupted', warning: expect.any(String) }, targets: [{ run: { id: originalRunId, status: 'interrupted' } }, { phase: 'queued' }] })
+    expect(await f.owner().profileReferences('shared')).toHaveLength(2)
+    expect((await f.start('restored-read', [target('a', 'shared'), target('b', 'shared')], 1)).status).toBe('interrupted')
+    expect(f.started).toEqual(['browser-a'])
+  })
+
   it('projects a later original run stop in an already waiting parallel result', async () => {
     const f = await fixture(1, true)
     await f.start('waiting-set')
