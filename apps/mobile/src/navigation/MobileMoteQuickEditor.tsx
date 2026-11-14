@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, sameMoteDefaultConversation, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { useMoteQuickDraft } from './useMoteQuickDraft'
@@ -82,7 +82,7 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
         {!read || read.status !== 'ready' ? <p>已保存的流转策略尚未确认；当前选择保留。</p> : !read.defaults?.conversationRollover && <p>配置中还没有流转策略，不修改时保持当前对话。</p>}
       </fieldset>
       <fieldset className="mobile-mote-presence"><legend>主 Agent 驻留与心跳</legend>
-        <label><input type="checkbox" aria-label="启用 Mote 自动维持" checked={presence.enabled} onChange={event => model.edit({ ...draft.values, presence: { ...presence, enabled: event.target.checked } })} />启用自动维持</label>
+        <label><Switch aria-label="启用 Mote 自动维持" checked={presence.enabled} onChange={event => model.edit({ ...draft.values, presence: { ...presence, enabled: event.target.checked } })} />启用自动维持</label>
         <FormRow layout="stacked" label="心跳间隔（分钟）"
           description="默认每 30 分钟核对目标、工作 thread 和未完成承诺；没有新进展时可保持安静。修改间隔不会恢复已经暂停的安排。"
           error={intervalIssue} invalid={Boolean(intervalIssue)}>

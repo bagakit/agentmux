@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import type { HostRuntimeObservation } from '@agentmux/core'
 import type { LocalHostConfig, TailcatListenerConfig } from '@agentmux/host/host-configuration'
 import type { HostConfig } from '../../../../shared/contracts'
@@ -71,7 +71,7 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, a
           setClientText({ text, keys }); onAllowedClientsTextChange?.(text); onChange({ ...configuration, allowedClients: keys })
         }} placeholder="nodekey:…" /></label>
     </div>
-    <label className="host-tailcat-toggle"><input type="checkbox" role="switch" aria-label="Allow Tailcat connections" checked={configuration.enabled}
+    <label className="host-tailcat-toggle"><Switch aria-label="Allow Tailcat connections" checked={configuration.enabled}
       onChange={event => onChange({ ...configuration, enabled: event.target.checked })} /><span><strong>Allow Tailcat connections</strong><small>Applies when you save incoming connections.</small></span></label>
     <p className="settings-group-note">{saveLabel} applies the access choice and allowed clients. The listener’s confirmed private address appears here when it is ready.</p>
     <div className="host-tailcat-status"><span role="status">{!saved ? `${saveLabel} to apply these changes.` : current?.error ?? (listener ? `Tailcat listener · ${listener.state}` : current?.busy ? 'Reading listener status…' : 'Tailcat listener status unknown')}</span>

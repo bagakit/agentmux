@@ -64,7 +64,6 @@
 .host-tailcat-toggle > span { display: grid; gap: 3px; }
 .host-tailcat-toggle strong { font-size: var(--fs-body); font-weight: 550; }
 .host-tailcat-toggle small { color: var(--text-3); font-size: 11px; line-height: 1.4; }
-.host-tailcat-toggle input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--green); }
 .host-tailcat-listener textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px; padding: 7px 9px; border: 1px solid var(--line-soft); border-radius: 6px; color: var(--text); background: var(--surface-0); font: inherit; overflow-wrap: anywhere; }
 .host-tailcat-status, .host-tailcat-address { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .host-tailcat-status > span { flex: 1 1 180px; color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; }

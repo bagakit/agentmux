@@ -135,17 +135,6 @@
 .notification-sound-toggle small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 /* 一个失效的开关必须看起来失效——通知整体关掉时，声音这一格没有可应用的对象。 */
 .notification-sound-toggle:has(input:disabled) { cursor: default; opacity: .55; }
-/* One switch for every on/off setting that takes effect at once. It was drawn only inside Mote's private
-   chat, so other switches fell back to a plain checkbox; the role, not a screen's class, selects it. */
-input[type="checkbox"][role="switch"] { appearance: none; flex: none; width: 32px; height: 19px; margin: 0; padding: 2px; background: var(--surface-3); border: 1px solid var(--text-3); border-radius: 12px; cursor: pointer; transition: background 160ms ease, border-color 160ms ease; }
-/* Off must read at a glance: the track's edge and the knob both clear 3:1 against the page in either theme.
-   type plus role outranks the shared checkbox rule that hides an unchecked checkbox's mark, so the knob stays. */
-input[type="checkbox"][role="switch"]::before { content: ''; display: block; visibility: visible; mask: none; width: 13px; height: 13px; border-radius: 50%; background: var(--text-2); transition: transform 160ms ease, background 160ms ease; }
-input[type="checkbox"][role="switch"]:checked { background: var(--green-bg); border-color: var(--green-text); }
-input[type="checkbox"][role="switch"]:checked::before { background: var(--green-text); transform: translateX(13px); }
-input[type="checkbox"][role="switch"]:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-input[type="checkbox"][role="switch"]:disabled { cursor: default; opacity: .6; }
-@media (prefers-reduced-motion: reduce) { input[type="checkbox"][role="switch"], input[type="checkbox"][role="switch"]::before { transition: none; } }
 .browser-automation-toggle code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-3); font: var(--fs-micro)/1.4 "SFMono-Regular", monospace; }
 
 /* 记住的应用链接选择。一节说明 + 一张「scheme / 当前选择 / 忘掉」的表。

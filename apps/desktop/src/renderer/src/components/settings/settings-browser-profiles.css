@@ -79,7 +79,6 @@
 /* Scoped under the editor so it outranks the shared toggle's padding whichever stylesheet loads last. */
 .browser-profile-editor .browser-profile-editor__agents { padding: 0; align-items: center; }
 /* The shared toggle's checkbox margin does not apply to a switch; keep the row on the section's left edge. */
-.browser-profile-editor .browser-profile-editor__agents > input[role="switch"] { margin: 0; }
 .browser-profile-editor__agents:has(input:disabled) { cursor: default; opacity: .55; }
 .browser-profile-editor__route { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
 .browser-profile-editor__route > span:first-child { color: var(--text-2); }

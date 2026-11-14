@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseNodePublishingPolicy, type NodeSettings, type NodePublishingPolicy } from '@agentmux/core/node-publishing'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { api } from '../../lib/api'
 import { useAppStore, updateNodePublicationDraft } from '../../store'
 import { nodePublicationDraftForRuntime, type NodePublicationDraft } from '../../lib/node-publication-draft'
@@ -210,7 +210,7 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
       {observed ? <NodeShareAddress node={observed.node} /> : null}
       {draft ? <>
         <label className="network-node-field"><span>Node alias</span><TextInput aria-label="Node alias" value={draft.alias} onChange={event => patch({ alias: event.target.value })} placeholder="Optional lowercase name" /><small>A readable locator. Original Runtime identity remains unchanged.</small></label>
-        <label className="network-node-switch"><input type="checkbox" role="switch" aria-label="Share system resources" checked={draft.shareResources} onChange={event => patch({ shareResources: event.target.checked })} /><span><strong>Share system resources</strong><small>Let authorized Node readers see this device’s real resource measurements.</small></span></label>
+        <label className="network-node-switch"><Switch aria-label="Share system resources" checked={draft.shareResources} onChange={event => patch({ shareResources: event.target.checked })} /><span><strong>Share system resources</strong><small>Let authorized Node readers see this device’s real resource measurements.</small></span></label>
         <div className="network-node-paths">{([['allowedPaths','Shared folders'],['deniedPaths','Excluded paths']] as const).map(([field,label]) => <label className="network-node-field" key={field}><span>{label}</span><textarea aria-label={label} rows={3} spellCheck={false} value={draft[field].join('\n')} onChange={event => patch({ [field]: event.target.value.split('\n') })} onBlur={() => patch({ [field]: draft[field].filter(value => value !== '') })} /><small>{field === 'allowedPaths' ? 'Absolute paths, one per line. Only these published roots are browsable.' : 'Excluded paths take precedence, including descendants.'}</small></label>)}</div>
         <label className="network-node-field"><span>Default landing folder</span><TextInput aria-label="Default landing folder" value={draft.defaultPath ?? ''} onChange={event => patch({ defaultPath: event.target.value || null })} placeholder="Optional path inside a shared folder" /><small>The first browsing location; this is not an operating-system sandbox.</small></label>
         <div className="network-node-save"><span role="status">{busy ? 'Reading or saving publication…' : editIssue ? 'Saved publication edit unavailable' : edit?.pending?.phase === 'in-flight' ? 'Original save is in progress' : operation ? 'Original save needs confirmation' : dirty ? 'Publication: unsaved changes' : 'Publication saved'}</span><button type="button" className="primary-button" disabled={busy || !dirty || Boolean(operation) || Boolean(newer) || Boolean(editIssue)} onClick={() => void savePolicy()}>Save publication</button></div>

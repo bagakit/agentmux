@@ -78,3 +78,56 @@ select[aria-invalid='true']:focus-visible { outline-color: var(--red-line); }
 .ui-form-row--stacked > strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .ui-form-row--stacked > small { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.45; }
 .ui-form-row--stacked > small[role='alert'] { color: var(--red-text); }
+
+/* Track and thumb share the native input bounds. Only the thumb changes position. */
+input.ui-switch[type="checkbox"] {
+  --switch-travel: 13px;
+  --switch-offset: 0px;
+  --switch-press: 1;
+  appearance: none;
+  box-sizing: border-box;
+  flex: none;
+  inline-size: 32px;
+  block-size: 19px;
+  margin: 0;
+  padding: 2px;
+  border: 1px solid var(--text-3);
+  border-radius: 12px;
+  background: var(--surface-3);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-enter), border-color var(--dur-fast) var(--ease-enter);
+}
+input.ui-switch[type="checkbox"]:dir(rtl) { --switch-travel: -13px; }
+input.ui-switch[type="checkbox"]::before {
+  content: '';
+  display: block;
+  visibility: visible;
+  inline-size: 13px;
+  block-size: 13px;
+  border-radius: 50%;
+  background: var(--text-2);
+  mask: none;
+  transform: translateX(var(--switch-offset)) scaleX(var(--switch-press));
+  transition: transform var(--dur-enter) var(--ease-enter), background-color var(--dur-fast) var(--ease-enter);
+}
+input.ui-switch[type="checkbox"]:checked {
+  --switch-offset: var(--switch-travel);
+  background: var(--green-bg);
+  border-color: var(--green-text);
+}
+input.ui-switch[type="checkbox"]:checked::before { background: var(--green-text); }
+input.ui-switch[type="checkbox"]:active:enabled { --switch-press: 1.12; }
+input.ui-switch[type="checkbox"]:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+input.ui-switch[type="checkbox"]:disabled { cursor: default; opacity: .6; }
+@media (prefers-reduced-motion: reduce) {
+  input.ui-switch[type="checkbox"], input.ui-switch[type="checkbox"]::before { transition: none; }
+}
+@media (forced-colors: active) {
+  input.ui-switch[type="checkbox"] { forced-color-adjust: none; background: Canvas; border-color: CanvasText; }
+  input.ui-switch[type="checkbox"]::before { background: CanvasText; }
+  input.ui-switch[type="checkbox"]:checked { background: Highlight; border-color: Highlight; }
+  input.ui-switch[type="checkbox"]:checked::before { background: HighlightText; }
+  input.ui-switch[type="checkbox"]:focus-visible { outline-color: Highlight; }
+  input.ui-switch[type="checkbox"]:disabled { background: Canvas; border-color: GrayText; opacity: 1; }
+  input.ui-switch[type="checkbox"]:disabled::before { background: GrayText; }
+}

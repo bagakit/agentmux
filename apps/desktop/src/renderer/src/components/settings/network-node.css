@@ -12,7 +12,6 @@
 .network-node-field textarea { min-width: 0; resize: vertical; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-1); color: var(--text); font: 12px/1.6 var(--font-mono); }
 .network-node-paths { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .network-node-switch { display: flex; align-items: start; gap: 10px; font-size: 12px; }
-.network-node-switch input { margin-top: 3px; accent-color: var(--focus-line); }
 .network-node-switch > span { display: grid; gap: 5px; }
 .network-node-save { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
 .network-node-save > span { font-size: 11px; color: var(--text-2); }

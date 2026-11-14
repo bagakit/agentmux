@@ -3,7 +3,7 @@ import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { BrowserProfileCookieFiles } from './BrowserProfileCookieFiles'
 import { BrowserProfileBookmarks } from './BrowserProfileBookmarks'
 import { BrowserProfileExtensions } from './BrowserProfileExtensions'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
@@ -363,7 +363,7 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
       <section className="browser-profile-editor__section" aria-label="Agents">
         <h4>Agents</h4>
         <label className="browser-automation-toggle browser-profile-editor__agents">
-          <input type="checkbox" role="switch" checked={profile.agentAccess !== false} disabled={busy !== null}
+          <Switch checked={profile.agentAccess !== false} disabled={busy !== null}
             onChange={event => void commit({ agentAccess: event.target.checked })} />
           <span>
             <strong>Let agents use Browsers in this Profile</strong>

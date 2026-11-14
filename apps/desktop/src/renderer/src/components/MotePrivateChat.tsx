@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useContext, useEffect, useRef, useState } from 'react'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MOTE_CHAT_DEFAULT_VALUES, type MoteChatConfiguration, type MoteChatValues } from '@agentmux/core/mote-chat'
@@ -218,7 +218,7 @@ function MotePrivateChatPanel({ scope, target: initialTarget, active, reference,
       {hostingTarget ? <details className="connector-diagnostics"><summary>Hosting details</summary><p className="settings-group-note">This Host stores bot credentials and private-chat policy. Agents can run elsewhere.</p><p><code>{hostingTarget.hostId}</code> · <code>{hostingTarget.runtimeId}</code></p></details> : null}
     </div>
     {target && hostingTarget ? <MoteChatActivity key={JSON.stringify(hostingTarget)} target={target} hostingTarget={hostingTarget} active={active} revision={configuration?.revision ?? null} /> : null}
-    <label className="mote-private-chat__toggle"><span>Allow private messages<small>Save to apply. A conversation starts with an incoming message.</small></span><input type="checkbox" role="switch" aria-label="Enable external private chat" checked={draft.enabled} disabled={saving} onChange={event => update({ ...draft, enabled: event.target.checked })} /></label>
+    <label className="mote-private-chat__toggle"><span>Allow private messages<small>Save to apply. A conversation starts with an incoming message.</small></span><Switch aria-label="Enable external private chat" checked={draft.enabled} disabled={saving} onChange={event => update({ ...draft, enabled: event.target.checked })} /></label>
     <div className="mote-private-chat__executor"><span>Shared Mote Executor<strong title={executorId}>{executorLabel}</strong></span><button ref={executorInvoker} type="button" className="small-button" onClick={() => setExecutorOpen(true)}>Mote preferences</button></div>
     {!executorId ? <p className="mote-details__hint">Choose the shared Executor in Mote preferences before enabling private chat.</p> : null}
     {configuration?.values.connection ? <section aria-label="Main identity"><div className="mote-private-chat__executor"><span>Main identity<strong>{configuration.creator ? 'Confirmed bot creator' : 'Native creator not confirmed'}</strong></span><button type="button" className="small-button" disabled={identityBusy || identityPending || !savedConnection || !hostingTarget} onClick={() => void refreshCreator()}>{identityBusy ? 'Checking identity…' : configuration.creator ? 'Refresh Main identity' : 'Confirm Main identity'}</button></div>

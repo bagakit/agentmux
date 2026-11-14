@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { openTopicDirectory } from '../../lib/topic-directory-navigation'
 import { useAppStore } from '../../store'
@@ -48,7 +49,7 @@ function PromotionSettings({ config }: Pick<SettingsPaneProps, 'config'>) {
     <header><span>Promotion</span><small>Saved: {saved ? 'Allowed' : 'Off'}</small></header>
     <label className="settings-promotion-policy__toggle">
       <span><strong>Allow promotion</strong><small>Allow new Clubs and Agent membership through the original Promotion actions.</small></span>
-      <input type="checkbox" role="switch" aria-label="Allow promotion" checked={draft.value} onChange={event => draft.setValue(event.target.checked)} />
+      <Switch aria-label="Allow promotion" checked={draft.value} onChange={event => draft.setValue(event.target.checked)} />
     </label>
     <p className="settings-workflows__note">Turning this off prevents new promotions. Existing Clubs and unfinished operations remain available, and Agents keep working.</p>
     <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} label="Save Promotion settings" onSave={() => void commit()} />
