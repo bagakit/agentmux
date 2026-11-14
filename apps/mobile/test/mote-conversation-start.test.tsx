@@ -6,7 +6,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, fixture, mount, mounted, paste, editor, deferred } from './conversation-fixture'
-import { mobileMoteStartDraftKey } from '../src/navigation/MobileMoteConversationStart'
+import { mobileMoteStartDraftKey } from '../src/conversation/mote-composer'
 import { MobileMoteMainActions } from '../src/navigation/MobileMoteMainActions'
 import type { MobileAgentCreateIntent } from '../src/recovery/agent-create-intents'
 import { createMoteConversationStartFixture } from '../../host/test/helpers/mote-conversation-start-fixture'
@@ -30,7 +30,7 @@ const retentionEvidenceDirectory = process.env.AGENTMUX_MOTE_RETENTION_EVIDENCE
 function retentionEvidence(surface: 'welcome' | 'profile', result: unknown, body: string | null) {
   if (retentionEvidenceDirectory) writeFileSync(join(retentionEvidenceDirectory, surface + '-fixture.json'), JSON.stringify({ surface, result, body }, null, 2))
 }
-async function actual(providerId?: 'claude') {
+async function actual(providerId: 'claude' = 'claude', earlyInputReceipt = false) {
   const host = await createMoteConversationStartFixture(providerId ? { providerId } : undefined); closing.push(host.close)
   const f = fixture(), owner = getDeviceWorkface(), content = { ...host.target.expectedResource, zoneId: host.target.zoneId }
   const identity = { name: 'Original Mote', project: 'Original', mote: { spaceId: host.target.spaceId, name: 'Original Mote', contentReference: content } }
@@ -39,9 +39,12 @@ async function actual(providerId?: 'claude') {
     recentMoteSpaceId: host.target.spaceId, identity, profile: null, moteView: { spaceId: host.target.spaceId, section: 'discussion', detail: false, directAgent: false } })
   f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'actual-start-runtime', ownerInstanceId: 'actual-start-process', availability: 'connected' }) as ReturnType<AgentMuxHostedClient['runtimeOwnerIdentity']>
   let lost = false, unknownNative = false, dueBarrier: ReturnType<typeof deferred<void>> | null = null, barrier: ReturnType<typeof deferred<void>> | null = null
+  const observations: Array<{ method: string; result: any }> = []
   const rpc = vi.fn(async (method: any, input: any) => {
     if (method === 'space.mote.dialogue.setup.advance' && unknownNative) { unknownNative = false; host.h.inner.kernel.input.mockImplementationOnce(async () => { throw Error('Original native input ACK is unknown') }) }
-    const result: any = await host.rpc.call(method, input)
+    const result: any = method === 'space.mote.dialogue.setup.advance' && !earlyInputReceipt
+      ? await host.setup(input.creation.operationId) : await host.rpc.call(method, input)
+    observations.push({ method, result })
     if (method === 'space.mote.dialogue.input.submit' && result.disposition === 'rollover-required' && dueBarrier) await dueBarrier.promise
     if (method === 'space.mote.dialogue.setup.advance') {
       if (result.reference) f.sessions.set(result.reference.sessionId, (await host.h.client.readAgentSession(result.reference.sessionId))!)
@@ -56,12 +59,13 @@ async function actual(providerId?: 'claude') {
   f.client.observeConversation = host.h.client.observeConversation.bind(host.h.client)
   f.client.releaseConversationView = host.h.client.releaseConversationView.bind(host.h.client)
   f.client.forwardRpc = rpc as AgentMuxHostedClient['forwardRpc']
+  const unlisten = host.h.client.onEvent(event => f.emit(event)); closing.push(async () => unlisten())
   const render = () => <MobileApp client={f.client} connection={{ state: 'connected', message: 'Original host' }} platform={createBrowserPlatform()} restoreWorkface />
   const view = await mount(render())
-  await wait(() => expect(view.element.querySelector('.mote-start [contenteditable="true"]')).toBeTruthy())
-  const scene = () => view.element.querySelector<HTMLElement>('.mote-start')!
+  await wait(() => expect(view.element.querySelector('.mobile-mote-composer [contenteditable="true"]')).toBeTruthy())
+  const scene = () => view.element.querySelector<HTMLElement>('.mobile-conversation-panel')!
   const key = mobileMoteStartDraftKey(f.client, host.target)
-  return { host, f, owner, rpc, view, render, scene, key, changes, holdDue() { dueBarrier = deferred<void>(); return dueBarrier }, unknownNative() { unknownNative = true }, lose() { lost = true }, hold() { barrier = deferred<void>(); return barrier } }
+  return { host, f, owner, rpc, observations, view, render, scene, key, changes, holdDue() { dueBarrier = deferred<void>(); return dueBarrier }, unknownNative() { unknownNative = true }, lose() { lost = true }, hold() { barrier = deferred<void>(); return barrier } }
 }
 
 async function openNewRound(f: Awaited<ReturnType<typeof actual>>) {
@@ -84,7 +88,9 @@ it('actual Mobile App welcome is editable before any Main exists and one send re
   await wait(() => expect(f.scene()?.querySelector('.mote-start__pending .mote-first-message')?.textContent).toContain('First exact Query'))
   expect(f.scene()?.querySelector('.mote-start__invitation')).toBeNull()
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1))
-  await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
+  await wait(() => expect(f.owner.snapshot().record.selectedSessionId, JSON.stringify({ body: f.scene().textContent,
+    conversation: f.owner.snapshot().record.conversation, setup: f.observations.filter(item => item.method.includes('setup')).map(item => item.result),
+    calls: f.rpc.mock.calls.map(([method]) => method) })).not.toBeNull())
   const packet = f.rpc.mock.calls.find(([method]) => method === 'agent.open')![1]
   expect(packet.moteMain.deferredInput.prompt).toBe('First exact Query'); expect(packet.content).not.toHaveProperty('prompt')
   expect(f.owner.snapshot().record.agentCreates?.find(value => value.input.operationId === packet.operationId)?.input).toEqual(packet)
@@ -92,6 +98,37 @@ it('actual Mobile App welcome is editable before any Main exists and one send re
   const setup = await f.host.setup(packet.operationId, false)
   expect(setup.binding).toBe('confirmed'); expect(setup.deferredInput?.record).toBeTruthy()
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
+})
+
+it.each([false, true])('actual Mobile original early input receipt waits for native acceptance without replay and preserves later draft=%s', async laterDraft => {
+  const f = await actual('claude', true), gate = deferred<void>(), originalWrite = f.host.h.inner.kernel.input.getMockImplementation()!
+  closing.push(async () => gate.resolve())
+  let nativeWaiting = false
+  f.host.h.inner.kernel.input.mockImplementationOnce(async (...args: any[]) => {
+    nativeWaiting = true; await gate.promise; return originalWrite(...args as Parameters<typeof originalWrite>)
+  })
+  const originalEditor = editor(f.scene()), query = 'Original early receipt Query'
+  await paste(f.scene(), query); await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false)); await click(button(f.scene(), 'Send'))
+  await wait(() => expect(nativeWaiting).toBe(true))
+  await wait(() => expect(f.observations.some(item => item.method === 'space.mote.dialogue.setup.advance')).toBe(true))
+  await wait(() => expect(f.observations.some(item => item.method === 'space.mote.dialogue.setup.inspect' &&
+    item.result.deferredInput?.input?.status === 'waiting')).toBe(true))
+  await wait(() => expect(f.observations.filter(item => item.method === 'space.mote.dialogue.setup.inspect')).toHaveLength(
+    f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.inspect').length))
+  expect(f.owner.snapshot().record.selectedSessionId).toBeNull()
+  expect(f.scene().querySelector('.mote-first-message')?.getAttribute('data-stage')).not.toBe('delivered')
+  if (laterDraft) await paste(f.scene(), 'Later C stays in this same Mote')
+  await act(async () => gate.resolve())
+  await wait(() => expect(f.observations.some(item => item.method === 'space.mote.dialogue.setup.inspect' &&
+    ['admitted', 'terminal-confirmed'].includes(agentPromptSubmissionOutcome(item.result.deferredInput?.record ?? null)))).toBe(true))
+  if (laterDraft) {
+    await wait(() => expect(f.scene().textContent).toContain('首条消息已送达'))
+    expect(new Map(f.owner.snapshot().record.conversation.drafts).get(f.key)).toBe('Later C stays in this same Mote')
+  } else await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
+  expect(editor(f.scene())).toBe(originalEditor)
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.advance')).toHaveLength(1)
+  expect(f.host.h.inner.kernel.input.mock.calls.filter((call: any[]) => String(call[1]?.data).includes(query))).toHaveLength(1)
 })
 
 it('a delayed original A receipt cannot clear later B or steal the later Mobile selection', async () => {
@@ -188,7 +225,7 @@ it('unknown setup outcome remounts through Core readonly inspection without crea
   await wait(() => expect((f.scene()?.textContent ?? '')).toContain('Original setup receipt lost'))
   const opens = f.rpc.mock.calls.filter(([method]) => method === 'agent.open').length
   await f.view.render(null); await f.view.render(f.render())
-  await wait(() => expect(f.view.element.querySelector('.mote-start [contenteditable="true"]')).toBeTruthy())
+  await wait(() => expect(f.view.element.querySelector('.mobile-mote-composer [contenteditable="true"]')).toBeTruthy())
   await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'space.mote.dialogue.setup.inspect')).toBe(true))
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(opens)
   expect(f.owner.snapshot().record.agentCreates?.some(item => item.input.moteMain?.deferredInput?.prompt === 'Keep unknown Query')).toBe(true)
@@ -341,7 +378,7 @@ it('retained Device first questions do not block an independent Core executor-ch
   await f.owner.updateNavigation({ selectedSessionId: current.reference!.sessionId, hostUrl: '', panel: 'conversation' })
   await f.view.render(f.render())
   const old = current.reference!.sessionId, before = (await f.host.h.client.readAgentSession(old))!, route = await f.host.rpc.call('space.mote.dialogue.input.inspect', { target: f.host.target, operationId: current.record!.moteMain!.deferredInput!.operationId })
-  const slot = () => f.view.element.querySelector<HTMLElement>('.mobile-conversation-slot:not([hidden])')!
+  const slot = () => f.view.element.querySelector<HTMLElement>('.mobile-conversation-panel')!
   await wait(() => expect(slot()?.querySelector('[contenteditable=true]')).toBeTruthy())
   const { readFile, writeFile } = await import('node:fs/promises')
   const path = join(f.host.h.root, 'configuration.json'), config = JSON.parse(await readFile(path, 'utf8'))
@@ -432,7 +469,7 @@ it('an explicit Mobile new round hands over before its first Query and keeps the
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
   const firstSession = f.owner.snapshot().record.selectedSessionId!
   await openNewRound(f)
-  await wait(() => expect(f.scene().dataset.mode).toBe('new'))
+  await wait(() => expect(f.scene().querySelector<HTMLElement>('.mote-start')?.dataset.mode).toBe('new'))
   expect(f.view.element.querySelector('.mobile-session-tool-slot')?.hasAttribute('hidden')).toBe(true)
   expect(f.view.element.querySelector('.mobile-conversation-slot')?.hasAttribute('hidden')).toBe(true)
   const before = f.rpc.mock.calls.filter(([method]) => method === 'agent.open').length
@@ -549,7 +586,7 @@ it('Device Mote drafts stay separate for exact Mote/Zone identities even when th
   const identity = { name: 'Other Mote', project: 'Other', mote: { spaceId: target.spaceId, name: 'Other Mote', contentReference: { ...target.expectedResource, zoneId: target.zoneId } } }
   await f.owner.updatePresentation({ selectedSessionId: null, hostUrl: '', panel: 'conversation' }, { primary: 'mote', showSession: true, showGoalWork: false,
     identity, profile: null, recentMoteSpaceId: target.spaceId, moteView: { spaceId: target.spaceId, section: 'discussion', detail: false, directAgent: false } })
-  await f.view.render(f.render()); await wait(() => expect(f.view.element.querySelector('.mote-start [contenteditable="true"]')).toBeTruthy())
+  await f.view.render(f.render()); await wait(() => expect(f.view.element.querySelector('.mobile-mote-composer [contenteditable="true"]')).toBeTruthy())
   expect(editor(f.scene()).textContent).toBe('')
   await paste(f.scene(), 'Unconfirmed exact Mote B draft')
   const otherKey = mobileMoteStartDraftKey(f.f.client, target)
@@ -584,7 +621,7 @@ it.each(['idle', 'executor-change'] as const)('actual Mobile new Query follows t
   const f = await actual('claude')
   await paste(f.scene(), 'Qualify original human Query'); await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false)); await click(button(f.scene(), 'Send'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
-  const old = f.owner.snapshot().record.selectedSessionId!, slot = () => f.view.element.querySelector<HTMLElement>('.mobile-conversation-slot:not([hidden])')!
+  const old = f.owner.snapshot().record.selectedSessionId!, slot = () => f.view.element.querySelector<HTMLElement>('.mobile-conversation-panel')!
   const setupIndex = f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.advance')
   expect(setupIndex).toBeGreaterThanOrEqual(0)
   const setup = await f.rpc.mock.results[setupIndex]!.value
@@ -632,7 +669,8 @@ it.each(['idle', 'executor-change'] as const)('actual Mobile new Query follows t
   const record = f.owner.snapshot().record.conversation, retained = JSON.stringify(['retained-prompt', old, query.input.operationId])
   expect(new Map(record.attempts).has(oldKey)).toBe(false)
   expect(new Map(record.attempts).get(retained)).toMatchObject({ operationId: query.input.operationId, phase: 'confirmed', moteMain: { reference: { sessionId: old } } })
-  expect(new Map(record.drafts).get(oldKey)).toBe('')
+  expect(new Map(record.drafts).get(oldKey)).toBe(oldDraft)
+  expect(new Map(record.drafts).get(f.key)).toBe('')
   expect(f.host.h.started).toHaveLength(2)
   expect(f.host.h.inner.kernel.stop).not.toHaveBeenCalled()
 })
@@ -641,7 +679,8 @@ it('a Core due response arriving after later B editing leaves the healthy origin
   const f = await actual('claude')
   await paste(f.scene(), 'Original idle proof Query'); await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false)); await click(button(f.scene(), 'Send'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
-  const old = f.owner.snapshot().record.selectedSessionId!, slot = () => f.view.element.querySelector<HTMLElement>('.mobile-conversation-slot:not([hidden])')!
+  const old = f.owner.snapshot().record.selectedSessionId!, slot = () => f.view.element.querySelector<HTMLElement>('.mobile-conversation-panel')!
+  const oldSessionDraft = new Map(f.owner.snapshot().record.conversation.drafts).get(JSON.stringify(['draft', old]))
   const setupIndex = f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.advance')
   expect(setupIndex).toBeGreaterThanOrEqual(0)
   const setup = await f.rpc.mock.results[setupIndex]!.value
@@ -659,6 +698,7 @@ it('a Core due response arriving after later B editing leaves the healthy origin
   await wait(() => expect(slot().textContent).toContain('设置要求开始新一轮'))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(old)
   expect(f.view.element.querySelector('.mote-start')).toBeNull()
-  expect(new Map(f.owner.snapshot().record.conversation.drafts).get(JSON.stringify(['draft', old]))).toBe('Later B Query remains here')
+  expect(new Map(f.owner.snapshot().record.conversation.drafts).get(f.key)).toBe('Later B Query remains here')
+  expect(new Map(f.owner.snapshot().record.conversation.drafts).get(JSON.stringify(['draft', old]))).toBe(oldSessionDraft)
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
 })

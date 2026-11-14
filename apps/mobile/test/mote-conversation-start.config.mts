@@ -47,5 +47,5 @@ export default { ...base, cacheDir: resolve(root, '.tmp/mobile-mote-start-vitest
     { find: /^@agentmux\/client-ui\/agent-icons\/(.*)$/, replacement: resolve(root, 'packages/client-ui/src/assets/agent-icons/$1') },
     ...base.resolve!.alias as import('vite').Alias[]
   ] },
-  test: { ...base.test, include: ['apps/mobile/test/mote-conversation-start.test.tsx'], testTimeout: 30000 }
+  test: { ...base.test, include: ['apps/mobile/test/mote-conversation-start.test.tsx', 'apps/mobile/test/mote-composer-continuity.test.tsx'], testTimeout: 30000 }
 }

@@ -17,7 +17,7 @@ app.whenReady().then(async () => {
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
   if (mode === 'responsive-primary-workfaces') await win.loadURL(html)
-  else await win.loadFile(html, ['mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
+  else await win.loadFile(html, ['mote-composer', 'mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')
@@ -103,6 +103,9 @@ app.whenReady().then(async () => {
   }
   if (mode === 'mote-start') {
     await require('./mote-start.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
+  }
+  if (mode === 'mote-composer') {
+    await require('./mote-composer.cjs')({ win, read, until, resize, tap, button, capture, result, phase }); result.passed = true; return
   }
   if (mode === 'quiet-run-status') {
     await require('./quiet-run-status.cjs')({ read, until, resize, tap, button, capture, result })

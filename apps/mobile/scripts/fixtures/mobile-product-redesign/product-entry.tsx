@@ -26,13 +26,18 @@ import '@agentmux/client-ui/styles.css'
 
 type Call = { sequence: number; observedAt: number; method: string; params: unknown }
 const responsiveFixture = new URLSearchParams(location.search).get('responsive-primary-workfaces') === '1'
+const composerFixture = new URLSearchParams(location.search).get('mote-composer') === '1'
+const composerFresh = composerFixture && localStorage.getItem('mobile-product-fixture-initialized') !== 'true'
+let composerRuntimeKnown = !composerFresh
+let releaseComposerReads: (() => void) | null = null
+const composerReads = composerFresh ? new Promise<void>(resolve => { releaseComposerReads = resolve }) : Promise.resolve()
 const restoreResponsiveWorkface = responsiveFixture && localStorage.getItem('mobile-product-fixture-initialized') === 'true'
 const calls: Call[] = []
 const record = (method: string, params: unknown = {}) => calls.push({ sequence: calls.length + 1, observedAt: Date.now(), method, params: structuredClone(params) })
 const original = (id: string): AgentMuxAgentSession => ({ kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'fixture-original',
   hostId: 'host-original', workspacePath: fixturePath("execution-original"), run: { runId: `run-${id}` }, retiredRuns: [], createdAt: 1, updatedAt: 1 })
 const main = original('session-mote'), waiting = original('session-waiting'), result = original('session-result')
-const moteDialogueCapture = new URLSearchParams(location.search).get('mote-dialogue') === '1' ? createMoteDialogueCapture() : null
+const moteDialogueCapture = new URLSearchParams(location.search).get('mote-dialogue') === '1' || composerFixture ? createMoteDialogueCapture() : null
 const ordinaryReply = '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。'
 waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-original', agentSessionId: waiting.agentSessionId,
   title: '请确认本次资料读取', evidence: { source: 'native-hook', observedAt: 1, run: waiting.run },
@@ -165,7 +170,7 @@ const client = {
   catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
   onStatusEvent: (listener: (event: AgentMuxClientEvent) => void) => { statusListeners.add(listener); record('sdk.onStatusEvent'); return () => { statusListeners.delete(listener); record('sdk.releaseStatusEvent') } },
-  runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', ownerInstanceId: 'owner-original', availability: connected ? 'connected' : 'disconnected' }),
+  runtimeOwnerIdentity: () => composerFixture && !composerRuntimeKnown ? null : ({ runtimeId: 'runtime-original', ownerInstanceId: 'owner-original', availability: connected ? 'connected' : 'disconnected' }),
   statusAgent: async (id: string) => {
     if (!densityScene) throw Error('Run status is not observed by this metadata fixture')
     record('sdk.statusAgent', { id })
@@ -287,6 +292,7 @@ const client = {
   },
   forwardRpc: async (method: string, params: Record<string, unknown>) => {
     record(method, params)
+    if (composerFixture && (method === 'space.ls' || method === 'space.mote.dialogue.read')) await composerReads
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
     if (method === 'space.ls' && moteDialogueCapture && __AGENTMUX_MOBILE_SETUP_RETENTION__) {
       const source = moteDialogueCapture.facts(), fact = catalog.motePresentation!.find(value => value.spaceId === source.target.spaceId)!
@@ -370,11 +376,19 @@ const client = {
 } as unknown as AgentMuxHostedClient
 if (!localStorage.getItem('mobile-product-fixture-initialized')) {
   localStorage.setItem('agentmux-mobile-home', 'mote')
-  if (responsiveFixture) {
+  if (responsiveFixture || composerFixture) {
     await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
     await getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
   } else getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
   localStorage.setItem('mobile-product-fixture-initialized', 'true')
+}
+if (composerFresh) {
+  const fact = catalog.motePresentation!.find(value => value.spaceId === 'mote-original')!
+  await getDeviceWorkface().updatePresentation({ selectedSessionId: main.agentSessionId, hostUrl: '', panel: 'conversation' },
+    { primary: 'mote', showSession: true, showGoalWork: false, identity: { name: '我的 Mote', project: '我的 Mote',
+      mote: { spaceId: 'mote-original', name: '我的 Mote', contentReference: fact.content! } }, profile: null, recentMoteSpaceId: 'mote-original',
+      moteView: { spaceId: 'mote-original', section: 'discussion', detail: false, directAgent: false } })
+  await getDeviceWorkface().editConversation([{ bucket: 'drafts', key: JSON.stringify(['draft', main.agentSessionId]), next: '原 Session B 草稿，独立保留。' }], getDeviceWorkface().recordIdentity())
 }
 const browserPlatform = createBrowserPlatform()
 const platform = { ...browserPlatform, copyText: async (text: string, reportError: (error: unknown) => void) => {
@@ -411,6 +425,7 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   const [connectScene, setConnectScene] = useState<MobileConnection | null>(null)
   Object.assign(window, { mobileProductScene: {
+    releaseComposerReads: () => { composerRuntimeKnown = true; releaseComposerReads?.(); releaseComposerReads = null },
     prepareCompactNavigation: () => {
       const names = ['Sample Project 业务协作与代码审查', '研究材料与证据核对成员', '原上下文中的实验建议', '视觉方向与实现核对']
       for (const [index, row] of (catalog.agentPresentation ?? []).entries()) {
@@ -674,7 +689,7 @@ function Scene() {
   } })
   if (connectScene) return <MobileApp key={'connect-' + connectScene.state + String(connectScene.paired)} client={null} connection={connectScene} platform={platform}
     connectionPanel={connectScene.paired === false ? undefined : connectScene.state === 'unavailable' ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button">重新检查连接</button></> : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
-  const app = <MobileApp key={densityMount} restoreWorkface={restoreResponsiveWorkface} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
+  const app = <MobileApp key={densityMount} restoreWorkface={restoreResponsiveWorkface || composerFixture} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
   return webUpdateScene ? <MobileWebUpdateSafetyProvider verifyConnection={verifyWebUpdateConnection}>{app}</MobileWebUpdateSafetyProvider> : app
 }
 createRoot(document.getElementById('root')!).render(<Scene />)
