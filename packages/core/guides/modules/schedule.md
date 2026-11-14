@@ -60,6 +60,14 @@ Creation/activation, a timer firing, input delivery and completed business work 
 lastTickAt is the last recorded check, not necessarily the latest identical busy observation;
 lastTickId identifies the last claimed tick, whose durability may be unconfirmed, and is not an
 identity for read-only checks.
+Paused records may include `pause.reason` and the paired `pause.episodeId`/`pause.pausedAt`.
+These are original scheduler facts: `manual` means an explicit pause mutation, not proof
+of a human actor. Source changes, disabled settings, preparation, ended execution and
+unconfirmed input or persistence have distinct typed reasons. Missing legacy fields
+remain unknown; never derive pause onset from lastTickAt or classify it from lastDecision.
+Keep a reminder's original schedule, episode and pending input even if the current Main
+or a later pause has changed. Inspect that original input before considering recovery;
+reading or dismissing a reminder does not resume the schedule or resend unknown input.
 Inspect original schedule facts after an unknown result rather than making a duplicate.
 Unavailable scheduler observations retain original schedules, Sessions and requests; report
 the failed read and the same-owner recovery action. Goal supervision does not itself authorize
