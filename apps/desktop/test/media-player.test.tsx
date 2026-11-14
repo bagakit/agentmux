@@ -5,6 +5,12 @@ import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('monaco-editor', () => ({}))
+// Unchanged, but counted: the player's own render formats the file size once, so its calls count player renders.
+vi.mock('@agentmux/editor-extensions/format-file-bytes', async original => {
+  const actual = await original<typeof import('@agentmux/editor-extensions/format-file-bytes')>()
+  return { ...actual, formatFileBytes: vi.fn(actual.formatFileBytes) }
+})
+import { formatFileBytes } from '@agentmux/editor-extensions/format-file-bytes'
 import { MediaPlayer, type MediaLease } from '@agentmux/editor-extensions/ui/MediaPlayer'
 import { api } from '../src/renderer/src/lib/api'
 import { classifyStream, createSeekQueue, describeMediaFailure, liveEdgeState, resolveMediaKey, seekableWindow, type MediaKeyEvent } from '@agentmux/editor-extensions/engines/media-player'
@@ -163,6 +169,21 @@ describe('mounted player', () => {
   function define(element: HTMLMediaElement, facts: Record<string, unknown>) {
     for (const [name, value] of Object.entries(facts)) Object.defineProperty(element, name, { configurable: true, get: () => value })
   }
+  function timeline() { return container.querySelector<HTMLInputElement>('.media-player__slider')! }
+  // The track runs 200–800px inside a 1000px stage whose top is 400px above it: with a 600 s file, x - 200 is the second.
+  function layout() {
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() { return this } }) as DOMRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('media-player__slider')) return rect(200, 500, 600, 20)
+      if (this.classList.contains('media-player__timeline')) return rect(192, 500, 616, 20)
+      return rect(0, 100, 1000, 450)
+    })
+  }
+  async function point(clientX: number) {
+    await act(async () => { timeline().dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX, pointerId: 1 })) })
+  }
+  const bubble = () => container.querySelector<HTMLElement>('.media-player__bubble')
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -478,5 +499,18 @@ describe('mounted player', () => {
     expect(retry!.textContent).toBe('Retry')
     // The deprecated small-button retry must be gone for this player.
     expect(container.querySelector('.media-player__failure .small-button')).toBeNull()
+  })
+
+  it('pointing along the timeline re-renders the timeline only, never the player around it', async () => {
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { duration: 600 })
+    await act(async () => { media().dispatchEvent(new Event('durationchange')) })
+    layout()
+    // The first move may let React re-run the player once to confirm its idle timer state is unchanged.
+    await point(260)
+    const renders = vi.mocked(formatFileBytes).mock.calls.length
+    for (const x of [320, 380, 440, 500]) await point(x)
+    expect(bubble()!.textContent).toBe('5:00')
+    expect(vi.mocked(formatFileBytes).mock.calls.length).toBe(renders)
   })
 })

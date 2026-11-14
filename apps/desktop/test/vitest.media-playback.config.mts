@@ -11,7 +11,9 @@ const changes = {
   'pointer-speed': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'direction: 1, wrap: true', 'direction: 1, wrap: false'],
   'seek-every-request': ['packages/editor-extensions/src/engines/media-player.ts', 'if (open && flight === null) {', 'if (open) {'],
   'seek-oldest-waiting': ['packages/editor-extensions/src/engines/media-player.ts', "next = time\n      return 'queued'", "next ??= time\n      return 'queued'"],
-  'seek-landing-keeps-waiting': ['packages/editor-extensions/src/engines/media-player.ts', 'next = null\n      if (time === flight', 'if (time === flight']
+  'seek-landing-keeps-waiting': ['packages/editor-extensions/src/engines/media-player.ts', 'next = null\n      if (time === flight', 'if (time === flight'],
+  'pointer-rerenders-player': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'onPointerMove={audioOnly ? undefined : wake}',
+    'onPointerMove={audioOnly ? undefined : () => { wake(); setFacts(previous => ({ ...previous })) }}']
 } as const
 
 export default defineConfig({ ...original,
