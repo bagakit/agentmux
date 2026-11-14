@@ -166,7 +166,7 @@ async function run() {
   await read('window.dispatchEvent(new Event("online"));document.dispatchEvent(new Event("visibilitychange"));true')
   await pause(80); assert.equal(heldMetadata.length, afterCancel, 'Foreground does not reissue a cancelled observation')
   await click('重新检查连接')
-  await wait(`document.querySelector('.mobile-startup-observation')?.textContent.includes('正在读取连接')`)
+  await wait(`document.querySelector('.mobile-startup > p')?.textContent.includes('正在读取连接')&&[...document.querySelectorAll('.mobile-startup-observation button')].some(n=>n.getClientRects().length&&n.textContent.trim()==='取消本次读取')`)
   await waitServer(() => heldMetadata.length === 2, 'New explicit metadata request entered')
   assert.equal(heldMetadata.length, 2, 'A second GET requires the new explicit retry')
   const first = heldMetadata[0], fakeOffer = { v: 2, serverId: 'unregistered-private-host', daemonPublicKeyB64: fakePublicKey.toString('base64'), relay: { endpoint: new URL(origin).host, useTls: false } }
@@ -174,7 +174,7 @@ async function run() {
   receipt.checks.push({ action: 'old-metadata-late-release', originalSequence: first.record.sequence, originalClosed: first.res.destroyed, delivered,
     boundary: 'Real fetch cancellation may already close this response; this proves HTTP observation cancellation, not an ignored-signal callback.' })
   await pause(100)
-  assert.equal(await read('Boolean(document.querySelector(".mobile-startup-observation")?.textContent.includes("正在读取连接"))'), true, 'The old HTTP release does not clear the new explicit pending read')
+  assert.equal(await read(`Boolean(document.querySelector('.mobile-startup > p')?.textContent.includes('正在读取连接')&&[...document.querySelectorAll('.mobile-startup-observation button')].some(n=>n.getClientRects().length&&n.textContent.trim()==='取消本次读取'))`), true, 'The old HTTP release does not clear the new explicit pending read')
   assert.equal(await read('localStorage.getItem("agentmux-mobile-workface-v1")'), originalRecord)
   assert.equal(receipt.websocketAttempts, 0, 'No old observation starts an encrypted connection')
   await capture('startup-retry-held-390-light')
