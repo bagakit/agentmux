@@ -1,4 +1,5 @@
 import { parseAgentTakeoverSource, parseAgentTakeoverQuery } from './agent-takeover.js'
+import { parseFocusParams } from './focus-control.js'
 import { parseAmuxObjectLink } from './sharing.js'
 import { SPACE_LINK_CLI_COMMANDS } from './space-link-cli.js'
 import { parseAgentPromotionParams } from './agent-promotion.js'
@@ -1207,6 +1208,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('message.dispatch.report', '--source-message ID --reply-message ID --kind KIND', 'Record an actual reply under the original participant and thread rules.', { '--source-message': 'data', '--reply-message': 'data', '--kind': 'value' }, f => ({ sourceMessageId: id(f, '--source-message'), replyMessageId: id(f, '--reply-message'), kind: value(f, '--kind', true) })),
   command('app.mobile.assets.inspect', '--input FILE|-', 'Read the original mobile asset owner, activation operation or exact reported page.', { '--input': 'data' }, async f => parseMobileAssetsParams('app.mobile.assets.inspect', await readControlJsonInput(value(f, '--input', true)!, 'Mobile asset target')) as unknown as Record<string, unknown>, 'Read {hostId,operationId?} or {hostId,client:{devicePrincipalId,documentId}}. No device administration, page reload or operation replay. Retention is current Host instance, active and previous namespaces; not-retained is not proof of non-application.'),
   command('app.mobile.assets.activate', '--input FILE|-', 'Activate a complete phone Web candidate from the authenticated Agent execution Workspace.', { '--input': 'data' }, async f => parseMobileAssetsParams('app.mobile.assets.activate', await readControlJsonInput(value(f, '--input', true)!, 'Mobile candidate')) as unknown as Record<string, unknown>, 'Requires the original managed Agent on the exact hostId. Input freezes operationId,candidatePath,candidateDigest,expectedActiveRevision; candidatePath is a literal relative build directory inside its original execution Workspace. Inspect an unknown original operation before another write. Activation changes HTTP bytes only; it never reloads a page or restarts an Agent/Host, and does not certify loaded.'),
+  command('focus.ls', '[--limit N] [--cursor CURSOR]', 'Read the original Focus Project and Collection group directory without navigation.',
+    { '--limit': 'value', '--cursor': 'data' }, f => parseFocusParams('focus.ls', { ...numbers(f, { '--limit': 'limit' }), ...fields(f, { '--cursor': 'cursor' }) }),
+    'Follow nextCursor with the same source and limit. Read status, issues and coverage; unavailable discovery is not an empty directory. Original scope identities are not titles, current focus or Agent Session identities.'),
+  command('focus.read', '--input FILE|-', 'Read one exact Focus group and explicit all or member selection without changing any Agent.',
+    { '--input': 'data' }, async f => parseFocusParams('focus.read', await readControlJsonInput(value(f, '--input', true)!, 'Exact Focus read')),
+    'Input {scope,selection,limit?,cursor?}. scope is project {kind,hostId,projectSpaceId} or collection {kind,hostId,categorySpaceIds}. selection is {kind:all} or {kind:members,references:[{hostId,contextId}]}; [] stays empty. One read accepts at most 256 references; partition larger logical tasks into complete exact batches, then follow every batch cursor unchanged. Never truncate or broaden a GUI cohort to all. Read coverage/status/issues and keep changed or unconfirmed members; read-only observations grant no control authority.'),
   command('app.inspect', '[--input FILE|-]', 'Inspect actual Desktop selection, or an exact mounted conversation consumer without activating it.',
     { '--input': 'data' }, async f => {
       const path = value(f, '--input')
