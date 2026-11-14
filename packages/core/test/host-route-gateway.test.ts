@@ -196,6 +196,59 @@ test('A original parent admits one B child, keeps A actor through C/D and refuse
 })
 
 
+test('real preparation and execution children constrain selected Host locators to the resolved SID and Agent Runtime', async () => {
+  const f = await fixture(), agentSessionId = 'original-selected-SID'
+  const input = { bindingId: 'locator-binding', agentHostId: 'D', agentRuntimeId: f.d.identity.runtimeId, agentRoute: f.route,
+    resourceHostId: 'local', resourceRuntimeId: f.b.identity.runtimeId, resourceWorkspacePath: '/B/project', resourceGrant: { scope: 'host-user' as const, bindingId: 'locator-binding' },
+    agent: { agentSessionId, createOperationId: 'locator-CID', executorId: 'selected', executorRevision: 'revision', workspacePath: '/D/agent' } }
+  const cGrant = f.grant('locator-C', f.b.identity), dGrant = f.grant('locator-D', f.c.identity)
+  cGrant.scopes.push('runtime.invoke/hostEnvironment', 'runtime.invoke/resolveAgentCreationSessionId')
+  dGrant.scopes.push('runtime.invoke/hostEnvironment', 'runtime.invoke/resolveAgentCreationSessionId')
+  await f.configure(f.c, [], [cGrant]); await f.configure(f.d, [], [dGrant])
+  f.intercept.set('D', async (_method, params) => {
+    const invocation = (params as typeof f.call.params).invocation
+    return { value: invocation.method === 'resolveAgentCreationSessionId' ? agentSessionId : null }
+  })
+  const invoke = (agentSessionId?: unknown, extra?: Record<string, unknown>) => ({
+    ...f.call.params, invocation: { method: 'hostEnvironment' as const,
+      args: agentSessionId === undefined ? [] : [{ agentSessionId, ...extra }] }
+  })
+  const preparation = await f.b.gateway.authorizePreparation(f.d.identity.runtimeId, { principal },
+    { method: 'agent.execution.create', params: input })
+  const beforeResolve = executionRouteRpc(f.b.gateway, f.route, preparation)
+  expect(await beforeResolve.call('runtime.invoke', invoke())).toEqual({ value: null })
+  expect(f.arrivals).toHaveLength(1)
+  await expect(beforeResolve.call('runtime.invoke', invoke(agentSessionId))).rejects.toMatchObject({ code: 'HOST_ROUTE_DERIVATION_MISMATCH' })
+  expect(f.arrivals).toHaveLength(1)
+  await beforeResolve.call('runtime.invoke', { ...f.call.params, invocation: { method: 'resolveAgentCreationSessionId', args: [input.agent.createOperationId] } })
+  expect(f.arrivals).toHaveLength(2)
+  const prepared = executionRouteRpc(f.b.gateway, f.route, preparation)
+  // The exact carrier records the CID resolver result; a fresh carrier has not resolved it.
+  await expect(prepared.call('runtime.invoke', invoke(agentSessionId))).rejects.toMatchObject({ code: 'HOST_ROUTE_DERIVATION_MISMATCH' })
+  expect(f.arrivals).toHaveLength(2)
+  expect(await beforeResolve.call('runtime.invoke', invoke(agentSessionId))).toEqual({ value: null })
+  expect(f.arrivals).toHaveLength(3)
+  for (const params of [invoke('another-SID'), invoke(agentSessionId, { preparationSessionId: agentSessionId })]) {
+    await expect(beforeResolve.call('runtime.invoke', params)).rejects.toMatchObject({ code: params.invocation.args[0] && 'preparationSessionId' in params.invocation.args[0]
+      ? 'INVALID_CONTROL_REQUEST' : 'HOST_ROUTE_DERIVATION_MISMATCH' })
+  }
+  expect(f.arrivals).toHaveLength(3)
+
+  const execution = await f.b.gateway.authorizeExecution(input, { principal })
+  const child = executionRouteRpc(f.b.gateway, f.route, execution)
+  expect(await child.call('runtime.invoke', invoke())).toEqual({ value: null })
+  expect(await child.call('runtime.invoke', invoke(agentSessionId))).toEqual({ value: null })
+  expect(f.arrivals).toHaveLength(5)
+  await expect(child.call('runtime.invoke', invoke('another-SID'))).rejects.toMatchObject({ code: 'HOST_ROUTE_DERIVATION_MISMATCH' })
+  await expect(child.call('runtime.invoke', invoke(agentSessionId, { guessed: true }))).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  const wrongRuntimeRoute = { source: f.b.identity, hops: [{ edgeId: 'C', target: f.c.identity }] }
+  await f.configure(f.b, [{ id: 'D', route: f.route }, { id: 'C', route: wrongRuntimeRoute }], [])
+  await expect(executionRouteRpc(f.b.gateway, wrongRuntimeRoute, execution).call('runtime.invoke', invoke(agentSessionId)))
+    .rejects.toMatchObject({ code: 'HOST_ROUTE_DERIVATION_MISMATCH' })
+  expect(f.arrivals).toHaveLength(5)
+})
+
+
 test('the actual Hosted helper target DTO is scoped to its original Run and unrelated Runs cannot attach', async () => {
   const f = await fixture()
   const input = { bindingId: 'binding', agentHostId: 'D', agentRuntimeId: f.d.identity.runtimeId, agentRoute: f.route,
