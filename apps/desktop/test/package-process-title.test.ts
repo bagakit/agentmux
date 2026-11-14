@@ -44,11 +44,11 @@ describe.skipIf(process.platform !== 'darwin' || !process.env.PROCESS_IDENTITY_E
         const afterRow = row()
         facts.afterRow = afterRow
         expect(afterRow).toMatch(new RegExp(` ${title}$`))
-        const image = JSON.parse(execFileSync('/usr/bin/python3', ['-c',
-          "import ctypes,json,sys;lib=ctypes.CDLL('/usr/lib/libproc.dylib',use_errno=True);buf=ctypes.create_string_buffer(4096);size=lib.proc_pidpath(int(sys.argv[1]),buf,len(buf));print(json.dumps({'size':size,'image':buf.value.decode()}))", String(pid)], { encoding: 'utf8' }))
+        const image = JSON.parse(execFileSync(resolve(import.meta.dirname, '../../../packages/core/dist/native-socket-peer-darwin'),
+          ['--process-executable', String(pid)], { encoding: 'utf8' }))
         facts.actualImage = image
-        expect(image.size).toBeGreaterThan(0)
-        expect(image.image).toBe(executable)
+        expect(image.pid).toBe(pid)
+        expect(Buffer.from(image.pathHex, 'hex').toString('utf8')).toBe(executable)
         const current = await observeApplicationProcesses(bundle, missing.admissions)
         facts.current = { requested: current.ownershipObservation.requested.has(pid),
           mode: current.nodeModes.find(mode => mode.pid === pid) ?? null,

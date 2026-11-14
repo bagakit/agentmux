@@ -140,7 +140,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale', declar
         return { stdout: version }
       }
       if (executable === '/usr/bin/codesign') return { stdout: '', stderr: display ? `CDHash=${sha(await readFile(args.at(-1)!)).slice(0, 40)}\n` : 'Changed human-readable signature display\n' }
-      if (executable === '/usr/bin/python3') return { stdout: JSON.stringify({ valid: true, cdHash: sha(await readFile(mapped)).slice(0, 40),
+      if (executable === process.execPath && args[1] === '--kernel-code') return { stdout: JSON.stringify({ valid: true, cdHash: sha(await readFile(mapped)).slice(0, 40),
         pid, uid: kernelUid, startSeconds, startMicroseconds: missingBirth ? undefined : startMicroseconds + (insideBirthDrift && kernelReads++ > 0 ? 1 : 0) }) }
       if (executable === '/usr/bin/tar') return { stdout: '' }
       if (executable === '/bin/ps') return { stdout: changeBirth ? `${displayBirth}-changed` : displayBirth }
@@ -168,7 +168,8 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale', declar
       queueMicrotask(() => { child.stdout.end(); child.stderr.end(); child.emit('exit', 0, null) })
       return child
     }
-    expect(command).toBe('/usr/bin/python3'); expect(args.slice(0, 2)).toEqual(['-I', '-c'])
+    expect(command).toBe(process.execPath); expect(args[1]).toBe('--static-code')
+    expect(options.env.ELECTRON_RUN_AS_NODE).toBe('1')
     const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(),
       kill: vi.fn(() => true), unref: vi.fn() })
     queueMicrotask(async () => {
@@ -182,7 +183,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale', declar
       // The CF reader can change the shared FD offset. Explicit-position hash
       // reads in the actual wrapper must still cover the entire original file.
       readSync(fd, Buffer.alloc(bytes.length), 0, bytes.length, null)
-      const observation = { result: { kind: 'security-static-code', architecture: staticArchitecture ?? args[3],
+      const observation = { result: { kind: 'security-static-code', architecture: staticArchitecture ?? args[2],
         dictionaryKey: 'kSecCodeInfoUnique', dataType: 'CFData', byteLength: 20, cdHash: sha(bytes).slice(0, 40), valid: true },
         primary: staticPrimary ? { name: 'RuntimeError', message: 'original CF observation failed' } : null,
         calls: ['SecStaticCodeCreateWithPathAndAttributes', 'SecStaticCodeCheckValidity', 'SecCodeCopySigningInformation'].map(api => ({ api, status: 0 })),

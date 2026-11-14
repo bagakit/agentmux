@@ -1,21 +1,22 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { observeApplicationProcesses } from '../scripts/package-process-scope.mjs'
 
 describe.skipIf(process.platform !== 'darwin')('installer process identity under slow OS observation', () => {
   it('waits for both fenced process observations and keeps the bound Node owner', async () => {
     const root = mkdtempSync(join(tmpdir(), 'agentmux-slow-process-probe-'))
-    const previousPythonPath = process.env.PYTHONPATH
+    const previousNodeOptions = process.env.NODE_OPTIONS
     const executable = realpathSync(process.execPath)
     let child: ChildProcess | undefined
     try {
-      // Delay the actual ps subprocess, so the original Python timeout and the
-      // outer Node timeout both exercise the production observation path.
-      writeFileSync(join(root, 'sitecustomize.py'), `import subprocess\n_original = subprocess.run\ndef _delayed(command, *args, **kwargs):\n    if isinstance(command, list) and command[:2] == ['/bin/ps', '-p']:\n        command = ['/bin/sh', '-c', 'sleep 2.7; exec "$@"', 'slow-ps'] + command\n    return _original(command, *args, **kwargs)\nsubprocess.run = _delayed\n`)
-      process.env.PYTHONPATH = previousPythonPath ? `${root}${delimiter}${previousPythonPath}` : root
+      // Delay the real bridge's ps read, without an external interpreter. This
+      // still exercises its original fenced observation and child completion.
+      const preload = join(root, 'slow-ps.mjs')
+      writeFileSync(preload, `import cp from 'node:child_process';import{syncBuiltinESMExports}from'node:module';const original=cp.execFileSync;cp.execFileSync=(command,args,...rest)=>{if(command==='/bin/ps'&&args[0]==='-p')Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2700);return original(command,args,...rest)};syncBuiltinESMExports();`)
+      process.env.NODE_OPTIONS = `${previousNodeOptions ?? ''} --import=${preload}`.trim()
       child = spawn(executable, ['-e', 'setInterval(() => {}, 1000)'], {
         env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'ignore'
       })
@@ -35,8 +36,8 @@ describe.skipIf(process.platform !== 'darwin')('installer process identity under
       expect(scope.serving).toContain(pid)
       expect(scope.admissions.find(admission => admission.pid === pid)?.classification).toBe('unknown')
     } finally {
-      if (previousPythonPath === undefined) delete process.env.PYTHONPATH
-      else process.env.PYTHONPATH = previousPythonPath
+      if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS
+      else process.env.NODE_OPTIONS = previousNodeOptions
       if (child && child.exitCode === null && child.signalCode === null) {
         child.kill('SIGTERM')
         await new Promise<void>(resolve => child!.once('exit', () => resolve()))
