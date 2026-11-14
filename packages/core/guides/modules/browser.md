@@ -87,6 +87,24 @@ Read only the matching local help:
   A missing result remains unconfirmed. History updates do not invalidate settings
   drafts, change native routes or close healthy pages; the original exit check remains
   available independently of diagnostic history storage.
+- amux browser profile bookmark --help: managed bookmarks in the original Profile metadata.
+  All five leaf commands use `--input FILE|-` JSON; `ls` requires `profileId` and `folderId`
+  (`null` for root), optionally `operationId` to check an original receipt. It returns the exact
+  folder's entries, ancestor path, library `revision` and all original pending operations for recovery.
+  `edit` requires `profileId`, `expectedRevision`, `operationId`, and `change`: `create-folder`
+  (`parentId`, `label`), `rename-folder` (`id`, `label`), `move-folder` (`id`, `parentId`),
+  `remove-folder` (`id`, must be empty), `save` (`folderId`, `title`, optional existing `id`,
+  optional `url` to keep an existing address), or `remove` (`id`). New bookmarks require `url`.
+  `import` also names `folderId`, `sourcePath` for Netscape HTML, `.webloc` or `.url`; it appends
+  new identities and reports conflicts without overwriting originals. `export` names `folderId`
+  and `destinationPath`; it writes a new Netscape HTML file and never overwrites an existing file.
+  `open` names `bookmarkId` and `browserId` in that exact Profile. The original Browser owns
+  input, Agent eligibility and app-link consent. A completed open receipt confirms the original
+  open request, not that the site succeeded. Query the original operation after an unconfirmed
+  reply; pending operations survive restart and are never automatically dispatched again.
+  Bookmark URLs retain their complete query/fragment for accurate reads, edits, opening and export;
+  operation receipts and diagnostics omit URLs and local source/destination paths. The Workspace
+  star still writes a standard `.webloc` through the original Workspace file owner.
 - amux browser profile extension --help: per-Profile approved local extension packages.
   `extension ls --profile ID` reads configured identities and current native load facts without
   creating a native Profile. `prepare --profile ID --expected-revision TOKEN --operation-id ID
