@@ -9,7 +9,7 @@ export function moteEntryDraftKey(scope: MoteWorkfaceScope): string {
 }
 
 /** A message the person sent before the Main was read. It stays on this device; nothing has been sent. */
-export type MoteHeldEntryInput = { operationId: string; prompt: string }
+export type MoteHeldEntryInput = import('@agentmux/core/mote-dialogue').MoteMainDeferredInput
 
 /** Held messages whose open is still alive in this window; a saved hold from a closed window or reload is not here. */
 const liveHolders = new Set<string>()
@@ -43,5 +43,5 @@ export function useMoteHeldEntryInput(draftKey: string | null, active: boolean) 
   }, [draftKey, holder])
   // A hold saved by an open that no longer exists (a reload or another closed window) is returned, not sent.
   useEffect(() => { if (saved && active && !liveHolders.has(saved.holder)) settle(saved.operationId) }, [saved, active, settle])
-  return { held: saved && own ? { operationId: saved.operationId, prompt: saved.prompt } : null, hold, release, settle }
+  return { held: saved && own ? { operationId: saved.operationId, prompt: saved.prompt, ...(saved.focusTask ? { focusTask: saved.focusTask } : {}) } : null, hold, release, settle }
 }

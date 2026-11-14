@@ -122,9 +122,11 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
     finally { restoring.current = false; setRestoringInput(false) }
   }
   if (!active) return null
-  const pending = [...new Set([...(reading?.pendingStarts ?? []), ...(reading?.pendingOperationId ? [reading.pendingOperationId] : []), ...(result?.binding === 'unconfirmed' ? [result.operationId] : [])])]
+  const pending = [...new Set([...(reading?.pendingStarts ?? []), ...(reading?.pendingOperationId ? [reading.pendingOperationId] : []), ...(result?.binding === 'unconfirmed' ? [result.operationId] : []),
+    ...(retained?.deferredInputIssue ? [retained.operationId] : [])])]
+  const notice = [issue, retained?.deferredInputIssue].filter(Boolean).join('\n') || null
   const retainedInput = retained?.deferredInput && !originalMainCreationRetainsInput(retained, result) ? { ...retained.deferredInput, creationOperationId: retained.operationId } : undefined
-  if (renderStart) return renderStart({ reading, result, issue, busy, checking, pending, retainedInput, restoringInput, restoreInput, ready: Boolean(reading && !reading.issue && !pending.length),
+  if (renderStart) return renderStart({ reading, result, issue: notice, busy, checking, pending, retainedInput, restoringInput, restoreInput, ready: Boolean(reading && !reading.issue && !pending.length),
     submit: async (query, rollover, retained) => { if (reading) await run(() => createMoteMain(scope, reading, query, rollover, retained), undefined, false, query) },
     inspect: id => { void inspectOriginal(id) }, advance: id => { void run(() => continueMoteMainAction(scope, id)) }, refresh: () => setGeneration(value => value + 1) })
   const queryOutcome = result?.deferredInput?.input?.status === 'not-applied' ? 'not-applied' : agentPromptSubmissionOutcome(result?.deferredInput?.record ?? null)
@@ -139,7 +141,7 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
     <button type="button" className="small-button" disabled={busy} onClick={() => setGeneration(value => value + 1)}>重新核对</button>
   </>
   const status = <>
-    {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
+    {notice ? <p role="status" className="mote-details__issue">{notice}</p> : null}
     {retainedInput ? <details><summary>本设备保留的问题</summary><p>{retainedInput.prompt}</p><p>原问题保留在本设备，可移回草稿。</p>
       <button type="button" className="small-button" disabled={restoringInput} onClick={() => { void restoreInput() }}>移回草稿</button></details> : null}
     {result ? <details><summary>原主 Agent 请求 · {queryPending ? '首条消息待核对' : result.binding === 'confirmed' ? '绑定已确认' : '待核对'}</summary>
@@ -154,7 +156,7 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
       {(result.binding === 'unconfirmed' || queryPending) && result.creation === 'confirmed' ? <button type="button" className="small-button" disabled={busy}
         onClick={() => void run(() => continueMoteMainAction(scope, result.operationId), undefined, true)}>继续原开始请求</button> : null}
     </details> : null}
-    {pending.length > 1 ? <details><summary>待核对的开始请求 · {pending.length}</summary>{pending.map(id => <div key={id}><code>{id}</code>
+    {pending.length > 1 || retained?.deferredInputIssue ? <details><summary>待核对的开始请求 · {pending.length}</summary>{pending.map(id => <div key={id}><code>{id}</code>
       <button type="button" disabled={checking} onClick={() => void inspectOriginal(id)}>核对原请求</button>
       <button type="button" disabled={busy} onClick={() => void run(() => continueMoteMainAction(scope, id))}>继续原请求</button></div>)}</details> : null}
   </>

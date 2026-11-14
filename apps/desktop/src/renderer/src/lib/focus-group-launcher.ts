@@ -1,11 +1,13 @@
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useAppStore } from '../store'
+import type { AgentMuxFocusTaskReference } from '@agentmux/core/focus-control'
 
 export type FocusGroupLauncher = { workspaceId: string; groupId: string; tabId: string; regionId: string }
 
 /** This operation prepares one original Launcher, never starts or replaces a Run. */
-export function openFocusGroupAgentLauncher(project: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, prompt: string, current: () => boolean): FocusGroupLauncher | undefined {
+export function openFocusGroupAgentLauncher(project: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, prompt: string, current: () => boolean,
+  focusTask?: AgentMuxFocusTaskReference): FocusGroupLauncher | undefined {
   if (!current()) return
   const state = useAppStore.getState(), matches = state.config?.workspaces.filter(workspace => workspace.id === project.id) ?? []
   const original = matches.length === 1 ? matches[0] : undefined
@@ -22,6 +24,6 @@ export function openFocusGroupAgentLauncher(project: Pick<WorkspaceRecord, 'id' 
     throw new Error('The project Launcher could not be confirmed. The task and existing work are kept; review the original project before trying again.')
   }
   // A newly created Region has its own draft; no warm Group input or existing Composer is consumed.
-  latest.setAgentComposerDraft(surface.regionId, prompt)
+  latest.setAgentComposerTask(surface.regionId, prompt, focusTask)
   return { workspaceId: original.id, groupId: layout.activeGroupId, tabId: tab.id, regionId: surface.regionId }
 }

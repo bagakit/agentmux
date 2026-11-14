@@ -22,17 +22,21 @@ const message = (cause: unknown) => cause instanceof Error ? cause.message : Str
 /** Custody of this exact caller text, not proof of Native delivery. */
 export function originalMainCreationRetainsInput(reference: MoteMainCreationReference, result: MoteMainActionResult | null | undefined): boolean {
   const query = reference.deferredInput, original = result?.record?.moteMain?.deferredInput
-  return !query || result?.record?.requestId === reference.operationId && original?.operationId === query.operationId && original.prompt === query.prompt
+  return !query || result?.record?.requestId === reference.operationId && original?.operationId === query.operationId && original.prompt === query.prompt && same(original.focusTask, query.focusTask)
 }
 /** Explicit local draft transfer. It never starts, advances or replays the original business input. */
 export async function moveMoteMainFirstInputToDraft(scope: MoteWorkfaceScope, reference: MoteMainCreationReference): Promise<void> {
   const key = JSON.stringify(reference.target), current = () => useAppStore.getState().moteMainCreationReferences[key]
   if (!same(targetOf(scope), reference.target) || !reference.deferredInput || !same(current(), reference)) throw new Error('The original first-message intent changed. Keep its text and inspect that same Mote.')
-  const draftKey = moteEntryDraftKey(scope), draft = useLauncherState.getState().drafts[draftKey]?.prompt ?? '', prompt = reference.deferredInput.prompt
+  const draftKey = moteEntryDraftKey(scope), originalDraft = useLauncherState.getState().drafts[draftKey], draft = originalDraft?.prompt ?? '', prompt = reference.deferredInput.prompt
   const merged = draft === prompt ? draft : [prompt, draft].filter(value => value.trim()).join('\n\n')
-  if (!useLauncherState.getState().setDraft(draftKey, 'prompt', merged)) throw new Error('The original question is retained; its draft transfer could not be saved.')
+  const focusTask = reference.deferredInput.focusTask
+  if (originalDraft?.focusTask && focusTask && !same(originalDraft.focusTask, focusTask)) throw new Error('This draft retains another original Focus task. Both tasks are kept; choose an empty draft before moving the original question.')
+  const saved = focusTask ? useLauncherState.getState().setTaskDraft(draftKey, { prompt: merged, focusTask }, { draft: originalDraft })
+    : useLauncherState.getState().setDraft(draftKey, 'prompt', merged)
+  if (!saved) throw new Error('The original question is retained; its draft transfer could not be saved.')
   await checkpointLauncherState(); await api.ui.requestStorageFlush()
-  if (useLauncherState.getState().drafts[draftKey]?.prompt !== merged || !same(current(), reference)) throw new Error('A later draft or original intent changed during saving. Both are kept; the original question remains retained.')
+  if (useLauncherState.getState().drafts[draftKey]?.prompt !== merged || focusTask && !same(useLauncherState.getState().drafts[draftKey]?.focusTask, focusTask) || !same(current(), reference)) throw new Error('A later draft or original intent changed during saving. Both are kept; the original question remains retained.')
   await retainMoteMainCreationReference({ target: reference.target, operationId: reference.operationId }, reference.operationId)
 }
 async function actionId(read: MoteQuickPreferencesReadResult): Promise<string> {
@@ -45,16 +49,16 @@ function targetOf(scope: MoteWorkfaceScope) {
   return target
 }
 export async function readMoteMainAction(scope: MoteWorkfaceScope): Promise<MoteMainActionReading> {
-  const target = targetOf(scope), input = { kind: 'quick' as const, target }
+  const target = targetOf(scope), input = { kind: 'quick' as const, target, includeChoices: 'executors' as const }
   const [raw, dialogue, spatial] = await Promise.all([api.motePreferences.read(input), api.moteDialogue.read({ target, kind: 'main' }), api.spatial.read()])
   const preferences = parseMotePreferencesReadResult(raw, input), baseline = moteQuickBaseline(preferences)
   const configured = preferences.defaults?.executorId
-  const executor = preferences.choices.executors.find(item => item.id === configured) ?? null
+  const executor = preferences.choices?.executors?.find(item => item.id === configured) ?? null
   const issue = preferences.status !== 'ready' || !baseline || preferences.issue ? preferences.issue ?? 'Mote 的设置暂未确认，写下的想法会保留。可以重新核对。'
     : dialogue.main.status !== 'ready' || dialogue.main.documentRevision !== (baseline.document?.revision ?? null) || !same(dialogue.main.current, baseline.defaults.conversation ?? null)
       ? '主对话的来源尚未核对一致，原对话和草稿仍保留。可以重新核对。'
       : !configured ? '先在设置中选择此 Mote 的默认执行器，就能开始对话。'
-        : !executor ? '已保存的执行器暂未在原 Host 中确认，可以检查设置或重新核对。' : null
+        : !executor ? preferences.choices?.issues?.executors ?? '已保存的执行器暂未在原 Host 中确认，可以检查设置或重新核对。' : null
   const pendingStarts = spatial ? pendingMoteMainStarts(spatial.graph, target).map(item => item.requestId) : []
   const pendingOperationId = spatial ? pendingMoteMainCreation(spatial.graph, target)?.requestId ?? null : null
   const retained = useAppStore.getState().moteMainCreationReferences[JSON.stringify(target)]
@@ -83,7 +87,7 @@ export async function createMoteMain(scope: MoteWorkfaceScope, reading: MoteMain
   }
   // Preserve this caller's first text before any Core read or launch can wait. It is an
   // intent, never a reconstructed creation/delivery ACK; the original owners still decide those.
-  await retainMoteMainCreationReference({ target, operationId, ...(query ? { deferredInput: { operationId: query.operationId, prompt: query.prompt } } : {}) }, prior?.operationId ?? null)
+  await retainMoteMainCreationReference({ target, operationId, ...(query ? { deferredInput: query } : {}) }, prior?.operationId ?? null)
   if (query) await onRetained?.(query)
   const existing = await api.spatial.read()
   const pending = existing ? pendingMoteMainCreation(existing.graph, target) : null

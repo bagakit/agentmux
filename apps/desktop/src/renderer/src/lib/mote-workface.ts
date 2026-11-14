@@ -31,7 +31,7 @@ export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   /** Accepts this surface's navigation only; creation and input keep their original receipts. */
   startRollover?(input: MoteRolloverStart): boolean
   /** A message the person sent while this Main was being read, now handed to that confirmed Main's Composer. */
-  heldInput?: { operationId: string; prompt: string } | undefined
+  heldInput?: import('@agentmux/core/mote-dialogue').MoteMainDeferredInput | undefined
   /** The Main's Composer accepted (true) or refused the held message; the workface stops holding it, clearing its draft only once accepted. */
   settleHeldInput?(operationId: string, accepted: boolean): void
   selectTab(tabId: string, groupId: string): void

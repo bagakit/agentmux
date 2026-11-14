@@ -9,6 +9,7 @@ import { desktopUserFragments } from './desktop-user-state'
 import type { SplitDirection } from '@agentmux/layout'
 import { launcherSourceExecution } from './launcher-source'
 import { restoredMoteQuickDraft, type MoteQuickDraft } from './mote-quick-draft'
+import { prepareMoteTask, type PreparedMoteTask } from './mote-task-packet'
 
 export type LauncherSection = 'agents' | 'terminal' | 'browser' | 'note'
 export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
@@ -26,13 +27,13 @@ export type LauncherDraft = { browser: string; note: string; noteCreation?: Note
   unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
   /** Cross-owner custody until this exact queue archive and destination draft both have storage ACKs. */
   queuedInputMoves?: Record<string, QueuedDraftMove> | undefined
-  prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions
+  prompt?: string; focusTask?: PreparedMoteTask['focusTask']; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions
   /** Exact Source selection shares this original private draft; future values remain opaque. */
   sourceExecution?: unknown
   /** Browser-owned unsent creation options share this existing utility-draft persistence owner. */
   browserAgent?: { executorId?: string; split?: SplitDirection; hostId?: string }
   /** A Mote message sent while its Main was read. It stays on this device until delivered; a reopened view returns it to the prompt. */
-  heldPrompt?: { operationId: string; prompt: string; holder: string } | undefined }
+  heldPrompt?: (PreparedMoteTask & { operationId: string; holder: string }) | undefined }
 export const EMPTY_LAUNCHER_DRAFT: LauncherDraft = { browser: '', note: '' }
 
 type LauncherState = {
@@ -43,6 +44,7 @@ type LauncherState = {
   moteTopicId: string | null
   setSection(workspaceId: string, section: LauncherSection, mode: LauncherSectionMode): boolean
   setDraft(launcherId: string, field: 'browser' | 'note' | 'prompt', value: string): boolean
+  setTaskDraft(launcherId: string, task: PreparedMoteTask & { focusTask: NonNullable<PreparedMoteTask['focusTask']> }, expected?: { draft: LauncherDraft | undefined }): boolean
   retainQueuedInputInDraft(launcherId: string, source: QueuedDraftMove): boolean
   clearQueuedInputMove(launcherId: string, source: QueuedDraftMove): boolean
   setBrowserAgentDraft(launcherId: string, patch: { prompt?: string; executorId?: string; split?: SplitDirection; hostId?: string }): boolean
@@ -61,7 +63,7 @@ type LauncherState = {
   setSourceExecution(launcherId: string, value: import('./launcher-source').LauncherSourceExecution | undefined): boolean
   setAgentOption(launcherId: string, providerId: string, optionId: string, choiceId: string | null): boolean
   copyUtilityDraft(fromLauncherId: string, toLauncherId: string): boolean
-  clearAgentInputsIfUnchanged(launcherId: string, submitted: Pick<LauncherDraft, 'prompt' | 'names' | 'optionsByProvider'>): boolean
+  clearAgentInputsIfUnchanged(launcherId: string, submitted: Pick<LauncherDraft, 'prompt' | 'focusTask' | 'names' | 'optionsByProvider'>): boolean
   setNoteCreation(launcherId: string, receipt: NoteCreationReceipt): boolean
   selectExecutor(workspaceId: string, executorId: string): boolean
   selectMote(topicId: string): boolean
@@ -125,8 +127,22 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   },
   setDraft(launcherId, field, value) {
-    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value } } })); return true }
+    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value,
+      ...(field === 'prompt' && !value.trim() ? { focusTask: undefined } : {}) } } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
+  },
+  setTaskDraft(launcherId, value, expected) {
+    try {
+      const task = prepareMoteTask(value)
+      let retained = false
+      set(state => {
+        const draft = state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT
+        if (draft.heldPrompt || (expected ? state.drafts[launcherId] !== expected.draft : draft.prompt?.trim())) return state
+        retained = true
+        return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, ...task } } }
+      })
+      return retained
+    } catch { reportStorageIssue('The original task reference and prompt could not be saved. Existing drafts are kept.'); return false }
   },
   retainQueuedInputInDraft(launcherId, source) {
     try { set(state => {
@@ -162,7 +178,8 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
     try { set(state => {
       const draft = state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT
       if (draft.heldPrompt || !draft.prompt?.trim()) return state
-      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, prompt: '', heldPrompt: { operationId, prompt: draft.prompt, holder } } } }
+      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, prompt: '', focusTask: undefined,
+        heldPrompt: { operationId, prompt: draft.prompt, holder, ...(draft.focusTask ? { focusTask: draft.focusTask } : {}) } } } }
     }); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   },
@@ -171,7 +188,9 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
       const draft = state.drafts[launcherId], held = draft?.heldPrompt
       if (!held || held.operationId !== operationId) return state
       const prompt = delivered ? draft.prompt ?? '' : [held.prompt, draft.prompt ?? ''].filter(value => value.trim()).join('\n\n')
-      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, prompt, heldPrompt: undefined } } }
+      if (!delivered && draft.focusTask && JSON.stringify(draft.focusTask) !== JSON.stringify(held.focusTask)) throw Error('A newer task reference is retained separately from the original held task.')
+      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, prompt,
+        ...(!delivered && held.focusTask ? { focusTask: held.focusTask } : {}), heldPrompt: undefined } } }
     }); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   },
@@ -224,7 +243,7 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
       const original = state.drafts[launcherId]
       if (!original) return state
       const draft = { ...original }
-      if ((original.prompt ?? '') === submitted.prompt) delete draft.prompt
+      if ((original.prompt ?? '') === submitted.prompt && JSON.stringify(original.focusTask) === JSON.stringify(submitted.focusTask)) { delete draft.prompt; delete draft.focusTask }
       if ((original.names ?? EMPTY_LAUNCHER_NAMES) === submitted.names) delete draft.names
       if ((original.optionsByProvider ?? EMPTY_LAUNCHER_OPTIONS) === submitted.optionsByProvider) delete draft.optionsByProvider
       return { drafts: { ...state.drafts, [launcherId]: draft } }

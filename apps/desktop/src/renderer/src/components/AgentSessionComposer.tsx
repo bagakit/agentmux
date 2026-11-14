@@ -178,7 +178,8 @@ export function AgentSessionComposer({
   const openRollover = (entry: AgentSteerQueueEntry) => {
     if (!entry.mainRollover || !moteWorkface?.startRollover) return
     const accepted = moteWorkface.startRollover({ sessionId, decision: entry.mainRollover, query: { operationId: entry.operationId, prompt: entry.text,
-      ...(entry.sourceChannel ? { sourceChannel: entry.sourceChannel } : {}), ...(entry.inputImages ? { inputImages: [...entry.inputImages] } : {}) } })
+      ...(entry.sourceChannel ? { sourceChannel: entry.sourceChannel } : {}), ...(entry.inputImages ? { inputImages: [...entry.inputImages] } : {}),
+      ...(entry.focusTask ? { focusTask: entry.focusTask } : {}) } })
     if (accepted) { rolloverHandled.current = entry.operationId; feedback.dismiss() }
     else feedback.report('这条输入属于原 Mote，当前页面未接纳。原问题和操作已保留；返回所属 Mote 后继续。')
   }
@@ -270,7 +271,8 @@ export function AgentSessionComposer({
     if (!submitMode.canSubmit || !original.text.trim() || !acceptsMoteMainInput()) return
     const { text: value, inputImages } = expandComposerInput(original.text)
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return
-    if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })) return
+    if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain,
+      ...(original.record?.focusTask ? { focusTask: original.record.focusTask } : {}) })) return
     feedback.dismiss()
     clearDraft(original)
     lastSubmitBySession.record(sessionId, value)
@@ -286,7 +288,8 @@ export function AgentSessionComposer({
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
     // must leave the words in the box — the store has already said why, and clearing here would strand
     // the user's message in a banner they cannot copy from.
-    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })) return
+    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain,
+      ...(original.record?.focusTask ? { focusTask: original.record.focusTask } : {}) })) return
     feedback.dismiss()
     clearDraft(original)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)
@@ -302,7 +305,8 @@ export function AgentSessionComposer({
     if (!held || !visible || !moteMain || !submitMode.canSubmit || heldStarted.current === held.operationId) return
     heldStarted.current = held.operationId
     const { text: value, inputImages } = expandComposerInput(held.prompt)
-    const accepted = send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })
+    const accepted = send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain,
+      ...(held.focusTask ? { focusTask: held.focusTask } : {}) })
     if (accepted) {
       useAppStore.getState().recordAgentComposerHistory(sessionId, value)
       lastSubmitBySession.record(sessionId, value)

@@ -17,6 +17,7 @@ import { readMoteMainAction, type MoteMainActionResult } from '../lib/mote-main-
 import type { MoteWorkfaceScope, MoteRolloverStart } from '../lib/mote-workface'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { moteEntryDraftKey, type MoteHeldEntryInput } from '../lib/mote-entry-hold'
+import type { MoteMainDeferredInput } from '@agentmux/core/mote-dialogue'
 
 
 /** The first message's stage from the original setup receipt alone; no result yet is still sending. */
@@ -45,7 +46,7 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
   const source = useRef({ key, active }); source.current = { key, active }
   const lifetime = useRef({})
   useEffect(() => { lifetime.current = {}; return () => { lifetime.current = {} } }, [key, active])
-  const submission = useRef<{ operationId: string; prompt: string; draft: LauncherDraft | undefined; lifetime: object; released?: boolean; releasedDraft?: LauncherDraft | undefined; landed?: boolean } | null>(null)
+  const submission = useRef<(MoteMainDeferredInput & { draft: LauncherDraft | undefined; lifetime: object; released?: boolean; releasedDraft?: LauncherDraft | undefined; landed?: boolean }) | null>(null)
   const automaticSettling = useRef<string | null>(null)
   const rows = moteConversationHistoryRows(dialogue?.page?.links ?? [], dialogue?.page?.main.roleRevision)
   // Only the history rows' own Sessions are read, so an unrelated Session update does not redraw the welcome.
@@ -59,9 +60,15 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
   const history = rows.map((row, index) => ({ ...row, item: { ...row.item, ...(labels[index] ? { title: labels[index]! } : {}) } }))
   // The person's message as sent, shown in place while its Main is created; the frozen first message, not a queue.
   const [sent, setSent] = useState<{ operationId: string; prompt: string; key: string } | null>(null)
-  async function releaseDraft(query: { operationId: string; prompt: string }) {
+  function restoreDraft(original: NonNullable<typeof submission.current>) {
+    const drafts = useLauncherState.getState()
+    if (drafts.drafts[key] !== original.releasedDraft) return
+    if (original.focusTask) drafts.setTaskDraft(key, { prompt: original.prompt, focusTask: original.focusTask }, { draft: original.releasedDraft })
+    else drafts.setDraft(key, 'prompt', original.prompt)
+  }
+  async function releaseDraft(query: MoteMainDeferredInput) {
     const original = submission.current
-    if (!original || original.operationId !== query.operationId || original.prompt !== query.prompt || source.current.key !== key ||
+    if (!original || original.operationId !== query.operationId || original.prompt !== query.prompt || JSON.stringify(original.focusTask) !== JSON.stringify(query.focusTask) || source.current.key !== key ||
       useLauncherState.getState().drafts[key] !== original.draft || original.lifetime !== lifetime.current || useLauncherState.getState().drafts[key]?.prompt !== original.prompt) return
     // The existing creation reference now durably holds this caller's text; later
     // draft edits have their own custody and must never be cleared by its receipt.
@@ -69,24 +76,25 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
     original.released = true; original.releasedDraft = useLauncherState.getState().drafts[key]
     try { await checkpointLauncherState() }
     catch {
-      if (useLauncherState.getState().drafts[key] === original.releasedDraft) useLauncherState.getState().setDraft(key, 'prompt', original.prompt)
+      restoreDraft(original)
       original.released = false
       setNotice('原问题已保留，输入框的保存尚未确认。')
     }
   }
   // Binding, input admission and draft custody are separate facts. Landing changes only the body; later text stays in the same editor.
-  async function confirmed(result: MoteMainActionResult, query: { operationId: string; prompt: string }, mayNavigate: () => boolean) {
+  async function confirmed(result: MoteMainActionResult, query: MoteMainDeferredInput, mayNavigate: () => boolean) {
     const original = submission.current, canonical = result.record?.moteMain?.deferredInput
     const outcome = agentPromptSubmissionOutcome(result.deferredInput?.record ?? null)
     const inLifetime = () => source.current.key === key && source.current.active && original?.lifetime === lifetime.current
     const draftUnchanged = () => useLauncherState.getState().drafts[key] === (original?.released ? original.releasedDraft : original?.draft)
     if (!original || query.operationId !== original.operationId || canonical?.operationId !== original.operationId || canonical.prompt !== original.prompt ||
-      query.prompt !== original.prompt || !inLifetime()) return
+      query.prompt !== original.prompt || JSON.stringify(canonical.focusTask) !== JSON.stringify(original.focusTask) ||
+      JSON.stringify(query.focusTask) !== JSON.stringify(original.focusTask) || !inLifetime()) return
     if (['admitted', 'terminal-confirmed'].includes(outcome) && draftUnchanged() && !original.released) {
       const saved = useLauncherState.getState().setDraft(key, 'prompt', '')
       if (saved) { original.released = true; original.releasedDraft = useLauncherState.getState().drafts[key] }
       if (!saved || useLauncherState.getState().persistenceIssue) {
-        if (draftUnchanged()) useLauncherState.getState().setDraft(key, 'prompt', original.prompt)
+        if (draftUnchanged()) restoreDraft(original)
         setNotice('原消息已确认投递；草稿保存尚未确认，原文保留。')
       }
     }
@@ -100,7 +108,7 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
     if (!automatic || automaticSettling.current === automatic.query.operationId || !result.reference) return
     const canonical = result.record?.moteMain?.deferredInput
     if (result.record?.requestId !== automatic.decision.creationOperationId || JSON.stringify(result.record.moteMain?.rollover) !== JSON.stringify(automatic.decision) ||
-      canonical?.operationId !== automatic.query.operationId || canonical.prompt !== automatic.query.prompt) return
+      canonical?.operationId !== automatic.query.operationId || canonical.prompt !== automatic.query.prompt || JSON.stringify(canonical.focusTask) !== JSON.stringify(automatic.query.focusTask)) return
     automaticSettling.current = automatic.query.operationId
     try {
       const fresh = await readMoteMainAction(scope)
@@ -110,8 +118,8 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
       const accepted = agentPromptSubmissionOutcome(observed.deferredInput?.record ?? null)
       const entry = useAppStore.getState().agentSteerQueues[automatic.sessionId]?.find(item => item.operationId === automatic.query.operationId)
       if (observed.record?.requestId === automatic.decision.creationOperationId && JSON.stringify(observed.record.moteMain?.rollover) === JSON.stringify(automatic.decision) &&
-        input?.operationId === automatic.query.operationId && input.prompt === automatic.query.prompt && ['admitted', 'terminal-confirmed'].includes(accepted) &&
-        entry?.mainRollover?.creationOperationId === automatic.decision.creationOperationId && entry.text === automatic.query.prompt)
+        input?.operationId === automatic.query.operationId && input.prompt === automatic.query.prompt && JSON.stringify(input.focusTask) === JSON.stringify(automatic.query.focusTask) && ['admitted', 'terminal-confirmed'].includes(accepted) &&
+        entry?.mainRollover?.creationOperationId === automatic.decision.creationOperationId && entry.text === automatic.query.prompt && JSON.stringify(entry.focusTask) === JSON.stringify(automatic.query.focusTask))
         await useAppStore.getState().archiveAgentSteer(automatic.sessionId, entry.operationId, entry.text, true)
       if (source.current.key === key && source.current.active && mayNavigate() && result.binding === 'confirmed' && JSON.stringify(fresh.dialogue.main.current) === JSON.stringify(result.reference)) onOpenMain(result.reference)
     } catch (cause) { setNotice(cause instanceof Error ? cause.message : String(cause)) }
@@ -147,9 +155,10 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
       composer={<ComposerSource ownerKey={key} sourceKey="welcome" value={draft} disabled={false} active={active} placeholder="写下你想聊的事…"
         onChange={value => { useLauncherState.getState().setDraft(key, 'prompt', value) }}
         {...(state.ready && !state.busy && active && !persistenceIssue && !automatic && (mode === 'new' || !state.reading?.dialogue.main.current) ? { onSubmit: () => {
-          const query = { operationId: mintObjectId(), prompt: useLauncherState.getState().drafts[key]?.prompt ?? '', draft: useLauncherState.getState().drafts[key], lifetime: lifetime.current }
+          const draft = useLauncherState.getState().drafts[key]
+          const query = { operationId: mintObjectId(), prompt: draft?.prompt ?? '', ...(draft?.focusTask ? { focusTask: draft.focusTask } : {}), draft, lifetime: lifetime.current }
           submission.current = query; setSent({ operationId: query.operationId, prompt: query.prompt, key })
-          void state.submit({ operationId: query.operationId, prompt: query.prompt }, undefined, releaseDraft)
+          void state.submit({ operationId: query.operationId, prompt: query.prompt, ...(query.focusTask ? { focusTask: query.focusTask } : {}) }, undefined, releaseDraft)
         } } : {})} />}
       notice={<>{state.issue && <p role="status">{state.issue}
         {state.reading?.preferences.status === 'ready' && !state.reading.executor && (mode === 'new' || !state.reading.dialogue.main.current)
@@ -173,12 +182,13 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
 
 /** Sends a held message once, as the first message, only after the original role owner confirms there is no Main. */
 function HeldStart({ held, state, active, onStart }: { held?: MoteHeldEntryInput | null | undefined; state: MoteStartActions; active: boolean
-  onStart(query: { operationId: string; prompt: string }): void }) {
+  onStart(query: MoteMainDeferredInput): void }) {
   const started = useRef<string | null>(null)
   useEffect(() => {
     if (!held || !active || !state.ready || state.busy || state.reading?.dialogue.main.current || started.current === held.operationId) return
     started.current = held.operationId
-    onStart({ operationId: held.operationId, prompt: held.prompt })
+    onStart({ operationId: held.operationId, prompt: held.prompt, ...(held.focusTask ? { focusTask: held.focusTask } : {}),
+      ...(held.sourceChannel ? { sourceChannel: held.sourceChannel } : {}), ...(held.inputImages ? { inputImages: held.inputImages } : {}) })
   }, [held, active, state.ready, state.busy, state.reading?.dialogue.main.current])
   return null
 }

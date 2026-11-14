@@ -212,7 +212,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     : roleOwned && !main?.current ? 'welcome' as const : currentMain ? 'current' as const : !dialogue?.page && !dialogue?.issue ? 'reading' as const : 'unconfirmed' as const
   // A message held while reading goes to the Main the role owner then confirms, once it is shown, never to a guessed one.
   const heldInput = entryHold.held && showOriginal && selectedMain && currentMain && readingMain?.sessionId === currentMain.sessionId
-    ? { operationId: entryHold.held.operationId, prompt: entryHold.held.prompt } : undefined
+    ? entryHold.held : undefined
   const settleHeldInput = entryHold.settle
   // An unconfirmed role source sends nothing; the held text returns to the editable draft.
   useEffect(() => { if (entry === 'unconfirmed' && entryHold.held) entryHold.release() }, [entry, entryHold.held, entryHold.release])
