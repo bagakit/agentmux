@@ -11,6 +11,7 @@ import type { BrowserProfileSite, BrowserProfileSummary, BrowserProfileFolder } 
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipCounts, type BrowserProfileCookieSkipReason } from '../../../../shared/browser-profile-import-skip'
 import { api } from '../../lib/api'
 import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
+import { browserProfileEnvironmentDescription } from '../../lib/browser-profile-presentation'
 import { useAppStore } from '../../store'
 import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop-presentation'
 import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
@@ -21,6 +22,7 @@ import { ProfileExitCheck, ProfileNetworkRoute, ProfileProxySignIn } from './Bro
 import { ProfileNetworkDiagnostics } from './ProfileNetworkDiagnostics'
 import { ProfileEnvironmentEditor } from './ProfileEnvironmentEditor'
 import { BrowserProfileOrganization } from './BrowserProfileOrganization'
+import { SettingsConceptSummary } from './SettingsConceptSummary'
 import * as Menu from '../HoverDropdownMenu'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
 import './settings-browser-profiles.css'
@@ -169,6 +171,8 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
 
   return (
     <div className="settings-resource-workbench settings-browser-profiles" data-resource-view={view} data-settings-field="browser-profiles">
+      <SettingsConceptSummary icon="object.settings-browser-use" title="Sign-ins, pages and environment"
+        description="Choose a Profile to continue its pages. Network and device settings stay with that same environment." />
       <div className="settings-pane-toolbar">
         <strong>Profiles <span>{list.profiles ? profiles.length : '…'}</span></strong>
         <button className="small-button" type="button" aria-label="New Profile" title="New Profile" disabled={busy !== null || !list.profiles} onClick={() => void create()}>
@@ -332,8 +336,6 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
         </div>
       </RovingFocus.Root> : null}
 
-      <p className="browser-profile-editor__quiet">Keep website sign-ins and site data together. Open this Profile to continue in the same environment.</p>
-
       {noting ? <textarea className="browser-profile-editor__notes" aria-label="Notes" autoFocus rows={2} maxLength={2000} value={notes}
           onChange={event => setNotes(event.target.value)} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error'))) void finishNotes() }}
           onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setNotes(profile.notes ?? ''); setNoting(false) } }} />
@@ -380,7 +382,7 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
       <BrowserProfileCookieFiles profile={profile} active={active} />
 
       <details className="browser-profile-editor__advanced">
-        <summary>Network and device settings</summary>
+        <summary>Network and device settings<small>{browserProfileEnvironmentDescription(profile)}</small></summary>
         <p className="browser-profile-editor__quiet">Optional settings for this environment. Existing settings stay in effect when this section is closed.</p>
         <ProfileEnvironmentEditor profile={profile} />
 

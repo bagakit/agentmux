@@ -52,7 +52,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
     <div className="settings-pane-stack settings-browser">
       <SettingsConceptSummary icon="object.browser" title="Pages, permissions and connections"
         description="Control how agents use browser pages, then inspect page resources and connected browsers below." />
-      <div className="settings-browser__preferences">
+      <section className="settings-browser__preferences" aria-label="Browser preferences">
       <section className="settings-group" data-settings-field="agent-automation">
         <header><span>Agent automation</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">
@@ -83,7 +83,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
           ? 'Check in Settings › Browser Profiles sends one request to this address through that Profile, to see where its route reaches. A service that answers with just your address shows it.'
           : 'Use an https:// address without a user name or password.'}</p>
       </section>
-      </div>
+      </section>
       <AppLinkSchemes browser={browser} onForget={onForget} />
       <BrowserResources active={active} directory={directory} app={observation.snapshot?.observation?.app} observationError={observation.error} />
       <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}

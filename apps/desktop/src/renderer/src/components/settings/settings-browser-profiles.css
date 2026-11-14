@@ -6,9 +6,9 @@
   overflow: hidden;
 }
 .settings-browser-profiles.settings-resource-workbench { display: flex; flex-direction: column; }
-/* The list's own actions stay over the list. The toolbar spans only the library column (the same width
-   the split gives it), so New Profile and Import never read as editor actions. */
-.settings-browser-profiles .settings-pane-toolbar { display: flex; align-items: center; gap: var(--sp-2); width: max(190px, 27%); min-width: 0; }
+.settings-browser-profiles > .settings-concept-summary { flex: none; padding-top: 0; margin-bottom: var(--sp-5); }
+/* Library actions have their own full-width row, separate from the selected Profile's identity. */
+.settings-browser-profiles .settings-pane-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); min-width: 0; padding-bottom: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
 .settings-browser-profiles .settings-pane-toolbar .small-button { padding-inline: var(--sp-3); }
 .settings-browser-profiles .settings-pane-toolbar > strong { margin-right: auto; font-size: var(--fs-body); font-weight: 550; }
 .settings-browser-profiles .settings-pane-toolbar > strong > span { color: var(--text-3); font-weight: 400; font-variant-numeric: tabular-nums; }
@@ -22,6 +22,8 @@
 .browser-profiles-settings__service button { border: 0; padding: 0; background: transparent; color: var(--text-2); text-decoration: underline; cursor: pointer; font: inherit; }
 
 .browser-profile-editor { display: flex; flex-direction: column; gap: var(--sp-5); padding-bottom: var(--sp-6); }
+.settings-browser-profiles .settings-resource-split { gap: var(--sp-6); padding-top: var(--sp-2); }
+.settings-browser-profiles .settings-resource-editor { padding-left: var(--sp-5); padding-inline-end: var(--sp-6); border-left: 1px solid var(--line-soft); scrollbar-gutter: stable; }
 .browser-profile-editor__identity { display: flex; align-items: center; gap: var(--sp-4); min-height: 48px; }
 .browser-profile-editor__mark { padding: 0; border: 0; border-radius: var(--radius); background: transparent; cursor: pointer; }
 .browser-profile-editor__mark:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
@@ -67,6 +69,7 @@
 .browser-profile-editor__notes:focus { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 
 .browser-profile-editor__section { display: grid; gap: var(--sp-3); padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
+.browser-profile-editor__section > h4 { letter-spacing: -.01em; }
 /* Sections sit at one rhythm: the editor's gap above each divider, the section's padding below it. */
 .browser-profile-editor__section > :last-child { margin-bottom: 0; }
 .browser-profile-editor__section h4 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
@@ -93,7 +96,8 @@
 .browser-profile-editor__route-modes > button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .browser-profile-editor__route-fields { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: center; gap: var(--sp-3); }
 .browser-profile-editor__route-fields > .browser-profile-editor__link { justify-self: start; }
-.browser-profile-editor__route-apply { display: flex; justify-content: flex-end; gap: var(--sp-3); }
+.browser-profile-editor__route-apply { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--sp-3); }
+.browser-profile-editor__route-apply > button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 @container settings-resource (width < 720px) { .browser-profile-editor__route-fields { grid-template-columns: minmax(0, 1fr); } }
 .browser-profile-editor__sign-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3); }
 @container settings-resource (width < 720px) { .browser-profile-editor__sign-in { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
@@ -176,6 +180,8 @@
 @container settings-resource (width < 720px) {
   .settings-browser-profiles[data-resource-view='editor'] .browser-profile-library { display: none; }
   .settings-browser-profiles[data-resource-view='library'] .browser-profile-library { flex: 1; }
+  .settings-browser-profiles .settings-resource-editor { padding-left: 0; border-left: 0; }
+  .settings-browser-profiles > .settings-concept-summary { margin-bottom: var(--sp-4); }
 }
 .browser-profile-library__results ul { list-style: none; padding-left: 0; }
 .browser-profile-library__results li + li { margin-top: var(--sp-2); }
@@ -198,5 +204,6 @@
 
 .browser-profile-editor__advanced { border-top: 1px solid var(--line-soft); padding-top: var(--sp-5); }
 .browser-profile-editor__advanced > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
+.browser-profile-editor__advanced > summary > small { display: block; margin: var(--sp-2) 0 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; }
 .browser-profile-editor__advanced > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
 .browser-profile-editor__advanced[open] { display: grid; gap: var(--sp-4); }
