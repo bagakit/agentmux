@@ -29,7 +29,7 @@ describe('full-page loading surface contract', () => {
     expect(styles.match(/animation:\s*[^;]+/g) ?? []).not.toHaveLength(0)
     expect(styles).toContain('var(--dur-enter)')
     expect(styles).not.toContain('full-page-loading-turn')
-    expect(component).toContain("animation={visible ? 'wait' : 'none'}")
+    expect(component).toContain("animation={shown ? 'wait' : 'none'}")
     expect(styles).not.toMatch(/animation:\s*[^;]+\b\d+ms\b/)
   })
 })
