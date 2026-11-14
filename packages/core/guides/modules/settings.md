@@ -75,9 +75,9 @@ as cold. Explicit search or exact reveal keeps the original target accessible.
 For example, one entry is
 `{"key":"[\"HOST\",\"PROJECT\"]","pinned":true,"note":"Main work","color":"blue","collapsed":null}`;
 replace both identity placeholders with the exact original pair and preserve the
-other array entries. Collection Pin entries use the same fields, with empty note,
-`default` color and `null` collapsed value; note, color and collapse editing remain
-Project preferences. Preserve any previously saved fields when changing a Pin.
+other array entries. Project and Collection appearance both use `pinned`, `note`
+and `color`. A Collection entry uses its complete Collection key and defaults to
+`collapsed:null`. Preserve the other saved fields when changing a preference.
 Project branches/worktrees share that project's preferences;
 different Hosts remain separate. A setting save is not a project rename, navigation,
 Agent state change or permission grant. After a failed or unknown save keep the
