@@ -76,3 +76,39 @@ it('honors explicit map motion through the actual reduced-motion cascade without
   expect(dom.container.querySelector('.collaboration-edge__pulse')).toBeNull()
   expect(duration(dom.container.querySelector('.collaboration-activity')!)).toBe(0)
 })
+
+it('keeps original territory title geometry and controls without colored frames in the actual cascade', async () => {
+  const contexts = ['project-member', 'topic-member', 'mote-member'].map(id => agentContextForSession(composerSession(id), undefined, id, undefined, null))
+  const agents = collaborationAgents(contexts)
+  const areas = (['project', 'topic', 'mote'] as const).map((kind, index) => ({ id: `original-${kind}`, kind,
+    name: `Original ${kind}`, members: [collaborationSubjectKey({ hostId: 'local', agentSessionId: contexts[index]!.id })] }))
+  await dom.render(<AgentCollaborationGraph agents={agents} areas={areas} relations={[]} pulses={[]}
+    selection={null} onSelect={vi.fn()} onOpen={vi.fn()} />)
+  await settleCollaborationCanvas(() => expect(dom.container.querySelectorAll('.collaboration-area__overview-label')).toHaveLength(3))
+  for (const area of areas) {
+    const title = dom.container.querySelector<HTMLElement>(`[data-region-id="${area.id}"]`)!
+    const name = title.querySelector('strong')!
+    const summary = title.querySelector<HTMLButtonElement>('.collaboration-area__summary')!
+    expect(name.textContent).toBe(area.name)
+    expect(getComputedStyle(name).fontSize).toBe('12px')
+    expect(getComputedStyle(name).fontWeight).toBe('600')
+    expect(getComputedStyle(summary).minHeight).toBe('44px')
+    expect(getComputedStyle(summary).padding).toBe('6px 26px 6px 11px')
+    expect(summary.getAttribute('aria-label')).toBe(`Locate ${area.name} · 1 Agents`)
+    expect(title.querySelector(`[aria-label="Collapse ${area.name}"]`)?.getAttribute('aria-expanded')).toBe('true')
+    for (const order of [collaborationCSS + '\n' + baseCSS, baseCSS + '\n' + collaborationCSS]) {
+      await act(async () => { stylesheet.textContent = order })
+      const before = getComputedStyle(title)
+      expect(before.borderTopWidth).toBe('1px')
+      expect(before.borderLeftWidth).toBe('1px')
+      expect(before.borderTopColor).toBe('transparent')
+      expect(before.boxShadow).toBe('none')
+    }
+    await dom.click(`[aria-label="Locate ${area.name} · 1 Agents"]`)
+    await settleCollaborationCanvas(() => expect(title.dataset.current).toBe('true'))
+    expect(getComputedStyle(title).borderTopColor).toBe('transparent')
+    expect(getComputedStyle(title).boxShadow).toBe('none')
+    expect(title.querySelector('strong')).toBe(name)
+    expect(title.querySelector('.collaboration-area__summary')).toBe(summary)
+  }
+})
