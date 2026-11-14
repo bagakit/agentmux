@@ -74,5 +74,5 @@ workface only; original Core/Native lifecycle has separate evidence.
 
 Screenshots cover complete wide/narrow and light/dark surfaces. Nonempty image
 checks do not judge their appearance. An independent reviewer must open the exact
-frames and approve them against the [Goal presentation contract](../../../../../docs/design/presentation/goals-and-demand.md#执行者责任告警与巡查反馈)
+frames and approve them against the [Goal presentation contract](../../../../../docs/design/presentation/goals.md#执行者责任告警与巡查反馈)
 and [visual review rules](../../../../../docs/guides/agent-visual-e2e-review.md).

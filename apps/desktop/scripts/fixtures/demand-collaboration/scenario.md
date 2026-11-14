@@ -1,6 +1,6 @@
 # Demand collaboration contract fixture
 
-Owning behavior: [Goals and Demand](../../../../../docs/design/behavior/goals-and-demand.md). Owning presentation: [Goals and Demand](../../../../../docs/design/presentation/goals-and-demand.md).
+Owning behavior: [Goals](../../../../../docs/design/behavior/goals.md). Owning presentation: [Goals presentation](../../../../../docs/design/presentation/goals.md).
 
 The source CLI, original public socket, authenticated Core Session, Desktop control bridge, preload, registered Main IPC, filesystem Demand owner, Desktop filter/detail and Mobile action component form the real product chain. Electron transport and Runtime native I/O are isolated in a temporary fixture; the product owners are current source modules. All assignment writes compare one Demand snapshot and preserve history. Unknown existing responsible identities remain visible and can be retained, while new public assignments require exact Core-owned Session IDs.
 
