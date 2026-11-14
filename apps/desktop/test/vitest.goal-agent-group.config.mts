@@ -18,7 +18,7 @@ const mutants = {
 if (mutation && !(mutation in mutants)) throw Error('Unknown Goal avatar mutation')
 const full = [shared, group, 'apps/desktop/src/renderer/src/components/AgentInformationPreview.tsx', 'apps/desktop/src/renderer/src/components/AgentInformationReader.tsx', 'packages/client-ui/src/styles/avatar-group.css', 'apps/desktop/src/renderer/src/styles/goal-agent-group.css']
 const segments: Record<string, [string, string]> = {
-  'apps/desktop/src/renderer/src/components/GoalsCollection.tsx': ['/** One Goal reading unit.', '/** The grouped list,'],
+  'apps/desktop/src/renderer/src/components/GoalsCollection.tsx': ['export function GoalRow(', '/** The grouped list,'],
   'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx': ['<GoalRow', 'setSelectedDemand(demand.id) }} />'],
   'apps/desktop/src/renderer/src/lib/goal-agent-selection.ts': ['export function goalAgentPresentation(', '/** Business selection uses canonical'],
   'apps/desktop/src/renderer/src/components/AgentAvatar.tsx': ['export function executorAvatarAppearance(', '\nfunction AgentAvatarFace(']

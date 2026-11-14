@@ -74,7 +74,7 @@ it('List keeps unknown visible and maintains its original grouped reading rather
   expect(dom.container.querySelector('[data-goal-responsibility-preview="working"] > summary')).toBe(summary)
 })
 
-it('related Agent status never becomes Goal progress and unrelated output does not redraw the row', async () => {
+it('ordinary Agent links stay in detail and unrelated output does not redraw the row', async () => {
   const record = goal('attribution', { sessionIds: ['related-agent'], delegationObservationIssue: originalIssue })
   const related = composerSession('related-agent')
   useAppStore.setState({ demands: { [record.id]: record }, sessions: [related,
@@ -83,23 +83,26 @@ it('related Agent status never becomes Goal progress and unrelated output does n
   await dom.render(<Profiler id="actual-goal-row" onRender={() => { commits++ }}><GoalRow demand={{ ...record, sessions: [], workspacePath: null }}
     selected={false} selectedSessionId={null} acknowledgementFailed={false} stageChanged={false} onSelect={() => {}} /></Profiler>)
   const facts = () => dom.container.querySelector('.goals-row__facts')!.textContent
-  expect(facts()).toContain('1 related Agent')
-  expect(facts()).not.toMatch(/working|error|running/iu)
+  expect(facts()).toBe('')
   expect(dom.container.querySelector('[data-goal-responsibility-preview]')!.textContent).toContain(originalIssue)
   const before = commits
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === related.id
     ? { ...session, status: { state: 'error', source: 'run-process', observedAt: 2 } }
     : { ...session, latestOutputBytes: 20000 }) })))
-  expect(facts()).toBe('1 related Agent')
+  expect(facts()).toBe('')
   expect(commits).toBe(before)
 })
 
-it.each([1, 2])('canonical and presentation references count one confirmed Actor in the actual Goal row (%s aliases)', async aliases => {
+it.each([false, true])('keeps a conflicting source visible and leaves matching aliases quiet (compact %s)', async compact => {
   const session = { ...composerSession('presentation-alias'), control: { kind: 'agent' as const,
     hostId: 'local', agentSessionId: 'canonical-actor', run: { runId: 'original-run' } } }
-  const record = goal('deduplicated', { sessionIds: ['canonical-actor', 'presentation-alias'] })
-  useAppStore.setState({ demands: { [record.id]: record }, sessions: aliases === 1 ? [session] : [session, { ...session, id: 'second-alias' }] })
+  const alias = { ...session, id: 'second-alias' }
+  const record = goal('original', { sessionIds: ['canonical-actor', 'presentation-alias'], projectName: 'Client tools' })
+  useAppStore.setState({ demands: { [record.id]: record }, sessions: [session, alias] })
   await dom.render(<GoalRow demand={{ ...record, sessions: [], workspacePath: null }} selected={false} selectedSessionId={null}
-    acknowledgementFailed={false} stageChanged={false} onSelect={() => {}} />)
-  expect(dom.container.querySelector('.goals-row__facts')!.textContent).toBe('1 related Agent')
+    acknowledgementFailed={false} stageChanged={false} onSelect={() => {}} compact={compact} />)
+  const facts = () => [...dom.container.querySelector('.goals-row__facts')!.children].map(node => node.textContent)
+  expect(facts()).toEqual(['Client tools'])
+  await act(async () => useAppStore.setState({ sessions: [session, { ...alias, control: { ...alias.control, hostId: 'remote' } }] }))
+  expect(facts()).toEqual(['Client tools', '1 linked Session unconfirmed'])
 })

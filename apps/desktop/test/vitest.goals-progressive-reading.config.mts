@@ -6,6 +6,8 @@ const owners = ['GoalResponsibilitySummary', 'GoalsCollection'].map(name => `app
 const mutations = {
   'expanded-diagnostics': [owners[0], '<details className="goal-responsibility-preview"', '<details open className="goal-responsibility-preview"'],
   'empty-lanes': [owners[1], '{occupied.map(status =>', '{visibleStatuses.map(status =>'],
+  'ordinary-link-rollup': [owners[1], '<GoalPlanRing demand={demand} />', '<GoalPlanRing demand={demand} />{demand.sessionIds.length ? <span>{demand.sessionIds.length} related Agents</span> : null}'],
+  'missing-link-warning': [owners[1], '{execution.unconfirmed ? <span>', '{false ? <span>'],
   'select-on-read': [owners[0], 'onClick={event => event.stopPropagation()}\n    onKeyDown=', 'onClick={() => {}}\n    onKeyDown=']
 } as const
 const mutation = process.env.GOAL_PROGRESSIVE_MUTATION as keyof typeof mutations | undefined
