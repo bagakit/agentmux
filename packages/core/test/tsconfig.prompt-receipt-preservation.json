@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "noEmit": true, "incremental": false, "composite": false },
+  "include": ["../src/agent-session-store.ts", "../src/prompt-submission-record.ts", "../src/prompt-submission.ts", "prompt-receipt-preservation.test.ts", "immediate-prompt.test.ts", "current-terminal-prompt.test.ts"]
+}

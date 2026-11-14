@@ -1,8 +1,11 @@
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
-import { AgentMuxMemoryAgentSessionStore, normalizeStoredAgentSession } from '../src/agent-session-store.js'
+import { AgentMuxMemoryAgentSessionStore, AgentMuxFileAgentSessionStore, normalizeStoredAgentSession, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js'
 import { AgentPromptSubmissionCoordinator } from '../src/prompt-submission.js'
@@ -11,12 +14,13 @@ import { AgentMuxError } from '../src/errors.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import type { AgentPromptExecutionEvidence, AgentMuxStoredAgentSession, AgentMuxClientEvent } from '../src/types.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
+import { inspectPromptInSecondProcess } from './helpers/prompt-receipt-process.js'
 
-async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: string) {
+async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: string, store: AgentMuxAgentSessionStore = new AgentMuxMemoryAgentSessionStore()) {
   let stored: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'private-immediate', providerId: 'fixture', executorId: 'fixture',
     hostId: 'local', workspacePath: fixturePath("private/workspace"), run: { runId: 'private-run' }, retiredRuns: [], hookBindingId: 'b', hookToken: 't', createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1),
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 1) } }
-  const store = new AgentMuxMemoryAgentSessionStore(), registry = new AgentMuxAgentSessionRegistry(store)
+  const registry = new AgentMuxAgentSessionRegistry(store)
   await registry.put(stored)
   const screen = new AgentTerminalScreen(100, 30)
   const draw = async (text = '', busy = true) => {
@@ -28,7 +32,11 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: str
   const template = new AgentProviderRegistry().get('codex')
   const capabilities = { ...template.catalog.capabilities }
   delete capabilities.providerFork // This execution fixture does not contribute a fork launcher.
-  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', capabilities: { ...capabilities, promptExecution: { immediate: 'interrupt-before-input' } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+  delete capabilities.nativeConversationInput
+  delete capabilities.asyncQuestionReply
+  capabilities.providerResume = false
+  capabilities.permission = 'none'
+  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', resumeStrategy: { kind: 'none' }, capabilities: { ...capabilities, promptExecution: { immediate: 'interrupt-before-input' } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: (prompt, context) => ({ kind: 'render-then-submit', payload: prompt, renderedText: prompt, submit: '\r',
       ...(context?.execution === 'immediate' ? { prepare: { interrupt, endEvent, ...(refresh ? { refresh } : {}) } } : {}) }),
@@ -182,7 +190,9 @@ describe('explicit Provider-owned non-submitting refresh', () => {
   } finally { f.screen.dispose() }
  })
  it('rejects changed geometry after refresh before emitting interrupt or owned payload', async () => {
-  const f = await fixture('\x1b', 'Interrupt', '\x1b[I')
+  const root = await mkdtemp(join(tmpdir(), 'amux-actual-refresh-'))
+  const database = join(root, 'sessions.sqlite')
+  const f = await fixture('\x1b', 'Interrupt', '\x1b[I', new AgentMuxFileAgentSessionStore(database))
   try {
    const input = f.kernel.input.getMockImplementation()!
    f.kernel.input.mockImplementation(async (...args) => {
@@ -194,7 +204,20 @@ describe('explicit Provider-owned non-submitting refresh', () => {
    expect(f.writes).toEqual(['\x1b[I'])
    await f.submit(); expect(f.writes).toEqual(['\x1b[I', '\x1b[I', '\x1b', 'ONLY_AUTHORIZED_MESSAGE', '\r'])
    expect(f.registry.get('private-immediate').promptCompletionAdmission!.frameRefresh!.resizeRevision).toBe(1)
-  } finally { f.screen.dispose() }
+   const original = await f.store.readPromptAdmission('private-immediate', { runId: 'private-run' }, 'owned')
+   expect(original!.ptyRefreshHistory).toHaveLength(1)
+   expect(original!.ptyRefreshHistory![0]).toMatchObject({ acknowledged: true, resizeRevision: 0,
+     nativeSourceId: 'private-native', inputByteRange: { startByte: 0, endByte: 3 } })
+   expect(original!.admission!.frameRefresh).toMatchObject({ acknowledged: true, resizeRevision: 1,
+     inputByteRange: { startByte: 3, endByte: 6 } })
+   expect(original!.terminalPromptSubmission!.submit.acknowledged).toBe(true)
+   const cold = await inspectPromptInSecondProcess(root, { kind: 'prompt', agentSessionId: 'private-immediate',
+     expectedRun: { runId: 'private-run' }, submissionId: 'owned' }, database)
+   expect(cold.readback.pid).not.toBe(process.pid)
+   expect(cold.readback.record).toEqual(original)
+   expect(cold.cli).toMatchObject({ ok: true, result: { record: original } })
+   expect(f.writes).toEqual(['\x1b[I', '\x1b[I', '\x1b', 'ONLY_AUTHORIZED_MESSAGE', '\r'])
+  } finally { f.screen.dispose(); await rm(root, { recursive: true, force: true }) }
  })
  it('refuses automatic refresh authorization before any native input', async () => {
   const f = await fixture('\x1b', 'Interrupt', '\x1b[I')
@@ -253,8 +276,8 @@ describe('retired Native writer declaration', () => {
   // abandoned authorization scheme. Their original bytes are retained in process
   // evidence; actual Native consumption and original draft safety have real tests.
   const template = new AgentProviderRegistry().get('codex')
-  const { providerFork: _fork, ...capabilities } = template.catalog.capabilities
-  expect(() => defineAgentProvider({ catalog: { ...template.catalog, id: 'no-native-port', capabilities: { ...capabilities, promptExecution: { immediate: 'native-steer' as never } }, hookStrategy: { kind: 'none' } },
+  const { providerFork: _fork, nativeConversationInput: _native, asyncQuestionReply: _question, ...capabilities } = template.catalog.capabilities
+  expect(() => defineAgentProvider({ catalog: { ...template.catalog, id: 'no-native-port', resumeStrategy: { kind: 'none' }, capabilities: { ...capabilities, providerResume: false, permission: 'none', promptExecution: { immediate: 'native-steer' as never } }, hookStrategy: { kind: 'none' } },
     hook: { rules: [] }, buildArgs: (_prompt, args) => [...args],
     terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: prompt => ({ kind: 'render-then-submit', payload: prompt, renderedText: prompt, submit: '\r' }),

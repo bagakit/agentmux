@@ -10,6 +10,7 @@ import type { DurableAgentMuxMessageQueue } from '../src/agent-global-message-qu
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 import type { AgentMuxStoredAgentSession, AgentNativePromptInputPlan, AgentPromptInputPlan } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { inspectPromptInSecondProcess } from './helpers/prompt-receipt-process.js'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const text = 'Original text 原文\n{"stop":true} stays opaque.'
@@ -126,6 +127,34 @@ it('a single-phase terminal protocol uses the same author, gate and byte owner',
     expect(h.forbidden).not.toHaveBeenCalled()
   } finally { await h.close() }
 })
+
+it.each(['render-then-submit', 'single-phase'] as const)('keeps the original %s ACK through real Client Run-end cleanup, Stop, cold Store and public CLI', async carrier => {
+  const h = await fixture()
+  try {
+    const inputPlan: AgentPromptInputPlan = carrier === 'single-phase' ? { kind: 'single-phase', data: text + '\r' } : plan
+    await h.submit('original-delivery', { inputPlan })
+    const original = await h.store.readPromptAdmission('recipient', h.initial.run, 'original-delivery')
+    expect(original?.admission?.acknowledged).toBe(true)
+    const writes = h.input.mock.calls.length
+    h.inner.kernel.status = vi.fn(async () => ({ ...h.run(), state: { type: 'exited', code: 0, signal: null } }))
+    h.inner.kernel.prepareStop = vi.fn(async (runId: string, operationKey: string) => ({ daemonInstance: 'original-terminal-runtime', operationKey, runId }))
+    Reflect.get(h.client, 'acceptKernelEvent').call(h.client, { type: 'exit', runId: h.initial.run.runId,
+      state: { type: 'exited', code: 0, signal: null }, observedAt: Date.now() })
+    if (carrier === 'render-then-submit') await expect.poll(async () => (await h.stored()).terminalPromptSubmission).toBeUndefined()
+    expect(await h.store.readPromptAdmission('recipient', h.initial.run, 'original-delivery')).toEqual(original)
+    await h.client.stopAgent('recipient', h.initial.run, { operationId: 'original-explicit-stop' })
+    const retirement = await h.store.readRetiredAgentSession('recipient')
+    expect(retirement).not.toBeNull()
+    expect(await h.store.readMetadata('recipient')).toBeNull()
+    expect(await h.store.readPromptAdmission('recipient', h.initial.run, 'original-delivery')).toEqual(original)
+    const cold = await inspectPromptInSecondProcess(h.root, h.key('original-delivery'))
+    expect(cold.readback.pid).not.toBe(process.pid)
+    expect(cold.readback).toMatchObject({ record: original, active: null, retired: retirement })
+    expect(cold.cli).toMatchObject({ ok: true, result: { record: original, input: { status: 'terminal-confirmed', admission: original } } })
+    expect(h.input).toHaveBeenCalledTimes(writes)
+    expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { await h.close() }
+}, 40_000)
 
 it('a new manual message preserves unknown Native history; its old key never replays through the terminal', async () => {
   const h = await fixture()
