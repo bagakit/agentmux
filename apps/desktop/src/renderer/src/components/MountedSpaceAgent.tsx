@@ -16,6 +16,7 @@ import { usePendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { SourceComposerRecovery } from './SourceComposerRecovery'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { ConversationReadFailure } from './ConversationReadFailure'
 
 /** One exact member reader. Full Session facts stay here, never in the observer's Session map. */
 export function SpaceMemberWorkface({ target, visible, active, interactiveResize = false, privateInput, sourceTabId, onRefreshSource, runtimeRecovery }: { target: SpaceMountMemberTarget; visible: boolean; active: boolean; interactiveResize?: boolean; privateInput?: SpaceMountRecord | undefined; sourceTabId?: string | undefined; onRefreshSource?: (() => void) | undefined; runtimeRecovery?: ((layout: 'inline' | 'surface') => ReactNode) | undefined }) {
@@ -188,10 +189,12 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
             enabled: visible && mode === 'activity', opened: true, readCaptured: true,
             onClose: () => useAppStore.getState().setViewMode(ownerKey, 'terminal', { focus: false }), returnLabel: 'Terminal',
             consumer: { regionId: target.target.regionId, visible, activityShown: mode === 'activity', viewMode: mode } }} />
-          : <FullPageLoadingSurface scope="region" visible={visible && mode === 'activity'} phase={conversationIssue ? 'failed' : 'loading'}
-            title={conversationIssue ? 'Original conversation unavailable' : 'Reading the original conversation'}
-            detail={conversationIssue ?? 'Reading this Agent’s original records independently of terminal observation.'}
-            actions={conversationIssue ? <button type="button" className="small-button" onClick={() => retryReading(value => value + 1)}>Retry original reading</button> : undefined} />}
+          : conversationIssue ? <ConversationReadFailure scope={readingKey} hasContent={false} visible={visible && mode === 'activity'}
+            issues={[{ id: 'original-conversation', label: 'Original conversation source', reasons: [conversationIssue], loading: false,
+              retryLabel: 'Retry original reading', retry: () => retryReading(value => value + 1) }]} />
+            : <FullPageLoadingSurface scope="region" visible={visible && mode === 'activity'} phase="loading"
+              title="Reading the original conversation" detail="Reading this Agent’s original records independently of terminal observation." />}
+
       </div> : null}
     </div></div>
     <SourceComposerRecovery target={target} tabId={sourceTabId} surfaceRef={recoveryRef} />

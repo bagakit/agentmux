@@ -763,7 +763,7 @@ export function ActivityView({
   const readingServiceScope = JSON.stringify(['conversation-reading', executionHostId, sessionId, conversationReading?.identity])
   const fullReadFailure = Boolean(conversationReading && !hasReadContent && readingIssues.length)
   const emptyReadStatus = fullReadFailure ? <ConversationReadFailure scope={readingServiceScope} issues={readingIssues}
-    full visible={readingEnabled} /> : !hasReadContent && !earlierReadPending && (initialReadPending || emptyReadFailed) ? (
+    hasContent={false} visible={readingEnabled} /> : !hasReadContent && !earlierReadPending && (initialReadPending || emptyReadFailed) ? (
     <FullPageLoadingSurface className="activity-feed__empty-reading" scope="region"
       phase={emptyReadFailed ? 'failed' : 'loading'} eyebrow="Conversation reading"
       title={emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'} detail="">

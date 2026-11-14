@@ -269,21 +269,22 @@
 /* The original read owns the shared Region surface. While it is pending the scene is a
    transparent field over the whole reading area; the original tools stay above it in
    their own places and its caption is stationary. */
-.activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) { display: flex; flex-direction: column; }
+.activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading[data-loading-phase='loading']) { display: flex; flex-direction: column; }
 .activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading[data-loading-phase='loading']) { position: relative; }
 .activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading[data-loading-phase='loading']) > :not(:has(> .activity-feed__empty-reading)),
 .activity-feed__empty-reading[data-loading-phase='loading'] ~ * { z-index: 1; }
-.activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-items: stretch; }
-.activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) > .reading-find__floating-trigger { grid-row: 1; }
-.activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) > .activity-feed__reading { grid-row: 1; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-loading-phase='loading']) { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-items: stretch; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-loading-phase='loading']) > .reading-find__floating-trigger { grid-row: 1; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-loading-phase='loading']) > .activity-feed__reading { grid-row: 1; }
 .activity-feed__empty-reading.full-page-loading--region { color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-sans); }
-.activity-feed__empty-reading.full-page-loading--region:not(.activity-feed__reading-failure-surface) .full-page-loading__stage { display: contents; }
-.activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface) { grid-column: 1 / -1; grid-row: 2; min-height: 0; padding: 0; }
+.activity-feed__empty-reading.full-page-loading--region .full-page-loading__stage { display: contents; }
+.activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading[data-loading-phase='loading'] { grid-column: 1 / -1; grid-row: 2; min-height: 0; padding: 0; }
 .activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading[data-loading-phase='loading'] { position: absolute; inset: 0; z-index: 0; background: none; pointer-events: none; }
 .activity-feed__empty-reading[data-loading-phase='loading']::before { content: none; }
-.activity-feed__empty-reading[data-loading-phase='failed']:not(.activity-feed__reading-failure-surface) { height: auto; background: none; justify-items: start; }
-.activity-feed__empty-reading[data-loading-phase='failed']:not(.activity-feed__reading-failure-surface)::before { content: none; }
-.activity-feed__reading-service { padding: var(--sp-2) var(--sp-4); }
+.activity-feed__empty-reading[data-loading-phase='failed'] { height: auto; background: none; justify-items: start; }
+.activity-feed__empty-reading[data-loading-phase='failed']::before { content: none; }
+.activity-feed__reading-service { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
+.activity-feed__reading-header > .activity-feed__reading-service { grid-column: 1 / -1; }
 .conversation-read-issues { display: grid; gap: var(--sp-4); min-width: 0; }
 .conversation-read-issues__source { display: grid; justify-items: start; gap: var(--sp-2); min-width: 0; padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
 .conversation-read-issues__source > strong { color: var(--text-2); font-weight: 500; }

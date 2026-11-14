@@ -1,4 +1,3 @@
-import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
 
@@ -12,10 +11,10 @@ export type ConversationReadIssue = {
   retry(): void
 }
 
-export function ConversationReadFailure({ scope, issues, full = false, visible }: {
+export function ConversationReadFailure({ scope, issues, hasContent = true, visible }: {
   scope: string
   issues: readonly ConversationReadIssue[]
-  full?: boolean
+  hasContent?: boolean
   visible: boolean
 }) {
   const title = 'Conversation reading interrupted'
@@ -36,15 +35,11 @@ export function ConversationReadFailure({ scope, issues, full = false, visible }
       </button>
     </section>)}
   </div>
-  if (full) return <FullPageLoadingSurface scope="region" phase="failed" eyebrow="Conversation reading"
-    className="activity-feed__empty-reading activity-feed__reading-failure-surface" title={title}
-    detail="Conversation records are unavailable right now. Your Session, draft and available controls are kept."
-    actions={retry} details={{ summary: 'Reading details', content: details }} />
   const notices: ServiceNoticeItem[] = issues.map(issue => ({ id: issue.id, cause: issue.id,
     notice: { kind: 'indeterminate', notice: { step: issue.label, mode: issue.reasons.join('\n'), restore: issue.retryLabel } } }))
   return <ServiceNoticeDisclosure scope={scope} notices={notices} visible={visible}
     title={title} persistentTitle className="activity-feed__reading-service" inlineActions={retry}>
-    <p className="conversation-read-issues__kept">Loaded messages, your reading position and draft are kept. This read failure does not confirm the Agent’s availability.</p>
+    <p className="conversation-read-issues__kept">{hasContent ? 'Loaded messages, your reading position and draft are kept.' : 'The original records are unavailable right now. Your Session, draft and available controls are kept.'} This read failure does not confirm the Agent’s availability.</p>
     {details}
   </ServiceNoticeDisclosure>
 }
