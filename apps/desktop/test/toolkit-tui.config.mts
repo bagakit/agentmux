@@ -10,6 +10,7 @@ const changes: Record<string, [string, string, string]> = {
   'cache-receipt-read-error': ['apps/desktop/src/main/toolkit-receipt-store.ts', '      this.loaded = null\n      throw error', '      throw error'],
   'cache-custom-load-error': [owner, "        value.error = 'Tool receipt is unconfirmed: ' + message(error)\n        value.loading = null", "        value.error = 'Tool receipt is unconfirmed: ' + message(error)"],
   'cache-performance-load-error': ['apps/desktop/src/main/toolkit-owner.ts', '        this.loaded = null\n      }', '      }'],
+  'require-prepared-launch-before-first-prepare': [owner, 'await this.start(retained, !needsPreparation)', 'await this.start(retained, true)'],
   'raw-ownership': ['apps/desktop/src/main/runtime-controller.ts', "if (output === 'raw') this.toolkitRuns.set", 'if (true) this.toolkitRuns.set'],
   'repeat-load': [owner, 'const added = [...enabled].filter(id => !this.autoStartingTools.has(id))', 'const added = [...enabled]'],
   'runner-environment': [owner, '      delete env.ELECTRON_RUN_AS_NODE\n', ''],

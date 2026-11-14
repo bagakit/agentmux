@@ -80,6 +80,44 @@ it('uses the original Native receipt through the Desktop Toolkit CLI after a los
   await record('tui-lost-launch-receipt', { executionId: pending.executionId, run: ref, starts: creation.mock.calls.length })
 })
 
+it('continues the original TUI admission after its first save lost the reply before preparation', async () => {
+  const main = await nativeMain()
+  const firstPrepare = vi.spyOn(main.core, 'prepareTerminal')
+  const firstStart = vi.spyOn(privateKernel(main), 'startPrepared')
+  const save = ToolkitReceiptStore.prototype.save
+  vi.spyOn(ToolkitReceiptStore.prototype, 'save').mockImplementationOnce(async function (this: ToolkitReceiptStore, id, receipt) {
+    await save.call(this, id, receipt)
+    throw new Error('Private first admission save reply was lost')
+  })
+  await add(main, 'interactive', false)
+  const pending = await inspect()
+  expect(pending).toMatchObject({ state: 'unknown', pendingLaunch: 'not-observed',
+    admission: { run: null, reason: expect.stringContaining('first admission save reply was lost') } })
+  const original = pending.admission!
+  expect(firstPrepare).not.toHaveBeenCalled()
+  expect(firstStart).not.toHaveBeenCalled()
+  expect(await main.sdk.list()).toEqual([])
+  await main.restart()
+  const prepare = vi.spyOn(main.core, 'prepareTerminal')
+  const start = vi.spyOn(privateKernel(main), 'startPrepared')
+  expect(await inspect()).toMatchObject({ state: 'unknown', pendingLaunch: 'not-observed',
+    admission: { executionId: original.executionId, invocationId: original.invocationId, run: null } })
+  expect(prepare).not.toHaveBeenCalled()
+  expect(start).not.toHaveBeenCalled()
+  expect(await main.sdk.list()).toEqual([])
+  const input = join(main.directory, 'continue-original.json')
+  await writeFile(input, JSON.stringify({ invocationId: original.invocationId,
+    expectedRevision: original.definition.revision, expectedLatestExecutionId: original.expectedLatestExecutionId }))
+  const resumed = (await oneCli('toolkit', 'run', 'interactive', '--input', input)).result.snapshot
+  expect(resumed).toMatchObject({ state: 'running', admission: { executionId: original.executionId, invocationId: original.invocationId,
+    target: original.target, run: { hostId: 'local', runId: expect.any(String) } } })
+  expect((await oneCli('toolkit', 'run', 'interactive', '--input', input)).result.snapshot.admission.run).toEqual(resumed.admission.run)
+  expect(prepare).toHaveBeenCalledOnce()
+  expect(start).toHaveBeenCalledOnce()
+  await stop(main, original.executionId)
+  await record('tui-preparation-recovery', { executionId: original.executionId, run: resumed.admission.run, starts: start.mock.calls.length })
+})
+
 it('fences the exact pending Toolkit key through the public CLI and waits for a new manual Run after restart', async () => {
   const main = await nativeMain(), pending = await pendingLaunch(main, 'Private original Start disposition is unknown')
   const { original } = pending
