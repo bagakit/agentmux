@@ -147,6 +147,16 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const drafts = useMemo(() => ({ current: composer?.text.local.drafts ?? local.drafts }), [local, composer?.text])
   const currentComposer = useRef(composer); currentComposer.current = composer
   const [, redraw] = useState(0)
+  useEffect(() => {
+    if (!client || !visible || !agentSessionId) return
+    const unsubscribe = client.onEvent(event => {
+      if (event.type === 'session-observation-state') redraw(value => value + 1)
+    })
+    // Provider declarations share the directory's owner and its readiness,
+    // including an empty inventory. They do not qualify ordinary input.
+    redraw(value => value + 1)
+    return unsubscribe
+  }, [client, visible, agentSessionId])
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const notices = useMobileNotices()
   const [localDismissed, setDismissed] = useState<Set<string>>(() => {
@@ -216,6 +226,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const isWorking = Boolean(session && (currentActivity || retainedActivity?.state === 'working'))
   const providerCapabilities = (() => {
     try {
+      if (client?.sessionObservation().state === 'unconfirmed') return {}
       const provider = session?.providerId ? client?.catalog?.().find(entry => entry.id === session.providerId) : undefined
       return { route: provider?.capabilities.asyncQuestionReply, postureControl: provider?.postureControl, commands: provider?.composer?.commands }
     } catch (error) { return { route: undefined, postureControl: undefined, commands: undefined, issue: errorMessage(error) } }

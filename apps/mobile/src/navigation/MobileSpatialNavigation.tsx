@@ -112,6 +112,14 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     return () => { disposed = true; setPending(false); clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
   }, [client, connected, catalogActive, revision, observeCatalog, onPresentation])
   const answered = useCallback(() => refresh(value => value + 1), [])
+  const retryDirectory = useCallback(() => {
+    refresh(value => value + 1)
+    if (client && connected && client.sessionObservation().state !== 'ready') {
+      // The same SDK owns directory retry and its visible diagnostic. Accurate
+      // conversation reads keep their original control connection throughout.
+      void client.connect().catch(() => {})
+    }
+  }, [client, connected])
   const previousHome = useRef(home), incoming = JSON.stringify(initialContext ?? null), previousIncoming = useRef(incoming)
   useEffect(() => {
     if (previousHome.current === home) return
@@ -139,7 +147,12 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const metadataEpoch = useRef(0)
   useEffect(() => {
     if (sessions !== undefined) return
-    return client?.onEvent(event => {
+    const unsubscribe = client?.onEvent(event => {
+      if (event.type === 'session-observation-state') {
+        metadataEpoch.current += 1
+        if (needsMetadataDirectory) refreshMetadata(value => value + 1)
+        return
+      }
       if (event.type === 'agent-session' && (missingMetadata === null || missingMetadata.has(event.session.agentSessionId) || memberReferences.has(event.session.agentSessionId)) ||
         event.type === 'run-removed' && (!event.agentSessionId || missingMetadata === null || missingMetadata.has(event.agentSessionId) || memberReferences.has(event.agentSessionId)) || event.type === 'connection-state') {
         metadataEpoch.current += 1
@@ -150,16 +163,28 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         if (needsMetadataDirectory || contentVisible && memberChanged) refreshMetadata(value => value + 1)
       }
     })
+    // Subscribe before rereading: an empty bootstrap emits no Session event.
+    // Its ready publication may also have occurred between render and effect.
+    if (needsMetadataDirectory) {
+      metadataEpoch.current += 1
+      refreshMetadata(value => value + 1)
+    }
+    return unsubscribe
   }, [client, sessions, missingMetadata, needsMetadataDirectory, memberReferences, contentVisible])
-  const retainedMetadata = useRef<{ client: typeof client; epoch: number; scope: string; revision: number; value: { sessions: AgentMuxAgentSession[]; issue: string } } | null>(null)
+  const retainedMetadata = useRef<{ client: typeof client; epoch: number; scope: string; revision: number; value: { sessions: AgentMuxAgentSession[]; issue: string; pending: boolean } } | null>(null)
   const metadata = useMemo(() => {
-    if (sessions !== undefined) return { sessions, issue: '' }
-    const previous = retainedMetadata.current && retainedMetadata.current.client === client ? retainedMetadata.current.value : { sessions: [], issue: '' }
-    if (!needsMetadataDirectory) return previous
+    if (sessions !== undefined) return { sessions, issue: '', pending: false }
+    const previous = retainedMetadata.current && retainedMetadata.current.client === client ? retainedMetadata.current.value : { sessions: [], issue: '', pending: false }
+    if (!needsMetadataDirectory) return { ...previous, issue: '', pending: false }
     if (retainedMetadata.current && retainedMetadata.current.client === client && retainedMetadata.current.epoch === metadataEpoch.current && retainedMetadata.current.scope === metadataScope && retainedMetadata.current.revision === revision) return previous
     let value
-    try { value = { sessions: client?.agentSessions() ?? [], issue: '' } }
-    catch { value = { sessions: previous.sessions, issue: '对话信息暂时读不到，可以刷新重试。' } }
+    const observation = client?.sessionObservation()
+    if (observation && !observation.hasSnapshot) value = { sessions: previous.sessions,
+      pending: observation.state === 'unconfirmed',
+      issue: observation.state === 'unavailable' ? observation.diagnostic?.message ?? '会话目录暂时读不到，可以刷新重试。' : '' }
+    else try { value = { sessions: client?.agentSessions() ?? [], pending: false,
+      issue: observation?.state === 'unavailable' ? observation.diagnostic?.message ?? '会话目录暂时读不到，可以刷新重试。' : '' } }
+    catch { value = { sessions: previous.sessions, pending: false, issue: '会话目录暂时读不到，可以刷新重试。' } }
     retainedMetadata.current = { client, epoch: metadataEpoch.current, scope: metadataScope, revision, value }
     return value
   }, [client, sessions, needsMetadataDirectory, metadataRevision, metadataScope, revision])
@@ -364,10 +389,11 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     </>
   }
   const filteredSessions = (values: SessionReference[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))
+  const focusIssues = [...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...directory.issues]
   const focusView = focusVisited.current ? <MobileNoticeScope owner={client} identity={['focus']}><section className="mobile-spatial-panel mobile-focus-facet">
     <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu /><div><h1>Focus</h1>
       <p>需要你处理的事项与最近执行</p></div>
-      <div className="mobile-section-actions">{focusActive && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...directory.issues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent({})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
+      <div className="mobile-section-actions">{focusActive && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={focusIssues} retry={retryDirectory} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent({})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}{(!wide || !focusIssues.length) && <IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton>}</div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={focusQuery} onChange={event => setFocusQuery(event.target.value)} placeholder="查找 Agent 或工作空间" aria-label="查找" /></label>
 
@@ -389,7 +415,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         if (!matchingValues.length) return null
         return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={focusActive} size={20} />}<strong>{project?.name ?? '其他'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></section>
       })}</div>
-      {!rows.length && <p className="mobile-spatial-empty">Focus 列表还没确认，可以刷新重试。</p>}
+      {!rows.length && <p className="mobile-spatial-empty">{metadata.pending ? '正在读取会话…' : catalog?.agentPresentation !== undefined && !issue ? '暂无会话' : 'Focus 列表还没确认，可以刷新重试。'}</p>}
       {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></details>}
 
   </section></MobileNoticeScope> : null
@@ -397,7 +423,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     <MobileWorkfacePane className="mobile-space-navigation" pane="navigation" presentation={panes.navigation}>
     <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
-      <div className="mobile-section-actions">{contentVisible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
+      <div className="mobile-section-actions">{contentVisible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={retryDirectory} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
       {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">空间绑定还没重新确认，可以刷新目录。</MobileNotice>}

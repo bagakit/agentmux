@@ -37,17 +37,22 @@ export function useMobileAgentReferences(client: AgentMuxHostedClient | null, se
       })
     }
     const refresh = () => {
+      const observation = client.sessionObservation()
+      if (!observation.hasSnapshot) {
+        issue = observation.state === 'unconfirmed' ? '正在读取引用目录…'
+          : observation.diagnostic?.message ?? '引用目录暂时读不到；收起后可重新打开。'
+        return
+      }
       try {
         const next = client.agentSessions().map(peer => [peer.agentSessionId,
           { runId: peer.run.runId, suggestion: reference(peer) }] as const)
         peers.clear()
         for (const [id, peer] of next) peers.set(id, peer)
-        issue = null
+        issue = observation.state === 'unavailable' ? observation.diagnostic?.message ?? '引用目录暂时读不到；显示的是最近读取的结果。' : null
       } catch (error) { issue = `引用目录暂未完整读取；收起后可重新打开。${errorMessage(error)}` }
     }
-    refresh()
-    publish()
     let unsubscribe: (() => void) | undefined
+    let subscriptionIssue: string | null = null
     try {
       unsubscribe = client.onEvent(event => {
         if (!current) return
@@ -59,15 +64,19 @@ export function useMobileAgentReferences(client: AgentMuxHostedClient | null, se
             previous.suggestion.searchText !== next.searchText) publish()
         } else if (event.type === 'run-removed' && event.agentSessionId && peers.get(event.agentSessionId)?.runId === event.run.runId) {
           peers.delete(event.agentSessionId); publish()
-        } else if (event.type === 'connection-state' && event.state === 'restored') {
-          // The SDK has accepted the new bootstrap before publishing restoration.
-          // A lost observation alone cannot retire retained references.
+        } else if (event.type === 'session-observation-state' || event.type === 'connection-state' && event.state === 'restored') {
+          // Directory readiness includes a genuinely empty bootstrap. A lost
+          // observation alone cannot retire retained references.
           refresh(); publish()
         }
       })
     } catch (error) {
-      issue = `引用目录变化暂未接回；收起后可重新打开。${errorMessage(error)}`; publish()
+      subscriptionIssue = `引用目录变化暂未接回；收起后可重新打开。${errorMessage(error)}`
     }
+    // Read after subscribing so readiness cannot disappear in the render gap.
+    refresh()
+    if (subscriptionIssue) issue = subscriptionIssue
+    publish()
     return () => { current = false; unsubscribe?.() }
   }, [client, sessionId, displayName, requested])
   const matches = requested && snapshot?.client === client && snapshot.sessionId === sessionId && snapshot.displayName === displayName

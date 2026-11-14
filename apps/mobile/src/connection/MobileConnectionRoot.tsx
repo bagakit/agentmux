@@ -148,7 +148,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
           if (controller.signal.aborted) return
         }
         const name = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android' : '浏览器'
-        const value = await connectRelayHostedClient({ offer: selected!, keyPair, name, signal: controller.signal, sessions: 'summary' })
+        const value = await connectRelayHostedClient({ offer: selected!, keyPair, name, signal: controller.signal, sessions: 'summary', waitForReady: false })
         if (controller.signal.aborted) { await value.dispose(); return }
         if (pin) {
           if (!pinSourceCurrent()) { pinAwaitingRetry = true; await value.dispose(); throw new Error('连接期间原工作面或连接记录已变化，请核对后重新读取。') }
