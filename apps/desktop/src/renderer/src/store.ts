@@ -5535,7 +5535,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   mountSpace(target, reveal = true) {
     const key = spaceMountKey(target.reference)
-    set(state => ({ mountedSpaceInputs: editMountedSpaceInput(state.mountedSpaceInputs, key, current => ({ ...current, target: { ...current?.target, ...target, reference: { ...current?.target.reference, ...target.reference } }, drafts: current?.drafts ?? {} })), ...(reveal ? { selectedSpaceMount: key, mainSurface: 'workbench' as const } : {}) }))
+    set(state => ({ mountedSpaceInputs: editMountedSpaceInput(state.mountedSpaceInputs, key, current => {
+      const { kind: _privateInput, ...retained } = current ?? {}
+      return { ...retained, target: { ...current?.target, ...target, reference: { ...current?.target.reference, ...target.reference } }, drafts: current?.drafts ?? {} }
+    }), ...(reveal ? { selectedSpaceMount: key, mainSurface: 'workbench' as const } : {}) }))
   },
   retainSpaceMountRegistration(key, update) {
     set(state => ({ mountedSpaceInputs: editMountedRegistration(state.mountedSpaceInputs, key, update) }))

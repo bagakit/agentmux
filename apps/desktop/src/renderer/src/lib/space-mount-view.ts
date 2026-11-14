@@ -5,7 +5,7 @@ import { spaceMountKey } from '../../../shared/space-mount'
 import { createWorkspaceLayout, createWorkbenchViewLayout, splitWorkbenchRegion, balanceWorkbenchRegionLayout, addTabOccurrence, groupIds, regionIds, type SplitTreeNode } from '@agentmux/layout'
 
 /** Only this client's reference, composition and unsent input; the source owns membership. */
-export type MountedSpaceInput = { target: SpaceMountRecord; view?: SpaceMountView; drafts: Record<string, string>; launchers?: unknown; memberInputs?: unknown }
+export type MountedSpaceInput = { kind?: 'space-member-input'; target: SpaceMountRecord; view?: SpaceMountView; drafts: Record<string, string>; launchers?: unknown; memberInputs?: unknown }
 export type MountedSpaceObservation = { snapshot?: SpaceSnapshot; lastPresentSnapshot?: SpaceSnapshot; error?: string | undefined; reading: boolean }
 export type MountedSpaceRegistrationInput = { kind: 'folder-registration'; hostId: string; registration: FolderSpaceRegistration; submitted: boolean; confirmed?: boolean; issue?: string }
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -31,20 +31,35 @@ function view(value: unknown): value is SpaceMountView {
   return selection === null || object(selection) && ['tabId', 'regionId', 'groupId'].every(key => text(selection[key]))
 }
 /** A readable locator remains usable when a separate private view fragment is unreadable. */
-export function mountedSpaceTarget(value: unknown, key: string): SpaceMountRecord | undefined {
+export function memberSpaceInputTarget(value: unknown, key: string): SpaceMountRecord | undefined {
   const entry = mountedSpaceInputs(value)[key]
   if (entry === undefined) return undefined
-  if (!object(entry) || !object(entry.target) || !text(entry.target.hostId) || !text(entry.target.zoneId) || !text(entry.target.workspaceId) ||
+  if (!object(entry) || entry.kind !== undefined && entry.kind !== 'space-member-input' || !object(entry.target) || !text(entry.target.hostId) || !text(entry.target.zoneId) || !text(entry.target.workspaceId) ||
     !object(entry.target.reference) || !text(entry.target.reference.runtimeId) || !text(entry.target.reference.spaceId) ||
     key !== spaceMountKey({ runtimeId: entry.target.reference.runtimeId, spaceId: entry.target.reference.spaceId })) return unreadable()
   return entry.target as SpaceMountRecord
 }
+/** A private member input is not an explicit mounted navigation destination. */
+export function mountedSpaceTarget(value: unknown, key: string): SpaceMountRecord | undefined {
+  const entry = mountedSpaceInputs(value)[key]
+  if (object(entry) && entry.kind === 'space-member-input') return undefined
+  return memberSpaceInputTarget(value, key)
+}
 export function mountedSpaceInput(value: unknown, key: string): MountedSpaceInput | undefined {
-  const target = mountedSpaceTarget(value, key)
+  const target = memberSpaceInputTarget(value, key)
   if (!target) return undefined
   const entry = mountedSpaceInputs(value)[key]
   if (!object(entry) || !object(entry.drafts) || !Object.values(entry.drafts).every(draft => typeof draft === 'string') || entry.view !== undefined && !view(entry.view)) return unreadable()
   return entry as MountedSpaceInput
+}
+/** Created only by a private edit/checkpoint, never by observing a Session. */
+export function ensureMemberSpaceInput(value: unknown, key: string, target: SpaceMountRecord): Record<string, unknown> {
+  const entries = mountedSpaceInputs(value)
+  if (key !== spaceMountKey(target.reference)) return unreadable()
+  if (entries[key] === undefined) return { ...entries, [key]: { kind: 'space-member-input', target, drafts: {} } satisfies MountedSpaceInput }
+  const original = memberSpaceInputTarget(entries, key)
+  if (!original || original.reference.runtimeId !== target.reference.runtimeId || original.reference.spaceId !== target.reference.spaceId) return unreadable()
+  return entries
 }
 /** Malformed or other-source entries remain opaque; an edit replaces only its exact readable entry. */
 export function editMountedSpaceInput(value: unknown, key: string, edit: (current: MountedSpaceInput | undefined) => MountedSpaceInput): Record<string, unknown> {
@@ -53,8 +68,8 @@ export function editMountedSpaceInput(value: unknown, key: string, edit: (curren
   return next === current ? original : { ...original, [key]: next }
 }
 /** An unreadable optional window layout cannot prevent an exact member draft edit. */
-export function editMountedSpaceDraftInput(value: unknown, key: string, tabId: string, regionId: string, text: string, selectedView?: SpaceMountView): Record<string, unknown> {
-  const entries = mountedSpaceInputs(value), target = mountedSpaceTarget(value,key), current = entries[key]
+export function editMountedSpaceDraftInput(value: unknown, key: string, tabId: string, regionId: string, text: string, selectedView?: SpaceMountView, privateTarget?: SpaceMountRecord): Record<string, unknown> {
+  const entries = privateTarget ? ensureMemberSpaceInput(value,key,privateTarget) : mountedSpaceInputs(value), target = memberSpaceInputTarget(entries,key), current = entries[key]
   if (!target || !object(current) || !object(current.drafts)) return unreadable()
   const draftKey = mountedRegionKey(target.reference,tabId,regionId)
   return current.drafts[draftKey] === text && (!selectedView || current.view === selectedView) ? entries :
