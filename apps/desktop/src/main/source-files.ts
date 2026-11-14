@@ -9,7 +9,8 @@ export async function resolveSourceFiles(rpc: Pick<AgentMuxRpcClient, 'call' | '
   const context = signal ? { signal } : {}
   let mount: SpaceMountRecord
   if (selection.kind === 'directory') {
-    const observation = await rpc.call('space.folder.inspect', { runtimeId: target.expectedRuntimeId, path: selection.path }, context)
+    const observation = await rpc.call('space.folder.inspect', { runtimeId: target.expectedRuntimeId, path: selection.path,
+      ...(selection.expectedResource ? { expectedResource: selection.expectedResource } : {}) }, context)
     if (!observation.resource) return unconfirmed(observation.issue?.code ?? 'CONTROL_UNAVAILABLE', observation.issue?.message ?? 'The original Source directory is unconfirmed.')
     if (selection.registration) {
       const chosen = selection.registration

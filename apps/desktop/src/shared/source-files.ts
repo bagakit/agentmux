@@ -1,6 +1,6 @@
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import type { FileReadResource } from '@agentmux/core/files'
-import type { FolderDirectoryInspection, FolderDirectoryRegistration, FolderSpaceRegistrationInspection } from '@agentmux/core/space-folder'
+import type { FolderDirectoryInspection, FolderDirectoryRegistration, FolderDirectoryResource, FolderSpaceRegistrationInspection } from '@agentmux/core/space-folder'
 import type { SpaceMountRecord } from './space-mount.js'
 
 /** A carrier selection is separate from every original Source namespace below. */
@@ -12,7 +12,7 @@ export type SourceFilesCall<M extends SourceFilesMethod> = { method: M; params: 
 export type SourceFilesResult<M extends SourceFilesMethod> = { result: AgentMuxRpcResult<M>; carrierCurrent: boolean }
 export type SourceFilesLocator = { mount: SpaceMountRecord; resource: FileReadResource }
 export type SourceFilesSelection = { kind: 'mount'; mount: SpaceMountRecord }
-  | { kind: 'directory'; path: string; registration?: SpaceMountRecord }
+  | { kind: 'directory'; path: string; expectedResource?: FolderDirectoryResource; registration?: SpaceMountRecord }
 export type SourceFilesResolution =
   | { status: 'located'; locator: SourceFilesLocator }
   | { status: 'registration-required'; registration: FolderDirectoryRegistration }
