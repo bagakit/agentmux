@@ -1,3 +1,4 @@
+import { CLAUDE_HOOK_EVENTS } from '@agentmux/providers/claude/provider'
 import { AgentProviderRegistry as LifecycleRegistry } from '../../src/agent-provider.js'
 const lifecycleProvider = new LifecycleRegistry().get('claude')
 const canonicalHookLifecycleEvent = (name: string) => {
@@ -14,7 +15,7 @@ import { basename, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
 import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-provider.js'
-import { CLAUDE_HOOK_EVENTS, CLAUDE_HOOKS, createClaudeManagedHookPlan, createClaudeProvider } from '../../src/providers/claude.js'
+import { CLAUDE_HOOKS, createClaudeManagedHookPlan, createClaudeProvider } from '../../src/providers/claude.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { agentHasActiveSubagents, type AgentNativeSubagents } from '../../src/agent-subagent-state.js'
 import { AgentMuxClient } from '../../src/client.js'

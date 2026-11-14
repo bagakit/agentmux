@@ -296,7 +296,7 @@ function programForProviders(overrides?: ReadonlyMap<string, string>): {
   const options: ts.CompilerOptions = {
     ...parsed.options,
     baseUrl: join(here, '..', '..'),
-    paths: { '@agentmux/providers/*': ['providers/src/*'] }
+    paths: { '@agentmux/providers/*': ['providers/src/*.ts'] }
   }
   const host = ts.createCompilerHost(options)
   if (overrides && overrides.size > 0) {
@@ -390,17 +390,19 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
 
   it.each(['alias', 'inferred'])('生成计划用 %s 返回类型时仍扫描真实 owner，手写 timeout 不能漏过', mode => {
     const path = join(providersDir, 'claude.ts')
+    const owner = join(packagedProvidersDir, 'claude/provider.ts')
     const original = readFileSync(path, 'utf8')
     const typed = mode === 'alias'
       ? original.replace('): AgentManagedHookPlan {', '): ManagedPlan {') + '\ntype ManagedPlan = AgentManagedHookPlan\n'
       : original.replace('): AgentManagedHookPlan {', ') {')
     expect(typed).not.toBe(original)
-    const mutated = typed.replace(`...(eventName === 'PermissionRequest' ? {} : ${HELPER_NAME}('claude'))`, `timeout: ${CONST_NAME}`)
-    expect(mutated).not.toBe(typed)
-    const { findings: bad, contributions: registered, scopes: covered } = generatedPlanScan(new Map([[path, mutated]]))
+    const ownerSource = readFileSync(owner, 'utf8')
+    const mutated = ownerSource.replace(`...(eventName === 'PermissionRequest' ? {} : ${HELPER_NAME}('claude'))`, `timeout: ${CONST_NAME}`)
+    expect(mutated).not.toBe(ownerSource)
+    const { findings: bad, contributions: registered, scopes: covered } = generatedPlanScan(new Map([[path, typed], [owner, mutated]]))
     expect(registered.length).toBeGreaterThan(0)
     for (const contribution of registered) expect(covered).toContain(contribution)
-    expect(bad.filter(site => site.path === path)).toEqual([expect.objectContaining({ key: 'timeout', text: CONST_NAME })])
+    expect(bad.filter(site => site.path === owner)).toEqual([expect.objectContaining({ key: 'timeout', text: CONST_NAME })])
   })
 
   it('自检 A0：至少有一处非数字字面量的写法也会被判据 A 抓——不是只挡裸数字', () => {
@@ -424,8 +426,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
   })
 
   it('自检 A2：注入一份手抄的 timeout 字面量，判据 A 必红（证明它不是恒真）', () => {
-    // 取 claude.ts 真实源码，把 `...hookCommandTimeout('claude')` 注入回手写的 `timeout: 10`，重扫。
-    const claudePath = join(providersDir, 'claude.ts')
+    const claudePath = join(packagedProvidersDir, 'claude/provider.ts')
     const original = readFileSync(claudePath, 'utf8')
     const mutated = original.replace(`...(eventName === 'PermissionRequest' ? {} : ${HELPER_NAME}('claude'))`, 'timeout: 10')
     expect(mutated, '注入替换没生效——被测锚点文本变了').not.toBe(original)

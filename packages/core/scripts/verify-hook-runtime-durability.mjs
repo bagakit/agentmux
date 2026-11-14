@@ -25,13 +25,13 @@ const definitions = {
       ...['claude', 'claude-native-settings', 'cursor-adapter', 'cursor-history',
         'hermes', 'opencode', 'pi'].map(name => 'providers/' + name + '.ts')].map(source)
       .concat(['packages/providers/src/claude/hook-settings.ts', 'packages/providers/src/claude/workspace-trust.ts'])
-      .concat(['antigravity', 'copilot', 'gemini', 'droid', 'grok', 'cursor', 'pi', 'opencode', 'hermes'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
+      .concat(['antigravity', 'claude', 'copilot', 'gemini', 'droid', 'grok', 'cursor', 'pi', 'opencode', 'hermes'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
     tests: ['provider-hook-environment.test.ts', 'claude-hook-activation.test.ts'],
     mutants: ['ignore-home', 'inherit-unset', 'drop-provider-env', 'core-cwd-relative', 'ignore-gemini-home', 'drop-inspect-unset',
       'ignore-claude-inspection-home', 'ignore-claude-trust-env', 'ignore-grok-home', 'trim-opencode-override'] },
   runtime: { config: 'vitest.managed-hook-runtime.config.mts', env: 'AGENTMUX_HOOK_RUNTIME_MUTATION', owners: ['managed-hook-runtime.ts'],
     inputs: ['managed-hook-runtime.ts', 'runtime-paths.ts', 'client.ts', 'agent-provider.ts', 'providers/shared.ts', 'hook-server.ts',
-      'providers/claude.ts', 'providers/claude-plugin.ts', 'packages/providers/src/claude/native-activity.ts', 'providers/codex.ts', 'providers/codex-hook-services.ts', 'packages/providers/src/codex/launch-hooks.ts'].map(source),
+      'providers/claude.ts', 'providers/claude-plugin.ts', 'packages/providers/src/claude/provider.ts', 'packages/providers/src/claude/native-activity.ts', 'providers/codex.ts', 'providers/codex-hook-services.ts', 'packages/providers/src/codex/launch-hooks.ts'].map(source),
     tests: ['managed-hook-runtime.test.ts', 'launch-scoped-hook-environment.test.ts', 'codex-claude-retained-hook.test.ts',
       'fixtures/codex-claude-retained-hook.py', 'vitest.codex-claude-retained-hook.config.mts', 'vitest.hook-runtime-core.config.mts'],
     extras: [core('scripts/verify-codex-claude-retained-hook.mjs')],
