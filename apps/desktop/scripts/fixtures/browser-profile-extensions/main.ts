@@ -1,0 +1,132 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { generateKeyPairSync } from 'node:crypto'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { app, BrowserWindow } from 'electron'
+import { zipSync, strToU8 } from 'fflate'
+import { AgentMuxControlServer } from '@agentmux/core'
+import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserProfileManager } from '../../../src/main/browser-profile-manager.js'
+import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
+import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
+import { executeBrowserProfileControl } from '../../../src/main/browser-profile-control.js'
+
+const home = process.env.EXTENSIONS_HOME!, out = process.env.EXTENSIONS_OUT!, phase = process.env.EXTENSIONS_PHASE!, base = process.env.EXTENSIONS_BASE!, node = process.env.EXTENSIONS_NODE!
+app.setActivationPolicy?.('prohibited'); app.on('window-all-closed', () => {})
+const receipt: any = { passed: false, phase, pid: process.pid, cases: [], cli: [], approvals: [] }
+let host: BrowserWindow | undefined, profiles: BrowserProfileManager | undefined, browsers: BrowserViewManager | undefined, control: AgentMuxControlServer | undefined
+let consent = true, fresh = 0
+const originalBrowserId = 'extension-original-browser'
+const contents = (id = originalBrowserId) => browsers!.nativeOwner(id)!.view.webContents
+const token = (id: string) => profiles!.listProfiles().find(profile => profile.id === id)!.revision
+const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+async function cli(args: string[], success = true) {
+  const result = await new Promise<{ code: number; stdout: string; stderr: string }>((accept, reject) => {
+    const child = spawn(node, [join(out, 'cli.mjs'), '--endpoint', 'unix:' + join(home, 'control.sock'), 'browser', 'profile', 'extension', ...args], {
+      env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'ELECTRON_RUN_AS_NODE' && !/^(AGENTMUX_|CTXMUX_)/.test(key))), NODE_NO_WARNINGS: '1' }, stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = '', stderr = ''; const timer = setTimeout(() => { child.kill(); reject(Error('Original extension CLI observation exceeded its private test deadline')) }, 90_000)
+    child.stdout.on('data', data => { stdout += data }); child.stderr.on('data', data => { stderr += data }); child.on('error', reject)
+    child.on('close', code => { clearTimeout(timer); accept({ code: code ?? -1, stdout, stderr }) }); child.stdin.end()
+  })
+  const body = JSON.parse(result.stdout || result.stderr); receipt.cli.push({ command: args[0], code: result.code, body })
+  assert.equal(result.code === 0, success, result.stderr + result.stdout)
+  return success ? body.result : body
+}
+async function freshPage(profileId: string) {
+  const id = `extension-observation-${++fresh}`
+  await browsers!.create(id, base, undefined, profileId); browsers!.setBounds(id, { x: 0, y: 0, width: 660, height: 500 })
+  let facts: any
+  for (let index = 0; index < 300; index++) {
+    facts = await contents(id).executeJavaScript('({...document.documentElement.dataset})')
+    if (facts.extensionBackground) return facts
+    await pause(25)
+  }
+  throw Error('The actual extension content script and background did not produce their protocol markers: ' + JSON.stringify(facts))
+}
+const manifest = (version: string, extra: Record<string, unknown> = {}) => ({ manifest_version: 3, name: 'Private Profile helper', version, permissions: ['storage'],
+  host_permissions: ['http://127.0.0.1/*'], content_scripts: [{ matches: ['http://127.0.0.1/*'], js: ['content.js'] }], background: { service_worker: 'background.js' },
+  update_url: 'https://update.invalid/extension.xml', ...extra })
+const code = (version: string) => `chrome.storage.local.get({count:0},state=>chrome.storage.local.set({count:state.count+1},()=>{document.documentElement.dataset.extensionVersion=${JSON.stringify(version)};document.documentElement.dataset.extensionCount=String(state.count+1);chrome.runtime.sendMessage({ping:true},reply=>document.documentElement.dataset.extensionBackground=reply?.version??'missing')}))`
+const background = (version: string) => `chrome.runtime.onMessage.addListener((message,sender,reply)=>reply({version:${JSON.stringify(version)}}))`
+async function source(version: string, options: { zip?: boolean; missingScript?: boolean; key?: string } = {}) {
+  const definition = manifest(version, { ...(options.key ? { key: options.key } : {}), ...(version === '2.0.0' ? { permissions: ['storage', 'tabs'] } : {}) })
+  const files = { 'manifest.json': JSON.stringify(definition), 'background.js': background(version), ...(!options.missingScript ? { 'content.js': code(version) } : {}) }
+  const path = join(home, 'source-' + version + '-' + (++fresh) + (options.zip ? '.zip' : ''))
+  if (options.zip) await writeFile(path, zipSync(Object.fromEntries(Object.entries(files).map(([name, data]) => [name, strToU8(data)]))))
+  else { await mkdir(path); for (const [name, data] of Object.entries(files)) await writeFile(join(path, name), data) }
+  return path
+}
+async function prepare(profileId: string, sourcePath: string, operationId: string, extensionId?: string) {
+  return (await cli(['prepare', '--profile', profileId, '--expected-revision', token(profileId), '--operation-id', operationId, '--source', sourcePath,
+    ...(extensionId ? ['--extension', extensionId] : [])])).review
+}
+async function apply(profileId: string, review: any, success = true) { return cli(['apply', '--profile', profileId, '--expected-revision', review.expectedRevision, '--review', review.reviewId], success) }
+async function main() {
+  try {
+    host = new BrowserWindow({ show: false, width: 760, height: 640, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } }); await host.loadURL('data:text/html,Private extension workbench')
+    profiles = new BrowserProfileManager(new BrowserProfileStore(join(home, 'profiles.json'))); await profiles.initialize()
+    const retained = phase === 'second' ? JSON.parse(await readFile(join(home, 'retained.json'), 'utf8')) : null
+    const profileId = retained?.profileId ?? profiles.defaultProfileId()
+    profiles.extensions.setConfirmationHandler(async request => { receipt.approvals.push({ ...request, actualHumanReviewFixture: true, confirmed: consent }); return consent })
+    browsers = new BrowserViewManager(host, profiles, new BrowserRefLedgerStore(join(home, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: async () => {} })
+    control = new AgentMuxControlServer({ socketPath: join(home, 'control.sock'), coreClients: () => [], execute: (request, context) => executeBrowserProfileControl(request as never,
+      { profiles: profiles!, usage: {} as never, network: {} as never }, context?.actor) }); await control.start()
+    if (retained) {
+      assert.equal(profiles.sessions.observedSession?.(profileId), undefined)
+      const cold = await cli(['ls', '--profile', profileId]); assert.equal(cold.extensions[0].application.state, 'unknown')
+      assert.equal(profiles.sessions.observedSession?.(profileId), undefined)
+      await browsers.create(originalBrowserId, base, undefined, profileId); browsers.setBounds(originalBrowserId, { x: 0, y: 0, width: 660, height: 500 })
+      let facts: any
+      for (let index = 0; index < 300; index++) { facts = await contents().executeJavaScript('({...document.documentElement.dataset})'); if (facts.extensionBackground) break; await pause(25) }
+      const restored = await cli(['ls', '--profile', profileId, '--operation-id', 'actual-update'])
+      assert.equal(restored.extensions[0].id, retained.extensionId); assert.equal(restored.extensions[0].nativeId, retained.nativeId); assert.equal(restored.extensions[0].sha256, retained.sha256)
+      assert.equal(restored.extensions[0].application.state, 'loaded'); assert.equal(facts.extensionVersion, '2.0.0'); assert.equal(facts.extensionBackground, '2.0.0'); assert.equal(facts.extensionCount, '3')
+      assert.equal((await contents().session.cookies.get({ name: 'profile-signin' }))[0]?.value, 'private-cookie-preserved')
+      assert.equal(await contents().executeJavaScript('localStorage.getItem("profile-note")'), 'original-note-kept')
+      assert.equal(profiles.listProfiles().length, retained.profileCount)
+      receipt.cases.push({ kind: 'second-process-approved-original-extension-storage-and-signin', extensionId: retained.extensionId, nativeId: retained.nativeId, facts, sameBrowserId: originalBrowserId, originalProfileId: profileId })
+    } else {
+      const independent = await profiles.createProfile('Independent Profile')
+      await browsers.create(originalBrowserId, base, undefined, profileId); browsers.setBounds(originalBrowserId, { x: 0, y: 0, width: 660, height: 500 })
+      await browsers.create('extension-independent-browser', base, undefined, independent.id); browsers.setBounds('extension-independent-browser', { x: 0, y: 0, width: 660, height: 500 })
+      await contents().executeJavaScript('document.querySelector("input").value="original-unsent-form";localStorage.setItem("profile-note","original-note-kept")')
+      await contents().session.cookies.set({ url: base, name: 'profile-signin', value: 'private-cookie-preserved', expirationDate: Math.floor(Date.now() / 1000) + 86_400 })
+      const review = await prepare(profileId, await source('1.0.0'), 'actual-install')
+      assert.equal(profiles.sessions.nativeSession(profileId).extensions.getAllExtensions().length, 0)
+      consent = false; assert.equal((await apply(profileId, review)).outcome, 'cancelled'); assert.equal(profiles.sessions.nativeSession(profileId).extensions.getAllExtensions().length, 0)
+      consent = true; await apply(profileId, review)
+      const first = await cli(['ls', '--profile', profileId, '--operation-id', 'actual-install']), extensionId = first.extensions[0].id, nativeId = first.extensions[0].nativeId
+      const facts = await freshPage(profileId); assert.equal(facts.extensionVersion, '1.0.0'); assert.equal(facts.extensionBackground, '1.0.0'); assert.equal(facts.extensionCount, '1')
+      assert.equal(await contents('extension-independent-browser').executeJavaScript('document.documentElement.dataset.extensionVersion'), undefined)
+      assert.equal((await contents('extension-independent-browser').session.cookies.get({ name: 'profile-signin' })).length, 0)
+      receipt.cases.push({ kind: 'actual-cli-human-boundary-content-script-and-mv3-worker', extensionId, nativeId, facts, independentProfileUnaffected: true })
+      const update = await prepare(profileId, await source('2.0.0', { zip: true }), 'actual-update', extensionId)
+      assert.ok(update.addedPermissions.includes('API: tabs')); await apply(profileId, update)
+      const updated = await cli(['ls', '--profile', profileId]), second = await freshPage(profileId)
+      assert.equal(updated.extensions[0].nativeId, nativeId); assert.equal(updated.extensions[0].id, extensionId); assert.equal(second.extensionVersion, '2.0.0'); assert.equal(second.extensionBackground, '2.0.0'); assert.equal(second.extensionCount, '2')
+      const failing = await prepare(profileId, await source('3.0.0', { missingScript: true }), 'actual-failed-update', extensionId), rejected = await apply(profileId, failing, false)
+      assert.equal(rejected.error.code, 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED')
+      const kept = await cli(['ls', '--profile', profileId, '--operation-id', 'actual-failed-update'])
+      assert.equal(kept.extensions[0].version, '2.0.0'); assert.equal(kept.extensions[0].application.state, 'loaded'); assert.equal(kept.receipt, null)
+      assert.equal(await contents().executeJavaScript('document.querySelector("input").value'), 'original-unsent-form')
+      assert.equal(await contents().executeJavaScript('localStorage.getItem("profile-note")'), 'original-note-kept')
+      receipt.cases.push({ kind: 'actual-zip-update-failure-native-old-ack-and-original-form', extensionId, nativeId, second })
+      const otherKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+      const temporary = await prepare(profileId, await source('4.0.0', { key: otherKey }), 'temporary-install'); await apply(profileId, temporary)
+      await cli(['remove', '--profile', profileId, '--expected-revision', token(profileId), '--extension', temporary.extensionId, '--operation-id', 'actual-remove'])
+      const final = await cli(['ls', '--profile', profileId, '--operation-id', 'actual-remove'])
+      assert.equal(final.extensions.length, 1); assert.equal(final.extensions[0].id, extensionId); assert.equal(final.receipt.kind, 'remove')
+      receipt.cases.push({ kind: 'exact-removal-keeps-other-extension-and-profile', extensionId: temporary.extensionId, remaining: extensionId })
+      await contents().session.cookies.flushStore(); contents().session.flushStorageData()
+      const saved = { profileId, extensionId, nativeId, sha256: final.extensions[0].sha256, profileCount: profiles.listProfiles().length }
+      await writeFile(join(home, 'retained.json'), JSON.stringify(saved)); receipt.retained = saved
+    }
+    receipt.passed = true
+  } catch (error) { receipt.failure = { message: (error as Error).message, stack: (error as Error).stack }; console.error(error) }
+  finally {
+    await control?.stop(); browsers?.dispose(); await profiles?.dispose(); host?.destroy()
+    await writeFile(join(out, phase + '.json'), JSON.stringify(receipt, null, 2)); app.exit(receipt.passed ? 0 : 1)
+  }
+}
+void main()
