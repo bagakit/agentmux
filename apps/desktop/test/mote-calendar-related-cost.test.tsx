@@ -23,12 +23,15 @@ const saved = (): ContinuousProgressLoop => ({ ...target, loopId: 'own-arrangeme
 beforeEach(() => {
   seedMoteWorkface(); useLauncherState.setState({ drafts: {}, persistenceIssue: null })
   vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [saved()], executionScope: 'connected-host' })
-  vi.spyOn(api.schedule, 'onChanged').mockReturnValue(() => {})
+  vi.spyOn(api.schedule, 'history').mockImplementation(async ({ scheduleId, from, to, bucketStarts }) => ({
+    scheduleId, from, to, executionScope: 'connected-host', coverage: 'recorded-inputs', entries: [], nextCursor: null, ...(bucketStarts ? { buckets: [] } : {}),
+  }))
 })
 async function mounted() {
   const confirmed = vi.spyOn(moteMaterials, 'confirmedMoteReference')
   let commits = 0
   await dom.render(<Profiler id="calendar" onRender={() => { commits++ }}><MoteCalendar scope={scope} reference={reference} active /></Profiler>)
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === 'Upcoming')!.click())
   await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-id="own-arrangement"]')).not.toBeNull())
   expect(dom.container.textContent).toContain(defaultAgent.label)
   return { confirmed, commits: () => commits }
@@ -72,8 +75,7 @@ it('invalidates original spatial membership while Session identity changes still
   } } } })))
   expect(h.confirmed.mock.calls.length).toBeGreaterThan(confirmations)
   const create = vi.spyOn(api.schedule, 'create').mockRejectedValue(new Error('Original request kept for consumer inspection'))
-  const details = dom.container.querySelector<HTMLDetailsElement>('.schedule-create')!
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  await dom.click('button[aria-label="New arrangement"]')
   const input = dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Arranged message"]')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Keep the exact selected discussion')
@@ -97,8 +99,7 @@ it('withdraws a changed control Host from the next pristine arrangement target',
   const h = await mounted(), confirmations = h.confirmed.mock.calls.length
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === defaultAgent.id && session.kind === 'agent'
     ? { ...session, control: { ...session.control, hostId: 'another-control-host' } } : session) })))
-  const details = dom.container.querySelector<HTMLDetailsElement>('.schedule-create')!
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  await dom.click('button[aria-label="New arrangement"]')
   expect(dom.container.textContent).toContain('Choose an exact discussion')
   expect(h.confirmed.mock.calls.length).toBe(confirmations)
   expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')

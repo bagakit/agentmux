@@ -16,9 +16,9 @@ export async function verifyMoteCalendar() {
   const config = join(root, 'apps/desktop/scripts/fixtures/mote-calendar/vitest.config.mts')
   const component = name => 'apps/desktop/src/renderer/src/components/' + name + '.tsx'
   const paths = [...['MoteCalendar', 'MoteCalendarTimes', 'MoteCalendarEvents', 'MoteDetailsPanel', 'MoteIdeaControls', 'CalendarScheduleControl', 'ScheduleArrangementRow', 'ScheduleCreateForm', 'ScheduleOperationNotice', 'ContinuousProgressControl', 'SessionMailbox'].map(component),
-    ...['schedule-controller', 'schedule-clock', 'schedule-draft', 'launcher-state', 'api'].map(name => 'apps/desktop/src/renderer/src/lib/' + name + '.ts'),
+    ...['mote-calendar-range', 'mote-calendar-receipts', 'schedule-controller', 'schedule-clock', 'schedule-draft', 'launcher-state', 'api'].map(name => 'apps/desktop/src/renderer/src/lib/' + name + '.ts'),
     ...['mote-calendar', 'agent'].map(name => 'apps/desktop/src/renderer/src/styles/' + name + '.css'), 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts',
-    ...['mote-calendar', 'calendar-schedule-control', 'continuous-progress-panel', 'mote-ideas'].map(name => 'apps/desktop/test/' + name + '.test.tsx'),
+    ...['mote-calendar', 'mote-calendar-related-cost', 'calendar-schedule-control', 'continuous-progress-panel'].map(name => 'apps/desktop/test/' + name + '.test.tsx'),
     'apps/desktop/test/helpers/schedule-rpc-fixture.ts', 'apps/desktop/scripts/fixtures/mote-calendar/vitest.config.mts',
     'apps/desktop/scripts/fixtures/agent-schedules/vitest.ui.config.mts', 'apps/desktop/scripts/fixtures/agent-schedules/isolate-core.mjs',
     'apps/desktop/scripts/verify-mote-calendar.mjs', 'apps/desktop/scripts/verify-agent-schedules-ui.mjs',
@@ -33,6 +33,7 @@ export async function verifyMoteCalendar() {
       ...(mutation ? { AGENT_SCHEDULE_MUTANT_OWNER: join(root, mutation.file), AGENT_SCHEDULE_MUTANT_COPY: mutation.copy } : {}) }
     let code = 0, output = ''
     try { const result = await run(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile', reportPath,
+      'test/mote-calendar.test.tsx', 'test/mote-calendar-related-cost.test.tsx', 'test/calendar-schedule-control.test.tsx', 'test/continuous-progress-panel.test.tsx',
       ...(mutation ? ['-t', mutation.filter] : [])], { cwd: root, env, timeout: 180000, maxBuffer: 8 * 1024 * 1024 }); output = result.stdout + result.stderr }
     catch (error) { code = error.code; output = (error.stdout ?? '') + (error.stderr ?? '') }
     finally { await rm(privateRoot, { recursive: true, force: true }) }
@@ -53,6 +54,7 @@ export async function verifyMoteCalendar() {
   }
   const runs = [await test('baseline')], mutations = []
   const changes = [
+    { file: 'apps/desktop/src/renderer/src/lib/mote-calendar-receipts.ts', name: 'drop-earlier-page-count', from: 'match.count += part.count', to: 'match.count = part.count', filter: 'counts earlier recorded inputs across summary pages' },
     { file: component('MoteCalendarEvents'), name: 'omit-original-events', from: 'timeline.push({ at: receipt.occurrenceAt, saved, receipt })', to: '', filter: 'keeps an earlier completed event with its frozen recap' },
     { file: component('MoteCalendar'), name: 'countdown-visibility', from: "source.records.filter(record => record.status !== 'stopped')", to: "source.records.filter(record => !!record.calendar && record.status !== 'stopped')", filter: 'actual Mote Renderer list and original control' },
     { file: component('MoteCalendar'), name: 'ended-input-hidden', from: 'projectScheduleOccurrences(source.records,', to: 'projectScheduleOccurrences(records,', filter: 'date and hour keep confirmed ended input' },
@@ -70,7 +72,7 @@ export async function verifyMoteCalendar() {
     mutations.push({ ...mutation, copy: relative(root, copy) }); runs.push(await test('red-' + change.name, mutation))
   }
   runs.push(await test('restored'))
-  const configuration = { extends: join(root, 'apps/desktop/tsconfig.json'), compilerOptions: { incremental: false, types: ['node'], typeRoots: [resolve(require.resolve('@types/node/package.json'), '../..')] },
+  const configuration = { extends: join(root, 'apps/desktop/tsconfig.json'), compilerOptions: { incremental: false, paths: { '@agentmux/core/schedule-rpc': [join(root, 'packages/core/src/public-rpc-schedules.ts')] }, types: ['node'], typeRoots: [resolve(require.resolve('@types/node/package.json'), '../..')] },
     include: [join(root, component('MoteCalendar')), join(root, 'apps/desktop/test/mote-calendar.test.tsx'), join(root, 'apps/desktop/src/renderer/src/global.d.ts'), resolve(require.resolve('vite'), '../../../client.d.ts')] }
   const typeConfig = join(directory, 'tsconfig.json'); await writeFile(typeConfig, JSON.stringify(configuration, null, 2))
   const types = await run(process.execPath, [require.resolve('typescript/bin/tsc'), '--noEmit', '-p', typeConfig], { cwd: root, timeout: 120000, maxBuffer: 4 * 1024 * 1024 })
