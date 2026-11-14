@@ -239,15 +239,17 @@
 .survey-item-tabs { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, max(64px, calc((100% - (var(--survey-thumbnail-columns) - 1) * 6px) / var(--survey-thumbnail-columns)))), 1fr)); align-items: stretch; gap: 6px; margin: 0; }
 .survey-tab-column { display: flex; flex-direction: column; align-items: stretch; gap: 5px; width: 100%; min-width: 0; padding: 3px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; text-align: left; font: inherit; font-size: var(--fs-meta); }
 .survey-tab-preview { position: relative; display: block; flex: none; width: 100%; height: var(--survey-thumbnail-height); overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-3); }
+.survey-tab-preview__region { position: absolute; overflow: hidden; min-width: 0; min-height: 0; }
+.survey-tab-preview[data-split] .survey-tab-preview__region::after { content: ""; position: absolute; inset: 0; border: .5px solid var(--survey-edge); pointer-events: none; }
 .survey-tab-preview__image { display: block; width: 100%; height: 100%; object-fit: cover; }
+.survey-tab-preview__type { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
+.survey-tab-preview__type .workbench-tab__marks { max-width: 100%; max-height: 100%; }
+.survey-tab-preview__type svg { max-width: 100%; max-height: 100%; }
 .survey-tab-preview__placeholder { position: absolute; inset: 0; background: linear-gradient(145deg, var(--surface-2), transparent); }
 .survey-tab-preview__placeholder::before { content: ''; position: absolute; inset: 31% 19% 18%; border: 1px solid var(--survey-edge); border-radius: 3px; }
 .survey-tab-preview__placeholder::after { content: ''; position: absolute; left: 29%; top: 48%; width: 33%; height: 1px; background: var(--survey-edge); box-shadow: 0 6px 0 var(--survey-edge); }
 .survey-tab-column__marks { position: absolute; top: 4px; left: 4px; display: flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 2px; border-radius: 5px; background: var(--surface-1); box-shadow: 0 1px 3px #0002; }
 .survey-tab-column__marks .workbench-tab__marks { flex-wrap: nowrap; }
-.survey-tab-column__other-marks { position: absolute; right: 3px; bottom: 3px; display: flex; align-items: center; gap: 2px; padding: 2px 3px; border-radius: 4px; background: var(--surface-1); }
-.survey-tab-column__other-marks .workbench-tab__marks { gap: 2px; }
-.survey-tab-column__other-marks small { font-size: 9px; line-height: 12px; }
 .survey-tab-status { margin-top: -3px; overflow: hidden; color: var(--text-3); font-size: 10px; font-weight: 400; line-height: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .survey-tab-label { display: block; min-width: 0; max-width: 100%; overflow: hidden; line-height: 1.4; }
 .survey-tab-label > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transform: translateX(0); }

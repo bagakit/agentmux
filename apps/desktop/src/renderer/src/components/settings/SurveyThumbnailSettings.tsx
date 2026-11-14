@@ -37,7 +37,7 @@ export function SurveyThumbnailSettings({ preferences, navigationWidth, onSave }
         <div className="survey-thumbnail-preview__viewport" tabIndex={0} role="region" aria-label="Scroll thumbnail sample"><div className="survey-thumbnail-preview__rail" aria-hidden="true"><div className="survey-thumbnail-preview__items">
           <div className="survey-item-row" data-multi-tab="true"><div className="survey-item-tabs">{examples.map((name, index) => <div className="survey-tab-cell" key={name}>
             <div className="survey-tab-column" aria-current={index === 0 ? 'true' : undefined}>
-              <span className="survey-tab-preview"><span className="survey-tab-preview__placeholder" /><span className="survey-tab-column__marks"><BrowserIcon size={14} /></span>{index === 0 ? <span className="survey-tab-column__other-marks"><small>+2</small></span> : null}</span>
+              <span className="survey-tab-preview"><span className="survey-tab-preview__placeholder" /><span className="survey-tab-column__marks"><BrowserIcon size={14} /></span></span>
               <span className="survey-tab-label"><span>{name}</span></span>{index === 0 ? <span className="survey-tab-status">Unconfirmed</span> : null}
             </div><span className="survey-tab-close"><CloseIcon size={12} /></span>
           </div>)}</div></div>

@@ -131,7 +131,7 @@ export function workbenchTabMarks(
   const marks: WorkbenchTabMark[] = []
   const seen = new Set<string>()
   for (const surface of ordered) {
-    const mark = surfaceMark(surface, agentFactsFor(surface))
+    const mark = workbenchSurfaceMark(surface, agentFactsFor(surface))
     const key = markAppearance(mark)
     if (seen.has(key)) continue
     seen.add(key)
@@ -164,7 +164,7 @@ export function markAppearance(mark: WorkbenchTabMark): string {
   return mark.kind
 }
 
-function surfaceMark(
+export function workbenchSurfaceMark(
   surface: WorkbenchSurface,
   agent: TabMarkAgentFacts | null
 ): WorkbenchTabMark {
@@ -227,7 +227,7 @@ export function tabRegionSummary(
 ): string | null {
   const labels: string[] = []
   for (const surface of workbenchSurfaces(tab)) {
-    const label = markLabel(surfaceMark(surface, agentFactsFor(surface)))
+    const label = markLabel(workbenchSurfaceMark(surface, agentFactsFor(surface)))
     // 按人话去重，而不是按种类：两个 codex Agent 在 tooltip 里也读作同一个词，列两遍是噪音。
     // 这与 `markAppearance` 是两个不同的判据（那个问"画出来一样吗"，这个问"说出来一样吗"），
     // 今天两者都把同 Provider 同类折成一个，但状态不进人话——状态点画得出来，写进这句话就成了
