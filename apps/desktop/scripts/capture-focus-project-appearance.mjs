@@ -10,16 +10,20 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { productInputs, captureInputs } from './fixtures/focus-project-appearance/inputs.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
-const combinedPreferences = process.argv[4] === '--focus-preferences'
-const neutralSurfaces = process.argv[4] === '--neutral-surfaces'
-const groupOrganization = process.argv[4] === '--group-organization' || combinedPreferences
-const selectionSettings = process.argv[4] === '--selection-settings' || combinedPreferences
-const containerOrder = process.argv[4] === '--container-order', compactDiscussion = process.argv[4] === '--group-compact'
-const groupDiscussion = process.argv[4] === '--group-discussion' || compactDiscussion
-const savedInProject = process.argv[4] === '--saved-in-project'
-const takeoverRecipients = process.argv[4] === '--takeover-recipients'
-assert.ok(process.argv[2] === '--evidence' && process.argv[3] && (process.argv.length === 4 || process.argv.length === 5 && (containerOrder || groupDiscussion || neutralSurfaces || groupOrganization || selectionSettings || savedInProject || takeoverRecipients)), 'Use --evidence <private evidence directory> [--container-order|--group-discussion|--group-compact|--neutral-surfaces|--group-organization|--selection-settings|--focus-preferences|--saved-in-project|--takeover-recipients]')
-const evidence = resolve(process.argv[3]); await mkdir(evidence, { recursive: true })
+const args = process.argv.slice(2), evidenceIndex = args.indexOf('--evidence')
+const evidencePath = args[evidenceIndex + 1]
+const modes = args.filter((_, index) => index !== evidenceIndex && index !== evidenceIndex + 1)
+const [requestedMode] = modes
+const combinedPreferences = requestedMode === '--focus-preferences'
+const neutralSurfaces = requestedMode === '--neutral-surfaces'
+const groupOrganization = requestedMode === '--group-organization' || combinedPreferences
+const selectionSettings = requestedMode === '--selection-settings' || combinedPreferences
+const containerOrder = requestedMode === '--container-order', compactDiscussion = requestedMode === '--group-compact'
+const groupDiscussion = requestedMode === '--group-discussion' || compactDiscussion
+const savedInProject = requestedMode === '--saved-in-project'
+const takeoverRecipients = requestedMode === '--takeover-recipients'
+assert.ok(evidenceIndex >= 0 && evidencePath && (modes.length === 0 || modes.length === 1 && (containerOrder || groupDiscussion || neutralSurfaces || groupOrganization || selectionSettings || savedInProject || takeoverRecipients)), 'Use --evidence <private evidence directory> [--container-order|--group-discussion|--group-compact|--neutral-surfaces|--group-organization|--selection-settings|--focus-preferences|--saved-in-project|--takeover-recipients]')
+const evidence = resolve(evidencePath); await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-project-appearance-')), fixture = join(desktop, 'scripts/fixtures/focus-project-appearance')
 const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], aliases = [], logs = []
@@ -142,7 +146,7 @@ try {
   const html = join(out, 'index.html'); await writeFile(html, '<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script type="module" src="./app.js"></script></html>')
   receipt.compiled = { renderer: hash(await readFile(renderer)), css: hash(await readFile(join(out, 'app.css'))) }
   const env = { ...process.env, AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state') }; delete env.ELECTRON_RUN_AS_NODE
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, ...process.argv.slice(4)], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, ...modes], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8')); assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
   assert.ok(receipt.frames.length >= (takeoverRecipients ? 14 : savedInProject ? 11 : combinedPreferences ? 14 : selectionSettings || groupOrganization ? 7 : neutralSurfaces ? process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT === 'selected-frame' ? 1 : 4 : compactDiscussion ? 6 : groupDiscussion ? 8 : containerOrder ? 8 : 10), 'Actual complete App frames cover the selected bounded scenario')
