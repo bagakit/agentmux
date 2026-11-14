@@ -190,6 +190,8 @@
 .composer-pending__card[data-editing='true'] > .composer-pending__retry { grid-area: auto; }
 .composer-queued-editor .composer-pending__more:disabled { opacity: 1; color: var(--text-3); cursor: default; }
 
+/* The open editor already presents the body. This preview returns when the editor closes. */
+[data-queue-editing] > .composer-mailbox__record .composer-mailbox__preview { display: none; }
 .composer-outbox__inline { margin: 0 var(--sp-3) var(--sp-3); min-width: 0; }
 .composer-outbox__actions { margin-top: 0; }
 .composer-outbox [data-archived="true"] .composer-mailbox__row { color: var(--text-2); }

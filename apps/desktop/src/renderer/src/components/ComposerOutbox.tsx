@@ -198,7 +198,8 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
         const confirmed = entry.confirmed || launchCarried
         const canSend = !conditionChanged && !launchCarried && !entry.archived && !state.busy && editingId !== entry.id
         const ownFailure = failure?.id === entry.id && failure.text === entry.text ? failure.message : null
-        return <li key={entry.id} data-state={entry.status} data-operation-id={entry.id} data-archived={Boolean(entry.archived)}>
+        return <li key={entry.id} data-state={entry.status} data-operation-id={entry.id} data-archived={Boolean(entry.archived)}
+          data-queue-editing={editingId === entry.id || undefined}>
           <MailboxRecordRow recordKey={`queue:${entry.id}`} label={state.label}
             avatar={<ConversationSpeakerAvatar speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} name="Author unknown" size={18} />}
             text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />} source={entry.archived ? 'Archived original message' : 'Pending original message'}
