@@ -11,6 +11,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { FocusContextCardBody } from '../src/renderer/src/components/FocusContextCardBody'
+import { AgentInformationDetails, type AgentInformationTab } from '../src/renderer/src/components/AgentInformationDetails'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
@@ -192,4 +193,24 @@ it('shared production card separates graph selection from the Reader original wo
   await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__open')!.click())
   expect(openWorkface).toHaveBeenCalledExactlyOnceWith(sid); expect(select).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original draft')
+})
+
+it('Agent information shares the current indicator and keeps the caller in charge of its selected page', async () => {
+  const context = agentContextForSession(agent, undefined, 'Original task', workspace, null)
+  const onTab = vi.fn()
+  const render = (tab: AgentInformationTab) => dom.render(<AgentInformationDetails context={context} tab={tab} onTab={onTab}
+    source={<p>Original source</p>} />)
+  await render('usage')
+  const nav = dom.container.querySelector('nav[aria-label="Agent information"]')!
+  const indicator = nav.querySelector('.selection-indicator')!
+  const source = [...nav.querySelectorAll('button')].find(button => button.textContent === 'Source')!
+  expect(indicator.getAttribute('aria-hidden')).toBe('true')
+  await act(async () => { source.focus(); source.click() })
+  expect(onTab).toHaveBeenCalledExactlyOnceWith('source')
+  expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe('Usage')
+  await render('source')
+  expect(nav.querySelector('[aria-current="page"]')).toBe(source)
+  expect(nav.querySelector('.selection-indicator')).toBe(indicator)
+  expect(document.activeElement).toBe(source)
+  expect(dom.container.textContent).toContain('Original source')
 })

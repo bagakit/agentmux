@@ -46,9 +46,12 @@ it('the mounted workspace tracks explicit reading and manual scroll without repl
   const editor = dom.container.querySelector('[aria-label="Goal description"]')!
   const plan = dom.container.querySelector('[data-goal-reading-section="plan"]')!
   const detail = measure()
+  const indicator = detail.querySelector('.goals-detail__reading-nav > .selection-indicator')
+  expect(indicator?.getAttribute('aria-hidden')).toBe('true')
   expect(selected()).toBe('Overview')
   await act(async () => button('Plan').click())
   expect(selected()).toBe('Plan'); expect(detail.scrollTop).toBe(848); expect(document.activeElement).toBe(plan)
+  expect(detail.querySelector('.goals-detail__reading-nav > .selection-indicator')).toBe(indicator)
   await scroll(detail, 1800)
   expect(selected()).toBe('Activity')
   await scroll(detail, 1000)
