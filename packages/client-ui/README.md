@@ -10,6 +10,7 @@
 | Notes | `@agentmux/client-ui/note/*`, `components/NoteReader` | The `.note.md` Markdown codec, wiki links, live three-way merge and a read-only Note reader |
 | Theme and icons | `@agentmux/client-ui/theme`, `@agentmux/client-ui/icons` | Theme catalog and built-in themes, semantic icons and their animations |
 | Native controls | `components/Button`, `components/IconButton`, `components/FormRow`, `input`, `components/Modal` | Buttons, form rows, text inputs and dialogs with one shared style owner |
+| Menu and avatars | `components/HoverDropdownMenu`, `components/AvatarGroup` | Menu disclosure and keyboard focus in the host document, plus avatar stacking and overflow |
 | Brand assets | `@agentmux/client-ui/brand/*` | App icons, hero art and illustrations ([brand sources](brand/README.md)) |
 
 Use the [component index](../../docs/design/agentmux-surface-density.md#按控件开始贡献) to find import paths, current consumers and design requirements. `components/` contains renderable components, `input/` owns native field primitives and their styles, and `lib/` provides the hooks and formatting that those components consume. Client adapters supply overlays, file and clipboard access, and business actions.
