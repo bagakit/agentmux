@@ -163,6 +163,7 @@ it('shows the complete name on actual hover/focus outside the strip without chan
   await mount([{ kind: 'tab', id: tabId }], async () => true)
   const trigger = host.querySelector('button')!; const other = document.createElement('input'); document.body.append(other); other.focus()
   await act(async () => trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).not.toBeNull())
   await settle(); const tooltip = document.querySelector('[role="tooltip"]')!
   expect(tooltip?.textContent).toContain('完整中文 Tab 名 · Long untruncated original work description')
   expect(host.contains(tooltip)).toBe(false); expect(document.activeElement).toBe(other)
@@ -174,7 +175,7 @@ it('hides both portals with the original surface and restores partial feedback w
   const save = vi.fn(async (target: TabNameTarget) => target.kind === 'agent-session')
   await mount([{ kind: 'agent-session', id: sid }, { kind: 'tab', id: tabId }], save)
   await act(async () => host.querySelector('button')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
-  expect(document.querySelector('[role="tooltip"]')).toBeTruthy()
+  await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).toBeTruthy())
   await act(async () => setSurfaceVisible(false)); expect(document.querySelector('[role="tooltip"]')).toBeNull()
   await act(async () => setSurfaceVisible(true)); expect(document.querySelector('[role="tooltip"]')).toBeNull()
   await act(async () => latest.begin()); await act(async () => latest.change('Retained hidden draft'))
@@ -185,6 +186,25 @@ it('hides both portals with the original surface and restores partial feedback w
   await act(async () => setSurfaceVisible(false)); expect(document.querySelector('[role="status"]')).toBeNull()
   await act(async () => setSurfaceVisible(true)); expect(latest.rename?.value).toBe('Retained hidden draft')
   expect(save).toHaveBeenCalledTimes(2)
+})
+
+it('a pointer press cancels a pending identity read and dragging does not disclose a new tooltip', async () => {
+  const save = vi.fn(async () => true)
+  await mount([{ kind: 'tab', id: tabId }], save)
+  const trigger = host.querySelector('button')!
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+    await new Promise(resolve => setTimeout(resolve, 350))
+  })
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }))
+    trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 1 }))
+    await new Promise(resolve => setTimeout(resolve, 350))
+  })
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  expect(save).not.toHaveBeenCalled()
 })
 
 it('the actual sortable Tab button merges both descriptions after the sortable attribute spread', () => {

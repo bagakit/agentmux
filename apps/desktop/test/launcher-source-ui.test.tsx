@@ -65,6 +65,11 @@ it('explicit ordinary preparation reads the original Source catalogue and regist
   await dom.render(<SourceAgentTargetSetup config={config} fixedResourceWorkspaceId={project.id} active actionLabel="Apply" onApply={selected} />)
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Update AgentMux Core') })
   await vi.waitFor(async () => { await act(async () => {}); expect(button('Apply').disabled).toBe(false) })
+  await act(async () => dom.container.querySelector<HTMLElement>('[aria-label="Agent runs on"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false })))
+  const deviceChoices = document.querySelector('.selection-field__menu')!
+  expect(deviceChoices.textContent).not.toContain('Reading this project device')
+  expect(deviceChoices.textContent).toContain('Project device')
+  await act(async () => [...deviceChoices.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.textContent?.startsWith('Project device'))!.click())
   expect(calls).not.toContain('register'); expect(await b.store.read()).toBeNull()
   await act(async () => button('Apply').click())
   await vi.waitFor(() => expect(selected).toHaveBeenCalledOnce())
@@ -100,7 +105,7 @@ async function routedLauncher(catalogue?: Promise<void>, explicit = true, observ
       return { operationId: request.operationId, outcome: 'unknown', from: null, to: null, agent: null, resource: null,
         save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: null }, issues: [] }
     }
-    if (method === 'space.inspect') { const input = params as AgentMuxRpcParams<'space.inspect'>; if (!('operationId' in input.target)) throw Error('Only the original operation is inspected.'); return { request: inspected ? { known: true, requestId: input.target.operationId, report: inspected } : { known: false, requestId: input.target.operationId } } }
+    if (method === 'space.inspect') { const input = params as AgentMuxRpcParams<'space.inspect'>; if (!('operationId' in input.target)) throw Error('Only the original operation is inspected.'); return { request: inspected ? { known: true, operationId: input.target.operationId, report: inspected } : { known: false, operationId: input.target.operationId } } }
     if (method === 'route.executors' && !(params as AgentMuxRpcParams<'route.executors'>).executorId) await catalogue
     if (method === 'route.executors' && observation) {
       const reply = await route.rpc.call('route.executors', params as AgentMuxRpcParams<'route.executors'>, context)
@@ -127,6 +132,15 @@ async function routedLauncher(catalogue?: Promise<void>, explicit = true, observ
 
 it('real ordinary Launcher uses selected D declarations and the complete Source request; unknown retains both names and Check never replays', async () => {
   const f = await routedLauncher(), before = useAppStore.getState()
+  const compatibility = dom.container.querySelector<HTMLDetailsElement>('.launcher-compatibility')!
+  const actions = dom.container.querySelector('.launch-surface__footer')!
+  expect(compatibility).not.toBeNull()
+  expect(compatibility.open).toBe(false)
+  expect(actions.compareDocumentPosition(compatibility) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  await act(async () => compatibility.querySelector('summary')!.click())
+  expect(compatibility.textContent).toContain('checked during Launch preparation')
+  expect(f.opens).toHaveLength(0)
+  expect(useAppStore.getState().agentComposerDrafts['original-slot']).toBe('  original task\n')
   expect(f.methods.filter(call => call.method === 'route.executors').map(call => call.params)).toEqual([
     { agentTarget: f.source.agentTarget, refresh: false }, { agentTarget: f.source.agentTarget, executorId: 'same-executor', refresh: false } ])
   expect(f.detect).not.toHaveBeenCalled(); expect(f.route.native).not.toHaveBeenCalled(); expect(f.route.creation).not.toHaveBeenCalled()
@@ -288,7 +302,7 @@ it('checking the same original Source operation updates the visible outcome whil
   const original = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)!
   f.inspect({ ...original.receipt!, outcome: 'opened' })
   await act(async () => button('Check original task').click())
-  await vi.waitFor(() => expect(dom.container.textContent).toContain('The project device confirmed this Agent.'))
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Original launch status"] .source-launch-feedback__status strong')?.textContent).toBe('Agent created'))
   expect(button('Continue original task')).toBeUndefined(); expect(f.opens).toHaveLength(1)
   expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.receipt?.outcome).toBe('unknown')
   expect(useAppStore.getState().agentComposerDrafts['original-slot']).toBe('  original task\n')

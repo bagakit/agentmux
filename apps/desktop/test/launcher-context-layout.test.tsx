@@ -28,7 +28,8 @@ it('the actual initial page groups execution placement with its project and pres
   const header = dom.container.querySelector<HTMLElement>('.launcher-environment')!
   const entry = header.querySelector<HTMLButtonElement>('[aria-label="Agent location"]')!
   expect(entry).not.toBeNull()
-  expect(header.textContent).toContain('Run mode')
+  expect(header.textContent).toContain('Agent device')
+  expect(entry.textContent).toContain('This Mac')
   expect(header.querySelector('h2')?.textContent).toBe('Project')
   expect(dom.container.querySelector('.launcher-agents-head [aria-label="Agent location"]')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Refresh agents on this device"]')).not.toBeNull()

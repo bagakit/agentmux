@@ -141,7 +141,7 @@ it('Reach preparation uses the original A owner and home without registering an 
   expect(f.calls.some(item => item.method === 'open')).toBe(false)
 })
 
-it('the Source trigger is icons-only and keyboard hover reads the original entire B route without borrowing an A same-name Host', async () => {
+it('the Source trigger names the selected device and keyboard hover reads the original entire B route without borrowing an A same-name Host', async () => {
   const f = await createHostRouteInventoryFixture(cleanup as Array<() => Promise<void>>), project = { id: 'project', hostId: 'B-in-A', name: 'B project', path: '/original/B/project', kind: 'folder' as const }
   const hosts = [...composerConfig.hosts, { id: project.hostId, kind: 'ssh' as const, label: 'Original project B', hostname: 'b.invalid' },
     { id: 'collision', kind: 'ssh' as const, label: 'WRONG_A_DIRECTORY_LABEL', hostname: 'a-other.invalid' }]
@@ -149,7 +149,8 @@ it('the Source trigger is icons-only and keyboard hover reads the original entir
     sourceExecution={{ project, target: { hostId: project.hostId, reference: { runtimeId: f.b.identity.runtimeId, spaceId: 'original-space' }, workspaceId: 'workspace', zoneId: 'zone' },
       agentTarget: { hostId: 'collision', runtimeId: f.d.identity.runtimeId, adoptedRoute: f.route } }} onSelect={() => true} onPreparingChange={() => {}} />)
   const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Agent location"]')!
-  expect(trigger.textContent?.trim()).toBe(String(f.route.hops.length))
+  expect(trigger.querySelector('.launcher-work-arrangement__name')?.textContent).toBe('collision')
+  expect(trigger.textContent).not.toContain('WRONG_A_DIRECTORY_LABEL')
   expect(trigger.querySelectorAll('[data-execution-role]')).toHaveLength(2)
   await act(async () => trigger.focus())
   await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).not.toBeNull())

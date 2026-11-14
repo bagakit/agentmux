@@ -55,6 +55,16 @@ app.whenReady().then(async () => {
     await wait('Boolean(window.spaceLauncher && document.querySelector(".launch-surface"))')
     await evaluate('launchpad.motes()'); await evaluate('spaceLauncher.clearPrompt()'); await paint()
     const original = await evaluate('launchpad.facts()')
+    if (suite === 'region-workflow') {
+      const wheelAt = async (selector, deltaY) => {
+        const point = await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+Math.min(80,r.height/2)}})()`)
+        await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY })
+        await paint()
+      }
+      await require('./region-workflow.cjs')({ evaluate, wait, paint, viewport, click, escape, frame, wheelAt, receipt, debugger: window.webContents.debugger })
+      receipt.passed = true
+      return
+    }
     if (suite === 'execution-relation') {
       const scrollTooltip = async deltaY => {
         const point = await evaluate(`(()=>{const r=document.querySelector('[role="tooltip"] .agent-work-detail').closest('[role="tooltip"]').getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`)

@@ -6,11 +6,13 @@ import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { sourceAliases } from './fixtures/launcher-launchpad/vitest.owning.config.mts'
 import { runProbeProcess } from './probe-process.mjs'
+import { radixOverlayAliases } from './radix-overlay-aliases.ts'
 
 const repository = resolve(import.meta.dirname, '../../..')
 const fixture = join(import.meta.dirname, 'fixtures/space-launcher')
 const evidence = resolve(process.argv[2] ?? join(repository, '.tmp/space-launcher'))
 const executionRelation = process.argv.includes('--execution-relation')
+const regionWorkflow = process.argv.includes('--region-workflow')
 const require = createRequire(join(repository, 'apps/desktop/package.json'))
 const { build } = await import(require.resolve('vite'))
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'amux-space-launcher-'))
@@ -21,7 +23,11 @@ const mutation = process.env.LAUNCHER_AFFORDANCE_MUTATION
 const mutations = {
   overflow: ['components/AgentExecutorPicker.tsx', 'const after = catalog.scrollTop + catalog.clientHeight < catalog.scrollHeight - 1', 'const after = false'],
   position: null,
-  'tooltip-width': ['components/agent-work-mode.css', 'min-width: 0; max-width: 100%; gap: 10px;', 'min-width: 720px; max-width: none; gap: 10px;']
+  'tooltip-width': ['components/agent-work-mode.css', 'min-width: 0; max-width: 100%; gap: 10px;', 'min-width: 720px; max-width: none; gap: 10px;'],
+  'region-boundary': ['components/LauncherAgentDevice.tsx', "anchor.closest<HTMLElement>('[data-workbench-region-id]') ?? ('clippingAncestors' as const)", "'clippingAncestors' as const"],
+  'footer-nowrap': null,
+  'pointer-focus-tooltip': ['components/WorkbenchNameTooltip.tsx', "const show = () => { if (parent.matches(':focus-visible')) current.current.showFor(parent) }", 'const show = () => { current.current.showFor(parent) }'],
+  'tooltip-anchor-overlap': ['components/WorkbenchNameTooltip.tsx', 'shift({ padding: 8 }), size({ padding: 8,', 'shift({ padding: 8, crossAxis: true }), size({ padding: 8,']
 }
 assert(!mutation || Object.hasOwn(mutations, mutation), 'Unknown Launcher affordance mutation')
 const mutationHits = []
@@ -30,15 +36,16 @@ const receipt = { passed: false, captureOnly: true, visualReview: 'pending-indep
   boundary: 'Current production Workbench, Launcher, rich inputs, theme and CSS with controlled preview API facts. No installed App or real CLI/Runtime claim.' }
 await mkdir(evidence, { recursive: true })
 try {
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: sourceAliases },
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: {
+    alias: [...Object.entries(radixOverlayAliases).map(([find,replacement]) => ({find,replacement})), ...sourceAliases], dedupe: ['react','react-dom'] },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
-    css: { postcss: { plugins: mutation === 'position' ? [{ postcssPlugin: 'launcher-position-counterexample', Once(css) {
-      css.walkRules('.launcher-mote', rule => {
-        const margin = rule.nodes.find(node => node.prop === 'margin-inline-end')
-        if (!margin) return
-        assert.equal(margin.value, 'auto', 'Mutate the actual Mote positioning declaration')
+    css: { postcss: { plugins: ['position', 'footer-nowrap'].includes(mutation) ? [{ postcssPlugin: 'launcher-position-counterexample', Once(css) {
+      css.walkRules(mutation === 'position' ? '.launcher-mote' : '.launch-surface__footer', rule => {
+        const declaration = rule.nodes.find(node => node.prop === (mutation === 'position' ? 'margin-inline-end' : 'flex-wrap'))
+        if (!declaration) return
+        assert.equal(declaration.value, mutation === 'position' ? 'auto' : 'wrap', 'Mutate the actual action layout declaration')
         const original = hash(rule.source.input.css)
-        margin.value = '0'
+        declaration.value = mutation === 'position' ? '0' : 'nowrap'
         mutationHits.push({ file: 'apps/desktop/src/renderer/src/styles/launcher.css', original, compiledRule: hash(rule.toString()) })
       })
     } }] : [] } },
@@ -48,7 +55,7 @@ try {
       const relative = file.slice(repository.length + 1)
       if (file.endsWith('.css')) styles[relative] = hash(source)
       else if (!id.includes('?')) sources[relative] = hash(source)
-      if (mutation && mutation !== 'position' && file === join(repository, 'apps/desktop/src/renderer/src', mutations[mutation][0])) {
+      if (mutation && !['position', 'footer-nowrap'].includes(mutation) && file === join(repository, 'apps/desktop/src/renderer/src', mutations[mutation][0])) {
         const [, from, to] = mutations[mutation]
         assert.equal(source.split(from).length, 2, 'Mutation must replace exactly one actual implementation')
         const code = source.replace(from, to)
@@ -71,8 +78,9 @@ try {
   const main = join(temporaryRoot, 'main.cjs')
   await writeFile(main, await readFile(join(fixture, 'main.cjs')))
   await writeFile(join(temporaryRoot, 'execution-relation.cjs'), await readFile(join(fixture, 'execution-relation.cjs')))
+  await writeFile(join(temporaryRoot, 'region-workflow.cjs'), await readFile(join(fixture, 'region-workflow.cjs')))
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_') && key !== 'ELECTRON_RUN_AS_NODE'))
-  const result = await runProbeProcess(require('electron'), [main, join(temporaryRoot, 'renderer/index.html'), join(temporaryRoot, 'profile'), evidence, executionRelation ? 'execution-relation' : 'default'],
+  const result = await runProbeProcess(require('electron'), [main, join(temporaryRoot, 'renderer/index.html'), join(temporaryRoot, 'profile'), evidence, executionRelation ? 'execution-relation' : regionWorkflow ? 'region-workflow' : 'default'],
     { cwd: repository, temporaryRoot, env, timeoutMs: 60000, onLine: line => process.stderr.write(line.slice(0, 300) + '\n') })
   const ui = JSON.parse(await readFile(join(evidence, 'ui-receipt.json'), 'utf8'))
   Object.assign(receipt, { sources, styles, ui, exitCode: result.exitCode })
