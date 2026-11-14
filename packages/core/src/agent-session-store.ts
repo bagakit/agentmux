@@ -39,7 +39,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { DatabaseSync } from 'node:sqlite'
-import { openSessionDatabase, closedCreationSchema, promptAdmissionSchema, promptSubmissionIndexSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
+import { openSessionDatabase, initializeLegacyClosedCreationSchema, promptAdmissionSchema, promptSubmissionIndexSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
@@ -5543,10 +5543,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         stage = 'begin'; this.db.exec('BEGIN IMMEDIATE'); began = true
         // Existing validated databases acquire the same owner's internal table
         // in this transaction; absence never means an old input was unapplied.
-        if (Number(this.db.prepare('PRAGMA user_version').get()?.user_version) === 1) {
-          if (!hasClosedCreations(this.db)) this.db.exec(closedCreationSchema)
-          this.db.exec('PRAGMA user_version = 2'); this.dirty = true
-        }
+        if (initializeLegacyClosedCreationSchema(this.db)) this.dirty = true
         if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) {
           this.db.exec(promptAdmissionSchema); this.dirty = true
         }

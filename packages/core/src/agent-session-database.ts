@@ -10,6 +10,14 @@ const applicationId = 0x414d5353
 const sqliteHeader = Buffer.from('SQLite format 3\0')
 export const closedCreationSchema = `CREATE TABLE IF NOT EXISTS closed_creations (
   id TEXT PRIMARY KEY, creation_operation TEXT NOT NULL UNIQUE, json TEXT NOT NULL);`
+/** Only the original v1 namespace can initialize this formerly nonexistent history.
+ * The caller owns the original transaction; acknowledged v2/v3 history is never rebuilt. */
+export function initializeLegacyClosedCreationSchema(db: DatabaseSync): boolean {
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) !== 1) return false
+  db.exec(closedCreationSchema)
+  db.exec('PRAGMA user_version = 2')
+  return true
+}
 export const promptAdmissionSchema = `CREATE TABLE IF NOT EXISTS prompt_admissions (
   session_id TEXT NOT NULL, run_id TEXT NOT NULL, record_id TEXT NOT NULL,
   json TEXT NOT NULL, PRIMARY KEY(session_id, run_id, record_id));`
