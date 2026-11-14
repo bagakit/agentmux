@@ -1471,7 +1471,7 @@ function BrowserPaneContent({
               <ThemeActionSearchIcon size={19} aria-hidden="true" />
               <BrowserAddressInput ref={startInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
                 onHistoryChange={() => setHistoryRevision(value => value + 1)}
-                historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
+                historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }} description={tab}
                 onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
               <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ThemeActionSubmitIcon size={16} /></button>
             </form>
@@ -1502,6 +1502,7 @@ function BrowserPaneContent({
         {tab.source ? <BrowserSourceNavigation source={tab.source} onOpenChange={setMenuOpen} /> : null}
         <button
           type="button"
+          className="browser-toolbar__external"
           aria-label="Open in external browser"
           title="Open in external browser"
           disabled={tab.url === 'about:blank' || busy}
@@ -1522,7 +1523,7 @@ function BrowserPaneContent({
           <BrowserAddressInput
             onHistoryChange={() => setHistoryRevision(value => value + 1)}
             ref={addressInput} aria-label="Browser address" value={address} placeholder="Search or enter an address"
-            historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
+            historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }} description={tab}
             onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }}
             onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })}
           />
@@ -1558,7 +1559,7 @@ function BrowserPaneContent({
           onOpenTimeline={() => openOperationTimeline(key)}
           onOpenChange={setMenuOpen}
         />
-        <button type="button" ref={visible ? discussion.buttonRef : undefined} aria-label="Message Browser operator"
+        <button type="button" className="browser-toolbar__discussion" ref={visible ? discussion.buttonRef : undefined} aria-label="Message Browser operator"
           title="Send an opinion to the original Agent" onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget, undefined, traceAnchors.current.get(key)) }}>{discussion.button}</button>
         {toolbar?.selectElement ? (
           <button

@@ -87,8 +87,17 @@
 .browser-address-history button { min-height: 24px; border: 0; border-radius: var(--radius-sm); padding: var(--sp-1) var(--sp-2); background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .browser-address-history button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .browser-address-history button:disabled { opacity: .4; cursor: default; }
-.browser-address-history__choose { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
-.browser-address-history__delete { flex: none; display: grid; place-items: center; color: var(--text-3); }
+.browser-address-history__choose { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; text-align: left; }
+.browser-address-history__delete { flex: none; display: grid; place-items: center; width: 24px; height: 24px; opacity: 0; color: var(--text-3); }
+.browser-address-history li:is(:hover, :focus-within, [aria-selected="true"]) .browser-address-history__delete { opacity: 1; }
+@media (hover: none) { .browser-address-history__delete { opacity: 1; } }
+.browser-address-history__action-space { width: 24px; flex: none; }
+.browser-address-history__icon { position: relative; display: grid; place-items: center; width: 16px; height: 16px; flex: none; color: var(--text-3); }
+.browser-address-history__icon img { position: absolute; inset: 0; width: 16px; height: 16px; object-fit: contain; }
+.browser-address-history__text { display: grid; gap: 1px; min-width: 0; padding-block: 3px; }
+.browser-address-history__text > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); color: var(--text); }
+.browser-address-history__text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
+.browser-address-history mark { padding: 0; background: transparent; color: inherit; font-weight: 650; }
 .browser-address-history > p { margin: var(--sp-2); color: var(--text-3); }
 .browser-toolbar > .browser-toolbar__more--optional { display: none; }
 .browser-find { flex: none; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); background: var(--surface-1); }
@@ -114,6 +123,12 @@
 @container browser-pane (max-width: 620px) {
   .browser-toolbar > .browser-toolbar__secondary { display: none; }
   .browser-toolbar > .browser-toolbar__more--optional { display: inline-flex; }
+}
+@container browser-pane (max-width: 620px) {
+  /* The original input borrows secondary chrome space only while editing; More, Close and control presence stay reachable. */
+  .browser-toolbar:has(> label input:focus) > :is(.browser-profile-chip, .browser-source-navigation, .browser-toolbar__external, .browser-toolbar__discussion, .browser-toolbar__navigation, .browser-toolbar__reload) { display: none; }
+  .browser-toolbar:has(> label input:focus) > label > svg,
+  .browser-toolbar:has(> label input:focus) .browser-operation-status__cue { display: none; }
 }
 @container browser-pane (max-width: 380px) {
   .browser-toolbar { padding-inline: var(--sp-1); }
