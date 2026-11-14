@@ -1786,18 +1786,14 @@ export async function registerIpc(args: {
   handleWithEvent('ui:publishNativeOverlays', async (event, regions: NativeOverlayRegion[], scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
     return await nativeChrome.update(regions, scope)
   })
-  handleWithEvent('ui:listAgentSkills', async (event, sessionId: string) => {
-    const session = await args.runtime.resolveSession(sessionId, config)
-    if (!session || session.kind !== 'agent') throw new Error('Agent session is unavailable')
-    if (session.hostId !== 'local') throw new Error('Skill discovery is available for local Agents.')
-    const catalog = (await args.runtime.providerCatalog()).find((item) => item.id === session.providerId)
-    if (!catalog) throw new Error('Agent Provider is unavailable')
-    return await discoverAgentSkills({ catalog, workspacePath: session.workspacePath, home: app.getPath('home') })
+  handleWithEvent('ui:listAgentSkills', async (_event, hostId: string, agentSessionId: string) => {
+    const { skills } = await callUserRpc('skill.ls', { hostId, agentSessionId })
+    return skills
   })
   handleWithEvent('ui:listWorkspaceSkills', async (event, workspaceId: string, providerId: string) => {
     const workspace = config.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || workspace.hostId !== 'local') throw new Error('Workspace skill discovery is available for local workspaces.')
-    const catalog = (await args.runtime.providerCatalog()).find((item) => item.id === providerId)
+    const { catalog: [catalog] } = await callUserRpc('agent.provider.ls', { hostId: workspace.hostId, providerId })
     if (!catalog) throw new Error('Agent Provider is unavailable')
     return await discoverAgentSkills({ catalog, workspacePath: workspace.path, home: app.getPath('home') })
   })

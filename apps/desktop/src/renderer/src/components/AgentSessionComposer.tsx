@@ -278,7 +278,9 @@ export function AgentSessionComposer({
     ? { canType: true, canSubmit: false, primaryAction: 'send' as const, placeholder: 'Original Agent is unconfirmed. Your draft and file tools remain available.' }
     : composerSubmitMode(session, disabled || readOnly)
   const completion = useComposerCandidates({ scope: JSON.stringify([draftOwner, sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null, source?.inputReading?.conversation.identity]),
-    active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue, sessionId: source ? undefined : sessionId,
+    active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue,
+    sessionId: !source && session?.kind === 'agent' ? session.control.agentSessionId : undefined,
+    sessionHostId: !source && session?.kind === 'agent' ? session.control.hostId : undefined,
     providerId: !source && session?.kind === 'agent' ? session.providerId : undefined, ...(source ? { originalSkills: source.inputReading?.skills ?? originalSkillsUnavailable } : {}), commands: composerOptions?.commands ?? [], insertion: insertionRef })
   const requestPending = session?.kind === 'agent' && Boolean(session.pendingInteraction)
   const nativeQueuePending = session?.kind === 'agent' && Boolean(interactionNativeComposerBinding(session))

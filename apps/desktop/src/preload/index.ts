@@ -556,7 +556,7 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on('ui:screenshotIssue', receive)
       return () => { ipcRenderer.removeListener('ui:screenshotIssue', receive) }
     },
-    listAgentSkills: (sessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', sessionId),
+    listAgentSkills: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', hostId, agentSessionId),
     listWorkspaceSkills: (workspaceId: string, providerId: string) => ipcRenderer.invoke('ui:listWorkspaceSkills', workspaceId, providerId),
     readClipboardText: () => ipcRenderer.invoke('ui:readClipboardText'),
     writeClipboardText: (text: string) => ipcRenderer.invoke('ui:writeClipboardText', text),

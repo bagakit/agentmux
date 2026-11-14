@@ -1987,7 +1987,7 @@ export type AgentMuxDesktopApi = {
     inspectScreenshotPin(operationId: string): Promise<import('@agentmux/core').ImageResult>
     screenshotShortcutStatus(): Promise<import('./screenshot-shortcut').ScreenshotShortcutStatuses>
     onScreenshotIssue(listener: (message: string) => void): () => void
-    listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
+    listAgentSkills(hostId: string, agentSessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
     listWorkspaceSkills(workspaceId: string, providerId: string): Promise<import('@agentmux/core').AgentSkill[]>
     readClipboardText(): Promise<string>
     writeClipboardText(text: string): Promise<void>
