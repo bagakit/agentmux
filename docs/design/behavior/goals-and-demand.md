@@ -236,6 +236,8 @@ Goals 提供明确的「全局巡查」入口，一次点击在同一个主 PMO 
 
 ## Goal 详情中的 Session 观察投影
 
+从 Goal 团队激活准确 Agent 时，优先在当前 Goal 上就地打开既有原 Agent 对话工作面，保留目标选择、正文位置和草稿；明确进入持久工作面仍沿原空间导航。目标是已确认的 canonical Agent Session 与 Host，有准确 occurrence 时保留原 reference；未知引用只读其原来源，不借本机同 SID。打开只导航，不隐含发送、恢复、改派或目标执行。它复用原对话与输入 owner，和下述只读观察投影分别遵守各自合同。
+
 执行拓扑按需表达准确 Project／资源 Workspace、Topic／Branch、已有 Tab、Region 与 AgentSession；多处合法绑定可辨，不以 Session 数量、当前焦点、最近顺序或终端标题猜位置。没有 Tab、Region 或当前 Agent 时诚实说明。共用原空间与 Session 投影组件，不为每张目标常驻完整终端或另建拓扑账本。
 
 选中目标后，可用原 arrangement 为一个或多个准确 Session 建观察投影；它是详情的临时呈现，不修改原持久工作面的分割，不创建 Session 或第二个进程。Region 复用同一 Session／Run、ordered bytes、Replay、Gap 和 Attachment owner；新观察 lease 不成为 Runtime 真相或另一份缓冲。返回 Goals 保原目标、详情位置与筛选。
