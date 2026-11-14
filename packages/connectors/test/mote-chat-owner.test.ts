@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { SQLInputValue } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
+import { ObjectCliProbe, objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { parseMoteChatParams, parseMoteChatResult, type MoteChatConfigure, type MoteChatGeneration } from '@agentmux/core/mote-chat'
 import { ConnectionHost } from '../src/connection-host.js'
 import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort, type MoteChatCreatedAgent, type MoteChatIncoming, type MoteChatPreparedLaunch } from '../src/mote-chat.js'
@@ -17,11 +18,11 @@ const creator = { application, idType: 'open_id', userId: 'creator' }
 const guest = { ...creator, userId: 'guest' }
 const lanePerson = { ...creator, userId: 'lane-person' }
 const target = { spaceId: 'original-mote', zoneId: 'original-home', expectedResource: { hostId: 'local', workspaceId: 'mote-files', workspacePath: 'mote-home' } }
-async function fixture(limit = 4) {
+async function fixture(limit = 4, confirmedCreator = true) {
   const root = await mkdtemp(join(tmpdir(), 'mote-chat-owner-')), databasePath = join(root, 'connections.sqlite')
   const connection = { connectionId: 'original-connection', adapterId: 'sample', application, label: 'Same name', enabled: true, credentialRef: 'private-ref' }
   const profile = vi.fn(async () => ({ connectionId: connection.connectionId, connectionRevision: 1, application, language: null,
-    state: 'observed' as const, profile: null, metadata: null, creator: { idType: creator.idType, userId: creator.userId }, botId: null, onlineVersionId: null, reviewingVersionId: null, version: null }))
+    state: 'observed' as const, profile: null, metadata: null, creator: confirmedCreator ? { idType: creator.idType, userId: creator.userId } : null, botId: null, onlineVersionId: null, reviewingVersionId: null, version: null }))
   const connections = new ConnectionHost({ databasePath, secrets: { resolve: async () => 'private-credential' }, adapters: [{ adapterId: 'sample', test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'ready' }, delivery: { state: 'ready' } }), profile: { get: profile } }] })
   await connections.configure({ operationId: 'save-connection', expectedRevision: null, connection })
   let clock = 10
@@ -44,6 +45,7 @@ async function fixture(limit = 4) {
   const assertTarget = vi.fn(async () => {})
   const options = { connections, agents, assertTarget, now: () => clock }, host = new MoteChatHost(options)
   const input: MoteChatConfigure = { operationId: 'enable-chat', target, expectedRevision: null, expectedConnectionRevision: 1,
+    ...(confirmedCreator ? { refreshCreator: true as const } : {}),
     values: { enabled: true, connection: { connectionId: connection.connectionId, application }, conversationIdleMs: 100, strangerMessageLimit: limit } }
   await host.configure(input, context)
   const incoming = (id: string, actor = lanePerson, externalConversationId = `chat-${actor.userId}`): MoteChatIncoming => ({ conversationKind: 'direct',
@@ -65,9 +67,201 @@ it('keeps configuration and original operation readable without launching, with 
   const other = { ...f.connection, connectionId: 'other-connection', application: { ...application, appId: 'other-app' } }
   await f.connections.configure({ operationId: 'save-other', expectedRevision: null, connection: other })
   f.profile.mockResolvedValueOnce({ ...(await f.profile()), connectionId: other.connectionId, application: other.application, creator: null } as never)
-  await expect(f.host.configure({ ...f.input, operationId: 'missing-creator', expectedRevision: 1, values: { ...f.input.values, connection: { connectionId: other.connectionId, application: other.application } } }, context)).rejects.toMatchObject({ code: 'MOTE_CHAT_CREATOR_UNCONFIRMED' })
-  expect((await f.host.inspect({ target })).configuration?.values).toEqual(f.input.values)
+  const { refreshCreator: _refresh, ...policy } = f.input
+  const saved = await f.host.configure({ ...policy, operationId: 'missing-creator', expectedRevision: 1, values: { ...f.input.values, connection: { connectionId: other.connectionId, application: other.application } } }, context)
+  expect(saved.configuration.creator).toBeNull()
+  expect(saved.configuration.values.connection).toEqual({ connectionId: other.connectionId, application: other.application })
 })
+
+it('admits only an explicitly finite guest when the native application cannot confirm a creator', async () => {
+  const f = await fixture(1, false)
+  expect((await f.host.inspect({ target })).configuration).toMatchObject({ creator: null, values: { enabled: true } })
+  const binding = await f.host.prepareIncoming(f.incoming('finite-native-guest', creator))
+  expect(binding).toMatchObject({ agentSessionId: expect.any(String) })
+  expect(f.agents.create).toHaveBeenCalledOnce()
+  expect((await f.host.audience({ target })).people).toMatchObject([{ actor: creator, creator: false, total: 1, used: 1, remaining: 0 }])
+  await expect(f.host.prepareIncoming(f.incoming('finite-exhausted', creator))).rejects.toMatchObject({ code: 'MOTE_CHAT_QUOTA_EXHAUSTED' })
+  expect(await f.host.prepareIncoming(f.incoming('finite-native-guest', creator))).toEqual(binding)
+  expect((await f.host.history({ target })).generations).toHaveLength(1)
+})
+
+it('keeps creator-null default zero closed and allocates one exact guest without replaying its refused original input', async () => {
+  const f = await fixture(0, false), declined = f.incoming('null-creator-zero', guest)
+  await expect(f.host.prepareIncoming(declined)).rejects.toMatchObject({ code: 'MOTE_CHAT_QUOTA_EXHAUSTED' })
+  const person = (await f.host.audience({ target })).people[0]!
+  expect(person).toMatchObject({ creator: false, total: 0, used: 0, remaining: 0 })
+  expect(f.agents.create).not.toHaveBeenCalled()
+  await f.host.allocate({ operationId: 'null-creator-allocate', target, expectedConfigurationRevision: 1, actor: guest, expectedPersonRevision: person.revision, total: 1 }, context)
+  expect(f.host.store.admissionByIngress(declined.ingressId)).toBeNull()
+  await f.host.prepareIncoming(f.incoming('null-creator-authorized', guest))
+  expect((await f.host.audience({ target })).people[0]).toMatchObject({ total: 1, used: 1, remaining: 0 })
+  expect(f.agents.create).toHaveBeenCalledOnce()
+})
+
+it('retains same-application creator proof across unavailable profile observations and connection aliases', async () => {
+  const f = await fixture(), alias = { ...f.connection, connectionId: 'same-application-alias' }
+  const { refreshCreator: _refresh, ...policy } = f.input
+  await f.connections.configure({ operationId: 'save-alias', expectedRevision: null, connection: alias })
+  f.profile.mockResolvedValue({ ...(await f.profile()), connectionId: alias.connectionId, creator: null, state: 'unknown', reason: 'online-unconfirmed' } as never)
+  const saved = await f.host.configure({ ...policy, operationId: 'select-alias', expectedRevision: 1, values: { ...f.input.values, connection: { connectionId: alias.connectionId, application } } }, context)
+  expect(saved.configuration.creator).toEqual(creator)
+  expect(saved.configuration.values.connection?.connectionId).toBe(alias.connectionId)
+  const get = vi.spyOn(f.connections.profile!, 'get').mockRejectedValueOnce(Object.assign(new Error('Original authority was revoked'), { code: 'CONTROL_PERMISSION_DENIED' }))
+  await expect(f.host.configure({ ...f.input, operationId: 'revoked-profile', expectedRevision: 2 }, context)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(get).toHaveBeenCalledOnce()
+  expect((await f.host.inspect({ target })).configuration).toEqual(saved.configuration)
+})
+
+it('qualifies only the requested audience page against confirmed current creator while retaining historical receipts and usage', async () => {
+  const f = await fixture(4, false)
+  await f.host.prepareIncoming(f.incoming('before-confirmation', guest))
+  await f.host.prepareIncoming(f.incoming('other-before-confirmation', lanePerson))
+  const before = (await f.host.audience({ target })).people, old = before.find(person => person.actor.userId === guest.userId)!
+  f.profile.mockResolvedValue({ ...(await f.profile()), creator: { idType: guest.idType, userId: guest.userId } })
+  await f.host.configure({ ...f.input, operationId: 'confirm-guest-is-creator', expectedRevision: 1, refreshCreator: true }, context)
+  const untouched = f.host.store.person(JSON.stringify([target.spaceId, application.domain, application.appId, lanePerson.idType, lanePerson.userId]))
+  const peopleRead = vi.spyOn(f.host.store, 'people')
+  const promoted = (await f.host.audience({ target, limit: 1 })).people[0]!
+  expect(promoted).toMatchObject({ actor: guest, creator: true, total: null, used: 1, remaining: null, revision: old.revision + 1 })
+  expect(peopleRead).toHaveBeenCalledWith(target.spaceId, '', 2)
+  expect(f.host.store.person(JSON.stringify([target.spaceId, application.domain, application.appId, lanePerson.idType, lanePerson.userId]))).toEqual(untouched)
+  await expect(f.host.allocate({ operationId: 'cannot-allocate-current-creator', target, expectedConfigurationRevision: 2, actor: guest, expectedPersonRevision: promoted.revision, total: 99 }, context)).rejects.toMatchObject({ code: 'MOTE_CHAT_CREATOR_UNLIMITED' })
+  f.profile.mockResolvedValue({ ...(await f.profile()), creator: { idType: creator.idType, userId: creator.userId } })
+  await f.host.configure({ ...f.input, operationId: 'confirm-different-creator', expectedRevision: 2, refreshCreator: true, values: { ...f.input.values, strangerMessageLimit: 2 } }, context)
+  const demoted = (await f.host.audience({ target })).people.find(person => person.actor.userId === guest.userId)!
+  expect(demoted).toMatchObject({ creator: false, total: 2, used: 1, remaining: 1, revision: promoted.revision + 1 })
+  await f.host.prepareIncoming(f.incoming('after-demotion', guest))
+  await expect(f.host.prepareIncoming(f.incoming('demoted-exhausted', guest))).rejects.toMatchObject({ code: 'MOTE_CHAT_QUOTA_EXHAUSTED' })
+  expect((await f.host.history({ target })).generations).toHaveLength(2)
+})
+
+it('uses the same current qualification in exact allocation and intake before any audience read, preserving original operations and admissions', async () => {
+  const f = await fixture(2, false), first = f.incoming('qualification-before-page', guest)
+  const binding = await f.host.prepareIncoming(first), old = (await f.host.audience({ target })).people[0]!
+  const allocation = { operationId: 'original-finite-allocation', target, expectedConfigurationRevision: 1, actor: guest, expectedPersonRevision: old.revision, total: 3 }
+  const receipt = await f.host.allocate(allocation, context)
+  f.profile.mockResolvedValue({ ...(await f.profile()), creator: { idType: guest.idType, userId: guest.userId } })
+  await f.host.configure({ ...f.input, operationId: 'qualification-promote', expectedRevision: 1, refreshCreator: true }, context)
+  await expect(f.host.allocate({ ...allocation, operationId: 'stale-guest-authority', expectedConfigurationRevision: 2, expectedPersonRevision: receipt.person.revision }, context)).rejects.toMatchObject({ code: 'MOTE_CHAT_CREATOR_UNLIMITED' })
+  const promoted = (await f.host.audience({ target })).people[0]!
+  f.profile.mockResolvedValue({ ...(await f.profile()), creator: { idType: creator.idType, userId: creator.userId } })
+  await f.host.configure({ ...f.input, operationId: 'qualification-demote', expectedRevision: 2, refreshCreator: true }, context)
+  await expect(f.host.allocate({ ...allocation, operationId: 'stale-creator-authority', expectedConfigurationRevision: 3, expectedPersonRevision: promoted.revision }, context)).rejects.toMatchObject({ code: 'MOTE_CHAT_REVISION_CONFLICT' })
+  await f.host.prepareIncoming(f.incoming('qualification-new-guest-input', guest))
+  expect((await f.host.audience({ target })).people[0]).toMatchObject({ creator: false, total: 2, used: 2, remaining: 0 })
+  expect(await f.host.prepareIncoming(first)).toEqual(binding)
+  expect(await f.host.allocate(allocation, context)).toEqual(receipt)
+  expect((await f.host.inspect({ operationId: allocation.operationId })).operation).toEqual(receipt)
+  expect((await f.host.audience({ target })).people[0]).toMatchObject({ used: 2, remaining: 0 })
+  expect(f.agents.create).toHaveBeenCalledOnce()
+})
+
+it('strict public chat codec permits nullable creator without accepting cross-application authority, unknown fields or unlimited guest quota', () => {
+  const configuration = { target, revision: 1, values: { enabled: true, connection: { connectionId: 'native-bot', application }, conversationIdleMs: 1, strangerMessageLimit: 0 }, creator: null }
+  expect(parseMoteChatResult('space.mote.chat.inspect', { configuration, operation: null }, { target })).toEqual({ configuration, operation: null })
+  expect(() => parseMoteChatResult('space.mote.chat.inspect', { configuration: { ...configuration, creator: { ...creator, application: { ...application, appId: 'foreign-app' } } }, operation: null }, { target })).toThrow()
+  expect(() => parseMoteChatResult('space.mote.chat.inspect', { configuration: { ...configuration, guestUnlimited: true }, operation: null }, { target })).toThrow()
+  expect(() => parseMoteChatResult('space.mote.chat.audience', { people: [{ actor: guest, creator: false, revision: 1, total: null, used: 0, remaining: null }], next: null }, { target })).toThrow()
+  const input = { operationId: 'strict-refresh', target, expectedRevision: null, expectedConnectionRevision: 1, values: configuration.values }
+  expect(parseMoteChatParams('space.mote.chat.configure', { ...input, refreshCreator: true })).toEqual({ ...input, refreshCreator: true })
+  const receipt = { operationId: input.operationId, action: 'configure', configuration }
+  expect(parseMoteChatResult('space.mote.chat.configure', receipt, input)).toEqual(receipt)
+  expect(() => parseMoteChatResult('space.mote.chat.configure', receipt, { ...input, refreshCreator: true })).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  for (const refreshCreator of [false, null, 1, 'true', undefined]) expect(() => parseMoteChatParams('space.mote.chat.configure', { ...input, refreshCreator })).toThrow()
+})
+
+it('the actual public RPC client rejects a raw null-creator refresh receipt while retaining the original complete request', async () => {
+  const f = await fixture(0, false), input = { ...f.input, operationId: 'raw-null-refresh-receipt', expectedRevision: 1, refreshCreator: true as const }
+  const configuration = (await f.host.inspect({ target })).configuration!
+  const probe = new ObjectCliProbe(() => ({ operationId: input.operationId, action: 'configure', configuration }))
+  await probe.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: probe.socketPath } })
+  try {
+    await expect(rpc.call('space.mote.chat.configure', input)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+    const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + probe.socketPath, 'space', 'mote', 'chat', 'configure', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(input))
+    expect(cli.code).not.toBe(0); expect(cli.stdout + cli.stderr).toContain('CONTROL_PROTOCOL_ERROR')
+    expect(probe.requests).toMatchObject([{ method: 'space.mote.chat.configure', params: input }, { method: 'space.mote.chat.configure', params: input }])
+    expect((await f.host.inspect({ target })).configuration).toEqual(configuration)
+  } finally { await rpc.dispose(); await probe.stop() }
+}, 15_000)
+
+it('public RPC and compiled CLI ordinary policy saves never wait for online profile and explicit refresh keeps its original action identity', async () => {
+  const f = await fixture(0, false), native = (await f.profile.getMockImplementation()!())
+  let release!: (value: typeof native) => void
+  f.profile.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  const online = vi.spyOn(f.connections.profile!, 'get')
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'quick.sock'), moteChat: f.host })
+  await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  const plain = { ...f.input, operationId: 'public-plain-with-never', expectedRevision: 1 }
+  const work = rpc.call('space.mote.chat.configure', plain)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = await Promise.race([work, new Promise(resolve => { timer = setTimeout(() => resolve('profile-waited'), 1_000) })])
+    expect(result).toMatchObject({ action: 'configure', configuration: { revision: 2, creator: null } })
+    expect(online).not.toHaveBeenCalled(); expect(f.profile).not.toHaveBeenCalled()
+    const run = (input: unknown) => runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'space', 'mote', 'chat', 'configure', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(input))
+    const cliPlain = { ...plain, operationId: 'cli-plain-with-never', expectedRevision: 2 }
+    const saved = await run(cliPlain)
+    expect(saved.code, saved.stderr + saved.stdout).toBe(0)
+    expect(JSON.parse(saved.stdout).result.configuration).toMatchObject({ revision: 3, creator: null })
+    expect(online).not.toHaveBeenCalled(); expect(f.profile).not.toHaveBeenCalled()
+    f.profile.mockReset().mockResolvedValue({ ...native, creator: { idType: creator.idType, userId: creator.userId } })
+    const refresh = { ...plain, operationId: 'cli-explicit-qualification', expectedRevision: 3, refreshCreator: true }
+    const confirmed = await run(refresh)
+    expect(confirmed.code, confirmed.stderr + confirmed.stdout).toBe(0)
+    expect(JSON.parse(confirmed.stdout).result.configuration).toMatchObject({ revision: 4, creator })
+    expect(online).toHaveBeenCalledOnce()
+    const changedFlag = await run({ ...cliPlain, refreshCreator: true })
+    expect(changedFlag.code).not.toBe(0); expect(changedFlag.stdout + changedFlag.stderr).toContain('MOTE_CHAT_OPERATION_CONFLICT')
+    f.profile.mockResolvedValue({ ...native, state: 'unknown', reason: 'online-unconfirmed', creator: null } as never)
+    const declined = await run({ ...refresh, operationId: 'cli-unconfirmed-qualification', expectedRevision: 4 })
+    expect(declined.code).not.toBe(0); expect(declined.stdout + declined.stderr).toContain('MOTE_CHAT_CREATOR_UNCONFIRMED')
+    expect((await rpc.call('space.mote.chat.inspect', { target })).configuration).toMatchObject({ revision: 4, creator })
+    expect(f.agents.create).not.toHaveBeenCalled()
+  } finally {
+    if (timer) clearTimeout(timer)
+    release?.(native); await work.catch(() => {})
+    await rpc.dispose(); await server.stop()
+  }
+}, 20_000)
+
+it('explicit unconfirmed qualification retains the old proof and policy and never records a success or replays an old operation', async () => {
+  const f = await fixture(), saved = (await f.host.inspect({ target })).configuration!
+  const native = await f.profile.getMockImplementation()!()
+  f.profile.mockResolvedValue({ ...native, state: 'unknown', reason: 'online-unconfirmed', creator: null } as never)
+  const refresh = { ...f.input, operationId: 'unconfirmed-refresh', expectedRevision: 1 }
+  await expect(f.host.configure(refresh, context)).rejects.toMatchObject({ code: 'MOTE_CHAT_CREATOR_UNCONFIRMED' })
+  expect((await f.host.inspect({ target })).configuration).toEqual(saved)
+  expect((await f.host.inspect({ operationId: refresh.operationId })).operation).toBeNull()
+  const { refreshCreator: _refresh, ...plain } = refresh
+  expect((await f.host.configure(plain, context)).configuration.creator).toEqual(creator)
+  await expect(f.host.configure(refresh, context)).rejects.toMatchObject({ code: 'MOTE_CHAT_OPERATION_CONFLICT' })
+})
+
+it('a held public creator refresh cannot block a newer ordinary policy save or overwrite its original configuration CAS', async () => {
+  const f = await fixture(), native = await f.profile.getMockImplementation()!()
+  let release!: (value: typeof native) => void, reached!: () => void
+  const entering = new Promise<void>(resolve => { reached = resolve })
+  f.profile.mockImplementationOnce(() => { reached(); return new Promise(resolve => { release = resolve }) })
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'held.sock'), moteChat: f.host })
+  await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  const refresh = { ...f.input, operationId: 'held-original-refresh', expectedRevision: 1 }
+  const work = rpc.call('space.mote.chat.configure', refresh).then(value => ({ value }), error => ({ error }))
+  try {
+    await entering
+    const { refreshCreator: _refresh, ...policy } = f.input
+    const input = { ...policy, operationId: 'newer-plain-policy', expectedRevision: 1, values: { ...policy.values, strangerMessageLimit: 7 } }
+    const saved = await rpc.call('space.mote.chat.configure', input)
+    expect(saved.configuration).toMatchObject({ revision: 2, creator, values: { strangerMessageLimit: 7 } })
+    release({ ...native, creator: { idType: guest.idType, userId: guest.userId } })
+    expect(await work).toMatchObject({ error: { code: 'MOTE_CHAT_REVISION_CONFLICT' } })
+    expect((await rpc.call('space.mote.chat.inspect', { target })).configuration).toEqual(saved.configuration)
+    expect((await rpc.call('space.mote.chat.inspect', { operationId: refresh.operationId })).operation).toBeNull()
+    expect(f.profile).toHaveBeenCalledTimes(2); expect(f.agents.create).not.toHaveBeenCalled()
+  } finally { release?.(native); await work; await rpc.dispose(); await server.stop() }
+}, 15_000)
 
 it('scoped private chat policy pauses new creation and publication without deleting the original route or Agent', async () => {
   const f = await fixture(), adapterId = f.connection.adapterId
@@ -251,7 +445,7 @@ it('uses exact issuer audience indexes after reopening old storage without scann
     for (let i = 0; i < 5000; i++) {
       const row = JSON.parse(String(original.snapshot_json))
       row.generation.application.issuer = 'https://foreign-' + i + '.example'
-      insert.run('foreign-' + i, 'foreign-' + i, original.space_id, 'foreign-session-' + i, 'foreign-binding-' + i, 'foreign-grant-' + i, JSON.stringify(row))
+      insert.run('foreign-' + i, 'foreign-' + i, String(original.space_id), 'foreign-session-' + i, 'foreign-binding-' + i, 'foreign-grant-' + i, JSON.stringify(row))
     }
     db.exec('COMMIT')
   } catch (error) { db.exec('ROLLBACK'); throw error }
@@ -260,7 +454,7 @@ it('uses exact issuer audience indexes after reopening old storage without scann
     DROP INDEX IF EXISTS mote_chat_generation_scoped_native_audience;
     CREATE INDEX IF NOT EXISTS mote_chat_generation_audience ON mote_chat_generation(space_id,json_extract(snapshot_json,'$.generation.application.domain'),json_extract(snapshot_json,'$.generation.application.appId'),json_extract(snapshot_json,'$.generation.externalConversationId'),sequence DESC);
     CREATE INDEX IF NOT EXISTS mote_chat_generation_native_audience ON mote_chat_generation(json_extract(snapshot_json,'$.generation.application.domain'),json_extract(snapshot_json,'$.generation.application.appId'),json_extract(snapshot_json,'$.generation.externalConversationId'));`)
-  const host = f.restart(), queries: Array<{ sql: string; args: SQLInputValue[] }> = []
+  const host = f.restart(), queries: Array<{ sql: string; args: Parameters<ReturnType<typeof db.prepare>['get']> }> = []
   const prepare = db.prepare.bind(db)
   const spy = vi.spyOn(db, 'prepare').mockImplementation(sql => {
     const statement = prepare(sql)
@@ -287,7 +481,7 @@ it('uses exact issuer audience indexes after reopening old storage without scann
     expect(detail.match(/<expr>=\?/g)).toHaveLength(4)
   }
   expect(db.prepare('SELECT count(*) AS n FROM mote_chat_generation').get()?.n).toBe(5001)
-})
+}, 15_000)
 
 it('preserves the original binding when another local alias selects the same native application', async () => {
   const f = await fixture(), first = (await f.host.prepareIncoming(f.incoming('first')))!
@@ -298,7 +492,14 @@ it('preserves the original binding when another local alias selects the same nat
   const observed = await f.profile(); f.profile.mockResolvedValueOnce({ ...observed, connectionId: alias.connectionId })
   await f.host.configure({ ...f.input, operationId: 'select-alias', expectedRevision: 1, values: { ...f.input.values, connection: { connectionId: alias.connectionId, application } } }, context)
   expect(f.host.publicationAuthority(first.bindingId, 1).authorized).toBe(true)
+  expect(f.host.hasAdmission('ingress-first', first.bindingId, lanePerson)).toBe(true)
+  expect(f.host.hasAdmission('ingress-first', 'wrong-binding', lanePerson)).toBe(false)
+  expect(f.host.hasAdmission('ingress-first', first.bindingId, guest)).toBe(false)
   expect((await f.host.prepareIncoming({ ...f.incoming('through-alias'), connectionId: alias.connectionId }))!.agentSessionId).toBe(first.agentSessionId)
+  await f.connections.configure({ operationId: 'disable-original-alias', expectedRevision: 1, connection: { ...f.connection, enabled: false } })
+  expect(f.host.hasAdmission('ingress-first', first.bindingId, lanePerson)).toBe(false)
+  await expect(f.connections.configure({ operationId: 'change-original-alias-application', expectedRevision: 2, connection: { ...f.connection, application: { ...application, appId: 'another-original-application' } } })).rejects.toMatchObject({ code: 'CONNECTION_IDENTITY_CONFLICT' })
+  expect(f.host.hasAdmission('ingress-first', first.bindingId, lanePerson)).toBe(false)
   expect(f.agents.create).toHaveBeenCalledTimes(1)
 })
 

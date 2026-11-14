@@ -1,5 +1,5 @@
 {
   "extends": "../tsconfig.json",
-  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "allowImportingTsExtensions": true, "lib": ["ES2024", "DOM", "DOM.Iterable"] },
-  "include": ["mote-chat-owner.test.ts", "mote-chat-desktop-journey.integration.test.ts", "vitest.mote-chat.config.mts"]
+  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "allowImportingTsExtensions": true, "jsx": "react-jsx", "lib": ["ES2024", "DOM", "DOM.Iterable", "DOM.AsyncIterable"] },
+  "include": ["mote-chat-owner.test.ts", "mote-chat-desktop-journey.integration.test.ts", "mote-chat-native-journey.integration.test.ts", "mote-chat-core-reopen.integration.test.ts", "mote-chat-main-alias.integration.test.ts", "vitest.mote-chat.config.mts"]
 }
