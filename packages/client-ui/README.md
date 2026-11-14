@@ -210,6 +210,8 @@ Two hosts can use this same field and footer with different drafts, error handli
 
 Spread the callback attributes from `FormRow` onto one native control. The label supplies the accessible name, and `description` and `error` supply its descriptions when present. Set `invalid` when the caller confirms the field's value is invalid. Use `layout="stacked"` with the shared input stylesheet for a text field or short editor. The default inline layout fits a checkbox and its label. Keep whole-save feedback with the action group, and let the caller own the input value, validation and persistence.
 
+Use `Switch` from `@agentmux/client-ui/input` for an on/off setting. It keeps the native checkbox ref, form value, keyboard activation and disabled state. Use `FormRow` for a visible label and optional help. The shared input stylesheet draws the track and thumb, respects writing direction and reduced motion, and supports forced colors.
+
 `src/input/` is the shared native field module: import `TextInput`, `Textarea` and `InputGroup` from `@agentmux/client-ui/input`, plus `@agentmux/client-ui/input/styles.css` when not using the full stylesheet. Each component forwards native props and React 19 refs; callers keep labels, values, validation and actions. `InputGroup` is the field container with one focus boundary, not an extra wrapper or form-state provider. Surface classes keep their own geometry.
 
 `Textarea` is the native field. `ComposerTextarea` delegates to it while preserving composition and final-value writeback in a controlled draft. Rich messages can use `AgentComposer` with `InlineComposer` (Tiptap). The value and change, references, commands, attachments, actions and feedback are explicit props. The host owns draft persistence, file IO and delivery.
