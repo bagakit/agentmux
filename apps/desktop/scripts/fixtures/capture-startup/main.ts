@@ -30,6 +30,7 @@ const receipt: any = { schema: 'agentmux.capture-startup-electron.v2', passed: f
   visibilityObservation: 'Native BrowserWindow.isVisible() sampled every 5 ms; show event offsets remain separate.' }
 let host: BrowserWindow, surface: CaptureSurface, globalCapture: GlobalScreenshot, shortcut: { dispose(): void }, active: any = null, nonce = nonceStart
 const shortcutCallbacks: Array<() => void> = []
+let previousSourceHashes: any[] | null = null, nativeConnectionCalls = 0
 const latestPath = join(userData, 'capture-timing.json')
 const info = console.info
 console.info = (...args) => {
@@ -73,7 +74,8 @@ function image(width: number, height: number, value: number) {
 }
 async function captureDisplays({ includeHostWindows = false } = {}) {
   assert.ok(active, 'native pixels belong to the exact callback request')
-  const row = active, requestStarted = performance.now()
+  const row = active, requestStarted = performance.now(), lazyConnectionMs = nativeConnectionCalls === 0 ? 1 : 0
+  nativeConnectionCalls++
   const grab: any = { includeHostWindows, opacity: host.getOpacity(), capturedAt: Date.now(), startedMs: requestStarted - row.startedAt, sources: {}, displayProducerMs: [] }
   row.grabs.push(grab)
   assert.equal(grab.opacity, variant === 'baseline' && !includeHostWindows ? 0 : 0.65, 'only the historical baseline fades its host')
@@ -94,7 +96,7 @@ async function captureDisplays({ includeHostWindows = false } = {}) {
   grab.returnedMs = performance.now() - row.startedAt
   return { state: 'captured' as const, capturedAt: grab.capturedAt,
     timing: { contentMs: 1, windowListMs: 1, responseSerializationMs: 0, totalMs: grab.returnedMs - grab.startedMs,
-      lazyConnectionMs: row.iteration === 1 ? 1 : 0, socketReadMs: 0, jsonParseMs: 0, requestMs: performance.now() - requestStarted, validationMs: 0 }, displays: frames }
+      lazyConnectionMs, socketReadMs: 0, jsonParseMs: 0, requestMs: performance.now() - requestStarted, validationMs: 0 }, displays: frames }
 }
 function productionSurface() {
   const write = async (path: string, contents: string) => {
@@ -108,7 +110,7 @@ function productionSurface() {
   return bind(CaptureSurface, () => ({ captureDisplays }), { appearance: { terminalTheme: 'graphite', appAppearance: 'dark' } },
     async () => { throw new Error('Pin output is outside this startup proof.') }, async () => {}, () => {}, write, join, { getPath: () => userData }) as CaptureSurface
 }
-async function capture(iteration: number) {
+async function capture(iteration: number, warmup = false) {
   const opacityStart = receipt.opacityChanges.length
   let releaseAlternate!: () => void
   const alternateGate = new Promise<void>(resolve => { releaseAlternate = resolve })
@@ -190,6 +192,7 @@ async function capture(iteration: number) {
     for (const mode of ['included', 'excluded']) {
       const native = row.finalTiming['native' + mode[0]!.toUpperCase() + mode.slice(1)]
       for (const key of ['contentMs', 'windowListMs', 'responseSerializationMs', 'totalMs', 'lazyConnectionMs', 'socketReadMs', 'jsonParseMs', 'requestMs', 'validationMs']) assert.ok(Number.isFinite(native.response[key]), mode + ' native ' + key)
+      assert.equal(native.response.lazyConnectionMs, mode === background && iteration === 1 ? 1 : 0, 'lazy native setup follows actual first/reused calls, including warm-up')
       assert.equal(native.displays.length, count)
       for (const frame of native.displays) for (const key of ['captureMs', 'pngMs', 'base64Ms', 'totalMs']) assert.ok(Number.isFinite(frame.timing[key]), mode + ' display ' + key)
     }
@@ -214,7 +217,9 @@ async function capture(iteration: number) {
   assert.deepEqual(receipt.opacityChanges.slice(opacityStart).map((row: any) => row.value), variant === 'candidate' ? [] : [0, 0.65])
   assert.ok(overlays.every(window => window.isDestroyed()), 'the capture releases all shells')
   const sourceHashes = row.grabs.map((grab: any) => Object.fromEntries(Object.entries(grab.sources).map(([id, png]) => [id, createHash('sha256').update(String(png)).digest('hex')])))
-  receipt.captures.push({ iteration, actualShownMs, observedShownMs, showEventMs: row.windows.map((entry: any) => entry.showEventMs),
+  if (previousSourceHashes) assert.notDeepEqual(sourceHashes, previousSourceHashes, 'every measured repeat freezes new pixels rather than reusing warm-up frames')
+  previousSourceHashes = sourceHashes
+  if (!warmup) receipt.captures.push({ iteration, actualShownMs, observedShownMs, showEventMs: row.windows.map((entry: any) => entry.showEventMs),
     constructedMs: row.windows.map((entry: any) => entry.constructedMs), grabs: row.grabs.map(({ sources, alternateGate, ...grab }: any) => grab), sourceHashes,
     timing: row.timing, finalTiming: row.finalTiming, diagnostic })
   active = null
@@ -245,8 +250,9 @@ async function run() {
       active.globalPromise = promise
       void promise.catch(error => console.error('Shortcut capture failed:', error))
     } })
+  if (iteration === 2) await capture(1, true)
   await capture(iteration)
-  assert.equal(receipt.opacityChanges.length, variant === 'candidate' ? 0 : 2)
+  assert.equal(receipt.opacityChanges.length, variant === 'candidate' ? 0 : iteration === 1 ? 2 : 4)
   receipt.passed = true
 }
 void run().catch(error => {
