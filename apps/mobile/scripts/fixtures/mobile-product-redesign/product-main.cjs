@@ -154,6 +154,10 @@ app.whenReady().then(async () => {
     await require('./focus-state.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
     result.passed = true; return
   }
+  if (mode === 'agent-locations') {
+    await require('./agent-locations.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
   if (mode === 'conversation-status') {
     await require('./conversation-status.cjs')({ win, read, until, resize, tap, button, capture, result, openMote })
     result.passed = true; return

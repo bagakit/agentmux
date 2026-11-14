@@ -381,6 +381,7 @@ const verifyWebUpdateConnection = async () => {
   if (creationUpdateScene) await new Promise<never>((_resolve, reject) => { rejectUpdatePreflight = () => reject(new Error('Controlled original connection preflight remains unconfirmed.')) })
   return () => connected
 }
+const agentLocationsOriginal = structuredClone(catalog)
 function Scene() {
   const [, refresh] = useState(0)
   const [densityMount, remountDensity] = useState(0)
@@ -388,6 +389,27 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   const [connectScene, setConnectScene] = useState<MobileConnection | null>(null)
   Object.assign(window, { mobileProductScene: {
+    prepareAgentLocations: (scene: 'multi' | 'zero' | 'one' | 'unknown' | 'long') => {
+      Object.assign(catalog, structuredClone(agentLocationsOriginal))
+      for (const row of catalog.agentPresentation ?? []) if (row.projectGroup) row.projectGroup.hostId = 'host-original'
+      const original = catalog.locations.find(place => place.regionId === 'region-mote')!
+      const other = catalog.locations.find(place => place.regionId === 'region-other')!
+      catalog.spaces.find(space => space.spaceId === 'other-space')!.name = '实验计划'
+      catalog.spaces.find(space => space.spaceId === 'mote-original')!.name = '实验计划'
+      catalog.tabs.find(tab => tab.tabId === 'tab-other')!.name = '日常协作'
+      catalog.locations.push({ ...original, spaceId: 'other-space' })
+      if (scene === 'zero') catalog.locations = catalog.locations.filter(place => !['region-mote', 'region-other'].includes(place.regionId))
+      if (scene === 'one') catalog.locations = catalog.locations.filter(place => place.regionId !== 'region-other')
+      if (scene === 'unknown') for (const region of catalog.regions) if (region.agentSessionId === main.agentSessionId) region.execution = null
+      if (scene === 'long') {
+        catalog.agentPresentation!.find(row => row.agentSessionId === main.agentSessionId)!.name = '把保留完整来源的研究想法整理成下一步小实验'
+        catalog.tabs.find(tab => tab.tabId === 'tab-mote')!.name = '一个完整保留原始上下文的研究与实验讨论'
+      }
+      catalog.tabs.push({ tabId: 'foreign-location-tab', zoneId: null, workspaceId: other.workspaceId, name: '日常协作', regionIds: ['foreign-location-region'] })
+      catalog.regions.push({ ...catalog.regions.find(region => region.regionId === 'region-mote')!, tabId: 'foreign-location-tab', regionId: 'foreign-location-region', execution: { hostId: 'another-host', cwd: fixturePath('other') } })
+      catalog.locations.push({ ...other, tabId: 'foreign-location-tab', regionId: 'foreign-location-region' })
+    },
+    invalidateAgentLocation: () => { catalog.locations = catalog.locations.filter(place => place.regionId !== 'region-other') },
     setConversationStatus: (state: typeof conversationStatusScene) => {
       conversationStatusScene = state
       publishClientEvent({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as AgentMuxClientEvent)
