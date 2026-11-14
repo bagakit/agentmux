@@ -1,4 +1,5 @@
 import { Textarea } from '@agentmux/client-ui/input'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -7,8 +8,8 @@ const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectConnectionCodeIcon = semanticIconComponent('object.connection-code')
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
-import { useContext, useEffect, useState } from 'react'
-import type { ToolkitConfirmedResult, ToolkitResultDocument } from '@agentmux/core/control'
+import { useContext, useEffect, useRef, useState } from 'react'
+import type { ToolkitConfirmedResult, ToolkitResultDocument, ToolkitRunInput } from '@agentmux/core/control'
 import { MOBILE_CONNECTION_TOOL_ID } from '../../../../shared/toolkit-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
@@ -19,6 +20,7 @@ import { continueToolkitRequest, CONTINUE_TOOLKIT_NOTICE } from './continue-tool
 import { useToolkitScriptObservation } from './use-toolkit-script-observation'
 
 type Connection = { url: string; result: ToolkitConfirmedResult; current: boolean }
+type CopyRequest = ToolkitRunInput & { workspacePath: string; executionId: string | null; phase: 'reading' | 'clipboard' }
 
 /** The declared display program owns current phone facts; original actions keep their own receipts. */
 export function MobileConnectionResult({ active, close }: { active: boolean; close(): void }) {
@@ -30,16 +32,28 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
   const [refreshing, setRefreshing] = useState(false), [continuing, setContinuing] = useState(false)
   const [error, setError] = useState(''), [notice, setNotice] = useState('')
   const [copyError, setCopyError] = useState(''), [previousError, setPreviousError] = useState('')
+  const [copyRequest, setCopyRequest] = useState<CopyRequest | null>(null)
+  const pendingCopy = useRef<CopyRequest | null>(null)
+  const current = useRef({ active, snapshot, sourceReason: reading.sourceReason })
+  current.current = { active, snapshot, sourceReason: reading.sourceReason }
+  const retainCopy = (value: CopyRequest | null) => { pendingCopy.current = value; setCopyRequest(value) }
+  const ownsInvocation = (request: CopyRequest) => pendingCopy.current?.invocationId === request.invocationId
+  const ownsCopy = (request: CopyRequest) => pendingCopy.current === request && current.current.active && !current.current.sourceReason &&
+    current.current.snapshot?.definition.revision === request.expectedRevision && current.current.snapshot.definition.workspacePath === request.workspacePath
+  useEffect(() => () => { current.current.active = false; pendingCopy.current = null }, [])
   const display = snapshot?.display
   const admission = snapshot?.admission
   const evaluating = display?.state === 'pending' || display?.state === 'running' || display?.state === 'stopping'
-  const canEvaluate = Boolean(snapshot?.definition.enabled && !reading.sourceReason && !evaluating && !refreshing)
+  const canEvaluate = Boolean(snapshot?.definition.enabled && !reading.sourceReason && !evaluating && !refreshing && !copyRequest)
   const name = snapshot?.definition.name ?? 'Phone connection'
 
   useEffect(() => {
     const displayResult = display?.latestConfirmed?.state === 'succeeded' && display.latestConfirmed.document ? display.latestConfirmed : display?.lastSucceeded
     const result = displayResult ?? snapshot?.latestConfirmed
     if (result?.state !== 'succeeded') return
+    const copying = pendingCopy.current
+    if (copying && (result.executionId !== copying.executionId || result.invocationId !== copying.invocationId ||
+      result.definition.revision !== copying.expectedRevision || result.target.workspacePath !== copying.workspacePath)) return
     const document = result.document
     if (!document) return
     setDevices({ document, at: result.endedAt })
@@ -47,6 +61,57 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
     if (link) setConnection({ url: link.url, result, current: result === display?.latestConfirmed })
     else setConnection(current => current ? { ...current, current: false } : null)
   }, [display?.latestConfirmed, display?.lastSucceeded, snapshot?.latestConfirmed])
+
+  useEffect(() => {
+    if (!copyRequest) return
+    if (!ownsCopy(copyRequest)) {
+      retainCopy(null)
+      if (active) setCopyError('The phone connection source changed. The shown link is kept; refresh to read it again.')
+      return
+    }
+    if (copyRequest.phase !== 'reading' || !copyRequest.executionId) return
+    const result = display?.latestConfirmed
+    if (result?.executionId === copyRequest.executionId) {
+      const exact = result.invocationId === copyRequest.invocationId && result.expectedLatestExecutionId === copyRequest.expectedLatestExecutionId &&
+        result.definition.id === MOBILE_CONNECTION_TOOL_ID && result.definition.revision === copyRequest.expectedRevision && result.target.workspacePath === copyRequest.workspacePath
+      const link = result.state === 'succeeded' && exact ? result.document?.links[0] : undefined
+      if (!link) { retainCopy(null); setCopyError(result.reason || 'This connection lookup did not confirm a link. The shown link is kept; refresh to try again.'); return }
+      const copying = { ...copyRequest, phase: 'clipboard' as const }
+      retainCopy(copying)
+      setError('')
+      setConnection({ url: link.url, result, current: true })
+      setDevices({ document: result.document!, at: result.endedAt })
+      void api.ui.writeClipboardText(link.url).then(() => { if (ownsCopy(copying)) setNotice('Current connection link copied.') }, cause => {
+        if (ownsCopy(copying)) setCopyError(`Could not copy the current link. The new code and full link are kept. ${presentError(cause)}`)
+      }).finally(() => { if (pendingCopy.current === copying) retainCopy(null) })
+    } else if (display?.state === 'unknown' || reading.error || result && result.executionId !== copyRequest.expectedLatestExecutionId && !display?.admission) {
+      retainCopy(null); setCopyError(reading.error || display?.reason || 'This connection lookup is unconfirmed. The shown link is kept; check or refresh to try again.')
+    }
+  }, [snapshot, copyRequest, active, reading.sourceReason, reading.error])
+
+  async function refreshAndCopy() {
+    if (!snapshot || !canEvaluate || pendingCopy.current) return
+    const request: CopyRequest = { invocationId: mintObjectId(), expectedRevision: snapshot.definition.revision,
+      expectedLatestExecutionId: display?.latestConfirmed?.executionId ?? null, workspacePath: snapshot.definition.workspacePath, executionId: null, phase: 'reading' }
+    retainCopy(request); setNotice(''); setCopyError('')
+    try {
+      const value = await api.toolkit.evaluate(MOBILE_CONNECTION_TOOL_ID, { invocationId: request.invocationId,
+        expectedRevision: request.expectedRevision, expectedLatestExecutionId: request.expectedLatestExecutionId })
+      if (!ownsCopy(request)) return
+      const lane = value.kind === 'script' && value.toolId === MOBILE_CONNECTION_TOOL_ID ? value.display : undefined
+      const execution = lane?.admission?.invocationId === request.invocationId ? lane.admission
+        : lane?.latestConfirmed?.invocationId === request.invocationId ? lane.latestConfirmed : undefined
+      if (!execution || execution.definition.revision !== request.expectedRevision || execution.target.workspacePath !== request.workspacePath ||
+        execution.expectedLatestExecutionId !== request.expectedLatestExecutionId) throw new Error('This lookup did not return its original display execution. The shown link is kept.')
+      retainCopy({ ...request, executionId: execution.executionId })
+      await reading.check()
+    } catch (cause) {
+      if (ownsInvocation(request)) {
+        retainCopy(null)
+        if (current.current.active) setCopyError(presentError(cause))
+      }
+    }
+  }
 
   async function refresh() {
     if (!canEvaluate) return
@@ -64,6 +129,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
   }
   async function copy() {
     if (!connection) return
+    retainCopy(null)
     setNotice(''); setCopyError('')
     try { await api.ui.writeClipboardText(connection.url); setNotice('Connection link copied.') }
     catch (cause) { setCopyError(`Could not copy the link. Select the full link below. ${presentError(cause)}`) }
@@ -84,12 +150,12 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
           {!currentCode ? <p className="phone-connection__code-state">{evaluating || refreshing ? 'Updating connection details…' : 'Saved code · current details not confirmed'}</p> : null}
           <PhoneConnectionCard url={connection.url} network={null} state={evaluating || refreshing ? 'updating' : currentCode ? 'current' : 'saved'} />
           <p className="phone-connection__scan">Scan with your phone’s camera</p>
-          <div className="phone-connection__buttons"><button type="button" className="primary-button" onClick={() => void copy()}><ThemeActionCopyIcon size={14} /> Copy link</button>
+          <div className="phone-connection__buttons"><button type="button" className="primary-button" disabled={!canEvaluate || Boolean(copyRequest)} onClick={() => void refreshAndCopy()}>{copyRequest ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCopyIcon size={14} />} {copyRequest ? 'Reading current link…' : 'Refresh & copy link'}</button>
             <OpenInSurveyButton url={connection.url} note="Opens your phone page in Survey on this Mac. It connects as another device." />
             <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />} Refresh</button></div>
           <p className="phone-connection__hint">Opening in Survey connects this Mac as another device. Choose a different network in Phone settings.</p>
           <p className="phone-connection__updated">{connection.current ? 'Checked' : 'Saved'} <time dateTime={new Date(connection.result.endedAt).toISOString()}>{new Date(connection.result.endedAt).toLocaleString()}</time></p>
-          <details className="phone-connection__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={connection.url} onFocus={event => event.target.select()} /></details>
+          <details className="phone-connection__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={connection.url} onFocus={event => event.target.select()} /><button type="button" className="small-button" onClick={() => void copy()}><ThemeActionCopyIcon size={14} /> Copy shown link</button></details>
         </> : <>
           <div className="phone-connection__placeholder"><ThemeObjectConnectionCodeIcon size={48} strokeWidth={1.2} aria-hidden="true" /></div>
           <p className="phone-connection__scan">{evaluating || reading.pending || refreshing ? 'Preparing your connection code…' : 'Connection code is not available yet'}</p>

@@ -50,24 +50,22 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
     pending.current = true; setBusy(true); setLinkAction(action); setNotice('')
     const epoch = generation.current
     try {
-      let connectionUrl = url
-      if (action !== 'copy' || !url || picked !== chosen) {
-        const request = picked && (!candidates.length || candidates.some(candidate => candidate.address === picked)) ? picked : null
-        // A pick can leave this Mac with a network change. Electron IPC keeps only an error's message, so a
-        // failed pick is followed by one read of the default link, which also brings the current candidates;
-        // a pick that is no longer among them is then dropped. Any other failure still reaches the notice below.
-        let result: Awaited<ReturnType<typeof api.deviceManagement.link>>
-        try { result = await api.deviceManagement.link(request ? { address: request } : {}) }
-        catch (error) {
-          if (!request) throw error
-          result = await api.deviceManagement.link({})
-          if (result.candidates.some(candidate => candidate.address === request)) throw error
-        }
-        if (epoch !== generation.current) return
-        connectionUrl = result.url; setCandidates(result.candidates)
-        setChosen(request && result.candidates.some(candidate => candidate.address === request) ? request : null)
-        setShown(new URL(result.pageUrl).hostname)
+      let connectionUrl: string
+      const request = picked && (!candidates.length || candidates.some(candidate => candidate.address === picked)) ? picked : null
+      // A pick can leave this Mac with a network change. Electron IPC keeps only an error's message, so a
+      // failed pick is followed by one read of the default link, which also brings the current candidates;
+      // a pick that is no longer among them is then dropped. Any other failure still reaches the notice below.
+      let result: Awaited<ReturnType<typeof api.deviceManagement.link>>
+      try { result = await api.deviceManagement.link(request ? { address: request } : {}) }
+      catch (error) {
+        if (!request) throw error
+        result = await api.deviceManagement.link({})
+        if (result.candidates.some(candidate => candidate.address === request)) throw error
       }
+      if (epoch !== generation.current) return
+      connectionUrl = result.url; setCandidates(result.candidates)
+      setChosen(request && result.candidates.some(candidate => candidate.address === request) ? request : null)
+      setShown(new URL(result.pageUrl).hostname)
       if (epoch !== generation.current) return
       setUrl(connectionUrl)
       if (action === 'scan') { setNotice('Scan this code with your phone camera to connect.'); return }
