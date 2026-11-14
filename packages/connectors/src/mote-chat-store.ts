@@ -1,5 +1,5 @@
 import { AgentMuxError, type AgentMuxAgentCreateInput } from '@agentmux/core'
-import { parseMoteChatConfiguration, parseMoteChatGeneration, parseMoteChatPerson, parseMoteChatResult, type MoteChatConfiguration, type MoteChatGeneration, type MoteChatOperation, type MoteChatPerson } from '@agentmux/core/mote-chat'
+import { parseMoteChatConfiguration, parseMoteChatGeneration, parseMoteChatPerson, parseMoteChatResult, type MoteChatConfiguration, type MoteChatGeneration, type MoteChatOperation, type MoteChatPerson, type MoteChatReviewMark } from '@agentmux/core/mote-chat'
 import { parseConnectionGrant, parseRoomBinding, type ConnectionActor, type ConnectionApplication, type ConnectionEnrollmentCallContext, type ConnectionGrant, type RoomBinding, type RoomBindingListInput } from '@agentmux/core/connections'
 import type { DatabaseSync } from 'node:sqlite'
 
@@ -61,7 +61,17 @@ export class MoteChatStore {
       CREATE INDEX IF NOT EXISTS mote_chat_generation_native_audience ON mote_chat_generation(json_extract(snapshot_json,'$.generation.application.domain'),json_extract(snapshot_json,'$.generation.application.appId'),json_extract(snapshot_json,'$.generation.externalConversationId'));
       CREATE INDEX IF NOT EXISTS mote_chat_generation_connection ON mote_chat_generation(json_extract(snapshot_json,'$.connectionId'),sequence);
       CREATE TABLE IF NOT EXISTS mote_chat_admission (domain TEXT NOT NULL, app_id TEXT NOT NULL, message_id TEXT NOT NULL, ingress_id TEXT NOT NULL UNIQUE, snapshot_json TEXT NOT NULL, PRIMARY KEY(domain,app_id,message_id));
+      CREATE TABLE IF NOT EXISTS mote_chat_review (space_id TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL);
     `))
+  }
+  reviewMark(spaceId: string): MoteChatReviewMark | null {
+    return this.safe(() => {
+      const row = this.database.prepare('SELECT snapshot_json FROM mote_chat_review WHERE space_id=?').get(spaceId)
+      return row ? parseMoteChatResult('space.mote.chat.review', { reviewed: JSON.parse(String(row.snapshot_json)) }).reviewed : null
+    })
+  }
+  saveReviewMark(spaceId: string, mark: MoteChatReviewMark): void {
+    this.database.prepare('INSERT INTO mote_chat_review(space_id,snapshot_json) VALUES(?,?) ON CONFLICT(space_id) DO UPDATE SET snapshot_json=excluded.snapshot_json').run(spaceId, json(mark))
   }
   safe<T>(read: () => T): T {
     try { return read() } catch (error) {

@@ -26,6 +26,8 @@ export type VerifiedIngressMessage = {
   /** No text projection exists; retain the complete raw event and refuse only this input. */
   unsupportedContent?: true
 }
+/** One retained message with its native addressing facts, for owner-private projections. */
+export type IngressApplicationMessage = { sequence: number; record: ConnectionIngressMessage; selection: VerifiedIngressMessage['selection']; replyToMessageId: string | null }
 export type VerifiedIngressAction = Pick<import('@agentmux/core/connections').ConnectionIngressAction,
   'kind' | 'eventId' | 'actor' | 'externalConversationId' | 'sourceMessageId' | 'actionRef' | 'answers'>
 export type VerifiedIngressEvent = VerifiedIngressMessage | VerifiedIngressAction
@@ -118,6 +120,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       CREATE INDEX IF NOT EXISTS connection_ingress_query_input ON connection_ingress_message(json_extract(record_json,'$.input.hostId'),json_extract(record_json,'$.input.agentSessionId'),json_extract(record_json,'$.input.expectedRun.runId'),json_extract(record_json,'$.input.messageId'));
       CREATE INDEX IF NOT EXISTS connection_ingress_received ON connection_ingress_message(connection_id,sequence) WHERE json_extract(record_json,'$.state')='received';
       CREATE INDEX IF NOT EXISTS connection_ingress_direct_application ON connection_ingress_message(domain,app_id,sequence) WHERE json_extract(record_json,'$.conversationKind')='direct';
+      CREATE INDEX IF NOT EXISTS connection_ingress_message_application ON connection_ingress_message(domain,app_id,sequence);
       CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_input_operation ON connection_ingress_message(json_extract(record_json,'$.input.operationId')) WHERE json_extract(record_json,'$.input.operationId') IS NOT NULL;
     `))
     // Action receipts belong to the original authenticated event, not a fabricated platform message.
@@ -1061,6 +1064,35 @@ export class DurableIngressHost implements ConnectionIngressPort {
         .all(application.domain, application.appId, limit + 1)
       const ingresses = rows.slice(0, limit).map(row => parseConnectionIngressRecord(JSON.parse(String(row.record_json))) as ConnectionIngressMessage)
       return { ingresses, more: rows.length > limit }
+    })
+  }
+  /** Owner-private page of one application's original messages in intake order; no claim, input or platform effect. */
+  listApplication(application: ConnectionIngressMessage['application'], input: { after: number } | { before: number }, limit: number): { rows: IngressApplicationMessage[]; more: boolean } {
+    return this.safe(() => {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
+      const backward = 'before' in input, bound = backward ? input.before : input.after
+      if (!Number.isSafeInteger(bound) || bound < 0) fail('INVALID_CONNECTION_INGRESS')
+      const rows = this.database.prepare(`SELECT sequence,event_json,record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND sequence${backward ? '<' : '>'}? ORDER BY sequence ${backward ? 'DESC' : 'ASC'} LIMIT ?`)
+        .all(application.domain, application.appId, bound, limit + 1)
+      return { more: rows.length > limit, rows: rows.slice(0, limit).map(row => {
+        const event = JSON.parse(String(row.event_json)) as Partial<VerifiedIngressMessage>
+        return { sequence: Number(row.sequence), record: parseConnectionIngressRecord(JSON.parse(String(row.record_json))) as ConnectionIngressMessage,
+          selection: event.selection === 'mention' || event.selection === 'reply' ? event.selection : 'message', replyToMessageId: typeof event.replyToMessageId === 'string' ? event.replyToMessageId : null }
+      }) }
+    })
+  }
+  /** Bounded count after one intake position; `more` means the count stopped at `cap`. */
+  countApplication(application: ConnectionIngressMessage['application'], after: number, cap: number): { count: number; more: boolean } {
+    return this.safe(() => {
+      const row = this.database.prepare('SELECT COUNT(*) AS total FROM (SELECT 1 FROM connection_ingress_message WHERE domain=? AND app_id=? AND sequence>? LIMIT ?)').get(application.domain, application.appId, after, cap + 1)
+      const total = Number(row?.total ?? 0)
+      return { count: Math.min(total, cap), more: total > cap }
+    })
+  }
+  newestApplication(application: ConnectionIngressMessage['application']): number | null {
+    return this.safe(() => {
+      const row = this.database.prepare('SELECT MAX(sequence) AS newest FROM connection_ingress_message WHERE domain=? AND app_id=?').get(application.domain, application.appId)
+      return row?.newest === null || row?.newest === undefined ? null : Number(row.newest)
     })
   }
   /** Private recovery reader: unfinished observation or unclaimed input, bounded to this connection. */

@@ -4,12 +4,13 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from '@agentmux/core'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import { parseMoteChatConfiguration, parseMoteChatParams, parseMoteChatPerson, parseMoteChatResult,
-  type MoteChatAllocate, type MoteChatAudienceInput, type MoteChatCallContext, type MoteChatConfiguration, type MoteChatConfigure,
-  type MoteChatGeneration, type MoteChatHistoryInput, type MoteChatInspect, type MoteChatOperation, type MoteChatPort, type MoteChatTarget } from '@agentmux/core/mote-chat'
+import { MOTE_CHAT_UNREVIEWED_BOUND, parseMoteChatConfiguration, parseMoteChatParams, parseMoteChatPerson, parseMoteChatResult,
+  type MoteChatAllocate, type MoteChatAudienceInput, type MoteChatCallContext, type MoteChatConfiguration, type MoteChatConfigure, type MoteChatEvent, type MoteChatEventsInput,
+  type MoteChatGeneration, type MoteChatHistoryInput, type MoteChatInspect, type MoteChatOperation, type MoteChatPort, type MoteChatReviewInput, type MoteChatTarget } from '@agentmux/core/mote-chat'
 import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, type ConnectionActor, type ConnectionIngressMessage,
   type RoomBinding, type RoomBindingListInput, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
+import type { DurableIngressHost, IngressApplicationMessage } from './durable-ingress.js'
 import { MoteChatStore, type MoteChatGenerationRow, type MoteChatPersonRow, type MoteChatPreparedLaunch } from './mote-chat-store.js'
 import { readMoteChatDiagnosis, type MoteChatDiagnosisOwner } from './mote-chat-diagnosis.js'
 
@@ -31,12 +32,15 @@ export type MoteChatHostOptions = {
   agents: MoteChatAgentPort
   assertTarget(target: MoteChatTarget): Promise<void>
   assertReady?: NonNullable<MoteChatDiagnosisOwner['assertReady']>
-  ingress?: NonNullable<MoteChatDiagnosisOwner['ingress']>
+  ingress?(): Pick<DurableIngressHost, 'listDirect' | 'inspect' | 'inspectInputRuntime' | 'listApplication' | 'countApplication' | 'newestApplication'> | undefined
+  /** Host spatial fact: this exact Host Session is one of the Mote's own Agents. Unknown is refusal, never membership. */
+  member?(target: MoteChatTarget, agent: { hostId: string; agentSessionId: string }): Promise<boolean>
   now?: () => number
 }
 export type MoteChatIncoming = Pick<ConnectionIngressMessage, 'ingressId' | 'connectionId' | 'application' | 'externalMessageId' | 'externalConversationId' | 'actor'> & { conversationKind: 'direct' }
 const same = isDeepStrictEqual
 const encode = JSON.stringify
+const displayName = (value: unknown) => typeof value === 'string' && value.trim() && !/[\u0000-\u001f\u007f]/u.test(value) ? value : undefined
 function fail(code: string, message: string): never { throw new AgentMuxError(message, code) }
 function dedicatedCreation(prepared: MoteChatPreparedLaunch): void {
   if ('forkSource' in prepared.input || 'nativeResumeSource' in prepared.input) fail('MOTE_CHAT_CREATE_MISMATCH', 'Private chat requires its original dedicated creation. The existing imported or copied conversation is retained without expanding its audience.')
@@ -155,6 +159,74 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     const scope = ['history', input.target, input.actor ?? null, lane ?? null], before = position(scope, input.cursor, Number.MAX_SAFE_INTEGER) as number
     const rows = this.store.generations(input.target.spaceId, before, (input.limit ?? 20) + 1, lane, input.actor), page = rows.slice(0, input.limit)
     return parseMoteChatResult('space.mote.chat.history', { generations: page.map(row => row.generation), next: rows.length > page.length ? cursor(scope, page.at(-1)!.sequence) : null }, input)
+  }
+  /** The person, device, or one of this Mote's own Agents. Agents serving an external audience never see other conversations. */
+  private async assertOwnAgent(target: MoteChatTarget, context: MoteChatCallContext): Promise<void> {
+    if (context.actor.kind !== 'agent') return
+    // A Session id is unique only within one Host, so only this Host's lane or relationship makes the caller serve an audience.
+    const hostId = context.agentHostId, agentSessionId = context.actor.id
+    if (hostId && this.store.generationBySession(agentSessionId)?.generation.executionHostId === hostId)
+      fail('CONTROL_PERMISSION_DENIED', 'An Agent serving an external private chat or group cannot read or act on this Mote’s other conversations.')
+    let member: boolean, relationship: RoomBinding | undefined
+    try {
+      if (!hostId) throw new Error('The authenticating Host is unknown.')
+      member = await this.options.member?.(target, { hostId, agentSessionId }) ?? false
+      // A paused relationship publishes this Session's later replies again once it is resumed.
+      relationship = (await this.options.connections.bindings?.list({ agentSessionId, executionHostId: hostId }))?.bindings.find(binding => binding.state !== 'detached')
+    } catch { return fail('MOTE_CHAT_MEMBERSHIP_UNCONFIRMED', 'Whether this Session is one of the Mote’s own Agents is unconfirmed. Its own conversation is unaffected; read the Mote again before retrying.') }
+    if (relationship) fail('CONTROL_PERMISSION_DENIED', `Group relationship ${relationship.bindingId} (${relationship.state}) can publish this Agent’s replies into an external group, so this Agent cannot read or act on this Mote’s other conversations. Detach that relationship, or use a Mote Agent without a group relationship.`)
+    if (!member) fail('CONTROL_PERMISSION_DENIED', 'Only this Mote’s own Agents may read its chat events or contact its creator.')
+  }
+  private intake() {
+    return this.options.ingress?.() ?? fail('MOTE_CHAT_EVENTS_UNAVAILABLE', 'The original message intake on this Host is unavailable. Received messages are retained; read again after the connection owner starts.')
+  }
+  async events(value: MoteChatEventsInput, context: MoteChatCallContext) {
+    const input = parseMoteChatParams('space.mote.chat.events', value); await context.assertCurrent?.()
+    const configuration = this.exact(input.target)
+    await this.assertOwnAgent(input.target, context); await context.assertCurrent?.()
+    const reviewed = this.store.reviewMark(input.target.spaceId), application = configuration?.values.connection?.application
+    if (!application) return parseMoteChatResult('space.mote.chat.events', { application: null, events: [], next: null, reviewed, unreviewed: { count: 0, more: false } }, input)
+    const ingress = this.intake(), order = input.order ?? 'unreviewed', scope = ['events', input.target, order, application]
+    const from = position(scope, input.cursor, order === 'recent' ? Number.MAX_SAFE_INTEGER : reviewed?.through ?? 0) as number
+    const page = ingress.listApplication(application, order === 'recent' ? { before: from } : { after: from }, input.limit ?? 20)
+    const unreviewed = ingress.countApplication(application, reviewed?.through ?? 0, MOTE_CHAT_UNREVIEWED_BOUND), names = new Map<string, Promise<string | undefined>>()
+    const events = await Promise.all(page.rows.map(row => this.event(row, names)))
+    return parseMoteChatResult('space.mote.chat.events', { application, events, next: page.more ? cursor(scope, page.rows.at(-1)!.sequence) : null, reviewed, unreviewed }, input)
+  }
+  async review(value: MoteChatReviewInput, context: MoteChatCallContext) {
+    const input = parseMoteChatParams('space.mote.chat.review', value); await context.assertCurrent?.()
+    const application = this.exact(input.target)?.values.connection?.application
+    await this.assertOwnAgent(input.target, context); await context.assertCurrent?.()
+    if (!application) fail('MOTE_CHAT_EVENTS_UNAVAILABLE', 'This Mote has no chat application, so there are no received events to review.')
+    const newest = this.intake().newestApplication(application)
+    if (newest === null || input.through > newest) fail('MOTE_CHAT_REVIEW_AHEAD', 'The reviewed position is after the newest received event. Read events again and review only what was read.')
+    const reviewed = this.store.transaction(() => {
+      const current = this.store.reviewMark(input.target.spaceId)
+      if (current && current.through >= input.through) return current
+      const mark = { through: input.through, revision: (current?.revision ?? 0) + 1, reviewedAt: this.now(), actor: context.actor }
+      this.store.saveReviewMark(input.target.spaceId, mark); return mark
+    })
+    return parseMoteChatResult('space.mote.chat.review', { reviewed }, input)
+  }
+  private async event(row: IngressApplicationMessage, names: Map<string, Promise<string | undefined>>): Promise<MoteChatEvent> {
+    const record = row.record, conversationKind = record.conversationKind ?? (record.group ? 'group' : 'direct')
+    let authorName: string | undefined
+    try { authorName = displayName(this.options.connections.readChannelActor(record.connectionId, record.actor).profile?.name) } catch { /* A display snapshot never blocks the original event. */ }
+    const key = encode([record.connectionId, record.externalConversationId])
+    if (conversationKind === 'group' && !names.has(key)) names.set(key, this.options.connections.metadata.get({ connectionId: record.connectionId, subject: { kind: 'conversation', externalConversationId: record.externalConversationId } })
+      .then(result => displayName(result.entry.observation.profile?.name), () => undefined))
+    const conversationName = conversationKind === 'group' ? await names.get(key) : undefined
+    return { sequence: row.sequence, ingressId: record.ingressId, receivedAt: record.receivedAt ?? null, application: record.application, conversationKind,
+      externalConversationId: record.externalConversationId, ...(conversationName ? { conversationName } : {}), author: record.actor, ...(authorName ? { authorName } : {}),
+      externalMessageId: record.externalMessageId, addressing: row.selection, replyToMessageId: row.replyToMessageId,
+      externalText: record.code === 'INGRESS_CONTENT_UNSUPPORTED' ? null : record.body, state: record.state, code: record.code ?? null, handledBy: this.handledBy(record) }
+  }
+  private handledBy(record: ConnectionIngressMessage): MoteChatEvent['handledBy'] {
+    if (record.input) return { executionHostId: record.input.hostId, agentSessionId: record.input.agentSessionId }
+    const target = record.group?.target
+    if (target) return { executionHostId: target.hostId, agentSessionId: target.agentSessionId }
+    const admission = this.store.admissionByIngress(record.ingressId), row = admission ? this.store.generation(admission.generationId) : null
+    return row ? { executionHostId: row.generation.executionHostId, agentSessionId: row.generation.agentSessionId } : null
   }
   private active(row: MoteChatGenerationRow): boolean {
     const config = this.store.configuration(row.generation.target.spaceId), ref = config?.values.connection

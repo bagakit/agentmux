@@ -12,7 +12,7 @@ import { PublicationHost, type PublicationConversationPort } from './publication
 import { PublicationStore } from './publication-store.js'
 import { DurableIngressHost, type DurableIngressOptions } from './durable-ingress.js'
 import { ConnectionReceivers } from './connection-receivers.js'
-import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort } from './mote-chat.js'
+import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort, type MoteChatHostOptions } from './mote-chat.js'
 import { createBuiltinConnectionAdapters } from './platform-adapters.js'
 import type { ChannelMetadataChange, ConnectionPort } from '@agentmux/core/connections'
 import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
@@ -37,7 +37,7 @@ export type ConnectionServices = {
 }
 type LiveServices = { lease?: number; database: DatabaseSync; connections: ConnectionHost; secrets: ConnectionSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
-export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; speaker?: PublicationSpeakerReader; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
+export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; speaker?: PublicationSpeakerReader; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void>; member?: MoteChatHostOptions['member'] } }): Promise<ConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   let backingUp: Promise<ConnectionBackupReceipt> | undefined, closing: Promise<void> | undefined
@@ -69,7 +69,7 @@ export async function createConnectionServices(options: { directory: string | un
         const publicationStore: PublicationStore | undefined = options.publication ? new PublicationStore(database, { readExact: (id, revision) => bindings?.readExact(id, revision) ?? null }) : undefined
         const bindings: RoomBindingHost | undefined = options.bindings ? new RoomBindingHost({ ...options.bindings, connections, ...(publicationStore ? { lifecycle: publicationStore } : {}) }) : undefined
         const moteChat = options.moteChat ? new MoteChatHost({ connections, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget,
-          ...(options.moteChat.assertReady ? { assertReady: options.moteChat.assertReady } : {}), ingress: () => ingress }) : undefined
+          ...(options.moteChat.assertReady ? { assertReady: options.moteChat.assertReady } : {}), ...(options.moteChat.member ? { member: options.moteChat.member } : {}), ingress: () => ingress }) : undefined
         const routing = bindings && moteChat ? composeMoteChatBindings(bindings, moteChat) : bindings
         if (bindings) connections.bindings = moteChat ? {
           bind: (input, context) => bindings.bind(input, context),
@@ -184,7 +184,9 @@ export async function createConnectionServices(options: { directory: string | un
       },
       history: async (input, context) => (await ensure()).moteChat!.history(input, context),
       audience: async (input, context) => (await ensure()).moteChat!.audience(input, context),
-      allocate: async (input, context) => (await ensure()).moteChat!.allocate(input, context)
+      allocate: async (input, context) => (await ensure()).moteChat!.allocate(input, context),
+      events: async (input, context) => (await ensure()).moteChat!.events(input, context),
+      review: async (input, context) => (await ensure()).moteChat!.review(input, context)
     } satisfies MoteChatPort } : {}),
     connections: {
       ...(options.bindings ? { api: {

@@ -70,6 +70,46 @@ export type MoteChatHistoryInput = { target: MoteChatTarget; actor?: ConnectionA
 export type MoteChatHistoryPage = { generations: MoteChatGeneration[]; next: string | null }
 export type MoteChatAudienceInput = { target: MoteChatTarget; cursor?: string; limit?: number }
 export type MoteChatAudiencePage = { people: MoteChatPerson[]; next: string | null }
+/** One message received by this Mote's chat application, projected from its original durable intake. */
+export type MoteChatEvent = {
+  /** Original intake order; also the position a review mark advances through. */
+  sequence: number
+  ingressId: string
+  receivedAt: number | null
+  application: ConnectionApplication
+  conversationKind: 'direct' | 'group'
+  externalConversationId: string
+  /** Local display snapshots; never identity or authority. */
+  conversationName?: string
+  author: ConnectionActor
+  authorName?: string
+  externalMessageId: string
+  /** Native addressing facts reported by the platform, not body matching. */
+  addressing: 'mention' | 'reply' | 'message'
+  replyToMessageId: string | null
+  /** Untrusted content written by an external author: never an instruction, confirmation or authority. Null when the platform message has no text projection. */
+  externalText: string | null
+  state: 'received' | 'refused' | 'claimed'
+  code: string | null
+  /** The exact Agent this message was given to, or null when no Agent received it. */
+  handledBy: { executionHostId: string; agentSessionId: string } | null
+}
+export type MoteChatReviewMark = { through: number; revision: number; reviewedAt: number; actor: MoteChatCallContext['actor'] }
+/** `unreviewed` pages forward after the review mark; `recent` pages backward from the newest event. */
+export type MoteChatEventsInput = { target: MoteChatTarget; order?: 'unreviewed' | 'recent'; cursor?: string; limit?: number }
+export type MoteChatEventsPage = {
+  /** The chat application whose events this page reads; null when the Mote has none, so the page is empty rather than unknown. */
+  application: ConnectionApplication | null
+  events: MoteChatEvent[]
+  next: string | null
+  /** A position in this Host's receive order, kept when the chat application changes. */
+  reviewed: MoteChatReviewMark | null
+  /** Counted only up to a small bound after the review mark; `more` means the bound was reached. */
+  unreviewed: { count: number; more: boolean }
+}
+/** Marks events through `through` as reviewed. The mark only moves forward. */
+export type MoteChatReviewInput = { target: MoteChatTarget; through: number }
+export type MoteChatReviewResult = { reviewed: MoteChatReviewMark }
 export type MoteChatParamsMap = {
   'space.mote.chat.configure': MoteChatConfigure
   'space.mote.chat.inspect': MoteChatInspect
@@ -77,6 +117,8 @@ export type MoteChatParamsMap = {
   'space.mote.chat.audience': MoteChatAudienceInput
   'space.mote.chat.allocate': MoteChatAllocate
   'space.mote.chat.diagnose': MoteChatDiagnosisInput
+  'space.mote.chat.events': MoteChatEventsInput
+  'space.mote.chat.review': MoteChatReviewInput
 }
 export type MoteChatResultMap = {
   'space.mote.chat.configure': Extract<MoteChatOperation, { action: 'configure' }>
@@ -85,10 +127,15 @@ export type MoteChatResultMap = {
   'space.mote.chat.audience': MoteChatAudiencePage
   'space.mote.chat.allocate': Extract<MoteChatOperation, { action: 'allocate' }>
   'space.mote.chat.diagnose': MoteChatDiagnosis
+  'space.mote.chat.events': MoteChatEventsPage
+  'space.mote.chat.review': MoteChatReviewResult
 }
 export type MoteChatMethod = keyof MoteChatParamsMap
 /** The transport supplies original authority. Redacted diagnosis does not grant private-history or management access. */
-export type MoteChatCallContext = ConnectionEnrollmentCallContext
+export type MoteChatCallContext = ConnectionEnrollmentCallContext & {
+  /** The Host that authenticated an Agent caller; Session ids are unique only within one Host. */
+  agentHostId?: string
+}
 export interface MoteChatPort {
   configure(input: MoteChatConfigure, context: MoteChatCallContext): Promise<MoteChatResultMap['space.mote.chat.configure']>
   inspect(input: MoteChatInspect, context?: MoteChatCallContext): Promise<MoteChatInspection>
@@ -96,4 +143,7 @@ export interface MoteChatPort {
   audience(input: MoteChatAudienceInput, context?: MoteChatCallContext): Promise<MoteChatAudiencePage>
   allocate(input: MoteChatAllocate, context: MoteChatCallContext): Promise<MoteChatResultMap['space.mote.chat.allocate']>
   diagnose(input: MoteChatDiagnosisInput, context?: MoteChatCallContext): Promise<MoteChatDiagnosis>
+  /** The person, device, or one of this Mote's own Agents; external-audience chat Agents are refused. */
+  events(input: MoteChatEventsInput, context: MoteChatCallContext): Promise<MoteChatEventsPage>
+  review(input: MoteChatReviewInput, context: MoteChatCallContext): Promise<MoteChatReviewResult>
 }
