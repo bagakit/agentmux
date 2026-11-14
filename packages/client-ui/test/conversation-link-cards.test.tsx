@@ -63,6 +63,39 @@ describe('local conversation link cards through the actual shared consumer', () 
       await render(message(content)); expect(cards(), content).toHaveLength(0)
     }
   })
+  it.each([
+    ['文件 ', 'https://files.example.test/file/Ab1', '，以及原附件 SHA-256'],
+    ['打开（', 'https://例子.测试/目录/资料?q=值%EF%BC%8C数#详细', '）。请核对'],
+    ['参考 ', 'www.example.test/path', '；下一段正文。']
+  ])('keeps punctuation outside a bare link in a real conversation item (%s)', async (before, address, after) => {
+    const content = `- ${before}${address}${after}`
+    await render(message(content))
+    const body = host.querySelector('.md-list li')!
+    const links = [...body.querySelectorAll<HTMLButtonElement>('button.md-link')]
+    const target = new URL(address.startsWith('www.') ? `http://${address}` : address).href
+    expect(body.textContent).toBe(before + address + after)
+    expect(links.map(link => [link.textContent, link.title])).toEqual([[address, target]])
+    const pieces = [...links[0]!.parentNode!.childNodes]
+    expect(pieces.slice(pieces.indexOf(links[0]!) + 1).map(node => node.textContent).join('')).toBe(after)
+    expect(cards()).toHaveLength(0)
+    await act(async () => links[0]!.click())
+    expect(open).toHaveBeenCalledExactlyOnceWith(target, expect.objectContaining({ metaKey: false, ctrlKey: false }))
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
+    expect(copy).toHaveBeenCalledExactlyOnceWith(content, expect.any(Function))
+  })
+  it('uses explicitly delimited targets intact even when their literal label is also a URL', async () => {
+    const address = 'https://例子.测试/原件，版本?q=字#说明'
+    const target = new URL(address).href
+    for (const authored of [`[${address}](${address})`, `<${address}>`, `<a href="${address}">${address}</a>`]) {
+      open.mockClear()
+      await render(message(`- ${authored}，仍是正文`))
+      const links = [...host.querySelectorAll<HTMLButtonElement>('.md-list button.md-link')]
+      expect(links.map(link => [link.textContent, link.title])).toEqual([[address, target]])
+      expect(host.querySelector('.md-list li')?.textContent).toBe(address + '，仍是正文')
+      await act(async () => links[0]!.click())
+      expect(open).toHaveBeenCalledExactlyOnceWith(target, expect.any(Object))
+    }
+  })
   it('preserves document, readonly and missing-adapter behavior', async () => {
     for (const props of [{ documentMode: true, openHttpLink: open }, { readOnly: true, openHttpLink: open }, {}]) {
       await render(<AgentMarkdown content={`[${label}](${uri})`} {...props} />)

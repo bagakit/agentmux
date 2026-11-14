@@ -456,6 +456,17 @@ describe('mounted Terminal link exits', () => {
       undefined, expect.objectContaining({ resource: { hostId: session.hostId, path: session.workspacePath } }), undefined)
     expect(renderer.Terminal.instances).toEqual([terminal]); expect(api.sessions.detach).not.toHaveBeenCalled()
   })
+  it('preserves Unicode prose punctuation in an expressly declared OSC 8 destination', async () => {
+    const uri = 'https://例子.测试/原件，附件?q=值#说明'
+    const target = new URL(uri).href
+    await installCells(`\x1b]8;;${uri}\x07原件\x1b]8;;\x07，正文`)
+    let links: ILink[] | undefined
+    terminal.provider!.provideLinks(1, value => { links = value })
+    expect(links?.map(link => [link.text, link.range])).toEqual([[target, { start: { x: 1, y: 1 }, end: { x: 4, y: 1 } }]])
+    await act(async () => terminal.options.linkHandler!.activate(pointer(), uri, links![0]!.range))
+    await act(async () => host.querySelector<HTMLButtonElement>('button[data-destination="tab"]')!.click())
+    expect(openHttp).toHaveBeenCalledExactlyOnceWith(origin, target, 'tab', expect.objectContaining({ active: true }))
+  })
   for (const provider of ['bare URL', 'OSC 8'] as const) {
     it(`${provider}: plain primary shows menu; modifier primary opens system`, async () => {
       const activate = provider === 'bare URL' ? web.activate : terminal.options.linkHandler!.activate
