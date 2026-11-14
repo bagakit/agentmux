@@ -242,7 +242,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 Host 进程退出后，服务管理者沿原入口与准确 namespace 重新激活，原 Core 重新核对持久 Runtime 身份、设备身份、Session、原生句柄、空间图及原操作。仍健康的 Run 自动接回；已结束或丢失 Run 的同 Session 语义恢复沿[冷启动按需恢复](#冷启动按需恢复p0-末位)，不以另建空会话代替。断线或超时保留原 operation、输入和回执未知事实，不自动重放副作用；服务管理者不解释 Provider、输入资格或 Run 终态。
 
-服务注册只保存启动所需的准确 namespace 和入口，不复制业务 Store、设置、权限或 Runtime 状态。无法确认现存 owner 或其启动归属时，保留原服务与健康 Run，说明未确认步骤和可达恢复路径，不能按进程名、展示文案或空观察抢占。安装更新须先通过同一服务管理者停止旧服务的自动激活，再正常收口准确旧 Host，随后用候选入口接回同一 namespace；旧服务未确认退出时不得激活第二 owner，观测失败不授权强杀健康 Run。
+服务注册只保存启动所需的准确 namespace 和入口，不复制业务 Store、设置、权限或 Runtime 状态。安装器换包前须先通过同一服务管理者停止旧服务的自动激活，再正常收口准确旧 Host，随后用候选入口接回同一 namespace。用户通过 Finder 替换已安装 App 后，首次打开也应自动接回新版 Host。仅在确认当前应答的是同一安装位置、同一持久 Store 的旧 Host，且原入口已指向新版 App 时，才收口这个 owner。原服务管理者沿该入口重新激活，原 ctxmux 和 Run 继续保留。升级观察失败时继续使用可用的原服务，在原界面说明失败步骤和可达恢复动作；准确旧 Host 未确认退出时，同一 namespace 继续由其原 owner 持有。
 
 公开 owner shutdown 收口准确旧 owner instance 的整个 Host，包括 HTTP、Relay、连接与 Core；它不撤销服务管理者的运行意图，服务管理者可沿同 namespace 激活新 instance。显式暂停自动激活由准确服务管理者负责，不把对旧 instance 的回执用于控制后来者。已关闭语义服务的 Host 不得继续把 HTTP 存活冒成业务可用。当前 owner、服务入口、失败步骤与恢复状态分别可观察；局部手机诊断或桌面观察失败不停止健康 Host，也不阻断无关输入。执行环境关闭期间不承诺在线，环境恢复后的重新激活不能冒称未发生中断。
 
