@@ -1,0 +1,99 @@
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BrowserProxyAsset } from '@agentmux/core/control'
+const port = vi.hoisted(() => ({ saveProxy: vi.fn(), deleteProxy: vi.fn(), assignProxy: vi.fn(), flush: vi.fn() }))
+vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port, ui: { requestStorageFlush: port.flush } } }))
+import { BrowserProxyLibrary } from '../src/renderer/src/components/settings/BrowserProxyLibrary'
+import { browserProxyDrafts } from '../src/renderer/src/lib/browser-proxy-drafts'
+import { DESKTOP_FRAGMENT_KEYS } from '../src/renderer/src/lib/desktop-user-fragments'
+const a: BrowserProxyAsset = { id: 'asset-a', revision: 'asset-a-v1', label: 'Work proxy', server: 'http://proxy.example:8080' }
+const b: BrowserProxyAsset = { id: 'asset-b', revision: 'asset-b-v1', label: 'Lab proxy', server: 'socks5://lab.example:1080' }
+const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }
+let root: Root, container: HTMLDivElement
+const field = (label: string) => container.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!
+const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)!
+async function render(assets = [a, b]) { await act(async () => root.render(createElement(BrowserProxyLibrary, { assets, active: true }))) }
+async function input(label: string, text: string) { await act(async () => { const element = field(label), prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : element.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(element, text); element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })) }) }
+async function click(label: string) { expect(button(label), label).toBeDefined(); await act(async () => button(label).click()) }
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); localStorage.clear(); vi.resetAllMocks()
+  port.flush.mockResolvedValue(undefined)
+  port.saveProxy.mockImplementation(async (edit, id) => ({ proxy: { ...edit, id: id ?? 'new-asset', revision: 'saved-v2' }, revision: 4 }))
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+})
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+describe('original proxy library editor and Desktop draft owner', () => {
+  it('saves the exact asset token through the product API and keeps drafts isolated across asset choices and remount', async () => {
+    await render(); await input('Saved proxy asset', a.id); await input('Proxy asset notes', 'Unfinished work note')
+    await input('Saved proxy asset', b.id); expect(field('Proxy asset notes').value).toBe('')
+    await input('Proxy asset notes', 'Lab draft'); await input('Saved proxy asset', a.id)
+    expect(field('Proxy asset notes').value).toBe('Unfinished work note')
+    await act(async () => root.unmount()); root = createRoot(container); await render(); await input('Saved proxy asset', a.id)
+    expect(field('Proxy asset notes').value).toBe('Unfinished work note')
+    await click('Save proxy')
+    expect(port.saveProxy).toHaveBeenCalledWith({ label: a.label, server: a.server, notes: 'Unfinished work note', bypass: [] }, a.id, a.revision)
+    expect(browserProxyDrafts.get(a.id)?.active).toBeUndefined()
+    expect(browserProxyDrafts.get(b.id)?.active?.notes).toBe('Lab draft')
+  })
+  it('uses the original batched writer while typing and checkpoints only when the editing field is left', async () => {
+    await render()
+    for (const text of ['G', 'Ga', 'Gat', 'Gate', 'Gateway']) await input('Proxy asset name', text)
+    expect(browserProxyDrafts.get('new')?.active?.label).toBe('Gateway')
+    expect(port.flush).not.toHaveBeenCalled()
+    await act(async () => field('Proxy asset name').dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+    expect(port.flush).toHaveBeenCalledTimes(1)
+  })
+  it('keeps later input and uses the original save ACK token for its next explicit update', async () => {
+    const hold = deferred<{ proxy: BrowserProxyAsset; revision: number }>(); port.saveProxy.mockReturnValueOnce(hold.promise)
+    await render(); await input('Saved proxy asset', a.id); await input('Proxy asset notes', 'Submitted note'); await click('Save proxy')
+    await input('Proxy asset notes', 'Later note')
+    await act(async () => hold.resolve({ proxy: { ...a, notes: 'Submitted note', revision: 'exact-ack-token' }, revision: 6 }))
+    expect(field('Proxy asset notes').value).toBe('Later note')
+    await click('Save proxy')
+    expect(port.saveProxy.mock.calls[1]).toEqual([{ label: a.label, server: a.server, bypass: [], notes: 'Later note' }, a.id, 'exact-ack-token'])
+  })
+  it('a late save cannot take over another selected asset or delete its input', async () => {
+    const hold = deferred<{ proxy: BrowserProxyAsset; revision: number }>(); port.saveProxy.mockReturnValueOnce(hold.promise)
+    await render(); await input('Saved proxy asset', a.id); await input('Proxy asset name', 'Submitted A'); await click('Save proxy')
+    await input('Saved proxy asset', b.id); await input('Proxy asset notes', 'Keep B input')
+    await act(async () => hold.resolve({ proxy: { ...a, label: 'Submitted A', revision: 'a-v2' }, revision: 4 }))
+    expect(field('Saved proxy asset').value).toBe(b.id); expect(field('Proxy asset notes').value).toBe('Keep B input')
+    expect(browserProxyDrafts.get(b.id)?.active?.notes).toBe('Keep B input')
+  })
+  it('removes only the asset version actually shown to the editing user, preserving a newer unseen version', async () => {
+    await render(); await input('Saved proxy asset', a.id)
+    await render([{ ...a, revision: 'a-newer-unreviewed', server: 'http://newer.example:8181' }, b])
+    port.deleteProxy.mockRejectedValueOnce(new Error('The original asset version changed. Draft retained.'))
+    await click('Remove unused proxy')
+    expect(port.deleteProxy).toHaveBeenCalledWith(a.id, a.revision)
+    expect(field('Proxy asset server').value).toBe(a.server)
+    expect(container.textContent).toContain('original asset version changed')
+  })
+  it('keeps sensitive pasted sign-in only in memory, preserves prior disk bytes and leaves secret entry to the original Profile owner', async () => {
+    await render(); await input('Proxy asset name', 'New non-secret name'); await input('Proxy asset server', 'ftp://proxy.example:21'); expect(button('Save proxy').disabled).toBe(true); expect(port.saveProxy).not.toHaveBeenCalled(); const before = localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProxyLibraryDrafts)
+    await input('Proxy asset server', 'http://user:secret-value@proxy.example:8080')
+    expect(button('Save proxy').disabled).toBe(true); expect(field('Proxy asset server').value).toContain('secret-value')
+    expect(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProxyLibraryDrafts)).toBe(before)
+    expect(container.textContent).toContain('has not been saved to disk'); expect(port.saveProxy).not.toHaveBeenCalled()
+  })
+  it('clears a failed draft write notice only after Retry receives the original checkpoint ACK', async () => {
+    await render(); await input('Proxy asset name', 'Saved once'); await input('Proxy asset server', a.server)
+    port.flush.mockRejectedValueOnce(new Error('Original draft flush unconfirmed')); await click('Save proxy')
+    expect(container.textContent).toContain('Original draft flush unconfirmed')
+    const pending = deferred<void>(); port.flush.mockReturnValueOnce(pending.promise)
+    await click('Retry draft storage')
+    expect(container.textContent).toContain('Original draft flush unconfirmed')
+    await act(async () => pending.resolve())
+    expect(container.textContent).not.toContain('Original draft flush unconfirmed')
+  })
+  it('keeps a confirmed asset save separate from a failed draft checkpoint', async () => {
+    await render(); await input('Proxy asset name', 'Saved once'); await input('Proxy asset server', a.server)
+    port.flush.mockRejectedValueOnce(new Error('Original draft flush unconfirmed'))
+    await click('Save proxy')
+    expect(port.saveProxy).toHaveBeenCalledTimes(1); expect(field('Saved proxy asset').value).toBe('new-asset')
+    expect(container.textContent).toContain('Draft storage:'); expect(field('Proxy asset name').value).toBe('Saved once')
+  })
+})
