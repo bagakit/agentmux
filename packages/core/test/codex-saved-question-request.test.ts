@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { projectConversationQuestions } from '../src/conversation-questions.js'
-import { readCodexSavedSessionHistoryRecord } from '../src/providers/codex-saved-history.js'
+import { readCodexSavedSessionHistoryRecord } from '../src/providers/codex-history-reader.js'
 import { readSessionHistoryTextResource } from '../src/session-history-content.js'
 import { savedQuestionFixture as fixture, savedQuestionEvent as event, savedQuestionTool as tool, savedQuestionResult as result,
   savedQuestionReply as reply, savedQuestionSource as source, savedQuestionTurn as turn, savedQuestionId as questionId,

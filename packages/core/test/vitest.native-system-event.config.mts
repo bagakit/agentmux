@@ -6,12 +6,16 @@ import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config'
 
 const root = resolve(import.meta.dirname, '../../..')
-const target = 'packages/core/src/providers/codex-saved-history.ts'
-const purpose = "...(record.type === 'token_usage_record' || record.type === 'event_msg' &&\n      (type === 'task_started' || type === 'task_complete' || type === 'turn_aborted')\n      ? { recordPurpose: 'system-event' as const } : {}),"
-export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache/native-system-event', process.env.AGENTMUX_SYSTEM_EVENT_MUTATION ?? 'baseline'),
+const target = 'packages/providers/src/codex/saved-history.ts'
+const purpose = "...(record.type === 'token_usage_record' || record.type === 'event_msg' &&\n        (type === 'task_started' || type === 'task_complete' || type === 'turn_aborted')\n        ? { recordPurpose: 'system-event' as const } : {}),"
+export default defineConfig({ ...original, root,
+  resolve: { ...original.resolve, alias: [
+    { find: '@agentmux/providers/codex/saved-history', replacement: resolve(root, 'packages/providers/src/codex/saved-history.ts') },
+    ...(Array.isArray(original.resolve?.alias) ? original.resolve.alias : [])
+  ] }, cacheDir: resolve(root, '.cache/native-system-event', process.env.AGENTMUX_SYSTEM_EVENT_MUTATION ?? 'baseline'),
   plugins: [...original.plugins ?? [], { name: 'native-system-event-actual-source', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!path.startsWith('packages/core/src/') || !path.endsWith('.ts')) return
+    if ((!path.startsWith('packages/core/src/') && path !== target) || !path.endsWith('.ts')) return
     let code = source
     const mutation = process.env.AGENTMUX_SYSTEM_EVENT_MUTATION
     if (mutation) {

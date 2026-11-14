@@ -6,9 +6,9 @@ import original from '../../../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations: Record<string, { path: string; from: string; to: string }> = {
-  'drop-codex-metrics': { path: 'packages/core/src/providers/codex-saved-history.ts', from: '    ...metrics(record, payload, nativeSessionId),\n', to: '' },
-  'wrong-codex-scope': { path: 'packages/core/src/providers/codex-saved-history.ts', from: 'const usage = object(payload.turn_token_usage)', to: 'const usage = object(payload.thread_token_usage)' },
-  'borrow-foreign-usage': { path: 'packages/core/src/providers/codex-saved-history.ts', from: '  if (!sameSource) return { metricsDiagnostic:', to: '  if (false) return { metricsDiagnostic:' },
+  'drop-codex-metrics': { path: 'packages/providers/src/codex/saved-history.ts', from: '    ...metrics(record, payload, nativeSessionId),\n', to: '' },
+  'wrong-codex-scope': { path: 'packages/providers/src/codex/saved-history.ts', from: 'const usage = object(payload.turn_token_usage)', to: 'const usage = object(payload.thread_token_usage)' },
+  'borrow-foreign-usage': { path: 'packages/providers/src/codex/saved-history.ts', from: '  if (!sameSource) return { metricsDiagnostic:', to: '  if (false) return { metricsDiagnostic:' },
   'drop-normalized-metrics': { path: 'packages/core/src/session-history.ts', from: '      ...normalizeSessionHistoryMetrics(item),\n', to: '' },
   'claude-response-as-turn': { path: 'packages/providers/src/claude/native-history.ts', from: "metrics: { scope: 'response', usage: {", to: "metrics: { scope: 'turn', usage: {" },
   'hook-response-as-turn': { path: 'packages/core/src/agent-usage-transcript.ts', from: "      scope: 'response',\n", to: "      scope: 'turn',\n" }
@@ -18,6 +18,7 @@ if (mutation && !mutations[mutation]) throw new Error('Unknown native turn summa
 
 export default defineConfig({ ...original, root,
   resolve: { ...original.resolve, alias: [
+    { find: '@agentmux/providers/codex/saved-history', replacement: resolve(root, 'packages/providers/src/codex/saved-history.ts') },
     { find: '@agentmux/providers/claude/native-history', replacement: resolve(root, 'packages/providers/src/claude/native-history.ts') },
     ...(Array.isArray(original.resolve?.alias) ? original.resolve.alias : [])
   ] },

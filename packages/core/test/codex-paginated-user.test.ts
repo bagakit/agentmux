@@ -1,7 +1,7 @@
 import { appendFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
 import { paginatedFixture, user, context, body, source, turn, jsonl } from './helpers/codex-paginated.js'
-import { readCodexSavedSessionHistoryRecord } from '../src/providers/codex-saved-history.js'
+import { readCodexSavedSessionHistoryRecord } from '../src/providers/codex-history-reader.js'
 import { conversationRevision, consumeJsonReadEntry, type ConversationUnit } from '../src/conversation.js'
 import { readSessionHistoryTextResource } from '../src/session-history-content.js'
 import { savedQuestionReply, savedQuestionAnswer } from './helpers/codex-saved-question.js'

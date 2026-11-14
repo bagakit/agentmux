@@ -8,14 +8,17 @@ const mutants: Record<string, [string, string, string]> = {
   'skip-preview-precheck': ['packages/core/src/client.ts', 'await read(assertSource())\n      const page = await read(provider.readSessionHistoryPage({ source, limit', 'const page = await read(provider.readSessionHistoryPage({ source, limit'],
   'skip-preview-postcheck': ['packages/core/src/client.ts', 'controller.signal.throwIfAborted()\n      await read(assertSource())\n      return normalizeSessionHistoryPage(source, page, limit)', 'controller.signal.throwIfAborted()\n      return normalizeSessionHistoryPage(source, page, limit)'],
   'drop-private-source-env': ['packages/core/src/client.ts', 'const env = input.env ?? {}, source = { providerId: provider.id, nativeSessionId: native.nativeHandle.sessionId }', 'const env = {}, source = { providerId: provider.id, nativeSessionId: native.nativeHandle.sessionId }'],
-  'drop-saved-speech': ['packages/core/src/providers/codex-saved-history.ts', 'if (converted) items.push(converted)', 'if (false) items.push(converted)'],
+  'drop-saved-speech': ['packages/providers/src/codex/saved-history.ts', 'if (converted) items.push(converted)', 'if (false) items.push(converted)'],
   'accept-foreign-page': ['packages/core/src/client.ts', 'return normalizeSessionHistoryPage(source, page, limit)', 'return page'],
   'accept-foreign-resource': ['packages/core/src/client.ts', 'if (request.source.providerId !== source.providerId || request.source.nativeSessionId !== source.nativeSessionId)', 'if (false)'],
   'accept-unrecorded-image': ['packages/core/src/client.ts', "if (item.id !== request.recordId || request.turnId !== undefined && item.turnId !== request.turnId ||\n        part?.kind !== 'resource' || part.resourceType !== 'image' || part.reference !== request.expectedReference)", 'if (false)'],
   'drop-resource-sid-lock': ['packages/core/src/session-history-content.ts', "(identityRead && (Object.hasOwn(receipt, 'agentSessionId') !== identityPresent || receipt.agentSessionId !== agentSessionId))", 'false']
 }
 export default defineConfig({ root,
-  resolve: { alias: { '@agentmux/providers/codex/native-catalog': resolve(root, 'packages/providers/src/codex/native-catalog.ts') } },
+  resolve: { alias: {
+    '@agentmux/providers/codex/native-catalog': resolve(root, 'packages/providers/src/codex/native-catalog.ts'),
+    '@agentmux/providers/codex/saved-history': resolve(root, 'packages/providers/src/codex/saved-history.ts')
+  } },
   plugins: [{ name: 'native-preview-actual-source', enforce: 'pre', transform(source, id) {
   const path = relative(root, id.split('?')[0]!)
   if (!path.startsWith('packages/core/src/') && !path.startsWith('packages/providers/src/')) return

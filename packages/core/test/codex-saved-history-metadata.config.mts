@@ -6,16 +6,20 @@ import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config'
 
 const root = resolve(import.meta.dirname, '../../..')
-const target = 'packages/core/src/providers/codex-saved-history.ts'
+const target = 'packages/providers/src/codex/saved-history.ts'
 const mutations: Record<string, [string, string]> = {
   'drop-time': ['{ startedAt: timestamp }', '{ timestamp }'],
   'drop-message-turn': [' : directTurnId ?? messageTurnId', ' : directTurnId'],
   'ignore-turn-conflict': ['directTurnId && messageTurnId && directTurnId !== messageTurnId', 'false']
 }
-export default defineConfig({ ...original, root, plugins: [...(original.plugins ?? []), {
+export default defineConfig({ ...original, root,
+  resolve: { ...original.resolve, alias: [
+    { find: '@agentmux/providers/codex/saved-history', replacement: resolve(root, 'packages/providers/src/codex/saved-history.ts') },
+    ...(Array.isArray(original.resolve?.alias) ? original.resolve.alias : [])
+  ] }, plugins: [...(original.plugins ?? []), {
   name: 'saved-metadata-original-source', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!path.startsWith('packages/core/src/') || !path.endsWith('.ts')) return
+    if ((!path.startsWith('packages/core/src/') && path !== target) || !path.endsWith('.ts')) return
     let code = source
     const mutation = process.env.SAVED_METADATA_MUTATION
     if (mutation) {

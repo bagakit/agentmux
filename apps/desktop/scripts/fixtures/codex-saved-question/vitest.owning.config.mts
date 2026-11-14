@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-const target = resolve(import.meta.dirname, '../../../../../packages/core/src/providers/codex-saved-history.ts')
+const target = resolve(import.meta.dirname, '../../../../../packages/providers/src/codex/saved-history.ts')
 export default defineConfig({ ...base, cacheDir: '.cache/codex-saved-question', plugins: [...base.plugins!, {
   name: 'saved-question-source-counterexample', enforce: 'pre', transform(source, id) {
     if (id.split('?')[0] !== target) return
@@ -22,7 +22,7 @@ export default defineConfig({ ...base, cacheDir: '.cache/codex-saved-question', 
       code = source.replace(...pair)
     }
     const log = process.env.AGENTMUX_SAVED_QUESTION_LOADED
-    if (log) appendFileSync(log, JSON.stringify({ path: 'packages/core/src/providers/codex-saved-history.ts', originalSHA256: createHash('sha256').update(source).digest('hex'), sha256: createHash('sha256').update(code).digest('hex'), ...(mutation ? { mutation } : {}) }) + '\n')
+    if (log) appendFileSync(log, JSON.stringify({ path: 'packages/providers/src/codex/saved-history.ts', originalSHA256: createHash('sha256').update(source).digest('hex'), sha256: createHash('sha256').update(code).digest('hex'), ...(mutation ? { mutation } : {}) }) + '\n')
     return code === source ? undefined : { code, map: null }
   }
 }], test: { ...base.test, include: ['packages/core/test/codex-saved-question-request.test.ts', 'apps/desktop/test/codex-saved-question-card.integration.test.tsx'], passWithNoTests: false } })
