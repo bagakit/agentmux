@@ -61,3 +61,10 @@
   .mobile-ticket-answer__choices > button:active:not(:disabled) { transform: none; }
   .mobile-ticket-answer[data-phase='sending'] .mobile-ticket-answer__choices > button[aria-pressed='true'] { animation: none; }
 }
+.mobile-focus-read-status { color: var(--text-2); font-size: var(--fs-meta); margin-block: 4px 8px; }
+.mobile-focus-read-status p { margin: 0; line-height: 1.4; }
+.mobile-focus-read-status > div { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.mobile-focus-read-status .mobile-text-button, .mobile-focus-read-status .mobile-directory-notice { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; background: transparent; }
+.mobile-focus-read-status .mobile-directory-notice { color: var(--text-3); }
+.mobile-focus-available .mobile-spatial-subheading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.mobile-focus-available .mobile-spatial-subheading > span { color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }

@@ -31,6 +31,8 @@ import { MobileWorkfaceFrame, MobileWorkfacePane } from '../layout/MobileWorkfac
 import { workfacePanes } from '../layout/workface-presentation'
 
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
+type CatalogObservation = { client: AgentMuxHostedClient; catalog: Catalog | null;
+  focusRows: Catalog['agentPresentation']; focusConfirmed: boolean; issue: string; pending: boolean }
 export type MobileSpatialContext = { spaceId: string | null; tabId: string | null; regionId: string | null }
 export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
   wide?: boolean;
@@ -53,9 +55,11 @@ const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, region
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
 export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, wide = false, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true, focusTarget, focusVisible, focusSelected, openFocusSession }: MobileSpatialNavigationProps) {
   const observeCatalog = useMobileWebCatalogObservation()
-  const [catalog, setCatalog] = useState<Catalog | null>(null)
-  const [issue, setIssue] = useState('')
-  const [pending, setPending] = useState(false)
+  const [catalogObservation, setCatalogObservation] = useState<CatalogObservation | null>(null)
+  const observation = catalogObservation?.client === client ? catalogObservation : null
+  const catalog = observation?.catalog ?? null, issue = observation?.issue ?? ''
+  const focusRows = observation?.focusRows
+  const focusConfirmed = connected && observation?.focusConfirmed === true
   const [query, setQuery] = useState('')
   const [focusQuery, setFocusQuery] = useState('')
   const focusActive = focusVisible ?? (visible && home === 'focus')
@@ -72,6 +76,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const context = home === 'space' ? spaceContext : home === 'mote' ? moteContext : EMPTY_CONTEXT
   const panes = workfacePanes({ active: contentVisible, split: wideSpace, hasSelection: Boolean(context.regionId) })
   const catalogActive = panes.navigation.observed || panes.content.observed || focusActive
+  const pending = connected && catalogActive && observation?.pending === true
   const selectedKey = home === 'space' ? spaceSelectedKey : home === 'mote' ? moteSelectedKey : null
   const setContext = useCallback((value: MobileSpatialContext | ((previous: MobileSpatialContext) => MobileSpatialContext)) => {
     if (home === 'mote') setMoteContext(value)
@@ -92,24 +97,37 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     let disposed = false, inFlight = false
     const read = async () => {
       if (inFlight || document.visibilityState === 'hidden') return
-      inFlight = true; setPending(true)
+      inFlight = true
+      setCatalogObservation(previous => previous?.client === client ? { ...previous, pending: true }
+        : { client, catalog: null, focusRows: undefined, focusConfirmed: false, issue: '', pending: true })
       let observed: Catalog | null = null
       try {
         if (!client.forwardRpc) throw new Error('空间目录暂不可读；已有会话仍可在 Focus 中访问。')
         const value = await client.forwardRpc('space.ls', { target: {}, presentation: true })
-        if (!disposed) { setCatalog(value.catalog); setIssue(''); observed = value.catalog; onPresentation?.(client, value.catalog.agentPresentation, value.catalog.agentPresentation === undefined ? '需要你列表暂时没有返回，可重新读取；已有对话仍可使用。' : null) }
-      } catch (error) { if (!disposed) {
+        if (!disposed && directorySource.current.client === client) {
+          const missing = value.catalog.agentPresentation === undefined
+          const reasons = value.presentation?.unavailable.map(reason => `${reason.code}: ${reason.message}\n${reason.recovery}`).join('\n') ?? ''
+          const readIssue = missing ? ['Focus 的项目与工作排序资料未返回；已有会话仍可打开。', reasons].filter(Boolean).join('\n') : reasons
+          setCatalogObservation(previous => ({ client, catalog: value.catalog,
+            focusRows: missing ? previous?.client === client ? previous.focusRows : undefined : value.catalog.agentPresentation,
+            focusConfirmed: !missing, issue: readIssue, pending: false }))
+          observed = value.catalog
+          onPresentation?.(client, value.catalog.agentPresentation, missing ? readIssue : null)
+        }
+      } catch (error) { if (!disposed && directorySource.current.client === client) {
         const message = error instanceof Error ? error.message : '空间目录暂时读不到，可以刷新重试。'
-        setIssue(message); onPresentation?.(client, undefined, message)
+        setCatalogObservation(previous => ({ client, catalog: previous?.client === client ? previous.catalog : null,
+          focusRows: previous?.client === client ? previous.focusRows : undefined, focusConfirmed: false, issue: message, pending: false }))
+        onPresentation?.(client, undefined, message)
       } }
-      finally { inFlight = false; if (!disposed) setPending(false) }
+      finally { inFlight = false }
       if (observed) observeCatalog?.(observed)
     }
     void read()
     const timer = setInterval(() => { void read() }, 10000)
     const foreground = () => { if (document.visibilityState === 'visible') void read() }
     document.addEventListener('visibilitychange', foreground)
-    return () => { disposed = true; setPending(false); clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
+    return () => { disposed = true; clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
   }, [client, connected, catalogActive, revision, observeCatalog, onPresentation])
   const answered = useCallback(() => refresh(value => value + 1), [])
   const retryDirectory = useCallback(() => {
@@ -189,6 +207,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     return value
   }, [client, sessions, needsMetadataDirectory, metadataRevision, metadataScope, revision])
   const sessionById = useMemo(() => new Map(metadata.sessions.map(session => [session.agentSessionId, session])), [metadata.sessions])
+  const focusRowById = useMemo(() => new Map((focusRows ?? []).map(row => [row.agentSessionId, row])), [focusRows])
   const spaces = catalog?.spaces ?? []
   const directory = useMemo(() => {
     const rows = new Map<string, NonNullable<Catalog['agentPresentation']>[number]>()
@@ -267,17 +286,15 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   }
   const spaceIdentity = (owner: Catalog['spaces'][number]): MobileObjectIdentity => ({ name: owner.name, project: owner.name,
     ...(owner.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) })
-  const identity = (session: SessionReference, occurrence?: AgentMuxSpaceAddress | null): MobileObjectIdentity => {
+  const identity = (session: SessionReference, occurrence?: AgentMuxSpaceAddress | null, row = directory.rows.get(session.agentSessionId)): MobileObjectIdentity => {
     const candidates = locations(session.agentSessionId)
     const context = occurrence === null ? undefined : occurrence ?? (candidates.length === 1 ? candidates[0] : undefined)
     const owner = context?.spaceId ? directory.owners.get(context.spaceId) : undefined
-    const row = directory.rows.get(session.agentSessionId)
     return { name: row?.name ?? '名称未确认', project: row?.project ?? owner?.name ?? '项目未确认',
       ...(context ? { context } : {}), ...(owner?.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) }
   }
-  const name = (session: SessionReference) => identity(session).name
   const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[], hostId?: string | null, focus = false) => {
-    const object = identity(session, context), row = directory.rows.get(session.agentSessionId)
+    const row = (focus ? focusRowById : directory.rows).get(session.agentSessionId), object = identity(session, context, row)
     const execution = directory.locationIndex.bySession.get(session.agentSessionId)
     const executionHost = execution?.length === 1 ? execution[0]!.hostId : execution ? null : sessionById.get(session.agentSessionId)?.hostId
     const group = locationGroup(session.agentSessionId, hostId ?? sessionById.get(session.agentSessionId)?.hostId ?? executionHost)
@@ -289,23 +306,23 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const attention = mobileNeedsYouReason(row)
     const title = object.name !== '名称未确认' ? object.name : tabName || object.name
     return <li key={key} className="mobile-agent-row" data-current={isCurrent || undefined} {...(attention ? { 'data-needs-you': attention === 'error' ? 'error' : 'waiting' } : {})}
-      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} selected={isCurrent} location={{ catalog, group, current: currentScope, onChoose: place => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, identity(session, place)) }} onOpen={() => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, object)}>
+      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} selected={isCurrent} location={{ catalog, group, current: currentScope, onChoose: place => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, identity(session, place, row)) }} onOpen={() => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, object)}>
       <MobileAgentRowContent title={title} presentation={row} providerId={providerId} detail={tabName && tabName !== title ? tabName : undefined} />
     </MobileAgentRow></li>
   }
-  const rows = catalog?.agentPresentation ?? []
+  const rows = focusRows ?? []
   const focusReady = focusVisited.current
   const projectRows = useMemo(() => {
     const groups = new Map<string, { project: NonNullable<Catalog['agentPresentation']>[number]['projectGroup']; values: SessionReference[] }>()
     if (!focusReady) return groups
-    for (const row of catalog?.agentPresentation ?? []) {
+    for (const row of focusRows ?? []) {
       const key = row.projectGroup?.key ?? 'unconfirmed-projects'
       let entry = groups.get(key)
       if (!entry) { entry = { project: row.projectGroup, values: [] }; groups.set(key, entry) }
       entry.values.push(sessionById.get(row.agentSessionId) ?? { agentSessionId: row.agentSessionId, providerId: row.providerId })
     }
     return groups
-  }, [focusReady, catalog, sessionById])
+  }, [focusReady, focusRows, sessionById])
   const presentationIssues = directory.issues.filter(owner => home === 'mote' ? owner.kind === 'mote' : home === 'space' ? owner.kind !== 'mote' : true)
   const tabs = directory.tabsByOwner.get(spaceId ?? '') ?? []
   const openContent = (owner: Catalog['spaces'][number], tab: Catalog['tabs'][number], region: Region) => {
@@ -388,14 +405,20 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       {!ownerTabs.length && <p className="mobile-spatial-empty">这个空间还没有绑定 Tab。</p>}
     </>
   }
-  const filteredSessions = (values: SessionReference[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))
+  const filteredSessions = (values: SessionReference[]) => values.filter(session => {
+    const object = identity(session, undefined, focusRowById.get(session.agentSessionId))
+    return matching(object.name + ' ' + object.project + ' ' + session.providerId)
+  })
+  const availableSessions = !focusConfirmed ? filteredSessions(metadata.sessions.filter(session => !focusRowById.has(session.agentSessionId))) : []
   const focusIssues = [...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...directory.issues]
   const focusView = focusVisited.current ? <MobileNoticeScope owner={client} identity={['focus']}><section className="mobile-spatial-panel mobile-focus-facet">
     <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu /><div><h1>Focus</h1>
       <p>需要你处理的事项与最近执行</p></div>
-      <div className="mobile-section-actions">{focusActive && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={focusIssues} retry={retryDirectory} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent({})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}{(!wide || !focusIssues.length) && <IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton>}</div></div>
+      <div className="mobile-section-actions">{focusActive && <MobileAvatarNoticeOutlet header />}{focusConfirmed && <MobileDirectoryNotice issues={focusIssues} retry={retryDirectory} />}{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent({})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}{(!wide || !focusIssues.length) && <IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton>}</div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={focusQuery} onChange={event => setFocusQuery(event.target.value)} placeholder="查找 Agent 或工作空间" aria-label="查找" /></label>
+    {!focusConfirmed && <MobileDirectoryNotice issues={focusIssues.length ? focusIssues : [{ source: 'Focus', message: connected ? '原 Focus 呈现资料尚未返回。' : '连接暂不可用。' }]} retry={retryDirectory}
+      summary={!connected ? '连接暂不可用，Focus 资料尚未确认。' : pending && focusRows === undefined ? '正在核对项目与工作排序。' : rows.length ? '项目与工作排序尚未确认，以下是上次读取的内容。' : metadata.sessions.length ? '项目与工作排序尚未确认，已有会话仍可打开。' : '项目与工作排序尚未确认，可重新读取。'} retryLabel="重新读取 Focus" />}
 
       {needsYou.length > 0 && !focusQuery.trim() && <section className="mobile-needs-you" aria-label={`需要你 · ${needsYou.length}`}>
         <header><span>需要你</span><span className="mobile-tab-badge" aria-hidden="true">{needsYou.length}</span></header>
@@ -415,8 +438,9 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         if (!matchingValues.length) return null
         return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={focusActive} size={20} />}<strong>{project?.name ?? '其他'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></section>
       })}</div>
-      {!rows.length && <p className="mobile-spatial-empty">{metadata.pending ? '正在读取会话…' : catalog?.agentPresentation !== undefined && !issue ? '暂无会话' : 'Focus 列表还没确认，可以刷新重试。'}</p>}
-      {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></details>}
+      {focusConfirmed && !rows.length && <p className="mobile-spatial-empty">暂无会话</p>}
+      {!focusConfirmed && metadata.pending && !metadata.sessions.length && <p className="mobile-spatial-empty" role="status">正在读取已有会话…</p>}
+      {availableSessions.length > 0 && <section className="mobile-focus-available" aria-label="已有会话"><h2 className="mobile-spatial-subheading">已有会话<span>项目与排序待确认</span></h2><ul className="mobile-session-list">{availableSessions.map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></section>}
 
   </section></MobileNoticeScope> : null
   return <>{contentVisited.current && <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><MobileWorkfaceFrame className="mobile-spatial-panel" presentation={panes} data-wide-space={wideSpace || undefined} hidden={home === 'focus'}>
