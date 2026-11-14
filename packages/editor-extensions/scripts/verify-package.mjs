@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { resolve, join } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { verifyPackagedPreviews } from './verify-packaged-previews.mjs'
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(import.meta.url)
 const { build } = createRequire(require.resolve('vite'))('esbuild')
@@ -39,7 +40,14 @@ const previews = await verifyPackagedPreviews(async folder => {
   assert.ok(result.testResults.flatMap(file => file.assertionResults).some(test => test.status === 'passed' && test.fullName.includes('analysis.ipynb')),
     'Desktop Source and the archived Notebook preview must read the active input')
 })
-const receipt = { passed: true, previews, inputs, catalogBytes: graph.outputFiles[0].contents.length, tests: greenReport.numPassedTests,
+const candidate = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+const sourceHashes = Object.fromEntries(await Promise.all([
+  'packages/editor-extensions/package.json',
+  'packages/client-ui/package.json',
+  'packages/editor-extensions/src/ui/NotebookFilePreview.tsx',
+  'packages/editor-extensions/src/pdf/PdfReader.tsx',
+].map(async path => [path, createHash('sha256').update(await readFile(join(root, path))).digest('hex')])))
+const receipt = { passed: true, candidate, sourceHashes, previews, inputs, catalogBytes: graph.outputFiles[0].contents.length, tests: greenReport.numPassedTests,
   mutation: { name: red.name, failedTests: redReport.numFailedTests, loaded: true }, restored: true }
 await writeFile(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2))
 console.log(JSON.stringify(receipt))
