@@ -104,7 +104,10 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
       <button type="button" className="small-button" disabled={working || pending || busy} onClick={() => void run(sendFirstDestination)}>Send planning request</button>
       <span className="goals-caption" title={`Host ${firstDestination.hostId} · Session ${firstDestination.agentSessionId} · Run ${firstDestination.runId}`}>First send to {firstPresentation.name ?? 'the current Supervisor'} on {firstHostName}.</span>
     </div> : null}
-    {observed ? <p className="goals-service" role="status"><strong>{labels[observed.state]}</strong><span>{observed.reason}</span></p>
+    {observed ? firstDestination ? <>
+      <p className="goals-caption" role="status"><strong>Planning request saved · Not sent yet</strong></p>
+      <details><summary>Original request observation</summary><p className="goals-caption">{observed.reason}</p></details>
+    </> : <p className="goals-service" role="status"><strong>{labels[observed.state]}</strong><span>{observed.reason}</span></p>
       : original ? <p className="goals-caption" role="status">Planning request saved. Reading its original input receipt…</p>
       : retained ? <p className="goals-caption" role="status">Your planning request is retained. {demand.supervisorSessionId ? 'Check the original request before sending again.' : 'Choose a Supervisor, then explicitly send it.'}</p> : null}
     {issue ? <p className="goals-service" role="status">{issue} Your original request and work are retained.</p> : null}
