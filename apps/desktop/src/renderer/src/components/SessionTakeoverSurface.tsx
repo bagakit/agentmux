@@ -55,9 +55,11 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
     label: `${config?.workspaces.find(workspace => workspace.id === displayWorkspaceId)?.name ?? 'Workspace'} · Group ${index + 1}`
   }))), [facts.layouts, config?.workspaces])
   const initialPlacement = { displayWorkspaceId: source.destination?.displayWorkspaceId ?? source.origin.workspaceId, groupId: source.destination?.groupId ?? source.origin.tabGroupId }
-  const [placementKey, setPlacementKey] = useState(initialPlacement.displayWorkspaceId && initialPlacement.groupId
+  const hasInitialPlacement = Boolean(initialPlacement.displayWorkspaceId && initialPlacement.groupId)
+  const [placementKey, setPlacementKey] = useState(hasInitialPlacement
     ? JSON.stringify([initialPlacement.displayWorkspaceId, initialPlacement.groupId]) : '')
   const placement = placements.find(item => item.value === placementKey)
+  const chooseDisplayFirst = !placement && !hasInitialPlacement
   // Resource and display choices remain independent: mounting a menu never creates
   // every Zone × display Group combination in this window.
   const destinations = useMemo(() => (placement ? agentNewTabDestinations(catalog, facts.layouts, undefined, placement) : [])
@@ -331,12 +333,12 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
       </details> : null}
       {!source.derived && subject.hostId && subject.agentSessionId ? <AgentPromotionRecovery target={{ hostId: subject.hostId, agentSessionId: subject.agentSessionId }} /> : null}
       {!source.derived ? <>
-        {placement ? <SelectionField label="Takeover destination" value={destinationKey} missingOptionLabel="Selected destination unavailable" missingOptionDescription="The original resource choice is retained. Choose another destination or return after its observation recovers." onValueChange={value => { setDestinationKey(value); setSelected(null) }} disabled={busy || creatingClub || unconfirmed || closedRequest !== null}
+        {!chooseDisplayFirst ? <SelectionField label="Takeover destination" value={destinationKey} missingOptionLabel="Selected destination unavailable" missingOptionDescription="The original resource choice is retained. Choose another destination or return after its observation recovers." onValueChange={value => { setDestinationKey(value); setSelected(null) }} disabled={busy || creatingClub || unconfirmed || closedRequest !== null}
           options={[{ value: '', label: source.destinationKind === 'club' ? 'Choose an existing Club' : 'Choose a destination' }, ...destinations]} /> : null}
-        <details className="session-takeover__placement" open={!placement || undefined}><summary>Show in · {placement?.label ?? 'Choose a display location'}</summary>
+        <details className="session-takeover__placement" open={chooseDisplayFirst || undefined}><summary>Show in · {placement?.label ?? 'Choose a display location'}</summary>
           <SelectionField label="Takeover display location" value={placementKey} missingOptionLabel="Selected display location unavailable" onValueChange={value => { setPlacementKey(value); setSelected(null) }}
             disabled={busy || creatingClub || unconfirmed || closedRequest !== null}
-            options={[{ value: '', label: 'Choose a display location' }, ...placements]} />
+            options={chooseDisplayFirst ? [{ value: '', label: 'Choose a display location' }, ...placements] : placements} />
         </details>
         {placement && !destinations.length ? <p>No destination is confirmed for this Group. Choose another display location.</p> : null}
         {source.destinationKind === 'club' ? <div className="session-takeover__club-create"><Button type="button" disabled={busy || creatingClub || unconfirmed || Boolean(workingSource.clubPreparation) || operations.some(operation => operation.takeoverSource.clubPreparation && !operation.takeoverSource.coreRequest) || closedRequest !== null || config?.promotion?.enabled === false} onClick={() => { void createClub() }}><MoteIcon size={14} />{creatingClub ? 'Creating Club…' : 'Create a Club first'}</Button><small>Two steps: create the team, then choose its Agent.</small></div> : null}
