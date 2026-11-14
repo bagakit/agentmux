@@ -12592,11 +12592,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (projection.notice) get().reportError(new Error(projection.notice), { kind: 'indeterminate',
           event: { source: 'spatial', key: `native-browser:${event.browser.id}` } })
         void finishNativeBrowserOpening({ get, checkpoint: checkpointSpatialWorkbench,
-          openWindow: async (location, returnContext) => {
+          openWindow: async (location, returnContext, shouldFocus) => {
             const { openWorkbenchWindow } = await import('./lib/workbench-windows')
             const surface = get().tabs[location.tabId]?.regions[location.regionId]
             if (surface?.kind === 'browser' && surface.browserId === event.browser.id) {
-              await openWorkbenchWindow({ kind: 'region', ...location }, { focus: false, returnContext })
+              await openWorkbenchWindow({ kind: 'region', ...location }, { focus: shouldFocus?.() ?? false, returnContext })
             }
           },
           reveal: async (context, stillCurrent) => {

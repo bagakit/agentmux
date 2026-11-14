@@ -46,7 +46,7 @@ export function nativeOpeningDestinationContext(context: WorkbenchReturnContext 
 export async function finishNativeBrowserOpening(ports: {
   get(): OpeningState
   checkpoint(): Promise<void>
-  openWindow(target: WorkbenchProjectionSelection, context: WorkbenchReturnContext | null): Promise<void>
+  openWindow(target: WorkbenchProjectionSelection, context: WorkbenchReturnContext | null, shouldFocus?: () => boolean): Promise<void>
   reveal(context: WorkbenchReturnContext, stillCurrent: () => boolean): Promise<void>
 }, event: Opening, target: WorkbenchProjectionSelection, destination: 'window' | 'tab' | 'region'): Promise<void> {
   const original = ports.get(), context = event.opening?.context ?? null
@@ -71,7 +71,10 @@ export async function finishNativeBrowserOpening(ports: {
     }).catch(report)
   }
   if (!kept()) return
-  if (destination === 'window') { await ports.openWindow(target, returnContext); return }
+  if (destination === 'window') {
+    await ports.openWindow(target, returnContext, event.opening?.foreground && context ? current : undefined)
+    return
+  }
   if (!returnContext || !current()) return
   if (event.opening?.foreground) { await ports.reveal(returnContext, current); return }
   // A new split must be visible in the same selected workface, while keeping its original caret/input.
