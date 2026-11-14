@@ -12,6 +12,7 @@ import { tabMarkAgentFactsFor, workbenchTabMarks } from '../lib/workbench-tab-ma
 import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { useAppStore } from '../store'
 import { parseNoteFile } from '../lib/note-knowledge'
+import { SurveyTabPreview } from './SurveyTabPreview'
 
 const BrowserIcon = semanticIconComponent('object.browser')
 const NoteIcon = semanticIconComponent('object.note')
@@ -19,7 +20,7 @@ const FileIcon = semanticIconComponent('file.text')
 const CloseIcon = semanticIconComponent('action.close')
 
 /** The same Tab naming owner as the workbench, scoped to this Tab's Sessions. */
-export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedBrowserRegionIds, compositionEnabled = false, selection }: { tab: WorkbenchTab; selected: boolean; onSelect(): void; onClose(title: string): void; unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined; compositionEnabled?: boolean; selection?: SurveyCompositionSelectionControl | undefined }) {
+export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedBrowserRegionIds, compositionEnabled = false, selection, active = true }: { tab: WorkbenchTab; selected: boolean; onSelect(): void; onClose(title: string): void; unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined; compositionEnabled?: boolean; selection?: SurveyCompositionSelectionControl | undefined; active?: boolean }) {
   const reference = { kind: 'tab' as const, tabId: tab.id }
   const sessions = useWorkbenchTabSessions(tab)
   const metadata = useWorkbenchTabNameMetadata(tab)
@@ -34,16 +35,32 @@ export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedB
   const Icon = surface.kind === 'file' ? document && parseNoteFile(document).status === 'valid' ? NoteIcon : FileIcon : BrowserIcon
   const drag = useSurveyContentDrag(reference, compositionEnabled, { title, icon: <span className="survey-page-favicon"><Icon size={14} />{surface.kind === 'browser' && surface.faviconDataUrl ? <img src={surface.faviconDataUrl} alt="" /> : null}</span> })
   const customPrimary = surface.kind === 'browser' || surface.kind === 'file'
+  const primaryMarks = marks.filter(mark => mark.regionId === surface.regionId)
+  const additionalMarks = marks.filter(mark => mark.regionId !== surface.regionId)
   const unknown = workbenchSurfaces(tab).some(region => region.kind === 'browser' && surveyBrowserControl(region, Boolean(unconfirmedBrowserRegionIds?.has(region.regionId))) === 'unknown')
   const status = unknown ? 'Page status unconfirmed · open this Tab to check' : undefined
+  const revealTitle = (button: HTMLButtonElement) => {
+    const label = button.querySelector<HTMLElement>('.survey-tab-label'), text = label?.firstElementChild as HTMLElement | null
+    if (!label || !text) return
+    const travel = Math.max(0, text.scrollWidth - label.clientWidth)
+    label.style.setProperty('--survey-title-travel', `${-travel}px`)
+    label.style.setProperty('--survey-title-duration', `${Math.max(1, travel / 28)}s`)
+  }
   return <div className="survey-tab-cell" data-selectable={Boolean(selection) || undefined} data-content-dragging={drag.isDragging || undefined}>{selection ? <SurveyCompositionCheckbox selection={selection} label={`Select complete Tab: ${title}`} /> : null}<button ref={drag.setNodeRef} {...drag.attributes} {...drag.listeners} data-survey-content-key={surveyContentKey(reference)} type="button" className="survey-tab-column" data-survey-tab-id={tab.id} aria-label={`Show survey tab: ${title}`}
-    aria-current={selected ? 'true' : undefined} aria-description={status} title={status ? `${title}\n${status}` : title} onClick={onSelect}>
+    aria-current={selected ? 'true' : undefined} aria-description={status} title={status ? `${title}\n${status}` : title} onClick={onSelect}
+    onPointerEnter={event => revealTitle(event.currentTarget)} onFocus={event => revealTitle(event.currentTarget)}>
+    <SurveyTabPreview browser={surface.kind === 'browser' ? surface : null} active={active}>
     <span className="survey-tab-column__marks" aria-hidden="true">
       {customPrimary ? <span className="survey-page-favicon"><Icon size={16} />{surface.kind === 'browser' && surface.faviconDataUrl
         ? <img key={surface.faviconDataUrl} src={surface.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span> : null}
-      <WorkbenchTabMarks marks={customPrimary ? marks.filter(mark => mark.regionId !== surface.regionId) : marks} />
+      {!customPrimary ? <WorkbenchTabMarks marks={primaryMarks} /> : null}
     </span>
-    <span className="survey-tab-label"><span>{title}</span>{unknown ? <span className="survey-status-label" aria-hidden="true">Unknown</span> : null}</span>
+    {additionalMarks.length ? <span className="survey-tab-column__other-marks" title={`Other content in this Tab: ${additionalMarks.length}`}>
+      <WorkbenchTabMarks marks={additionalMarks.slice(0, 2)} />{additionalMarks.length > 2 ? <small>+{additionalMarks.length - 2}</small> : null}
+    </span> : null}
+    </SurveyTabPreview>
+    <span className="survey-tab-label"><span>{title}</span></span>
+    {unknown ? <span className="survey-tab-status" aria-hidden="true">Unconfirmed</span> : null}
   </button><button type="button" className="survey-tab-close" aria-label={`Close survey tab: ${title}`} title={`Close ${title}`}
     onClick={() => onClose(title)}><CloseIcon size={12} /></button></div>
 }
