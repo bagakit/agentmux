@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, writeFile, symlink, rm, copyFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, writeFile, symlink, rm, copyFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve, relative } from 'node:path'
 import { release } from 'node:os'
@@ -19,7 +19,9 @@ assert.equal(process.platform, 'darwin', 'Real ScreenCaptureKit measurement requ
 assert.ok(Number(release().split('.')[0]) >= 23, 'Real host exclusion requires macOS 14 or later')
 const login = spawnSync('ioreg', ['-n', 'Root', '-d1', '-a'], { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 })
 assert.equal(login.status, 0, 'The original loginwindow state must be readable')
-assert.match(login.stdout, /<key>IOConsoleLocked<\/key>\s*<false\s*\/>/, 'Unlock the original macOS session before real capture')
+const locked = login.stdout.match(/<key>IOConsoleLocked<\/key>\s*<(true|false)\s*\/>/)
+assert.ok(locked, 'The original loginwindow lock state is unavailable')
+assert.equal(locked[1], 'false', 'Unlock the original macOS session before real capture')
 assert.equal(execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: root, encoding: 'utf8' }).trim(), '', 'Pin a clean candidate before measuring')
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
 function baselinePath() {
@@ -39,6 +41,15 @@ const mainRoot = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd:
 const baselineTree = join(mainRoot, '.worktrees', 'capture-real-baseline-' + process.pid)
 const receipt = { schema: 'agentmux.capture-real-startup-proof.v1', passed: false, smoke, candidate: { head }, baseline: { ref: baseline.ref }, productionInputs: {}, samples: [], comparisons: [], cleanup: {}, boundary: 'Real ScreenCaptureKit and actual display topology. Time starts at the registered shortcut callback; physical keydown before it remains unknown.' }
 let added = false
+async function sourceFiles(directory) {
+  const files = []
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) files.push(...await sourceFiles(path))
+    else if (entry.isFile() && entry.name.endsWith('.swift')) files.push(path)
+  }
+  return files
+}
 const command = async (label, executable, args, env, timeout = 120000) => {
   const result = await new Promise((done, reject) => {
     const child = spawn(executable, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -81,11 +92,14 @@ try {
     inputFiles.add(join(tree, 'apps/desktop/src/renderer/screenshot-editor/index.html'))
     const consumed = {}
     for (const path of inputFiles) { const name = relative(tree, path); if (!name.startsWith('..')) consumed[name] = sha(await readFile(path)) }
+    for (const path of [join(tree, 'packages/native-desktop/macos/Package.swift'), join(tree, 'packages/native-desktop/scripts/build-macos.mjs'), ...await sourceFiles(join(tree, 'packages/native-desktop/macos/Sources'))]) consumed[relative(tree, path)] = sha(await readFile(path))
     for (const required of ['apps/desktop/src/main/capture-surface.ts', 'apps/desktop/src/main/screen-capture.ts', 'apps/desktop/src/main/global-screenshot.ts', 'apps/desktop/src/main/screenshot-shortcut.ts', 'apps/desktop/src/preload/capture-surface.ts', 'apps/desktop/src/renderer/screenshot-editor/entry.tsx', 'packages/native-desktop/src/client.ts']) assert.ok(consumed[required], variant + ': production input missing: ' + required)
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
     const built = await command(variant + '-native-build', process.execPath, [join(tree, 'packages/native-desktop/scripts/build-macos.mjs'), '--bare', '--configuration', 'debug', '--scratch-path', join(out, variant + '-native-scratch')], env, 180000)
     assert.equal(built.code, 0, variant + ': native build failed')
-    const nativeBuild = JSON.parse(built.log.trim().split('\n').at(-1))
+    const buildReceipt = built.log.split('\n').find(line => line.startsWith('{"schema":"agentmux.native-build.v1"'))
+    assert.ok(buildReceipt, variant + ': native build receipt is missing')
+    const nativeBuild = JSON.parse(buildReceipt)
     variants[variant] = { appRoot, executablePath: nativeBuild.executablePath }
     receipt.productionInputs[variant] = { ref, files: consumed, nativeBinarySha256: sha(await readFile(nativeBuild.executablePath)) }
   }
