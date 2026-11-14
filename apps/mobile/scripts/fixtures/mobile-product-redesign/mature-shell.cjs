@@ -193,6 +193,20 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       assert.ok(gap !== null && gap <= 48, `A short Mote discussion rests on the composer (gap ${gap})`)
     }
     await capture(`mature-${label.toLowerCase()}-390-dark`)
+
+    if (label === 'Space') {
+      for (const width of [320, 390]) {
+        await resize(width, 760)
+        const trigger = '.mobile-page-header .mobile-avatar-notice > .mobile-notice__body > details > summary'
+        await tap(trigger, 'Read original appearance issues from the header')
+        const notice = await read(`(()=>{const n=document.querySelector('.mobile-page-header .mobile-avatar-notice__list'),r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,originals:n.querySelectorAll('.mobile-avatar-notice__item').length,footer:!!document.querySelector('.mobile-notice-stack .mobile-avatar-notice')}})()`)
+        assert.ok(notice.left >= 0 && notice.right <= width && notice.top >= 0 && notice.bottom <= 760, 'Original appearance details fit the phone')
+        assert.ok(notice.originals > 0); assert.equal(notice.footer, false)
+        await capture(`mature-space-appearance-${width}-dark`)
+        await tap(trigger, 'Fold original appearance details')
+      }
+      await resize(390, 844)
+    }
     if (label === 'Goals') {
       const entry = await read(`(()=>{const h=document.querySelector('.mobile-goals .mobile-page-header'),b=h.querySelector('[aria-label="新建目标"]');return {create:!!b,hit:b?.getBoundingClientRect().height,lookup:!!h.querySelector('.mobile-goal-lookup'),firstRow:!!document.querySelector('.mobile-goal-create__form:not([hidden])')}})()`)
       assert.equal(entry.create, true); assert.ok(entry.hit >= 44); assert.equal(entry.lookup, true); assert.equal(entry.firstRow, false)
