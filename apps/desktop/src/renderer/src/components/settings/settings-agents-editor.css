@@ -157,7 +157,7 @@
 }
 .provider-comparison__open:hover { background: var(--green-bg); }
 .provider-comparison__open > svg { flex: none; }
-.provider-comparison__viewport :is(button, input):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.provider-comparison__viewport button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 @container provider-comparison (width < 57rem) {
   .provider-comparison__viewport :is(table, tbody) { display: block; }
   .provider-comparison__viewport colgroup { display: none; }

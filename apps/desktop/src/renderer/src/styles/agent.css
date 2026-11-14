@@ -208,14 +208,14 @@
 .agent-settings-fields label, .host-edit-grid label, .workspace-composer label { display: grid; gap:var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
 .agent-settings-card[hidden] { display: none; }
 .agent-settings-fields .agent-guide-toggle { grid-column: 1 / -1; display: flex; grid-template-columns: none; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-4) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); cursor: pointer; }
-.agent-settings-fields .agent-guide-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin:1px 0 0; padding:0; }
 .agent-settings-fields .agent-guide-toggle > span { display: grid; justify-content: normal; gap:var(--sp-1); }
 .agent-settings-fields .agent-guide-toggle strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .agent-settings-fields label > span, .host-edit-grid label > span, .workspace-composer label > span { display: flex; justify-content: space-between; }
+:is(.settings-agent-pane, .settings-host-executors) .agent-settings-fields .ui-input, .host-edit-grid .ui-input { width: 100%; }
 .agent-settings-fields label small, .host-edit-grid label small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
-.agent-settings-fields input, .agent-settings-fields select, .agent-settings-fields textarea, .host-edit-grid input, .host-edit-grid textarea, .workspace-composer input, .workspace-composer select { width: 100%; padding:var(--sp-3) var(--sp-4); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--bg); font: var(--fs-body)/1.5 var(--font-sans); }
-.agent-settings-fields input:focus, .agent-settings-fields textarea:focus, .host-edit-grid input:focus, .host-edit-grid textarea:focus, .workspace-composer input:focus { border-color: var(--focus-line); }
-.agent-settings-fields select:focus, .workspace-composer select:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.agent-settings-fields :is(input, select, textarea):not(:where(:is(.settings-agent-pane, .settings-host-executors) :is(.ui-input, .ui-switch))), .workspace-composer input, .workspace-composer select { width: 100%; padding:var(--sp-3) var(--sp-4); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--bg); font: var(--fs-body)/1.5 var(--font-sans); }
+.agent-settings-fields :is(input, textarea):not(:where(:is(.settings-agent-pane, .settings-host-executors) :is(.ui-input, .ui-switch))):focus, .workspace-composer input:focus { border-color: var(--focus-line); }
+.agent-settings-fields select:not(:where(:is(.settings-agent-pane, .settings-host-executors) .ui-input)):focus, .workspace-composer select:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 
 /* 服务窗（AGENTS.md 原则 11）：像窗口上贴的一条告示。停在旁边，不挡路，也不消失。
    语汇沿用紧邻其下的审批卡片——Surface 填充 + elevation + 一枚 STATUS 图标，不用描边（描边会与

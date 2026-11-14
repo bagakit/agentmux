@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import type { AgentCatalogEntry, AgentMuxRpcResult } from '@agentmux/core'
 import { AgentProviderIcon } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
-import { SearchInput } from '@agentmux/client-ui/input'
+import { NativeSelect, SearchInput } from '@agentmux/client-ui/input'
 import type { HostConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -132,13 +132,13 @@ export function ProviderComparisonPane({ hosts, active, requestedHostId, onExecu
   return <section data-settings-field="providers" className="settings-pane-stack provider-comparison" aria-label="Provider capabilities" hidden={!active}>
     <div className="provider-comparison__toolbar">
       <label className="settings-compact-field"><span>Host</span>
-        <select aria-label="Provider Host" value={hostId} onChange={event => {
+        <NativeSelect aria-label="Provider Host" value={hostId} onChange={event => {
           setSelection(noSelection)
           setHostId(event.target.value)
         }}>
           {!host ? <option value={hostId}>{hostId ? 'Unavailable Host' : 'Choose a Host'}</option> : null}
           {hosts.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}
-        </select>
+        </NativeSelect>
       </label>
       <button type="button" className="small-button provider-comparison__refresh" aria-label="Refresh Provider capabilities"
         disabled={!host} onClick={() => setRefresh(value => value + 1)}>

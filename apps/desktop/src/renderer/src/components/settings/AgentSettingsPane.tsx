@@ -11,7 +11,7 @@ import type { AgentExecutorConfig, AppConfig, AgentAvatarAppearance, AgentAvatar
 import { executorDetectionKey, useAppStore } from '../../store'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
-import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
+import { ComposerTextarea, NativeSelect, Switch, TextInput } from '@agentmux/client-ui/input'
 import { withUnrestrictedLaunchArgs } from '@agentmux/core/provider-launch-options'
 import { parseExecutorArgs } from '../../lib/executors'
 export { parseExecutorArgs } from '../../lib/executors'
@@ -437,7 +437,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
               <div className="agent-settings-fields">
                 {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
                 {Object.hasOwn(resource.expected, id) ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
-                  <label><span>Provider</span><select data-executor-provider disabled={saving} value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{!providerCatalog.some(provider => provider.id === draft.providerId) ? <option value={draft.providerId}>{agentProviderLabel(draft.providerId)} · current draft</option> : null}{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
+                  <label><span>Provider</span><NativeSelect data-executor-provider disabled={saving} value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{!providerCatalog.some(provider => provider.id === draft.providerId) ? <option value={draft.providerId}>{agentProviderLabel(draft.providerId)} · current draft</option> : null}{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</NativeSelect></label>}
                 <label><span>Executable</span><TextInput aria-label="Executor executable" value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
                 <p className="settings-group-note">One executable name or path, without arguments or shell quotes. Paths may contain spaces.</p>
                 <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea aria-label="Executor arguments" value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder={'--model "model name" --effort high'} rows={2} /></label>
@@ -447,7 +447,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                 <div className="agent-avatar-settings__row">
                   <span className="agent-avatar-settings__name"><strong>Appearance</strong><small>Recognize this executor across your workspace</small></span>
                   <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={avatar?.tint ?? '#8ab4f8'} onChange={(event) => updateAvatar(id, { ...avatar, tint: event.target.value })} /></label>
-                  <label>Icon<select aria-label={`${draft.label} avatar icon`} value={avatar?.badge ?? ''} onChange={(event) => { const next = { ...avatar }; if (event.target.value) next.badge = event.target.value as AgentAvatarBadge; else delete next.badge; updateAvatar(id, next) }}><option value="">None</option>{AGENT_AVATAR_BADGE_IDS.map((badge) => <option key={badge} value={badge}>{AGENT_AVATAR_BADGE_LABELS[badge]}</option>)}</select></label>
+                  <label>Icon<NativeSelect aria-label={`${draft.label} avatar icon`} value={avatar?.badge ?? ''} onChange={(event) => { const next = { ...avatar }; if (event.target.value) next.badge = event.target.value as AgentAvatarBadge; else delete next.badge; updateAvatar(id, next) }}><option value="">None</option>{AGENT_AVATAR_BADGE_IDS.map((badge) => <option key={badge} value={badge}>{AGENT_AVATAR_BADGE_LABELS[badge]}</option>)}</NativeSelect></label>
                   <Button type="button" aria-label={`Reset ${draft.label} avatar`} disabled={!avatar?.tint && !avatar?.badge} onClick={() => updateAvatar(id, {})}>Reset</Button>
                 </div>
                 <details className="settings-launch-config" open={launchOpen[id] ?? false} onToggle={(event) => { const open = event.currentTarget.open; setLaunchOpen((current) => current[id] === open ? current : { ...current, [id]: open }) }}>
@@ -456,7 +456,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                     <p className="settings-group-note">Used for new sessions. Running agents keep their current configuration.</p>
                     {!config.executors[id] ? <p className="settings-group-note">Executor ID: <code>{id}</code>. Provider and ID are fixed after saving.</p> : null}
                         <label><span>Environment variables <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
-                    <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
+                    <label className="agent-guide-toggle"><Switch checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
                     {withUnrestrictedLaunchArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><Button type="button" disabled={saving} onClick={() => void enableYolo(id)}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO</Button></div> : null}
                   </div>
                 </details>
