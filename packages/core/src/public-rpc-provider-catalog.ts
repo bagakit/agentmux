@@ -1,4 +1,3 @@
-import { isAbsolute } from 'node:path'
 import { AGENT_PROVIDER_ACP_PROBE_FAILURES, type AgentProviderAcpProbe } from './agent-provider-acp-probe.js'
 import { RISK_TIERS } from './risk-tier.js'
 import { AgentMuxError } from './errors.js'
@@ -30,7 +29,7 @@ export function parseProviderCatalogQuery(value: unknown): ProviderCatalogQuery 
 export function parseProviderProbeQuery(value: unknown): ProviderProbeQuery {
   const p = rpcRecord(value, ['hostId', 'runtimeId', 'executorId', 'configRevision', 'workspacePath'])
   const workspacePath = rpcString(p.workspacePath, 'Original workspace directory')
-  if (!isAbsolute(workspacePath)) throw new AgentMuxError('Choose an absolute workspace directory on the original Host.', 'INVALID_CONTROL_REQUEST')
+  if (!workspacePath.startsWith('/')) throw new AgentMuxError('Choose an absolute workspace directory on the original Host.', 'INVALID_CONTROL_REQUEST')
   return { hostId: rpcString(p.hostId, 'Exact route Host ID'), runtimeId: rpcString(p.runtimeId, 'Original Runtime ID'),
     executorId: rpcString(p.executorId, 'Original Executor ID'), configRevision: rpcString(p.configRevision, 'Original Executor revision'), workspacePath }
 }
