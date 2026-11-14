@@ -19,6 +19,8 @@ const selectedCase = caseIndex < 0 ? 'complete' : args[caseIndex + 1]
 assert.ok(['admission', 'profile-switch', 'settings', 'complete', 'surface-windows'].includes(selectedCase), 'Choose an exact Profile Survey case')
 const mutation = mutationIndex < 0 ? null : args[mutationIndex + 1]
 const mutationCases = { 'surface-windows': {
+  'omit-recall-content-edge': { file: 'apps/desktop/src/renderer/src/components/GlobalRecallSurface.tsx',
+    before: "useKnowledgeWindowChrome('recall')", after: "useKnowledgeWindowChrome('survey')" },
   'steal-main-surface': { file: 'apps/desktop/src/renderer/src/lib/knowledge-surface-navigation.ts',
     before: 'if (!detached) setMainSurface(surface)', after: 'setMainSurface(surface)' },
   'misroute-surface-menu': { file: 'apps/desktop/src/renderer/src/components/KnowledgeSurfaceWindow.tsx',

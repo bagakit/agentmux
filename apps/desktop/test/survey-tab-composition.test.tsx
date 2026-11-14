@@ -2101,7 +2101,7 @@ it.each([false, true, 'focus-local'] as const)('[window-return-app] original exa
     const context = prepared.returnContext!
     expect(await dispatch({ action: 'open', returnContext: context, url: 'about:blank', frameName: 'exact-original-shell' }, 'open-original-return')).toMatchObject({ outcome: 'applied' })
     expect(childDocument.querySelector('.browser-surface')).not.toBeNull()
-    expect(childDocument.querySelector('.workbench-window-toolbar')?.textContent).toContain('Return to Survey')
+    expect(childDocument.querySelector('button[data-workbench-window-return]')?.getAttribute('aria-label')).toBe('Return to Survey')
     await act(async () => useAppStore.getState().setMainSurface('workbench'))
     const work = useAppStore.getState().workbenchSpaceSelection
     if (!later) {

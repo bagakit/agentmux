@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { BrowserWindow } from 'electron'
 import { nativeInput, nativeUntil } from './native-input'
 import { surfaceWindowNavigation } from './surface-window-navigation'
+import { surveyOrRecallEdge, spatialWindowEdges } from './window-content-edge'
 
 type Surface = 'survey' | 'recall'
 type Context = {
@@ -21,6 +22,7 @@ const title = (surface: Surface) => surface === 'survey' ? 'Survey' : 'Recall'
 
 export async function surfaceWindowsCase({ phase, directory, window, result, cli, evaluate, workspaceId, pageUrl, core, receipt }: Context) {
   const inputs: any[] = []
+  receipt.contentEdges = []
   const main = nativeInput(window.webContents, inputs)
   const attached = [main]
   const facts = () => evaluate('profileSurveyNative.read()')
@@ -46,6 +48,10 @@ export async function surfaceWindowsCase({ phase, directory, window, result, cli
     const inWindow = nativeInput(win.webContents, inputs)
     attached.push(inWindow)
     await nativeUntil(() => inWindow.read(`document.querySelector('.global-${surface}-surface')?.checkVisibility()`), 'complete visible ' + surface)
+    const top = await inWindow.read(`document.querySelector('.global-${surface}-surface').getBoundingClientRect().top`)
+    assert.ok(Math.abs(top) <= 1, `The original ${surface} content starts at the window top (actual ${top}px)`)
+    const returns = await inWindow.read(`[...document.querySelectorAll('.global-${surface}-surface button[data-workbench-window-return]')].filter(e => e.checkVisibility() && !e.closest('[inert]')).length`)
+    assert.equal(returns, 1, 'one accessible Return inside the original ' + title(surface))
     return { win, inWindow, descriptor }
   }
   const priorFile = join(directory, 'surface-window-identities.json')
@@ -111,7 +117,7 @@ export async function surfaceWindowsCase({ phase, directory, window, result, cli
     await nativeUntil(() => survey.win.contentView.children.find((view: any) =>
       view.webContents?.getURL() === pageUrl && !view.webContents.isLoading() && view.getVisible()), 'live web page visible in original Survey window')
     if (phase === 'first') receipt.detachedNavigation = await surfaceWindowNavigation({ survey, recall,
-      originalPage: selection, noteId: await noteId(recall.inWindow), notesText, pageUrl, evaluate, result, cli })
+      originalPage: selection, noteId: await noteId(recall.inWindow), notesText, pageUrl, evaluate, result, cli, capture, directory })
     const status = await core.statusAgent(agent.agentSessionId)
     assert.equal(status.run?.runId, agent.runId)
     assert.equal(status.run?.state, 'running')
@@ -125,10 +131,15 @@ export async function surfaceWindowsCase({ phase, directory, window, result, cli
       for (const [surface, child] of [['survey',survey],['recall',recall]] as const) {
         await evaluate('profileSurveyNative.appearance("light")')
         child.win.setSize(1160, 760)
+        receipt.contentEdges.push({ surface, expanded: await surveyOrRecallEdge(child.inWindow, surface) })
         await capture(child.win, surface + '-wide')
         await evaluate('profileSurveyNative.appearance("dark")')
         child.win.setSize(720, 480)
         await capture(child.win, surface + '-compact')
+        await child.inWindow.click('[aria-label="Hide ' + title(surface) + ' items"]')
+        receipt.contentEdges.push({ surface, collapsed: await surveyOrRecallEdge(child.inWindow, surface, true) })
+        await capture(child.win, surface + '-collapsed')
+        await child.inWindow.click('[aria-label="Show ' + title(surface) + ' items"]')
         await evaluate('profileSurveyNative.appearance("light")')
       }
       await evaluate('profileSurveyNative.checkpoint()')
@@ -142,7 +153,7 @@ export async function surfaceWindowsCase({ phase, directory, window, result, cli
       survey.win.close()
       await nativeUntil(() => survey.win.isDestroyed(), 'native close returned Survey')
       assert.equal((await facts()).mainSurface, 'agents')
-      await recall.inWindow.click('.workbench-window-toolbar button')
+      await recall.inWindow.click('button[data-workbench-window-return][aria-label="Return to main window"]')
       await nativeUntil(() => recall.win.isDestroyed(), 'explicit Return closed the original Recall shell')
       await nativeUntil(() => evaluate(`document.querySelector('.global-recall-surface')?.checkVisibility() && [...document.querySelectorAll('.ProseMirror')].some(e=>e.checkVisibility()&&e.textContent.includes(${JSON.stringify(notesText)}))`), 'edited original Note returned into main workbench')
       assert.equal((await observeWindows()).windows.length, 1)
@@ -153,6 +164,10 @@ export async function surfaceWindowsCase({ phase, directory, window, result, cli
       })()`)
       assert.ok(Math.abs(bounds.mainBottom - bounds.surfaceBottom) < 2, 'Returned Recall fills the original working area down to the footer')
       await capture(window, 'recall-returned')
+      await main.click(work)
+      receipt.spatialEdges = await spatialWindowEdges(actual.work, inputs, result, capture, main)
+      assert.equal((await observeWindows()).windows.length, 1)
+      assert.equal((await core.statusAgent(agent.agentSessionId)).run?.pid, actual.runPid)
     }
     receipt.surfaceWindowInput = inputs
     receipt.cases.push({ kind: 'surface-windows', phase, passed: true })

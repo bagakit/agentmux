@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import type { BrowserWindow } from 'electron'
 import type { AppWindowDescriptor } from '@agentmux/core/control'
 import { nativeInput, nativeUntil } from './native-input'
+import { optionalMacWindow, surveyTabEdge } from './window-content-edge'
 
 type Child = { win: BrowserWindow; descriptor: AppWindowDescriptor; inWindow: ReturnType<typeof nativeInput> }
 
@@ -9,6 +10,7 @@ export async function surfaceWindowNavigation(input: {
   survey: Child; recall: Child; originalPage: { regionId: string; browserId: string }; noteId: string
   notesText: string; pageUrl: string; evaluate(expression: string): Promise<any>; result(args: string[], input?: string): Promise<any>
   cli(args: string[]): Promise<any>
+  directory: string; capture(window: BrowserWindow, name: string): Promise<void>
 }) {
   const { survey, recall, originalPage, noteId, notesText, pageUrl, evaluate, result, cli } = input
   const work = await evaluate('profileSurveyNative.read().workbenchSpaceSelection')
@@ -70,6 +72,34 @@ export async function surfaceWindowNavigation(input: {
     (op.state === 'confirmed' || op.state === 'unknown')), 'exact native foreground request for the Note source')
   assert.equal(sourceDestination.state, survey.win.isFocused() ? 'confirmed' : 'unknown')
   await keepFocus('Opening the Note source across windows')
+  const research = await evaluate('profileSurveyNative.read().surveySelection')
+  const originalTab = research.active.tabId
+  const list = await result(['space', 'survey-list'])
+  if (!list.collectedZoneIds.includes(research.zoneId)) {
+    const saved = await result(['space', 'survey-list', '--input', '-', '--operation-id', 'register-private-research-for-chrome'],
+      JSON.stringify({ collection: { zoneIds: [...list.collectedZoneIds, research.zoneId], expectedZoneIds: list.collectedZoneIds } }))
+    assert.ok(saved.collectedZoneIds.includes(research.zoneId))
+  }
+  await survey.inWindow.click('.workbench-zone button[aria-label="New Tab"]')
+  const siblingTab = await nativeUntil(async () => {
+    const selected = await evaluate('profileSurveyNative.read().surveySelection')
+    return selected?.zoneId === research.zoneId && selected.active?.tabId !== originalTab && selected.active?.tabId
+  }, 'the Survey tab action creates and selects a sibling in the same research')
+  const researchTabs = await surveyTabEdge(survey.inWindow, originalTab, siblingTab)
+  await survey.inWindow.click('.pane-tabbar .workbench-tab[data-workbench-tab-id="' + originalTab + '"]')
+  await nativeUntil(() => survey.win.contentView.children.some((view: any) =>
+    view.webContents?.getURL() === sourceUrl && view.getVisible()), 'the original research Tab presents its native page')
+  survey.win.setSize(1160, 760)
+  await input.capture(survey.win, 'survey-research-tabs')
+  const macWindow = await optionalMacWindow(survey.win, input.directory, 'first-survey-research-tabs-macos.png')
+  survey.win.setSize(720, 480)
+  await survey.inWindow.click('[aria-label="Exploration options"]')
+  await survey.inWindow.click('[role="menuitem"][aria-label="Browser management"]:not([aria-disabled=true])')
+  await nativeUntil(() => survey.inWindow.read(`document.querySelector('.survey-management button[data-workbench-window-return]')?.checkVisibility()`), 'the narrow research tools panel supplies its own Return')
+  assert.equal(await survey.inWindow.read(`[...document.querySelectorAll('button[data-workbench-window-return]')].filter(e => e.checkVisibility() && !e.closest('[inert]')).length`), 1)
+  await input.capture(survey.win, 'survey-tools-compact')
+  await survey.inWindow.click('[aria-label="Close browser management"]')
+  await keepFocus('Returning to the original research Tab')
   await recall.inWindow.click('[aria-label="Close page sources"]')
   await nativeUntil(noteEditor, 'the original Note remains editable after opening its source')
 
@@ -118,5 +148,5 @@ export async function surfaceWindowNavigation(input: {
     publicNavigation.push(report)
   }
   await evaluate('window.stopProofFocus(); true')
-  return { noteId, originalPage, sourceUrl, sourceDestination, hidden, restored, publicNavigation, recallFocused, work }
+  return { noteId, originalPage, sourceUrl, sourceDestination, researchTabs, macWindow, hidden, restored, publicNavigation, recallFocused, work }
 }

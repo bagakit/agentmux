@@ -283,7 +283,7 @@ async function run() {
     await click(nativeWindow, 'button[aria-label="Go to source Browser"]')
     await until('source button follows moved original Region', async () => (await facts()).tabs[movedSource.id]?.layout.activeRegionId === sourceLocation.regionId && main.isFocused())
     receipt.assertions.push({ label: 'source-return-follows-moved-region', original: sourceLocation, movedTabId: movedSource.id, facts: await facts() })
-    await click(nativeWindow, '.workbench-window-toolbar button')
+    await click(nativeWindow, 'button[data-workbench-window-return]')
     await until('Return moves the same child into original workspace', () => {
       const owner = browsers.nativeOwner(child.id)
       return nativeWindow.isDestroyed() && owner && browsers.windowForView(owner.view) === main
