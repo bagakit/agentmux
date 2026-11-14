@@ -1,4 +1,7 @@
+import { serializeNoteDocument, readNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { NOTEBOOK_ROOT_NAME } from '../../../packages/core/src/notebook-files.js'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile, symlink } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
@@ -27,16 +30,16 @@ import type { AgentMuxSpatialGraph } from '../../../packages/core/src/spatial-gr
 vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp/notes-storage-control-fixture") } }))
 const roots: string[] = [], servers: AgentMuxControlServer[] = []
 afterEach(async () => { for (const server of servers.splice(0)) await server.stop(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
-const change = { noteId: 'original', from: { hostId: 'local', workspaceId: '__scratch__', workspacePath: _hygiene_fixturePath("old"), path: 'one.note.json' }, to: { hostId: 'local', workspaceId: '__notes__', workspacePath: _hygiene_fixturePath("notes"), path: 'one.note.json' } }
+const change = { noteId: 'original', from: { hostId: 'local', workspaceId: '__scratch__', workspacePath: _hygiene_fixturePath("old"), path: 'one.note.md' }, to: { hostId: 'local', workspaceId: '__notes__', workspacePath: _hygiene_fixturePath("notes"), path: 'one.note.md' } }
 describe('Notes storage original production consumers', () => {
   it('reconciles only file resources while retaining Tab, Region, Zone, layout, draft and execution facts', () => {
-    const key = '__scratch__\0one.note.json', layout = { retained: 'same-layout' }
-    const state = { tabs: { originalTab: { id: 'originalTab', workspaceId: '__scratch__', space: { spaceId: 'source', zoneId: 'originalZone' }, titleRegionId: 'originalRegion', layout, regions: { originalRegion: { regionId: 'originalRegion', kind: 'file', workspaceId: '__scratch__', path: 'one.note.json' }, agent: { regionId: 'agent', kind: 'agent', workspaceId: '__scratch__', sessionId: 'healthy' } } } }, documents: { [key]: { content: 'UNSAVED DRAFT', path: 'one.note.json', workspaceId: '__scratch__' } }, dirtyDocuments: { [key]: true }, documentGenerations: { [key]: 9 }, documentObservationGenerations: {}, documentIssues: {}, savingDocuments: {}, layouts: { original: layout }, lastActiveFileByWorkspace: {}, fileExplorerStates: {} } as unknown as FileWorkbenchState
-    const result = reconcileNotesStorageResources(state, [change]), nextKey = '__notes__\0one.note.json'
+    const key = '__scratch__\0one.note.md', layout = { retained: 'same-layout' }
+    const state = { tabs: { originalTab: { id: 'originalTab', workspaceId: '__scratch__', space: { spaceId: 'source', zoneId: 'originalZone' }, titleRegionId: 'originalRegion', layout, regions: { originalRegion: { regionId: 'originalRegion', kind: 'file', workspaceId: '__scratch__', path: 'one.note.md' }, agent: { regionId: 'agent', kind: 'agent', workspaceId: '__scratch__', sessionId: 'healthy' } } } }, documents: { [key]: { content: 'UNSAVED DRAFT', path: 'one.note.md', workspaceId: '__scratch__' } }, dirtyDocuments: { [key]: true }, documentGenerations: { [key]: 9 }, documentObservationGenerations: {}, documentIssues: {}, savingDocuments: {}, layouts: { original: layout }, lastActiveFileByWorkspace: {}, fileExplorerStates: {} } as unknown as FileWorkbenchState
+    const result = reconcileNotesStorageResources(state, [change]), nextKey = '__notes__\0one.note.md'
     expect(Object.keys(result.tabs)).toEqual(['originalTab']); expect(result.tabs.originalTab?.regions.originalRegion).toMatchObject({ regionId: 'originalRegion', workspaceId: '__notes__' })
     expect(result.tabs.originalTab?.regions.agent).toEqual(state.tabs.originalTab?.regions.agent); expect(result.tabs.originalTab?.space).toEqual(state.tabs.originalTab?.space)
     expect(result.layouts).toBe(state.layouts); expect(result.documents[nextKey]?.content).toBe('UNSAVED DRAFT'); expect(result.dirtyDocuments[nextKey]).toBe(true); expect(result.documentGenerations[nextKey]).toBe(9)
-    const graph = { zones: [], regions: [{ kind: 'file', regionId: 'originalRegion', tabId: 'originalTab', execution: null }, { kind: 'agent', regionId: 'agent', execution: { cwd: _hygiene_fixturePath("old"), hostId: 'local' } }], resources: { 'region:originalRegion': { workspaceId: '__scratch__', path: 'one.note.json' }, 'region:agent': { sessionId: 'healthy', cwd: _hygiene_fixturePath("old") } } } as unknown as AgentMuxSpatialGraph
+    const graph = { zones: [], regions: [{ kind: 'file', regionId: 'originalRegion', tabId: 'originalTab', execution: null }, { kind: 'agent', regionId: 'agent', execution: { cwd: _hygiene_fixturePath("old"), hostId: 'local' } }], resources: { 'region:originalRegion': { workspaceId: '__scratch__', path: 'one.note.md' }, 'region:agent': { sessionId: 'healthy', cwd: _hygiene_fixturePath("old") } } } as unknown as AgentMuxSpatialGraph
     const nextGraph = reconcileNotesSpatialResources(graph, [change]); expect(nextGraph.regions).toBe(graph.regions); expect(nextGraph.resources['region:agent']).toBe(graph.resources['region:agent']); expect(nextGraph.resources['region:originalRegion']).toMatchObject({ workspaceId: '__notes__' })
   })
   it('rebinds the dedicated Notes Zone birth resource and creates a new page under the current root without moving execution cwd', () => {
@@ -52,8 +55,8 @@ describe('Notes storage original production consumers', () => {
     expect(mapped.regions).toBe(graph.regions); expect(mapped.resources['zone:' + zoneId]).toMatchObject({ directoryPath: _hygiene_fixturePath("notes") })
   })
   it('keeps both conflicting dirty drafts while still admitting the canonical relocated file surface', () => {
-    const oldKey = '__scratch__\0one.note.json', newKey = '__notes__\0one.note.json'
-    const tab = createWorkbenchTab('retained-file', { regionId: 'file', kind: 'file', workspaceId: '__scratch__', path: 'one.note.json' })
+    const oldKey = '__scratch__\0one.note.md', newKey = '__notes__\0one.note.md'
+    const tab = createWorkbenchTab('retained-file', { regionId: 'file', kind: 'file', workspaceId: '__scratch__', path: 'one.note.md' })
     const state = { tabs: { [tab.id]: tab }, documents: { [oldKey]: { content: 'OLD UNSAVED' }, [newKey]: { content: 'NEW UNSAVED' } }, dirtyDocuments: { [oldKey]: true, [newKey]: true }, documentGenerations: {}, documentObservationGenerations: {}, documentIssues: {}, savingDocuments: {} } as any
     const mapped = reconcileNotesStorageResources(state, [change])
     expect(mapped.tabs[tab.id].regions.file.workspaceId).toBe('__notes__'); expect(mapped.documents[oldKey]).toBeUndefined(); expect(mapped.documents[newKey].content).toBe('NEW UNSAVED')
@@ -61,17 +64,17 @@ describe('Notes storage original production consumers', () => {
     expect(mapped.retainedDocumentDrafts[newKey]).toMatchObject([{ content: 'OLD UNSAVED' }])
   })
   it('does not reacquire a Note file watcher after its original consumer closes during reobservation', async () => {
-    const tab = createWorkbenchTab('closing-file', { regionId: 'file', kind: 'file', workspaceId: '__notes__', path: 'one.note.json' })
+    const tab = createWorkbenchTab('closing-file', { regionId: 'file', kind: 'file', workspaceId: '__notes__', path: 'one.note.md' })
     let current = { tabs: { [tab.id]: tab } } as any, release!: () => void
     const unobserve = vi.spyOn(api.files, 'unobserve').mockImplementation(() => new Promise<void>(resolve => { release = resolve }))
     const observe = vi.spyOn(api.files, 'observe').mockResolvedValue({ status: 'unavailable' } as any)
     const pending = reobserveNotesStorageResources(current, [change], () => current)
     current = { tabs: {} }; release(); await pending
-    expect(unobserve).toHaveBeenCalledWith('__scratch__', 'one.note.json'); expect(observe).not.toHaveBeenCalled()
+    expect(unobserve).toHaveBeenCalledWith('__scratch__', 'one.note.md'); expect(observe).not.toHaveBeenCalled()
     unobserve.mockRestore(); observe.mockRestore()
   })
   it('retains the original creating intent and new input when its directory moves', () => {
-    const receipt = { intentId: 'same-intent', noteId: 'original', blockIds: ['same-block'], path: 'one.note.json', draft: 'UNSAVED', target: { workspaceId: '__scratch__', workspacePath: _hygiene_fixturePath("old"), directoryPath: _hygiene_fixturePath("old"), hostId: 'local', zoneId: 'same-zone', groupId: 'same-group' } } as any
+    const receipt = { intentId: 'same-intent', noteId: 'original', blockIds: ['same-block'], path: 'one.note.md', draft: 'UNSAVED', target: { workspaceId: '__scratch__', workspacePath: _hygiene_fixturePath("old"), directoryPath: _hygiene_fixturePath("old"), hostId: 'local', zoneId: 'same-zone', groupId: 'same-group' } } as any
     expect(reconcileNotesCreationReceipt(receipt, [change], _hygiene_fixturePath("notes"))).toMatchObject({ intentId: 'same-intent', blockIds: ['same-block'], draft: 'UNSAVED', target: { workspaceId: '__notes__', workspacePath: _hygiene_fixturePath("notes"), directoryPath: _hygiene_fixturePath("notes"), zoneId: 'same-zone' } })
   })
   it('keeps original bytes and references until the Main durable resource acknowledgement succeeds', async () => {
@@ -79,10 +82,10 @@ describe('Notes storage original production consumers', () => {
     const original = join(root, 'notes'), target = join(root, 'target'); await mkdir(original)
     let owner!: NotesStorageOwner
     const storage = new AgentMuxNotesStorage(join(root, 'state', 'notes-location.json'), original, { beforeSourceCleanup: async () => { await owner.confirmResources(await storage.inspect()) } })
-    const store = new AgentMuxNotebookStore(undefined, storage), bytes = JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'original', content: 'Last good source' })
-    await writeFile(join(original, 'one.note.json'), bytes)
+    const store = new AgentMuxNotebookStore(undefined, storage), bytes = serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'original', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'same-block' }, content: [{ type: 'text', text: 'Last good source' }] }] } })
+    await writeFile(join(original, 'one.note.md'), bytes)
     await store.apply({ operationId: 'register', expectedRevision: 0, change: { kind: 'register', noteId: 'original', title: 'Original', resource: { ...change.to, workspacePath: original } } }, { kind: 'user', id: 'fixture' })
-    let config = { hosts: [], executors: {}, workspaces: [{ id: '__notes__', hostId: 'local', path: original, kind: 'folder' }] } as unknown as AppConfig
+    let config = { ...structuredClone(DEFAULT_CONFIG), hosts: [], executors: {}, workspaces: [{ id: '__notes__', hostId: 'local', path: original, kind: 'folder' }] } as unknown as AppConfig
     const configOwner = new ConfigOwner({ read: () => config, save: async value => value, publish: value => { config = value } })
     const spatial = new AgentMuxSpatialStateStore(join(root, 'state', 'spatial.json')), spaceId = directoryIdentity('local', original), zoneId = workspaceZoneId(spaceId, '__notes__')
     await spatial.commit({ expectedRevision: 0, graph: { spaces: [{ spaceId, kind: 'folder', name: 'Recall', hostId: 'local', directoryPath: original, projectId: null }], zones: [{ zoneId, workspaceId: '__notes__', kind: 'directory', hostId: 'local', directoryPath: original, branch: null }], bindings: [{ spaceId, zoneId }], tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: { ['zone:' + zoneId]: { directoryPath: original } } } })
@@ -90,22 +93,22 @@ describe('Notes storage original production consumers', () => {
     vi.spyOn(spatial, 'commit').mockRejectedValueOnce(new Error('Original host reference acknowledgement failed'))
     const operation = { operationId: 'original-host-ack', expectedDirectory: original, directory: target }
     await expect(owner.change(operation)).rejects.toThrow('acknowledgement failed')
-    expect(await readFile(join(original, 'one.note.json'), 'utf8')).toBe(bytes); expect(await readFile(join(original, 'notebooks.json'), 'utf8')).toContain('original')
+    expect(await readFile(join(original, 'one.note.md'), 'utf8')).toBe(bytes); expect(await readFile(join(original, NOTEBOOK_ROOT_NAME), 'utf8')).toContain('original')
     expect(config.workspaces[0]?.path).toBe(original); expect((await spatial.readForLayout())!.graph.zones[0]?.directoryPath).toBe(original)
     const pending = await new AgentMuxRpcService({ notebookStore: store }).call('notebook.inspect', { noteId: 'original' })
     expect(pending.storageOperation).toMatchObject({ operationId: operation.operationId, phase: 'committed' })
-    expect((await storage.inspect()).catalogPath).toBe(join(target, 'notebooks.json'))
+    expect((await storage.inspect()).catalogPath).toBe(join(target, NOTEBOOK_ROOT_NAME))
     expect((await store.read()).pages.original?.resource.workspacePath).toBe(target)
     await owner.change(operation)
     expect(config.workspaces[0]?.path).toBe(target); expect((await spatial.readForLayout())!.graph.zones[0]?.directoryPath).toBe(target)
-    await expect(readFile(join(original, 'one.note.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(original, 'one.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
   it('changes the real directory through shipping CLI and the same Settings owner, then inspects the original operation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'notes-settings-')); roots.push(root); const original = join(root, 'notes'), target = join(root, 'new notes'); await mkdir(original)
     const storage = new AgentMuxNotesStorage(join(root, 'state', 'notes-location.json'), original), store = new AgentMuxNotebookStore(undefined, storage)
-    await writeFile(join(original, 'one.note.json'), JSON.stringify({ noteId: 'original', blocks: ['same-block'] }))
+    await writeFile(join(original, 'one.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'original', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'same-block' }, content: [{ type: 'text', text: 'Last good source' }] }] } }))
     await store.apply({ expectedRevision: 0, operationId: 'register', change: { kind: 'register', noteId: 'original', title: 'Saved', resource: { ...change.to, workspacePath: original } } }, { kind: 'user', id: 'test' })
-    let config = { hosts: [], executors: {}, workspaces: [{ id: '__notes__', name: 'Recall', hostId: 'local', kind: 'folder', path: original }] } as unknown as AppConfig
+    let config = { ...structuredClone(DEFAULT_CONFIG), hosts: [], executors: {}, workspaces: [{ id: '__notes__', name: 'Recall', hostId: 'local', kind: 'folder', path: original }] } as unknown as AppConfig
     const configOwner = new ConfigOwner({ read: () => config, save: async value => value, publish: value => { config = value } }), snapshots: unknown[] = []
     const spatial = new AgentMuxSpatialStateStore(join(root, 'state', 'spatial.json'))
     const spaceId = directoryIdentity('local', original), zoneId = workspaceZoneId(spaceId, '__notes__')
@@ -114,17 +117,17 @@ describe('Notes storage original production consumers', () => {
     await spatial.commit({ expectedRevision: 0, graph: originalGraph })
     const owner = new NotesStorageOwner(configOwner, spatial, value => snapshots.push(value), storage)
     const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), notebookStore: store, coreClients: () => [], execute: request => { if (request.operation !== 'settings.get' && request.operation !== 'settings.set') throw new Error('Unexpected request'); return executeSettingsControl(request, configOwner, owner) } }); servers.push(server); await server.start()
-    const out = resolve('.local/recall/storage-cli.mjs'); await symlink('../../packages/core/node_modules', join(dirname(out), 'node_modules'), 'dir').catch(error => { if (error.code !== 'EEXIST') throw error }); await build({ entryPoints: ['packages/core/src/agentmux.ts'], outfile: out, platform: 'node', format: 'esm', packages: 'external', bundle: true, logLevel: 'silent' })
+    const out = resolve('.local/recall/storage-cli.mjs'); await mkdir(dirname(out), { recursive: true }); await symlink('../../packages/core/node_modules', join(dirname(out), 'node_modules'), 'dir').catch(error => { if (error.code !== 'EEXIST') throw error }); await build({ entryPoints: ['packages/core/src/agentmux.ts'], outfile: out, platform: 'node', format: 'esm', packages: 'external', bundle: true, logLevel: 'silent' })
     const exec = promisify(execFile), env = { ...process.env, AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined, AGENTMUX_ENV: undefined }
     const listed = JSON.parse((await exec(process.execPath, [out, 'settings', 'inspect', 'notes'], { env, timeout: 5000 })).stdout)
     expect(listed.result.entries).toContainEqual(expect.objectContaining({ key: 'notes.directory', value: original }))
     const saved = JSON.parse((await exec(process.execPath, [out, 'settings', 'set', 'notes.directory', target], { env, timeout: 5000 })).stdout)
     expect(saved.result.entry.value).toBe(target); expect(config.workspaces[0]?.path).toBe(target); expect(snapshots).toHaveLength(1)
-    expect(JSON.parse(await readFile(join(target, 'one.note.json'), 'utf8')).noteId).toBe('original')
+    expect(readNoteDocument(await readFile(join(target, 'one.note.md'), 'utf8'))).toMatchObject({ status: 'valid', note: { noteId: 'original' } })
     const staleSave = vi.fn(async () => 'WRITTEN')
-    await expect(owner.write({ id: '__notes__', hostId: 'local', path: original, kind: 'folder' } as any, { path: 'one.note.json', content: 'MUST NOT WRITE', expectedRevision: 'pinned' }, staleSave)).rejects.toMatchObject({ code: 'NOTE_RESOURCE_CHANGED' })
+    await expect(owner.write({ id: '__notes__', hostId: 'local', path: original, kind: 'folder' } as any, { path: 'one.note.md', content: 'MUST NOT WRITE', expectedRevision: 'pinned' }, staleSave)).rejects.toMatchObject({ code: 'NOTE_RESOURCE_CHANGED' })
     expect(staleSave).not.toHaveBeenCalled()
-    await owner.write(config.workspaces[0]!, { path: 'one.note.json', content: 'retained draft', expectedRevision: 'current' }, staleSave)
+    await owner.write(config.workspaces[0]!, { path: 'one.note.md', content: 'retained draft', expectedRevision: 'current' }, staleSave)
     expect(staleSave).toHaveBeenCalledWith(config.workspaces[0])
     const restoredGraph = (await spatial.readForLayout())!.graph
     expect(restoredGraph.zones[0]).toMatchObject({ zoneId, directoryPath: target }); expect(restoredGraph.tabs).toEqual(originalGraph.tabs)

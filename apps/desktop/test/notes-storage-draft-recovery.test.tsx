@@ -31,7 +31,7 @@ it('recovers either kept draft through a visible File owner, preserving later in
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const surface = useAppStore.getState().tabs['original-tab']!.regions['original-region'] as FileWorkbenchSurface
   await act(async () => root!.render(<RetainedDocumentDraftNotice tabId="original-tab" surface={surface} />))
-  expect(container.textContent).toContain('Another draft was kept')
+  expect(container.textContent).toContain('Another draft is kept')
   expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
   await act(async () => {
     useAppStore.getState().updateDocument('original-tab', 'LATER DESTINATION INPUT', 'original-region')
@@ -39,7 +39,8 @@ it('recovers either kept draft through a visible File owner, preserving later in
   })
   expect(useAppStore.getState().documents[key]?.content).toBe('LATER DESTINATION INPUT')
   expect(useAppStore.getState().retainedDocumentDrafts[key]).toHaveLength(1)
-  await act(async () => container!.querySelector('button')!.click())
+  await act(async () => { const details = container!.querySelector('details')!; details.open = true; details.dispatchEvent(new Event('toggle')) })
+  await act(async () => Array.from(container!.querySelectorAll('button')).find(button => button.textContent?.startsWith('Use selected draft'))!.click())
   expect(useAppStore.getState().documents[key]).toMatchObject({ content: 'SOURCE UNSAVED', revision: 'destination-disk' })
   expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
   expect(useAppStore.getState().retainedDocumentDrafts[key]?.[0]?.content).toBe('LATER DESTINATION INPUT')
@@ -47,7 +48,7 @@ it('recovers either kept draft through a visible File owner, preserving later in
   await act(async () => useAppStore.setState(reconcileNotesStorageResources(useAppStore.getState(), [change])))
   expect(useAppStore.getState().documents[key]?.revision).toBe('destination-disk')
   expect(useAppStore.getState().retainedDocumentDrafts[key]?.[0]?.content).toBe('LATER DESTINATION INPUT')
-  await act(async () => container!.querySelector('button')!.click())
+  await act(async () => Array.from(container!.querySelectorAll('button')).find(button => button.textContent?.startsWith('Use selected draft'))!.click())
   expect(useAppStore.getState().documents[key]?.content).toBe('LATER DESTINATION INPUT')
   expect(useAppStore.getState().retainedDocumentDrafts[key]?.[0]?.content).toBe('SOURCE UNSAVED')
   expect(write).not.toHaveBeenCalled()

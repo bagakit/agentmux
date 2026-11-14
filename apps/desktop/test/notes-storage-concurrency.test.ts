@@ -1,4 +1,7 @@
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { NOTEBOOK_ROOT_NAME } from '../../../packages/core/src/notebook-files.js'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile, symlink } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
@@ -25,10 +28,10 @@ async function fixture() {
   const original = join(root, 'original'), target = join(root, 'target'); await mkdir(original)
   let owner!: NotesStorageOwner
   const storage = new AgentMuxNotesStorage(join(root, 'state', 'notes-location.json'), original, { beforeSourceCleanup: async () => { await owner.confirmResources(await storage.inspect()) } })
-  const store = new AgentMuxNotebookStore(undefined, storage), bytes = JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'original', content: 'Last good source' })
-  await writeFile(join(original, 'one.note.json'), bytes)
-  await store.apply({ operationId: 'register', expectedRevision: 0, change: { kind: 'register', noteId: 'original', title: 'Original', resource: { hostId: 'local', workspaceId: '__notes__', workspacePath: original, path: 'one.note.json' } } }, { kind: 'user', id: 'fixture' })
-  let config = { hosts: [], executors: {}, workspaces: [{ id: '__notes__', hostId: 'local', path: original, kind: 'folder' }] } as unknown as AppConfig
+  const store = new AgentMuxNotebookStore(undefined, storage), bytes = serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'original', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'same-block' }, content: [{ type: 'text', text: 'Last good source' }] }] } })
+  await writeFile(join(original, 'one.note.md'), bytes)
+  await store.apply({ operationId: 'register', expectedRevision: 0, change: { kind: 'register', noteId: 'original', title: 'Original', resource: { hostId: 'local', workspaceId: '__notes__', workspacePath: original, path: 'one.note.md' } } }, { kind: 'user', id: 'fixture' })
+  let config = { ...structuredClone(DEFAULT_CONFIG), hosts: [], executors: {}, workspaces: [{ id: '__notes__', hostId: 'local', path: original, kind: 'folder' }] } as unknown as AppConfig
   const configOwner = new ConfigOwner({ read: () => config, save: async value => value, publish: value => { config = value } })
   const spatial = new AgentMuxSpatialStateStore(join(root, 'state', 'spatial.json')), spaceId = directoryIdentity('local', original), zoneId = workspaceZoneId(spaceId, '__notes__')
   const tabs = ['first-tab', 'second-tab'].map(id => createWorkbenchTab(id, { regionId: id + '-region', kind: 'launcher', workspaceId: '__notes__' }))
@@ -55,14 +58,14 @@ describe('Notes directory acknowledgement concurrent with layout edits', () => {
     expect(graph.layouts.__notes__!.groups[0]).toMatchObject({ activeTabId: 'second-tab', recentTabIds: ['second-tab', 'first-tab'] })
     expect(graph.tabs).toEqual(f.graph.tabs); expect(graph.tabLayouts).toEqual(f.graph.tabLayouts)
     expect(graph.zones[0]?.directoryPath).toBe(f.target); expect(f.config().workspaces[0]?.path).toBe(f.target)
-    await expect(readFile(join(f.original, 'one.note.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(f.original, 'one.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
   it.each(['SPATIAL_STATE_CONFLICT', 'SPATIAL_STATE_UNAVAILABLE'])('retains the original operation and sources after bounded %s acknowledgement failures', async code => {
     const f = await fixture(), commit = vi.spyOn(f.spatial, 'commit').mockRejectedValue(Object.assign(new Error('ACK unavailable'), { code }))
     await expect(f.owner.change(f.operation)).rejects.toMatchObject({ code })
     expect(commit).toHaveBeenCalledTimes(code === 'SPATIAL_STATE_CONFLICT' ? 3 : 1)
-    expect(await readFile(join(f.original, 'one.note.json'), 'utf8')).toBe(f.bytes)
-    expect(await readFile(join(f.original, 'notebooks.json'), 'utf8')).toContain('original')
+    expect(await readFile(join(f.original, 'one.note.md'), 'utf8')).toBe(f.bytes)
+    expect(await readFile(join(f.original, NOTEBOOK_ROOT_NAME), 'utf8')).toContain('original')
     expect(f.config().workspaces[0]?.path).toBe(f.original)
     expect((await f.storage.inspect()).operation).toMatchObject({ operationId: f.operation.operationId, phase: 'committed', expectedDirectory: f.original })
   })
@@ -74,7 +77,7 @@ describe('Notes directory acknowledgement concurrent with layout edits', () => {
     const exec = promisify(execFile), env = { ...process.env, AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined, AGENTMUX_ENV: undefined }
     const args = ['settings', 'set', 'notes.directory', f.target, '--operation-id', f.operation.operationId]
     await expect(exec(process.execPath, [out, ...args], { env, timeout: 5000 })).rejects.toMatchObject({ stderr: expect.stringContaining('SPATIAL_STATE_UNAVAILABLE') })
-    expect(commit).toHaveBeenCalledTimes(1); expect(await readFile(join(f.original, 'one.note.json'), 'utf8')).toBe(f.bytes)
+    expect(commit).toHaveBeenCalledTimes(1); expect(await readFile(join(f.original, 'one.note.md'), 'utf8')).toBe(f.bytes)
     const pending = JSON.parse((await exec(process.execPath, [out, 'notebook', 'inspect', '--operation-id', f.operation.operationId], { env, timeout: 5000 })).stdout)
     expect(pending.result.storageOperation).toMatchObject({ operationId: f.operation.operationId, phase: 'committed', expectedDirectory: f.original })
     await expect(exec(process.execPath, [out, 'settings', 'set', 'notes.directory', join(f.root, 'wrong'), '--operation-id', f.operation.operationId], { env, timeout: 5000 })).rejects.toMatchObject({ stderr: expect.stringContaining('NOTES_STORAGE_INPUT_INVALID') })
@@ -83,6 +86,6 @@ describe('Notes directory acknowledgement concurrent with layout edits', () => {
     expect((await f.storage.inspect()).operation).toBeNull(); expect((await f.store.read()).trail).toHaveLength(2)
     expect(JSON.parse(await readFile(f.storage.locatorPath, 'utf8')).operations).toEqual(expect.objectContaining({ [f.operation.operationId]: expect.objectContaining({ expectedDirectory: f.original, directory: f.target }) }))
     expect(Object.keys(JSON.parse(await readFile(f.storage.locatorPath, 'utf8')).operations)).toEqual([f.operation.operationId])
-    await expect(readFile(join(f.original, 'one.note.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(f.original, 'one.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
