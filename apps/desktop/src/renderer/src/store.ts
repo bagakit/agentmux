@@ -1637,7 +1637,7 @@ export type AppState = GitReadingActions & {
   clearDocumentRevealTarget(key: string): void
   openProjectFolder(): Promise<void>
   openHostHome(hostId: string): Promise<void>
-  createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }, knowledge?: { categoryId?: string; title?: string }): Promise<ScratchTopicSnapshot>
+  createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }, knowledge?: { categoryId?: string; title?: string }, options?: { reveal?: boolean; preparation?: { topicId: string; tabId: string; createPresentation?: boolean; expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource'] } }): Promise<ScratchTopicSnapshot>
   refreshScratchTopics(workspaceId: string, force?: boolean, topicId?: string): Promise<void>
   invalidateScratchTopicPaths(workspaceId: string, paths: readonly string[], structural?: boolean): Promise<void>
   setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<void>
@@ -4118,9 +4118,8 @@ function newRegionId(): string {
   return mintObjectId()
 }
 
-function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
+function newLauncherTab(workspaceId: string, topicId?: string, tabId = mintObjectId()): WorkbenchTab {
   const executorId = moteDefaultExecutor(useAppStore.getState(), workspaceId, topicId)
-  const tabId = mintObjectId()
   const surface: LauncherWorkbenchSurface = {
     regionId: initialWorkbenchRegionId(tabId),
     kind: 'launcher',
@@ -5416,6 +5415,14 @@ export async function checkpointMountedSpaceInputs(): Promise<void> {
   try {
     if (!workbenchWriteFence.isOpen()) throw new Error('The original Desktop user document is still being restored. This Space request is kept in memory and has not been sent.')
     await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, { state: partializeAppState(useAppStore.getState()), version: 1 })
+  } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
+}
+/** Flush the original operation references before admitting their separate content writes. */
+export async function checkpointAgentOperations(): Promise<void> {
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The original workbench is still being restored. This exact operation is kept and has not been submitted.')
+    await checkpointWorkbenchUserDocument()
+    await requestWorkbenchStorageFlush(false)
   } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
 }
 function requestWorkbenchStorageCommit(): void {
@@ -10204,16 +10211,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         await get().refreshScratchTopics(workspaceId, true, topicId)
     } catch (error) { get().reportError(error); throw error }
   },
-  async createScratchTopic(preset, initialRequest, knowledge) {
+  async createScratchTopic(preset, initialRequest, knowledge, options) {
     const state = get()
     const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
     if (!workspace) throw new Error('Topics workspace is unavailable')
+    const preparation = options?.preparation
+    if (preparation && (preset !== 'mote' || initialRequest || knowledge)) throw new Error('A retained Club preparation can only continue its original empty Club creation. Existing work is kept.')
     const layout = state.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
     // A Topic owns its directory before any Tab or Session exists. The launcher is a projection,
     // not the identity from which the Topic is derived.
-    const topicId = mintObjectId()
-    const targetTab = { ...newLauncherTab(workspace.id, topicId),
-      ...(initialRequest && preset === 'mote' ? { topicPreparation: 'mote' as const } : {}) }
+    const topicId = preparation?.topicId ?? mintObjectId()
+    const existingTab = preparation ? state.tabs[preparation.tabId] : undefined
+    if (existingTab && (existingTab.topicId !== topicId || existingTab.workspaceId !== workspace.id)) throw new Error('The retained Club preparation does not own this Tab. Its original work is kept.')
+    const targetTab = existingTab ?? { ...newLauncherTab(workspace.id, topicId, preparation?.tabId),
+      ...(preset === 'mote' ? { topicPreparation: 'mote' as const } : {}) }
     const regionId = targetTab.layout.activeRegionId
     const initialSurface = targetTab.regions[regionId]
     const placeLauncher = (reveal = true): void => {
@@ -10253,7 +10264,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (placementFailed) throw new Error('The Tab Group is no longer available')
     }
     // A first request belongs to a real durable Region before metadata can fail or navigation unmounts Goals.
-    if (initialRequest) placeLauncher()
+    if ((initialRequest || preset === 'mote') && !existingTab && (!preparation || preparation.createPresentation === true)) placeLauncher(options?.reveal !== false)
     const bornSelection = fileNavigationSelection(get())
     let snapshot: ScratchTopicSnapshot
     let createdIdentity: { topicId: string; zoneId: string } | undefined
@@ -10261,8 +10272,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // The durable placeholder and Host registration write the same Core graph.
       // Finish this original edit before the exact-revision registration; the
       // navigation snapshot above still protects later user choices.
-      if (initialRequest) await coreSpatialPersistence?.flush()
-      if (preset === 'mote') snapshot = await api.scratch.ensureMote(workspace.id, topicId)
+      if (initialRequest || preset === 'mote' && get().tabs[targetTab.id]?.topicPreparation === 'mote') await coreSpatialPersistence?.flush()
+      if (preset === 'mote') {
+        const original = preparation ? await api.scratch.readTopic(workspace.id, topicId, preparation.expectedResource) : null
+        snapshot = original && (original.readError || scratchTopicKind(topicId, [original]) === 'mote')
+          ? original : await api.scratch.ensureMote(workspace.id, topicId, preparation?.expectedResource)
+      }
       else {
         const result = await api.topics.call('topic.create', { topicId, title: knowledge?.title ?? 'New Topic', ...(knowledge?.categoryId ? { categoryId: knowledge.categoryId } : {}) })
         createdIdentity = result.topic
@@ -10272,7 +10287,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         snapshot = created
       }
     } catch (cause) {
-      if (initialRequest && get().tabs[targetTab.id]?.regions[regionId] === initialSurface) get().reportError(cause, {
+      if ((initialRequest || preset === 'mote') && get().tabs[targetTab.id]?.regions[regionId] === initialSurface) get().reportError(cause, {
         kind: 'indeterminate', summary: 'Topic preparation is unconfirmed. Your request has not been sent; the same Topic, Region and draft are kept. Retry Start agent here.'
       })
       throw cause
@@ -10282,8 +10297,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // content read, rather than predicting a Zone from the logical Scratch root.
     if (snapshot.id !== topicId || snapshot.readError || !address || preset !== 'mote' &&
       (!createdIdentity || createdIdentity.topicId !== topicId || createdIdentity.zoneId !== address.zoneId)) throw new Error('The created Topic original identity is unconfirmed. Read the same Topic to inspect its saved state; any existing Tab, Region and draft are kept.')
-    const mayReveal = fileNavigationSelection(get()) === bornSelection
-    if (!initialRequest) placeLauncher(mayReveal)
+    const mayReveal = options?.reveal !== false && fileNavigationSelection(get()) === bornSelection
+    if (!initialRequest && preset !== 'mote') placeLauncher(mayReveal)
     else set(current => {
       const tab = current.tabs[targetTab.id]
       if (tab?.topicId !== topicId || tab.regions[regionId] !== initialSurface || !tab.topicPreparation) return current
@@ -10294,13 +10309,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const previous = current.scratchTopicSnapshots[workspace.id], scope = scratchTopicsScope(workspace)
       const topics = previous?.scope === scope ? previous.topics ?? [] : []
       const live = current.tabs[targetTab.id]
-      if (!live || live.topicId !== topicId || live.regions[regionId] !== initialSurface) return current
-      const groupId = tabGroupForTab(current.layouts[workspace.id], live.id)
-      return { tabs: { ...current.tabs, [live.id]: { ...live, space: originalTopicAddress(workspace, snapshot, current.spaceZoneBindings)! } },
+      const samePresentation = live?.topicId === topicId && live.regions[regionId] === initialSurface
+      const groupId = samePresentation ? tabGroupForTab(current.layouts[workspace.id], live.id) : undefined
+      return { ...(samePresentation ? { tabs: { ...current.tabs, [live.id]: { ...live, space: originalTopicAddress(workspace, snapshot, current.spaceZoneBindings)! } } } : {}),
         scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: { scope, revision: previous?.revision ?? 0,
           reading: previous?.reading ?? false, discoveryError: previous?.discoveryError ?? null, error: previous?.error ?? null, topics: topics.some(topic => topic.id === snapshot.id)
             ? topics.map(topic => topic.id === snapshot.id ? snapshot : topic) : [...topics, snapshot] } },
-        ...(mayReveal && groupId ? { workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId,
+        ...(mayReveal && groupId && live ? { workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId,
           tabId: live.id, groupId, regionId: live.layout.activeRegionId } } : {}) }
     })
     // Ordinary Topics open one attached Terminal through the existing Region lifecycle.
