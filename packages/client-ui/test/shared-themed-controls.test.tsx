@@ -42,7 +42,7 @@ describe('themed shared production controls', () => {
     await act(async () => button.click())
     expect(button.getAttribute('aria-label')).toBe('Grow the input box for long text')
     expect(host.querySelector('output')?.textContent).toBe('current')
-    expect(button.querySelector('[data-semantic-icon="layout.expand"]')).not.toBeNull()
+    expect(button.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('layout.composer-grow'))
     await act(async () => button.click())
     expect(host.querySelector('output')?.textContent).toBe('expanded')
     await act(async () => button.click())
