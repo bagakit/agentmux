@@ -1,6 +1,7 @@
 import owning from '../note-restore/vitest.owning.config.mts'
 import { defineConfig } from 'vitest/config'
 import { relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 export default defineConfig({ ...owning, plugins: [{ name: 'original-composition-source', enforce: 'pre', transform(source, id) {
@@ -19,4 +20,4 @@ export default defineConfig({ ...owning, plugins: [{ name: 'original-composition
   if (process.env.SURVEY_COMPOSITION_LOADED && /^(apps\/desktop\/src|packages\/core\/src)\//.test(file))
     appendFileSync(process.env.SURVEY_COMPOSITION_LOADED, JSON.stringify({ file, original: createHash('sha256').update(source).digest('hex'), loaded: createHash('sha256').update(code).digest('hex') }) + '\n')
   return code === source ? null : { code, map: null }
-} }, ...(owning.plugins ?? [])], test: { ...owning.test, include: ['apps/desktop/test/survey-tab-composition.test.tsx', 'apps/desktop/test/survey-composition-mote-context.test.tsx'], hookTimeout: 30_000, testTimeout: 30_000 } })
+} }, ...(owning.plugins ?? [])], test: { ...owning.test, setupFiles: [...(owning.test!.setupFiles as string[]), fileURLToPath(new URL('./native-listener.setup.ts', import.meta.url))], include: ['apps/desktop/test/survey-tab-composition.test.tsx', 'apps/desktop/test/survey-composition-mote-context.test.tsx'], hookTimeout: 30_000, testTimeout: 30_000 } })

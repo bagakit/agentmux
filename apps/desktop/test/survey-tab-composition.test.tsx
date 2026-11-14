@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, relative, dirname } from 'node:path'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { composeSpatialTabs } from '../../../packages/core/src/spatial-tab-composition'
-import { createWorkspaceLayout } from '@agentmux/layout'
+import { addTabOccurrence, createWorkspaceLayout } from '@agentmux/layout'
 import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { checkpointSpatialWorkbench, prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
@@ -18,6 +18,9 @@ import { createWorkbenchTab, addWorkbenchRegion, documentKey } from '../src/rend
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { restorePersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
 import { captureSurveyCompositionSource, planSurveyTabComposition } from '../src/renderer/src/lib/survey-tab-composition'
+import { isSurveyCompositionRecovery } from '../src/renderer/src/lib/survey-composition-recovery'
+import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
+import { createWorkbenchUserDocument, WORKBENCH_USER_STATE_KEY } from '../src/renderer/src/lib/workbench-user-storage'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { surveyInitialZoneSelection } from '../src/renderer/src/lib/survey-workface'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
@@ -37,13 +40,6 @@ import { moteDefaultConversation } from '../src/renderer/src/lib/mote-quick-pref
 import { directoryIdentity } from '../src/shared/space-addresses'
 import { scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 
-// Keep the real listener process and protocol; resolve its shipped asset to this candidate's Source.
-vi.mock('node:child_process', async original => {
-  const actual = await original<typeof import('node:child_process')>()
-  return { ...actual, fork: ((path: string | URL, args: readonly string[], options: import('node:child_process').ForkOptions) =>
-    actual.fork(String(path).endsWith('/control-endpoint-listener-worker.js')
-      ? resolve('packages/core/src/control-endpoint-listener-worker.ts') : path, args, options)) as typeof actual.fork }
-})
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => <textarea aria-label="Original Agent input" defaultValue="Unsent Agent input" /> }))
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => <textarea aria-label="Original file input" defaultValue="Unsent file input" /> }))
@@ -62,7 +58,7 @@ const session = { ...composerSession('composition-agent'), workspacePath: resour
 const config = { ...composerConfig, hosts: [...composerConfig.hosts, { id: 'other-host', kind: 'ssh' as const, label: 'Other host', hostname: 'composition-remote-host' }], workspaces: [resource, target, display] }
 const source = () => useAppStore.getState().tabs['composition-tab']!
 const catalog = () => spatialCatalog(useAppStore.getState(), [])
-const destination = () => ({ zoneId: zones.target, workspaceId: target.id, displayWorkspaceId: target.id, groupId: 'target-group' })
+const destination = () => ({ kind: 'existing' as const, zoneId: zones.target, workspaceId: target.id, displayWorkspaceId: target.id, groupId: 'target-group' })
 const captured = (kind: 'tab' | 'page' = 'tab') => captureSurveyCompositionSource(useAppStore.getState(), catalog(), kind === 'tab'
   ? { kind, tabId: source().id } : { kind, regionId: 'composition-page', browserId: 'composition-page' })!
 const request = (kind: 'tab' | 'page' = 'tab') => ({ requestId: 'original-composition-request', sources: [captured(kind)], target: destination() })
@@ -80,7 +76,14 @@ beforeEach(async () => {
   const restart = process.env.SURVEY_COMPOSITION_RESTART_FILE
   resource.path = join(restart ? dirname(restart) : directory, 'original-files'); session.workspacePath = resource.path
   core = new AgentMuxSpatialStateStore(restart ? restart + '.spatial.json' : join(directory, 'spatial.json'))
-  if (process.env.SURVEY_COMPOSITION_RESTART_PHASE === 'read') localStorage.setItem('agentmux-workbench-v1', JSON.parse(await readFile(restart!, 'utf8')).record)
+  if (process.env.SURVEY_COMPOSITION_RESTART_PHASE === 'read') {
+    if (process.env.SURVEY_DRAG_RESTART_OUTCOME) {
+      const user = new WorkbenchUserStateStore(restart! + '.user.json')
+      const document = createWorkbenchUserDocument({ readWorkbenchState: () => user.read(), importWorkbenchState: raw => user.importIfAbsent(raw), writeWorkbenchState: raw => user.write(raw) }, () => localStorage)
+      await document.hydrate()
+      localStorage.setItem(WORKBENCH_USER_STATE_KEY, JSON.stringify(await document.persistent.storage.getItem(WORKBENCH_USER_STATE_KEY)))
+    } else localStorage.setItem(WORKBENCH_USER_STATE_KEY, JSON.parse(await readFile(restart!, 'utf8')).record)
+  }
   vi.spyOn(api.spatial, 'read').mockImplementation(() => core.read())
   vi.spyOn(api.spatial, 'commit').mockImplementation(input => core.commit(input))
   vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => core.subscribe(value => { if (!suppressObservation) listener(value) }))
@@ -308,7 +311,6 @@ it('[composition-public] source-built public CLI reads, commits and discovers th
       return { contents: code, loader: 'ts' }
     }) } }] })
   const socketPath = join(socketDirectory, 'control.sock'), server = new AgentMuxControlServer({ socketPath, spatialState: core, coreClients: () => [] })
-  await server.start()
   const env = privateEnvironment({ AGENTMUX_RUNTIME_DIRECTORY: socketDirectory, AGENTMUX_STATE_DIRECTORY: join(socketDirectory, 'state'), AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath })
   const command = (args: string[], input = '', expected = 0) => new Promise<any>((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -317,6 +319,7 @@ it('[composition-public] source-built public CLI reads, commits and discovers th
     child.stdin.end(input)
   })
   try {
+    await server.start()
     const original = (await command(['space', 'state'])).result.state
     expect(original.graph).toEqual((await core.read())!.graph)
     const planned = planSurveyTabComposition(useAppStore.getState(), [], original.graph, request('page'))
@@ -520,6 +523,435 @@ it('[composition-page-occurrence] a clicked page keeps its same original display
   expect(surveyPageProjection(page, { ...facts, locations: unique }, current.tabs, () => {}, original)?.selection).toEqual([{ displayWorkspaceId: target.id, groupId: 'target-group', tabId: moved.tabId, regionId: page.regionId }])
 })
 
+
+it('[composition-browser-cross-resource] original page menu preserves the same visible Browser input while extracting from an all-Browser Tab', async () => {
+  const native = await api.browser.create('secondary-sibling', 'https://sibling.example.test/', resource.id)
+  const state = useAppStore.getState(), page = source().regions['composition-page']!
+  const paired = addWorkbenchRegion(createWorkbenchTab(source().id, page), page.regionId, 'right', {
+    ...native, kind: 'browser', regionId: 'secondary-sibling', browserId: native.id, workspaceId: resource.id })
+  useAppStore.setState({ tabs: { ...state.tabs, [paired.id]: paired }, surveyPageReferences: [{ regionId: page.regionId, browserId: 'composition-page' }],
+    surveyZoneSelection: { kind: 'page', regionId: page.regionId, browserId: 'composition-page' } })
+  await checkpointSpatialWorkbench(); await dom.render(<App />)
+  await vi.waitFor(() => expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).not.toBeNull())
+  const input = document.querySelector<HTMLInputElement>('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Unsubmitted original secondary address'); input.dispatchEvent(new Event('input', { bubbles: true })) })
+  await act(async () => input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, button: 0 })))
+  input.setSelectionRange(3, 12)
+  const originalPage = useAppStore.getState().tabs[paired.id]!.regions[page.regionId]
+  const options = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [aria-haspopup="menu"]')!
+  await menu(options.getAttribute('aria-label')!); await click(named('Move page to research…'))
+  await chooseField(named('Destination research'), JSON.stringify([zones.target, target.id, 'target-group']))
+  vi.mocked(api.spatial.commit).mockClear(); await click(named('Move page'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  const moved = catalog().regions.find(region => region.regionId === page.regionId)!
+  expect(catalog().tabs.find(tab => tab.tabId === moved.tabId)!.zoneId).toBe(zones.target)
+  expect(useAppStore.getState().tabs[moved.tabId]!.regions[page.regionId]).toBe(originalPage)
+  expect(Object.keys(source().regions)).toEqual(['secondary-sibling'])
+  expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).toBe(input)
+  expect(input.value).toBe('Unsubmitted original secondary address'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 12])
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+function dragGeometry() {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+    if (this.closest('[hidden],[inert]')) return new DOMRect()
+    const pages = [...document.querySelectorAll<HTMLElement>('[data-survey-page-region-id]')]
+    const page = this.closest<HTMLElement>('[data-survey-page-region-id]')
+    if (page) return new DOMRect(10, 80 + pages.indexOf(page) * 44, 230, 36)
+    const items = [...document.querySelectorAll<HTMLElement>('.survey-list-item')], item = this.closest<HTMLElement>('.survey-list-item')
+    if (item) {
+      const top = 80 + pages.length * 44 + items.indexOf(item) * 130
+      const tab = this.closest<HTMLElement>('.survey-tab-cell')
+      if (tab) return new DOMRect(14, top + 34 + [...item.querySelectorAll('.survey-tab-cell')].indexOf(tab) * 34, 220, 30)
+      return new DOMRect(10, top, 230, 120)
+    }
+    if (this.matches('.survey-list-ungrouped,.survey-page-list')) return new DOMRect(0, 75, 250, 420)
+    return new DOMRect()
+  })
+}
+async function dragPointer(element: HTMLElement, destination: { x: number; y: number }) {
+  const rect = element.getBoundingClientRect(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2
+  const pointer = async (target: EventTarget, type: string, px: number, py: number) => act(async () => target.dispatchEvent(new PointerEvent(type,
+    { bubbles: true, cancelable: true, pointerId: 5, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: px, clientY: py })))
+  await pointer(element, 'pointerdown', x, y); await pointer(document, 'pointermove', x + 7, y)
+  await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.getAttribute('data-dragging')).toBe('true'))
+  await new Promise(resolve => setTimeout(resolve, 30)); await pointer(document, 'pointermove', destination.x, destination.y)
+  await new Promise(resolve => setTimeout(resolve, 30)); await pointer(document, 'pointerup', destination.x, destination.y)
+  await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false))
+}
+
+it('[drag-composition] actual PointerSensor drags an exact saved page onto another into one new independent research', async () => {
+  const native = await api.browser.create('target-page', 'https://target.example.test/', target.id)
+  const current = useAppStore.getState(), targetTab = addWorkbenchRegion(current.tabs['target-tab']!, 'target-region', 'right', {
+    ...native, kind: 'browser', regionId: 'target-page', browserId: native.id, workspaceId: target.id })
+  useAppStore.setState({ tabs: { ...current.tabs, [targetTab.id]: targetTab }, surveyCollectedZones: { [zones.source]: true, [zones.target]: true },
+    surveyPageReferences: [{ regionId: 'composition-page', browserId: 'composition-page' }, { regionId: 'target-page', browserId: 'target-page' }] })
+  await checkpointSpatialWorkbench(); dragGeometry(); await dom.render(<App />)
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-survey-page-region-id]')).toHaveLength(2))
+  const before = (await core.read())!.graph, lifecycle = ['create', 'navigate', 'close'].map(name => vi.spyOn(api.browser, name as 'create'))
+  const sourceButton = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [data-survey-content-key]')!
+  const targetRow = document.querySelector<HTMLElement>('[data-survey-page-region-id="target-page"]')!, rect = targetRow.getBoundingClientRect()
+  vi.mocked(api.spatial.commit).mockClear()
+  await dragPointer(sourceButton, { x: rect.left + 90, y: rect.top + rect.height / 2 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  const graph = (await core.read())!.graph, research = graph.zones.filter(zone => !before.zones.some(original => original.zoneId === zone.zoneId))
+  expect(research).toHaveLength(1); const zone = research[0]!
+  expect(zone.workspaceId).toBe(target.id); expect(graph.resources['zone:' + zone.zoneId]).toMatchObject({ workspaceId: target.id })
+  expect(graph.bindings.filter(binding => binding.zoneId === zone.zoneId)).toEqual([])
+  const members = graph.tabs.filter(tab => tab.zoneId === zone.zoneId)
+  expect(members).toHaveLength(2); expect(members.flatMap(tab => tab.regionIds).sort()).toEqual(['composition-page', 'target-page'])
+  expect(useAppStore.getState().tabs['target-tab']!.regions['target-region']).toBeDefined()
+  expect(source().regions['composition-file']).toBeDefined(); expect(source().regions['composition-agent-region']).toBeDefined()
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+  for (const call of lifecycle) expect(call).not.toHaveBeenCalled()
+})
+
+it('[drag-composition] actual PointerSensor moves only the dragged Tab into an existing research', async () => {
+  const state = useAppStore.getState(), neighbor = createWorkbenchTab('source-neighbor', { kind: 'launcher', workspaceId: resource.id, regionId: 'source-neighbor-region' })
+  useAppStore.setState({ tabs: { ...state.tabs, [neighbor.id]: neighbor }, layouts: { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', neighbor.id)! } })
+  await checkpointSpatialWorkbench(); dragGeometry(); await dom.render(<App />)
+  const tab = document.querySelector<HTMLElement>('[data-survey-tab-id="composition-tab"]')!, row = [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zones.target)!
+  expect(tab).not.toBeNull(); const rect = row.getBoundingClientRect(), before = (await core.read())!.graph
+  vi.mocked(api.spatial.commit).mockClear()
+  await dragPointer(tab, { x: rect.left + 100, y: rect.top + 15 })
+  await vi.waitFor(() => expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(zones.target))
+  expect(catalog().tabs.find(tab => tab.tabId === neighbor.id)!.zoneId).toBe(zones.source)
+  expect((await core.read())!.graph.zones).toEqual(before.zones)
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+it.each(['occupied Zone', 'missing resource'] as const)('[drag-composition] new-research %s refuses before any composition submission', async failure => {
+  const held = request('page'), before = await core.read()
+  vi.mocked(api.spatial.commit).mockClear()
+  const result = await useAppStore.getState().composeSurveyTabs({ ...held, target: { ...held.target, kind: 'new-research',
+    zoneId: failure === 'occupied Zone' ? zones.target : 'reserved-independent-research', workspaceId: failure === 'missing resource' ? 'missing-original-resource' : target.id } })
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+  expect(result.outcome).toBe('refused'); expect(result.targetZoneId).toBe(failure === 'occupied Zone' ? zones.target : 'reserved-independent-research')
+  expect((await core.read())!.graph).toEqual(before!.graph)
+})
+
+async function dragPagePair(options: { sameTab?: boolean; pagesOnly?: boolean } = {}) {
+  const native = await api.browser.create('target-page', 'https://target.example.test/', options.sameTab ? resource.id : target.id)
+  const state = useAppStore.getState(), originalTab = options.sameTab ? source() : state.tabs['target-tab']!
+  const first = options.pagesOnly ? createWorkbenchTab(source().id, source().regions['composition-page']!) : originalTab
+  const paired = addWorkbenchRegion(first, Object.keys(first.regions)[0]!, 'right', {
+    ...native, kind: 'browser', regionId: 'target-page', browserId: native.id, workspaceId: options.sameTab ? resource.id : target.id, title: 'Second exact page' })
+  useAppStore.setState({ tabs: { ...state.tabs, [paired.id]: paired },
+    surveyPageReferences: [{ regionId: 'composition-page', browserId: 'composition-page' }, { regionId: 'target-page', browserId: 'target-page' }],
+    surveyZoneSelection: { kind: 'page', regionId: 'composition-page', browserId: 'composition-page' } })
+  await checkpointSpatialWorkbench(); dragGeometry(); await dom.render(<App />)
+  await new Promise(resolve => setTimeout(resolve, 80)); await checkpointSpatialWorkbench()
+  const from = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [data-survey-content-key]')!
+  const to = document.querySelector<HTMLElement>('[data-survey-page-region-id="target-page"]')!, rect = to.getBoundingClientRect()
+  return { from, to, destination: { x: rect.left + 90, y: rect.top + rect.height / 2 } }
+}
+
+it.each(['unknown ACK', 'partial Survey save'] as const)('[drag-composition] actual pointer %s retains its original intent and repairs only references', async failure => {
+  const { from, destination } = await dragPagePair(), before = await core.read()
+  vi.mocked(api.spatial.commit).mockClear()
+  if (failure === 'unknown ACK') vi.mocked(api.spatial.commit).mockImplementationOnce(async input => { await core.commit(input); throw new Error('Original CAS ACK lost') })
+  else vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => {
+    if ((await core.read())!.graph.zones.length > before!.graph.zones.length) throw new Error('Original Survey save ACK lost')
+  })
+  await dragPointer(from, destination)
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-composition-request]')).not.toBeNull())
+  const retained = useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)
+  expect(retained).toHaveLength(1); const operation = retained[0]!
+  expect(operation.report.outcome).toBe(failure === 'unknown ACK' ? 'unknown' : 'partial')
+  expect(operation.sources.flatMap(source => source.owners.map(owner => owner.regionId))).toEqual(['composition-page', 'target-page'])
+  expect(operation.sources.map(source => source.tabId)).toEqual(['composition-tab', 'target-tab'])
+  const graph = (await core.read())!.graph
+  expect(graph.zones.filter(zone => !before!.graph.zones.some(original => original.zoneId === zone.zoneId)).map(zone => zone.zoneId)).toEqual([operation.target.zoneId])
+  expect(document.querySelector('[data-survey-composition-request]')?.getAttribute('data-survey-composition-request')).toBe(operation.requestId)
+  await click(named('Keep working'))
+  await click([...document.querySelectorAll<HTMLElement>('.survey-composition-recovery button')][0]!)
+  expect(named('Repair Survey references').hasAttribute('disabled')).toBe(true)
+  await click(named('Check current target'))
+  await vi.waitFor(() => expect(named('Repair Survey references').hasAttribute('disabled')).toBe(false))
+  expect(document.querySelector('[data-survey-composition-request]')?.textContent).toContain('does not confirm the earlier acknowledgement')
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+  vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined)
+  await prepareRendererUpdate()
+  expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.surveyCompositionRecoveries).toEqual(retained)
+  await click(named('Repair Survey references'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]))
+  expect(useAppStore.getState().surveyPageReferences).toEqual([])
+  expect(useAppStore.getState().surveyCollectedZones[operation.target.zoneId]).toBe(true)
+  expect((await core.read())!.graph).toEqual(graph); expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+it.each([false, true])('[drag-composition] both exact pages from the same mixed Tab (pages only=%s) compose without including siblings or empty Tabs', async pagesOnly => {
+  const { from, destination } = await dragPagePair({ sameTab: true, pagesOnly })
+  const before = (await core.read())!.graph, address = document.querySelector<HTMLInputElement>('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')!
+  expect(address).not.toBeNull()
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(address, 'Unsubmitted page address'); address.dispatchEvent(new Event('input', { bubbles: true })) })
+  address.setSelectionRange(2, 7)
+  vi.mocked(api.spatial.commit).mockClear(); await dragPointer(from, destination)
+  // The exact page has two original display locations. No first/active Group is selected implicitly.
+  await vi.waitFor(() => expect(named('Research location'), document.body.textContent ?? '').toBeDefined())
+  const chooser = named('Research location')
+  await act(async () => chooser.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  const choices = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].filter(item => item.dataset.value)
+  expect(choices).toHaveLength(2)
+  const choice = choices.find(item => { const value = JSON.parse(item.dataset.value!); return value[2] === display.id })!
+  await click(choice); await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  expect(named('Create research').hasAttribute('disabled')).toBe(false)
+  await click(named('Create research'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences, document.body.textContent ?? '').toEqual([]))
+  const graph = (await core.read())!.graph, added = graph.zones.filter(zone => !before.zones.some(zoneBefore => zoneBefore.zoneId === zone.zoneId))
+  expect(added).toHaveLength(1)
+  expect(graph.tabs.filter(tab => tab.zoneId === added[0]!.zoneId).flatMap(tab => tab.regionIds).sort()).toEqual(['composition-page', 'target-page'])
+  expect(graph.tabs.every(tab => tab.regionIds.length > 0)).toBe(true)
+  if (!pagesOnly) expect(Object.keys(source().regions).sort()).toEqual(['composition-agent-region', 'composition-file'])
+  expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]'), JSON.stringify({ connected: address.isConnected, current: [...document.querySelectorAll<HTMLInputElement>('[aria-label="Browser address"]')].map(input => ({ same: input === address, value: input.value, region: input.closest('[data-workbench-region-id]')?.getAttribute('data-workbench-region-id'), survey: Boolean(input.closest('.global-survey-surface')), selection: [input.selectionStart, input.selectionEnd] })) })).toBe(address)
+  expect(address.value).toBe('Unsubmitted page address'); expect([address.selectionStart, address.selectionEnd]).toEqual([2, 7])
+  expect(document.querySelector<HTMLElement>('[data-survey-tab-id][aria-current="true"]')?.getAttribute('data-survey-tab-id')).toBe(graph.regions.find(region => region.regionId === 'composition-page')!.tabId)
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+it('[drag-composition] outside, original-position and keyboard pickup cancellation preserve original content and organization', async () => {
+  const { from } = await dragPagePair()
+  await new Promise(resolve => setTimeout(resolve, 80)); await checkpointSpatialWorkbench()
+  const before = await core.read(), state = useAppStore.getState()
+  vi.mocked(api.spatial.commit).mockClear()
+  await dragPointer(from, { x: 850, y: 850 })
+  const bounds = from.getBoundingClientRect(); await dragPointer(from, { x: bounds.left + 80, y: bounds.top + 15 })
+  await act(async () => { from.focus(); from.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })) })
+  await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.getAttribute('data-dragging')).toBe('true'))
+  await act(async () => from.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false))
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled(); expect((await core.read())!.graph).toEqual(before!.graph)
+  expect(useAppStore.getState().surveyOrganization).toBe(state.surveyOrganization)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(state.surveyZoneSelection)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
+  expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([])
+})
+
+it('[drag-composition] explicit mixed selection drags exactly the selected page and whole Tab without changing navigation', async () => {
+  const state = useAppStore.getState(), extra = createWorkbenchTab('source-neighbor', { kind: 'launcher', workspaceId: resource.id, regionId: 'neighbor-region' }, 'Selected complete note Tab')
+  useAppStore.setState({ tabs: { ...state.tabs, [extra.id]: extra }, layouts: { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', extra.id)! }, surveyPageReferences: [{ regionId: 'composition-page', browserId: 'composition-page' }] })
+  await checkpointSpatialWorkbench(); dragGeometry(); await dom.render(<App />)
+  const before = useAppStore.getState()
+  await menu('Options for Source research'); await click(named('Select content to combine…'))
+  const page = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] input')!
+  const whole = document.querySelector<HTMLElement>('[data-survey-tab-id="source-neighbor"]')!.closest('.survey-tab-cell')!.querySelector<HTMLElement>('input')!
+  await click(page); await click(whole)
+  expect(document.querySelector('.survey-composition-toolbar')?.textContent).toContain('2 selected')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  const targetRow = [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zones.target)!, rect = targetRow.getBoundingClientRect()
+  const from = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [data-survey-content-key]')!
+  vi.mocked(api.spatial.commit).mockClear(); await dragPointer(from, { x: rect.left + 100, y: rect.top + 15 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  const graph = (await core.read())!.graph
+  expect(graph.tabs.find(tab => tab.tabId === extra.id)!.zoneId).toBe(zones.target)
+  expect(graph.tabs.find(tab => tab.regionIds.includes('composition-page'))!.zoneId).toBe(zones.target)
+  expect(graph.tabs.find(tab => tab.tabId === 'composition-tab')!.regionIds.sort()).toEqual(['composition-agent-region', 'composition-file'])
+  expect(document.querySelector('.survey-composition-toolbar')?.textContent).toContain('0 selected')
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+  await click(named('Cancel content selection'))
+  expect(document.querySelector('.survey-composition-toolbar')).toBeNull()
+})
+
+it('[drag-composition] explicit selection narrows overlapping whole Tab into an exact page and offers the same keyboard and touch menu action', async () => {
+  const { from } = await dragPagePair(), before = useAppStore.getState()
+  await menu('Options for Source research'); await click(named('Select content to combine…'))
+  await click(document.querySelector<HTMLElement>('[aria-label="Select all Tabs in Source research"]')!)
+  expect(document.querySelector('.survey-composition-toolbar')?.textContent).toContain('1 selected')
+  await click(from.closest('[data-survey-page-region-id]')!.querySelector<HTMLElement>('input')!)
+  expect(document.querySelector('[aria-label="Select all Tabs in Source research"]')?.getAttribute('aria-checked')).toBe('mixed')
+  expect(document.querySelector('.survey-composition-toolbar')?.textContent).toContain('1 selected')
+  await menu('Actions for selected content'); await click(named('Move selected to research…'))
+  await chooseField(named('Destination research'), JSON.stringify([zones.target, target.id, 'target-group']))
+  vi.mocked(api.spatial.commit).mockClear(); await click(named('Move page'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([{ regionId: 'target-page', browserId: 'target-page' }]))
+  expect(Object.keys(source().regions).sort()).toEqual(['composition-agent-region', 'composition-file'])
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+it('[drag-composition] keyboard direct movement and Escape use the same valid-target predicate', async () => {
+  const { from } = await dragPagePair()
+  const key = async (value: string, code = value) => { await act(async () => from.dispatchEvent(new KeyboardEvent('keydown', { key: value, code, bubbles: true }))); await new Promise(resolve => setTimeout(resolve, 30)) }
+  await act(async () => from.focus()); vi.mocked(api.spatial.commit).mockClear()
+  await key(' ', 'Space'); await key('ArrowDown'); await key('Escape')
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+  await key(' ', 'Space'); await key('ArrowDown'); await key(' ', 'Space')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+it('[drag-composition] unread saved recovery records remain visible and do not prevent healthy content composition', async () => {
+  const unread = { requestId: 'unread-original', originalData: ['keep exact bytes'] }
+  useAppStore.setState({ surveyCompositionRecoveries: [unread] })
+  const { from, destination } = await dragPagePair()
+  expect(document.querySelector('.survey-composition-recovery')?.textContent).toContain('could not be read')
+  await dragPointer(from, destination)
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([unread])
+  await prepareRendererUpdate()
+  expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.surveyCompositionRecoveries).toEqual([unread])
+})
+
+it.runIf(Boolean(process.env.SURVEY_DRAG_RESTART_OUTCOME))('[drag-restart] two real processes preserve a newly composed research and unresolved exact intent through the original native user document', async () => {
+  const path = process.env.SURVEY_COMPOSITION_RESTART_FILE!, outcome = process.env.SURVEY_DRAG_RESTART_OUTCOME
+  if (process.env.SURVEY_COMPOSITION_RESTART_PHASE === 'write') {
+    const splitDuringIntent = Boolean(process.env.SURVEY_DRAG_RESTART_SPLIT)
+    if (splitDuringIntent) useAppStore.setState(state => ({ tabs: { ...state.tabs,
+      'composition-tab': createWorkbenchTab('composition-tab', source().regions['composition-page']!) } }))
+    const { from, destination } = await dragPagePair(), before = (await core.read())!.graph
+    let laterSibling: string | undefined
+    if (outcome === 'unknown') vi.mocked(api.spatial.commit).mockImplementation(async input => {
+      const saved = await core.commit(input)
+      if (input.graph.zones.some(zone => !before.zones.some(original => original.zoneId === zone.zoneId))) throw new Error('Original composition ACK lost')
+      return saved
+    })
+    if (splitDuringIntent) vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => {
+      if (!laterSibling && useAppStore.getState().surveyCompositionRecoveries.length) {
+        await act(async () => { laterSibling = useAppStore.getState().splitRegion(resource.id, 'composition-tab', 'composition-page', 'right') })
+      }
+    })
+    if (outcome === 'partial') vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => {
+      if ((await core.read())!.graph.zones.length > before.zones.length) throw new Error('Original preference ACK lost')
+    })
+    await dragPointer(from, destination)
+    if (outcome === 'moved') await vi.waitFor(() => { expect(useAppStore.getState().surveyPageReferences).toEqual([]); expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]) })
+    else await vi.waitFor(() => { expect(document.querySelector('[data-survey-composition-request]')).not.toBeNull(); expect(useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]?.report.outcome).toBe(outcome) })
+    vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined); await prepareRendererUpdate()
+    const user = new WorkbenchUserStateStore(path + '.user.json')
+    await user.write(JSON.stringify({ state: {}, version: 1 }))
+    const nativeDocument = createWorkbenchUserDocument({ readWorkbenchState: () => user.read(), importWorkbenchState: raw => user.importIfAbsent(raw), writeWorkbenchState: raw => user.write(raw) }, () => localStorage)
+    await nativeDocument.hydrate()
+    // This is an explicit host-boundary segment: original Store projection -> original document writer -> Main durable file.
+    const projection = JSON.parse(localStorage.getItem(WORKBENCH_USER_STATE_KEY)!)
+    await nativeDocument.persistent.checkpoint(WORKBENCH_USER_STATE_KEY, projection)
+    const saved = JSON.parse((await user.read())!)
+    expect(saved.state.surveyCompositionRecoveries).toEqual(useAppStore.getState().surveyCompositionRecoveries)
+    const graph = (await core.read())!.graph, added = graph.zones.filter(zone => !before.zones.some(original => original.zoneId === zone.zoneId))
+    expect(added).toHaveLength(1)
+    await writeFile(path, JSON.stringify({ pid: process.pid, graph, targetZoneId: added[0]!.zoneId,
+      laterSibling, pending: saved.state.surveyCompositionRecoveries, references: saved.state.surveyPageReferences, drafts: saved.state.agentComposerDrafts, selection: saved.state.surveyZoneSelection,
+      nativeDocument: path + '.user.json', hostBoundary: 'Store preview projection -> createWorkbenchUserDocument -> WorkbenchUserStateStore private file; read process uses original document read then Store hydrate' }))
+  } else {
+    const saved = JSON.parse(await readFile(path, 'utf8')), state = useAppStore.getState()
+    expect(saved.pid).not.toBe(process.pid); expect((await core.read())!.graph).toEqual(saved.graph)
+    expect(state.surveyCompositionRecoveries).toEqual(saved.pending)
+    expect(state.surveyPageReferences).toEqual(saved.references); expect(state.agentComposerDrafts).toEqual(saved.drafts)
+    expect(state.surveyZoneSelection).toEqual(saved.selection)
+    const members = catalog().tabs.filter(tab => tab.zoneId === saved.targetZoneId)
+    expect(members.flatMap(tab => tab.regionIds).sort()).toEqual(['composition-page', 'target-page'])
+    expect(state.spaceZoneBindings[saved.targetZoneId]).toMatchObject({ workspaceId: target.id })
+    if (saved.laterSibling) expect(source().regions[saved.laterSibling]).toMatchObject({ kind: 'launcher', regionId: saved.laterSibling })
+    else { expect(source().regions['composition-file']).toBeDefined(); expect(source().regions['composition-agent-region']).toHaveProperty('sessionId', session.id) }
+    vi.mocked(api.spatial.commit).mockClear(); await dom.render(<App />)
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Browser address"]')).not.toBeNull())
+    if (outcome !== 'moved') {
+      expect(state.surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]!.report.outcome).toBe(outcome)
+      expect(document.querySelector('.survey-composition-recovery')?.textContent).toContain('Review combination')
+      await click(document.querySelector<HTMLElement>('.survey-composition-recovery button')!)
+      expect(document.querySelector('[data-survey-composition-request]')?.getAttribute('data-survey-composition-request')).toBe(saved.pending[0].requestId)
+      await click(named('Check current target'))
+      await vi.waitFor(() => expect(named('Repair Survey references').hasAttribute('disabled')).toBe(false))
+      expect(useAppStore.getState().surveyCompositionRecoveries).toEqual(saved.pending)
+    } else expect(state.surveyCollectedZones[saved.targetZoneId]).toBe(true)
+    expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+  }
+})
+
+it('[drag-composition] a changed current Region resource cannot repair an old unacknowledged move', async () => {
+  const { from, destination } = await dragPagePair()
+  vi.mocked(api.spatial.commit).mockImplementationOnce(async input => { await core.commit(input); throw new Error('Original CAS ACK lost') })
+  await dragPointer(from, destination)
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-composition-request]')).not.toBeNull())
+  const saved = (await core.read())!, originalIntent = useAppStore.getState().surveyCompositionRecoveries
+  await core.commit({ expectedRevision: saved.revision, graph: { ...saved.graph,
+    regions: saved.graph.regions.map(region => region.regionId === 'composition-page' ? { ...region, browserId: 'different-current-browser' } : region),
+    resources: { ...saved.graph.resources, 'region:composition-page': { ...saved.graph.resources['region:composition-page'] as object, browserId: 'different-current-browser' } } } })
+  const before = useAppStore.getState().surveyPageReferences
+  vi.mocked(api.spatial.commit).mockClear(); await click(named('Check current target'))
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-composition-request]')?.textContent).toContain('not confirmed together'))
+  expect(named('Repair Survey references').hasAttribute('disabled')).toBe(true)
+  expect(useAppStore.getState().surveyCompositionRecoveries).toEqual(originalIntent)
+  expect(useAppStore.getState().surveyPageReferences).toBe(before)
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+})
+
+it('[drag-composition] a later original split during intent saving survives the single composition CAS', async () => {
+  const { from, destination } = await dragPagePair(), before = (await core.read())!.graph
+  let release!: () => void, entered!: () => void, paused = false
+  const held = new Promise<void>(resolve => { release = resolve }), saving = new Promise<void>(resolve => { entered = resolve })
+  vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => {
+    if (!paused && useAppStore.getState().surveyCompositionRecoveries.length) { paused = true; entered(); await held }
+  })
+  vi.mocked(api.spatial.commit).mockClear()
+  try {
+    await dragPointer(from, destination); await saving
+    let sibling: string | undefined
+    await act(async () => { sibling = useAppStore.getState().splitRegion(resource.id, 'composition-tab', 'composition-file', 'down') })
+    expect(sibling).toBeDefined(); release()
+    await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+    await checkpointSpatialWorkbench()
+    const graph = (await core.read())!.graph
+    expect(source().regions[sibling!]).toMatchObject({ kind: 'launcher', regionId: sibling })
+    expect(graph.regions.find(region => region.regionId === sibling)).toMatchObject({ tabId: 'composition-tab', kind: 'launcher' })
+    const compositions = vi.mocked(api.spatial.commit).mock.calls.filter(([input]) => input.graph.zones.some(zone => !before.zones.some(original => original.zoneId === zone.zoneId)))
+    // Later ordinary saves may retain the accepted new Zone; only its first appearance is the composition.
+    expect(compositions[0]![0].graph.regions.some(region => region.regionId === sibling)).toBe(true)
+  } finally { release(); vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined) }
+})
+
+
+it('[drag-intent-split] a sole page split during intent save keeps its reserved identity after a lost composition ACK', async () => {
+  const state = useAppStore.getState(), page = source().regions['composition-page']!
+  useAppStore.setState({ tabs: { ...state.tabs, 'composition-tab': createWorkbenchTab('composition-tab', page) } })
+  const { from, destination } = await dragPagePair(), before = (await core.read())!.graph
+  let release!: () => void, entered!: () => void, paused = false, compositionSubmissions = 0
+  const held = new Promise<void>(resolve => { release = resolve }), saving = new Promise<void>(resolve => { entered = resolve })
+  vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => {
+    if (!paused && useAppStore.getState().surveyCompositionRecoveries.length) { paused = true; entered(); await held }
+  })
+  vi.mocked(api.spatial.commit).mockImplementation(async input => {
+    const composing = input.graph.zones.some(zone => !before.zones.some(original => original.zoneId === zone.zoneId))
+    const saved = await core.commit(input)
+    if (composing) { ++compositionSubmissions; throw new Error('This original composition wrote but its ACK was lost') }
+    return saved
+  })
+  try {
+    await dragPointer(from, destination); await saving
+    const initial = useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]!
+    expect(initial.report.tabIds[0]).toBe('composition-tab')
+    let sibling: string | undefined
+    await act(async () => { sibling = useAppStore.getState().splitRegion(resource.id, 'composition-tab', 'composition-page', 'right') })
+    expect(sibling).toBeDefined(); release()
+    await vi.waitFor(() => expect(document.querySelector('[data-survey-composition-request]')).not.toBeNull())
+    const retained = useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]!
+    expect(retained.requestId).toBe(initial.requestId); expect(retained.target).toEqual(initial.target)
+    expect(retained.report.outcome).toBe('unknown'); expect(compositionSubmissions).toBe(1)
+    const moved = catalog().regions.find(region => region.regionId === 'composition-page')!
+    expect(moved.tabId).not.toBe('composition-tab')
+    const original = retained.sources.find(source => source.tabId === 'composition-tab')!
+    expect(original.kind).toBe('page')
+    if (original.kind !== 'page') throw new Error('Expected the original exact page intent')
+    expect(original.promotedTabId).toBe(moved.tabId)
+    expect(source().regions[sibling!]).toMatchObject({ kind: 'launcher', regionId: sibling })
+    await click(named('Check current target'))
+    await vi.waitFor(() => expect(named('Repair Survey references').hasAttribute('disabled')).toBe(false))
+    expect(document.querySelector('[data-survey-composition-request]')?.textContent).toContain('does not confirm the earlier acknowledgement')
+    vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined)
+    await prepareRendererUpdate()
+    expect(JSON.parse(localStorage.getItem(WORKBENCH_USER_STATE_KEY)!).state.surveyCompositionRecoveries).toEqual([retained])
+    vi.mocked(api.spatial.commit).mockClear()
+    await click(named('Repair Survey references'))
+    await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]))
+    expect(useAppStore.getState().surveyPageReferences).toEqual([])
+    expect(source().regions[sibling!]).toBeDefined()
+    expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled(); expect(compositionSubmissions).toBe(1)
+  } finally { release(); vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined) }
+})
+
 it('[composition-browser-secondary-same-resource] original page menu keeps the same visible Browser input in a separate existing research on the same resource', async () => {
   const native = await api.browser.create('secondary-sibling', 'https://sibling.example.test/', resource.id)
   const state = useAppStore.getState(), page = source().regions['composition-page']!
@@ -544,34 +976,6 @@ it('[composition-browser-secondary-same-resource] original page menu keeps the s
   await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
   const moved = catalog().regions.find(region => region.regionId === page.regionId)!
   expect(catalog().tabs.find(tab => tab.tabId === moved.tabId)!.zoneId).toBe(nearby.zone.zoneId)
-  expect(useAppStore.getState().tabs[moved.tabId]!.regions[page.regionId]).toBe(originalPage)
-  expect(Object.keys(source().regions)).toEqual(['secondary-sibling'])
-  expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).toBe(input)
-  expect(input.value).toBe('Unsubmitted original secondary address'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 12])
-  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
-})
-
-it('[composition-browser-cross-resource] original page menu preserves the same visible Browser input while extracting from an all-Browser Tab', async () => {
-  const native = await api.browser.create('secondary-sibling', 'https://sibling.example.test/', resource.id)
-  const state = useAppStore.getState(), page = source().regions['composition-page']!
-  const paired = addWorkbenchRegion(createWorkbenchTab(source().id, page), page.regionId, 'right', {
-    ...native, kind: 'browser', regionId: 'secondary-sibling', browserId: native.id, workspaceId: resource.id })
-  useAppStore.setState({ tabs: { ...state.tabs, [paired.id]: paired }, surveyPageReferences: [{ regionId: page.regionId, browserId: 'composition-page' }],
-    surveyZoneSelection: { kind: 'page', regionId: page.regionId, browserId: 'composition-page' } })
-  await checkpointSpatialWorkbench(); await dom.render(<App />)
-  await vi.waitFor(() => expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).not.toBeNull())
-  const input = document.querySelector<HTMLInputElement>('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')!
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Unsubmitted original secondary address'); input.dispatchEvent(new Event('input', { bubbles: true })) })
-  await act(async () => input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, button: 0 })))
-  input.setSelectionRange(3, 12)
-  const originalPage = useAppStore.getState().tabs[paired.id]!.regions[page.regionId]
-  const options = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [aria-haspopup="menu"]')!
-  await menu(options.getAttribute('aria-label')!); await click(named('Move page to research…'))
-  await chooseField(named('Destination research'), JSON.stringify([zones.target, target.id, 'target-group']))
-  vi.mocked(api.spatial.commit).mockClear(); await click(named('Move page'))
-  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
-  const moved = catalog().regions.find(region => region.regionId === page.regionId)!
-  expect(catalog().tabs.find(tab => tab.tabId === moved.tabId)!.zoneId).toBe(zones.target)
   expect(useAppStore.getState().tabs[moved.tabId]!.regions[page.regionId]).toBe(originalPage)
   expect(Object.keys(source().regions)).toEqual(['secondary-sibling'])
   expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).toBe(input)
