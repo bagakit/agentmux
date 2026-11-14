@@ -58,7 +58,9 @@ Desktop 的 `workbench-user-state.json` 位于同一应用 `userData` 根，由�
 
 首次读取只在宿主文档确认不存在时导入既有 Web Storage 字节；原子导入与普通写入共用同一宿主队列。新的宿主文档存在后只读取原文件，读取失败保留原数据。旧内容仅在准确写入确认后清理。普通读取、目录存在和相同摘要都不产生新的写入确认；历史 `lastConfirmedWrite` 与当前读取分别表达。
 
-显式保存与受控退出调用 [`checkpointSpatialWorkbench`](../../apps/desktop/src/renderer/src/store.ts) 捕获当前空间结构，再提交当前用户投影，等待两个原 owner。空间观察器与其初始化 owner 同寿命，Runtime 启动失败不撤销空间保存，旧初始化的清理也不释放新 owner。公共空间操作的 `clientStateWritten` 表示客户端用户投影写入，`diskDurability` 仍须覆盖本次空间与用户数据；字段不绑定某个浏览器 API。
+[`checkpointSpatialWorkbench`](../../apps/desktop/src/renderer/src/store.ts) 只捕获当前空间结构并等待原 Core 空间 owner 确认；显式汇总保存与受控退出由 `requestWorkbenchStorageFlush` 另行覆盖用户投影及各片段的待保存编辑。空间观察器与其初始化 owner 同寿命，Runtime 启动失败不撤销空间保存，旧初始化的清理也不释放新 owner。公共空间操作的 `clientStateWritten` 表示客户端用户投影写入，`diskDurability` 仍须覆盖本次空间与用户数据；字段不绑定某个浏览器 API。
+
+Survey 的 [`createSurveyBrowser`](../../apps/desktop/src/renderer/src/lib/survey-browser-creation.ts)、[`openSystemPageInSurvey`](../../apps/desktop/src/renderer/src/lib/survey-system-page.ts) 与页面准入只暴露所需的 `Pick<AppState, …>` 能力；对 Store 的引用仅用于类型。Store 适配器复用 [`planSpatialZone`](../../apps/desktop/src/renderer/src/lib/space-agent-control.ts) 同步准备准确位置，再把原 `checkpointSpatialWorkbench` 作为显式端口注入：Launcher 框架可先显示，Native 创建仍等准确位置确认。页面准入和选中偏好由同一 `saveSurveyPreferences` 保存原用户文档，不调用会汇总 Launcher、书签等片段的通用 Zone 创建或汇总保存。原 getter 身份、页面引用数组代次、Main Browser 回执与 Core 空间身份继续由原 owner 持有。
 
 共同数据分类、失败边界和重启验收归[用户数据与本地持久化](../design/behavior/persistence.md)。
 
