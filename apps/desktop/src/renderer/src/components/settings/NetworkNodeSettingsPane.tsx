@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseNodePublishingPolicy, type NodeSettings, type NodePublishingPolicy } from '@agentmux/core/node-publishing'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -9,6 +9,7 @@ import { configValuesEqual } from '../../../../shared/config-edit'
 import { HostRuntimePanel } from './HostRuntimePanel'
 import { nodePublicationTarget, useNodePublicationReporter } from './NodePublicationObservation'
 import { NodeShareAddress } from './NodeShareAddress'
+import { SelectionField } from '../SelectionField'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { NodeOwnerTarget } from '../../../../shared/node-publishing'
 import type { SettingsPaneProps } from './settings-catalog'
@@ -18,6 +19,7 @@ import './network-node.css'
 export function NetworkNodeSettingsPane({ config, active, onNavigate, navigationRequest }: SettingsPaneProps) {
   const publication = useNodePublicationReporter()
   const local = config.hosts.find(host => host.kind === 'local')
+  const fieldId = useId(), labelId = `node-to-manage-label-${fieldId}`, hintId = `node-to-manage-hint-${fieldId}`
   const [selected, setSelected] = useState(navigationRequest?.hostId ?? local?.id ?? '')
   useEffect(() => { if (navigationRequest?.hostId) setSelected(navigationRequest.hostId) }, [navigationRequest])
   const host = config.hosts.find(item => item.id === selected)
@@ -44,10 +46,7 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate, navigation
   const target = identity?.route === route ? identity.target : undefined
   return <div className="settings-pane-stack network-node-settings" data-settings-host={host?.id}>
     <div className="network-node-intro"><h3>Manage a node</h3><p>Select a saved Host to manage what its original Core publishes. Connecting and starting work stay separate.</p><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Open Mesh</button></div>
-    <label className="network-node-field"><span>Node to manage</span><select aria-label="Node to manage" value={selected} onChange={event => setSelected(event.target.value)}>
-      {!host ? <option value={selected}>Original saved Host unavailable</option> : null}
-      {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label} · {item.kind === 'local' ? 'This device' : 'Remote Host'}</option>)}
-    </select><small>{host ? `${host.id}${target ? ` · Runtime ${target.expectedRuntimeId}` : ' · Identity not confirmed'}` : 'Select an original saved Host; no replacement target is selected automatically.'}</small></label>
+    <label className="network-node-field"><span id={labelId}>Node to manage</span><SelectionField label="Node to manage" labelledBy={labelId} describedBy={hintId} value={selected} missingOptionLabel="Original saved Host unavailable" missingOptionDescription="Select an original saved Host; no replacement target is selected automatically." options={config.hosts.map(item => ({ value: item.id, label: `${item.label} · ${item.kind === 'local' ? 'This device' : 'Remote Host'} · ${item.id}` }))} onValueChange={setSelected} /><small id={hintId}>{host ? `${host.id}${target ? ` · Runtime ${target.expectedRuntimeId}` : ' · Identity not confirmed'}` : 'Select an original saved Host; no replacement target is selected automatically.'}</small></label>
     {host && target ? <NodePublicationEditor key={route + target.expectedRuntimeId} host={host} target={target} active={active} /> : <section className="network-node-section"><p role="status">{identity?.route === route && identity.error ? identity.error : host ? 'Reading the selected Node identity…' : 'The requested saved Host is unavailable. Original drafts are retained.'}</p><button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Refresh Node identity</button></section>}
   </div>
 }
