@@ -313,7 +313,7 @@ describe('mounted original Goal delegation consumer', () => {
     const record = { ...goal(), supervisorSessionId: 'current-supervisor', delegations: [original, second] }
     await mount(record)
     const captions = [...container.querySelectorAll('.goal-delegation__identity')].map(element => element.textContent)
-    expect(captions).toEqual(['Agent Session original-worker · Host original-host · Follow-up Session current-supervisor', 'Agent Session second-worker · Host original-host · Follow-up Session current-supervisor'])
+    expect(captions).toEqual(['Agent Session original-worker · Host original-host · Follow-up Supervisor reference · Host unconfirmed', 'Agent Session second-worker · Host original-host · Follow-up Supervisor reference · Host unconfirmed'])
     await act(async () => { useAppStore.setState({ demands: { [record.id]: { ...record, supervisorSessionId: null } } }) })
     expect(container.querySelector('.goal-delegation__identity')!.textContent).toContain('needs an assigned Supervisor')
   })
