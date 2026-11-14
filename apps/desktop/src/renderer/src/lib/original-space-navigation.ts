@@ -3,13 +3,13 @@ import type { SpaceSnapshot } from '@agentmux/core'
 import type { AgentMuxDesktopSpaceSelection } from '@agentmux/core/control'
 import { folderDirectoryFacts } from '@agentmux/core/space-folder-resources'
 import type { FolderSpaceResource } from '@agentmux/core/space-folder'
-import { createWorkbenchViewLayout, splitWorkbenchRegion, removeTab as removeTabOccurrence, addTabOccurrence, createWorkspaceLayout, activateTab as activateLayoutTab,
+import { createWorkbenchViewLayout, closeWorkbenchRegion, regionIds, splitWorkbenchRegion, removeTab as removeTabOccurrence, addTabOccurrence, createWorkspaceLayout, activateTab as activateLayoutTab,
   type WorkspaceLayout, type WorkbenchViewLayout } from '@agentmux/layout'
-import type { AppConfig, WorkspaceRecord } from '../../../shared/contracts'
+import type { AppConfig, WorkspaceRecord, FileDocument } from '../../../shared/contracts'
 import type { SpaceMountRecord, SpaceMountView } from '../../../shared/space-mount'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { mountedSpaceInput, mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, editMountedSpaceInput, type MountedSpaceInput } from './space-mount-view'
-import { sourceRegionProjectionReference, type WorkbenchTab, type FileWorkbenchSurface } from './workbench-tabs'
+import { documentKey, sourceRegionProjectionReference, type WorkbenchTab, type FileWorkbenchSurface } from './workbench-tabs'
 import type { LauncherSourceExecution } from './launcher-source'
 import type { OrdinaryMemberReference, OrdinarySpaceMember } from './ordinary-space-member'
 
@@ -29,6 +29,10 @@ export type OriginalSpaceSelectionState = {
   mountedSpaceInputs?: unknown
   mountedSpaceObservations?: Record<string, import('./space-mount-view').MountedSpaceObservation> | undefined
   tabs?: Readonly<Record<string, WorkbenchTab>> | undefined
+  closingWorkbenchViews?: Readonly<Record<string, unknown>>
+  dirtyDocuments?: Readonly<Record<string, boolean>>
+  documents?: Readonly<Record<string, FileDocument>>
+  documentIssues?: Readonly<Record<string, unknown>>
 }
 export type OriginalSourceEntry = { key: string; target: SpaceMountRecord; input: MountedSpaceInput | undefined; issue?: string | undefined }
 
@@ -77,11 +81,18 @@ function sourceViewLayout(snapshot: Pick<SpaceSnapshot, 'scope'>, target: SpaceM
   for (const regionId of regionIds.slice(1)) layout = splitWorkbenchRegion(layout, layout.activeRegionId, 'right', originalSourceRegionProjectionId(target, regionId))
   return layout
 }
-function projectedSourceTab(target: SpaceMountRecord, snapshot: Pick<SpaceSnapshot, 'scope'>, tabId: string, layout: WorkbenchViewLayout): WorkbenchTab | undefined {
+function projectedSourceTab(target: SpaceMountRecord, snapshot: Pick<SpaceSnapshot, 'scope'>, tabId: string, layout: WorkbenchViewLayout,
+  retainedRegions: WorkbenchTab['regions'] = {}): WorkbenchTab | undefined {
   const tab = snapshot.scope.tabs.find(candidate => candidate.tabId === tabId && candidate.zoneId === target.zoneId && candidate.workspaceId === target.workspaceId)
   if (!tab) return undefined
   const id = originalSourceTabProjectionId(target, tabId), workspaceId = originalSourceWorkspaceId(target), source = sourceAddress(target, tabId)
-  const regions: WorkbenchTab['regions'] = {}
+  const wanted = new Set([...tab.regionIds.map(regionId => originalSourceRegionProjectionId(target, regionId)), ...Object.keys(retainedRegions)])
+  for (const regionId of regionIds(layout.root)) if (!wanted.has(regionId)) {
+    layout = closeWorkbenchRegion(layout, regionId) ?? sourceViewLayout(snapshot, target, tabId)
+  }
+  const shown = new Set(regionIds(layout.root))
+  for (const regionId of wanted) if (!shown.has(regionId)) layout = splitWorkbenchRegion(layout, layout.activeRegionId, 'right', regionId)
+  const regions: WorkbenchTab['regions'] = { ...retainedRegions }
   for (const originalRegionId of tab.regionIds) {
     const region = snapshot.scope.regions.find(candidate => candidate.tabId === tabId && candidate.regionId === originalRegionId)
     if (!region) continue
@@ -111,6 +122,12 @@ export function reconcileOriginalSourceProjection<T extends OriginalSpaceSelecti
   const sourceTabs = snapshot.scope.tabs.filter(tab => tab.zoneId === target.zoneId && tab.workspaceId === target.workspaceId)
   const wanted = new Set(sourceTabs.map(tab => originalSourceTabProjectionId(target, tab.tabId)))
   const launcherId = originalSourceLauncherTabId(target), retainedLaunchers = Object.values(state.tabs).filter(tab => tab.id === launcherId && tab.source?.tabId.startsWith('new-work:'))
+  // A Source write can finish while the common close still reviews newer local
+  // input. Keep that original workface until its existing document owner settles it.
+  const retained = Object.values(state.tabs).filter(tab => tab.source && spaceMountKey(tab.source.reference) === key &&
+    tab.source.zoneId === target.zoneId && tab.source.workspaceId === target.workspaceId && (state.closingWorkbenchViews?.[tab.id] ||
+      Object.values(tab.regions).some(surface => surface.kind === 'file' && (state.dirtyDocuments?.[documentKey(surface.workspaceId, surface.path)] ||
+        state.documentIssues?.[documentKey(surface.workspaceId, surface.path)] && state.documents?.[documentKey(surface.workspaceId, surface.path)]))))
   if (!currentLayout && savedView?.tabLayouts[legacyLauncherId(target)] && !retainedLaunchers.length) {
     const tabId = 'new-work:' + target.zoneId, source = sourceAddress(target, tabId), regionId = 'new-work'
     retainedLaunchers.push({ id: launcherId, workspaceId, titleRegionId: originalSourceRegionProjectionId(target, regionId),
@@ -120,7 +137,7 @@ export function reconcileOriginalSourceProjection<T extends OriginalSpaceSelecti
   }
   const initialLayout = currentLayout ?? (savedView ? projectWorkspaceLayout(savedView.composition, target) : createWorkspaceLayout(originalSourceGroupProjectionId(target, 'original-group'), sourceTabs.map(tab => originalSourceTabProjectionId(target, tab.tabId))))
   let composition = initialLayout
-  const privateIds = new Set(retainedLaunchers.map(tab => tab.id))
+  const privateIds = new Set([...retainedLaunchers, ...retained].map(tab => tab.id))
   for (const group of initialLayout.groups) for (const tabId of group.tabOrder) if (!wanted.has(tabId) && !privateIds.has(tabId)) composition = removeTabOccurrence(composition, group.id, tabId)
   for (const tab of sourceTabs) {
     const id = originalSourceTabProjectionId(target, tab.tabId)
@@ -132,10 +149,16 @@ export function reconcileOriginalSourceProjection<T extends OriginalSpaceSelecti
   for (const tab of sourceTabs) {
     const id = originalSourceTabProjectionId(target, tab.tabId), existing = state.tabs[id]
     const layout = existing?.layout ?? (savedView?.tabLayouts[tab.tabId] ? projectRegionLayout(savedView.tabLayouts[tab.tabId]!, target) : sourceViewLayout(snapshot, target, tab.tabId))
-    const projected = projectedSourceTab(target, snapshot, tab.tabId, layout)
+    const held = retained.find(tab => tab.id === id)
+    const retainedRegions = held ? Object.fromEntries(Object.entries(held.regions).filter(([, surface]) => {
+      const source = sourceRegionProjectionReference(surface)
+      return source && !snapshot.scope.regions.some(region => region.tabId === tab.tabId && region.regionId === source.regionId)
+    })) : {}
+    const projected = projectedSourceTab(target, snapshot, tab.tabId, layout, retainedRegions)
     if (projected) tabs[id] = projected
   }
   for (const tab of retainedLaunchers) tabs[tab.id] = tab
+  for (const tab of retained) if (!tabs[tab.id]) tabs[tab.id] = tab
   const selection = state.workbenchSpaceSelection
   const selectedHere = selection?.sourceRuntimeId === target.reference.runtimeId && selection.spaceId === target.reference.spaceId && selection.zoneId === target.zoneId
   const activeGroup = composition.groups.find(group => group.id === composition.activeGroupId)

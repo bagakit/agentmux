@@ -3,6 +3,8 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString, rpcCount } from './rpc-data.js'
 import { parseTerminalControl, parseTerminalControlResult, type TerminalControlRequest, type TerminalControlReceipt } from './terminal-control.js'
 import { parseAgentStopReceipt, parseAgentStopInspection, type AgentMuxAgentStopReceipt, type AgentMuxAgentStopInspection } from './agent-stop-receipt.js'
+import { parseSpaceAuthorityParams } from './space-authority-codec.js'
+import type { SpaceApply } from './space-authority.js'
 
 /** Client-owned workface close: these are frozen references, never a second layout or Runtime. */
 export type SpaceCloseTarget = { kind: 'tab-occurrence'; displayWorkspaceId: string; groupId: string; tabId: string }
@@ -21,6 +23,8 @@ export type SpaceCloseResource = { key: string; kind: 'session'; sessionId: stri
 export type SpaceCloseDocument = { hostId: string; workspaceId: string; path: string; noteId: string | null }
 export type SpaceCloseDraft = { document: SpaceCloseDocument; witness: string; regionIds: string[] }
 export type SpaceCloseProjection = { workspaceId: string; tabGroupId: string; tabId: string; closesView: boolean;
+  /** Exact original spatial contribution; never authorizes stopping an execution. */
+  source?: { hostId: string; edit: SpaceApply };
   surfaces: Array<{ owner: SpaceCloseSurfaceOwner; resourceKeys: string[]; witness: string; blocker: 'session-unconfirmed' | 'draft-busy' | null; binding: { hostId: string; agentSessionId: string } | null; bindingAvailability: 'known' | 'unconfirmed' | null }>;
   resources: SpaceCloseResource[]; reservedSessionIds: string[]; drafts: SpaceCloseDraft[]; otherOccurrences: Array<{ displayWorkspaceId: string; groupId: string }> }
 export type SpaceClosePlan = { authority: { ownerId: string; endpoint: string; documentGeneration: string }; target: SpaceCloseTarget;
@@ -128,7 +132,8 @@ function owner(value: unknown): SpaceCloseSurfaceOwner {
   if (p.kind !== 'launcher') invalid(); rpcRecord(p, ['regionId', 'kind']); return { ...common, kind: 'launcher' }
 }
 export function parseSpaceCloseProjection(value: unknown): SpaceCloseProjection {
-  const p = rpcRecord(value, ['workspaceId', 'tabGroupId', 'tabId', 'closesView', 'surfaces', 'resources', 'reservedSessionIds', 'drafts', 'otherOccurrences'])
+  const p = rpcRecord(value, ['workspaceId', 'tabGroupId', 'tabId', 'closesView', 'source', 'surfaces', 'resources', 'reservedSessionIds', 'drafts', 'otherOccurrences'])
+  const source = p.source === undefined ? undefined : rpcRecord(p.source, ['hostId', 'edit'])
   const resources = list(p.resources, value => {
     const r = rpcRecord(value)
     if (r.kind === 'browser') { rpcRecord(r, ['key', 'kind', 'browserId']); if (r.key !== `browser:${r.browserId}`) invalid(); return { key: text(r.key), kind: 'browser' as const, browserId: text(r.browserId) } }
@@ -145,7 +150,9 @@ export function parseSpaceCloseProjection(value: unknown): SpaceCloseProjection 
   unique(resources.map(r => r.key)); unique(surfaces.map(s => s.owner.regionId))
   for (const s of surfaces) { unique(s.resourceKeys); if (s.resourceKeys.some(k => !resources.some(r => r.key === k))) invalid() }
   const drafts = list(p.drafts, value => { const d = rpcRecord(value, ['document', 'witness', 'regionIds']); const regionIds = strings(d.regionIds); unique(regionIds); if (regionIds.some(id => !surfaces.some(s => s.owner.regionId === id && s.owner.kind === 'file'))) invalid(); return { document: document(d.document), witness: text(d.witness), regionIds } })
-  return { workspaceId: text(p.workspaceId), tabGroupId: text(p.tabGroupId), tabId: text(p.tabId), closesView: bool(p.closesView), surfaces, resources, reservedSessionIds: strings(p.reservedSessionIds), drafts, otherOccurrences: list(p.otherOccurrences, value => { const o = rpcRecord(value, ['displayWorkspaceId', 'groupId']); return { displayWorkspaceId: text(o.displayWorkspaceId), groupId: text(o.groupId) } }) }
+  return { workspaceId: text(p.workspaceId), tabGroupId: text(p.tabGroupId), tabId: text(p.tabId), closesView: bool(p.closesView),
+    ...(source ? { source: { hostId: text(source.hostId), edit: parseSpaceAuthorityParams('space.apply', source.edit) } } : {}),
+    surfaces, resources, reservedSessionIds: strings(p.reservedSessionIds), drafts, otherOccurrences: list(p.otherOccurrences, value => { const o = rpcRecord(value, ['displayWorkspaceId', 'groupId']); return { displayWorkspaceId: text(o.displayWorkspaceId), groupId: text(o.groupId) } }) }
 }
 export function parseSpaceClosePlan(value: unknown): SpaceClosePlan {
   const p = rpcRecord(value, ['authority', 'target', 'keepAgentSessions', 'projection', 'children']), a = rpcRecord(p.authority, ['ownerId', 'endpoint', 'documentGeneration'])

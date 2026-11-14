@@ -14,6 +14,7 @@ import { folderDirectoryFacts } from '@agentmux/core/space-folder-resources'
 import type { FileMutationEffect, FileReadIdentity } from '@agentmux/core/files'
 import { openSourceFolderInput } from './lib/space-mount-view'
 import { observeMountedSpaceWindow } from './lib/mounted-space-observation'
+import { sourceCloseObservation } from './lib/source-workbench-close'
 import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSelection, type MountedLauncherSlot } from './lib/space-mount-launch'
 import { editSourceCoordinatorInput, sourceCoordinatorInputKey, type SourceCoordinatorInput } from './lib/source-coordinator-input'
 import { associateCreatedSourceCoordinator } from './lib/source-coordinator-request'
@@ -8860,16 +8861,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return false
   },
   async prepareWorkbenchClose(input) {
-    const unavailable = originalSourceActionUnavailable(get(), input.target.displayWorkspaceId, 'close')
-    if (unavailable) throw unavailable
     const request: SpaceClosePrepare = { ...input, operationId: input.operationId ?? mintObjectId() }
     const result = parseSpaceCloseResult('space.close.prepare', await api.workbenchClose.call('space.close.prepare', request), request)
     if (!result.operation || !__AGENTMUX_WEB_PREVIEW__ && result.operation.diskDurability !== 'confirmed') throw new Error('The original close plan has no confirmed save. Its ID, workface and drafts are retained; inspect the same operation.')
     return result.operation
   },
   async applyWorkbenchClose(record) {
-    const unavailable = originalSourceActionUnavailable(get(), record.plan.target.displayWorkspaceId, 'close')
-    if (unavailable) throw unavailable
     const request = { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: spaceCloseDecisions(record.plan) }
     const result = parseSpaceCloseResult('space.close.apply', await api.workbenchClose.call('space.close.apply', request), request).operation!
     if (result.outcome !== 'applied' || result.diskDurability !== 'confirmed') {
@@ -8925,7 +8922,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       validateWorkbenchClose(get(), record, request.key)
       return { operation: request.operation, requestId: request.requestId }
     }
-    const previousTabs = get().tabs
+    const previousTabs = get().tabs, source = record.plan.projection.source
+    if (source) {
+      // The common durable close claim owns this one Source contribution. Native
+      // observation is irrelevant; an unknown write is never automatically replayed.
+      validateWorkbenchClose(get(), record)
+      const receipt = await api.spaceMounts.call('apply', { hostId: source.hostId, reference: source.edit.reference, edit: source.edit })
+      const observed = sourceCloseObservation(get(), source, receipt)
+      if (observed) get().observeSpaceMount(observed.target, { snapshot: observed.snapshot, reading: false })
+    }
     let removedTab: WorkbenchTab | undefined, removedTabOrder: readonly string[] = [], collectionChanged = false
     let projection = { applied: false, removedRegions: [] as string[], retainedRegions: record.plan.projection.surfaces.map(s => s.owner.regionId), save: null as SpaceCloseCommitResult['clientProjection']['save'] }
     // All final dirty/content/lifetime/consumer witnesses are checked within this exact state replacement.
@@ -8939,12 +8944,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       removedTab = current.tabs[target.tabId] && !committed.tabs[target.tabId] ? current.tabs[target.tabId] : undefined
       removedTabOrder = current.layouts[target.displayWorkspaceId]?.groups.find(g => g.id === target.groupId)?.tabOrder ?? []
       collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
-      recordClosedWorkbenchEntities(current.tabs, committed.tabs)
+      if (!previousTabs[target.tabId]?.source) recordClosedWorkbenchEntities(current.tabs, committed.tabs)
       const closesView = record.plan.projection.closesView
       const removedOriginal = closesView && record.plan.projection.surfaces.some(s => current.tabs[target.tabId]?.regions[s.owner.regionId] && !committed.tabs[target.tabId]?.regions[s.owner.regionId])
       const unlinkedOriginal = current.layouts[target.displayWorkspaceId]?.groups.some(g => g.id === target.groupId && g.tabOrder.includes(target.tabId)) &&
         !committed.layouts[target.displayWorkspaceId]?.groups.some(g => g.id === target.groupId && g.tabOrder.includes(target.tabId))
-      projection = { ...projection, applied: Boolean(removedOriginal || unlinkedOriginal || workbenchCloseBrowsersAlreadyApplied(current, record)), removedRegions: closesView ? record.plan.projection.surfaces.filter(s => !committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [],
+      projection = { ...projection, applied: Boolean(removedOriginal || unlinkedOriginal || source && !record.plan.projection.surfaces.some(s => committed.tabs[target.tabId]?.regions[s.owner.regionId]) || workbenchCloseBrowsersAlreadyApplied(current, record)), removedRegions: closesView ? record.plan.projection.surfaces.filter(s => !committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [],
         retainedRegions: closesView ? record.plan.projection.surfaces.filter(s => committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [] }
       if (!removedTab) return committed
       return { ...committed, recentMoteAgents: Object.fromEntries(Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTab!.id)) }
@@ -8962,7 +8967,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return { ...value, clientStateWritten: true, storageFlushRequested: true, diskDurability: !__AGENTMUX_WEB_PREVIEW__ || owner === 'spatial' ? 'confirmed' as const : 'unconfirmed' as const }
       } catch (error) { get().reportWorkbenchSaveFailure(error, owner === 'client' ? 'local-storage' : 'workbench'); return { ...value, reason: presentError(error) } }
     }
-    const [client, spatial] = await Promise.all([save('client'), save('spatial')])
+    const [client, spatial] = await Promise.all([save('client'), source
+      ? Promise.resolve({ layoutApplied: projection.applied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' as const, reason: null })
+      : save('spatial')])
     return { operation: 'workbench.close.commit', requestId: request.requestId, result: { clientProjection: { ...projection, save: client }, spatialContribution: { save: spatial } } }
   },
   async closeTab(workspaceId, tabGroupId, tabId, options) {
