@@ -2,6 +2,9 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { connectSpaceMember } from '../src/space-member-client.js'
 import { parseSpaceMemberParams } from '../src/space-member-codec.js'
 import { createSpaceSessionsFixture } from './helpers/space-session-fixture.js'
+import { consumeConversationWindowPage, type ConversationWindowAssembly, type ConversationWindowSnapshot } from '../src/conversation-changes.js'
+import type { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const release of cleanup.splice(0).reverse()) await release(); vi.restoreAllMocks() })
 it('the actual two-Core member SDK reads the exact full foreign Session and sends input only to its current original Run', async () => {
@@ -40,6 +43,48 @@ it('the finite member parser rejects another Session, Run, inventory and native 
   expect(() => parseSpaceMemberParams('space.member.call', input('writeAgent', { agentSessionId: 'sid', expectedRun: { runId: 'other-run' } }))).toThrow()
   expect(() => parseSpaceMemberParams('space.member.call', input('readAgentSessions', {}))).toThrow()
   expect(() => parseSpaceMemberParams('space.member.call', input('respondAgentInteraction', { agentSessionId: 'sid', expectedRun: { runId: 'run' } }))).toThrow()
+  expect(() => parseSpaceMemberParams('space.member.call', input('readAgentConversation', { hostId: 'local', agentSessionId: 'another-sid' }))).toThrow()
+  expect(() => parseSpaceMemberParams('space.member.call', input('readAgentConversation', { hostId: 'other-host', agentSessionId: 'sid' }))).toThrow()
+  const options = input('conversationCheckpoint', { hostId: 'local', agentSessionId: 'sid' }); options.call.params.invocation.args.push({ caller: { agentSessionId: 'another-sid' } })
+  expect(() => parseSpaceMemberParams('space.member.call', options)).toThrow()
+  const watch = (ref: unknown) => ({ target, call: { method: 'runtime.conversation-watch', params: { consumerId: 'reader', fence: { runtimeId: 'D', ownerInstanceId: 'D-instance' }, reference: ref } } })
+  expect(() => parseSpaceMemberParams('space.member.watch', watch({ hostId: 'local', agentSessionId: 'another-sid' }))).toThrow()
+})
+
+it('the actual two-Core member SDK reads, follows and releases only the original conversation, preserving fragmented records', async () => {
+  const f = await createSpaceSessionsFixture(cleanup), sid = 'same-conversation-sid'
+  await f.b.put(sid); const session = await f.d.put(sid), admission = await f.admit('D-in-B', f.d.owner.runtimeId, sid, 'conversation-member-op')
+  const store = (f.d.core as unknown as { store: AgentMuxMemoryAgentSessionStore }).store
+  const originalBody = 'Original D conversation body. '.repeat(3000)
+  await store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item: { id: 'original-D-record', agentSessionId: sid,
+    kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Original result', content: originalBody, createdAt: 1, updatedAt: 1 } })
+  const target = { reference: f.reference, regionId: admission.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: sid, expectedRun: session.run }
+  const client = await connectSpaceMember(f.b.rpc, target); cleanup.push(() => client.dispose())
+  const observerRead = vi.spyOn(f.b.core, 'readAgentConversation').mockRejectedValue(Error('The Source-local same SID must not supply conversation content'))
+  let pending: ConversationWindowAssembly | undefined, snapshot: ConversationWindowSnapshot | undefined, cursor: string | undefined, pages = 0
+  for (; pages < 100; pages++) {
+    const page = await client.readAgentConversation({ hostId: 'local', agentSessionId: sid, maxBytes: 16 * 1024, ...(cursor ? { cursor } : {}) })
+    const assembled = consumeConversationWindowPage(page, pending)
+    if (assembled.kind === 'complete') { snapshot = assembled.snapshot; pending = undefined; if (!page.nextCursor) break }
+    else pending = assembled.pending
+    cursor = page.nextCursor ?? undefined
+  }
+  expect(pages).toBeGreaterThan(0); expect(snapshot).toBeDefined()
+  expect(JSON.stringify(snapshot)).toContain(originalBody)
+  expect(observerRead).not.toHaveBeenCalled()
+  const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + f.d.server.path, 'agent', 'conversation', 'inspect', '--input', '-'], objectCliEnvironment(f.d.root),
+    JSON.stringify({ hostId: 'local', agentSessionId: sid, maxBytes: 4 * 1024 * 1024 }))
+  expect(cli.code, cli.stderr).toBe(0); expect(JSON.stringify(JSON.parse(cli.stdout).result)).toContain(originalBody)
+  const checkpoint = await client.conversationCheckpoint({ hostId: 'local', agentSessionId: sid })
+  const watch = await client.observeConversation({ hostId: 'local', agentSessionId: sid, view: snapshot!.window.view! }, () => {})
+  expect(watch.agentSessionId).toBe(sid)
+  const changed = await client.readConversationChanges({ hostId: 'local', agentSessionId: sid, checkpoint: checkpoint.checkpoint, view: snapshot!.window.view!, maxBytes: 16 * 1024 })
+  expect(changed.agentSessionId).toBe(sid); expect(changed.window.id).toBe(snapshot!.window.id)
+  await expect(client.readAgentConversation({ hostId: 'local', agentSessionId: 'different-sid' })).rejects.toMatchObject({ code: 'SPACE_MEMBER_TARGET_MISMATCH' })
+  watch.dispose(); expect(watch.closed.aborted).toBe(true)
+  expect(await client.releaseConversationView({ hostId: 'local', agentSessionId: sid, view: snapshot!.window.view! })).toMatchObject({ agentSessionId: sid, released: true })
+  expect(await f.d.core.readAgentSession(sid)).toMatchObject({ run: session.run })
+  for (const core of [f.b, f.d]) { expect(core.inventory).not.toHaveBeenCalled(); expect(core.runs).not.toHaveBeenCalled(); expect(core.all).not.toHaveBeenCalled() }
 })
 
 it('a managed caller cannot acquire a member control identity through the public wrapper', async () => {

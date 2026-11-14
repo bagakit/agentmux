@@ -132,6 +132,33 @@ it('the original member Core SDK reaches fixed trusted Main IPC and the scoped p
   expect(snapshot).toMatchObject({ id: surface.initial.id, hostId: surface.initial.hostId, workspacePath: session.workspacePath,
     control: { kind: 'agent', hostId: surface.initial.hostId, agentSessionId: sid, run: session.run } })
   expect(snapshot.id).not.toBe(sid); expect(snapshot.hostId).not.toBe('local'); expect(snapshot.hostId).not.toBe('D-in-B')
+  const store = (f.d.core as unknown as { store: import('../../../packages/core/src/agent-session-store').AgentMuxMemoryAgentSessionStore }).store
+  await store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item: { id: 'source-result', agentSessionId: sid,
+    kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Original result', content: 'Original D work remains source-qualified', createdAt: 1, updatedAt: 1 } })
+  const observerConversation = vi.spyOn(f.b.core, 'readAgentConversation').mockRejectedValue(Error('Never read the source-local same-SID conversation'))
+  const released = vi.spyOn(f.d.core, 'releaseConversationView')
+  const conversation = await surface.call('conversationRead', { input: { limit: 3, processDetails: 'deferred' } })
+  expect(conversation.agentSessionId).toBe(sid); expect(JSON.stringify(conversation)).toContain('Original D work remains source-qualified')
+  expect(conversation.agentSessionId).not.toBe(surface.initial.id); expect(observerConversation).not.toHaveBeenCalled()
+  await expect(surface.call('conversationRead', { input: { agentSessionId: 'another-sid' } } as never)).rejects.toMatchObject({ code: 'SPACE_MEMBER_TARGET_MISMATCH' })
+  const cut = await surface.call('conversationCheckpoint', { input: {} })
+  const changes = await surface.call('conversationChanges', { input: { checkpoint: cut.checkpoint, view: conversation.window.view!, processDetails: 'deferred' } })
+  expect(changes.window.id).toBe(conversation.window.id)
+  const originalWatches = vi.spyOn(f.d.core, 'observeConversation')
+  const one = await surface.call('conversationWatch', { view: conversation.window.view! }), two = await surface.call('conversationWatch', { view: conversation.window.view! })
+  expect(one).toMatchObject({ agentSessionId: sid }); expect(two.readerId).not.toBe(one.readerId)
+  const firstHandle = await originalWatches.mock.results[0]!.value, secondHandle = await originalWatches.mock.results[1]!.value
+  await surface.call('conversationUnwatch', { readerId: one.readerId })
+  await vi.waitFor(() => expect(firstHandle.closed.aborted).toBe(true))
+  expect(secondHandle.closed.aborted).toBe(false)
+  const update = await store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item: { id: 'source-followup', agentSessionId: sid,
+    kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Original continuation', content: 'Followed original D source', createdAt: 2, updatedAt: 2 } })
+  ;(f.d.core as unknown as { publisher: import('../../../packages/core/src/client-event-publisher').AgentMuxClientEventPublisher }).publisher.publishTimeline(update, { source: 'native-hook', observedAt: 2, run: session.run }, 'local')
+  await vi.waitFor(() => expect(events.some(event => event.type === 'conversation' && event.readerId === two.readerId && event.observation.kind === 'invalidated')).toBe(true))
+  expect(events.some(event => event.type === 'conversation' && event.readerId === one.readerId)).toBe(false)
+  await surface.call('conversationUnwatch', { readerId: two.readerId })
+  expect(await surface.call('conversationRelease', { view: conversation.window.view! })).toMatchObject({ agentSessionId: sid, released: true })
+  expect(released).toHaveBeenCalledWith(expect.objectContaining({ hostId: 'local', agentSessionId: sid, view: conversation.window.view }))
   await surface.call('write', { data: 'ping', source: 'user' }); expect(write).toHaveBeenCalledOnce()
   expect(write.mock.calls[0]?.[0]).toMatchObject({ agentSessionId: sid, expectedRun: session.run, data: 'ping' })
   expect(() => main.handlers.get('spaceMounts:memberCall')!({ ...main.event, senderFrame: { ...main.sender.mainFrame } } as never, 'foreign-call', 'other-view', 'write', { data: 'bad', source: 'user' })).toThrow('Untrusted application')
