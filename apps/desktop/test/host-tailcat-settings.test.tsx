@@ -3,6 +3,7 @@ import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig, HostConfig, SshHostConfig } from '../src/shared/contracts'
 import { parseHostConfiguration, parseHostConfigurations } from '@agentmux/host/host-configuration'
+import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -18,9 +19,12 @@ beforeEach(() => {
   installNoteCanvasGeometry()
   config = { ...structuredClone(composerConfig), hosts: [composerConfig.hosts[0]!, structuredClone(remote)] }
   onSave.mockClear()
-  useAppStore.setState({ sessions: [], hostChecks: {}, checkHost })
+  useAppStore.setState({ config, sessions: [], hostChecks: {}, checkHost, tailcatConnectionDrafts: {} })
+  vi.spyOn(api.hosts, 'configureTailcat').mockResolvedValue({} as never)
+  vi.spyOn(api.hosts, 'network').mockRejectedValue(new Error('No local network fixture'))
+  vi.spyOn(api.nodePublishing, 'call').mockRejectedValue(new Error('No Node publication fixture'))
 })
-const show = (hostId = remote.id) => dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
+const show = (hostId = remote.id) => hostId === 'local' ? dom.render(<NetworkNodeSettingsPane config={config} active={true} onSave={async () => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />) : dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
 function input(label: string) {
   const node = dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)
   expect(node).not.toBeNull()
@@ -93,7 +97,7 @@ it('turning Tailcat off preserves its credentials and the complete original SSH 
   expect(onSave.mock.calls[0]![0][1]).toEqual({ ...config.hosts[1], transport: 'ssh' })
 })
 
-it('the local switch remains a draft until Save hosts and displays the original listener failure without closing work', async () => {
+it('the local switch remains a draft until Save incoming connections and displays the original listener failure without closing work', async () => {
   const local = { ...config.hosts[0]!, tailcat: { enabled: true, keyFile: 'saved-server', allowedClients: ['nodekey:fixture'] } } as HostConfig
   config.hosts[0] = local
   const original = composerSession('original-retained')
@@ -106,9 +110,10 @@ it('the local switch remains a draft until Save hosts and displays the original 
   expect(dom.container.querySelector('[data-tailcat-listener]')!.textContent).toContain('Install it on PATH')
   expect(onSave).not.toHaveBeenCalled()
   await act(async () => input('Allow Tailcat connections').click())
-  expect(dom.container.querySelector('[data-tailcat-listener]')!.textContent).toContain('Save hosts to apply')
-  await button('Save hosts')
-  expect(onSave.mock.calls[0]![0][0]).toEqual({ ...local, tailcat: { ...local.tailcat, enabled: false } })
+  expect(dom.container.querySelector('[data-tailcat-listener]')!.textContent).toContain('Save incoming connections to apply')
+  await button('Save incoming connections')
+  expect(api.hosts.configureTailcat).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', expected: local.tailcat, candidate: { ...local.tailcat, enabled: false } })
+  expect(onSave).not.toHaveBeenCalled()
   expect(useAppStore.getState().sessions).toEqual([original])
 })
 

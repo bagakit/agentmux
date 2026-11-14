@@ -22,6 +22,7 @@ beforeEach(() => {
   vi.spyOn(api.hosts, 'network').mockRejectedValue(new Error('Local network not observed in this controlled connection test'))
   vi.spyOn(api.nodePublishing, 'call').mockRejectedValue(new Error('Publication identity is outside this incoming-connection test'))
   vi.spyOn(api.config, 'save').mockImplementation(async next => next)
+  vi.spyOn(api.hosts, 'configureTailcat').mockResolvedValue({} as never)
 })
 const show = (hostId = 'studio') => hostId === 'local'
   ? dom.render(<NetworkNodeSettingsPane config={config} active={true} onSave={async () => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />)
@@ -59,8 +60,8 @@ it('the receiving Mac prepares its missing server key as a draft, focuses approv
   expect(api.config.save).not.toHaveBeenCalled()
   await fill('Tailcat allowed clients', publicKey)
   await click('Save incoming connections')
-  expect(api.config.save).toHaveBeenCalledOnce()
-  expect(vi.mocked(api.config.save).mock.calls[0]![0].hosts[0]).toEqual({ ...config.hosts[0], tailcat: { keyFile: 'agentmux-server', enabled: true, allowedClients: [publicKey] } })
+  expect(api.hosts.configureTailcat).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', expected: null, candidate: { keyFile: 'agentmux-server', enabled: true, allowedClients: [publicKey] } })
+  expect(api.config.save).not.toHaveBeenCalled()
 })
 
 it.each([
