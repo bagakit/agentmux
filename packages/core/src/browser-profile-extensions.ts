@@ -11,6 +11,7 @@ export type BrowserProfileExtensionReview = { reviewId: string; profileId: strin
   name: string; version: string; sha256: string; source: BrowserProfileExtensionSource; permissions: BrowserProfileExtensionPermissions;
   addedPermissions: string[]; previousVersion?: string }
 export type BrowserProfileExtensionReceipt = { operationId: string; profileId: string; extensionId: string; kind: 'install' | 'update' | 'remove'; sha256: string }
+export type BrowserProfileExtensionPending = BrowserProfileExtensionReceipt & { expectedRevision: string; version: string; previousSha256?: string; nativeId?: string }
 export const BROWSER_PROFILE_EXTENSION_OPERATIONS = ['browser.profile.extension.ls', 'browser.profile.extension.prepare', 'browser.profile.extension.apply', 'browser.profile.extension.remove', 'browser.profile.extension.load'] as const
 export type BrowserProfileExtensionOperation = typeof BROWSER_PROFILE_EXTENSION_OPERATIONS[number]
 export function isBrowserProfileExtensionOperation(value: unknown): value is BrowserProfileExtensionOperation { return typeof value === 'string' && (BROWSER_PROFILE_EXTENSION_OPERATIONS as readonly string[]).includes(value) }
@@ -21,7 +22,7 @@ export type BrowserProfileExtensionPayload =
   | { operation: 'browser.profile.extension.remove'; profileId: string; expectedRevision: string; extensionId: string; operationId: string }
   | { operation: 'browser.profile.extension.load'; profileId: string; extensionId: string }
 export type BrowserProfileExtensionResult =
-  | { operation: 'browser.profile.extension.ls'; profileId: string; profileRevision: string; extensions: BrowserProfileExtension[]; receipt?: BrowserProfileExtensionReceipt | null }
+  | { operation: 'browser.profile.extension.ls'; profileId: string; profileRevision: string; extensions: BrowserProfileExtension[]; pending: BrowserProfileExtensionPending[]; receipt?: BrowserProfileExtensionReceipt | null }
   | { operation: 'browser.profile.extension.prepare'; review: BrowserProfileExtensionReview }
   | { operation: 'browser.profile.extension.apply' | 'browser.profile.extension.remove'; profileId: string; profileRevision: string; outcome: 'applied' | 'cancelled'; receipt: BrowserProfileExtensionReceipt | null; application?: BrowserProfileExtensionApplication }
   | { operation: 'browser.profile.extension.load'; profileId: string; extensionId: string; application: BrowserProfileExtensionApplication }
@@ -60,9 +61,14 @@ export function parseBrowserProfileExtensionPayload(value: unknown): BrowserProf
   if (operation === 'browser.profile.extension.remove') return { operation, profileId, expectedRevision: text(r.expectedRevision), extensionId: text(r.extensionId), operationId: text(r.operationId) }
   return { operation: 'browser.profile.extension.load', profileId, extensionId: text(r.extensionId) }
 }
+function pending(value: unknown): BrowserProfileExtensionPending {
+  const r = rpcRecord(value, ['operationId', 'profileId', 'extensionId', 'kind', 'sha256', 'expectedRevision', 'version', 'previousSha256', 'nativeId'])
+  const { expectedRevision, version, previousSha256, nativeId, ...ack } = r
+  return { ...receipt(ack), expectedRevision: text(expectedRevision), version: text(version), ...(previousSha256 === undefined ? {} : { previousSha256: digest(previousSha256) }), ...(nativeId === undefined ? {} : { nativeId: text(nativeId) }) }
+}
 function extensionResult(operation: BrowserProfileExtensionOperation, value: unknown): BrowserProfileExtensionResult {
   const r = rpcRecord(value)
-  const resultFields = operation === 'browser.profile.extension.prepare' ? ['review'] : operation === 'browser.profile.extension.ls' ? ['profileId', 'profileRevision', 'extensions', 'receipt'] : operation === 'browser.profile.extension.load' ? ['profileId', 'extensionId', 'application'] : ['profileId', 'profileRevision', 'outcome', 'receipt', 'application']
+  const resultFields = operation === 'browser.profile.extension.prepare' ? ['review'] : operation === 'browser.profile.extension.ls' ? ['profileId', 'profileRevision', 'extensions', 'pending', 'receipt'] : operation === 'browser.profile.extension.load' ? ['profileId', 'extensionId', 'application'] : ['profileId', 'profileRevision', 'outcome', 'receipt', 'application']
   rpcRecord(r, ['operation', ...resultFields], 'CONTROL_PROTOCOL_ERROR')
   if (r.operation !== undefined && r.operation !== operation) return fail()
   if (operation === 'browser.profile.extension.prepare') {
@@ -79,7 +85,10 @@ function extensionResult(operation: BrowserProfileExtensionOperation, value: unk
     const extensions = r.extensions.map(value => { const v = rpcRecord(value, ['id', 'nativeId', 'name', 'version', 'sha256', 'source', 'permissions', 'application']);
       return { id: text(v.id), nativeId: text(v.nativeId), name: text(v.name), version: text(v.version), sha256: digest(v.sha256), source: parseBrowserProfileExtensionSource(v.source), permissions: parseBrowserProfileExtensionPermissions(v.permissions), application: application(v.application) } })
     if (new Set(extensions.map(extension => extension.id)).size !== extensions.length) return fail()
-    return { operation, profileId, profileRevision, extensions, ...(r.receipt === undefined ? {} : { receipt: r.receipt === null ? null : receipt(r.receipt) }) }
+    if (!Array.isArray(r.pending)) return fail()
+    const intents = r.pending.map(pending)
+    if (new Set(intents.map(intent => intent.operationId)).size !== intents.length) return fail()
+    return { operation, profileId, profileRevision, extensions, pending: intents, ...(r.receipt === undefined ? {} : { receipt: r.receipt === null ? null : receipt(r.receipt) }) }
   }
   if (r.outcome !== 'applied' && r.outcome !== 'cancelled') return fail()
   const acknowledged = r.receipt === null ? null : receipt(r.receipt)
@@ -102,6 +111,7 @@ export function assertBrowserProfileExtensionTarget(request: BrowserProfileExten
     if (result.operation === 'browser.profile.extension.load' && request.operation === result.operation && result.extensionId !== request.extensionId) return wrong()
     if ((result.operation === 'browser.profile.extension.apply' || result.operation === 'browser.profile.extension.remove') && result.receipt &&
         (result.receipt.profileId !== request.profileId || request.operation === 'browser.profile.extension.apply' && result.receipt.operationId !== request.reviewId || request.operation === 'browser.profile.extension.remove' && (result.receipt.operationId !== request.operationId || result.receipt.extensionId !== request.extensionId))) return wrong()
+    if (result.operation === 'browser.profile.extension.ls' && request.operation === result.operation && (result.pending.some(intent => intent.profileId !== request.profileId || request.operationId !== undefined && intent.operationId !== request.operationId) || request.operationId !== undefined && !Object.hasOwn(result, 'receipt'))) return wrong()
     if (result.operation === 'browser.profile.extension.ls' && request.operation === result.operation && result.receipt && (result.receipt.profileId !== request.profileId || result.receipt.operationId !== request.operationId)) return wrong()
   }
 }

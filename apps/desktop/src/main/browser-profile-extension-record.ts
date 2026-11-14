@@ -8,3 +8,6 @@ export type BrowserProfileExtensionRecord = z.infer<typeof browserProfileExtensi
 export const browserProfileExtensionReceiptSchema = z.object({ operationId: z.string().min(1), profileId: z.string().min(1), extensionId: z.string().min(1),
   kind: z.enum(['install', 'update', 'remove']), sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()
 export type BrowserProfileExtensionReceipt = z.infer<typeof browserProfileExtensionReceiptSchema>
+
+export const browserProfileExtensionPendingSchema = browserProfileExtensionReceiptSchema.extend({ expectedRevision: z.string().min(1), version: z.string().min(1), previousSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), nativeId: z.string().min(1).optional() }).strict().transform(({ previousSha256, nativeId, ...base }) => ({ ...base, ...(previousSha256 === undefined ? {} : { previousSha256 }), ...(nativeId === undefined ? {} : { nativeId }) }))
+export type BrowserProfileExtensionPending = z.infer<typeof browserProfileExtensionPendingSchema>

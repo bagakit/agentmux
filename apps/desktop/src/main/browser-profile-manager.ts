@@ -117,12 +117,13 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       read: async profileId => {
         const { snapshot, profile } = await this.store.inspectProfile(profileId)
         this.adopt(snapshot)
-        return { profileRevision: profile.revision, records: snapshot.extensions?.[profileId] ?? [], receipts: snapshot.extensionReceipts?.[profileId] ?? [] }
+        return { profileRevision: profile.revision, records: snapshot.extensions?.[profileId] ?? [], receipts: snapshot.extensionReceipts?.[profileId] ?? [], pending: snapshot.extensionPending?.[profileId] ?? [] }
       },
+      begin: async (profileId, expectedRevision, intent) => { this.adopt(await this.store.beginExtensionChange(profileId, expectedRevision, intent)) },
       commit: async (profileId, expectedRevision, records, receipt) => {
         const snapshot = await this.store.setExtensions(profileId, expectedRevision, records, receipt)
         this.adopt(snapshot)
-        return { profileRevision: snapshot.profiles.find(profile => profile.id === profileId)!.revision, records: snapshot.extensions?.[profileId] ?? [], receipts: snapshot.extensionReceipts?.[profileId] ?? [] }
+        return { profileRevision: snapshot.profiles.find(profile => profile.id === profileId)!.revision, records: snapshot.extensions?.[profileId] ?? [], receipts: snapshot.extensionReceipts?.[profileId] ?? [], pending: snapshot.extensionPending?.[profileId] ?? [] }
       }
     })
   }

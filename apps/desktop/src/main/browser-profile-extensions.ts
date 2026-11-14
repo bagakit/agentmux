@@ -3,15 +3,16 @@ import { dirname, join } from 'node:path'
 import type { Session } from 'electron'
 import { AgentMuxError } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
-import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionReceipt, BrowserProfileExtensionApplication } from '@agentmux/core/control'
+import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionReceipt, BrowserProfileExtensionApplication, BrowserProfileExtensionPending } from '@agentmux/core/control'
 import type { BrowserProfileExtensionRecord } from './browser-profile-extension-record.js'
 import { prepareExtensionPackage, hashExtensionDirectory, BrowserProfileExtensionPackageError, type PreparedExtensionPackage } from './browser-profile-extension-package.js'
 
-type ProfileExtensions = { profileRevision: string; records: BrowserProfileExtensionRecord[]; receipts: BrowserProfileExtensionReceipt[] }
+type ProfileExtensions = { profileRevision: string; records: BrowserProfileExtensionRecord[]; receipts: BrowserProfileExtensionReceipt[]; pending: BrowserProfileExtensionPending[] }
 export type BrowserProfileExtensionConfirmation = { kind: 'install' | 'update' | 'remove'; review: BrowserProfileExtensionReview; localSourcePath?: string }
 export type BrowserProfileExtensionPorts = {
   root(profileId: string): string
   read(profileId: string): Promise<ProfileExtensions>
+  begin(profileId: string, expectedRevision: string, intent: BrowserProfileExtensionPending): Promise<void>
   commit(profileId: string, expectedRevision: string, records: BrowserProfileExtensionRecord[], receipt: BrowserProfileExtensionReceipt): Promise<ProfileExtensions>
   change<T>(profileId: string, action: () => Promise<T>): Promise<T>
   prepareSession(profileId: string): Promise<void> | undefined
@@ -29,7 +30,6 @@ const permissionSet = (permissions: BrowserProfileExtensionReview['permissions']
 /** One Profile metadata owner, one original native Session. Loading never grants Agent or site access. */
 export class BrowserProfileExtensions {
   private readonly prepared = new Map<string, Preparation>()
-  private readonly attempted = new Set<string>()
   private definitions: Record<string, BrowserProfileExtensionRecord[]> = {}
   private readonly applications = new Map<string, Map<string, BrowserProfileExtensionApplication>>()
   private readonly loading = new Map<string, Promise<void>>()
@@ -58,7 +58,7 @@ export class BrowserProfileExtensions {
   }
   async list(profileId: string, operationId?: string) {
     const current = await this.ports.read(profileId)
-    return { profileId, profileRevision: current.profileRevision, extensions: current.records.map(record => this.present(profileId, record)),
+    return { profileId, profileRevision: current.profileRevision, extensions: current.records.map(record => this.present(profileId, record)), pending: structuredClone(current.pending.filter(intent => operationId === undefined || intent.operationId === operationId)),
       ...(operationId === undefined ? {} : { receipt: current.receipts.find(receipt => receipt.operationId === operationId) ?? null }) }
   }
   /** Boot/loading facts are independent from the Browser's own network and page readiness. */
@@ -101,6 +101,7 @@ export class BrowserProfileExtensions {
       if (current.profileRevision !== expectedRevision) return unavailable('The Profile settings changed. Read the original Profile before preparing this extension again.', 'BROWSER_PROFILE_CONFIGURATION_CONFLICT')
       const previous = extensionId ? current.records.find(record => record.id === extensionId) : undefined
       if (extensionId && !previous) return unavailable('The extension to update is unavailable in this Profile.')
+      if (current.pending.some(intent => intent.operationId === operationId)) return unavailable('This original extension operation has a durable pending intent. Inspect it before preparing another action; it was not replayed.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED')
       const existing = this.prepared.get(operationId)
       if (existing) {
         if (existing.sourcePath !== sourcePath || existing.review.profileId !== profileId || existing.review.expectedRevision !== expectedRevision || existing.review.extensionId !== (extensionId ?? existing.review.extensionId)) return unavailable('This original review identity belongs to a different request.')
@@ -108,9 +109,8 @@ export class BrowserProfileExtensions {
       }
       if (current.receipts.some(receipt => receipt.operationId === operationId)) return unavailable('This original extension operation already has a durable receipt. Inspect that operation before preparing a new one.')
       const id = previous?.id ?? mintObjectId(), stagingRoot = join(this.ports.root(profileId), '.staging')
-      await mkdir(stagingRoot, { recursive: true })
       let pkg: PreparedExtensionPackage
-      try { pkg = await prepareExtensionPackage(sourcePath, join(stagingRoot, mintObjectId()), previous?.key) }
+      try { await mkdir(stagingRoot, { recursive: true }); pkg = await prepareExtensionPackage(sourcePath, join(stagingRoot, mintObjectId()), previous?.key) }
       catch (cause) { return unavailable(cause instanceof BrowserProfileExtensionPackageError ? cause.message : 'The extension source could not be read or unpacked. Original packages, Profile data and Browser work remain.', 'BROWSER_PROFILE_EXTENSION_SOURCE_UNAVAILABLE') }
       if (current.records.some(record => record.id !== id && record.key === pkg.key)) { await rm(dirname(pkg.directory) === stagingRoot ? pkg.directory : dirname(pkg.directory), { recursive: true, force: true }); return unavailable('This native extension identity is already installed in the Profile. Update that exact installed item instead.') }
       const oldPermissions = new Set(previous ? permissionSet(previous.permissions) : [])
@@ -127,7 +127,7 @@ export class BrowserProfileExtensions {
       if (already?.kind === 'remove') return unavailable('This original operation identifies an extension removal, not an installation review.')
       if (already) return { profileId, profileRevision: current.profileRevision, outcome: 'applied' as const, receipt: already,
         ...(current.records.find(record => record.id === already.extensionId) ? { application: this.observe(profileId, current.records.find(record => record.id === already.extensionId)!) } : {}) }
-      if (this.attempted.has(reviewId)) return unavailable('This original extension change has an unconfirmed native effect. Inspect its original operation and current load facts; it was not replayed.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED', { profileId, operationId: reviewId })
+      if (current.pending.some(intent => intent.operationId === reviewId)) return unavailable('This original extension change has an unconfirmed native effect. Inspect its original operation and current load facts; it was not replayed.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED', { profileId, operationId: reviewId })
       const prepared = this.prepared.get(reviewId)
       if (!prepared || prepared.review.profileId !== profileId || prepared.review.expectedRevision !== expectedRevision) return unavailable('The exact prepared extension review is unavailable. No package was loaded; prepare the intended source again.')
       if (current.profileRevision !== expectedRevision) return unavailable('The Profile settings changed. Its original extension remains; prepare against the current Profile revision.', 'BROWSER_PROFILE_CONFIGURATION_CONFLICT')
@@ -141,24 +141,28 @@ export class BrowserProfileExtensions {
       try { reviewedHash = await hashExtensionDirectory(pkg.directory) } catch { /* Keep the original package and request unknown. */ }
       if (reviewedHash !== pkg.sha256) return unavailable('The reviewed package bytes changed. Nothing was loaded; prepare and review the source again.')
       const targetPath = this.path(profileId, { id: prepared.review.extensionId, sha256: pkg.sha256 })
+      try {
       await mkdir(dirname(targetPath), { recursive: true })
       if (pkg.directory !== targetPath) {
         try { await rename(pkg.directory, targetPath) }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST' && (error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error; if (await hashExtensionDirectory(targetPath) !== pkg.sha256) throw error }
         pkg.directory = targetPath
       }
+      } catch { return unavailable('The reviewed package could not be retained in its original Profile. No extension code was dispatched; original packages and Profile data remain.', 'BROWSER_PROFILE_EXTENSION_SOURCE_UNAVAILABLE') }
       const receipt: BrowserProfileExtensionReceipt = { operationId: reviewId, profileId, extensionId: prepared.review.extensionId, kind, sha256: pkg.sha256 }
       let nativeAttempted = false
       try {
         await this.ports.prepareSession(profileId)
         const target = this.ports.session(profileId)
-        nativeAttempted = true; this.attempted.add(reviewId)
+        try { await this.ports.begin(profileId, expectedRevision, { ...receipt, expectedRevision, version: pkg.version, ...(previous ? { previousSha256: previous.sha256, nativeId: previous.nativeId } : {}) }) }
+        catch { return unavailable('The original extension dispatch intent could not be confirmed saved. No native action was dispatched; inspect this operation before retrying.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED', receipt) }
+        nativeAttempted = true
         const loaded = await target.extensions.loadExtension(targetPath, { allowFileAccess: false })
         if (loaded.path !== targetPath || loaded.version !== pkg.version || previous && loaded.id !== previous.nativeId || current.records.some(record => record.id !== receipt.extensionId && record.nativeId === loaded.id)) return unavailable('The native extension identity did not match the reviewed installation.')
         const record: BrowserProfileExtensionRecord = { id: receipt.extensionId, nativeId: loaded.id, reviewId, key: pkg.key, sha256: pkg.sha256,
           name: pkg.name, version: pkg.version, source: pkg.source, permissions: pkg.permissions }
         const saved = await this.ports.commit(profileId, expectedRevision, [...current.records.filter(item => item.id !== record.id), record], receipt)
-        this.remember(profileId, record.id, { state: 'loaded' }); this.prepared.delete(reviewId); this.attempted.delete(reviewId)
+        this.remember(profileId, record.id, { state: 'loaded' }); this.prepared.delete(reviewId)
         return { profileId, profileRevision: saved.profileRevision, outcome: 'applied' as const, receipt, application: { state: 'loaded' as const } }
       } catch (cause) {
         if (!nativeAttempted) throw cause
@@ -186,7 +190,7 @@ export class BrowserProfileExtensions {
         if (existing.kind !== 'remove' || existing.extensionId !== extensionId) return unavailable('This original extension operation belongs to a different request.')
         return { profileId, profileRevision: current.profileRevision, outcome: 'applied' as const, receipt: existing }
       }
-      if (this.attempted.has(operationId)) return unavailable('This original removal has an unconfirmed native effect. Inspect that same operation before another action; it was not replayed.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED', { profileId, operationId })
+      if (current.pending.some(intent => intent.operationId === operationId)) return unavailable('This original removal has an unconfirmed native effect. Inspect that same operation before another action; it was not replayed.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED', { profileId, operationId })
       const record = current.records.find(record => record.id === extensionId)
       if (!record || current.profileRevision !== expectedRevision) return unavailable('The exact installed extension or Profile revision changed. Original data is kept; read the current Profile.')
       if (!this.confirm) return unavailable('Human extension review is unavailable in this host.', 'HOST_CAPABILITY_UNAVAILABLE')
@@ -197,12 +201,13 @@ export class BrowserProfileExtensions {
       if (current.profileRevision !== expectedRevision) return unavailable('The Profile changed during removal review. No extension was removed.')
       const receipt: BrowserProfileExtensionReceipt = { operationId, profileId, extensionId, kind: 'remove', sha256: record.sha256 }
       try {
-        this.attempted.add(operationId)
+        try { await this.ports.begin(profileId, expectedRevision, { ...receipt, expectedRevision, version: record.version, previousSha256: record.sha256, nativeId: record.nativeId }) }
+        catch { return unavailable('The original removal intent could not be confirmed saved. No native removal was dispatched; inspect this operation before retrying.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED', receipt) }
         const target = this.ports.existingSession(profileId)
         target?.extensions.removeExtension(record.nativeId)
         if (target?.extensions.getExtension(record.nativeId)) return unavailable('The host did not confirm that this extension was unloaded.')
         const saved = await this.ports.commit(profileId, expectedRevision, current.records.filter(record => record.id !== extensionId), receipt)
-        this.applications.get(profileId)?.delete(extensionId); this.attempted.delete(operationId)
+        this.applications.get(profileId)?.delete(extensionId)
         return { profileId, profileRevision: saved.profileRevision, outcome: 'applied' as const, receipt }
       } catch {
         await this.restoreAfterFailure(profileId, extensionId, record)

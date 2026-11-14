@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import { browserProfileExtensionRecordSchema, browserProfileExtensionReceiptSchema, type BrowserProfileExtensionRecord, type BrowserProfileExtensionReceipt } from './browser-profile-extension-record.js'
+import { browserProfileExtensionRecordSchema, browserProfileExtensionReceiptSchema, browserProfileExtensionPendingSchema, type BrowserProfileExtensionPending, type BrowserProfileExtensionRecord, type BrowserProfileExtensionReceipt } from './browser-profile-extension-record.js'
 import { parseBrowserProxyEdit, parseBrowserProxyAsset, type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileView, type BrowserProfileView, type BrowserProfileQuery, parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
 import { parseBrowserProxyProbe, type BrowserProxyProbe, type BrowserProxyProbeHistory } from '@agentmux/core/control'
 import { isDeepStrictEqual } from 'node:util'
@@ -95,6 +95,7 @@ const profileRecordSchema = z
     // Stored only when Agents are turned off, so an untouched Profile keeps the global switch's answer.
     extensions: z.array(browserProfileExtensionRecordSchema).optional(),
     extensionReceipts: z.array(browserProfileExtensionReceiptSchema).optional(),
+    extensionPending: z.array(browserProfileExtensionPendingSchema).optional(),
     agentAccess: z.literal(false).optional()
   })
   .strict()
@@ -245,7 +246,7 @@ export type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 /** The whole committed list after one write; the manager replaces its cache with it. */
-export type BrowserProfileSnapshot = { extensions?: Record<string, BrowserProfileExtensionRecord[]>; extensionReceipts?: Record<string, BrowserProfileExtensionReceipt[]>; proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; purgeReceipts?: import('@agentmux/core/control').BrowserProfilePurgeReceipt[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
+export type BrowserProfileSnapshot = { extensionPending?: Record<string, BrowserProfileExtensionPending[]>; extensions?: Record<string, BrowserProfileExtensionRecord[]>; extensionReceipts?: Record<string, BrowserProfileExtensionReceipt[]>; proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; purgeReceipts?: import('@agentmux/core/control').BrowserProfilePurgeReceipt[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
 
 function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
   if (source === null) return null
@@ -256,8 +257,9 @@ function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
   const retained = [...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)]
   const extensions = Object.fromEntries(retained.filter(profile => profile.extensions?.length).map(profile => [profile.id, structuredClone(profile.extensions!)]))
+  const extensionPending = Object.fromEntries(retained.filter(profile => profile.extensionPending?.length).map(profile => [profile.id, structuredClone(profile.extensionPending!)]))
   const extensionReceipts = Object.fromEntries(retained.filter(profile => profile.extensionReceipts?.length).map(profile => [profile.id, structuredClone(profile.extensionReceipts!)]))
-  return { purgeReceipts: structuredClone(metadata.purgeReceipts ?? []), ...(Object.keys(extensions).length ? { extensions } : {}), ...(Object.keys(extensionReceipts).length ? { extensionReceipts } : {}), proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
+  return { ...(Object.keys(extensionPending).length ? { extensionPending } : {}), purgeReceipts: structuredClone(metadata.purgeReceipts ?? []), ...(Object.keys(extensions).length ? { extensions } : {}), ...(Object.keys(extensionReceipts).length ? { extensionReceipts } : {}), proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
     views: structuredClone(metadata.views ?? []), revision: metadata.revision ?? 0, sequence: metadata.sequence ?? metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
     profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
@@ -288,7 +290,7 @@ export function profileSummary(profile: BrowserProfileRecord, defaultProfileId: 
 
 /** An opaque current configuration baseline, never an edit count or a root-list version. */
 function configurationBytes(profile: BrowserProfileRecord): string {
-  const { revision: _revision, activity: _activity, ...configuration } = profile
+  const { revision: _revision, activity: _activity, extensionPending: _extensionPending, ...configuration } = profile
   return JSON.stringify(configuration)
 }
 function profileConfigurationRevision(profile: BrowserProfileRecord): string {
@@ -472,6 +474,20 @@ export class BrowserProfileStore {
     })
   }
 
+  /** Durable dispatch intent belongs to the original Profile metadata, before any native effect. */
+  beginExtensionChange(profileId: string, expectedRevision: string, pending: BrowserProfileExtensionPending): Promise<BrowserProfileSnapshot> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata(), current = metadata.profiles.find(profile => profile.id === profileId)
+      if (!current) throw new Error('The original Browser Profile is unavailable.')
+      this.assertProfileRevision(current, expectedRevision)
+      const intent = browserProfileExtensionPendingSchema.parse(pending)
+      if (intent.profileId !== profileId || intent.expectedRevision !== expectedRevision) throw new Error('The extension intent names a different original Profile.')
+      if (current.extensionPending?.some(value => value.operationId === intent.operationId) || current.extensionReceipts?.some(value => value.operationId === intent.operationId)) throw new Error('This original extension operation already has a durable intent or receipt.')
+      const updated = { ...current, extensionPending: [...(current.extensionPending ?? []), intent] }
+      return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? updated : profile) }, false)
+    })
+  }
+
   /** Extension changes use the original Profile transaction and configuration token. */
   setExtensions(profileId: string, expectedRevision: string, extensions: BrowserProfileExtensionRecord[], receipt: BrowserProfileExtensionReceipt): Promise<BrowserProfileSnapshot> {
     return this.enqueue(async () => {
@@ -485,7 +501,9 @@ export class BrowserProfileStore {
         if (!isDeepStrictEqual(previous, saved)) throw new Error('This original extension operation belongs to a different request.')
         return snapshotOf(metadata)
       }
-      const updated = { ...current, revision: mintObjectId(), extensions: records, extensionReceipts: [...(current.extensionReceipts ?? []), saved] }
+      const intent = current.extensionPending?.find(value => value.operationId === saved.operationId)
+      if (!intent || intent.extensionId !== saved.extensionId || intent.kind !== saved.kind || intent.sha256 !== saved.sha256 || intent.profileId !== saved.profileId) throw new Error('The original durable extension dispatch intent is unavailable or different.')
+      const updated = { ...current, revision: mintObjectId(), extensionPending: current.extensionPending!.filter(value => value.operationId !== saved.operationId), extensions: records, extensionReceipts: [...(current.extensionReceipts ?? []), saved] }
       return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? updated : profile) })
     })
   }

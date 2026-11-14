@@ -1,7 +1,7 @@
 import { createHash, createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto'
 import { createReadStream, appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { cp, lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { Unzip, UnzipInflate } from 'fflate'
 import type { BrowserProfileExtensionPermissions, BrowserProfileExtensionSource } from '@agentmux/core/control'
 
@@ -113,14 +113,17 @@ async function extract(path: string, destination: string, offset: number): Promi
 }
 export async function prepareExtensionPackage(sourcePath: string, staging: string, previousKey?: string): Promise<PreparedExtensionPackage> {
   await mkdir(staging, { recursive: false })
+  const snapshot = staging + '.package-snapshot'
   const stats = await lstat(sourcePath); if (stats.isSymbolicLink()) invalid('Choose an ordinary extension directory or package, without a symbolic link.')
-  let source: BrowserProfileExtensionSource = { kind: 'directory', label: basename(sourcePath), signature: 'not-verified' }, packagedKey: string | undefined
+  let source: BrowserProfileExtensionSource = { kind: 'directory', label: 'Unpacked extension', signature: 'not-verified' }, packagedKey: string | undefined
   try {
     if (stats.isDirectory()) { await hashExtensionDirectory(sourcePath); await cp(sourcePath, staging, { recursive: true, force: false, errorOnExist: false, dereference: false }) }
     else if (stats.isFile()) {
-      const info = await archive(sourcePath); source = { ...source, kind: info.offset ? 'crx' : 'zip', signature: info.verified ? 'package-verified' : 'not-verified' }; packagedKey = info.key
-      await extract(sourcePath, staging, info.offset)
+      await cp(sourcePath, snapshot, { force: false, errorOnExist: true })
+      const info = await archive(snapshot); source = { ...source, label: info.offset ? 'CRX package' : 'ZIP package', kind: info.offset ? 'crx' : 'zip', signature: info.verified ? 'package-verified' : 'not-verified' }; packagedKey = info.key
+      await extract(snapshot, staging, info.offset)
     } else invalid('Choose an ordinary extension directory, ZIP or CRX package.')
+    await hashExtensionDirectory(staging)
     let directory = staging
     try { await lstat(join(directory, 'manifest.json')) } catch {
       const children = await readdir(staging, { withFileTypes: true }), folders = children.filter(entry => entry.isDirectory())
@@ -148,4 +151,5 @@ export async function prepareExtensionPackage(sourcePath: string, staging: strin
     const permissions = extensionPermissions(manifest), sha256 = await hashExtensionDirectory(directory)
     return { directory, sha256, key, name, version: manifest.version as string, permissions, source }
   } catch (error) { await rm(staging, { recursive: true, force: true }); throw error }
+  finally { await rm(snapshot, { force: true }) }
 }
