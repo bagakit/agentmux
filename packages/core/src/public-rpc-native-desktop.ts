@@ -29,6 +29,7 @@ export type NativeDesktopParamsMap = {
   'native.windows.list': NativeDesktopScope & { target: NativeDesktopAppTarget }
   'native.snapshot': NativeDesktopScope & { target: NativeDesktopWindowTarget }
   'native.permissions.inspect': NativeDesktopScope
+  'native.text.recognize': NativeDesktopScope & { data: string; sensitiveOnly?: boolean }
   'native.capture': NativeDesktopScope & { operationId: string; capture: NativeDesktopCapture }
   'native.clipboard.read': NativeDesktopScope & { format: 'text' | 'png' }
   'native.clipboard.write': NativeDesktopScope & { operationId: string; format: 'text' | 'png'; data: string }
@@ -53,7 +54,7 @@ export interface AgentMuxRpcNativeDesktopOwner {
 export const AGENTMUX_RPC_DESKTOP_NATIVE_METHODS = {
   'native.capabilities': 'short', 'native.apps.list': 'short', 'native.displays.list': 'short',
   'native.windows.list': 'short', 'native.snapshot': 'long', 'native.permissions.inspect': 'short',
-  'native.capture': 'long', 'native.clipboard.read': 'short', 'native.clipboard.write': 'long',
+  'native.text.recognize': 'long', 'native.capture': 'long', 'native.clipboard.read': 'short', 'native.clipboard.write': 'long',
   'native.action': 'long', 'native.operation.inspect': 'short'
 } as const satisfies Record<NativeDesktopMethod, 'short' | 'long'>
 export const NATIVE_DESKTOP_WRITES = new Set<NativeDesktopMethod>(['native.capture', 'native.clipboard.write', 'native.action'])
@@ -120,7 +121,7 @@ export function parseNativeDesktopParams<M extends NativeDesktopMethod>(method: 
   const extra: Record<NativeDesktopMethod, string[]> = {
     'native.capabilities': [], 'native.apps.list': [], 'native.displays.list': [],
     'native.windows.list': ['target'], 'native.snapshot': ['target'],
-    'native.permissions.inspect': [], 'native.capture': ['operationId', 'capture'],
+    'native.text.recognize': ['data', 'sensitiveOnly'], 'native.permissions.inspect': [], 'native.capture': ['operationId', 'capture'],
     'native.clipboard.read': ['format'], 'native.clipboard.write': ['operationId', 'format', 'data'],
     'native.action': ['operationId', 'target', 'snapshotId', 'action'], 'native.operation.inspect': ['operationId']
   }
@@ -136,6 +137,7 @@ export function parseNativeDesktopParams<M extends NativeDesktopMethod>(method: 
     if (method === 'native.clipboard.write') text(p.data, code, p.format === 'text')
     if (method === 'native.clipboard.write' && p.format === 'png') pngPayload(p.data, code)
   }
+  if (method === 'native.text.recognize') { pngPayload(p.data, code); if (p.sensitiveOnly !== undefined && typeof p.sensitiveOnly !== 'boolean') invalid('sensitiveOnly must be boolean.', code) }
   if (method === 'native.capture') {
     const capture = rpcRecord(p.capture, undefined, code)
     if (!['selection', 'display', 'rect', 'window'].includes(capture.mode as string)) invalid('Choose a typed capture mode.', code)
@@ -277,6 +279,18 @@ export function parseNativeDesktopResult<M extends NativeDesktopMethod>(method: 
         if (observation.state !== 'failed') invalid('Native follow-up observation state is invalid.', code)
         errorData(observation.error, code)
       }
+    }
+  } else if (method === 'native.text.recognize') {
+    rpcRecord(result, ['state', 'width', 'height', 'lines'], code)
+    const size = pngPayload((input as NativeDesktopParamsMap['native.text.recognize']).data, code)
+    if (result.state !== 'recognized' || result.width !== size.width || result.height !== size.height) invalid('Recognition changed its image dimensions.', code)
+    for (const item of boundedArray(result.lines, code)) {
+      const line = rpcRecord(item, ['text', 'confidence', 'rect'], code)
+      text(line.text, code, true); number(line.confidence, code)
+      if ((line.confidence as number) < 0 || (line.confidence as number) > 1) invalid('Recognition confidence is invalid.', code)
+      const rect = rpcRecord(line.rect, ['x', 'y', 'width', 'height'], code)
+      for (const key of ['x', 'y', 'width', 'height']) number(rect[key], code, key === 'width' || key === 'height')
+      if ((rect.x as number) < 0 || (rect.y as number) < 0 || (rect.x as number) + (rect.width as number) > size.width + 1 || (rect.y as number) + (rect.height as number) > size.height + 1) invalid('Recognition rectangle is outside the image.', code)
     }
   } else if (method === 'native.capture') {
     rpcRecord(result, ['state', 'screenshot', 'engine', 'selectionRect', 'error'], code)

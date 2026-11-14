@@ -300,3 +300,5 @@ export * from './capture-sequence.js'
 export { normalizeAgentSession, normalizeInteractionOperationReceipt, normalizeSessionHistoryMetadata, parseAgentCreationFact, parseAgentCreationSpatialIntent, normalizeAgentInteractionRequest } from './agent-session-codec.js'
 export { agentLifecycleOperationIdentity } from './agent-session-identity.js'
 export { parseCumulativeUsage } from './agent-cumulative-usage.js'
+
+export * from './image-text.js'

@@ -306,6 +306,12 @@ export class NativeDesktop {
     return { operationId, instanceId, state: 'unknown', reason: 'original_receipt_unavailable' }
   }
 
+  async recognizeText(image: import('./image.js').NativePng): Promise<import('./protocol.js').NativeRecognizedText> {
+    const { pngBytes } = await import('./image.js')
+    const raw = await this.request('recognizeText', { data: pngBytes(image).toString('base64') })
+    return parseRecognizedText(raw, image)
+  }
+
   async captureScreenshot(params: CaptureParams): Promise<CaptureResult> {
     const operationId = randomUUID()
     const raw = await this.request('captureScreenshot', params as unknown as JsonObject, { operationId, timeoutMs: 120_000 })
@@ -493,4 +499,10 @@ export class NativeDesktop {
       await rm(tokenPath, { force: true })
     }
   }
+}
+
+export function parseRecognizedText(raw: unknown, image: { width: number; height: number }): import('./protocol.js').NativeRecognizedText {
+  const r = raw as import('./protocol.js').NativeRecognizedText
+  if (!r || r.state !== 'recognized' || r.width !== image.width || r.height !== image.height || !Array.isArray(r.lines) || r.lines.some(line => !line || typeof line.text !== 'string' || !Number.isFinite(line.confidence) || line.confidence < 0 || line.confidence > 1 || !line.rect || !Object.values(line.rect).every(Number.isFinite) || line.rect.x < 0 || line.rect.y < 0 || line.rect.width <= 0 || line.rect.height <= 0 || line.rect.x + line.rect.width > r.width + 1 || line.rect.y + line.rect.height > r.height + 1)) throw new NativeRequestError('invalid_protocol', 'Recognition returned invalid text or image coordinates')
+  return r
 }

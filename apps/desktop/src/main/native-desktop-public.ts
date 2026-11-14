@@ -1,4 +1,4 @@
-import { AgentMuxError, parseNativeDesktopParams, parseNativeDesktopResult, NATIVE_DESKTOP_WRITES,
+import { isSensitiveImageText, AgentMuxError, parseNativeDesktopParams, parseNativeDesktopResult, NATIVE_DESKTOP_WRITES,
   type AgentMuxRpcNativeDesktopOwner, type AgentMuxRpcCallContext, type NativeDesktopMethod,
   type NativeDesktopParamsMap, type NativeDesktopPayloadMap, type NativeDesktopReply, type NativeDesktopJson } from '@agentmux/core'
 import { NativeRequestError, type NativeDesktop, type NativeMethod, type JsonObject } from '@agentmux/native-desktop'
@@ -43,6 +43,7 @@ export function createNativeDesktopPublicOwner(native: NativePort, host: { hostI
       let params: JsonObject = {}
       const clientScope = actorId
       if (method === 'native.capabilities') nativeMethod = 'handshake'
+      else if (method === 'native.text.recognize') { nativeMethod = 'recognizeText'; params = { data: (input as NativeDesktopParamsMap['native.text.recognize']).data } }
       else if (method === 'native.apps.list') nativeMethod = 'listApps'
       else if (method === 'native.displays.list') nativeMethod = 'listDisplays'
       else if (method === 'native.permissions.inspect') nativeMethod = 'permissionStatus'
@@ -89,8 +90,13 @@ export function createNativeDesktopPublicOwner(native: NativePort, host: { hostI
         })
         if (operationId && instanceId) receiptActors.set(operationId, { actor: actorId, instanceId })
         const responseInstance = instanceId ?? (result && typeof result === 'object' && !Array.isArray(result) && typeof result.instanceId === 'string' ? result.instanceId : '')
-        return parseNativeDesktopResult(method, { hostId: host.hostId, instanceId: responseInstance, state: 'responded',
+        const reply = parseNativeDesktopResult(method, { hostId: host.hostId, instanceId: responseInstance, state: 'responded',
           ...(operationId ? { operationId } : {}), result }, value)
+        if (method === 'native.text.recognize' && (input as NativeDesktopParamsMap['native.text.recognize']).sensitiveOnly) {
+          const recognized = reply.result as unknown as NativeDesktopPayloadMap['native.text.recognize']
+          recognized.lines = recognized.lines.filter(line => isSensitiveImageText(line.text))
+        }
+        return reply
       } catch (error) {
         if (!(error instanceof NativeRequestError) || !instanceId) throw error
         if (operationId && error.operation?.operationId === operationId && error.operation.instanceId === instanceId &&

@@ -132,7 +132,7 @@ enum NativeDesktopOperations {
         return format
     }
 
-    private static func validatedPNG(_ data: Data) throws -> CGImage {
+    static func validatedPNG(_ data: Data) throws -> CGImage {
         let magic: [UInt8] = [137, 80, 78, 71, 13, 10, 26, 10]
         guard data.count <= NativeImageLimits.maxPNGBytes, data.starts(with: magic),
               let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) == 1,

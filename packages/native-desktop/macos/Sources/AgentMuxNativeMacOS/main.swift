@@ -194,6 +194,8 @@ final class Provider: @unchecked Sendable {
             return NativeDesktopOperations.listDisplays()
         case "captureScreenshot":
             return NativeDesktopOperations.capture(params)
+        case "recognizeText":
+            return try NativeTextRecognition.recognize(params)
         case "captureDisplays":
             if let value = params["includeHostWindows"], value.bool == nil {
                 throw ProviderError.coded("invalid_argument", "includeHostWindows must be a protocol boolean")
@@ -243,7 +245,8 @@ final class Provider: @unchecked Sendable {
             // The action receipt survives an observation failure on its original target.
             // Never silently remove the window selector and observe another window.
             let failure = nativeErrorPayload(error)
-            return ["action": action, "observation": ["state": "failed", "error": failure]]
+            return ["action": action, "observation": [
+                    "textRecognition": true,"state": "failed", "error": failure]]
         }
     }
 
@@ -402,6 +405,7 @@ final class Provider: @unchecked Sendable {
                     "moveResize": false,
                 ],
                 "observation": [
+                    "textRecognition": true,
                     "screenshot": true,
                     "displayFrames": true,
                     "displayScreenshot": true,
@@ -3931,7 +3935,7 @@ private func handleRequest(
         }
     }
     let independent = ["handshake", "listApps", "listDisplays", "permissionStatus", "clipboardRead", "clipboardWrite", "captureScreenshot",
-                       "captureDisplays"].contains(request.method)
+                       "captureDisplays", "recognizeText"].contains(request.method)
     if !independent { lock.lock() }
     defer { if !independent { lock.unlock() } }
     guard isConnected() else { return failed("connection_closed", "original native connection closed before this operation began") }

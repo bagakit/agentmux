@@ -41,6 +41,7 @@ export type NativeDesktopPayloadMap = {
   'native.windows.list': { app: NativeDesktopApp; windows: Array<NativeDesktopWindow & { app: NativeDesktopApp; index: number }> }
   'native.snapshot': NativeDesktopSnapshot
   'native.permissions.inspect': { accessibility: 'granted' | 'not-granted'; screenshots: 'granted' | 'not-granted'; source: 'macOS-preflight'; authoritativeForOperation: false }
+  'native.text.recognize': { state: 'recognized'; width: number; height: number; lines: Array<{ text: string; confidence: number; rect: NativeDesktopRect }> }
   'native.capture': { state: 'captured'; screenshot: NativeDesktopPng; engine: string; selectionRect: NativeDesktopRect }
     | { state: 'cancelled' } | { state: 'failed'; error: { code: string; message: string } }
   'native.clipboard.read': { format: 'text' | 'png'; state: 'read'; data: string; changeCount: number }

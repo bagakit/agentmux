@@ -14,6 +14,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./image-text": {
+      "types": "./dist/image-text.d.ts",
+      "import": "./dist/image-text.js"
+    },
     "./agent-input-submit": {
       "types": "./dist/agent-input-submit.d.ts",
       "import": "./dist/agent-input-submit.js"

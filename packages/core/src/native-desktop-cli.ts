@@ -11,6 +11,7 @@ const summaries: Record<NativeDesktopMethod, string> = {
   'native.windows.list': 'List windows of one original OS process.',
   'native.snapshot': 'Observe the exact window and machine AX action references.',
   'native.permissions.inspect': 'Read permission preflight facts without requesting a grant.',
+  'native.text.recognize': 'Recognize local PNG base64 using system OCR; returns text and top-left pixel rectangles.',
   'native.capture': 'Capture an explicit screen selection, display, rectangle or exact window.',
   'native.clipboard.read': 'Read native text or PNG without input or focus changes.',
   'native.clipboard.write': 'Write exact native text or PNG without pasting.',

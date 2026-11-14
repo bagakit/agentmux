@@ -4,7 +4,7 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 export type JsonObject = { [key: string]: Json }
 export const NATIVE_METHODS = [
   'handshake', 'listApps', 'listWindows', 'listDisplays', 'getAppState', 'permissionStatus',
-  'captureScreenshot', 'clipboardRead', 'clipboardWrite', 'click', 'performSecondaryAction',
+  'recognizeText', 'captureScreenshot', 'clipboardRead', 'clipboardWrite', 'click', 'performSecondaryAction',
   'setValue', 'typeText', 'pressKey', 'hotkey', 'pasteText', 'scroll', 'drag', 'captureDisplays'
 ] as const
 export type NativeMethod = typeof NATIVE_METHODS[number]
@@ -126,3 +126,5 @@ export function decodeResponse(input: unknown): NativeResponse {
   }
   return value as unknown as NativeResponse
 }
+
+export interface NativeRecognizedText { state: 'recognized'; width: number; height: number; lines: Array<{ text: string; confidence: number; rect: { x: number; y: number; width: number; height: number } }> }
