@@ -49,12 +49,16 @@ const ThemeObjectHostIcon = semanticIconComponent('object.host')
 const NO_SESSIONS: SessionSnapshot[] = []
 const NO_HOST_CHECKS: Record<string, HostCheckState> = {}
 
-export function HostSettingsPane({ config, onSave, active, onClose, navigationRequest, onRemoteWork }: {
+export type HostAddRequest = { readonly intentId: string }
+
+export function HostSettingsPane({ config, onSave, active, onClose, navigationRequest, onRemoteWork, addHostRequest }: {
   config: AppConfig
   active: boolean
   onClose?: (() => void) | undefined
   onRemoteWork?: (() => void) | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
+  /** One explicit presentation intent; creation and persistence stay with addHost. */
+  addHostRequest?: HostAddRequest | undefined
   onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>) => Promise<void>
 }) {
   const settingsNavigation = useContext(SettingsNavigation)
@@ -69,6 +73,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
   const requestedHostId = navigationRequest?.section === 'hosts' ? navigationRequest.hostId : undefined
   const appliedNavigation = useRef<SettingsNavigationRequest | undefined>(undefined)
+  const appliedAddRequest = useRef<string | undefined>(undefined)
   const pendingHostNavigation = requestedHostId !== undefined && appliedNavigation.current !== navigationRequest
   const selectedId = pendingHostNavigation ? requestedHostId : resource.selectedHostId !== undefined
     ? resource.selectedHostId : requestedHostId ?? config.hosts[0]?.id ?? null
@@ -224,6 +229,12 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     setFilter({ query: '', snapshot: [] })
     setPendingEdit({ id, select: true })
   }
+
+  useEffect(() => {
+    if (!active || saving || !addHostRequest || appliedAddRequest.current === addHostRequest.intentId) return
+    appliedAddRequest.current = addHostRequest.intentId
+    addHost()
+  }, [active, saving, addHostRequest])
 
   async function save(nextHosts = hosts, nextWorkspaces = config.workspaces): Promise<boolean> {
     const submitted = resource.beginSave(Object.fromEntries(nextHosts.map((host) => [host.id, host])))
