@@ -503,6 +503,9 @@ importers:
       '@radix-ui/react-dismissable-layer':
         specifier: 1.1.19
         version: 1.1.19(patch_hash=64bab6ea14515676c9233cc8160d4b9a928b71ee1810d040d46c0f48c46c1203)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-dropdown-menu':
+        specifier: 2.1.20
+        version: 2.1.20(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tiptap/core':
         specifier: ^3.31.3
         version: 3.31.3(@tiptap/pm@3.31.3)
