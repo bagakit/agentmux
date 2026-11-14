@@ -175,6 +175,10 @@ async function prepareStage({ root, userData, runtimeRoot, workspaces }) {
   const configurationPath = join(userData, 'agentmux.config.json')
   const { AGENTMUX_DESKTOP_READY_FILE, AGENTMUX_DESKTOP_EXIT_AFTER_READY, ...environment } =
     privatePackageSmokeEnvironment(process.env, { userData, runtimeRoot })
+  if (environment.AGENTMUX_DESKTOP_USER_DATA !== userData || environment.AGENTMUX_RUNTIME_DIRECTORY !== runtimeRoot ||
+      environment.AGENTMUX_STATE_DIRECTORY !== join(runtimeRoot, 'state')) {
+    throw new Error('Private Desktop and Runtime paths did not resolve to the resource fixture.')
+  }
   const paths = { home: environment.HOME, appData: join(userData, 'appData'), userData, sessionData: join(userData, 'sessionData') }
   await Promise.all([...new Set([...Object.values(paths), environment.TMPDIR,
     ...workspaces.map(({ path }) => path)])].map(path => mkdir(path, { recursive: true, mode: 0o700 })))
