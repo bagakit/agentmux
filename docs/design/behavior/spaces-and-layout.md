@@ -56,11 +56,15 @@ flowchart LR
 | **Space** | 用户选择的持久工作上下文。Folder、Mote 与知识库的 Topic Category 在此层表达；普通 Topic 对应 Zone，见[知识库层级](#topics-知识库的层级与沉淀)。Folder/Mote 的来源身份仍是 Host 与对象的绝对持久目录；Category 使用耐久分类身份，名称和归属不是身份。当前 Session、是否打开 Tab 均不构成身份，Space 不等同于 Project。 | Core 保存原空间身份与绑定；Folder 的目录/项目记录、Topic/Mote 的真实持久目录由原 Host 提供。分类描述沿原 Host 的独立持久目录与 `category.md` 内容 owner，分类归属只由 Core 空间绑定持有；发现复用原来源，不建第二份 Space 注册表。 |
 | **Zone** | Space 内的一条工作分区/上下文，承载 Tab；知识库中的具体 Topic 对应此层。worktree、普通目录和 Topic/Mote 的 home 上下文均可绑定 Zone，不能把 Zone 限定为 Git 或全量改名 Workspace。 | Core 保存稳定 Zone 身份、组成与全部空间绑定。Folder 的 Workspace、Topic/Mote 的 home 来源沿原 Host 的资源事实；展示地址与查询索引从 Core 空间图派生，不重新铸造 Zone，不复制目录、Git 或 Session 真相。 |
 | **Project** | 围绕项目目录组织的来源项目事实，可关联多个实际 checkout/Workspace；Git 能力按真实仓库事实提供。它是 Space 的可选项目上下文，不能冒充所有 Space，也不能用单个 worktree Workspace ID 冒充项目 ID。 | 已有 Host、项目根目录和 Workspace 分组来源；不另建项目注册表。 |
-| **Workspace** | 宿主在特定 Host 上登记的实际工作目录记录。folder/worktree、路径、仓库根与分支是该记录的事实；Scratch Workspace 是既有 Topic 收纳和布局容器，不是每个 Topic 的身份。 | 原宿主配置/目录 owner；Git checkout 事实由现有 Git owner 提供，Core 的空间绑定不改写资源事实。 |
+| **Workspace**（资源 Workspace） | 宿主在特定 Host 上登记的实际工作目录记录。folder/worktree、路径、仓库根与分支是该记录的事实；Scratch Workspace 是既有 Topic 收纳和布局容器，不是每个 Topic 的身份。同一 Workspace ID 也用作下一行显示 Workspace 的布局键，两种用途必须分别表达。 | 原宿主配置/目录 owner；Git checkout 事实由现有 Git owner 提供，Core 的空间绑定不改写资源事实。 |
+| **显示 Workspace** | 承载一棵 Tab Group 分割树的展示容器，是准确展示位置 display Workspace／Group／Tab／Region 的第一段（字段名 `displayWorkspaceId`）。它只回答“在哪里显示”，不回答“在哪个目录工作或执行”；Tab 所在的显示 Workspace 可以不同于其内容的资源 Workspace 和 Agent 的执行 cwd，二者不能互相代替。 | Core 同一持久空间图中按显示 Workspace ID 保存的布局；资源事实仍归上一行的 Workspace owner。 |
+| **Tab Group** | 显示 Workspace 中的一组 Tab，持有 Tab 顺序、当前 Tab 与最近选择；各 Group 在显示 Workspace 内按分割树排列。它只组织 Tab 的展示，不是空间层级，不决定 Tab 的 Zone 归属；同一 Tab 可以在多个 Group 中各有一个展示绑定（occurrence）。 | Core 同一持久空间图中所属显示 Workspace 的布局。 |
 | **Tab** | Zone 中的一张完整工作面，拥有持久身份、分割布局与多个 Region。首张 Tab 不以另一张 Tab 为存在前提。 | Core 的同一持久空间图保存身份、布局、选择与全部展示绑定；Topic 来源身份仍由原目录 owner 提供。 |
 | **Region** | Tab 布局的一块精确 leaf 位置，承载 Agent/Terminal、文件、Browser 或启动面。它是空间位置，不是 Session 身份。 | Core 的同一持久空间图；移动、分割和关闭绑定明确 Region，Client 呈现与内容 owner 消费原位置。 |
 | **AgentSession** | Core 持有的 Agent 语义会话，包含 Provider/Executor、原生会话身份、执行目录与恢复事实。它可以在多个 Region 展示；空间归属不能改写其执行事实。 | AgentMux Core 的公开 API。 |
 | **Run** | ctxmux 持有的一次真实执行及其进程、PTY、ordered bytes、Replay 与 Attachment 事实。Session 与当前 Run 的绑定不把两个身份合并。 | ctxmux；client 只消费公开事实。 |
+
+源码里仍有几个旧名：`View`（如 `WorkbenchViewLayout`）指 Tab，`Pane` 指一个 Tab Group 及其 Tabbar 的界面框，`Workbench` 指一个显示 Workspace 在 Desktop 中的工作面界面。正文使用本表名称；确需提到代码名时，在首次出现处注明「（代码名 X）」。
 
 对外空间层级统一为 **Space / Zone / Tab / Region**。公开 discovery、inspect 与动作回执分别给出空间位置、可选 Project/Workspace 绑定及 Session/Run 执行事实，所有可寻址 ID 均可原样用作下一次输入。精确 Region 或 Tab 可反推其上层；额外给出的父层必须一致。目标不依赖调用者工作目录、当前 Workspace、焦点、标题或最近 Session；存在多个候选时返回真实候选，不猜唯一目标。
 
@@ -68,7 +72,7 @@ flowchart LR
 
 已有 Session 投影的进入动作（包括观察面里的 Open Session 与 Continue in Session）以该投影持久保存的 Workspace/Tab/Region 位置为导航事实。执行 cwd 只能为没有投影的 Session 提供新展示来源，不能在进入已有展示时把整个 Tab、Topic 或其他 Region 搬回执行目录所属 Workspace、重复加入另一个布局或改写额外投影。启动快照暂时没有 Session 事实时，仍可进入已保留的持久投影查看恢复状态；导航不能伪造新的 Session/Run 或触发重新启动。
 
-普通 Topic 对应原 Zone，Category 对应 Space；该知识层级及本地承接只见[《Topics 知识库的层级与沉淀》](#topics-知识库的层级与沉淀)。公共发现、目标语法及实施边界见[《公共控制与跨客户端接入》](public-control.md)，本节不代签 CUI、实际工作面或迁移验收。既有 Renderer 文案与视觉不作全仓机械改名。 原实体、目录和合法绑定继续保全。
+普通 Topic 对应原 Zone，Category 对应 Space；该知识层级及本地承接只见[《Topics 知识库的层级与沉淀》](#topics-知识库的层级与沉淀)。公共发现、目标语法及实施边界见[《公共控制与跨客户端接入》](public-control.md)，本节不代签 CUI、实际工作面或迁移验收。既有 Renderer 文案与视觉不作全仓机械改名，原实体、目录和合法绑定继续保全。
 
 #### Agent 的自身位置与邻居发现
 
@@ -76,9 +80,11 @@ Agent 的自身位置由准确 Host／Session 与原空间绑定关联，执行 
 
 同 Tab 邻居指同一准确 Tab 中其他 Region 及其真实内容绑定；方向相邻由原布局几何决定，不按列表顺序、树深度或相同执行目录猜测。Agent 可沿原空间模块按需读取自己的地址、所在 Tab 的完整组成、邻居身份和相关呈现事实；只读发现不切焦点、不读取无关正文、不创建或关闭工作面，也不授予对邻居内容的额外操作权限。邻居可见、内容可读、页面可操作与本次授权分别成立；Browser 指代解析和复用优先级归[Browser 工作面](browser-workface.md#browser-工作面-1)。
 
-#### Frontend-independent positions
+#### 与前端无关的持久位置
 
-The stable spatial graph is part of amux and is maintained by Core even on a remote host without an App. Identities, topology, ordering, split ratios, selection and every binding are durable; only lookup caches, screen geometry and UI mounts are derived. All clients and the public CLI consume the same owner. Loading a Zone uses its stable identity and complete composition, without a saved display-coordinate gate. Unknown presentation coordinates do not remove original content, references or healthy Runs. Technical ownership and persistence are defined in [Durable spatial state](../../architecture/spatial-state.md). A failed initial read retains the current workbench and later edits. Save Retry reads the same owner again, applies disjoint edits against the retained baseline, and keeps conflicting local and durable facts until the user resolves them; it does not require an App restart or replace a healthy Run.
+稳定空间图属于 amux，由 Core 维护；远端 Host 即使没有运行 App 也照常持有。身份、拓扑、顺序、分割比例、选择和全部绑定都是持久事实，只有查找缓存、屏幕几何和界面挂载是派生的。所有客户端与公开 CLI 消费同一 owner。展示坐标未知不移除原内容、引用或健康 Run；Zone 的加载规则见[实体加载与准确位置](#实体加载与准确位置)，持久化机制见[空间状态与导航机制](../../architecture/spatial-state.md)。
+
+首次读取失败时保留当前工作面和之后的编辑。保存重试重新读取同一 owner，以保留的基线合并互不相交的编辑；同一项的本地值与持久值冲突时两者都保留，直到用户处理。重试不要求重启 App，也不替换健康 Run。
 
 #### Space 入口与实体的关系
 
@@ -94,7 +100,7 @@ The stable spatial graph is part of amux and is maintained by Core even on a rem
 
 ### 产品实体 ID 分配
 
-AgentMux 自主发号的可寻址产品实体统一使用固定12位 Base58 新 ID，包括 AgentSession、Tab、TabGroup、Region，以及自主创建的目录／知识／目标／消息／资源记录。项目自主创建的 operation、request、lease、观察代次、阅读视图和临时关联身份也复用同一分配组件，不各自生成 UUID 或复制随机编码算法；身份用途与 owner 仍独立，不能由共同编码合并。对象类型由类型字段或 URI 路径表达。目录 `[host,path]` 的 Space／Project 身份、Zone 资源坐标、文档键与 Git 对象坐标继续按原资源合同确定，不为统一发号改写资源寻址。外部 Provider 身份、ctxmux Run、外部协议规定的 UUID、内容哈希和确定性协议映射沿各自 owner 透传，不改造成短 ID。 外部写请求的格式接受合同尚不明确时，保留其原 wire 身份格式并明确未知，不以相邻 API 或本地测试接受代签，也不另造一份身份映射。
+AgentMux 自主发号的可寻址产品实体统一使用固定12位 Base58 新 ID，包括 AgentSession、Tab、Tab Group、Region，以及自主创建的目录／知识／目标／消息／资源记录。项目自主创建的 operation、request、lease、观察代次、阅读视图和临时关联身份也复用同一分配组件，不各自生成 UUID 或复制随机编码算法；身份用途与 owner 仍独立，不能由共同编码合并。对象类型由类型字段或 URI 路径表达。目录 `[host,path]` 的 Space／Project 身份、Zone 资源坐标、文档键与 Git 对象坐标继续按原资源合同确定，不为统一发号改写资源寻址。外部 Provider 身份、ctxmux Run、外部协议规定的 UUID、内容哈希和确定性协议映射沿各自 owner 透传，不改造成短 ID。外部写请求的格式接受合同尚不明确时，保留其原 wire 身份格式并明确未知，不以相邻 API 或本地测试接受代签，也不另造一份身份映射。
 
 编码与安全随机分配由同一无 UI、无宿主依赖的工具持有，Core 提供公开出口，依赖 Core 的领域包也消费同一底层工具，不复制实现或增加发号服务；隔离脚本、Hook 与 Browser extension 消费从该实现构建的产物。普通随机 ID 分配取9字节密码学安全样本；确定性分配按无歧义的业务域及原业务键派生。两者共用整样本溢出拒绝与左补 `1` 至12位规则，空间为 `58^12`（约70.3bit），不截断或取模。按这一空间，已有一千万个 ID 时单个新 ID 与其中任一个相撞的概率约 7×10⁻¹⁵；一千万个 ID 之间出现任意一次碰撞的概率约 3×10⁻⁸，因此持久 owner 在落盘前拒绝已存在的 ID（AgentSession 为 `DUPLICATE_AGENT_SESSION`），不以概率代替唯一性检查。ID 不能充当权限凭证；确实以不可猜测值授予一次性准入或持有者能力的 nonce 使用同一组件的安全随机出口，保留至少128bit熵及原授权边界，不能因统一外观而降为普通短 ID。既有密钥、认证令牌、HMAC 和协议 nonce 继续由安全 owner 持有。
 
@@ -102,7 +108,13 @@ AgentMux 自主发号的可寻址产品实体统一使用固定12位 Base58 新 
 
 ### Zone→Tabs→Regions 的实体与展示绑定
 
-同一个 Zone→Tabs→Regions 组件须能在 Space、Focus、Survey、Recall、Mote 等位置灵活加载任一级。同一实体与其资源 Workspace／Host／目录、Session／Run，以及展示绑定各自可辨；一个实体可以有多个准确可枚举的位置，不从某个 surface、Topic 或 Group 重新铸身份或指定唯一归属。每次加载明确来源实体与本次绑定，复用原组成、内容和动作 owner，不复制布局或生命周期。某处收起、遮挡或取消绑定不搬走其它位置、不关闭实体、不改资源或后来焦点；显式关闭实体仍沿原确认与清理合同。位置查询、导航及关系增删消费同一全位置事实，不取首地址代替明确目标。各导航上下文的选择范围只见[Work、Survey、Recall 与 Mote 的导航上下文](#worksurveyrecall-与-mote-的导航上下文)；共用组件不要求共用当前目标。Focus 内明确选择文件、Browser、Launcher 或其他原内容时，只改变当前 Work 的空间展示引用，原语义 Agent 与执行历史保持；展示位置独立于初始 Agent 定位，同一上下文内不另建平行选择字段。原持久关联必须保留，重启保原实体、所有持久绑定与选择，foreign 展示位置或暂缺恢复事实不构成删除理由。同实体多处实际显示须由真实呈现能力证明，引用、单宿主搬移、截图、重复新页面或 Run 都不能冒充实时并显；输入／尺寸与遮挡沿原权威 owner，隐藏或目录中未显示的绑定不新增页读、bytes 订阅或 fit。
+同一个 Zone→Tabs→Regions 组件须能在 Space、Focus、Survey、Recall、Mote 等位置加载任一级。每次加载明确来源实体与本次展示绑定，复用原组成、内容和动作 owner，不复制布局或生命周期。共用组件不要求共用当前目标，各导航上下文的选择范围只见[Work、Survey、Recall 与 Mote 的导航上下文](#worksurveyrecall-与-mote-的导航上下文)。
+
+实体、资源与展示分别可辨：同一实体与它的资源 Workspace／Host／目录、Session／Run 以及展示绑定各是一类事实。一个实体可以有多个准确可枚举的位置，不能从某个 surface、Topic 或 Group 重新铸造身份或指定唯一归属；位置查询、导航及关系增删消费同一份全位置事实，不取第一个地址代替明确目标。
+
+某一处收起、遮挡或取消绑定，不搬走其他位置、不关闭实体、不改资源或后来的焦点；显式关闭实体仍沿原确认与清理合同。原持久关联必须保留：重启保原实体、所有持久绑定与选择，属于其他上下文的展示位置或暂缺的恢复事实都不构成删除理由。Focus 内明确选择文件、Browser、Launcher 或其他原内容时，只改变当前 Work 的空间展示引用，原语义 Agent 与执行历史保持；展示位置独立于初始 Agent 定位，同一上下文内不另建平行选择字段。
+
+同一实体在多处“实时同时显示”，必须由真实呈现能力证明；引用、单宿主搬移、截图、重复新开页面或另起 Run 都不能冒充实时并显。输入、尺寸与遮挡沿原权威 owner；隐藏的绑定或目录中未显示的绑定不新增页读、bytes 订阅或 fit。
 
 #### 实体加载与准确位置
 
@@ -220,7 +232,7 @@ Survey、Recall 与 Mote 面板中的局部对象、Tab／Region 选择只更新
 
 ### Space、Folder 与 Topic
 
-Space 是共同的外层产品概念，Project 表达可选项目来源，不能与 Space 等同；当前词典见[《统一概念与空间寻址》](#统一概念与空间寻址)。Folder 围绕目录，Topics 围绕知识分类与具体主题，Mote 围绕持久协作对象，组织特点必须可辨认。知识库的 Category/Topic 分层以[《Topics 知识库的层级与沉淀》](#topics-知识库的层级与沉淀)为准，取代普通 Topic 直接作为 Space Item 的旧层级。共同工作能力不变，树中使用可读分组、类型图标和父子层级帮助定位，目标是好懂好找；历史 Folder/Project 文案不能改变当前含义。
+Space 是共同的外层产品概念，Project 表达可选项目来源，不能与 Space 等同；当前词典见[《统一概念与空间寻址》](#统一概念与空间寻址)。Folder 围绕目录，Topics 围绕知识分类与具体主题，Mote 围绕持久协作对象，组织特点必须可辨认。知识库的 Category/Topic 分层以[《Topics 知识库的层级与沉淀》](#topics-知识库的层级与沉淀)为准：Category 是 Space，普通 Topic 是 Zone。共同工作能力不变，树中使用可读分组、类型图标和父子层级帮助定位，目标是好懂好找；历史 Folder/Project 文案不能改变当前含义。
 
 - Folder/Project 类围绕已有目录组织工作。Project 可以由普通目录承载，Git 能力按真实仓库事实提供；不因采用 Space 概念就要求目录使用 Topic 的 Wiki 脚手架。
 - Topic 类围绕一件事情组织工作，保留独立 Wiki、资料、产出与 Agent 铭牌。它为日常临时讨论提供低门槛起点，让相似讨论在同一 Topic 持续聚集，并从交流中积累可长期使用的知识。Topic 的存在与耐久内容不依赖 Agent 或 Tab 是否仍打开。
@@ -230,45 +242,47 @@ Space 是共同的外层产品概念，Project 表达可选项目来源，不能
 
 创建入口必须按对象范围区分：打开已有目录沿 Folder/Project，Topics 分区创建 Category，具体 Topic 的创建在分类页中进行，顶部通用创建继续保留准确的跨类型菜单。
 
-- Space 导航与分类页对 Folder/Project 与 Topic 使用各自适合的内容来源。Folder/Project 表达打开的目录与实际项目事实；Topic 按识别规则自动发现，从该目录的 `topic.md` 读取人类可读标题、摘要等显示信息。Topic 不要求用户手动注册或绑定，发现与显示不依赖当前 Tab、Region 或 Session。
+- Space 导航与分类页对 Folder/Project 与 Topic 使用各自适合的内容来源。Folder/Project 表达打开的目录与实际项目事实；Topic 按识别规则自动发现，从该目录的 `topic.md` 读取人类可读标题、摘要等显示信息。自动发现只读取原收纳目录的直接 Topic 子目录，不扫描无关项目或全盘；内容和工作面身份保持连续。Topic 不要求用户手动注册或绑定，发现与显示不依赖当前 Tab、Region 或 Session。
 - Space 树保留用特殊图标识别的 Topics 总入口与已 polish 的总览列表；树与分类页的导航范围沿知识库合同，使用同一分类、Topic 集合、选中与工作面事实。分类层不改变 Topic 的自动发现，不把每个 Topic 的二级内容恢复成全局列表。总览页的视觉与控件约束只定义在 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
 - Space 左侧树负责工作上下文导航。Mote、Topics 与 Folders 在同一导航滚动区内保持可达，顶部创建与侧栏动作共用一层固定控制行，密度动作紧邻就地查找；展开与收起只改变树的显示，不启动、停止或替换 Session。长标题可通过 hover 信息和可访问名称读全；名称打开对象，折叠动作与 Mote 人格编辑各自有完整命中区，键盘操作能清楚看到当前焦点。窄栏与短窗口继续保留原对象、选中、折叠和工作面事实。对齐、缩进及视觉节奏只定义在 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
 - 树需要承担快速找 Space、辨认当前位置和继续操作的完整导航职责。就地查找只筛选已知的 Mote、Category、Topic 和 Folder 名称、摘要、路径及 Host，不扫描磁盘、不启动 Agent；命中具体 Topic 时定位其分类与分类页内结果，不重新把 Topic 叶项铺回 Space 树。匹配项的导航上下文临时可见，清除查找后还原用户原有折叠与滚动位置。无结果必须明确可恢复，不能表现为对象被删除。键盘可沿当前可见对象连续移动、到达首尾、展开或收起分组，Enter 打开明确聚焦的对象；移动焦点本身不改变工作面。Topic 的 pin 等既有事实、原总览入口和 Folder 导航身份继续共用原 owner。状态摘要优先展示需要用户处理的情况，完整分类与准确数量仍在同一入口的提示、无障碍名称与展开面中可读；收敛常驻信息不能把未知当作正常，或隐藏待回答与错误。视觉层级与信息预算只定义在密度 SSOT 同节。
-- 创建入口必须明确区分打开已有目录、创建 Category 与在分类中创建 Topic。Topics 分区原创建槽位用于创建 Category，不再同时保留一条文字创建分类按钮；分类页的新建动作形成 Topic 原持久目录与 Wiki、资料、产出、Agent 铭牌结构，创建后在准确分类可见可进入。创建后的工作面沿原内容 owner 确认的 Topic／Zone 身份绑定，不按逻辑容器路径预造身份；内容已保存而呈现未确认时保同一 Topic 与已有工作面，通过原对象查询和继续打开，不再创建替代 Topic。图标及列表层级只见呈现合同的知识库章节。
+- 创建入口必须明确区分打开已有目录、创建 Category 与在分类中创建 Topic。Topics 分区原创建槽位用于创建 Category，不再同时保留一条文字创建分类按钮；分类页的新建动作形成 Topic 原持久目录与 Wiki、资料、产出、Agent 铭牌结构，创建后在准确分类可见可进入。从任意当前 Space 创建 Topic 或 Mote 都进入其持久目录，不要求先切到默认 Topics。创建后的工作面沿原内容 owner 确认的 Topic／Zone 身份绑定，不按逻辑容器路径预造身份；内容已保存而呈现未确认时保同一 Topic 与已有工作面，通过原对象查询和继续打开，不再创建替代 Topic。图标及列表层级只见呈现合同的知识库章节。
 - 显示信息读取失败属于流程状态：保留已有 Space 与工作面，在对应条目或服务窗明确说明问题。一个 Topic 的读取失败不能隐藏其他健康 Topic，也不能清空其已有 Tab/Region 或停止健康 Agent。
 
 ### Folder 与项目树
 
 - 导航围绕 Space 的工作上下文组织；Folder/Project、Mote 与知识分类／Topic 的产品归属见[《Space、Folder 与 Topic》](#spacefolder-与-topic)。当前 Project Rail 负责选择工作上下文、显示紧凑状态和进入 Settings/Hosts。
 
-- **选中和运行是两件独立的事实**。选中项目只用中性的整行 Surface 与 `aria-current` 表达；项目下存在处于 Board `working` 列（`starting`/`running`/`working`）的 Agent 时，在该行的独立尾部状态槽显示运行标记。这个标记对所有有运行中 Agent 的项目都显示，不能因为项目未选中而隐藏，也不能因为项目选中而变亮。运行标记必须复用 `sessionBoardColumn` 的判定，不维护第二份 Session 状态。
-
-- **“活着”和“正在产出”分开说**。`running` 表示进程可用但当前回合安静，只在 Project/Scratch 行显示为 muted 的 `idle` 数量；`starting`/`working` 才进入行内的 `Agent is working` 文案。独立的运行标记仍覆盖整个 Board working 列，让健康但安静的 Session 可被找到，却不能让同一 Agent 同时读成 working 和 idle。
+- **选中和运行状态是两件独立的事实。** 选中项目只用中性的整行 Surface 与 `aria-current` 表达；项目行尾的独立状态槽对所有有 Agent 的项目都显示，不因项目未选中而隐藏，也不因选中而变亮。状态槽沿[全窗共享的 Agent 状态判定](agent-capabilities-and-messaging.md#agent-全局状态唯一事实与投影)计数，不维护第二份 Session 状态：进程存活但当前回合安静计为 idle，只有已确认的当前语义活动计为 working，Run 未观察到、进程不在运行或活动无法确认计为 unknown，同一 Agent 不能同时读成 working 和 idle。待回答与错误即使活动未确认也照常计入；已确认的完成结果不因之后失去 Run 观察而消失。图形与数量的呈现只见密度 SSOT[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
 
 - **Project 的共同父目录与真实嵌套必须可辨。** 同目录的项目按组呈现，真实子项目相邻缩进；判据如下：
-  - **分组的键是「同 host + 共同父目录」**，不是路径字面相同。`~/proj/agentmux` 与 `~/proj/bagakit` 归到 `~/proj` 一组；远程 host 上的 `~/proj` 与本机 `~/proj` **不同组**——路径字符串一样不代表是同一个地方，跨 host 混排会让用户点错机器。
-  - **真嵌套才缩进**：一个 Project 位于另一个 Project 的目录内时，两者相邻排列、子项向前缩进成树。
-  - **判断"在里面"必须按路径段边界，不能用裸字符串前缀**。`bagakit/agentmux-preview` 以 `bagakit/agentmux` 开头，但它不在 `agentmux` 里面，是它的兄弟。比较前给祖先补上分隔符（`ancestor + '/'`）才是"位于其目录内"。同理，一个 Project 嵌在多个 Project 里时**认最深的那个祖先**做父节点——挂到更浅的祖先上会让中间那层凭空消失。
-  - **单例不成组**。一个分组里只有一个顶层 Project 时不显示分组头，它直接平铺。分组头的价值在于表达"这几个是一伙的"，只领一个成员时它不携带信息，只是又一行占位——与[《控件语言》](../presentation/shared-rules.md#控件语言)「一列全同的图标不是信息」同一条理由。**数的是顶层成员，不是节点总数**：一个独苗项目底下挂着一串嵌套子项目时，那些子孙并不在这个父目录里（它们的归属由缩进表达），分组头同样只领一个成员。
-  - **分组头不是可选中的行**。它是分组标签（`Projects` 那一档的元信息层级），不承担选中、不显示计数、不接收点击——它不是一个 Project，点它没有任何东西可以被激活。
-  - **worktree 不进这棵树**。`defaultWorktreePath` 把 worktree 放在 `<repo>/.worktrees/<branch>`，它天然是子目录，但它已经是所属 Project 的一个 Workspace（在 Project 内部展开）。按路径包含关系再把它变成一个子节点，同一个东西就有了两套嵌套，用户无从判断该点哪个。**归属只有一种表达**：worktree 归它的 repo，树只表达 Project 之间的真实嵌套。
+  - 分组的键是「同 Host + 共同父目录」，不是路径字面相同。`~/proj/agentmux` 与 `~/proj/bagakit` 归到 `~/proj` 一组；远程 Host 上的 `~/proj` 与本机 `~/proj` 不同组，因为路径字符串相同不代表是同一个地方，跨 Host 混排会让用户点错机器。
+  - 只有真实嵌套才缩进：一个 Project 位于另一个 Project 的目录内时，两者相邻排列，子项缩进成树。
+  - 判断“在目录内”必须按路径段边界，不能用裸字符串前缀。`bagakit/agentmux-preview` 以 `bagakit/agentmux` 开头，但它是 `agentmux` 的兄弟而不在其内；比较前给祖先补上分隔符（`ancestor + '/'`）。一个 Project 嵌在多个 Project 里时，以最深的祖先为父节点，否则中间那层会从树上消失。
+  - 单例不成组。一个分组里只有一个顶层 Project 时不显示分组头，它直接平铺；只领一个成员的分组头不携带信息，理由与[《控件语言》](../presentation/shared-rules.md#控件语言)「一列全同的图标不是信息」相同。计数按顶层成员而不是节点总数：一个顶层项目下挂着嵌套子项目时，子孙的归属由缩进表达，分组头仍只领一个成员。
+  - 分组头不是可选中的行。它是元信息层级的分组标签，不承担选中、不显示计数、不接收点击。
+  - worktree 不进这棵树。新建 worktree 的默认位置是 `<repo>/.worktrees/<branch>`，天然是子目录，但它已经是所属 Project 内展开的一个 Workspace；再按路径包含关系把它变成子节点，同一个目录就有两套嵌套。worktree 只归它的 repo，树只表达 Project 之间的真实嵌套。
 
-- 这里只是**呈现**变了。分组与缩进从原 Workspace 的路径与 Host 身份派生，不新增第二份 Project 注册表，也不把层级写进配置——路径是唯一真相，用户在磁盘上移动了目录，这棵树就该跟着变。
+- 分组与缩进只改变呈现：它们从原 Workspace 的路径与 Host 身份派生，不新增第二份 Project 注册表，也不把层级写进配置。路径是唯一事实，用户在磁盘上移动目录后，树随之变化。
 
 - 左侧 Project Rail 的项目行支持“从侧栏移除视图”。这只撤销该 Project 的 Workspace 注册与导航入口，不删除磁盘目录、文件、布局、Session 或正在运行的 Agent；移除当前项目后应落到仍可用的 Scratch/其他 Project，并保留 Runtime 中未被停止的事实。
 
 - 当已登记的本地 Workspace 目录被移动、导致 Explorer 报 `Could not read workspace` 时，错误面必须提供“选择新目录/重设路径”出口。重设更新原 Workspace 的路径并保留 Workspace id、Session 归属与已有工作面；取消选择或选择失败不应清空原记录。仅把失败重试留给用户是不完整的恢复路径。
 
-- Projects 必须能区分项目、路径自动聚合分组与实际目录；父子关系可扫读。有项目自身图标时优先使用，缺失时按项目／目录类型显示图标。分组仍是路径派生事实，不新增实体。
+- Projects 必须能区分项目、路径自动聚合分组与实际目录；父子关系可扫读。项目图标的来源与优先级只见[用户图标与近期活动](#用户图标与近期活动)。分组仍是路径派生事实，不新增实体。
 - 活动提示应直接说明正在运行的 Agent；通知必须能解释哪个 Agent 在等什么或出了什么问题，悬停显示明细，点击直达对应会话。已读提醒可消退，但尚待回答的请求不可伪装成已解决；查看后继续显示明确的待处理原因，处理后由 Session 事实自动消失。
 
 - **文件树目录是可操作的项目入口**。目录右键菜单提供“作为项目打开”：把该目录注册为新项目并立即切换到该项目；动作只对目录显示，复用既有 Workspace 创建/选择 seam。失败时保留当前项目，并用持续可见的服务窗提示说明恢复动作。
 
-- 用户对 Space「顶部 icon 有两层、有多余标题、目录和功能区没有 `+`」的反馈同时约束 Workspace tools：工具选择和工具创建必须各有清楚作用域。Agents 的就地 `+` 打开已有 Launcher 让用户选择 Executor；Files 已有 New File、New Folder 和刷新动作继续在文件工具的原上下文生效。不为所有工具发明一个无定义的通用 `+`，不因收敛标题重写文件树，没有可用创建动作的工具不显示假按钮。Browser 的创建、导航与管理在所在工作面就地可达，各入口复用同一 Browser 动作与配置 owner；不以管理操作强制进入 Survey。项目 Browser 的「在 Survey 进一步研究」创建及成果整理只见[《Survey、临时 Zone 工作面与知识入口》](knowledge-workflows.md#survey临时-zone-工作面与知识入口)。工具切换、菜单开合和创建失败保留原工作面与健康 Session。视觉层数和重复标签约束归密度 SSOT[《顶行与 Tabbar》](../presentation/spaces-and-layout.md#顶行与-tabbar)。
+- Workspace Tools 的工具选择和工具创建必须各有清楚作用域，有创建动作的目录与功能区就地提供创建入口，顶部不叠两层图标或多余标题。Agents 的就地 `+` 打开已有 Launcher 让用户选择 Executor；Files 已有 New File、New Folder 和刷新动作继续在文件工具的原上下文生效。不为所有工具发明一个无定义的通用 `+`，不因收敛标题重写文件树，没有可用创建动作的工具不显示假按钮。Browser 的创建、导航与管理在所在工作面就地可达，各入口复用同一 Browser 动作与配置 owner；不以管理操作强制进入 Survey。项目 Browser 的「在 Survey 进一步研究」创建及成果整理只见[《Survey、临时 Zone 工作面与知识入口》](knowledge-workflows.md#survey临时-zone-工作面与知识入口)。工具切换、菜单开合和创建失败保留原工作面与健康 Session。视觉层数和重复标签约束归密度 SSOT[《顶行与 Tabbar》](../presentation/spaces-and-layout.md#顶行与-tabbar)。
 
 - **Branch/Worktree 条与 Topic 条共用交互，保原资源与空间事实。** 两者都沿“挑一个条目 → 进入原 Tab/Region 工作面”呈现（见密度合同[《控件语言》](../presentation/shared-rules.md#控件语言)）。worktree 的目录与 Workspace 是原资源事实，Topic 的内容身份与 Zone 也是原事实；选择从同一空间图定位准确工作面，Tab/Group/Region 不另复制。共享 Scratch 不把 Topic 降为临时活动 Tab 标签，也不要求另建每 Topic 的 layout 或选中 registry；对象选择、全局未绑定内容及局部落焦只遵守[Topic 导航与成员范围](#topic-导航与成员范围)的同一范围合同。
 
-- **注意力沿导航树上卷**：某一层内有 Agent 需要你时，该层的折叠行也必须表达出来，否则折起来的项目与空闲项目无法区分，"先处理谁"就退化成逐层展开去找。上卷复用同一份 Session 投影与共享状态语汇，不建第二个聚合管线；needs-you 与 error 同时存在时保留两类准确 icon+count，其他安静活动按[《Space、Folder 与 Topic》](#spacefolder-与-topic)的预算渐进展示，不靠颜色猜状态。`done` 不升级为待处理告警，`disconnected` 保持中性。
+- **注意力沿导航树上卷**：某一层内有 Agent 需要你时，该层的折叠行也必须表达出来，否则折起来的项目与空闲项目无法区分，"先处理谁"就退化成逐层展开去找。上卷复用同一份 Session 投影与共享状态语汇，不建第二个聚合管线；needs-you 与 error 同时存在时保留两类准确 icon+count，其他安静活动按密度 SSOT[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)的信息预算渐进展示，不靠颜色猜状态。`done` 不升级为待处理告警，`disconnected` 保持中性。
+
+#### Board 的工作线行
+
+Workspace 的 Board 以工作线行呈现当前对象：项目 Workspace 中是 Branch／worktree 行，Scratch 中是 Topic 行。Board 的行、读取状态和刷新动作必须来自同一次读取，Board 与侧栏工具消费同一个请求 owner；刷新后行必须更新，读取失败不能呈现为空项目，切换 Workspace 时不得短暂显示上一个 Workspace 的 Topic。Branch 行与 Topic 行都展示对应工作线的 recap，沿用同一份 Board 行摘要来源，不复制状态管线。
 
 ### 对象树与真实注意力
 
@@ -278,30 +292,32 @@ Space 导航必须同时回答「这是什么、在哪里、是否需要我、�
 - 各分区就地提供明确的 `+`：Motes 创建 Mote，Topics 创建 Category，Folders 打开已有目录作为 Project；Category 页的新建动作创建该分类中的 Topic。顶部通用创建保留跨类型菜单。分区的 `+` 不折叠分区、不切换到其他对象、不要求用户先进入默认 Topics；路径派生分组不是可创建、重命名或删除的实体，不给它伪造管理动作。
 - 「热度」使用已有 Session 的真实 working、needs-you、error、idle 与 completed 事实。Topic/Mote 的成员状态按 Core 的准确 Zone/Tab/Region 关系聚合，保全部合法外来绑定；后台协作者沿原 Host 与持久内容来源确认，不以 cwd 或共用 Scratch 补造成员。资源相对显示目录仍锚定准确内容根，不与 Session 的绝对路径直接混比；Folder 沿现有 Workspace/Project 归属。名字相同、父目录相邻或属于另一个 Host 都不能串状态。需要回答与错误同时存在时都可见，展开面继续给出准确分类和原 Session 的进入动作；折叠分区或父目录时把所有被隐藏后代的注意力卷上来，同一 Session 不重复计数。没有真实活动不显示虚假热度，不以读取失败推断空闲，不新增后台轮询或状态账本；导航投影的工作量随已加载对象和相关 Session 增长，不允许每行重复扫描全部 Session。 活动控件只订阅其所属 Session 的时间线事实；空对象不增加活动消费者，无关 Session 的时间线更新不能唤醒这些控件。
 - 标记由用户拥有。Topic/Mote 的 pin 操作与既有 Topics 总览复用同一 `pinnedItems` 与 toggle owner，标记在 Mote 树行及 Topic 分类页／总览行中可读、可操作、可撤销；已有 Branch pin 仍从属于原 Folder。pin、选中与运行状态表达不同事实，不能相互冒充。热度变化不重新排序对象；沿用已有用户顺序和置顶规则，保持空间记忆。
-- 分区开合、查找、pin、密度和人格入口不改写 Session/Run、Tab/Region 或布局；查找继续暂时显示命中上下文并在清除时恢复原折叠与滚动。进程重启后保留原对象、分区折叠、pin、密度、选中及工作面，并沿既有恢复路径继续原 Session；探测或显示信息失败按原服务窗合同保留健康工作面。顶部层数、左缘、折叠字形与无连线层级的视觉约束只定义在 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
-
-Space 导航已交付的对象、创建、查找、标记、真实注意力与恢复行为继续成立；本次视觉收敛只调整顶部开关的静息选中重量与三档分区节奏，不能借调整外观改写对象归属、工作面、焦点、Session/Run 或健康 Agent 的可用性。视觉约束唯一见 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)，不扩展 Agents、Browser 主体或其他工作面。
+- 分区开合、查找、pin、密度和人格入口不改写 Session/Run、Tab/Region 或布局；查找继续暂时显示命中上下文并在清除时恢复原折叠与滚动。进程重启后保留原对象、分区折叠、pin、密度、选中及工作面，并沿既有恢复路径继续原 Session；探测或显示信息失败按原服务窗合同保留健康工作面。顶部层数、左缘、折叠字形与无连线层级的视觉约束只定义在 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)；调整这些外观不能改写对象归属、工作面、焦点、Session/Run 或健康 Agent 的可用性。
 
 ### 用户图标与近期活动
 
 一级归属、身份槽、分类与聚合组的辨认、pin 尺度和目录背景的视觉约束唯一见 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
 
 - Mote、Topic、Folder 共用用户拥有的图标选择、恢复自动和显示规则。手动选择优先于已有自动项目图标或自动身份，树与 Topics 总览消费同一选择；自动图标稍后读到不能覆盖用户选择。恢复自动只撤销该对象的手动选择，不修改标题、Topic 内容或已有项目图标。
-- 手动图标属于 Workbench 的持久界面身份元数据，沿用现有唯一保存与恢复 owner，不进入 Core/ctxmux、Runtime 配置或 Topic 内容。身份由 Host 与对象的绝对持久目录共同确定：Folder 围绕原 Project 目录，Topic/Mote 围绕其持久 Topic 目录；名称、分类、当前 Session 和工作面都不构成身份。改名、Topic 转为 Mote、进入同一 Project 的 worktree 不丢失选择；不同 Host 或不同持久根下的同名对象不串图标。
+- 手动图标属于 Desktop 客户端的持久界面身份元数据，沿用现有唯一保存与恢复 owner，不进入 Core/ctxmux、Runtime 配置或 Topic 内容。身份由 Host 与对象的绝对持久目录共同确定：Folder 围绕原 Project 目录，Topic/Mote 围绕其持久 Topic 目录；名称、分类、当前 Session 和工作面都不构成身份。改名、Topic 转为 Mote、进入同一 Project 的 worktree 不丢失选择；不同 Host 或不同持久根下的同名对象不串图标。
 - 图标动作在已有对象菜单中可达，鼠标与键盘使用同一紧凑选择面；可预览、选择、恢复自动和取消。保存失败保留选择草稿与原工作面，明确指出失败步骤并可重试，不能假装保存成功后关闭。保存请求的成功不冒称磁盘确认；进程重启后的实际读回才证明该选择恢复。一次保存不覆盖另一个对象的选择，也不丢 pin、布局或并发工作面变更。
 - 图标选择不改变导航、折叠、pin、真实注意力、排序、Session/Run、Tab/Region 或焦点恢复。没有手动选择时继续使用已有自动来源；不新增磁盘扫描、后台轮询、状态账本或无关 Session 的图标工作。重启保留对象选择及原工作面，显示与保存失败仍按既有服务窗合同保全健康 Agent。
 
-近期活跃只辅助 Space 中 Folder 行首的彩色自动项目图像与后续「优化吧」要求中的自动字母牌；Topic 字母牌、Mote 类型图形、手动线型图标和其他表面的项目身份沿原规则。三档视觉与时间边界唯一见 surface-density[《Folder 自动图像的近期活跃色调》](../presentation/spaces-and-layout.md#folder-自动图像的近期活跃色调)。
+#### Folder 图标的近期活跃色调
+
+近期活跃只辅助 Space 中 Folder 行首的彩色自动项目图像，以及确认无图时的自动字母牌（见下文[无图 Folder 字母牌的身份色](#无图-folder-字母牌的身份色)）；Topic 字母牌、Mote 类型图形、手动线型图标和其他表面的项目身份沿原规则。三档视觉与时间边界唯一见 surface-density[《Folder 自动图像的近期活跃色调》](../presentation/spaces-and-layout.md#folder-自动图像的近期活跃色调)。
 
 - 近期活跃依据本 Project 所属已加载 Agent 的最后确认语义观察，沿 Core 已保留的原生 Hook/ACP 活动事实，不在图像层重复判断语义状态。当前状态未知不否定一次真实工作观察；「近期未知」指缺少可信活动时间。进程健康、仅打开或切换、后台探测、终端字节、文件时间与显示刷新都不是该来源，重复快照不生成新活动。只有有限、正数且不超前的既有时刻可表达年龄；时间未知、无效或超前时不编造当前时间，也不把安静外观称作「从未活跃」或已证实超过某个时长。
 - 同一 Project 的所有 worktree 共用所属 Session 的最近可信时刻；按现有 Host、Project 与 Workspace 归属，不能因同名、相邻目录或折叠而把独立子 Project 的活动算到父 Project 图像上。折叠后的尾部注意力仍沿原汇总规则，图像的近期程度不改变该规则。
 - 色调只辅助表达最近确认观察的年龄，不代替当前选中、真实运行状态、需要回答或错误；图像来源、手动优先、对象顺序、导航、工作面和健康 Session/Run 保持原事实。不新增持久活跃时间、权限或状态 owner；显示更新只消费已有相关事实与时间边界，不增加后台轮询、时间线或终端扫描。
 
-近期色调必须在用户实际使用的 Space Folder 行上成立：已有彩色自动图像且所属 Agent 有近期可信观察时，该行必须消费该事实并可见对应色调，不能让安装版本、事实传递或呈现链的缺项把所有项目一律当成未知灰态。缺少图像、可信活动时间或显示读取失败时如实区分，不能伪造活动来染色，也不能以受控图像和受控 Session 的测试通过替代用户工作面上的实际结果。三档视觉与时间边界仍唯一见 surface-density[《Folder 自动图像的近期活跃色调》](../presentation/spaces-and-layout.md#folder-自动图像的近期活跃色调)，不改变原工作面或健康 Agent。
+近期色调必须在实际使用的 Space Folder 行上成立：已有彩色自动图像且所属 Agent 有近期可信观察时，该行必须消费这一事实并显示对应色调；安装版本、事实传递或呈现链的缺项都不能让所有项目一律落为未知灰态。缺少图像、可信活动时间或显示读取失败时如实区分，不能伪造活动来染色。色调不改变原工作面或健康 Agent。
 
-已有项目图像的发现必须有界，隐藏与临时工具目录不能耗尽扫描预算、遮蔽正常项目目录中已有的图标，也不能让隐藏工具目录的图像冒充项目身份。不因单个项目或厂商增加专用路径分支；真正没有图像时保留字母牌或图形，不能为表现热度伪造项目图像。自动字母牌的身份色与近期程度遵守下述「优化吧」约束；没有可显示字素的图形仍保持中性。该来源约束不扩大到 Focus、Mote、Topic 或手动图标。
+已有项目图像的发现必须有界，隐藏与临时工具目录不能耗尽扫描预算、遮蔽正常项目目录中已有的图标，也不能让隐藏工具目录的图像冒充项目身份。不因单个项目或厂商增加专用路径分支；真正没有图像时保留字母牌或图形，不能为表现热度伪造项目图像。自动字母牌的身份色与近期程度遵守下文[无图 Folder 字母牌的身份色](#无图-folder-字母牌的身份色)；没有可显示字素时退回中性的项目／目录类型图形。该来源约束不扩大到 Focus、Mote、Topic 或手动图标。
 
-Space 左侧 Folders 即使确认没有原图，也要从自动字母图标看出近期活跃程度，并保持克制。已有项目图像仍优先；确认无图且名称提供可显示字素时，沿已有字母牌呈现稳定身份色，并消费与原图相同的可信活动时间和三档规则。身份色只辅助辨认项目，不能冒充当前状态、选中、需要回答或错误；未知活动仍明确未知，不因无图伪造活动。
+#### 无图 Folder 字母牌的身份色
+
+Space 左侧 Folders 即使确认没有原图，也要从自动字母牌看出近期活跃程度，并保持克制。已有项目图像仍优先；确认无图且名称提供可显示字素时，沿已有字母牌呈现稳定身份色，并消费与原图相同的可信活动时间和三档规则。身份色只辅助辨认项目，不能冒充当前状态、选中、需要回答或错误；未知活动仍明确未知，不因无图伪造活动。
 
 - 身份色由原 Host 与 Project 的绝对持久根身份确定，不随名称、当前 worktree、所属 Session、渲染顺序、焦点或刷新改变；同一 Project 的各 worktree 共享身份，不同 Host 或根各按自身身份派生，不承诺有限颜色绝不重复。重启后仍从同一原身份得到同一颜色，不新增持久化配色配置或注册表。
 - 只扩展 Space Folder 的自动字母牌；Topic/Mote 字母牌、手动图标、其他表面的项目身份与没有可显示字素的默认图形保留原规则。探测未完成时保留原未知呈现，不提前闪一枚彩色牌，图像稍后读到时仍优先显示原图。原手动优先、归属、名称、顺序、pin、导航、布局与健康 Session/Run 保留。
@@ -309,13 +325,13 @@ Space 左侧 Folders 即使确认没有原图，也要从自动字母图标看�
 
 ### Topic 导航与成员范围
 
-- Scratch 使用同一工具槽，内容按明确的对象范围提供。Category 的二级 Topic 目录在选中具体 Topic 后仍保该分类范围；Topics／Knowledge 功能及右侧 Chat 导航只见[Topic 导航合同](#topic-导航与成员范围)。明确 Topics 总览与 Mote 保各自对象范围，不能只因它们使用 Scratch 就统一挂上全局 Files + Topics。Topic 来自文件系统，不从打开的 View 反推；文件树沿同一公共能力和准确资源根。
+- Scratch 使用同一工具槽，内容按明确的对象范围提供。Category 的二级 Topic 目录在选中具体 Topic 后仍保该分类范围；Topics／Knowledge 功能及右侧 Chat 导航见本节下文。明确 Topics 总览与 Mote 保各自对象范围，不能只因它们使用 Scratch 就统一挂上全局 Files + Topics。Topic 来自文件系统，不从打开的 Tab 反推；文件树沿同一公共能力和准确资源根。
 
-- **一个 Topic 容纳多个 Agent，不是一 Agent 一 Topic**。同一 Topic 里的参与者关系在磁盘侧以 collaborators 表达（Scratch 文件系统是唯一真相），不另建 UI 侧的 Topic Registry；Topic 之间的切换归 Topic 面板，不靠 View 或 Tab 的开合暗中改绑。因此 `topicId` **绝不由 `tabId` 派生**——把当前 Tab 的 id 当作 topicId 会让每开一个 Tab 就凭空多出一个 Topic，与"一 Topic 多 Agent"直接矛盾；目标 Topic 由启动意图显式携带，缺失时不绑定任何 Topic 而非发明一个。
+- **一个 Topic 容纳多个 Agent，不是一 Agent 一 Topic**。同一 Topic 里的参与者关系在磁盘侧以 collaborators 表达（Scratch 文件系统是唯一真相），不另建 UI 侧的 Topic Registry；Topic 之间的切换归 Topic 面板，不靠 Tab 的开合暗中改绑。因此 `topicId` **绝不由 `tabId` 派生**——把当前 Tab 的 id 当作 topicId 会让每开一个 Tab 就凭空多出一个 Topic，与"一 Topic 多 Agent"直接矛盾；目标 Topic 由启动意图显式携带，缺失时不绑定任何 Topic 而非发明一个。
 
 - Topic 条目的目录动作只在内置 Explorer 中展开、选中并滚动到对应目录，不调用 Finder 或其他系统文件管理器。
 
-- Topic 条目的改名是对 `topic.md` 一级标题的语义编辑；`topic--*` 目录、`topicId`、Agent cwd 和 View 绑定保持稳定，Explorer 不向这些顶层目录暴露通用 Rename。
+- Topic 条目的改名是对 `topic.md` 一级标题的语义编辑；`topic--*` 目录、`topicId`、Agent cwd 和 Tab 绑定保持稳定，Explorer 不向这些顶层目录暴露通用 Rename。
 
 - Topic 的「Reveal in Files」明确展开二级栏的 Files，并显示被操作 Topic 的原目录；从当前 Topic 定位另一 Topic 的文件时，只改变文件辅助区的范围，不切换当前讨论、Tab、Region、Session 或草稿。随后显式选择 Topic 时，文件区重新随该 Topic 显示。折叠只收起文件呈现，原目录能力与用户显式偏好仍保留。
 
@@ -325,15 +341,16 @@ Space 左侧 Folders 即使确认没有原图，也要从自动字母图标看�
 
 - **文件数据复用与展示复用分别判断。** Files、知识正文及来源链接沿同一文件 owner 打开准确资源，展示保本次已确认 Topic／Zone 和导航上下文；同一文档在另一个 Topic 已打开，不授予复用该展示或切分类的意图。空 Topic 新建文件页也沿其明确 Zone。重开原文件或应用 Diff 消费本次操作的实际 Tab／Region 回执，不能在异步结束后用新的当前选择代替。原 Zone 和准确既有文件位置已确认时，分类关系未知不撤销原文件阅读或同 Zone 局部导航；新建落点仍守原公共多候选合同，不猜分类。共享文档、原脏稿、其他合法展示与健康执行保留。
 
-- **从当前工作线新建的 Tab 必须继承明确的对象／Zone 展示范围。** 点击 Tabbar 的 `+`、从当前 View 打开 Browser/Terminal/Agent，或由 Control/链接创建新 Tab 时，沿已确认当前目标创建和绑定；不能因新建 `WorkbenchTab` 退回未绑定。无对象范围时仍可保未绑定，显式指定另一个目标时以显式意图为准；已有 Session 的执行目录与展示归属仍是两种事实。继承不新增布局、Topic 注册表或另一份当前状态。
+- **从当前工作线新建的 Tab 必须继承明确的对象／Zone 展示范围。** 点击 Tabbar 的 `+`、从当前 Tab 打开 Browser/Terminal/Agent，或由 Control/链接创建新 Tab 时，沿已确认当前目标创建和绑定；不能因新建 Tab（代码名 `WorkbenchTab`）退回未绑定。无对象范围时仍可保未绑定，显式指定另一个目标时以显式意图为准；已有 Session 的执行目录与展示归属仍是两种事实。继承不新增布局、Topic 注册表或另一份当前状态。
 
-- 用户从 Category 的二级 Topic 目录或明确的 Topics 总览点击具体 Topic 后，右侧必须直接显示该 Topic 已有的 Tabs、Region 和焦点；不能只改后台选中项而让工作面留在 Board 或 Agents。Topic 的 Zone 成员与 Group 布局范围沿[Topic 导航与成员范围](#topic-导航与成员范围)的同一合同。
+- 用户从 Category 的二级 Topic 目录或明确的 Topics 总览点击具体 Topic 后，右侧必须直接显示该 Topic 已有的 Tabs、Region 和焦点；不能只改后台选中项而让工作面留在 Board 或 Agents。Topic 的 Zone 成员与 Group 布局范围沿本节上文「切 Topic 就换它的 Chat/Tab 工作面」一条。
 - Category 的 Topic 目录持续位于中间二级菜单。选择具体 Topic 只切换右侧原 Zone 工作面，二级目录保当前 Category 的准确成员、滚动位置与当前 Topic 标记；不换成 Chat 目录，也不在右侧重复铺同一分类目录。Chat／Tab 导航直接沿右侧原 Tabstrip，包含跨 Group 的准确 Zone 成员；明确选择 Chat 沿其原展示位置落焦，保当前 Topic，不猜当前 Group 或第一个位置。
 - 二级菜单顶部提供 Topics／Knowledge 切换：Topics 为分类 Topic 目录，Knowledge 复用现有知识搜索与内容 owner：已选 Topic 时检索该 Topic，仅选 Category 且未选 Topic 时复用全局搜索并明确标为 All Topics。未输入查询不把全库搜索冒充知识列表，结果保准确来源 Topic；不声称未实现的分类检索范围。切换二级功能本身保检索输入和已确认结果、原 Topic、右侧工作面、草稿与执行焦点，不启动 Agent。层级、入口和密度只见[知识库呈现合同](../presentation/spaces-and-layout.md#topics-知识库的导航与内容层级)。
 - 一次点击只建立被点中 Topic 的这一次导航。首次显示可以复用该 Topic 原已选 Chat／Tab／Region；后续元数据读取、后台准备和恢复回执不能再把工作面切到另一个 Topic、Chat、Agent 或其他对象。Chat／Agent 的独立入口只响应自己的显式动作，不冒泡叠加 Topic 行的导航。
 - 已有持久化工作面应先可见；读取 Topic 元数据的流程不能挡住已存在 Tabs。读取失败或分类归属、准确工作面位置尚未确认时，保留原内容、工作面与健康 Run，明确说明失败或未知及恢复动作，不能清空 Tabs、猜另一个对象或另建 Session。
 - 分类描述的显式刷新复用原分类只读能力，只更新准确原分类的描述；不改变 Core 分类归属、当前选择或工作面。读取仍未知时保留原描述、目录及真实原因，迟到结果不能重放导航。
 - 用户随后选择 Category、Topic、Tab、Region 或其他工作面时，新导航优先；迟到的读取、准备或恢复结果可以更新同一对象已确认的事实，不能重放旧导航、夺回焦点。仍在同一 Workspace 不代表旧导航仍有效。
+- 键盘切换焦点格时，输入焦点必须到达目标表面，包括异步加载的编辑器。较晚的指针导航取消旧的移焦意图，旧消费者不得清掉更新的请求；隐藏表面在稍后加载完成时不得夺回焦点。
 - Leader Topic 浮层的后台准备不能抢普通 Topic 的导航焦点，也不能重复挂载其他 Topic 的终端；重启后保留原工作面。
 
 ### Topic 的打开与工作起点
@@ -366,16 +383,18 @@ Topics 是从日常讨论持续积累知识的入口。临时交流可以先开�
 
 | 公共空间层级 | 知识库中的含义 | 用户面对的对象 |
 | --- | --- | --- |
-| Space Item | Topic Category | 工作、学习、Idea 等知识分类／大主题。 |
+| Space | Topic Category | 工作、学习、Idea 等知识分类／大主题。 |
 | Zone | Topic | 分类中的具体主题，保有自身知识与持续讨论。 |
 | Tab | Chat | 围绕该主题的一次具体讨论，可承载多个 Region。 |
 | Region（Agent） | Thread | Chat 内一条 Agent 讨论线，复用原 Region、正文与输入。 |
 
 该映射是确认的产品层级，不是仅替换标签，也不新建聊天、Session 或 Runtime 系统。Thread 不等同于 Session/Run；同一 Session 的合法多位置展示继续成立。普通 Region 仍能承载文件、Browser、Terminal 与 Launcher，不因知识库术语制造虚假 Agent。消息回复形成的子线程并非这里已确认的另一个层级。
 
-**导航与持久归属。** Space 树的 Topics 分区只列 Category，点击分类在中间二级菜单显示该分类的 Topic 目录，再查找、创建和打开具体 Topic；树不展开 Topic 子项，进入分类不默认替用户打开任一 Topic 或 Chat。选择 Topic 时目录留在原位，右侧直达该 Topic 的原 Zone 工作面，不再把分类目录铺成右侧主页面。二级功能和 Chat 导航边界见[Topic 点击必须打开可见 Tabs](#topic-导航与成员范围)。Topics 总览继续可达，与分类二级目录消费同一分类和 Topic 来源。Category 有自己的耐久身份与名称，Topic 保原耐久内容身份和 Zone；标题、当前 Chat、目录外观或分类改变不重发身份。原 `topic.md`、Wiki、资料、产出、协作者、pin 与已有工作面继续保全。Category 描述由原 Host 目录中的 `category.md` 持有，改名不改其持久目录或身份；明确创建与改名沿原内容 owner 保存，并表达真实持久确认，取消不写入。Category 是持久分类对象，不是只存于内存的筛选标签。分类标题按用户请求的字面内容保存，不将特殊字符当作替换指令。分类目录承载分类自身的描述，不作为成员 Topic 内容目录的物理父；分类详情与 Topic 的目录动作分别呈现各自准确内容根，不能让分类导航冒充磁盘目录嵌套。Topic 与 Category 的主归属只取 Core 空间绑定，不在文件另存一份分类关系；转移分类保原内容目录，物理目录规则仍见[《Topic 与 Mote 的物理目录》](motes-and-coordination.md#topic-与-mote-的物理目录)。默认分类名为「未分类」：旧内容未明确归类、新讨论没有指定分类时在此可达并能继续讨论，不据标题猜工作／学习／Idea、不隐藏旧 Topic，也不先搬目录才可使用。已有明确分类保持；工作／学习／Idea 示例不强制建成固定目录。目录或分类读取暂失败属于未知，保原绑定与引用，不凭未知将已分类对象写回「未分类」。Note 的正文、结构与来源继续沿原内容 owner，见[《Recall、Notebook 与块知识》](knowledge-workflows.md#recallnotebook-与块知识)，不与 Topic 分类合并。
+**导航与持久归属。** Space 树的 Topics 分区只列 Category，点击分类在中间二级菜单显示该分类的 Topic 目录，再查找、创建和打开具体 Topic；树不展开 Topic 子项，进入分类不默认替用户打开任一 Topic 或 Chat。选择 Topic 时目录留在原位，右侧直达该 Topic 的原 Zone 工作面，不再把分类目录铺成右侧主页面。二级功能和 Chat 导航边界见[Topic 导航与成员范围](#topic-导航与成员范围)。Topics 总览继续可达，与分类二级目录消费同一分类和 Topic 来源。Category 有自己的耐久身份与名称，Topic 保原耐久内容身份和 Zone；标题、当前 Chat、目录外观或分类改变不重发身份。原 `topic.md`、Wiki、资料、产出、协作者、pin 与已有工作面继续保全。Category 描述由原 Host 目录中的 `category.md` 持有，改名不改其持久目录或身份；明确创建与改名沿原内容 owner 保存，并表达真实持久确认，取消不写入。Category 是持久分类对象，不是只存于内存的筛选标签。分类标题按用户请求的字面内容保存，不将特殊字符当作替换指令。分类目录承载分类自身的描述，不作为成员 Topic 内容目录的物理父；分类详情与 Topic 的目录动作分别呈现各自准确内容根，不能让分类导航冒充磁盘目录嵌套。Topic 与 Category 的主归属只取 Core 空间绑定，不在文件另存一份分类关系；转移分类保原内容目录，物理目录规则仍见[《Topic 与 Mote 的物理目录》](motes-and-coordination.md#topic-与-mote-的物理目录)。默认分类名为「未分类」：旧内容未明确归类、新讨论没有指定分类时在此可达并能继续讨论，不据标题猜工作／学习／Idea、不隐藏旧 Topic，也不先搬目录才可使用。已有明确分类保持；工作／学习／Idea 示例不强制建成固定目录。目录或分类读取暂失败属于未知，保原绑定与引用，不凭未知将已分类对象写回「未分类」。Note 的正文、结构与来源继续沿原内容 owner，见[《Recall、Notebook 与块知识》](knowledge-workflows.md#recallnotebook-与块知识)，不与 Topic 分类合并。
 
-**本地内容承接新层级。** 旧 Topic 的目录与原内容身份保持，`topic.md`、Wiki、refs、outcome、协作者铭牌和任意用户文件保全；原 Home Zone、Chat/Tab、Group、Thread/Region、全部合法展示、文件逻辑引用、pin、图标、输入草稿与脏文件保留。旧 Topic-as-Space 导航节点按精确名单一次转换到 Category→Topic，旧目录 Space ID 保为 Topic 内容／来源身份，不作为另一套可导航 Space 并行保留，也不保留永久旧导航解析或分类 registry。Mote 的原 Space/Zone 与 Scratch 全局 Zone/Tab 不进入此转换；未绑定 Topic 的内容继续通过明确全局入口找到，不默认塞进 Mote 或丢弃。未明确归类的旧 Topic 原样进入「未分类」，不复制正文或强制重组用户知识。转换先保留原图、内容清单及受影响元数据并预演精确改动，再经同一业务 owner 调用 Core 的 exact-revision 提交；陈旧 revision 拒绝本次写入，并发或未知不覆盖较新工作。未确认回执核读同一对象与操作，不能盲重放创建；重启读回同一图，重复已完成的转换不再改动，旧图保存不能复活过时导航。分类转移及层级转换不搬执行目录、不停止或重建健康 Session/Run；已授权的物理目录承接及临时旧文件地址仍只见[《Topic 与 Mote 的物理目录》](motes-and-coordination.md#topic-与-mote-的物理目录)，不与永久旧空间 owner 混同。
+**本地内容承接新层级。** 旧 Topic 的目录与原内容身份保持，`topic.md`、Wiki、refs、outcome、协作者铭牌和任意用户文件保全；原 Home Zone、Chat/Tab、Group、Thread/Region、全部合法展示、文件逻辑引用、pin、图标、输入草稿与脏文件保留。旧 Topic-as-Space 导航节点按精确名单一次转换到 Category→Topic，旧目录 Space ID 保为 Topic 内容／来源身份，不作为另一套可导航 Space 并行保留，也不保留永久旧导航解析或分类 registry。Mote 的原 Space/Zone 与 Scratch 全局 Zone/Tab 不进入此转换；未绑定 Topic 的内容继续通过明确全局入口找到，不默认塞进 Mote 或丢弃。未明确归类的旧 Topic 原样进入「未分类」，不复制正文或强制重组用户知识。
+
+层级转换必须可核对、可重入：改动前保留原图、内容清单及受影响元数据并预演精确改动，再经同一业务 owner 以 Core 的 exact-revision 提交；陈旧 revision 拒绝本次写入，并发或未知结果不覆盖较新工作。未确认回执按同一对象与操作核读，不能盲目重放创建；重启读回同一图，已完成的转换再次执行不产生改动，旧图的保存不能复活过时导航。分类转移及层级转换不搬执行目录、不停止或重建健康 Session/Run；已授权的物理目录承接及临时旧文件地址仍只见[《Topic 与 Mote 的物理目录》](motes-and-coordination.md#topic-与-mote-的物理目录)，不与永久旧空间 owner 混同。
 
 **整个 Topic 可以转移分类。** 用户或已获授权的 Agent 能选择准确 Topic 和目标 Category，看清当前与目标归属，再改变同一 Topic 的分类关系。从分类二级目录可以直接对准确 Topic 发起此操作，不要求先打开其 Chat 或启动 Agent；具体 Topic 内也能发起同一操作，两处复用同一转移 owner 和公共能力，不能另存 UI 分类关系。转移后其所有 Chat、Thread、知识和来源在目标分类继续可达，源分类不再将其列作该次转移的原成员；这是归属转移，不是复制内容或 Agent 移动。原 Topic/Zone/Tab/Region、Session/Run、cwd、布局、草稿与其他合法展示绑定保持。取消不写入，保存未确认保原引用与当下工作并提供核对／重试；成功回执区分关系已应用与持久确认。分类写入沿原 Core 内容身份判断目标；人格文件缺失或一次 Host 元数据变化不把已确认 Mote 降为普通 Topic。身份矛盾只拒绝错误目标的本次写入，并保原内容、知识、工作面、健康执行及准确核对／恢复路径。GUI 与 CUI 的分类更新经共同空间应用边界协调同一原 Zone 的选择；原父绑定仍合法时不动，唯一新分类确认后保原准确 occurrence，多个候选或未知时保原工作面并说明。跨分类引用不等同于转移，多分类同时作为主归属的规则另行确定。
 
@@ -389,7 +408,7 @@ Topics 是从日常讨论持续积累知识的入口。临时交流可以先开�
 
 Survey 的整理入口沿[《Survey、临时 Zone 工作面与知识入口》](knowledge-workflows.md#survey临时-zone-工作面与知识入口)继续。普通 Topic 对应 Zone，不能再把另一套 Zone 嵌在 Topic 下；整项研究成为新 Topic 时保原研究 Zone 身份，加入所选 Category。整理到已有 Topic 时，以原内容引用、知识条目或准确 Tab/Region 展示关系进入目标 Topic，原研究 Zone、Note/Block 和其他绑定保留，不压扁研究布局或复制生命周期。
 
-**CUI 将 Topics 用作真实知识库。** 人与 Agent 经公共控制界面发现 Category/Topic，按范围搜索与读取知识及来源，创建讨论／知识、修订条目、转移 Topic 归属，并读取真实结果。GUI 与 CUI 消费同一内容、关系、权限与修订 owner；返回可继续寻址的稳定 ID、来源和准确目标，不从调用者 cwd、最近 Tab 或默认 Mote 猜目标。歧义返回候选，局部读取失败表达部分／未知，未知保存不冒成功，也不盲重放创建。并发编辑沿原 revision-aware 保存与冲突合同，写入不隐式启动、发消息或续跑 Agent。具体命令、权限粒度与存储格式由实施评审明确；这些设计要求不声称当前 CLI 已交付全部知识能力，公共接入与分层仍见[《公共控制与跨客户端接入》](public-control.md)。
+**CUI 将 Topics 用作真实知识库。** 人与 Agent 经公共控制界面发现 Category/Topic，按范围搜索与读取知识及来源，创建讨论／知识、修订条目、转移 Topic 归属，并读取真实结果。GUI 与 CUI 消费同一内容、关系、权限与修订 owner；返回可继续寻址的稳定 ID、来源和准确目标，不从调用者 cwd、最近 Tab 或默认 Mote 猜目标。歧义返回候选，局部读取失败表达部分／未知；准确内容或资源 owner 不可用时只报告本次操作未知，未知保存不冒成功，也不盲重放创建。按原准确 Topic 发起的 inspect 与知识读取，在该 Topic 晋升为 Mote 后接续到同一对象并返回其实际类型，规则只见[《完成以后，接着原来的事》](companions-from-work.md#完成以后接着原来的事)。并发编辑沿原 revision-aware 保存与冲突合同，写入不隐式启动、发消息或续跑 Agent。具体命令、权限粒度与存储格式归公共接入合同；这些设计要求不声称当前 CLI 已交付全部知识能力，公共接入与分层仍见[《公共控制与跨客户端接入》](public-control.md)。
 
 **Mote 与普通 Topic 分开组织。** Mote 是带持久人格的协作对象，继续作为自己的 Space；Topics 是知识组织入口，普通 Topic 是 Category 中的主题 Zone。复用公共文件与工作面能力、具有全局工作能力或共享 Scratch，均不使普通 Topic/未绑定 Tab 自动属于某个 Mote。成员可包含通过原空间关系明确绑定的外来内容，不能按 cwd、标题、相邻位置或所有 Scratch Tab 猜成员。Mote 的选择、恢复和同一对象内操作须保持对象范围，具体约束见[《Mote 快捷入口与当前协调上下文》](motes-and-coordination.md#mote-快捷入口与当前协调上下文)。
 
@@ -423,15 +442,15 @@ Mote 保持自己的 Space 身份并复用共同框架；其持久人格、SOUL�
 
 ### Tab、Tab Group 与 Region
 
-- `View` 是用户认知里的一张完整工作视图，在 Desktop 中表现为一个 Tab。
+三者的定义只见[概念词典](#统一概念与空间寻址)。本节约束它们的布局操作：
 
-- `Tab Group` 用来整理整张 View；移动 Tab 不改变 View 内部内容布局。
+- Tab 是一张完整工作面（代码名 View），Tab Group 整理整张 Tab；在 Group 之间移动 Tab 不改变 Tab 内部的 Region 布局。
 
-- `Region` 是 View 内的内容 leaf，可展示 Agent、Terminal、File、Browser 或 Launcher。
+- Region 是 Tab 内的内容叶位置，可展示 Agent、Terminal、File、Browser 或 Launcher。
 
-- `split`（`left|right|up|down`）只修改目标 View 的 Region 树；`new-tab` 创建新 View。用户明确给定的目标、Tab 或分屏方向优先；未指定时，Agent 可在已授权的开启范围内依据任务用途、当前布局与可读空间选择，并简短说明。选择与核验见[开启工作面的意图与落点](#开启工作面的意图与落点)，不把未指定位置视为必须再问一次的条件。
+- `split`（`left|right|up|down`）只修改目标 Tab 的 Region 树；`new-tab` 创建新 Tab。用户明确给定的目标、Tab 或分屏方向优先；未指定时，Agent 可在已授权的开启范围内依据任务用途、当前布局与可读空间选择，并简短说明。选择与核验见[开启工作面的意图与落点](#开启工作面的意图与落点)，不把未指定位置视为必须再问一次的条件。
 
-- Workspace 保存 Tab Group 树，每个 View 保存自己的 Region 树。两个树使用不同 ID、焦点、resize 状态和操作入口。
+- 显示 Workspace 保存 Tab Group 的分割树，每个 Tab 保存自己的 Region 分割树。两棵树使用不同 ID、焦点、resize 状态和操作入口。
 
 - **可见工作面的控件直接响应本次操作。** 同一准确 Tab 内，Region 的关闭、菜单等控件和分隔线不以预先聚焦为条件；第一次点击执行所点控件的原动作，第一次拖动调整所命中的原分割节点。需要更新选择时在同次操作内完成，不能只聚焦而吞掉动作。主工作面与合法重复呈现沿同一布局 owner 提供操作；内部焦点更新不能换掉正在操作的准确目标或中断本次点击、拖动。原权限、未保存确认及位置未知边界仍由原动作 owner 判定，不从当前聚焦格猜目标。
 
@@ -473,29 +492,22 @@ Mote 保持自己的 Space 身份并复用共同框架；其持久人格、SOUL�
 - 按钮、Region 右键菜单、既有快捷键入口和 typed Control 表达同一操作。inspect 区分原布局几何与 Tab 内当前呈现几何：铺满格占整 Tab，隐藏格当前 bounds 为 null；null 只表示在该 Tab 内隐藏，不表示 Region/Session 不存在。布局结构缩略图明确展示原结构。
 - 局部显示或尺寸握手失败留下范围明确的服务窗，健康 Agent 仍能输入；铺满/还原不启动、恢复、停止或替换 Run。
 
-### Tab 与 Pane
+### Tabbar 与切换保活
 
-- Agent/Terminal 内容上方只保留一行 Tabbar，不再显示第二条 Session Info Bar。
-- Agent Tab 使用 Provider 图标并叠加语义状态点；Terminal Tab 使用 Terminal 图标，不能用同形状态点同时表达内容身份。
-- 语义状态点是全窗口共享语汇（StatusDot 与 Attention Bar 的 StatusCount 同源）：`waiting`/`blocked`（"需要你"）带 `?` 字形而非仅靠颜色，`disconnected` 用中性空心环从琥珀让出，使琥珀唯一表示"需要你"；字形只在全尺寸点上浮现，Tab 角与 Rail 行的 5px 角标仍只用颜色加位置区分。详见密度 SSOT[《响应式与可访问性》](../presentation/shared-rules.md#响应式与可访问性)。
-- Tab 保持稳定可读宽度和单行名称；窄 Pane 使用自身横向 overflow、左右导航和自动滚入可见区。
+- Agent/Terminal 内容上方只保留一行 Tabbar，不显示第二条 Session Info Bar。
+- Agent Tab 使用 Provider 图标并叠加语义状态点；Terminal Tab 使用 Terminal 图标，不能用同形状态点同时表达内容身份。状态点的字形与颜色语汇只见密度 SSOT[《响应式与可访问性》](../presentation/shared-rules.md#响应式与可访问性)。
+- Tab 保持稳定可读宽度和单行名称；窄 Tab Group 使用自身横向 overflow、左右导航和自动滚入可见区。
 - Active Run 的 Stop 是 Tabbar 内的图标动作，继续使用统一确认和 Core stop owner。
-- `Split` 表示拆分当前 View 内容；移动整张 Tab 使用独立命令和拖拽落点，两种预览和结果不能混用。
+- `Split` 拆分当前 Tab 的内容；移动整张 Tab 使用独立命令和拖拽落点，两种预览和结果不能混用。
 - **切回已打开的 Tab 保留原实例，不重复恢复与重放。** 非活动 Tab 保持挂载并隐藏，不能因切换卸载原 xterm 与内容子树。保活须满足以下边界：
-  - **保住实例的代价必须为零**，这是首要约束不是优化项。不可见的 Region 里终端与原生表面一律
-    停工——不 fit、不 resize、不渲染，且不新增常驻定时器或监听；否则开十个 Tab 就是十份持续开销，
-    等于拿一种卡顿换另一种。这类退化不会让任何行为测试变红（画面仍然正确），必须显式断言。
-  - **实例的存活边界严格等于 Region 的存活边界**：关闭 Region 即销毁实例。**不建终端实例缓存池**
-    ——那会造出第二套终端生命周期，谁回收、何时回收都无人负责，与 Region 是展示身份 SSOT 直接冲突。
-  - **恢复态本身不删**。真的没有内容可显示时——首次 attach、断连重连、replay 有缺口——仍要如实说
-    正在恢复。删掉它会更安静，但那是拿谎报换安静：用户会盯着一个空白终端不知道在等什么。
-  - 隐藏用 `visibility` 而非 `display:none`：后者的子树量不到尺寸，切回时得先重新 fit 一次才显示对的
-    行列数，那正是要消掉的那一帧。隐藏格必须 absolute 叠放，留在文档流里会把活动格挤变形。
-- **切换 Project/Workspace 也遵守同一条保活合同**。所有已打开 Workspace 的 Workbench 由窗口级 owner 保持挂载；非当前 Workspace 只隐藏并停工，不卸载其 Session Region。切换回来不得重新 attach、重新 loading TUI 或从 replay 起点重放一遍。Workbench 真的关闭、Region 被删除或 Session 被用户明确停止时，才释放对应实例与 attachment。
-- **阅读保护只处理该工作面实际持有的阅读与输入**。没有本地选区、也无需恢复原输入焦点时，普通内容更新不应反复检查全窗口选区。原有选区、滚动与迁移后的输入恢复仍须保留，后来的人类选择优先。
-- **保活不等于无限常驻重资源**。活动 Workspace 与近期访问的工作面保持 warm，确保回访不触发恢复态；长期隐藏、超出明确 hot-retain 数量的 Terminal/Monaco/Browser surface 可以进入 cold-park，但只能在该 surface 有可验证的重建或 replay 路径、且不切断 Core Session/Run 事实时进行。cold-park 必须有 TTL、数量上限与 cooldown，避免在项目来回切换时反复卸载/挂载；语义 Session、Topic/Region 布局和可恢复的 attachment 归属不得因内存预算被删除。
-- **项目切换本身不得触发 cold-park**。非当前 Workspace 的 Workbench 虽然隐藏，仍受保活合同保护；只有当前 Workspace 内长期隐藏且满足重建条件的非活动 Tab 才能进入 cold-park。这样切换项目后立即回来不会因为 30 秒计时器卸载 TerminalView/attachment，因而不会凭空制造 replay gap；真正关闭 Workbench/Region 或用户明确停止 Session 的释放边界不变。
-- **内存归因必须按进程和 owner 分层**。比较 AgentMux 与其他客户端时，不能把 Chromium helper 的 RSS、共享页或 V8 保留容量直接相加后称为“应用泄漏”；至少要分别记录 Main、Renderer、GPU/Utility、Browser target，以及 Terminal/Monaco/Browser/attachment owner。只有在同一场景的 working-set 与 owner count 同时收敛时，才把 cold-park 记为有效回收；没有证据的数值不得写成产品承诺。
+  - 保住实例的额外代价必须为零：不可见 Region 里的终端与原生表面一律停工，不 fit、不 resize、不渲染，也不新增常驻定时器或监听；否则每多一张隐藏 Tab 就多一份持续开销。画面正确不能证明这一点，必须显式验证，方法见[测试策略](../../testing/strategy.md#资源与故障证据)。
+  - 实例的存活边界等于 Region 的存活边界：关闭 Region 即销毁实例。不建终端实例缓存池，否则会出现第二套无人负责回收的终端生命周期，与 Region 作为展示身份的唯一来源冲突。
+  - 恢复态不删：真的没有内容可显示时（首次 attach、断连重连、replay 有缺口），仍如实显示正在恢复，不用空白终端代替说明。
+  - 隐藏格保留可测量的尺寸且不占文档流：切回时直接按原行列数显示，不先额外 fit 一帧；隐藏格不能挤压活动格。当前实现机制见[Terminal 运行时《隐藏工作面与冷停》](../../architecture/terminal-runtime.md#4-隐藏工作面与冷停cold-park)。
+- **切换 Project 或显示 Workspace 也遵守同一保活合同。** 所有已打开显示 Workspace 的工作面（代码名 Workbench）由窗口级 owner 保持挂载；非当前的只隐藏并停工，不卸载其 Session Region。切换回来不得重新 attach、重新 loading TUI 或从 replay 起点重放。只有工作面真的关闭、Region 被删除或用户明确停止 Session 时，才释放对应实例与 attachment。
+- **阅读保护只处理该工作面实际持有的阅读与输入。** 没有本地选区、也无需恢复原输入焦点时，普通内容更新不反复检查全窗口选区。原有选区、滚动与迁移后的输入恢复仍须保留，后来的人类选择优先。
+- **保活不等于无限常驻重资源。** 活动显示 Workspace 与近期访问的工作面保持 warm，回访不触发恢复态；长期隐藏、超出明确热保留数量的 Terminal、Monaco 与 Browser surface 可以停放（cold-park），前提是该 surface 有可验证的重建或 replay 路径，且停放不切断 Core Session/Run 事实。停放必须有闲置时限、数量上限与冷却期，避免在项目来回切换时反复卸载和挂载；语义 Session、Topic/Region 布局和可恢复的 attachment 归属不得因内存预算被删除。
+- **切换项目或 Topic 本身不触发 Terminal 与 Monaco 的停放。** 不属于当前显示 Workspace 与所选 Topic 的 Terminal 与 Monaco 虽然隐藏，仍受保活合同保护；只有当前显示 Workspace 与所选 Topic 内长期隐藏且满足重建条件的非活动 Tab 才能停放，因此切换项目或 Topic 后立即回来不会因停放计时卸载终端与 attachment、凭空制造 replay gap。Browser 的闲置回收覆盖全部导航位置，离开项目或 Topic 不是永久保留的理由，规则只见[Browser 工作面](browser-workface.md#browser-工作面-1)的闲置回收与停放约束。真正关闭工作面、删除 Region 或用户明确停止 Session 的释放边界不变。
 
 ### Agent Region 关闭与身份入口
 
@@ -522,9 +534,9 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 - **项目路径统一遵守路径表示设置。** 所有客户端自行呈现的项目／工作区路径，包括 hover，其正文、摘要、tooltip、菜单与复制同时遵守现有路径样式设置，范围包括 Explorer／Git、相邻 Sidebar／Launcher 和其他确实呈现该路径的 typed metadata；同一准确资源在这些入口采用同一偏好，不再出现正文已缩写而 hover 又露出另一套路径风格。只改变表示，资源身份、原始路径、Host、文件事务、执行 argv 与 Runtime 字节保持；相对路径仍保其真实坐标，不为视觉拼成另一资源。不对文档、Markdown、终端或任意系统字符串猜路径。缩写继续只依据所属主机与真实 home，本机其他用户、未知 home 和远程路径不猜；原边界见本节路径缩写条目。Explorer 的去重与视觉唯一见密度文档[《Explorer 与快捷输入区》](../presentation/files-and-git.md#explorer-与-editor-的共用头和列表)。
 
 - **路径默认以 `~` 表示已确认本机当前用户的真实家目录，用户可切回绝对路径。** 复制与显示使用同一偏好。
-  - **缩写只在"这确实是当前用户的家目录"时发生，判据是真实 home 值而不是路径长相。** 不得用形如 `任意用户目录前缀` 的正则去猜（那会把**别人的**家目录也改写成 `~`，粘给对方时指向错的地方）。边界必须是 `home` 本身或 `home + '/'`，不是 `startsWith(home)`——否则 `${USER_HOME}OTHER/x` 会被剥成 `~OTHER/x`，一个看起来合法、实则不存在的路径。这条与 Terminal 路径识别那侧的根内判据同源，两侧不得各写一份边界。
-  - **远程主机的路径绝不套用本机家目录。** Workspace 可以挂在 SSH 主机上，而"我的 home"是本机事实；把本机 home 从远程路径上剥掉会产出一个在对面根本不存在的路径。所以缩写以**该路径所属主机是本机**为前置条件；非本机一律原样给绝对路径。这属于"分不清就如实说"的同一条纪律：宁可长，不可错。
-  - **一个概念一个出口。** 今天"复制路径"有多处各自拼接（其中若干直接把绝对路径递给剪贴板，绕过了既有的路径格式化出口），这条能力**必须先把它们收成一处**再实现缩写；分散实现意味着开关只对一部分入口生效，而用户看到的是"有时缩写有时不缩写"。已知的相邻事实：剪贴板写入本身已经只有一个出口，但它同时承载终端选区与分支名等非路径文本，**不是**缩写该发生的层——缩写属于"路径怎么表示"，不属于"文本怎么写进剪贴板"。
+  - 缩写只在路径确实位于当前用户家目录时发生，判据是真实 home 值而不是路径长相。不得用形如 `任意用户目录前缀` 的正则去猜，否则别人的家目录也会被改写成 `~`，粘给对方时指向错误位置。边界必须是 `home` 本身或 `home + '/'`，不是 `startsWith(home)`，否则 `${USER_HOME}OTHER/x` 会被剥成一个看似合法、实则不存在的 `~OTHER/x`。这条与 Terminal 路径识别的根内判据同源，两侧不得各写一份边界。
+  - 远程主机的路径不套用本机家目录。Workspace 可以挂在 SSH 主机上，而本机 home 只是本机事实，从远程路径上剥掉它会产出对端不存在的路径。缩写以该路径所属主机是本机为前置条件，非本机一律原样给绝对路径；分不清时宁可长，不可错。
+  - 一个概念一个出口：所有显示与复制路径的入口共用同一个路径表示出口，偏好开关因此对全部入口同时生效，不出现有的入口缩写、有的不缩写。剪贴板写入另有自己的唯一出口，它同时承载终端选区与分支名等非路径文本，不是缩写发生的层；缩写属于“路径怎么表示”，不属于“文本怎么写进剪贴板”。
 
 ### 公共空间操作与分享
 
@@ -542,12 +554,12 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 
 - Agent 的 Skill 必须能指导它为自己设置用户可读的显示名，并为当前工作区设置用户可读的名称。显示名是可持久化的展示事实，Session、Workspace、路径和其他内部 ID 保持稳定；设置失败要留在当前工作面说明，不得清空工作区。
 
-- **显示名与身份严格分离**。名字只用于显示，绝不进入 id、寻址 key 或持久化路径。改名因此永远不会破坏引用——这条不是优化，是前置约束：一旦名字进了 key，后面就只能靠别名表和"已删名不复用"打补丁。
-- **Agent 与 Tab 各有自己的名字，因为它们是两级身份**。Tab 比 Agent 所在的 Region 高一级（与上文 Tab/Region 的层级同源）：Agent 名回答"**这个 Agent 在做什么**"，Tab 名回答"**这张工作面是什么**"。把两者合成一个字段，就等于假设一张 View 永远只有一个 Agent——而分屏恰恰是常态。
+- **显示名与身份严格分离。** 名字只用于显示，不进入 ID、寻址 key 或持久化路径，因此改名不会破坏引用；名字一旦进入 key，就只能靠别名表和“已删名不复用”补救。
+- **Agent 与 Tab 各有自己的名字，因为它们是两级身份。** Tab 比 Agent 所在的 Region 高一级：Agent 名回答“这个 Agent 在做什么”，Tab 名回答“这张工作面是什么”。把两者合成一个字段，等于假设一张 Tab 永远只有一个 Agent，而分屏是常态。
 - **Tab 菜单的改名作用域明确。** Tabstrip 的 Tab 菜单只提供一个改名入口：多个 Region 时为 `Rename tab`；仅有一个已确认的 Agent Region 且当前 Tab 显示名与该 Agent 显示名相同时，为 `Rename tab and agent`，本次编辑同时落实到原准确 Tab 与 Session 的名称。单 Agent 异名以及其它单 Region 类型仅改 Tab，Agent 的独立改名继续由原 Agent 菜单提供，Tab 菜单不重复放置 `Rename Agent`。资格按实际 Region 组成和同一显示优先级链判断，不按唯一不同 SID、title Region、截断文字或当前焦点猜测。两级身份、各自名称 revision 与既有派生策略保留；合并编辑的各目标按原 owner 写入与留痕，只有两者均已完成且持久确认时才表示整体成功。冲突、局部完成或磁盘未确认就地说明准确目标与已应用范围，保留原编辑稿、工作面和健康能力，不自动重放或回滚另一目标。
-- **Tab 名的默认策略随 Region 数量变化，这正是分开存的价值**：
-  - **一个 Agent 时，Tab 名默认对齐该 Agent 的名字**——此时两级身份指向同一件事，让用户填一次名字就够。
-  - **再开 Region 之后，Tab 名要体现这是一个 Agent 家族**，而不是继续显示其中某一个 Agent 的名字（那会让另外几个 Agent 在这张 View 上失去表示，也会让 Tab 名随"哪个 Region 是 title region"而跳变）。家族名从成员派生，不要求用户手填。
+- **Tab 名的默认策略随 Region 数量变化：**
+  - 只有一个 Agent 时，Tab 名默认对齐该 Agent 的名字；两级身份指向同一件事，用户填一次名字就够。
+  - 再开 Region 之后，Tab 名体现这是一组 Agent，而不是继续显示其中某一个 Agent 的名字；否则其他 Agent 在这张 Tab 上失去表示，Tab 名也会随“哪个 Region 是 title region”跳变。组名从成员派生，不要求用户手填。
   - 用户显式改过 Tab 名之后，上面两条自动策略对这个 Tab 永久停手——它变成一个手改名，不再随成员增减而变。
 - **名字有一条统一的优先级链**，只有一处定义：`用户手改 > 启动时指定 > 从成员/首条 prompt 派生 > Provider·Workspace 派生`。任何展示名字的地方都经这条链求值，不各自拼一份。
 - **自动命名绝不覆盖用户意图**。派生名只在当前名仍是系统生成时才更新；用户手改过一次之后，自动机制对这个名字永久停手。
