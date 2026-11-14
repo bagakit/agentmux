@@ -1234,6 +1234,8 @@ export type AgentSessionUserMessage = {
   author: AgentSessionUserMessageAuthor
   /** Original user-content boundary only; absence is unknown. Not sharing authority, safety or identity. */
   publicContent?: 'confirmed' | 'unknown'
+  /** Reading declaration from the separately frozen system context of this automatic input. */
+  declaredTrigger?: import('./amux-protocol-definition.js').AmuxTriggerKind
   content: string
   contentParts: AgentSessionHistoryContentPart[]
   /** Existing Provider reply facts; the original contentParts remain complete for Copy. */
@@ -2260,6 +2262,8 @@ export type AgentTimelineItem = {
   contentEligibility?: AgentSessionHistoryContentEligibility
   /** Set by the original userContent writer, never inferred from legacy content or author. Not sharing authority. */
   publicContent?: 'confirmed'
+  /** Reading declaration from the separately frozen system context of this automatic input. */
+  declaredTrigger?: import('./amux-protocol-definition.js').AmuxTriggerKind
   /** Original saved or submitted Input identity; attribution or opaque IDs never reconstruct it. */
   inputRef?: import('./agent-prompt-condition.js').AgentPromptInputKey
   /** Immutable membership in the original saved-input journal. */

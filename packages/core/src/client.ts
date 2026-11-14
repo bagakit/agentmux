@@ -137,6 +137,7 @@ import { AgentSessionObservationRetries, sessionObservationSource,
   type SessionObservationKind, type SessionObservationTarget } from './session-observation-retry.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
+import { readAmuxTriggerNote, type AmuxTriggerKind } from './amux-protocol-definition.js'
 import { composeAgentLaunchPrompt, composeAgentPrompt } from './agent-outbound-message.js';
 import { parseBrowserInputContext, parseBrowserInputContextSource } from './browser-input-context.js'
 import { parseAgentInputContextCaptureReference, type AgentInputContextCaptureProof } from './agent-input-context-capture.js'
@@ -8618,7 +8619,9 @@ export class AgentMuxClient {
       }
       if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       stage('receipt')
-      await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered, 'complete', inputControl?.sourceKey ?? inputKey)
+      const automatic = input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined
+      const declaredTrigger = automatic && delivered.systemContext ? readAmuxTriggerNote(delivered.systemContext)?.kind : undefined
+      await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered, 'complete', inputControl?.sourceKey ?? inputKey, undefined, declaredTrigger)
     } finally { releasePreparationObservation?.() }
   }
 
@@ -10485,7 +10488,8 @@ export class AgentMuxClient {
     message: AgentPromptMessageContent,
     status: 'complete' | 'failed' = 'complete',
     inputRef?: AgentPromptInputKey,
-    inputOwner?: 'launch'
+    inputOwner?: 'launch',
+    declaredTrigger?: AmuxTriggerKind
   ): Promise<void> {
     const now = Date.now()
     if (message.systemContext) await this.recordMessageAfterSideEffect(session, `system-context:${operationId}`,
@@ -10525,7 +10529,7 @@ export class AgentMuxClient {
       } catch (error) { this.publishInputConversationFailure(inputRef, error); return }
     }
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
-      title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),
+      title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(declaredTrigger ? { declaredTrigger } : {}), ...(inputRef ? { inputRef } : {}),
         ...(message.authorProfile ? { authorProfile: publicAuthorProfile(message.authorProfile) } : {}),
         ...(message.inputImages === undefined ? {} : { inputImages: message.inputImages }),
         ...(message.inputContext ? { inputContext: message.inputContext, inputContextSource: message.inputContextSource, ...(message.inputContextCaptureProof ? { inputContextCaptureProof: message.inputContextCaptureProof } : {}) } : {}),
@@ -10588,7 +10592,7 @@ export class AgentMuxClient {
     content: string,
     observedAt: number,
     source: 'user' | 'agentmux',
-    delivery: { a2aNotificationId?: string; sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey;
+    delivery: { declaredTrigger?: AmuxTriggerKind; a2aNotificationId?: string; sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey;
       authorProfile?: import('./author-profile.js').AgentAuthorProfile; inputImages?: import('./agent-input-resource.js').AgentInputImage[]; inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource; inputContextCaptureProof?: AgentInputContextCaptureProof } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
@@ -10608,6 +10612,7 @@ export class AgentMuxClient {
         ...(source === 'user' && delivery.authorProfile ? { authorProfile: delivery.authorProfile } : {}),
         ...(source === 'user' && delivery.inputImages !== undefined ? { inputImages: delivery.inputImages } : {}),
         ...(source === 'user' && delivery.inputContext ? { inputContext: delivery.inputContext, ...(delivery.inputContextSource ? { inputContextSource: delivery.inputContextSource } : {}), ...(delivery.inputContextCaptureProof ? { inputContextCaptureProof: delivery.inputContextCaptureProof } : {}) } : {}),
+        ...(source === 'user' && delivery.declaredTrigger ? { declaredTrigger: delivery.declaredTrigger } : {}),
         ...(source === 'user' && delivery.publicContent ? { publicContent: delivery.publicContent } : {}),
         ...((source === 'user' || delivery.a2aNotificationId !== undefined) && delivery.inputRef ? { inputRef: delivery.inputRef } : {}),
         ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),

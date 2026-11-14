@@ -143,6 +143,7 @@ export function projectSessionUserMessages(params: {
           revision: positions.get(item.id)!.revision
         } } : {}),
         author,
+        ...(item.declaredTrigger ? { declaredTrigger: item.declaredTrigger } : {}),
         publicContent: item.publicContent === 'confirmed' ? 'confirmed' : 'unknown',
         content: item.content ?? '',
         contentParts: [{ kind: 'text', text: item.content ?? '' }],

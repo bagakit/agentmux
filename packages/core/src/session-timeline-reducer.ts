@@ -62,7 +62,7 @@ export function applyNormalizedTimelineMutation(
   if (previous.inputOrigin && mutation.content !== undefined && mutation.content !== previous.content)
     throw new AgentMuxError('The original saved input content is immutable.', 'AGENT_TIMELINE_ID_CONFLICT')
   // An ordinary content update does not carry the original userContent writer's fact.
-  const { publicContent: _publicContent, inputRef: _inputRef, inputOrigin: _inputOrigin, inputSubmission: _inputSubmission, ...unqualified } = previous
+  const { declaredTrigger: _declaredTrigger, publicContent: _publicContent, inputRef: _inputRef, inputOrigin: _inputOrigin, inputSubmission: _inputSubmission, ...unqualified } = previous
   const next: AgentTimelineItem = {
     ...(mutation.content === undefined || previous.inputOrigin ? previous : unqualified),
     updatedAt: mutation.updatedAt,

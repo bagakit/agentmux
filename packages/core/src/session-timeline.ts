@@ -1,3 +1,4 @@
+import { isAmuxTriggerKind } from './amux-protocol-definition.js'
 import { parseAgentTurnOutcome } from './turn-outcome.js'
 import { authorProfileFields } from './author-profile.js'
 import { parseAgentInputImages } from './agent-input-resource.js'
@@ -236,6 +237,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     ...browserInputContextFields(source), ...agentInputContextCaptureProofFields(source),
     ...optionalField(source, 'content'),
     ...(contentEligibility === undefined ? {} : { contentEligibility }),
+    ...(source.publicContent === 'confirmed' && isAmuxTriggerKind(source.declaredTrigger) ? { declaredTrigger: source.declaredTrigger } : {}),
     ...(source.publicContent === undefined ? {} : { publicContent: 'confirmed' as const }),
     ...(inputRef ? { inputRef } : {}),
     ...(externalInput ? { externalInput } : {}),
