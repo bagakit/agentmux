@@ -1,6 +1,6 @@
 import { parseAgentTakeoverCancellationResult, type AgentTakeoverCancellationInput, type AgentTakeoverCancellationResult } from '@agentmux/core/agent-takeover'
 import { api } from './api'
-import { agentOperationKey, type AgentOperationFeedback, type TakeoverCancellation } from './agent-operation'
+import { agentOperationKey, isDurableTakeoverCancellation, withoutCancellationFeedback, type AgentOperationFeedback, type TakeoverCancellation } from './agent-operation'
 import { checkpointAgentOperations, currentCoreSpatialGraph, useAppStore } from '../store'
 
 type Takeover = Extract<AgentOperationFeedback, { kind: 'takeover' }>
@@ -19,7 +19,9 @@ function retain(operation: Takeover, cancellation: TakeoverCancellation, result?
     const weaker = known && known.outcome !== 'unconfirmed' &&
       (!result || result.outcome === 'unconfirmed' || known.diskDurability === 'confirmed' && result.outcome === known.outcome && result.diskDurability !== 'confirmed')
     const accepted = weaker ? undefined : result
-    const next = weaker ? { ...cancellation, pending: false, result: known } : cancellation
+    const newlySettled = isDurableTakeoverCancellation(accepted) && !isDurableTakeoverCancellation(known)
+    const next: TakeoverCancellation = { ...withoutCancellationFeedback(cancellation), ...(weaker ? { pending: false, result: known } : {}),
+      ...(held.cancellation?.settlingFeedback || newlySettled ? { settlingFeedback: true } : {}) }
     return { agentOperations: { ...state.agentOperations, [key]: { ...held, cancellation: next,
       ...(accepted ? { phase: accepted.outcome === 'cancelled' ? 'cancelled' : accepted.outcome === 'created' ? 'partial' : 'unconfirmed' } : {}) } } }
   })

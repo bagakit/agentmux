@@ -19,7 +19,7 @@
   animation-delay: var(--operation-phase); animation-play-state: paused;
 }
 .agent-operation-feedback[data-motion-active='true'] .agent-operation-feedback__item[data-phase='pending'] .agent-operation-feedback__label > [role='status']::after { animation-play-state: running; }
-.agent-operation-feedback__item[data-phase='succeeded'] .agent-operation-feedback__label { --operation-accent: var(--success); animation: agent-operation-settle var(--dur-exit) var(--ease-enter) 1; }
+.agent-operation-feedback__item:is([data-phase='succeeded'], [data-result-settling='true']) .agent-operation-feedback__label { --operation-accent: var(--success); animation: agent-operation-settle var(--dur-exit) var(--ease-enter) 1; }
 .agent-operation-feedback__item[data-detail-open='true'] .agent-operation-feedback__label { animation: none; }
 .agent-operation-feedback__detail { padding: var(--sp-2); color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
 .agent-operation-feedback__item[open] > .agent-operation-feedback__detail { animation: agent-operation-detail-enter var(--dur-enter) var(--ease-enter) both; }
@@ -48,7 +48,7 @@
   .agent-operation-feedback__item[data-phase='pending'] .agent-operation-feedback__label > [role='status']::after { display: none; animation: none; }
   .focus-communication-feedback__mark, .agent-operation-feedback__item[open] > .agent-operation-feedback__detail { animation: none; }
   .agent-operation-feedback__label { transition: none; }
-  .agent-operation-feedback__item[data-phase='succeeded'] .agent-operation-feedback__label { animation-duration: 0s; }
+  .agent-operation-feedback__item:is([data-phase='succeeded'], [data-result-settling='true']) .agent-operation-feedback__label { animation-duration: 0s; }
 }
 @media (forced-colors: active) {
   .agent-operation-feedback__item[data-phase='pending'] .agent-operation-feedback__label > [role='status']::after { display: none; animation: none; }

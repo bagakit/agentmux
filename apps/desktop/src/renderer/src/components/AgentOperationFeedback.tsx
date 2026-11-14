@@ -8,7 +8,7 @@ import { useAppStore } from '../store'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { agentOperationKey, dismissAgentOperation, inspectAgentOperation, type AgentOperationFeedback as Operation, type AgentOperationSubject } from '../lib/agent-operation-feedback'
 import { stopSessionInBackground } from '../lib/session-stop-background'
-import { agentOperationsForSubject } from '../lib/agent-operation'
+import { agentOperationsForSubject, isDurableTakeoverCancellation } from '../lib/agent-operation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
 import { useSessionStop } from './SessionStop'
@@ -23,13 +23,19 @@ const titles = { stop: '停止', takeover: '接手', fork: 'Fork' }
 // One original result can be read in a card and Header at once. Decoration in
 // either projection must not remove the other projection's open reading surface.
 const readers = new Map<string, Set<object>>()
-function setReading(key: string, reader: object, open: boolean) {
-  const held = readers.get(key) ?? new Set<object>()
-  if (open) { held.add(reader); readers.set(key, held) }
-  else { held.delete(reader); if (!held.size) readers.delete(key) }
+const visibleFeedback = new Map<string, Set<object>>()
+function trackFeedback(consumers: Map<string, Set<object>>, key: string, reader: object, active: boolean) {
+  const held = consumers.get(key) ?? new Set<object>()
+  if (active) { held.add(reader); consumers.set(key, held) }
+  else { held.delete(reader); if (!held.size) consumers.delete(key) }
 }
 function dismissDecoration(operation: Operation) {
-  if (operation.phase === 'succeeded' && !readers.has(agentOperationKey(operation))) dismissAgentOperation(operation)
+  if ((operation.phase === 'succeeded' || operation.kind === 'takeover' && operation.cancellation?.settlingFeedback) &&
+      !readers.has(agentOperationKey(operation))) dismissAgentOperation(operation)
+}
+function dismissOffscreenDecoration(operation: Operation) {
+  if (operation.kind === 'takeover' && operation.cancellation?.settlingFeedback && visibleFeedback.has(agentOperationKey(operation))) return
+  dismissDecoration(operation)
 }
 function feedbackPhase(operation: Operation) {
   const cancellation = operation.kind === 'takeover' ? operation.cancellation : undefined
@@ -56,7 +62,8 @@ function label(operation: Operation) {
 
 /** Both the real card and Region header read these exact original references. */
 export function AgentOperationFeedback({ subject, compact = false }: { subject: AgentOperationSubject; compact?: boolean }) {
-  const operations = useAppStore(useShallow(state => agentOperationsForSubject(state.agentOperations, subject)))
+  const operations = useAppStore(useShallow(state => agentOperationsForSubject(state.agentOperations, subject).filter(operation =>
+    operation.kind !== 'takeover' || !isDurableTakeoverCancellation(operation.cancellation?.result) || operation.cancellation?.settlingFeedback)))
   const active = useWorkbenchPresentationActive()
   if (!operations.length) return null
   return <AgentOperationFeedbackBody operations={operations} compact={compact} active={active} />
@@ -105,14 +112,19 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   const showSaveGap = cancellation?.result?.outcome !== 'unconfirmed' && cancellation?.result?.diskDurability === 'unconfirmed'
   function changeOpen(next: boolean) {
     if (!next && !compact && content.current?.contains(content.current.ownerDocument.activeElement)) trigger.current?.focus({ preventScroll: true })
-    setReading(key, reader.current, next)
+    trackFeedback(readers, key, reader.current, next)
     setOpen(next)
     if (!next) dismissDecoration(operation)
   }
-  useEffect(() => () => { setReading(key, reader.current, false); dismissDecoration(latest.current) }, [key])
-  useEffect(() => { setReading(key, reader.current, open); return () => setReading(key, reader.current, false) }, [key, open])
+  useEffect(() => () => { trackFeedback(readers, key, reader.current, false); dismissOffscreenDecoration(latest.current) }, [key])
+  useEffect(() => { trackFeedback(readers, key, reader.current, open); return () => trackFeedback(readers, key, reader.current, false) }, [key, open])
+  const settlementVisible = Boolean(takeover && visible)
+  useLayoutEffect(() => {
+    trackFeedback(visibleFeedback, key, reader.current, settlementVisible)
+    return () => trackFeedback(visibleFeedback, key, reader.current, false)
+  }, [key, settlementVisible])
   // Offscreen completion needs no decorative wait; open readers and unresolved references remain.
-  useEffect(() => { if (!visible) dismissDecoration(operation) }, [operation, visible])
+  useEffect(() => { if (!visible) dismissOffscreenDecoration(operation) }, [operation, visible])
   const statusText = cancellation?.pending ? label(operation) : preparingCancel ? '正在提交取消'
     : checking ? '正在检查' : continuing ? '正在继续接手' : cancelPreparationIssue ? '取消未提交' : label(operation)
   const busy = preparingCancel || checking || continuing || phase === 'pending'
@@ -192,7 +204,8 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   </div>
   if (compact || takeover) return <>
     <div className={`agent-operation-feedback__item${!compact ? ' agent-operation-feedback__takeover' : ''}`}
-      data-kind={operation.kind} data-phase={phase} data-detail-open={open} data-takeover-created={created || undefined}>
+      data-kind={operation.kind} data-phase={phase} data-detail-open={open} data-takeover-created={created || undefined}
+      data-result-settling={cancellation?.settlingFeedback}>
       <div className="agent-operation-feedback__rail">
         {!compact && !retainedOnly ? <span className="agent-operation-feedback__label agent-operation-feedback__readout" onAnimationEnd={onAnimationEnd}>{status}</span> : null}
         <div className="agent-operation-feedback__quick-actions">

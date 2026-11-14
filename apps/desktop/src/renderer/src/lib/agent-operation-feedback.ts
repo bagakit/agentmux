@@ -6,7 +6,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { TakeoverSource } from './session-takeover'
 import type { AgentMuxAgentStopReceipt } from '@agentmux/core'
 
-import { agentOperationKey, type AgentOperationFeedback } from './agent-operation'
+import { agentOperationKey, withoutCancellationFeedback, type AgentOperationFeedback } from './agent-operation'
 export { agentOperationKey, restoredAgentOperations } from './agent-operation'
 export type { AgentOperationFeedback, AgentOperationKind, AgentOperationPhase, AgentOperationReferences, AgentOperationSubject } from './agent-operation'
 
@@ -49,6 +49,10 @@ export function dismissAgentOperation(operation: AgentOperationFeedback) {
   const key = agentOperationKey(operation)
   useAppStore.setState(state => {
     const held = state.agentOperations[key]
+    if (held?.kind === 'takeover' && held.cancellation?.settlingFeedback) {
+      const cancellation = withoutCancellationFeedback(held.cancellation)
+      return { agentOperations: { ...state.agentOperations, [key]: { ...held, cancellation } } }
+    }
     if (held?.phase !== 'succeeded' || held.kind === 'takeover' && held.cancellation) return state
     const { [key]: _finished, ...agentOperations } = state.agentOperations
     return { agentOperations }
