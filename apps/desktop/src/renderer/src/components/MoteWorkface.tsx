@@ -34,6 +34,7 @@ import type { MoteThreadView } from '@agentmux/client-ui/components/MoteConversa
 import { MoteActiveWorkShortcut } from './MoteActiveWorkShortcut'
 import { ComposerSurface, useComposerConnection } from '@agentmux/client-ui/components/ComposerHost'
 import { DesktopMoteComposerHost, moteComposerSessionKey } from './MoteComposer'
+import { requestPmoTeamsTopicFloatingClose } from '../lib/pmo-teams-topic-floating'
 
 /** Use the existing retained-view context bridge; DOM portals do not inherit the floating shell's React context. */
 function MoteComposerPresentation({ value, dialogue, publishKey, children }: {
@@ -135,6 +136,14 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     setLocal({ owner, section: 'threads', member: true, original: false })
     sharedFrame?.select('threads', next)
     showMoteConversation(scope, { reference: next, floating })
+    return true
+  }
+  function openOriginalWork(next: WorkbenchProjectionSelection) {
+    const state = useAppStore.getState()
+    if (!state.selectMainRegion(next, state.workbenchSpaceSelection)) return false
+    state.setFocusView('list')
+    state.setMainSurface('agents')
+    if (floating) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
     return true
   }
   const lastEntry = useRef<string>('')
@@ -262,7 +271,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
       })}>{currentLocal.periodOriginal ? '← 返回这段历史' : '← 返回对话'}</button>
         {currentLocal.periodOriginal ? <MoteOriginalConversation source={currentLocal.period} client={api.conversation} visible={visible} name={scope.topic.title} />
           : <MotePeriodConversation source={currentLocal.period} client={api.conversation} visible={visible} name={scope.topic.title} onOpenOriginal={() => setLocal(previous => ({ ...previous, periodOriginal: true }))} />}</div> : null}
-      {scope ? <MoteThreadsPanel scope={scope} requestedEvent={sharedFrame ? sharedFrame.threadEvent : currentThreads.event} active={visible && section === 'threads' && !memberIntent && presentation !== 'workface'} observe={visible} view={threadView} onViewChange={showThreads} onCount={reportCount} onSelect={showThread} /> : null}
+      {scope ? <MoteThreadsPanel scope={scope} requestedEvent={sharedFrame ? sharedFrame.threadEvent : currentThreads.event} active={visible && section === 'threads' && !memberIntent && presentation !== 'workface'} observe={visible} view={threadView} onViewChange={showThreads} onCount={reportCount} onSelect={showThread} onOpenOriginal={openOriginalWork} /> : null}
       {scope && section === 'discussion' && !showOriginal && !currentMain && main?.current ? <p role="status" className="mote-conversation__issue">原主对话的角色或位置尚未确认，原身份、工作和输入仍保留。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={() => showThreads()}>查看 Threads</button></p> : null}
       <div className="mote-workface__original" hidden={!showOriginal} inert={!showOriginal}>{children}</div>
       </div>
