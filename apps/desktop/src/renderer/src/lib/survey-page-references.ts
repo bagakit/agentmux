@@ -42,30 +42,85 @@ export function restoredSurveySelection(value: unknown): SurveySelection | null 
   return restoredSurveyZoneSelection(value)
 }
 
+type SurveyCatalogScope = {
+  regionsById: Map<string, Pick<AgentMuxSpaceCatalog['regions'][number], 'tabId' | 'kind'>[]>
+  tabsByZone: Map<string, string[]>
+  zoneIds: Set<string>
+  occurrencesByRegion: Map<string, WorkbenchProjectionSelection[]>
+  projectionCatalogs: Map<string, AgentMuxSpaceCatalog>
+}
+const catalogScopes = new WeakMap<AgentMuxSpaceCatalog, SurveyCatalogScope>()
+
+/** Original immutable topology and slices; no live Browser, permission or callback cache. */
+export function surveyCatalogScope(catalog: AgentMuxSpaceCatalog): SurveyCatalogScope {
+  const known = catalogScopes.get(catalog)
+  if (known) return known
+  const regionsById: SurveyCatalogScope['regionsById'] = new Map()
+  const tabsByZone = new Map<string, string[]>()
+  for (const region of catalog.regions) {
+    const members = regionsById.get(region.regionId) ?? []
+    members.push({ tabId: region.tabId, kind: region.kind })
+    regionsById.set(region.regionId, members)
+  }
+  for (const tab of catalog.tabs) if (tab.zoneId !== null) {
+    const members = tabsByZone.get(tab.zoneId) ?? []
+    members.push(tab.tabId)
+    tabsByZone.set(tab.zoneId, members)
+  }
+  const occurrencesByRegion = new Map<string, WorkbenchProjectionSelection[]>(), seen = new Set<string>()
+  for (const location of catalog.locations) {
+    const reference = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId,
+      tabId: location.tabId, regionId: location.regionId }
+    const key = JSON.stringify(reference)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const members = occurrencesByRegion.get(reference.regionId) ?? []
+    members.push(reference)
+    occurrencesByRegion.set(reference.regionId, members)
+  }
+  const scope = { regionsById, tabsByZone, occurrencesByRegion, zoneIds: new Set(catalog.zones.map(zone => zone.zoneId)),
+    projectionCatalogs: new Map<string, AgentMuxSpaceCatalog>() }
+  catalogScopes.set(catalog, scope)
+  return scope
+}
+
 /** The original Region must still contain that exact Browser; placement cannot select a replacement. */
-export function surveyPageOwner(tabs: Readonly<Record<string, WorkbenchTab>>, page: Page) {
+export function surveyPageOwner(tabs: Readonly<Record<string, WorkbenchTab>>, page: Page, catalog?: AgentMuxSpaceCatalog | null) {
+  if (catalog) {
+    const facts = surveyCatalogScope(catalog).regionsById.get(page.regionId)
+    const tab = facts?.length === 1 ? tabs[facts[0]!.tabId] : undefined
+    const surface = tab?.regions[page.regionId]
+    if (tab && surface?.kind === 'browser' && surface.browserId === page.browserId) return { tab, surface }
+  }
+  // Unconfirmed or stale display topology cannot take away the original page's
+  // title/tools or change control callers' existing exact-owner recovery path.
   const owner = findWorkbenchRegion(tabs, page.regionId)
   return owner?.surface.kind === 'browser' && owner.surface.browserId === page.browserId ? owner : null
 }
 
 export function surveyPageProjection(page: Page, catalog: AgentMuxSpaceCatalog | null, tabs: Readonly<Record<string, WorkbenchTab>>,
   onSelect: WorkbenchProjection['onSelect'], preferred: WorkbenchProjectionSelection | null = null): WorkbenchProjection | null {
-  const owner = surveyPageOwner(tabs, page)
-  if (!owner || !catalog) return null
-  const facts = catalog.regions.filter(region => region.regionId === page.regionId && region.tabId === owner.tab.id && region.kind === 'browser')
+  if (!catalog) return null
+  const owner = surveyPageOwner(tabs, page, catalog)
+  if (!owner) return null
+  const scope = surveyCatalogScope(catalog)
+  const facts = (scope.regionsById.get(page.regionId) ?? []).filter(region => region.tabId === owner.tab.id && region.kind === 'browser')
   if (facts.length !== 1) return null
-  const choices = [...new Map(catalog.locations.filter(location => location.regionId === page.regionId && location.tabId === owner.tab.id)
-    .map(location => {
-      const reference = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }
-      return [JSON.stringify(reference), reference] as const
-    })).values()]
+  const choices = (scope.occurrencesByRegion.get(page.regionId) ?? []).filter(reference => reference.tabId === owner.tab.id)
   const original = choices.filter(reference => reference.displayWorkspaceId === owner.tab.workspaceId)
-  const reference = preferred && choices.find(choice => sameWorkbenchProjectionSelection(preferred, choice)) ||
+  const chosen = preferred && choices.find(choice => sameWorkbenchProjectionSelection(preferred, choice)) ||
     original.length === 1 && original[0] || choices.length === 1 && choices[0]
-  if (!reference) return null
+  if (!chosen) return null
+  const reference = { ...chosen }
+  const key = JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId])
+  let selected = scope.projectionCatalogs.get(key)
+  if (!selected) {
+    selected = selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId })
+    scope.projectionCatalogs.set(key, selected)
+  }
   return {
     entity: { kind: 'region', regionId: page.regionId }, presentationId: 'survey-workbench', displayWorkspaceId: reference.displayWorkspaceId,
-    catalog: selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }),
+    catalog: selected,
     selection: [reference], onSelect
   }
 }

@@ -1,5 +1,5 @@
 import { parseSurveyProfileView, type AgentMuxSurveyProfileView, type AgentMuxSpaceCatalog, type AgentMuxSurveyPageReference } from '@agentmux/core/control'
-import { isSurveyPage, surveyPageOwner, type SurveySelection } from './survey-page-references'
+import { isSurveyPage, surveyPageOwner, surveyCatalogScope, type SurveySelection } from './survey-page-references'
 import type { WorkbenchTab } from './workbench-tabs'
 
 export type SurveyProfileView = AgentMuxSurveyProfileView
@@ -36,31 +36,6 @@ export function surveySelectionProfileMatch(view: SurveyProfileView, selection: 
   if (matches.includes('unknown')) return 'unknown'
   return matches.length && matches.every(match => match === 'other') ? 'other' : 'independent'
 }
-type SurveyCatalogScope = {
-  tabByRegion: Map<string, string | null>
-  tabsByZone: Map<string, string[]>
-  zoneIds: Set<string>
-}
-const catalogScopes = new WeakMap<AgentMuxSpaceCatalog, SurveyCatalogScope>()
-
-/** Original immutable topology only; live Browser/Profile facts stay in Tabs. */
-function surveyCatalogScope(catalog: AgentMuxSpaceCatalog): SurveyCatalogScope {
-  const known = catalogScopes.get(catalog)
-  if (known) return known
-  const tabByRegion = new Map<string, string | null>(), tabsByZone = new Map<string, string[]>()
-  for (const region of catalog.regions) {
-    tabByRegion.set(region.regionId, tabByRegion.has(region.regionId) ? null : region.tabId)
-  }
-  for (const tab of catalog.tabs) if (tab.zoneId !== null) {
-    const members = tabsByZone.get(tab.zoneId) ?? []
-    members.push(tab.tabId)
-    tabsByZone.set(tab.zoneId, members)
-  }
-  const scope = { tabByRegion, tabsByZone, zoneIds: new Set(catalog.zones.map(zone => zone.zoneId)) }
-  catalogScopes.set(catalog, scope)
-  return scope
-}
-
 /** A derived view over the original references. It never writes membership or creates entities. */
 export function surveyProfileReferences(view: SurveyProfileView, pages: readonly AgentMuxSurveyPageReference[], zoneIds: readonly string[],
   tabs: Readonly<Record<string, WorkbenchTab>>, defaultProfileId: string | undefined, catalog: AgentMuxSpaceCatalog | null) {
@@ -80,7 +55,8 @@ export function surveyProfileReferences(view: SurveyProfileView, pages: readonly
   }
   return {
     pages: pages.filter(page => {
-      const tabId = scope.tabByRegion.get(page.regionId)
+      const regions = scope.regionsById.get(page.regionId)
+      const tabId = regions?.length === 1 ? regions[0]!.tabId : undefined
       const surface = tabId ? tabs[tabId]?.regions[page.regionId] : undefined
       return !surface || surface.kind !== 'browser' || surface.browserId !== page.browserId || browserMatch(view, surface, defaultProfileId) !== 'other'
     }),

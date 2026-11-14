@@ -120,7 +120,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const resourceWorkspaces = useMemo(() => new Map(config?.workspaces.map(workspace => [workspace.id, workspace]) ?? []), [config?.workspaces])
   const currentZone = useMemo(() => selection ? catalog?.zones.find(zone => zone.zoneId === selection.zoneId) : undefined, [catalog, selection?.zoneId])
   const resourceWorkspaceId = currentZone?.workspaceId ?? (pageSelection
-    ? surveyPageOwner(tabs, pageSelection)?.tab.workspaceId ?? null
+    ? surveyPageOwner(tabs, pageSelection, catalog)?.tab.workspaceId ?? null
     : !selection ? SCRATCH_WORKSPACE_ID : null)
   const workspace = resourceWorkspaceId ? resourceWorkspaces.get(resourceWorkspaceId) : undefined
   const items = useMemo(() => catalog ? surveyZoneItems(catalog, collected) : [], [catalog, collected])
@@ -548,7 +548,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         </p> : null}
         {profileReferences.pages.length > 0 ? <div aria-label="Saved Survey pages">
           {profileReferences.pages.map(page => {
-            const owner = surveyPageOwner(tabs, page)
+            const owner = surveyPageOwner(tabs, page, catalog)
             const browser = owner?.surface.kind === 'browser' ? owner.surface : null
             return <div className="survey-item-row" key={JSON.stringify(page)}
               data-survey-page-region-id={page.regionId} data-survey-page-browser-id={page.browserId}
