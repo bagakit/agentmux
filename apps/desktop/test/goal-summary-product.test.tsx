@@ -30,7 +30,7 @@ describe('compact Goal summary through the production Board and original owners'
     f.statuses.set('finite-worker', semantic(f.metadata.get('finite-worker')!, 'working'))
     await updated(() => f.emit('finite-worker'), () => expect(goal().responsibility!.executions[0]!.phase).toBe('executing'))
     expect(summary().querySelector('.goal-responsibility__next-action')?.textContent).toBe(row().nextOwner.action)
-    expect(summary().querySelector('.goal-responsibility__phase')!.textContent).toBe('执行中')
+    expect(summary().querySelector('.goal-responsibility__phase')!.textContent).toBe('Executing')
     expect(summary().querySelector('.goal-patrol')).toBeNull()
   }, 30_000)
 
@@ -99,8 +99,8 @@ describe('compact Goal summary through the production Board and original owners'
     const f = await board(); f.patrolState.routeUnavailable = true
     await updated(() => primary().click(), () => expect(goal().patrolObservations?.[0]?.state).toBe('missing'))
     const actions = summary().querySelector('.goal-patrol__actions')!
-    expect(actions.textContent).toContain('选择 Supervisor')
-    expect(actions.textContent).toContain('对话')
+    expect(actions.textContent).toContain('Choose Supervisor')
+    expect(actions.textContent).toContain('conversation')
     expect(actions.closest('details')).toBeNull()
     expect(summary().querySelector('.goal-patrol__feedback')!.textContent).toContain(goal().patrolObservations![0]!.reason)
     expect(f.attempts).toEqual([]); expect(f.nativeWrites).toEqual([])

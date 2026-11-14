@@ -83,12 +83,13 @@ describe('responsibility production owners, compiled public CLI and mounted cons
     await mount(createElement('div', {}, createElement(GoalDelegationWork, { demand: loaded }),
       createElement(RegionCurrentDemand, { hostId: 'local', agentSessionId: 'worker-c' })))
     const detail = container.querySelector('[data-goal-responsibility="goal"]')!
-    expect(detail.textContent).toContain('执行停滞'); expect(detail.textContent).toContain('worker-c')
-    expect(detail.textContent).toContain('owner'); expect(container.querySelector('.region-current-demand')!.textContent).toContain('执行停滞')
+    expect(detail.textContent).toContain('Execution stalled'); expect(detail.textContent).toContain('worker-c')
+    expect(detail.textContent).toContain('owner'); expect(container.querySelector('.region-current-demand')!.textContent).toContain('Execution stalled')
     expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(useAppStore.getState().selectedDemandId).toBe(selection)
     const target = detail.querySelector<HTMLButtonElement>('button[title="Session worker-c · Host local"]')!
+    const focus = vi.spyOn(useAppStore.getState(), 'executeControl')
     expect(target).not.toBeNull(); await act(async () => target.click())
-    expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/worker-c')
+    expect(focus).toHaveBeenCalledWith(expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'local', agentSessionId: 'worker-c' }, inputPolicy: 'preserve' }))
     const readCount = f.read.mock.calls.length
     await act(async () => f.emit('stranger')); await settle(); expect(f.read).toHaveBeenCalledTimes(readCount)
     expect(f.nativeInputs.map(input => input.messageId)).toEqual(['source-worker-a', 'source-worker-b', 'source-worker-c'])
@@ -104,7 +105,7 @@ describe('responsibility production owners, compiled public CLI and mounted cons
     await mount(createElement(GlobalBoardSurface))
     const compact = container.querySelector('.goals-row [data-goal-responsibility="goal"]')!
     expect(compact).not.toBeNull()
-    expect([...compact.querySelectorAll('.goal-responsibility__phase')].map(node => node.textContent)).toEqual(['执行停滞', '执行中'])
+    expect([...compact.querySelectorAll('.goal-responsibility__phase')].map(node => node.textContent)).toEqual(['Execution stalled', 'Executing'])
     expect(compact.querySelector('.goal-responsibility__execution')!.textContent).toContain('worker-c')
     f.statuses.set('finite-worker', semantic(f.metadata.get('finite-worker')!, 'error'))
     f.statuses.set('worker-a', semantic(f.metadata.get('worker-a')!, 'error'))
@@ -112,7 +113,7 @@ describe('responsibility production owners, compiled public CLI and mounted cons
       f.emit('finite-worker'); f.emit('worker-a')
       await vi.waitFor(() => expect(useAppStore.getState().demands.goal!.responsibility!.executions.filter(row => row.alert !== null)).toHaveLength(3))
     })
-    expect(compact.textContent).toContain('另有 1 项责任待处理')
+    expect(compact.textContent).toContain('1 more need attention')
     expect(compact.querySelectorAll('.goal-responsibility__phase--attention')).toHaveLength(2)
     const goal = useAppStore.getState().demands.goal!
     await mount(null)
@@ -125,7 +126,7 @@ describe('responsibility production owners, compiled public CLI and mounted cons
     })
     await mount(createElement(MoteCurrentWork, { scope }))
     const mote = container.querySelector('.mote-current-work [data-goal-responsibility="goal"]')!
-    expect(mote).not.toBeNull(); expect(mote.textContent).toContain('阻塞待处理'); expect(mote.textContent).toContain('另有 1 项责任待处理')
+    expect(mote).not.toBeNull(); expect(mote.textContent).toContain('Blocked'); expect(mote.textContent).toContain('1 more need attention')
     expect(mote.querySelectorAll('.goal-responsibility__execution')).toHaveLength(2)
     await evidence('compact-list-and-mote-attention-priority', await f.proof())
   }, 30_000)
@@ -146,14 +147,14 @@ describe('responsibility production owners, compiled public CLI and mounted cons
     const verified = await f.action('owner', 'progress', { goalId: 'goal', progress: { ...update, operationId: 'manager-verified-wait', expectedScope: declared.result.responsibility.scope } })
     expect(verified.result.responsibility.executions[0]).toMatchObject({ phase: 'waiting-external', alert: null, nextOwner: { kind: 'external' } })
     await f.publish(); await mount(createElement(GoalDelegationWork, { demand: useAppStore.getState().demands.goal! }))
-    expect(container.querySelector('[data-goal-responsibility="goal"]')!.textContent).toContain('等待外部条件')
+    expect(container.querySelector('[data-goal-responsibility="goal"]')!.textContent).toContain('Waiting on external conditions')
     const active = semantic(f.metadata.get('finite-worker')!, 'working'); active.session.semanticStatus!.currentActivityRevision = 8
     f.statuses.set('finite-worker', active)
     await act(async () => { f.emit('finite-worker'); await vi.waitFor(() => expect(useAppStore.getState().demands.goal!.responsibility!.executions[0]!.phase).toBe('executing')) })
     const other = semantic({ ...f.metadata.get('finite-worker')!, run: { runId: 'replacement-run' } }, 'done')
     f.statuses.set('finite-worker', other)
     await act(async () => { f.emit('finite-worker'); await vi.waitFor(() => expect(useAppStore.getState().demands.goal!.responsibility!.executions[0]!.phase).toBe('unknown')) })
-    expect(container.querySelector('[data-goal-responsibility="goal"]')!.textContent).toContain('观察待确认')
+    expect(container.querySelector('[data-goal-responsibility="goal"]')!.textContent).toContain('Observation unconfirmed')
     expect((await f.demands.get('goal'))!.dispatches![0]!.runId).toBe('finite-worker-run')
     expect(f.nativeInputs).toEqual([]); expect(f.stop).not.toHaveBeenCalled()
     await evidence('authenticated-progress-native-activity-run-fence', await f.proof())

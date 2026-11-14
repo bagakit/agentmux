@@ -125,7 +125,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(container.querySelector('[data-goal-result-state]')).toBeNull(); expect(next()).toBe('Goal needs an outline')
     expect(button('Clarify goal').parentElement?.textContent).toContain('Starts a dedicated discussion in your primary Mote')
     expect(container.querySelector('[data-demand-id]')?.getAttribute('aria-label')).toBe('Open goal Restore my work. Goal needs an outline')
-    expect(container.querySelector('.goals-row__facts')?.textContent).toBe('Repo1 linked Session unconfirmed')
+    expect(container.querySelector('.goals-row__facts')?.textContent).toBe('Repo')
     expect(container.querySelector('.goals-row__next svg')).toBeNull()
     expect((await owner.get('goal'))!).toMatchObject({ description: intent, status: 'in_progress', sessionIds: ['healthy-run'] })
   })
@@ -233,7 +233,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(container.querySelector('[data-goal-confirm]')).toBeNull(); expect(container.querySelector('[data-goal-accept]')).toBeNull()
     expect(container.querySelector('[data-goal-alignment-revision]')?.getAttribute('data-goal-alignment-revision')).toBe('1')
     expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull(); expect(host.executed('demand.confirm')).toEqual([])
-    expect(next()).toBe(expected); expect(container.querySelector('.goals-section-heading .goals-caption')?.textContent).toBe(_label === 'open questions' ? 'Decisions needed' : 'Define success criteria')
+    expect(next()).toBe(expected); expect(container.querySelector('.goals-alignment .goals-section-heading .goals-caption')?.textContent).toBe(_label === 'open questions' ? 'Decisions needed' : 'Define success criteria')
     expect([...container.querySelectorAll('.goals-detail .primary-button')].map(node => node.textContent?.trim())).toEqual(['Discuss changes in goal discussion'])
   })
 
@@ -318,14 +318,28 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     useAppStore.setState({ sessions: [healthyRun] }); await mount()
     const reviewed = useAppStore.getState().demands.goal!
     // The original Host owner commits; only the receipt back to the renderer is lost.
+    const readsBefore = host.executed('demand.show').length
     const lost = host.once(kind === 'confirm' ? 'demand.confirm' : 'demand.accept', { kind: 'lose-receipt', error: new Error('Receipt lost after the owner committed') })
     await click(kind === 'confirm' ? 'Confirm goal' : 'Accept results')
     await eventually(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('is unconfirmed'))
-    expectReloadOnly(); expect(useAppStore.getState().demands.goal).toEqual(reviewed)
+    expectReloadOnly()
     expect((await lost.committed).operation).toBe(kind === 'confirm' ? 'demand.confirm' : 'demand.accept')
     const committed = (await openDemandStore({ root: temporaryRoot }).get('goal'))!
     const savedAt = kind === 'confirm' ? committed.alignment!.confirmedAt : committed.grounding!.acceptedAt
     expect(savedAt).toBeGreaterThan(0)
+    const observed = useAppStore.getState().demands.goal!
+    const observedAt = kind === 'confirm' ? observed.alignment?.confirmedAt : observed.grounding?.acceptedAt
+    if (observedAt != null) {
+      // A separate authenticated Host read is allowed to observe its real commit, never a fabricated ACK.
+      expect(observedAt).toBe(savedAt)
+      expect(observed.updatedAt).toBe(committed.updatedAt)
+      expect(observed.activities).toEqual(committed.activities)
+      expect(host.executed('demand.show').length).toBeGreaterThan(readsBefore)
+      expect(kind === 'confirm' ? { ...observed.alignment!, confirmedAt: null } : observed.alignment).toEqual(reviewed.alignment)
+      expect(kind === 'accept' ? { ...observed.grounding!, acceptedAt: null } : observed.grounding).toEqual(reviewed.grounding)
+      expect({ id: observed.id, title: observed.title, description: observed.description, sessionIds: observed.sessionIds, status: observed.status })
+        .toEqual({ id: reviewed.id, title: reviewed.title, description: reviewed.description, sessionIds: reviewed.sessionIds, status: reviewed.status })
+    } else expect(observed).toEqual(reviewed)
     expect(kind === 'confirm' ? reviewed.alignment!.confirmedAt : reviewed.grounding!.acceptedAt).toBeNull()
     await click('Reload current proposal')
     expect(container.querySelector('[data-goal-acknowledgement-failure]')).toBeNull()

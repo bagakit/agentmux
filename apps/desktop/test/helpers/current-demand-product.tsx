@@ -72,10 +72,10 @@ import { parseAgentMuxCliInvocation } from '../../../../packages/core/src/agentm
 import { issueAgentCapability, hashAgentCapability } from '../../../../packages/core/src/agent-capability'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { readFile } from 'node:fs/promises'
-vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } } }))
+vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }; extensions = { setConfirmationHandler() {} }; listProfiles() { return [] }; async initialize() {} async dispose() {} onChange() { return () => {} }; onEnvironmentApplicationChange() { return () => {} } } }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() { throw new Error('Browser release is outside this Goal fixture') } dispose() {} } }))
+vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { async flushProfileActivity() {} setPresentationWindowOwner() {} async release() { throw new Error('Browser release is outside this Goal fixture') } dispose() {} } }))
 vi.mock('../../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 // Install the actual mocked Electron bridge before transitive renderer consumers load api.
 await vi.hoisted(async () => { await import('../../src/preload/index') })
@@ -86,7 +86,7 @@ import { registerIpc } from '../../src/main/ipc'
 import { DEFAULT_CONFIG } from '../../src/main/config-store'
 import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { createHostGoals } from '../../../host/src/goals.js'
-import { useAppStore } from '../../src/renderer/src/store'
+import { useAppStore, prepareRendererUpdate } from '../../src/renderer/src/store'
 import { api } from '../../src/renderer/src/lib/api'
 import { GoalContinuationControl } from '../../src/renderer/src/components/GoalContinuationControl'
 import { GlobalBoardSurface } from '../../src/renderer/src/components/GlobalBoardSurface'
@@ -229,16 +229,18 @@ beforeEach(async () => {
   await act(async () => root.render(<AgentSessionComposer sessionId={session.agentSessionId} />))
 })
 afterEach(async () => {
-  await act(async () => root?.unmount()); container?.remove(); disposeStore?.(); disposeStore = undefined
-  useAppStore.setState(initial, true)
+  await act(async () => root?.unmount()); container?.remove()
+  await prepareRendererUpdate()
   window.dispatchEvent(new Event('pagehide'))
   await api.ui.requestStorageFlush()
+  disposeStore?.(); disposeStore = undefined
+  useAppStore.setState(initial, true)
   const cleanup = await Promise.allSettled([hostGoals?.dispose(), hostService?.dispose(), disposeIpc?.(), runtime?.dispose()])
   disposeIpc = undefined
   workbenchWindows?.dispose(); await applicationAccess?.dispose()
   bridge.main.clear(); bridge.renderer.clear(); bridge.handlers.clear(); bridge.invoke.mockReset()
   vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 })
-  expect(cleanup.filter(r => r.status === 'rejected')).toEqual([])
+  expect(cleanup.filter(r => r.status === 'rejected'), cleanup.flatMap(r => r.status === 'rejected' ? [String(r.reason)] : []).join('\n')).toEqual([])
 })
 
 const request = (operationId = 'original-start') => ({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'demand.start' as const, demandId: 'goal', sessionId: session.agentSessionId, continuation: { intervalMs: 60_000, alignmentRevision: 1 } })

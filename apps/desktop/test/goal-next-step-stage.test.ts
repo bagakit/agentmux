@@ -3,7 +3,7 @@ import type { DemandAlignment, DemandGrounding } from '@agentmux/demand/goals'
 import type { DemandDelegation, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
 import type { GoalDelegationObservation } from '@agentmux/core/goal-delegation'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
-import { goalNextStep, goalNextStepFact, GOAL_STAGES, type GoalStage } from '../src/renderer/src/lib/goal-presentation'
+import { goalNextStep, goalNextStepFact, goalHasOriginalWork, GOAL_STAGES, type GoalStage } from '../src/renderer/src/lib/goal-presentation'
 
 /**
  * The Goals list groups and marks each Goal by whose turn it is. That stage must come from the same
@@ -76,5 +76,23 @@ describe('Goal work status labels', () => {
     const { DEMAND_STATUS_IDS, DEMAND_STATUS_LABELS } = await import('../src/renderer/src/lib/global-demand-board')
     expect(Object.keys(DEMAND_STATUS_LABELS).sort()).toEqual([...DEMAND_STATUS_IDS].sort())
     expect(DEMAND_STATUS_LABELS.in_progress).toBe('In progress')
+  })
+})
+
+
+describe('the same typed current source and original work reading budget', () => {
+  it('keeps exact original execution references instead of deriving an action from the sentence', () => {
+    expect(goalNextStepFact({ ...base, dispatches: [start], startObservations: [startObserved] }).source).toEqual({ kind: 'start', operationId: start.operationId, hostId: start.hostId, agentSessionId: start.agentSessionId, runId: start.runId })
+    expect(goalNextStepFact({ ...base, delegations: [delegation], delegationObservations: [observed()] }).source).toEqual({ kind: 'delegation', operationId: delegation.operationId, sourceMessageId: delegation.sourceMessageId, hostId: delegation.hostId, agentSessionId: delegation.workerAgentSessionId, runId: delegation.workerRunId })
+  })
+  it('retains original work when accepted results are the current focus and ignores another Goals local intent', () => {
+    const accepted = { ...base, alignment: alignment(), grounding: grounding(['met', 'met'], { acceptedAt: 20 }), dispatches: [start] }
+    expect(goalNextStepFact(accepted).source).toEqual({ kind: 'results', submissionId: 'report', revision: 1 })
+    expect(goalHasOriginalWork(accepted)).toBe(true)
+    const retained = { goalId: base.id, operationId: 'original-pending', sessionId: 'worker', expectedUpdatedAt: 1, phase: 'may-have-dispatched' as const }
+    expect(goalNextStepFact(base, retained).source).toMatchObject({ kind: 'start', operationId: retained.operationId, agentSessionId: 'worker' })
+    expect(goalHasOriginalWork(base, retained)).toBe(true)
+    expect(goalHasOriginalWork({ ...base, id: 'another-goal' }, retained)).toBe(false)
+    expect(goalNextStepFact({ ...base, id: 'another-goal' }, retained).source.kind).toBe('definition')
   })
 })
