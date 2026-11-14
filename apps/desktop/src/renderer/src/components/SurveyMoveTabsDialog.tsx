@@ -11,10 +11,11 @@ import { SelectionField } from './SelectionField'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** One opening holds its original source; target choices always name exact existing display Groups. */
-export function SurveyMoveTabsDialog({ sources, catalog, visible, onClose, intent, requestId, onMoved, onUnconfirmed }: {
+export function SurveyMoveTabsDialog({ sources, catalog, visible, onClose, intent, requestId, surveyGroupId, onMoved, onUnconfirmed }: {
   onMoved?(): void
   onUnconfirmed?(requestId: string): void
   intent?: SurveyCompositionDestinationIntent; requestId?: string
+  surveyGroupId?: string | null
   sources: readonly SurveyCompositionSource[]; catalog: AgentMuxSpaceCatalog | null; visible: boolean; onClose(): void
 }) {
   const names = useAppStore(state => state.surveyExplorationNames), collected = useAppStore(state => state.surveyCollectedZones)
@@ -33,7 +34,8 @@ export function SurveyMoveTabsDialog({ sources, catalog, visible, onClose, inten
   async function move() {
     if (!destination || pending.current || consumed) return
     pending.current = true; setBusy(true); setIssue(null)
-    const result = await useAppStore.getState().composeSurveyTabs({ requestId: requestId ?? mintObjectId(), sources, target: destination.target })
+    const result = await useAppStore.getState().composeSurveyTabs({ requestId: requestId ?? mintObjectId(), sources, target: destination.target,
+      ...(surveyGroupId === undefined ? {} : { surveyGroupId }) })
     pending.current = false
     if (!mounted.current) return
     setBusy(false)

@@ -3,7 +3,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxSurveyOrganization } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
-import { effectiveSurveyOrganization, surveyOrganizationZoneIds } from '../lib/survey-list'
+import { effectiveSurveyOrganization, moveSurveyListItem, surveyOrganizationZoneIds } from '../lib/survey-list'
 
 export type SurveyItemGrouping = {
   groups: AgentMuxSurveyOrganization['groups']
@@ -13,14 +13,6 @@ export type SurveyItemGrouping = {
 }
 
 /** Edit one list document; the original read remains the expected value through each interaction. */
-export function moveSurveyListItem(base: AgentMuxSurveyOrganization, zoneId: string, target: string | null, index?: number): AgentMuxSurveyOrganization {
-  const next = { ungrouped: base.ungrouped.filter(id => id !== zoneId),
-    groups: base.groups.map(group => ({ ...group, zoneIds: group.zoneIds.filter(id => id !== zoneId) })) }
-  const ids = target === null ? next.ungrouped : next.groups.find(group => group.groupId === target)?.zoneIds
-  if (ids) ids.splice(index ?? ids.length, 0, zoneId)
-  return next
-}
-
 export function useSurveyListOrganization() {
   const stored = useAppStore(state => state.surveyOrganization)
   const collected = useAppStore(state => state.surveyCollectedZones)

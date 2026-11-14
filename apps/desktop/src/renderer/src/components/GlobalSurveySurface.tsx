@@ -29,6 +29,7 @@ import { surveyCompositionDestinations, type SurveyCompositionDestinationIntent 
 import type { SurveyContentReference, SurveyCompositionDropTarget, SurveyCompositionSelectionControl } from '../lib/survey-composition-drag'
 import { SurveyItemList } from './SurveyItemList'
 import { useSurveyListOrganization } from '../hooks/useSurveyListOrganization'
+import { moveSurveyListItem } from '../lib/survey-list'
 import { BrowserStartPage } from './BrowserStartPage'
 import { resolveBrowserStartPage } from '../../../shared/browser-start-page'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
@@ -170,7 +171,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [recallCapture, setRecallCapture] = useState<RecallCaptureTarget | null>(null)
   const [locationChoice, setLocationChoice] = useState<{ kind: 'note' | 'agent' | 'browser' | 'tab'; zoneId: string; choices: WorkbenchProjectionSelection[] } | { kind: 'close'; zoneId: string; subject: string; choices: WorkbenchProjectionSelection[] } | { kind: 'close-page'; page: SurveyPageSelection; choices: WorkbenchProjectionSelection[] } | null>(null)
   const [movingSources, setMovingSources] = useState<SurveyCompositionSource[] | null>(null)
-  const [movingIntent, setMovingIntent] = useState<{ intent: SurveyCompositionDestinationIntent; requestId: string } | null>(null)
+  const [movingIntent, setMovingIntent] = useState<{ intent: SurveyCompositionDestinationIntent; requestId: string; surveyGroupId?: string | null } | null>(null)
   const [selectingContent, setSelectingContent] = useState(false)
   const [selectedSources, setSelectedSources] = useState<SurveyCompositionSource[]>([])
   const pendingCompositions = useAppStore(state => state.surveyCompositionRecoveries)
@@ -178,7 +179,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const unresolvedCompositions = pendingCompositions.filter(isSurveyCompositionRecovery)
   const reviewingOperation = unresolvedCompositions.find(operation => operation.requestId === reviewingComposition)
   const compositionBusy = useRef(false)
-  const compositionDrag = useRef<{ requestId: string; reservedZoneId: string; sources: SurveyCompositionSource[] } | null>(null)
+  const compositionDrag = useRef<{ requestId: string; reservedZoneId: string; sources: SurveyCompositionSource[]; researchZoneId: string | null; organization: typeof list.stored; editable: typeof list.editable } | null>(null)
   const zonesForComposition = useMemo(() => new Map(catalog?.zones.map(zone => [zone.zoneId, zone]) ?? []), [catalog])
   function captureContent(reference: SurveyContentReference): SurveyCompositionSource[] | null {
     if (!catalog) return null
@@ -208,12 +209,30 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const captured = !compositionBusy.current && captureContent(reference)
     const selected = captured && captured.every(source => selectedSources.some(original => sourceKey(original) === sourceKey(source)))
     const sources = captured ? selected ? selectedSources : captured : null
-    compositionDrag.current = sources ? { sources, requestId: mintObjectId(), reservedZoneId: mintObjectId() } : null
+    compositionDrag.current = sources ? { sources, requestId: mintObjectId(), reservedZoneId: mintObjectId(),
+      researchZoneId: reference.kind === 'research' && captured && sources.length === captured.length && sources.every(source => captured.some(original => sourceKey(original) === sourceKey(source))) ? reference.zoneId : null,
+      organization: list.stored, editable: list.editable } : null
     return sources ? `${sources.length} ${sources.every(source => source.kind === 'page') ? sources.length === 1 ? 'page' : 'pages' : sources.every(source => source.kind === 'tab') ? sources.length === 1 ? 'Tab' : 'Tabs' : 'items'}` : null
+  }
+  function completeResearch(sources: readonly SurveyCompositionSource[]): string | null {
+    const zoneId = sources[0]?.zoneId
+    if (!zoneId || !collected[zoneId] || !sources.every(source => source.kind === 'tab' && source.zoneId === zoneId)) return null
+    const members = tabsByZone.get(zoneId) ?? [], sourceIds = new Set(sources.map(source => source.tab.id))
+    return members.length === sourceIds.size && members.every(tabId => sourceIds.has(tabId)) ? zoneId : null
+  }
+  function canGroupContent(sources: readonly SurveyCompositionSource[]): boolean {
+    return sources.length === 1 && sources[0]!.kind === 'tab' || completeResearch(sources) !== null
   }
   function canCompose(target: SurveyCompositionDropTarget): boolean {
     const held = compositionDrag.current
     if (!held || !catalog || !visible || controlsCoverPage) return false
+    if (target.kind === 'independent') return held.researchZoneId === null && completeResearch(held.sources) === null
+    if (target.kind === 'list-group') {
+      if (held.researchZoneId === null && !canGroupContent(held.sources)) return false
+      if (target.groupId !== null && !list.stored.groups.some(group => group.groupId === target.groupId)) return false
+      const wholeZoneId = held.researchZoneId ?? completeResearch(held.sources)
+      return !wholeZoneId || (list.stored.groups.find(group => group.zoneIds.includes(wholeZoneId))?.groupId ?? null) !== target.groupId
+    }
     if (target.kind === 'research') {
       const zone = zonesForComposition.get(target.zoneId), resource = zone && resourceWorkspaces.get(zone.workspaceId)
       return Boolean(zone && resource && !held.sources.every(source => source.zoneId === target.zoneId))
@@ -227,8 +246,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     if (!held || !target || !canCompose(target) || !catalog) { compositionDrag.current = null; return }
     compositionDrag.current = null
     let sources = held.sources
+    const wholeZoneId = target.kind === 'list-group' ? held.researchZoneId ?? completeResearch(sources) : null
+    if (target.kind === 'list-group' && wholeZoneId) {
+      void list.commit(moveSurveyListItem(held.editable, wholeZoneId, target.groupId), held.organization)
+      return
+    }
+    const surveyGroupId = target.kind === 'list-group' ? target.groupId : undefined
     const intent: SurveyCompositionDestinationIntent = target.kind === 'research' ? { kind: 'existing', zoneId: target.zoneId }
-      : { kind: 'new-research', zoneId: held.reservedZoneId, anchor: target }
+      : { kind: 'new-research', zoneId: held.reservedZoneId, ...(target.kind === 'page' ? { anchor: target } : {}) }
     if (target.kind === 'page') {
       const page = captureSurveyCompositionSource(useAppStore.getState(), catalog, target)
       if (!page) { setError('The original target page changed. Its content and this selection are kept; choose that same page again.'); return }
@@ -236,10 +261,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     }
     const destinations = surveyCompositionDestinations(useAppStore.getState(), catalog, sources, intent)
     if (destinations.length !== 1) {
-      setMovingIntent({ intent, requestId: held.requestId }); setMovingSources(sources); return
+      setMovingIntent({ intent, requestId: held.requestId, ...(surveyGroupId === undefined ? {} : { surveyGroupId }) }); setMovingSources(sources); return
     }
     compositionBusy.current = true
-    void useAppStore.getState().composeSurveyTabs({ requestId: held.requestId, sources, target: destinations[0]!.target }).then(result => {
+    void useAppStore.getState().composeSurveyTabs({ requestId: held.requestId, sources, target: destinations[0]!.target, ...(surveyGroupId === undefined ? {} : { surveyGroupId }) }).then(result => {
       if (result.outcome === 'unknown' || result.outcome === 'partial') setReviewingComposition(result.requestId)
       else if (result.issue) setError(result.issue)
       if (result.outcome === 'moved') setSelectedSources(current => current.filter(source => !sources.includes(source)))
@@ -690,6 +715,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu" align="start" sideOffset={4}>
         <Menu.Item className="tab-context-menu__item" onSelect={() => { setMovingIntent(null); setMovingSources([...selectedSources]) }}>Move selected to research…</Menu.Item>
         <Menu.Item className="tab-context-menu__item" onSelect={() => { setMovingIntent({ intent: { kind: 'new-research', zoneId: mintObjectId() }, requestId: mintObjectId() }); setMovingSources([...selectedSources]) }}>New research from selected…</Menu.Item>
+        <Menu.Sub><Menu.SubTrigger className="tab-context-menu__item" disabled={!canGroupContent(selectedSources)} title="Select one complete Tab or one complete research to organize">Move selected to list group</Menu.SubTrigger>
+          <Menu.SubContent className="tab-context-menu">{[{ groupId: null, name: 'Ungrouped' }, ...list.stored.groups].map(group =>
+            <Menu.Item key={JSON.stringify(['survey-list-group', group.groupId])} className="tab-context-menu__item" onSelect={() => {
+              compositionDrag.current = { sources: [...selectedSources], researchZoneId: completeResearch(selectedSources), requestId: mintObjectId(), reservedZoneId: mintObjectId(), organization: list.stored, editable: list.editable }
+              dropComposition({ kind: 'list-group', groupId: group.groupId })
+            }}>{group.name || 'Unnamed group'}</Menu.Item>)}</Menu.SubContent>
+        </Menu.Sub>
       </Menu.Content></DocumentOverlayPortal></Menu.Root>
       <button type="button" aria-label="Cancel content selection" onClick={() => { setSelectingContent(false); setSelectedSources([]) }}>Cancel</button>
     </> : null}

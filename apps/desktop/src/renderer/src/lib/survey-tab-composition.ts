@@ -24,6 +24,8 @@ export type SurveyCompositionRequest = {
   requestId: string
   sources: readonly SurveyCompositionSource[]
   target: SurveyCompositionTarget
+  /** User list placement, distinct from the target's physical display Group. */
+  surveyGroupId?: string | null
 }
 export type SurveyCompositionPlan = {
   graph: AgentMuxSpatialGraph
@@ -83,6 +85,8 @@ function keepDisplaySelection(before: WorkspaceLayout | undefined, after: Worksp
 /** Pure whole-request preparation. Promotion has no side effect until one original Core CAS accepts the complete graph. */
 export function planSurveyTabComposition(state: AppState, topics: readonly ScratchTopicSnapshot[], base: AgentMuxSpatialGraph,
   request: SurveyCompositionRequest): SurveyCompositionPlan {
+  if (request.surveyGroupId !== undefined && request.surveyGroupId !== null && !state.surveyOrganization.groups.some(group => group.groupId === request.surveyGroupId))
+    changed('The selected Survey list group no longer exists.')
   // A full-graph CAS must start from the same authoritative revision the client has actually consumed.
   if (!sameSpatialValue(desktopSpatialGraph(state, topics, base), base)) changed('The displayed workface has not consumed the original Core graph.')
   let planningState = state

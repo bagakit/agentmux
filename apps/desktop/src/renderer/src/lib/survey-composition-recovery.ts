@@ -9,6 +9,7 @@ import type { SurveyCompositionReport, SurveyCompositionRequest } from './survey
 export type SurveyCompositionRecovery = {
   requestId: string
   target: SurveyCompositionRequest['target']
+  surveyGroupId?: string | null
   sources: ({ tabId: string; zoneId: string | null; owners: WorkbenchViewCloseSurfaceOwner[] } &
     ({ kind: 'tab' } | { kind: 'page'; promotedTabId: string }))[]
   report: SurveyCompositionReport
@@ -16,7 +17,7 @@ export type SurveyCompositionRecovery = {
 export type SurveyCompositionReview = { targetConfirmed: boolean; referencesRepaired: boolean; issue: string }
 
 export function retainSurveyComposition(request: SurveyCompositionRequest, report: SurveyCompositionReport): SurveyCompositionRecovery {
-  return { requestId: request.requestId, target: request.target, report, sources: request.sources.map(source => ({
+  return { requestId: request.requestId, target: request.target, ...(request.surveyGroupId === undefined ? {} : { surveyGroupId: request.surveyGroupId }), report, sources: request.sources.map(source => ({
     tabId: source.tab.id, zoneId: source.zoneId,
     ...(source.kind === 'page' ? { kind: 'page' as const, promotedTabId: source.promotedTabId } : { kind: 'tab' as const }),
     owners: Object.values(source.tab.regions).filter(region => source.kind === 'tab' || region.regionId === source.regionId).map(workbenchSurfaceOwner)
@@ -55,6 +56,7 @@ export function isSurveyCompositionRecovery(value: unknown): value is SurveyComp
   if (!record(value) || !text(value.requestId) || !record(value.target) || !record(value.report) || !Array.isArray(value.sources) || !value.sources.length) return false
   const target = value.target, report = value.report
   return (target.kind === 'existing' || target.kind === 'new-research') && ['zoneId', 'workspaceId', 'displayWorkspaceId', 'groupId'].every(key => text(target[key])) &&
+    (value.surveyGroupId === undefined || value.surveyGroupId === null || text(value.surveyGroupId)) &&
     report.requestId === value.requestId && report.targetZoneId === target.zoneId && ['unknown', 'partial'].includes(report.outcome as string) &&
     Array.isArray(report.tabIds) && report.tabIds.every(text) && value.sources.every(source => record(source) &&
       (source.kind === 'tab' || source.kind === 'page' && text(source.promotedTabId)) && text(source.tabId) && (source.zoneId === null || text(source.zoneId)) &&

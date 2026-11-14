@@ -24,6 +24,7 @@ export function SurveyCompositionResultDialog({ operation, visible, onClose }: {
         {operation.report.issue ? <p className="surface-inline-error">{operation.report.issue}</p> : null}
         <details className="confirmation-dialog__description survey-composition-details"><summary>Original operation details</summary>
           <dl><dt>Request</dt><dd>{operation.requestId}</dd><dt>Target research</dt><dd>{operation.target.zoneId}</dd>
+            {operation.surveyGroupId !== undefined ? <><dt>Survey list group</dt><dd>{operation.surveyGroupId ?? 'Ungrouped'}</dd></> : null}
             <dt>Original content</dt><dd>{operation.sources.flatMap(source => source.owners.map(owner => `${owner.kind}: ${owner.regionId}`)).join(', ')}</dd></dl>
         </details>
         {review ? <p role="status" className="confirmation-dialog__description">{review.issue}</p> : null}

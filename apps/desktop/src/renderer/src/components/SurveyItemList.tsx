@@ -8,7 +8,8 @@ import type { AgentMuxSurveyOrganization } from '@agentmux/core/control'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import type { SurveyContentDrag, SurveyPageDrop, SurveyContentReference, SurveyCompositionDropTarget } from '../lib/survey-composition-drag'
-import { moveSurveyListItem, type SurveyListOrganizationModel } from '../hooks/useSurveyListOrganization'
+import type { SurveyListOrganizationModel } from '../hooks/useSurveyListOrganization'
+import { moveSurveyListItem } from '../lib/survey-list'
 
 const DragIcon = semanticIconComponent('action.drag')
 const DisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -22,6 +23,10 @@ const groupKey = (id: string) => `survey-group:${id}`
 const ungroupedKey = 'survey-ungrouped'
 
 type Target = { kind: 'item'; zoneId: string; groupId: string | null; index: number } | { kind: 'group'; groupId: string } | { kind: 'ungrouped' }
+type Composition = { start(reference: SurveyContentReference): string | null; canDrop(target: SurveyCompositionDropTarget): boolean; drop(target: SurveyCompositionDropTarget | null): void }
+type DropData = Target | SurveyPageDrop | { kind: 'composition-target'; target: SurveyCompositionDropTarget }
+const contentTarget = (data: DropData | undefined): SurveyCompositionDropTarget | null => data?.kind === 'item' ? { kind: 'research', zoneId: data.zoneId }
+  : data?.kind === 'page-target' ? data.reference : data?.kind === 'composition-target' ? data.target : null
 
 /** A container is a destination only across containers; ordering uses an exact row. */
 function acceptsContainer(from: Target | undefined, groupId: string | null): boolean {
@@ -29,13 +34,13 @@ function acceptsContainer(from: Target | undefined, groupId: string | null): boo
     : from?.kind === 'group' && groupId !== null && from.groupId !== groupId
 }
 
-/** List organization alone owns drag behavior; each original row retains its existing content/actions. */
+/** One sensor routes list sorting and content drops to their respective original owners. */
 export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId, leading, trailing, pinnedZoneIds = [], pinnedPages, composition }: {
   leading?: ReactNode
   trailing?: ReactNode
   pinnedZoneIds?: readonly string[]
   pinnedPages?: ReactNode
-  composition?: { start(reference: SurveyContentReference): string | null; canDrop(target: SurveyCompositionDropTarget): boolean; drop(target: SurveyCompositionDropTarget | null): void }
+  composition?: Composition | undefined
   model: SurveyListOrganizationModel
   titles: ReadonlyMap<string, string>
   renderItem(zoneId: string, dragHandle: ReactNode, compositionEnabled: boolean): ReactNode
@@ -50,8 +55,7 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
       if (!current || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(direction)) return
       event.preventDefault()
       const candidates = args.context.droppableContainers.getEnabled().flatMap(container => {
-        const data = container.data.current as Target | SurveyPageDrop | undefined
-        const target = data?.kind === 'item' ? { kind: 'research' as const, zoneId: data.zoneId } : data?.kind === 'page-target' ? data.reference : null
+        const target = contentTarget(container.data.current as DropData | undefined)
         const rect = args.context.droppableRects.get(container.id)
         if (!rect || !target || !composition?.canDrop(target)) return []
         const valid = direction === 'ArrowDown' ? rect.top > current.top : direction === 'ArrowUp' ? rect.top < current.top
@@ -63,8 +67,8 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
       return target ? { x: target.left + (target.width - current.width) / 2, y: target.top + (target.height - current.height) / 2 } : undefined
     }
     const rects = new Map([...args.context.droppableRects].filter(([id]) => {
-      const data = args.context.droppableContainers.get(id)?.data.current as Target | undefined
-      if (!data) return false
+      const data = args.context.droppableContainers.get(id)?.data.current as DropData | undefined
+      if (!data || data.kind === 'composition-target' || data.kind === 'page-target') return false
       if (groupDrag) return data.kind === 'group'
       if (data.kind === 'item') return true
       if (data.kind === 'ungrouped') return model.effective.ungrouped.length === 0
@@ -94,8 +98,7 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
   function end({ active, over }: DragEndEvent) {
     const baseline = held.current; held.current = null; setDragging(false)
     if (active.data.current?.kind === 'content') {
-      const target = over?.data.current
-      composition?.drop(target?.kind === 'item' ? { kind: 'research', zoneId: target.zoneId } : target?.kind === 'page-target' ? target.reference : null)
+      composition?.drop(contentTarget(over?.data.current as DropData | undefined))
       return
     }
     if (!baseline || !over || active.id === over.id) return
@@ -131,8 +134,13 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
     <DndContext sensors={sensors} onDragStart={start} onDragEnd={end} onDragCancel={() => { held.current = null; setDragging(false); composition?.drop(null) }}
       accessibility={{ screenReaderInstructions: { draggable: 'Press Space to pick up. Use arrow keys to choose a destination. Press Space to drop, or Escape to cancel.' },
         announcements: {
-          onDragStart: ({ active }) => active.data.current?.kind === 'content' ? `Picked up ${contentLabel.current ?? 'original content'}. Move over a research, or another page to combine.` : 'Picked up for reordering.',
-          onDragOver: ({ active, over }) => active.data.current?.kind === 'content' ? !over ? 'No merge target. Content stays in place.' : over.data.current?.kind === 'page-target' ? 'Combine into a new research.' : 'Move into this research.' : over ? 'Reorder at this position.' : 'No insertion target.',
+          onDragStart: ({ active }) => active.data.current?.kind === 'content' ? `Picked up ${contentLabel.current ?? 'original content'}. Choose a research, a list group, or Make independent research.` : 'Picked up for reordering.',
+          onDragOver: ({ active, over }) => {
+            if (active.data.current?.kind !== 'content') return over ? 'Reorder at this position.' : 'No insertion target.'
+            const target = contentTarget(over?.data.current as DropData | undefined)
+            return !target ? 'No target. Content stays in place.' : target.kind === 'independent' ? 'Make independent research.'
+              : target.kind === 'list-group' ? 'Move to this Survey list group.' : target.kind === 'page' ? 'Combine into a new research.' : 'Move into this research.'
+          },
           onDragEnd: ({ active, over }) => active.data.current?.kind === 'content' ? over ? 'Drop requested. Check the research or choose its exact destination.' : 'Canceled. Content stays in place.' : 'Reordering gesture ended.',
           onDragCancel: () => 'Canceled. Content stays in place.'
         } }}
@@ -141,9 +149,8 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
         const groupsOnly = args.active.data.current?.kind === 'group'
         const droppableContainers = args.droppableContainers.filter(container => {
           const data = container.data.current
-          if (content) return Boolean(composition && (data?.kind === 'item' ? composition.canDrop({ kind: 'research', zoneId: data.zoneId })
-            : data?.kind === 'page-target' && composition.canDrop(data.reference)))
-          if (data?.kind === 'page-target') return false
+          if (content) { const target = contentTarget(data as DropData | undefined); return Boolean(target && composition?.canDrop(target)) }
+          if (data?.kind === 'page-target' || data?.kind === 'composition-target') return false
           return groupsOnly ? data?.kind === 'group' : !args.pointerCoordinates || container.id !== args.active.id
         })
         const candidates = { ...args, droppableContainers }
@@ -166,34 +173,25 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
         </SortableContext>
         {pinnedPages}
       </div> : null}
-      <Ungrouped hasGroups={model.effective.groups.length > 0}>{rows(model.effective.ungrouped, null)}</Ungrouped>
+      <Ungrouped hasGroups={model.effective.groups.length > 0} composition={composition} visible={visible}>{rows(model.effective.ungrouped, null)}</Ungrouped>
       <SortableContext items={model.effective.groups.map(group => groupKey(group.groupId))} strategy={verticalListSortingStrategy}>
-        {model.effective.groups.map(group => <SurveyListGroup key={group.groupId} group={group} model={model} visible={visible} selected={group.zoneIds.includes(selectedZoneId ?? '')}>
+        {model.effective.groups.map(group => <SurveyListGroup key={group.groupId} group={group} model={model} visible={visible} composition={composition} selected={group.zoneIds.includes(selectedZoneId ?? '')}>
           {rows(group.zoneIds, group.groupId, visible && !group.collapsed)}
         </SurveyListGroup>)}
       </SortableContext>
       {trailing}
-      {contentLabel.current ? <DragOverlay dropAnimation={null} modifiers={[({ transform, activeNodeRect, activatorEvent }) => {
-        const point = activatorEvent && getEventCoordinates(activatorEvent)
-        if (!activeNodeRect) return transform
-        const bounds = previewBounds.current, width = bounds ? Math.min(188, bounds.width - 12) : 188
-        const desiredLeft = activeNodeRect.left + transform.x + 8
-        const left = bounds ? Math.max(bounds.left + 6, Math.min(desiredLeft, bounds.right - width - 6)) : desiredLeft
-        return { ...transform, x: left - activeNodeRect.left, y: transform.y + (point ? point.y - activeNodeRect.top + 14 : activeNodeRect.height + 8) }
-      }]}>{dragging && contentLabel.current ? <div className="survey-composition-preview" style={previewBounds.current ? { maxWidth: Math.min(188, previewBounds.current.width - 12) } : undefined}>
-        {contentPresentation.current?.icon ? <span className="survey-composition-preview__icon" aria-hidden="true">{contentPresentation.current.icon}</span> : null}
-        <span><strong>{contentPresentation.current?.title ?? contentLabel.current}</strong>{contentPresentation.current?.title ? <small>{contentLabel.current}</small> : null}</span>
-      </div> : null}</DragOverlay> : null}
+      <IndependentDestination composition={composition} visible={visible} />
+      {contentLabel.current ? <CompositionDragOverlay label={dragging ? contentLabel.current : null} presentation={contentPresentation.current} bounds={previewBounds.current} /> : null}
     </DndContext>
     {model.error ? <p className="survey-relation-notice" role="alert">{model.error}</p> : null}
   </div>
 }
 
-function Ungrouped({ children, hasGroups }: { children: ReactNode; hasGroups: boolean }) {
+function Ungrouped({ children, hasGroups, composition, visible }: { children: ReactNode; hasGroups: boolean; composition?: Composition | undefined; visible: boolean }) {
   const { active } = useDndContext()
   const { setNodeRef, isOver } = useDroppable({ id: ungroupedKey, data: { kind: 'ungrouped' } satisfies Target })
   return <div ref={setNodeRef} className="survey-list-ungrouped" data-survey-list-group="ungrouped" data-drop-over={isOver && acceptsContainer(active?.data.current as Target | undefined, null) || undefined}>
-    {hasGroups ? <span className="survey-list-label">Ungrouped</span> : null}{children}
+    {hasGroups ? <CompositionDestination target={{ kind: 'list-group', groupId: null }} composition={composition} visible={visible}><span className="survey-list-label">Ungrouped</span></CompositionDestination> : null}{children}
   </div>
 }
 
@@ -210,7 +208,7 @@ function SortableItem({ zoneId, groupId, title, visible, render, index }: { inde
   </div>
 }
 
-function SurveyListGroup({ group, model, children, visible, selected }: { group: AgentMuxSurveyOrganization['groups'][number]; model: SurveyListOrganizationModel; children: ReactNode; visible: boolean; selected: boolean }) {
+function SurveyListGroup({ group, model, children, visible, selected, composition }: { group: AgentMuxSurveyOrganization['groups'][number]; model: SurveyListOrganizationModel; children: ReactNode; visible: boolean; selected: boolean; composition?: Composition | undefined }) {
   const { active } = useDndContext()
   const { setNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id: groupKey(group.groupId), data: { kind: 'group', groupId: group.groupId } satisfies Target, disabled: !visible })
   const [menuOpen, setMenuOpen] = useState(false)
@@ -226,7 +224,7 @@ function SurveyListGroup({ group, model, children, visible, selected }: { group:
   useEffect(() => { if (!visible) setMenuOpen(false) }, [visible])
   const cancel = () => { ++generation.current; setEdit(null); model.setRenamingGroupId(null) }
   return <section ref={setNodeRef} className="survey-list-group" data-survey-list-group={group.groupId} data-collapsed={group.collapsed} data-selected={selected || undefined} data-dragging={isDragging || undefined} data-drop-over={isOver && acceptsContainer(active?.data.current as Target | undefined, group.groupId) || undefined} style={{ transform: CSS.Transform.toString(transform), transition }}>
-    <div className="survey-list-group-heading" data-survey-group-header={group.groupId}>
+    <CompositionDestination target={{ kind: 'list-group', groupId: group.groupId }} composition={composition} visible={visible && !edit} label={group.name || 'Unnamed group'}><div className="survey-list-group-heading" data-survey-group-header={group.groupId}>
       <button type="button" className="survey-drag-handle" {...attributes} {...listeners} aria-label={`Move survey group: ${group.name}`} title="Drag group"><DragIcon size={12} /></button>
       {edit ? <form className="survey-group-name" onSubmit={async event => {
         event.preventDefault(); if (saving) return
@@ -262,6 +260,56 @@ function SurveyListGroup({ group, model, children, visible, selected }: { group:
         </Menu.Root>
       </>}
     </div>
-    <div className="survey-list-group-items" hidden={group.collapsed} inert={group.collapsed}>{children}{group.zoneIds.length === 0 ? <span className="survey-list-empty">Drop items here</span> : null}</div>
+    {group.zoneIds.length === 0 && !group.collapsed ? <div className="survey-list-group-items">{children}<span className="survey-list-empty">Drop items here</span></div> : null}
+    </CompositionDestination>
+    {group.zoneIds.length > 0 ? <div className="survey-list-group-items" hidden={group.collapsed} inert={group.collapsed}>{children}</div> : null}
   </section>
+}
+
+/** A list heading is a different destination from the research cards beneath it. */
+function CompositionDestination({ target, composition, visible, children, label }: {
+  target: SurveyCompositionDropTarget; composition?: Composition | undefined; visible: boolean; children: ReactNode; label?: string
+}) {
+  const { active } = useDndContext()
+  const enabled = visible && active?.data.current?.kind === 'content' && Boolean(composition?.canDrop(target))
+  const { setNodeRef, isOver } = useDroppable({ id: JSON.stringify(target.kind === 'list-group' ? ['survey-list-group', target.groupId] : ['independent-research']),
+    data: { kind: 'composition-target', target } satisfies DropData, disabled: !enabled })
+  return <div ref={setNodeRef} className="survey-composition-destination" data-compose-over={enabled && isOver || undefined}
+    data-survey-list-target={target.kind === 'list-group' ? target.groupId ?? 'ungrouped' : undefined}
+    data-survey-list-target-kind={target.kind === 'list-group' ? target.groupId === null ? 'ungrouped' : 'group' : undefined}
+    data-survey-independent-target={target.kind === 'independent' || undefined}>
+    {children}{enabled && isOver && target.kind === 'list-group' ? <span className="survey-composition-group-cue">Move to {label ?? 'Ungrouped'}</span> : null}
+  </div>
+}
+
+function IndependentDestination({ composition, visible }: { composition?: Composition | undefined; visible: boolean }) {
+  const { active } = useDndContext()
+  if (!visible || active?.data.current?.kind !== 'content' || !composition?.canDrop({ kind: 'independent' })) return null
+  return <CompositionDestination target={{ kind: 'independent' }} composition={composition} visible={visible}>
+    <span className="survey-independent-target">Make independent research</span>
+  </CompositionDestination>
+}
+
+/** Only the visual preview moves; its origin stays fixed while the source can reflow. */
+function CompositionDragOverlay({ label, presentation, bounds }: {
+  label: string | null; presentation: SurveyContentDrag['presentation']; bounds: { left: number; right: number; width: number } | null
+}) {
+  const { active, activeNodeRect, droppableContainers } = useDndContext()
+  const origin = useRef({ id: active?.id, rect: activeNodeRect })
+  if (origin.current.id !== active?.id) origin.current = { id: active?.id, rect: activeNodeRect }
+  if (!origin.current.rect && activeNodeRect) origin.current.rect = activeNodeRect
+  return <DragOverlay dropAnimation={null} modifiers={[({ transform, activatorEvent, over }) => {
+    const initial = origin.current.rect, point = activatorEvent && getEventCoordinates(activatorEvent)
+    if (!initial) return transform
+    const width = bounds ? Math.min(188, bounds.width - 12) : 188
+    const desiredLeft = (point ? point.x : initial.left) + transform.x + 8
+    const left = bounds ? Math.max(bounds.left + 6, Math.min(desiredLeft, bounds.right - width - 6)) : desiredLeft
+    const belowPointer = transform.y + (point ? point.y - initial.top + 14 : initial.height + 8)
+    const group = contentTarget(over?.data.current as DropData | undefined)?.kind === 'list-group'
+    const targetRect = group && over ? droppableContainers.get(over.id)?.node.current?.getBoundingClientRect() : null
+    return { ...transform, x: left - initial.left, y: targetRect ? Math.max(belowPointer, targetRect.bottom + 8 - initial.top) : belowPointer }
+  }]}>{label ? <div className="survey-composition-preview" style={bounds ? { maxWidth: Math.min(188, bounds.width - 12) } : undefined}>
+    {presentation?.icon ? <span className="survey-composition-preview__icon" aria-hidden="true">{presentation.icon}</span> : null}
+    <span><strong>{presentation?.title ?? label}</strong>{presentation?.title ? <small>{label}</small> : null}</span>
+  </div> : null}</DragOverlay>
 }

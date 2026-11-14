@@ -4,6 +4,15 @@ import { changeSurveyPin, surveyPinnedReferences, surveyPinKey, type SurveyPinRe
 
 export const EMPTY_SURVEY_ORGANIZATION: AgentMuxSurveyOrganization = { ungrouped: [], groups: [] }
 
+/** Move only an original Zone reference; never change its content or membership. */
+export function moveSurveyListItem(base: AgentMuxSurveyOrganization, zoneId: string, target: string | null, index?: number): AgentMuxSurveyOrganization {
+  const next = { ungrouped: base.ungrouped.filter(id => id !== zoneId),
+    groups: base.groups.map(group => ({ ...group, zoneIds: group.zoneIds.filter(id => id !== zoneId) })) }
+  const ids = target === null ? next.ungrouped : next.groups.find(group => group.groupId === target)?.zoneIds
+  if (ids) ids.splice(index ?? ids.length, 0, zoneId)
+  return next
+}
+
 /** Restore only client presentation. Missing topology never retires a saved reference. */
 export function restoreSurveyOrganization(value: unknown): AgentMuxSurveyOrganization {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}

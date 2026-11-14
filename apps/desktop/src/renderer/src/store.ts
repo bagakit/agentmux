@@ -137,7 +137,7 @@ import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from '@agentmux/host/goal-project-context'
 import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext, type SpatialControlOptions } from './lib/space-agent-control'
 import { executeWorkfaceAgentView } from './lib/workface-agent-view'
-import { changeSurveyCollection, executeSurveyList, restoreSurveyOrganization, surveyCollectedZoneIds } from './lib/survey-list'
+import { changeSurveyCollection, executeSurveyList, moveSurveyListItem, restoreSurveyOrganization, surveyCollectedZoneIds } from './lib/survey-list'
 import { executeWorkspaceAgentOrder, restoreWorkspaceAgentOrder, workspaceAgentOrderMembers } from './lib/workspace-agent-order'
 import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
 import { executeWorkfaceFileOpen, resolveFileOpenTarget } from './lib/workface-file-open'
@@ -4760,6 +4760,9 @@ async function requestWorkbenchStorageFlush(includeSpatial = true, includeFileVi
 /** Same original list owner after a composition or an explicit repair; never submits topology. */
 async function saveSurveyCompositionReferences(get: () => AppState, set: (next: Partial<AppState>) => void, retained: SurveyCompositionRecovery) {
   const current = get(), catalog = spatialCatalog(current, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots) ?? [])
+  if (retained.surveyGroupId !== undefined && retained.surveyGroupId !== null && !current.surveyOrganization.groups.some(group => group.groupId === retained.surveyGroupId))
+    return { save: null, issues: [{ step: 'target', code: 'SURVEY_LIST_CONFLICT', message: 'The original destination list group no longer exists.',
+      recovery: 'The original composition and group ID are kept. Restore that group before repairing this request; no content is moved again.' }] }
   const movedPages = new Set(retained.sources.flatMap(source => source.owners.flatMap(owner => owner.kind === 'browser' ? [JSON.stringify([owner.regionId, owner.browserId])] : [])))
   const sourceZoneIds = new Set(retained.sources.map(source => source.zoneId))
   const zoneIds = [...new Set([...surveyCollectedZoneIds(current.surveyCollectedZones).filter(zoneId =>
@@ -4767,6 +4770,8 @@ async function saveSurveyCompositionReferences(get: () => AppState, set: (next: 
   const pages = current.surveyPageReferences.filter(page => !movedPages.has(JSON.stringify([page.regionId, page.browserId])))
   return executeSurveyList({ get, set, hasZone: confirmedSurveyZones(current), hasPage: page => Boolean(surveyPageOwner(get().tabs, page)),
     save: saveSurveyPreferences }, { schemaVersion: 5, requestId: retained.requestId, operation: 'space.survey-list',
+    ...(retained.surveyGroupId === undefined ? {} : {
+      organization: moveSurveyListItem(current.surveyOrganization, retained.target.zoneId, retained.surveyGroupId), expected: current.surveyOrganization }),
     collection: { zoneIds, expectedZoneIds: surveyCollectedZoneIds(current.surveyCollectedZones), pageReferences: pages, expectedPageReferences: current.surveyPageReferences } })
 }
 

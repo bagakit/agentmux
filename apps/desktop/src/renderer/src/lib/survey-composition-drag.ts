@@ -4,7 +4,7 @@ import type { AgentMuxSurveyPageReference } from '@agentmux/core/control'
 
 /** Ephemeral UI addresses; only the original composition planner can change their topology. */
 export type SurveyContentReference = { kind: 'research'; zoneId: string } | { kind: 'tab'; tabId: string } | ({ kind: 'page' } & AgentMuxSurveyPageReference)
-export type SurveyCompositionDropTarget = Exclude<SurveyContentReference, { kind: 'tab' }>
+export type SurveyCompositionDropTarget = Exclude<SurveyContentReference, { kind: 'tab' }> | { kind: 'independent' } | { kind: 'list-group'; groupId: string | null }
 export type SurveyContentDrag = { kind: 'content'; reference: SurveyContentReference; presentation?: { title: string; icon?: ReactNode } }
 export type SurveyPageDrop = { kind: 'page-target'; reference: Extract<SurveyContentReference, { kind: 'page' }> }
 export const surveyContentKey = (reference: SurveyContentReference) => reference.kind === 'page'
