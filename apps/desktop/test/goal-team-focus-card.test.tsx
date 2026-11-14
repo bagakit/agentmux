@@ -16,6 +16,7 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { openHostGoalTransport } from './helpers/host-goal-transport'
+import { readPmoTeamsTopicFloatingState, requestAgentConversationFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 
 const dom = composerDOM({ agentInformation: true }), actorId = 'original-team-agent', viewId = 'original-team-view'
 const goal = (): DemandProjection => ({ id: 'team-goal', title: 'Keep original responsibility', description: 'The original Goal text',
@@ -38,6 +39,7 @@ async function editSupervisor() {
   await act(async () => team().querySelector<HTMLButtonElement>('[aria-label="Choose Goal Supervisor"]')!.click())
 }
 beforeEach(() => {
+  requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
   vi.spyOn(api.demands, 'onChanged').mockReturnValue(() => {})
   seed()
 })
@@ -95,23 +97,90 @@ it('different Hosts or Runs keep the exact bare reference unknown without a firs
   const retained = [...team().querySelectorAll<HTMLElement>('[data-goal-team-unconfirmed]')].find(node => node.getAttribute('data-goal-team-unconfirmed') === demandAgentReferenceKey('unobserved-original'))
   expect(retained).toBeDefined(); expect(retained?.textContent).toContain('reference')
   await act(async () => cards()[0]!.click())
-  expect(select).toHaveBeenCalledWith('healthy-view')
-  expect(select).not.toHaveBeenCalledWith('host-a-view'); expect(select).not.toHaveBeenCalledWith('host-b-view')
+  expect(select).not.toHaveBeenCalled()
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, agentTarget: { agentSessionId: 'healthy-agent', hostId: 'local' } })
+  expect(useAppStore.getState().mainSurface).toBe('board')
+  expect(useAppStore.getState().selectedDemandId).toBe(record.id)
   expect(useAppStore.getState().demands[record.id]!.sessionIds).toEqual(record.sessionIds)
 })
 
-it('the confirmed card navigates through the original durable workface owner without sending or replacing its draft', async () => {
+it('the confirmed card opens the original conversation within the Goal without sending or replacing its draft', async () => {
   const workspace = composerConfig.workspaces[0]!, tab = createWorkbenchTab('original-team-tab', { kind: 'agent', phase: 'attached', regionId: 'original-team-region', workspaceId: workspace.id, sessionId: viewId })
   useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('original-team-group', [tab.id]) }, activeWorkspaceId: workspace.id })
   await initializeSpatialControlFixture()
   const before = useAppStore.getState().agentComposerDrafts
+  const focusBefore = useAppStore.getState().agentFocus
   const input = vi.spyOn(api.sessions, 'submitPrompt')
   await dom.render(<GlobalBoardSurface />)
   await act(async () => cards()[0]!.click())
-  expect(useAppStore.getState().mainSurface).toBe('workbench')
-  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(viewId)
+  expect(useAppStore.getState().mainSurface).toBe('board')
+  expect(useAppStore.getState().selectedDemandId).toBe(goal().id)
+  expect(useAppStore.getState().agentFocus).toBe(focusBefore)
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true,
+    agentTarget: { agentSessionId: actorId, hostId: 'local' },
+    targetAgent: { hostId: 'local', sessionId: actorId, presentationSessionId: viewId },
+    reference: { displayWorkspaceId: workspace.id, tabId: tab.id, regionId: 'original-team-region' } })
   expect(useAppStore.getState().agentComposerDrafts).toBe(before)
   expect(input).not.toHaveBeenCalled()
+})
+
+it('a source-qualified remote Agent opens its own conversation instead of a local namesake', async () => {
+  const record = goal()
+  record.participations = record.participations!.map(participation => ({ ...participation, hostId: 'original-remote-host' }))
+  seed(record, [agent('remote-view', actorId, 'original-remote-host'), agent('local-namesake', actorId, 'local', 'different-local-run')])
+  const input = vi.spyOn(api.sessions, 'submitPrompt')
+  await dom.render(<GlobalBoardSurface />)
+  const original = cards().find(card => card.dataset.sessionId === 'remote-view')
+  expect(original).toBeDefined()
+  expect(cards().some(card => card.dataset.sessionId === 'local-namesake')).toBe(false)
+  await act(async () => original!.click())
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true,
+    agentTarget: { agentSessionId: actorId, hostId: 'original-remote-host' },
+    targetAgent: { hostId: 'original-remote-host', sessionId: actorId, presentationSessionId: 'remote-view' } })
+  expect(useAppStore.getState().selectedDemandId).toBe(record.id)
+  expect(input).not.toHaveBeenCalled()
+})
+
+it.each([1, 2])('presentation aliases retain the unique original occurrence or explicit position uncertainty (%s positions)', async positions => {
+  const canonical = `aliases-actor-${positions}`, record = goal(), workspace = composerConfig.workspaces[0]!
+  record.supervisorSessionId = canonical; record.sessionIds = [canonical]; record.assigneeSessionIds = [canonical]
+  record.participations = record.participations!.map(participation => ({ ...participation, agentSessionId: canonical }))
+  seed(record, [agent('alias-one', canonical), agent('alias-two', canonical)])
+  const tabs = Array.from({ length: positions }, (_, index) => createWorkbenchTab(`aliases-tab-${index}`, {
+    kind: 'agent', phase: 'attached', regionId: `aliases-region-${index}`, workspaceId: workspace.id,
+    sessionId: index === 0 ? 'alias-two' : 'alias-one' }))
+  useAppStore.setState({ tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])),
+    layouts: { [workspace.id]: createWorkspaceLayout('aliases-group', tabs.map(tab => tab.id)) }, activeWorkspaceId: workspace.id })
+  const input = vi.spyOn(api.sessions, 'submitPrompt')
+  await dom.render(<GlobalBoardSurface />)
+  expect(cards()).toHaveLength(1)
+  await act(async () => cards()[0]!.click())
+  const floating = readPmoTeamsTopicFloatingState()!
+  expect(floating.agentTarget).toEqual({ agentSessionId: canonical, hostId: 'local' })
+  if (positions === 1) {
+    expect(floating.reference).toMatchObject({ displayWorkspaceId: workspace.id, tabId: 'aliases-tab-0', regionId: 'aliases-region-0' })
+    expect(floating.targetAgent).toEqual({ hostId: 'local', sessionId: canonical, presentationSessionId: 'alias-two' })
+  } else {
+    expect(floating.reference).toBeNull(); expect(floating.targetTabId).toBeNull()
+    expect(floating.targetAgent).toBeUndefined()
+  }
+  expect(useAppStore.getState().mainSurface).toBe('board')
+  expect(useAppStore.getState().selectedDemandId).toBe(record.id)
+  expect(input).not.toHaveBeenCalled()
+})
+
+it('a bare Actor across Hosts stays unconfirmed even when only a local namesake has a visible occurrence', async () => {
+  const canonical = 'unknown-source-actor', workspace = composerConfig.workspaces[0]!
+  seed(goal(), [agent('local-namesake', canonical, 'local'), agent('remote-original', canonical, 'remote')])
+  const tab = createWorkbenchTab('unrelated-local-tab', { kind: 'agent', phase: 'attached', regionId: 'unrelated-local-region',
+    workspaceId: workspace.id, sessionId: 'local-namesake' })
+  useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('unknown-source-group', [tab.id]) } })
+  await dom.render(<GlobalBoardSurface />)
+  await act(async () => { requestAgentConversationFloatingOpen(canonical) })
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, agentTarget: { agentSessionId: canonical },
+    reference: null, targetTabId: null })
+  expect(readPmoTeamsTopicFloatingState()!.targetAgent).toBeUndefined()
+  expect(useAppStore.getState().mainSurface).toBe('board')
 })
 
 it('the original role picker saves its exact relationship through the public Host owner and retains all other input', async () => {
@@ -119,7 +188,7 @@ it('the original role picker saves its exact relationship through the public Hos
   try {
     const { creationOrigin: _origin, participations: _participants, ...input } = goal()
     const saved = (await host.demands.create({ ...input, assigneeSessionIds: [actorId, 'next-supervisor'], sessionIds: [actorId, 'next-supervisor'] })).demand
-    seed({ ...saved, source: 'default-topic' }, [agent(), agent('next-view', 'next-supervisor')])
+    seed({ ...saved, source: 'default-topic', sessions: [], workspacePath: null }, [agent(), agent('next-view', 'next-supervisor')])
     const before = useAppStore.getState().agentComposerDrafts
     await dom.render(<GlobalBoardSurface />)
     await editSupervisor()
@@ -141,14 +210,14 @@ it('a refused relationship write retains the original role and picker selection 
   try {
     const { creationOrigin: _origin, participations: _participants, ...input } = goal()
     const saved = (await host.demands.create({ ...input, assigneeSessionIds: [actorId, 'next-supervisor'], sessionIds: [actorId, 'next-supervisor'] })).demand
-    seed({ ...saved, source: 'default-topic' }, [agent(), agent('next-view', 'next-supervisor')])
+    seed({ ...saved, source: 'default-topic', sessions: [], workspacePath: null }, [agent(), agent('next-view', 'next-supervisor')])
     host.once('demand.update', { kind: 'reject', error: new Error('Original relationship owner unavailable') })
     await dom.render(<GlobalBoardSurface />)
     await editSupervisor()
     await act(async () => document.querySelector<HTMLInputElement>('[data-session-id="next-supervisor"] input')!.click())
     const save = [...document.querySelectorAll<HTMLButtonElement>('.goal-agent-picker button')].find(button => button.textContent === 'Save relationships')!
     await act(async () => { save.click(); await host.settle() })
-    await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')?.textContent).toContain('Relationships are not saved'))
+    await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')?.textContent).toContain('Original relationship owner unavailable'))
     expect(document.querySelector<HTMLInputElement>('[data-session-id="next-supervisor"] input')!.checked).toBe(true)
     expect(await host.demands.get(saved.id)).toMatchObject({ supervisorSessionId: actorId })
     await act(async () => { save.click(); await host.settle() })
