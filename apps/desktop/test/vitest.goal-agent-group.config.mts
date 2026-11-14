@@ -7,13 +7,16 @@ const shared = 'packages/client-ui/src/components/AvatarGroup.tsx'
 const group = 'apps/desktop/src/renderer/src/components/GoalAgentGroup.tsx'
 const mutation = process.env.GOAL_AVATARS_MUTATION || null
 const mutants = {
+  'anchor-dismissed': ['apps/desktop/src/renderer/src/components/AgentInformationReader.tsx', ' && !request.anchor.contains(event.target as Node)', ''],
+  'detail-disconnected': [group, 'branch?.enterKeyboard(); preview.read()', 'branch?.enterKeyboard(); void 0'],
+  'goal-selected': [group, 'onClick={event => { event.stopPropagation(); branch?.enterKeyboard(); preview.read() }}', 'onClick={event => { branch?.enterKeyboard(); preview.read() }}'],
   'overflow-hidden': [shared, 'const visible = items.slice(0, max), remaining = items.length - visible.length', 'const visible = items.slice(0, max), remaining = 0'],
   'history-members': [group, 'demand.assigneeSessionIds ?? []', 'demand.sessionIds'],
   'alias-not-deduped': [group, "JSON.stringify(['actor', session.control.hostId, session.control.agentSessionId])", 'referenceKey'],
-  'assumed-running': [group, 'avatar: <ResolvedAgentAvatar label={face.name}', 'avatar: <ResolvedAgentAvatar state="running" label={face.name}']
+  'assumed-running': [group, '<ResolvedAgentAvatar label={face.name}', '<ResolvedAgentAvatar state="running" label={face.name}']
 } as const
 if (mutation && !(mutation in mutants)) throw Error('Unknown Goal avatar mutation')
-const full = [shared, group, 'packages/client-ui/src/styles/avatar-group.css', 'apps/desktop/src/renderer/src/styles/goal-agent-group.css']
+const full = [shared, group, 'apps/desktop/src/renderer/src/components/AgentInformationPreview.tsx', 'apps/desktop/src/renderer/src/components/AgentInformationReader.tsx', 'packages/client-ui/src/styles/avatar-group.css', 'apps/desktop/src/renderer/src/styles/goal-agent-group.css']
 const segments: Record<string, [string, string]> = {
   'apps/desktop/src/renderer/src/components/GoalsCollection.tsx': ['/** One Goal reading unit.', '/** The grouped list,'],
   'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx': ['<GoalRow', 'setSelectedDemand(demand.id) }} />'],

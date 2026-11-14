@@ -2,6 +2,9 @@
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import type { DemandAgentReference } from '@agentmux/demand/relations'
+import * as contexts from '../src/renderer/src/lib/focus-context'
+import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
+import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import * as avatars from '@agentmux/client-ui/components/AvatarGroup'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { api } from '../src/renderer/src/lib/api'
@@ -9,12 +12,12 @@ import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
-const dom = composerDOM()
+const dom = composerDOM({ agentInformation: true })
 const goal = (patch: Partial<DemandRecord> = {}): DemandRecord => ({ id: 'team-goal', title: 'Goal with original Agents', description: '', status: 'in_progress', priority: 'normal', projectId: null, projectName: null,
   source: 'session', sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, createdAt: 1, updatedAt: 1, ...patch })
 const group = () => dom.container.querySelector<HTMLElement>('[data-goal-agent-group="team-goal"]')
 const faces = () => [...group()!.querySelectorAll<HTMLElement>('[data-avatar-group-key]')]
-const label = () => group()?.querySelector('[role="img"]')?.getAttribute('aria-label')
+const label = () => group()?.querySelector('.avatar-group[role="group"]')?.getAttribute('aria-label')
 async function mount(record: DemandRecord, sessions = Array.from({ length: 5 }, (_, i) => ({ ...composerSession(`agent-${i + 1}`), label: `Original Agent ${i + 1}` }))) {
   useAppStore.setState({ demands: { [record.id]: record }, selectedDemandId: null, mainSurface: 'board', sessions })
   await dom.render(<GlobalBoardSurface />)
@@ -34,7 +37,8 @@ it.each([0, 1, 3, 5])('the actual Goal card shows %i current Agents with exactly
     expect(group()!.closest('.goals-row__footer')).not.toBeNull()
     const row = group()!.closest('[data-demand-id]')!
     expect(document.getElementById(row.getAttribute('aria-describedby')!)?.textContent).toBe(label())
-    expect(group()!.querySelectorAll('button')).toHaveLength(0)
+    expect(group()!.querySelectorAll('button')).toHaveLength(Math.min(count, 3) + 1 + (count > 3 ? 1 : 0))
+    expect(group()!.querySelector('[aria-hidden="true"] button')).toBeNull()
   }
   expect(delegation).not.toHaveBeenCalled()
 })
@@ -86,4 +90,54 @@ it('uses the original executor appearance and updates names while unrelated outp
   expect(rendered).toHaveBeenCalledTimes(calls)
   expect(faces()).toEqual(originalFaces)
   expect(rpc).not.toHaveBeenCalled()
+})
+
+
+it('enters the original Agent Reader on click without selecting the Goal and resolves detail only on intent', async () => {
+  const context = vi.spyOn(contexts, 'agentContextForSession')
+  const session = composerSession('agent-1')
+  const source = { providerId: 'codex', nativeSessionId: 'original-native-agent' }
+  vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: 'agent-1', source, nextCursor: null, items: [{ id: 'original-reply', kind: 'assistant-message', startedAt: 1, contentParts: [{ kind: 'text', text: 'Original Agent detail' }] }] })
+  vi.spyOn(api.sessions, 'observeHistory').mockResolvedValue({ source, dispose() {} })
+  await mount(goal({ supervisorSessionId: 'agent-1', assigneeSessionIds: ['agent-1'] }), [session])
+  await agentCardConversationFixture(() => source)
+  const before = useAppStore.getState(), trigger = faces()[0]!.querySelector<HTMLButtonElement>('button')!
+  expect(context).not.toHaveBeenCalled(); expect(api.sessions.historyPage).not.toHaveBeenCalled()
+  await act(async () => trigger.click())
+  await waitForAgentCardReading(() => expect(document.querySelector('.agent-information-reader')).not.toBeNull())
+  expect(context).toHaveBeenCalled()
+  expect(context.mock.calls.every(([subject]) => subject.id === 'agent-1' && subject.control.hostId === 'local')).toBe(true)
+  expect(agentInformationPreview.get()?.context.id).toBe('agent-1')
+  expect(agentInformationPreview.get()?.control).toEqual(session.control)
+  expect(useAppStore.getState().selectedDemandId).toBeNull(); expect(useAppStore.getState().mainSurface).toBe('board')
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  const original = document.querySelector('.agent-information-reader')!
+  await act(async () => trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })))
+  expect(document.querySelector('.agent-information-reader')).toBe(original)
+  await act(async () => { trigger.focus(); trigger.click() })
+  expect(document.querySelector('.agent-information-reader')).toBe(original)
+  expect(document.activeElement?.classList.contains('agent-information-reader__reading')).toBe(true)
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(document.querySelector('.agent-information-reader')).toBeNull(); expect(document.activeElement).toBe(trigger)
+})
+
+it('reveals all current members with roles from Agents and overflow without opening the Goal', async () => {
+  await mount(goal({ supervisorSessionId: 'agent-1', assigneeSessionIds: ['agent-1', 'agent-2', 'agent-3', 'agent-4', 'agent-5'], sessionIds: ['historical-only'] }))
+  const trigger = group()!.querySelector<HTMLButtonElement>('.goal-agent-group__overflow')!
+  await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })))
+  const menu = document.querySelector('.goal-agent-menu')!
+  expect(menu).not.toBeNull(); expect(menu.querySelectorAll('.goal-agent-menu__member')).toHaveLength(5)
+  expect(menu.textContent).toContain('Original Agent 5'); expect(menu.textContent).toContain('Supervisor / Executor')
+  expect(menu.textContent).not.toContain('historical-only'); expect(useAppStore.getState().selectedDemandId).toBeNull()
+})
+
+it('keeps unresolved Source details readable without targeting the local namesake Reader', async () => {
+  await mount(goal({ supervisorSessionId: source('source-a') }))
+  const trigger = faces()[0]!.querySelector<HTMLButtonElement>('button')!
+  await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })))
+  const menu = document.querySelector('.goal-agent-menu')!
+  expect(menu.textContent).toContain('source-a'); expect(menu.textContent).toContain('original-region')
+  expect(menu.textContent).toContain('Current presentation unconfirmed'); expect(menu.textContent).not.toContain('Original Agent 1')
+  expect(menu.querySelector('button')).toBeNull(); expect(document.querySelector('.agent-information-reader')).toBeNull()
+  expect(useAppStore.getState().selectedDemandId).toBeNull()
 })
