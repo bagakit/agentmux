@@ -38,11 +38,21 @@ type Gesture = {
   origin: HTMLElement | null
 }
 
+function TerminalHistoryBoundaryNote({ historyBoundary, observeHistoryBoundary }: {
+  historyBoundary: string | null
+  observeHistoryBoundary(): () => void
+}) {
+  // Radix mounts this note's observer with the standalone menu content.
+  useLayoutEffect(observeHistoryBoundary, [observeHistoryBoundary])
+  return historyBoundary ? <div className="tab-context-menu__hint" role="note">{historyBoundary}</div> : null
+}
+
 export function TerminalContextMenu({
   children,
   hasSelection,
   identityActions,
   historyBoundary,
+  observeHistoryBoundary,
   mouseTrackingMode,
   pathActions,
   contextSource,
@@ -59,6 +69,7 @@ export function TerminalContextMenu({
   hasSelection: boolean
   /** Contextual buffer information; it never becomes a persistent Terminal banner. */
   historyBoundary: string | null
+  observeHistoryBoundary(): () => void
   /**
    * 这一格 Agent 的身份动作（发消息 / 复制 Session 地址），由 `terminalIdentityMenuActions` 算出。
    *
@@ -132,6 +143,9 @@ export function TerminalContextMenu({
     }
   } }), [])
   useLayoutEffect(() => () => clearContextSource?.(source), [clearContextSource, source])
+  useLayoutEffect(() => {
+    if (openSource === source) return observeHistoryBoundary()
+  }, [openSource, source, observeHistoryBoundary])
   useLayoutEffect(() => {
     if (openSource !== source) return
     const invocation = gesture.current
@@ -214,7 +228,7 @@ export function TerminalContextMenu({
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyScrollback}>
             <ThemeObjectDocumentIcon size={14} /><span>Copy all output</span>
           </ContextMenu.Item>
-          {historyBoundary ? <div className="tab-context-menu__hint" role="note">{historyBoundary}</div> : null}
+          <TerminalHistoryBoundaryNote historyBoundary={historyBoundary} observeHistoryBoundary={observeHistoryBoundary} />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onPaste}>
             <ThemeActionPasteIcon size={14} /><span>Paste</span><kbd>{chords.paste}</kbd>
           </ContextMenu.Item>

@@ -21,7 +21,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal, type IBuffer, type IMarker } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { SemanticIcon, semanticIconComponent, type SemanticIconId } from '@agentmux/client-ui/icons'
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionControl, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -386,6 +386,17 @@ function TerminalViewOwner({
   const [historyReadFailure, setHistoryReadFailure] = useState(false)
   const [historyPolicyFailure, setHistoryPolicyFailure] = useState<string | null>(null)
   const [historyBoundary, setHistoryBoundary] = useState<string | null>(null)
+  const observingHistoryBoundary = useRef(false)
+  const refreshHistoryBoundary = useCallback((terminal: Terminal) => {
+    if (observingHistoryBoundary.current && visibleRef.current) {
+      setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
+    }
+  }, [])
+  const observeHistoryBoundary = useCallback(() => {
+    observingHistoryBoundary.current = true
+    if (terminalRef.current) refreshHistoryBoundary(terminalRef.current)
+    return () => { observingHistoryBoundary.current = false }
+  }, [refreshHistoryBoundary])
   const [replaySizeUnknown, setReplaySizeUnknown] = useState(false)
   const [continuationAbsence, setContinuationAbsence] = useState<TerminalContinuationAbsence | null>(null)
   const [viewportSyncFailed, setViewportSyncFailed] = useState(false)
@@ -619,6 +630,7 @@ function TerminalViewOwner({
     viewportRef.current?.setVisible(visible)
     initialObservationVisibilityRef.current?.(visible)
     if (!visible || !terminal) return
+    refreshHistoryBoundary(terminal)
     // Restore after the synchronizer's first visibility frame as well: fit/resize can otherwise
     // move xterm's DOM viewport before the user sees the reactivated Region.
     const restore = () => {
@@ -645,7 +657,7 @@ function TerminalViewOwner({
       stopObserving()
       releaseViewportMemoryMarker(terminal)
     }
-  }, [visible, hostDocument])
+  }, [visible, hostDocument, refreshHistoryBoundary])
 
   // 变为 running 时启动 live 视口同步。attach effect 不再随 processState 重挂，
   // 所以这条独立小 effect 覆盖"attach 时非 running、随后恢复运行"的场景。
@@ -1361,7 +1373,7 @@ function TerminalViewOwner({
       if (disposed) return
       await writeTerminal(data, cause)
       kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, kittyOutputDecoder.decode(data, { stream: true }))
-      if (!disposed) setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
+      if (!disposed) refreshHistoryBoundary(terminal)
     }
     const writeHistoricalOutput = async (data: Uint8Array): Promise<void> => {
       historicalOutputDepth++
@@ -1553,7 +1565,7 @@ function TerminalViewOwner({
               setReplaySizeUnknown(false)
               // A continuous suffix confirms this canvas, not an older missing byte range.
               // Keep history-gap/read failures until their original recovery actually fills them.
-              setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
+              refreshHistoryBoundary(terminal)
             } catch (error) {
               if (!disposed) incidents?.capture('terminal-replay-failed', 'replay-failed', error)
               cursor = previousCursor
@@ -1957,7 +1969,7 @@ function TerminalViewOwner({
           if (refresh) incidents?.capture('terminal-refresh', 'refresh-completed', undefined, refreshOccurrence ?? null)
           return
         }
-        setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
+        refreshHistoryBoundary(terminal)
         // Only the first hidden frame belongs to initial positioning. The reveal deadline may
         // already have made this buffer readable; a late replay must preserve the user's scroll.
         if (!revealed && visibleRef.current) restoreRememberedViewport(terminal)
@@ -2352,6 +2364,7 @@ function TerminalViewOwner({
       <TerminalContextMenu
         hasSelection={hasSelection}
         historyBoundary={!hydrating && !historyReadFailure && !replayGap && !runtimeHistoryGap ? historyBoundary : null}
+        observeHistoryBoundary={observeHistoryBoundary}
         pathActions={pathActions ?? []}
         contextSource={{
           identity: JSON.stringify([session.id, session.control]),
