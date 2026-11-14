@@ -45,7 +45,9 @@ describe('original detail feedback', () => {
       expect(next.getAttribute('data-copy-state')).toBe('copied')
       expect(clipboard.mock.calls.map(([text]) => text)).toEqual(['Original payload', 'Original payload', 'Changed payload', 'Changed payload'])
       await act(async () => host.querySelector<HTMLButtonElement>('.conversation-tool-trace__row')!.click())
-      expect(host.querySelector('.conversation-tool-trace__payload')).toBeNull()
+      const disclosure = host.querySelector('.conversation-tool-trace__payload')!.closest('.conversation-disclosure')!
+      expect(disclosure.hasAttribute('inert')).toBe(true)
+      expect(disclosure.getAttribute('aria-hidden')).toBe('true')
     } finally { await act(async () => root.unmount()); host.remove(); clipboard.mockRestore() }
   })
 

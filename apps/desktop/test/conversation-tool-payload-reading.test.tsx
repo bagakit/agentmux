@@ -52,14 +52,17 @@ describe('original tool payload reading', () => {
       const pre = panel.querySelector('pre')!, text = pre.firstChild
       await act(async () => row.click())
       expect(panel.isConnected).toBe(true)
-      expect(panel.hidden).toBe(true)
-      expect(panel.hasAttribute('inert')).toBe(true)
+      const disclosure = panel.closest('.conversation-disclosure')!
+      expect(disclosure.getAttribute('data-open')).toBe('false')
+      expect(disclosure.hasAttribute('inert')).toBe(true)
+      expect(disclosure.getAttribute('aria-hidden')).toBe('true')
       expect(pre.firstChild).toBe(text)
       await act(async () => row.click())
       expect(host.querySelector('pre')).toBe(pre)
       expect(pre.firstChild).toBe(text)
       expect(format.getAttribute('aria-pressed')).toBe('true')
-      expect(panel.hidden).toBe(false)
+      expect(disclosure.getAttribute('data-open')).toBe('true')
+      expect(disclosure.hasAttribute('inert')).toBe(false)
     } finally { await act(async () => root.unmount()); host.remove() }
   })
 

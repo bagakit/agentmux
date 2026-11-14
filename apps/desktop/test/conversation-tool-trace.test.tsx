@@ -100,10 +100,13 @@ describe('conversation tool trace in the production message', () => {
       expect(host.querySelector('[data-call-id="call-a"] button')!.getAttribute('aria-expanded')).toBe('true')
       expect(host.querySelector('pre')!.textContent).toBe(input)
       await act(async () => toggle.click())
-      expect(host.querySelectorAll('.conversation-tool-trace__payload')).toHaveLength(0)
+      const retained = traces[0]!.querySelector('.conversation-tool-trace__payload')!
+      expect(retained).not.toBeNull()
+      expect(retained.closest('.conversation-disclosure')!.hasAttribute('inert')).toBe(true)
+      expect(retained.closest('.conversation-disclosure')!.getAttribute('aria-hidden')).toBe('true')
       const failed = host.querySelector<HTMLButtonElement>('[data-status="failed"] button')!
       await act(async () => failed.click())
-      expect(host.querySelector('pre')!.textContent).toBe(output)
+      expect(failed.closest('.conversation-tool-trace')!.querySelector('pre')!.textContent).toBe(output)
     } finally {
       await act(async () => root.unmount())
       host.remove()
