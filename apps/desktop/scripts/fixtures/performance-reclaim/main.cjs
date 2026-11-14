@@ -17,9 +17,15 @@ app.whenReady().then(async () => {
   const evaluate = code => win.webContents.executeJavaScript(code)
   const until = async (code, label) => { const end = Date.now() + 10000; while (Date.now() < end) { if (await evaluate(code)) return; await wait(40) } throw Error(label) }
   const click = async selector => { await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw Error('Actual action unavailable');e.click()})()`); await wait(80) }
+  const nativeClick = async selector => {
+    const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw Error('Original native action unavailable');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`)
+    win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
+    win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point }); await wait(100)
+  }
   const capture = async name => {
     await wait(160)
     const facts = await evaluate(`(()=>{const p=document.querySelector('.performance-popover'),b=document.querySelector('.performance-body');return{viewport:{width:innerWidth,height:innerHeight},panel:p.getBoundingClientRect().toJSON(),body:{width:b.clientWidth,scrollWidth:b.scrollWidth,scrollTop:b.scrollTop,scrollHeight:b.scrollHeight,height:b.clientHeight},appearance:document.documentElement.dataset.appearance,expanded:p.dataset.performanceExpanded,selected:[...document.querySelectorAll('[data-browser-resource][data-selected]')].map(e=>e.dataset.browserResource),cacheSize:document.querySelector('[data-cache-size]')?.textContent,cacheResult:document.querySelector('[data-cache-result]')?.getAttribute('data-cache-result'),cacheChange:document.querySelector('[data-cache-change]')?.textContent,detailsOpen:document.querySelector('.performance-reclaim-details')?.open,...reclaimVisual.facts()}})()`)
+    facts.offlineAction = await evaluate('document.querySelector("[data-offline-clear-all]")?.getBoundingClientRect().toJSON()')
     assert.ok(facts.panel.left >= 0 && facts.panel.right <= facts.viewport.width && facts.panel.bottom <= facts.viewport.height, 'Whole original panel fits viewport')
     assert.ok(facts.body.scrollWidth <= facts.body.width + 1, 'Original body has no horizontal clipping')
     const image = await win.webContents.capturePage(), bytes = image.toPNG(), file = name + '.png'
@@ -56,6 +62,39 @@ app.whenReady().then(async () => {
   await capture('dark-narrow-refreshed-unknown')
   await click('.performance-reclaim-details summary')
   await capture('dark-narrow-details')
+  win.setContentSize(1040, 820); await wait(200)
+  await evaluate('document.querySelector(".performance-body").scrollTop=0')
+  await capture('offline-dark-compact')
+  await click('[aria-label="Expand Performance"]')
+  await evaluate('document.querySelector("[data-offline-cache]").scrollIntoView({block:"start"})')
+  await capture('offline-dark-expanded')
+  await nativeClick('[data-offline-clear-all]')
+  await until('document.querySelector("[data-offline-result=completed]")', 'Original offline all-site action must render its typed receipt')
+  const all = await evaluate('reclaimVisual.offline.actions.filter(a=>a.kind==="clear")')
+  assert.equal(all.length, 1); assert.equal(all[0].input.sites.length, 3); assert.equal(all[0].input.sites[0].storageKeys.length, 2)
+  await evaluate('reclaimVisual.theme("light");document.querySelector("[data-offline-cache]").scrollIntoView({block:"start"})')
+  await capture('offline-light-expanded-cleaned')
+  await evaluate('reclaimVisual.offline.unknown()')
+  await nativeClick('[data-offline-site] button')
+  await until('document.querySelector("[data-offline-result=unknown]")', 'Unknown offline reply remains bound to the original operation')
+  win.setContentSize(420, 780); await wait(200)
+  await click('[aria-label="Compact Performance"]')
+  await evaluate('document.querySelector("[data-offline-cache]").scrollIntoView({block:"start"})')
+  await capture('offline-light-narrow-unknown')
+  await evaluate('reclaimVisual.theme("dark");reclaimVisual.offline.partial()')
+  await nativeClick('[aria-label="Refresh offline cache"]')
+  await until('document.querySelector("[data-offline-unattributed]")', 'Partial disk coverage remains explicit')
+  assert.ok(await evaluate('Boolean(document.querySelector("[data-offline-result=unknown]"))'), 'A new disk reading cannot settle an unknown cleanup')
+  await evaluate('document.querySelector("[data-offline-cache]").scrollIntoView({block:"start"})')
+  await capture('offline-dark-narrow-partial')
+  const normalAction = receipt.frames.find(frame => frame.name === 'offline-light-narrow-unknown').facts.offlineAction
+  const partialAction = receipt.frames.find(frame => frame.name === 'offline-dark-narrow-partial').facts.offlineAction
+  assert.ok(Math.abs(normalAction.x - partialAction.x) <= 1 && Math.abs(normalAction.y - partialAction.y) <= 1, 'Offline clear-all action stays in its original slot when partial reading text wraps')
+  await evaluate('document.querySelector("[data-offline-result]").scrollIntoView({block:"start"})')
+  await capture('offline-dark-narrow-original-result')
+  receipt.offlineActions = await evaluate('reclaimVisual.offline.actions')
+  assert.equal(receipt.offlineActions.filter(a => a.kind === 'clear').length, 2, 'No automatic offline deletion or unknown replay')
+  receipt.offlineNativeInputQualified = true
   await click('[data-performance-section-tab="overview"]')
   await until('reclaimVisual.facts().directoryReaders===0', 'Hiding Reclaim must release its directory reader')
   receipt.actions = await evaluate('reclaimVisual.actions')

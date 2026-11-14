@@ -17,10 +17,12 @@ assert.ok(directory.startsWith(join(root, '.tmp/performance-reclaim/') + 'native
 const sourceFile = join(directory, 'source.json'), fixture = join(desktop, 'scripts/fixtures/performance-reclaim')
 const owning = ['apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx',
   'apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
+  'apps/desktop/src/renderer/src/components/performance/BrowserOfflineCache.tsx',
   'apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
   'apps/desktop/src/renderer/src/lib/use-browser-directory.ts', 'apps/desktop/src/renderer/src/lib/browser-resource-view.ts',
   'apps/desktop/src/renderer/src/styles/browser-resources.css', 'apps/desktop/src/renderer/src/styles/performance-toolkit.css',
-  'packages/core/src/renderer-cache.ts']
+  'packages/core/src/renderer-cache.ts', 'packages/core/src/browser-profile-storage.ts',
+  'apps/desktop/scripts/fixtures/performance-reclaim/offline-data.ts']
 if (args[0] === '--prepare') {
   await mkdir(directory, { recursive: true })
   const sources = {}, aliases = [], escape = value => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')

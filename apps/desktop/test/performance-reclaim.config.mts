@@ -9,6 +9,18 @@ const aliases = Object.entries(host).map(([key, value]) => ({
   replacement: resolve(root, 'apps/host/src', value.import.slice(7).replace(/\.js$/u, '.ts'))
 })).sort((a, b) => b.find.length - a.find.length)
 const mutations = {
+  'offline-forget-original': ['apps/desktop/src/renderer/src/components/performance/BrowserOfflineCache.tsx',
+    '[...entries, next]', '[next]'],
+  'offline-receipt-regress': ['apps/desktop/src/renderer/src/components/performance/BrowserOfflineCache.tsx',
+    "old?.kind === 'receipt' && old.receipt.finishedAt !== null && value.kind === 'receipt' && value.receipt.finishedAt === null", 'false'],
+  'offline-first-key': ['apps/desktop/src/renderer/src/components/performance/BrowserOfflineCache.tsx',
+    'sites: structuredClone(sites)', 'sites: sites.map(site => ({ ...site, storageKeys: site.storageKeys.slice(0, 1) }))'],
+  'offline-all-first-site': ['apps/desktop/src/renderer/src/components/performance/BrowserOfflineCache.tsx',
+    'clear(sites.map(({ origin, storageKeys })', 'clear(sites.slice(0, 1).map(({ origin, storageKeys })'],
+  'offline-stale-target': ['apps/desktop/src/renderer/src/components/performance/BrowserOfflineCache.tsx',
+    ' && live.current.profileId === id && generation.current === serial', ''],
+  'offline-automatic-clear': ['apps/desktop/src/renderer/src/components/performance/BrowserOfflineCache.tsx',
+    '      if (operationId && result.receipt) remember', "      void api.browser.clearProfileStorage({ profileId: id, expectedRevision: result.snapshot.profileRevision, operationId: crypto.randomUUID(), sites: result.snapshot.sites.map(({ origin, storageKeys }) => ({ origin, storageKeys })) })\n      if (operationId && result.receipt) remember"],
   'automatic-cleanup': ['apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
     "    void run('inspect')\n", "    void run('reclaim')\n"],
   'entry-read': ['apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
@@ -30,7 +42,7 @@ const mutations = {
     'const measured = [...counts.keys()].map(key => samples.get(key))',
     'const measured = current.flatMap(row => (row.target.resource?.processes ?? []).map(process => samples.get(processKey(process))))']
 } as const
-export default { ...base, cacheDir: resolve(root, '.tmp/performance-reclaim/cache'),
+export default { ...base, cacheDir: resolve(root, '.tmp/performance-reclaim/cache', process.env.AGENTMUX_RECLAIM_MUTATION ?? 'baseline'),
   resolve: { ...base.resolve, alias: [...aliases, ...base.resolve!.alias as []] },
   plugins: [{ name: 'performance-reclaim-source', enforce: 'pre' as const, transform(code: string, id: string) {
     const path = relative(root, id.split('?')[0]!)
@@ -50,5 +62,5 @@ export default { ...base, cacheDir: resolve(root, '.tmp/performance-reclaim/cach
       appendFileSync(process.env.AGENTMUX_RECLAIM_INPUTS, JSON.stringify({ path, source: hash(code), served: hash(served), mutated: served !== code }) + '\n')
     }
     return served === code ? undefined : { code: served, map: null }
-  } }], test: { ...base.test, include: ['apps/desktop/test/performance-reclaim.test.tsx', 'apps/desktop/test/performance-workbench.test.tsx'], maxWorkers: 1, fileParallelism: false, passWithNoTests: false }
+  } }], test: { ...base.test, include: ['apps/desktop/test/performance-reclaim.test.tsx', 'apps/desktop/test/browser-offline-cache-reclaim.test.tsx', 'apps/desktop/test/performance-workbench.test.tsx'], maxWorkers: 1, fileParallelism: false, passWithNoTests: false }
 }

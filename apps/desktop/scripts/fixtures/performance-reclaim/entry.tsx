@@ -11,6 +11,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { performanceAttributionSnapshots } from '../performance-panel/data'
 import { fixturePath } from '../../lib/fixture-values.mjs'
+import { offlineProfiles, offlineSnapshot, offlineReceipt } from './offline-data'
 import '../../../src/renderer/src/styles/index.css'
 
 // Controlled typed protocol inputs exercise original presentation only. No native
@@ -64,6 +65,29 @@ function cacheReceipt(input: RendererCacheInput, action: 'inspect' | 'reclaim'):
 }
 api.performance.inspectCache = async input => cacheReceipt(input, 'inspect')
 api.performance.reclaimCache = async input => cacheReceipt(input, 'reclaim')
+const offlineActions: { kind: string; input?: unknown; profileId?: string; operationId?: string }[] = []
+const offlineRecords = new Map<string, ReturnType<typeof offlineReceipt>>()
+let offlineUnknown = false, offlinePartial = false
+api.browser.listProfiles = async () => structuredClone(offlineProfiles)
+api.browser.inspectProfileStorage = async (profileId, operationId) => {
+  offlineActions.push({ kind: 'inspect', profileId, operationId })
+  const snapshot = offlineSnapshot(profileId)
+  if (offlinePartial) {
+    snapshot.usage.complete = false; snapshot.usage.allocatedBytes = null
+    snapshot.unattributed = { logicalBytes: 8388608, allocatedBytes: null, complete: false }
+    snapshot.issues.push('One offline bucket could not be attributed. Its known bytes do not establish extra deletion targets.')
+  }
+  return { snapshot, receipt: operationId ? offlineRecords.get(operationId) ?? null : null, pending: [] }
+}
+api.browser.clearProfileStorage = async input => {
+  offlineActions.push({ kind: 'clear', input: structuredClone(input) })
+  if (offlineUnknown) throw new Error('The original cleanup reply is unavailable. Check that operation; no automatic retry was made.')
+  const receipt = offlineReceipt(input)
+  for (const site of receipt.after!.sites) { site.usage.logicalBytes = site.usage.allocatedBytes = 33554432 }
+  receipt.after!.usage.logicalBytes = receipt.after!.usage.allocatedBytes = 100663296
+  offlineRecords.set(input.operationId, receipt)
+  return receipt
+}
 useAppStore.setState({ config, loading: false })
 mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
 function Surface() {
@@ -78,4 +102,5 @@ function Surface() {
 flushSync(() => createRoot(document.getElementById('root')!).render(<Surface />))
 Object.assign(window, { reclaimVisual: { ready: true, actions, facts: () => ({ directoryReaders, actions }),
   theme: (appAppearance: 'light' | 'dark') => updateThemeSelection({ ...config.appearance, appAppearance }),
-  markPrevious: () => { partial = true; changed?.() }, unknownCache: () => { cacheUnknown = true } } })
+  markPrevious: () => { partial = true; changed?.() }, unknownCache: () => { cacheUnknown = true },
+  offline: { actions: offlineActions, unknown: () => { offlineUnknown = true }, partial: () => { offlinePartial = true } } } })
