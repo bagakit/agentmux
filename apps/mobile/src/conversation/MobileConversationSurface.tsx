@@ -389,9 +389,14 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
     respond, inspectResponse, retainedResponses, unidentifiedResponses } = useMobileInteractionController({ local, client,
       agentSessionId, session, available })
   function responseStatus(key: string, attempt: ResponseAttempt, active = false) {
-    return <aside key={key} className="mobile-send-status" data-phase={attempt.phase} data-original-response={attempt.original!.input.operationId}>
-      <MobileNotice identity={[attempt.original?.input.operationId, attempt.phase, attempt.message]} role="status" dismissible={!active}>
-        <span className="mobile-send-status__line" title={attempt.message}>{attempt.message}</span>
+    const input = attempt.original!.input, request = input.expectedRequest
+    const title = request.kind === 'permission' ? request.title : request.questions[0]?.title || request.questions[0]?.prompt || mobileInteractionLabels.question
+    return <aside key={key} className="mobile-send-status" data-phase={attempt.phase} data-original-response={input.operationId} data-original-request={request.id}>
+      <MobileNotice identity={[input.operationId, attempt.phase, attempt.message]} role="status" dismissible={!active}>
+        <div className="mobile-send-status__subject">
+          {!active ? <strong>{title}</strong> : null}
+          <span className="mobile-send-status__line">{attempt.message}</span>
+        </div>
         <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询答复结果</button>
       </MobileNotice>
     </aside>
