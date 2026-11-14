@@ -1,4 +1,4 @@
-import { mintObjectId } from '@agentmux/core/object-id'
+import { deriveObjectId, mintObjectId } from '@agentmux/core/object-id'
 import { constants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { link, lstat, mkdir, open, unlink } from 'node:fs/promises'
@@ -47,15 +47,23 @@ export async function savePastedImage(home: string, input: { bytes: Uint8Array; 
   if (bytes.byteLength > PASTED_IMAGE_MAX_BYTES) throw new Error('Pasted image exceeds the size limit.')
   const extension = extensions.has(input.extension) ? input.extension : 'png'
   const sha256 = createHash('sha256').update(bytes).digest('hex')
-  const directory = pastedDirectory(home), path = join(directory, `${sha256}.${extension}`)
+  const directory = pastedDirectory(home), legacyPath = join(directory, `${sha256}.${extension}`)
+  const objectId = deriveObjectId('pasted-image.v1', JSON.stringify([sha256, extension]))
+  const shortPath = join(directory, `paste-${objectId}.${extension}`)
+  let path = shortPath
   const temporary = join(directory, `.${sha256}.${mintObjectId()}.partial`)
   try {
     await mkdir(directory, { recursive: true, mode: 0o700 })
-    const file = await open(temporary, 'wx', 0o600)
-    try { await file.writeFile(bytes); await file.sync() } finally { await file.close() }
-    try { await link(temporary, path) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
-    await confirm(path, bytes)
+    // Resolve the original long-name object first. Only its confirmed absence permits a new short name.
+    try { await confirm(legacyPath, bytes); path = legacyPath }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    if (path === shortPath) {
+      const file = await open(temporary, 'wx', 0o600)
+      try { await file.writeFile(bytes); await file.sync() } finally { await file.close() }
+      try { await link(temporary, path) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+      await confirm(path, bytes)
+    }
     await syncDirectory(directory)
     // Also persist newly created pasted/.agentmux directory entries. A later same-byte retry
     // performs these syncs too; it does not infer a prior successful receipt from existence.
