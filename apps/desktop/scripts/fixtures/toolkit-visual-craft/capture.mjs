@@ -16,7 +16,9 @@ export async function captureCraft({ root, evidence, bind, proofFiles, mode = 'c
   const privateRoot = await mkdtemp(resolve(tmpdir(), 'amx-visual-craft-'))
   const compiled = resolve(evidence, 'compiled'), inputs = {}, artifacts = [], phases = []
   const receipt = { schema: 'agentmux.toolkit-visual-craft-capture.v1', completed: false, privateRoot, phases, inputs, compiled: artifacts, frames: [], mode, mutation, loadedCSS: [],
-    boundary: 'Actual selected product components and configuration owner only; no App/Run/Runtime, built CLI, real account query or installation. Controlled result DTO is synthetic.' }
+    boundary: mode === 'current-phone-link'
+      ? 'Actual Phone component and full product CSS with synthetic presentation DTO only; no configuration Store, Host query, system clipboard, App/Run/Runtime or installation.'
+      : 'Actual selected product components and configuration owner only; no App/Run/Runtime, built CLI, real account query or installation. Controlled result DTO is synthetic.' }
   async function input(file) {
     const key = relative(root, file), bytes = await bind(key)
     if (Object.hasOwn(inputs, key)) assert.equal(inputs[key].sha256, sha(bytes), 'Capture input stayed exact: ' + key)
@@ -37,7 +39,7 @@ export async function captureCraft({ root, evidence, bind, proofFiles, mode = 'c
     }
     for (const entry of await readdir(fixture, { withFileTypes: true })) if (entry.isFile()) await input(resolve(fixture, entry.name))
     // Node bundle narrows only exports, not their implementations, to avoid importing Runtime.
-    await esbuild({ entryPoints: [resolve(sharedFixture, 'owner-entry.ts')], outfile: resolve(compiled, 'owner.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', logLevel: 'error',
+    if (mode !== 'current-phone-link') await esbuild({ entryPoints: [resolve(sharedFixture, 'owner-entry.ts')], outfile: resolve(compiled, 'owner.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', logLevel: 'error',
       plugins: [{ name: 'bind-config-owner-only', setup(builder) {
         builder.onResolve({ filter: /^@agentmux\// }, args => args.path === '@agentmux/core' ? { path: resolve(sharedFixture, 'core-entry.ts') } : aliases.has(args.path) ? { path: aliases.get(args.path) } : undefined)
         builder.onResolve({ filter: /^[^./]/ }, args => {
@@ -50,9 +52,10 @@ export async function captureCraft({ root, evidence, bind, proofFiles, mode = 'c
           return { contents: (await input(args.path)).toString(), loader: args.path.endsWith('tsx') ? 'tsx' : 'ts' }
         })
       } }] })
-    const alias = [...aliases.entries()].map(([name, replacement]) => ({ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'), replacement }))
+    const alias = [...(mode === 'current-phone-link' ? [] : aliases.entries())].map(([name, replacement]) => ({ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'), replacement }))
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client']) alias.push({ find: new RegExp('^' + name + '$'), replacement: require.resolve(name) })
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias }, esbuild: { jsx: 'automatic' },
+      ...(mode === 'current-phone-link' ? { worker: { format: 'es' } } : {}),
       define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
       css: { postcss: { plugins: [{ postcssPlugin: 'bind-actual-custom-identity-css', async Once(rootNode) {
         const files = new Set(); rootNode.walk(node => { if (node.source?.input.file) files.add(node.source.input.file) })
@@ -75,11 +78,11 @@ export async function captureCraft({ root, evidence, bind, proofFiles, mode = 'c
       } }] } },
       plugins: [{ name: 'bind-mounted-custom-product', enforce: 'pre', async transform(_code, id) {
         const file = id.split('?')[0]; if (file.startsWith(root + '/') && !file.includes('/node_modules/')) await input(file)
-      } }], build: { target: 'esnext', outDir: resolve(compiled, 'renderer'), sourcemap: false, emptyOutDir: false } })
+      } }], build: { ...(mode === 'current-phone-link' ? {rollupOptions:{input:resolve(fixture,'phone.html')}} : {}), target: 'esnext', outDir: resolve(compiled, 'renderer'), sourcemap: false, emptyOutDir: false } })
     assert.ok(receipt.loadedCSS.length > 0, 'Actual owning CSS is loaded into the full product cascade')
     for (const stage of mode === 'capture' ? ['control', 'restart'] : ['control']) {
       const lines = [], env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-      const facts = await runProbeProcess(require('electron'), [resolve(fixture, 'main.cjs'), resolve(compiled, 'renderer/index.html'), resolve(compiled, 'owner.mjs'), resolve(sharedFixture, 'preload.cjs'), privateRoot, evidence, stage, mode],
+      const facts = await runProbeProcess(require('electron'), [resolve(fixture, mode === 'current-phone-link' ? 'phone-main.cjs' : 'main.cjs'), resolve(compiled, mode === 'current-phone-link' ? 'renderer/phone.html' : 'renderer/index.html'), resolve(compiled, 'owner.mjs'), resolve(sharedFixture, 'preload.cjs'), privateRoot, evidence, stage, mode],
         { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 150_000, onLine: line => lines.push(line) })
       await writeFile(resolve(evidence, stage + '-process.log'), lines.join('\n') + '\n')
       phases.push({ stage, ...facts }); assert.equal(facts.exitCode, mutation ? 1 : 0); assert.equal(facts.timedOut, false); assert.equal(facts.interruption, null)
@@ -91,7 +94,7 @@ export async function captureCraft({ root, evidence, bind, proofFiles, mode = 'c
         assert.ok(receipt.loadedCSS.some(item => item.originalOwningRulesSHA256 !== item.consumedOwningRulesSHA256))
         receipt.specificAssertionRED = true
       } else assert.equal(scene.completed, true)
-      if (stage === 'control' && mode === 'capture') { assert.equal(scene.frames.length, 6); receipt.frames = scene.frames }
+      if (stage === 'control' && (mode === 'capture' || mode === 'current-phone-link')) { assert.equal(scene.frames.length, mode === 'capture' ? 6 : 4); receipt.frames = scene.frames }
       else if (stage === 'restart') { assert.equal(scene.restart.sameId, true); assert.equal(scene.restart.allFields, true); assert.deepEqual(scene.restart.executionCalls, []) }
     }
     assert.ok(Object.keys(inputs).length > 0); assert.ok(Object.keys(inputs).some(file => file.endsWith('settings-toolkit.css')))
@@ -109,7 +112,8 @@ export async function captureCraft({ root, evidence, bind, proofFiles, mode = 'c
         else { const bytes = await readFile(file); artifacts.push({ file: relative(evidence, file), sha256: sha(bytes), bytes: bytes.length }) }
       }
     }
-    await collect(compiled); assert.ok(artifacts.length > 0, 'Actual compiled artifacts are nonempty')
+    await collect(compiled)
+    if (!artifacts.length && !receipt.failure) { receipt.failure = 'Actual compiled artifacts are nonempty'; receipt.completed = false }
     receipt.remainingPrivateProcesses = await listProbeProcesses(-1, privateRoot)
     if (!receipt.remainingPrivateProcesses.length) { await rm(privateRoot, { recursive: true }); receipt.privateRootRemoved = true }
     else { receipt.privateRootRemoved = false; receipt.completed = false }
