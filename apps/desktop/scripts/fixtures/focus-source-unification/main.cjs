@@ -1,9 +1,10 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path')
 const {app,BrowserWindow}=require('electron')
 const [html,privateRoot,evidence,mode]=process.argv.slice(2)
-const sourceRecovery=mode==='--source-recovery',primaryOnly=mode==='--primary-only',memberState=mode==='--member-state',unconfirmed=mode==='--unconfirmed'
+const takeoverFeedback=mode==='--takeover-feedback'||mode==='--takeover-feedback-restore',sourceRecovery=mode==='--source-recovery',primaryOnly=mode==='--primary-only',memberState=mode==='--member-state',unconfirmed=mode==='--unconfirmed'
 app.setPath('userData',path.join(privateRoot,'user-data'));app.setPath('sessionData',path.join(privateRoot,'session-data'))
 const result={schema:'agentmux.focus-source-unification-actual.v1',passed:false,pid:process.pid,frames:[],scenes:[],rendererConsole:[],boundary:'Actual App/GlobalFocusSurface/unified source adapter/normal lane/card/Reader/filter/menu. Original source and Native IO are controlled typed preview leaves. No user Run, Runtime, restart or installation claim.'}
+if(takeoverFeedback)result.boundary='Actual App/ordinary Focus/Region header/feedback/operation parser/target navigation/Stop confirmation/Store persist and hydration; controlled owner IO, Core graph observation, original writer admission and PTY painting. No user Run or Provider recovery claim.'
 let win
 app.whenReady().then(async()=>{try{
  win=new BrowserWindow({width:1440,height:900,useContentSize:true,show:false,webPreferences:{contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:false}})
@@ -14,6 +15,7 @@ app.whenReady().then(async()=>{try{
  const settle=()=>read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
  const click=async selector=>{const r=await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control '+${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`);assert.equal(r.hit,true,'Actual center hit '+selector);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:r.x,y:r.y,button:'left',clickCount:1})}
  const captureMember=async(file,label)=>{await settle();await pause(160);await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.frames.push({file,label,viewport:await read('innerWidth')})}
+ if(takeoverFeedback){await require('./feedback-main.cjs')({win,read,until,pause,settle,click,capture:captureMember,captureIntermediate:async(file,label)=>{await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.frames.push({file,label,viewport:await read('innerWidth'),intermediate:true})},result,privateRoot,restoreOnly:mode==='--takeover-feedback-restore'});return}
  if(sourceRecovery){
   await until('original unresolved source card',()=>read('window.unifiedFocusProof?.ready&&[...document.querySelectorAll(".focus-context")].some(e=>e.textContent.includes("Agent · 4iSNA9U2sBCU"))'))
   result.before=await read('window.unifiedFocusProof.facts()')
