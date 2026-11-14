@@ -1,10 +1,12 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
+import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseGoalPlanReviewInput, type GoalPlanReview, type GoalPlanReviewInput } from '@agentmux/demand/goal-plan'
-import type { DemandDelegation } from '@agentmux/demand/delegations'
+import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { api } from '../lib/api'
 import { applyGoalDelegationResult, beginGoalDelegationRead } from '../lib/goal-delegation-work'
+import { useGoalAgentName } from '../lib/goal-discussion-recipient'
 import type { GoalPlanNodeView } from './GoalPlanGraph'
 import { GoalEvidence } from './GoalEvidence'
 import { GoalPlanThread } from './GoalPlanThread'
@@ -30,6 +32,11 @@ function DeliveryReport({ delegation }: { delegation: DemandDelegation }) {
       {check.evidence.length ? <GoalEvidence evidence={check.evidence} criterion={check.criterionId} /> : <p className="goals-caption">No evidence reported.</p>}
     </li>)}</ul>
   </div>
+}
+
+function PreviousAttemptAuthor({ attempt }: { attempt: DemandDelegation }) {
+  const name = useGoalAgentName(attempt.workerAgentSessionId, delegationWorkerHostId(attempt))
+  return <h4>{name ?? `Agent · ${compactReferenceId(attempt.workerAgentSessionId)}`}</h4>
 }
 
 /** Human review reaches the existing public owner; no command is executed here. */
@@ -110,7 +117,7 @@ export function GoalPlanDelivery({ demand, item, author, draft, onDraft, previou
     </div> : null}
     <GoalPlanThread delegation={delegation} />
     {previous.length ? <details className="goal-delivery__history"><summary>Previous attempts · {previous.length}</summary>{previous.map(attempt => <article key={attempt.operationId} data-goal-delivery-history={attempt.operationId}>
-      <h4>{attempt.workerAgentSessionId}</h4><DeliveryReport delegation={attempt} />
+      <PreviousAttemptAuthor attempt={attempt} /><DeliveryReport delegation={attempt} />
       {(demand.plan?.reviews ?? []).filter(review => review.delegationOperationId === attempt.operationId).map(review => <div key={review.operationId}>
         <p>{review.verdict === 'pass' ? 'Passed' : 'Changes requested'} by {review.reviewer.id}{review.note ? ` · ${review.note}` : ''}</p>
         {review.check.command ? <p><code>{review.check.command}</code> → {review.check.result}</p> : null}

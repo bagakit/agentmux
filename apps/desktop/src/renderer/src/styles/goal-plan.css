@@ -17,7 +17,7 @@
 .goal-delivery__review input, .goal-delivery__review textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
 .goal-delivery__review textarea { resize: vertical; }
 .goal-delivery__form > summary { cursor: pointer; color: var(--text); }
-.goal-delivery__form[open] { display: grid; gap: var(--sp-3); }
+.goal-delivery__form[open] > :not(summary) { margin-block: var(--sp-3) 0; }
 .goal-delivery__review pre { margin: var(--sp-2) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .goal-delivery__history > article { padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
 .goal-delivery__receipt { color: var(--green); outline-offset: 4px; }
