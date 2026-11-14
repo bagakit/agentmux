@@ -147,6 +147,30 @@ it('lost Input and Interrupt ACKs remain unknown across original Host reopen and
   expect((await f.inspect(signal.operationId)).operation).toMatchObject({ outcome: 'unknown' })
 })
 
+it('retains an obtained Native ACK when the admitted record disappears before receipt settlement, without replay after reopen', async () => {
+  const f = await fixture(), input = { ...f.wire('ack-before-metadata-loss'), expectedByte: 0, dataBase64: 'eA==' }
+  const operations = (f.host.client as unknown as { runControlOperations(): { path(id: string): string } }).runControlOperations()
+  f.calls.input.mockImplementationOnce(async (...args) => {
+    const ack = await f.originalInput(...args)
+    await rm(operations.path(input.operationId))
+    return ack
+  })
+  const response = await f.cli('input', input)
+  expect(response.stdout, response.stderr).toContain('acknowledgement')
+  const acknowledged = receipt(response, 1)
+  expect(acknowledged).toMatchObject({ outcome: 'applied', diskDurability: 'unconfirmed', acknowledgement: {
+    kind: 'input', runId: f.run.runId, appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1 } })
+  expect((await f.inspect(input.operationId)).operation).toEqual(acknowledged)
+  expect(receipt(await f.cli('input', input), 1)).toEqual(acknowledged)
+  expect(f.calls.input).toHaveBeenCalledTimes(1)
+  await f.reopen()
+  await expect(f.inspect(input.operationId)).rejects.toMatchObject({ code: 'RUN_CONTROL_RECORD_UNCONFIRMED' })
+  expect((await f.cli('input', input)).code).toBe(1)
+  expect(f.calls.input).not.toHaveBeenCalled()
+  await f.host.client.writeTerminalBytes(f.target.run, 'healthy-after-metadata-loss')
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+})
+
 it('a failed Native Stop keeps the original visible Attachment and healthy input, and inspect does not retry Stop', async () => {
   const f = await fixture(), visible: Buffer[] = []
   await f.host.client.attachTerminal(f.run.runId, 5)
