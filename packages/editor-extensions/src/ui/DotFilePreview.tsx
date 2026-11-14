@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import '../styles/preview-common.css'
 import { createDotWorker } from '../engines/worker-clients'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -40,7 +41,7 @@ export function DotFilePreview({ content, path, visible = true }: { content: str
       setResult(current => current === ready ? { owner, content, attempt, error: 'DOT image could not be decoded. Retry preview or return to Source.' } : current)
     }} /> : <>
       {ready?.error ? <div className="file-preview-state" role="alert"><strong>DOT could not render</strong><span>{ready.error}</span>
-        <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div> : <div role="status">{inView ? 'Rendering DOT…' : 'DOT preview'}</div>}
+        <Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry preview</Button></div> : <div role="status">{inView ? 'Rendering DOT…' : 'DOT preview'}</div>}
       <pre className="md-block-code"><code>{content}</code></pre>
     </>}
   </div>

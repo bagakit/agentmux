@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import '../styles/build-preview.css'
 import '../styles/preview-common.css'
 import { lazy, Suspense } from 'react'
@@ -17,10 +18,10 @@ export function BuildPreview({kind,path,result,pdf,onBuild,onCancel,onInspect}: 
     <div className="file-build-preview__actions">
       <strong>{kind === 'latex' ? 'LaTeX' : 'Typst'} document</strong>
       {result?.status === 'running'
-        ? <button type="button" className="small-button" onClick={() => { void onCancel() }}>Cancel build</button>
-        : <button type="button" className="small-button" onClick={() => { void onBuild() }}>{result ? 'Build again' : 'Build current draft'}</button>}
+        ? <Button type="button" onClick={() => { void onCancel() }}>Cancel build</Button>
+        : <Button type="button" onClick={() => { void onBuild() }}>{result ? 'Build again' : 'Build current draft'}</Button>}
       <span role="status">{result?.status === 'running' ? 'Building…' : result?.status ?? 'Build explicitly to preview the current draft.'}</span>
-      {result?.status === 'unknown' && <><button type="button" className="small-button" onClick={() => { void onInspect() }}>Refresh build status</button><button type="button" className="small-button" onClick={() => { void onCancel() }}>Cancel build</button></>}
+      {result?.status === 'unknown' && <><Button type="button" onClick={() => { void onInspect() }}>Refresh build status</Button><Button type="button" onClick={() => { void onCancel() }}>Cancel build</Button></>}
     </div>
     {(!result || result.status === 'unavailable') && <p className="file-build-preview__help">{kind === 'latex' ? 'Requires Tectonic on the original local Host and a complete offline package cache.' : 'Requires Typst on the original local Host.'} Install the tool on that Host, then retry. Remote document builds are currently unavailable.</p>}
     {result?.message && <div className="file-preview-state" role={result.status === 'failed' || result.status === 'unknown' ? 'alert' : 'status'}><span>{result.message}</span></div>}

@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import '../styles/preview-common.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
@@ -33,7 +34,7 @@ export function ExcalidrawFilePreview({ content, visible = true }: { content: st
   }, [content, inView, owner])
   if (!visible) return null
   return <div ref={ref} style={{ width: '100%', height: '100%', minHeight: 320 }}>
-    {inView && failure?.owner === owner ? <div className="file-preview-state" role="alert"><strong>Excalidraw preview could not load</strong><span>{failure.message}</span><button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div>
+    {inView && failure?.owner === owner ? <div className="file-preview-state" role="alert"><strong>Excalidraw preview could not load</strong><span>{failure.message}</span><Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry preview</Button></div>
       : inView && loaded?.owner === owner ? <ReadOnlyScene loaded={loaded} />
         : <div className="file-preview-state" role="status">Preparing Excalidraw preview…</div>}
   </div>

@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import '../styles/preview-common.css'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
@@ -73,7 +74,7 @@ export function VegaFilePreview({ content, path, resource, createLoader, visible
   const current = state.owner === owner ? state : { owner }
   return <div ref={container} className="file-vega-preview" style={{ height: '100%', overflow: 'auto', padding: 16 }}>
     {!current.url && <div className="file-preview-state" role={current.message ? 'alert' : 'status'}>
-      {current.message ? <><strong>Chart preview could not load</strong><span>{current.message}</span><button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></> : 'Preparing chart preview…'}
+      {current.message ? <><strong>Chart preview could not load</strong><span>{current.message}</span><Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry preview</Button></> : 'Preparing chart preview…'}
     </div>}
     {current.snapshot?.bindings.map(binding => <ChartControl key={binding.signal} binding={binding} onChange={value => chart.current?.setSignal(binding.signal, value)} />)}
     <img ref={image} src={current.url} alt={`${path} chart`} tabIndex={0} title={current.snapshot?.tooltip} style={{ display: current.url ? 'block' : 'none', maxWidth: '100%' }} />

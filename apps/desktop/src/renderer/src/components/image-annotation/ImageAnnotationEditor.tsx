@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ImageTextTools, type ImageTextPort } from './ImageTextTools'
 import { composeScreenshot } from './compose'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -1103,7 +1104,7 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
   const discardControl = confirmingDiscard ? <span className="image-annotation-editor__discard" role="alert">
           <span>{(documentState.shapes.length ? 'Discard ' + documentState.shapes.length + ' annotation' + (documentState.shapes.length === 1 ? '' : 's') : 'Discard the crop') + (confirmingDiscard === 'retake' ? ' and retake?' : '?')}</span>
           <button type="button" onClick={() => setDiscarding(false)}>Keep editing</button>
-          <button type="button" className="danger-button" onClick={discard}>{confirmingDiscard === 'retake' ? 'Discard & retake' : 'Discard'}</button>
+          <Button type="button" variant="danger" onClick={discard}>{confirmingDiscard === 'retake' ? 'Discard & retake' : 'Discard'}</Button>
         </span> : null
   const outputControls = <>
         <span className="image-annotation-toolbar__output" role="group" aria-label="Screenshot output">
@@ -1113,7 +1114,7 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
           {onCheckPin ? <button type="button" title="Cycle through unconfirmed original operations without creating another pin" disabled={busy} onClick={onCheckPin}>Check pin</button> : null}
           {onCopyContext ? <button type="button" aria-label="Copy context" title="Copy the processed image context" disabled={busy || !loaded} onClick={() => complete('context')}><ClipboardIcon size={13} /><span>Copy context</span></button> : null}
         </span>
-        <button className="primary-button" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? busyLabel : label}</button>
+        <Button variant="primary" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? busyLabel : label}</Button>
   </>
   const toolbar = <AnnotationToolbar active={active} tool={tool} busy={busy} undoable={canUndo(documentState)} redoable={canRedo(documentState)} selected={groupIds.size > 0}
     clearable={!!documentState.shapes.length || !!documentState.crop} onTool={next => { resetGesture(); setTool(next); schedulePaint() }}

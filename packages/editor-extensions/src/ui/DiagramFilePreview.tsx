@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import '../styles/preview-common.css'
 const noSubscription = () => () => {}
 export type DiagramHost = { readTheme(): 'light' | 'dark'; subscribeTheme(listener: () => void): () => void; render(request: FileDiagramRequest): Promise<FileDiagramResult>; cancel(id: string): Promise<unknown> }
@@ -39,7 +40,7 @@ export function DiagramFilePreview({ content, kind, path, visible = true, page, 
       setResult(current => current === ready ? { owner, source: content, kind, page, attempt, error: 'Diagram image could not be decoded. Retry preview or return to Source.' } : current)
     }} /> : <>
       {ready?.error ? <div className="file-preview-state" role="alert"><strong>Diagram could not render</strong><span>{ready.error}</span>
-        <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div> : <div role="status">{inView ? 'Rendering diagram…' : 'Diagram preview'}</div>}
+        <Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry preview</Button></div> : <div role="status">{inView ? 'Rendering diagram…' : 'Diagram preview'}</div>}
       <pre className="md-block-code"><code>{content}</code></pre>
     </>}
   </div>

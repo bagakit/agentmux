@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
 import type { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { FilePreviewState } from '../ui/FilePreviewState'
 import type { RandomAccessSource } from '../bytes'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -288,7 +289,7 @@ export function PdfReader({ source, name, visible = true }: { source: RandomAcce
           form.reset(); unlock(value)
         }}>
           <label>Password<TextInput name="password" type="password" autoComplete="off" required aria-label="PDF password" /></label>
-          <div className="file-preview__controls"><button type="submit" className="small-button">Unlock PDF</button><button type="button" className="small-button" onClick={() => cancel.current?.()}>Cancel</button></div>
+          <div className="file-preview__controls"><Button type="submit">Unlock PDF</Button><Button type="button" onClick={() => cancel.current?.()}>Cancel</Button></div>
         </form></FilePreviewState>
         : phase === 'error' ? <FilePreviewState title="PDF preview unavailable" detail={current?.message || ''} error />
         : phase === 'cancelled' ? <FilePreviewState title="PDF loading cancelled" detail="Reload the file preview to read it again." />
