@@ -1124,7 +1124,7 @@ export type AppState = GitReadingActions & {
   mountedSpaceSessions: Record<string, MountedSessionObservation>
   observeSpaceMountSessions(target: SpaceMountRecord, update: MountedSessionUpdate): void
   mountSpace(target: SpaceMountRecord, reveal?: boolean): void
-  openOriginalSpaceLocation(input: OriginalSpaceLocation): void
+  openOriginalSpaceLocation(input: OriginalSpaceLocation, reveal?: boolean): void
   openOriginalSpaceLauncher(workspaceId: string, tabGroupId: string): { tabId: string; regionId: string } | null
   openSourceFolder(target: SpaceMountRecord): void
   retainSpaceMountRegistration(key: string, update: (current: MountedSpaceRegistrationInput | undefined) => MountedSpaceRegistrationInput | undefined): void
@@ -3771,7 +3771,7 @@ function dispatchStartupRecovery(session: Extract<SessionSnapshot, { kind: 'agen
   if (startupRecoveryReaders.has(key)) return
   const generation = sessionObservationGeneration
   const current = () => generation === sessionObservationGeneration
-  const job = mote ? recoverMoteConversationAtStartup(session) : useAppStore.getState().recoverSession(session.id, undefined, { stillCurrent: current, trigger: 'startup' })
+  const job = mote ? recoverMoteConversationAtStartup(session) : useAppStore.getState().recoverSession(session.id, undefined, { stillCurrent: current, trigger: 'startup', preserveView: true })
   startupRecoveryReaders.set(key, job)
   void job.catch(error => { if (current()) useAppStore.getState().reportError(error, { kind: 'indeterminate', subject: session.control,
     summary: 'Restoring this original Session failed. Other Sessions remain available.' }) })
@@ -6100,7 +6100,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (reveal) { get().openOriginalSpaceLocation({ target }); return }
     set(state => ({ mountedSpaceInputs: openSourceFolderInput(state.mountedSpaceInputs, target) }))
   },
-  openOriginalSpaceLocation(input) {
+  openOriginalSpaceLocation(input, reveal = true) {
     const target = input.target, key = spaceMountKey(target.reference)
     let before = get()
     let mountedSpaceInputs: unknown
@@ -6166,10 +6166,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const nextLayout = layout.activeGroupId === reference.groupId && group?.activeTabId === reference.tabId ? layout : activateLayoutTab(layout, reference.groupId, reference.tabId)
         set(state => {
           const next: AppState & { selectedSpaceMount?: unknown } = { ...state, mountedSpaceInputs, sourceFilesInputs, activeWorkspaceId: choice.workspaceId,
-            workbenchSpaceSelection: { ...choice, sourceRuntimeId: target.reference.runtimeId } as AgentMuxDesktopSpaceSelection, agentFocus,
+            workbenchSpaceSelection: { ...choice, sourceRuntimeId: target.reference.runtimeId } as AgentMuxDesktopSpaceSelection,
             tabs: nextTab === tab ? state.tabs : { ...state.tabs, [reference.tabId]: nextTab },
             layouts: nextLayout === layout ? state.layouts : { ...state.layouts, [reference.displayWorkspaceId]: nextLayout },
-            mainSurface: 'workbench', retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null }
+            ...(reveal ? { mainSurface: 'workbench' as const, agentFocus, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null } : {}) }
           delete next.selectedSpaceMount
           return next
         })
@@ -6178,8 +6178,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const workspaceId = locations.length ? target.workspaceId : projectionWorkspaceId
     set(state => {
-      const next: AppState & { selectedSpaceMount?: unknown } = { ...state, mountedSpaceInputs, sourceFilesInputs, activeWorkspaceId: workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
-        workbenchNavigationInputPolicy: null, regionCaretFocus: null,
+      const next: AppState & { selectedSpaceMount?: unknown } = { ...state, mountedSpaceInputs, sourceFilesInputs, activeWorkspaceId: workspaceId,
+        ...(reveal ? { mainSurface: 'workbench' as const, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null } : {}),
         workbenchSpaceSelection: { spaceId: target.reference.spaceId, zoneId: target.zoneId, workspaceId,
           topicId: catalog.spaces.find(space => space.spaceId === target.reference.spaceId)?.topicId ?? null, tabId: null, groupId: null, regionId: null,
           sourceRuntimeId: target.reference.runtimeId } as AgentMuxDesktopSpaceSelection }
@@ -7029,7 +7029,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } : null,
         errorDismissed: false
       })
-      // Legacy Mounted selections are only restored as ordinary original-Space navigation.
+      // Restore the legacy locator through the ordinary Source owner without revealing a surface.
+      // A current exact selection supersedes the old Mounted selection.
       // The locator and every private input remain in their existing user-document owner.
       const legacySelectedSpaceMount = (persistedState as PersistedAppState).selectedSpaceMount
       let restoredSourceTarget = typeof legacySelectedSpaceMount === 'string' ? mountedSpaceTarget(restoredUi.mountedSpaceInputs, legacySelectedSpaceMount) : undefined
@@ -7042,8 +7043,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         })
         if (candidates.length === 1) restoredSourceTarget = candidates[0]
       }
-      if (restoredSourceTarget) {
-        try { get().openOriginalSpaceLocation({ target: restoredSourceTarget }) }
+      if (restoredSourceTarget && !restoredUi.workbenchSpaceSelection) {
+        try { get().openOriginalSpaceLocation({ target: restoredSourceTarget }, false) }
         catch (cause) { get().reportError(cause) }
       }
       // Executable observations continue behind the usable workface. Publication and
