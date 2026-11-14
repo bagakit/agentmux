@@ -319,7 +319,7 @@ export class CaptureSurface {
   }
 
   private recordTiming(active: Active, final: boolean): void {
-    if (this.active !== active || (final && (!active.finalTimingExpected || active.finalTimingWritten))) return
+    if (final && (!active.finalTimingExpected || active.finalTimingWritten)) return
     if (final) active.finalTimingWritten = true
     const timing: CaptureSurfaceTiming = { schema: 'agentmux.capture-timing.v2', requestId: active.requestId, final, recordedAt: Date.now(),
       physicalKeydownToCallbackMs: null, callbackToPrepareMs: active.requestTiming.callbackToPrepareMs, prepareMs: active.requestTiming.prepareMs,
