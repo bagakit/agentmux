@@ -114,6 +114,21 @@ describe('journal persistence under isolated resource pressure', () => {
     if(kind==='delivery') expect((await q.listAfter())[0]?.delivery.state).toBe('delivered')
   })
 
+  it('observes only an existing original input when its durability confirmation fails', async () => {
+    const q = await queue()
+    const key = { kind: 'prompt', agentSessionId: 'recipient', expectedRun: condition.expectedRun, submissionId: 'original-prompt' } as const
+    const intent = { key, admissionIntent: { kind: 'manual-actor', expectedRun: key.expectedRun }, execution: 'immediate',
+      environment: { providerId: 'codex', executorId: 'codex' },
+      source: { kind: 'prompt', prompt: 'Original submitted text', authorHuman: true, recoveryAuthorization: 'local-human' } } as const
+    const original = await q.savePromptInput(intent)
+    const reader = new DurableAgentMuxMessageQueue(q.path)
+    fault('dir-sync', 'ENOSPC')
+    await expect(reader.observeInput({ key })).resolves.toMatchObject({ entry: original, persistence: 'observed' })
+    fault('dir-sync', 'ENOSPC')
+    await expect(reader.observeInput({ key: { ...key, submissionId: 'absent' } })).rejects.toMatchObject({ code: 'MESSAGE_QUEUE_UNAVAILABLE' })
+    await expect(reader.observeInput({ key })).resolves.toMatchObject({ entry: original, persistence: 'confirmed' })
+  })
+
   it('preserves EACCES cause and frees a failed mutex',async()=>{
     const q=await queue(); await q.append(input()); fault('chmod','EACCES')
     const error=await q.append(input('two')).catch(error=>error)

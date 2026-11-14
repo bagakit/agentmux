@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { defineRun } from '@ctxmux/sdk'
 import { AgentMuxClient } from '../src/client.js'
@@ -15,6 +16,7 @@ import type { AgentExternalMessageAuthor } from '../src/external-author.js'
 import type { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { messageJournalIo } from './helpers/message-journal-io.js'
 
 vi.mock('node:child_process', async original => {
   const actual = await original<typeof import('node:child_process')>()
@@ -166,6 +168,91 @@ it.each(['same Run', 'new Run'])('rechecks the original input after its first qu
     expect(write).toHaveBeenCalledOnce()
   }
   expect(h.writes).not.toHaveBeenCalled()
+})
+
+it.each(['live', 'reopened'])('continues an enabled original wait after real SQLite read IO failure in a %s Core', async owner => {
+  const h = await fixture(), id = 'saved-wait-storage-recovery'
+  const saved = await h.save(id)
+  if (owner === 'reopened') await h.reopen()
+  const probe = await messageJournalIo()
+  cleanup.push(() => probe.close())
+  probe.target(join(await realpath(dirname(h.queue.path)), basename(h.queue.path)))
+  probe.fault('read')
+  // No more connection, Session, or send events will be sent after this one.
+  await h.wake(owner === 'reopened' ? 'connection' : 'session')
+  expect(probe.stats().failures).toBe(1)
+  await vi.waitFor(() => expect(h.writes).toHaveBeenCalledTimes(2), { timeout: 4_000 })
+  await h.settled()
+  const receipt = await h.read(id)
+  expect(receipt).toMatchObject({ key: saved.intent.key, ref: saved.control.ref, status: 'terminal-confirmed' })
+  expect(receipt.continuation).toBeUndefined()
+  expect(h.writes.mock.calls.map(([run, request]) => [run, request.data])).toEqual([
+    [saved.intent.key.expectedRun.runId, '\u001b[200~' + h.input(id).prompt + '\u001b[201~'],
+    [saved.intent.key.expectedRun.runId, '\r']
+  ])
+})
+
+it('exposes an explicit rejoin of the original wait after exhausting storage rechecks', async () => {
+  const h = await fixture(), id = 'saved-wait-still-on-disk'
+  const saved = await h.save(id)
+  const read = h.queue.inspectInput.bind(h.queue)
+  const failing = vi.spyOn(h.queue, 'inspectInput').mockImplementation(async () => {
+    throw Object.assign(new Error('The original pressure has not cleared'), { code: 'MESSAGE_QUEUE_UNAVAILABLE' })
+  })
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    await h.wake()
+    expect((await h.read(id)).observation).toBe('owned')
+    for (const ms of [150, 600, 2_400, 9_600]) {
+      await vi.advanceTimersByTimeAsync(ms)
+      await h.settled()
+    }
+    const checks = failing.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(failing).toHaveBeenCalledTimes(checks)
+    expect(h.writes).not.toHaveBeenCalled()
+  } finally {
+    failing.mockImplementation(read)
+    vi.useRealTimers()
+  }
+  const original = await h.read(id)
+  expect(original).toMatchObject({ ref: saved.control.ref, status: 'waiting', observation: 'rejoin-needed', continuation: 'rejoin-wait' })
+  await h.rpc.call('agent.input.rejoin', { ref: original.ref })
+  await h.settled()
+  expect(await h.read(id)).toMatchObject({ key: original.key, status: 'terminal-confirmed' })
+  expect(h.writes).toHaveBeenCalledTimes(2)
+})
+
+it.each(['stopped', 'exhausted'] as const)('resumes another original wait when the first storage recheck is %s', async release => {
+  const h = await fixture(), first = await h.save('first-wait'), next = await h.save('next-wait')
+  const read = h.queue.inspectInput.bind(h.queue)
+  let fails = true
+  vi.spyOn(h.queue, 'inspectInput').mockImplementation(async selector => {
+    if (fails && 'key' in selector && selector.key.kind === 'prompt' && selector.key.submissionId === 'first-wait') {
+      throw Object.assign(new Error('The first original input cannot be read'), { code: 'MESSAGE_QUEUE_UNAVAILABLE' })
+    }
+    return read(selector)
+  })
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    await h.wake()
+    expect(h.writes).not.toHaveBeenCalled()
+    if (release === 'stopped') {
+      fails = false
+      await h.rpc.call('agent.input.stop', { ref: first.control.ref, cancelOperationId: 'stop-first-wait' })
+    } else {
+      for (const delay of [150, 600, 2_400, 9_600]) {
+        await vi.advanceTimersByTimeAsync(delay)
+        await h.settled()
+      }
+    }
+    await h.settled()
+    expect(await h.read('next-wait')).toMatchObject({ ref: next.control.ref, status: 'terminal-confirmed' })
+    expect(h.writes.mock.calls.map(([, request]) => request.data)).toEqual(['\u001b[200~' + h.input('next-wait').prompt + '\u001b[201~', '\r'])
+    expect(await h.read('first-wait')).toMatchObject({ ref: first.control.ref, status: release === 'stopped' ? 'stopped' : 'waiting' })
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 it('first delivers a retained human input on the verified resumed Session and exposes the actual admission through the original RPC key', async () => {

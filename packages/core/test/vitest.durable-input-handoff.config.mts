@@ -6,6 +6,10 @@ import { relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const connectorRequire = createRequire(resolve(root, 'packages/connectors/package.json'))
 const mutations = {
+  'hide-original-continuation': { file: 'packages/core/src/client.ts',
+    before: "saved.control.handoff ? 'continue-handoff' : undefined", after: 'undefined' },
+  'skip-observed-journal': { file: 'packages/core/src/agent-global-message-queue.ts',
+    before: "return { ...original, persistence: 'observed' }", after: 'throw error' },
   'skip-session-exclusion': { file: 'packages/core/src/agent-input-claim-lease.ts', before: 'return await store.withPromptSubmission(key.agentSessionId, async () => {', after: 'return await (async (_id: string, callback: () => Promise<T>) => await callback())(key.agentSessionId, async () => {' },
   'forge-live-lease': { file: 'packages/core/src/agent-input-claim-lease.ts', before: 'const scope = live.get(lease)', after: "const scope = live.get(lease) ?? { store: journalOwners.get(journal)!, storeScope: 'forged-source', journalId, key }" },
   'reselect-pty-carrier': { file: 'packages/core/src/client.ts', before: "const ordinaryPlan = inputControl?.handoff && inputControl.handoff.carrier.kind !== 'launch'", after: "const ordinaryPlan = false && inputControl?.handoff && inputControl.handoff.carrier.kind !== 'launch'" },

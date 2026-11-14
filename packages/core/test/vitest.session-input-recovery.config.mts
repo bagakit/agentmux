@@ -8,6 +8,12 @@ import mailbox from './vitest.input-mailbox.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_SESSION_INPUT_MUTATION
 const edits: Record<string, Array<{ path: string; before: string; after: string }>> = {
+  'storage-recheck-disabled': [{ path: 'packages/core/src/client.ts',
+    before: 'if (!context.continueGate && isInputStorageFailure(error) && delay !== undefined) {',
+    after: 'if (false) {' }],
+  'skip-successor-after-stop': [{ path: 'packages/core/src/client.ts',
+    before: 'else if (interruptedRecheck && !this.inputWaitingDisposed) void this.scheduleInputWaiting(ref.key.agentSessionId)',
+    after: 'else if (false) void this.scheduleInputWaiting(ref.key.agentSessionId)' }],
   'original-run': [{ path: 'packages/core/src/client.ts',
     before: 'const deliveryKey = { ...agentInputDeliveryKey(saved.control), expectedRun: { ...selected.run } } as AgentPromptInputKey',
     after: 'const deliveryKey = { ...agentInputDeliveryKey(saved.control), expectedRun: { ...key.expectedRun } } as AgentPromptInputKey' }],

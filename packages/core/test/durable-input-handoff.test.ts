@@ -8,11 +8,34 @@ import { withAgentInputClaimLease, type AgentInputClaimLease } from '../src/agen
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentInputSubmissionReceipt } from '../src/agent-input-wait.js'
+import { parseAgentInputSubmissionReceipt } from '../src/agent-input-receipt-codec.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
+const noSpace = vi.hoisted(() => ({ file: '', failures: 0 }))
+vi.mock('node:fs/promises', async original => {
+  const fs = await original<typeof import('node:fs/promises')>()
+  return { ...fs, async open(...args: Parameters<typeof fs.open>) {
+    const handle = await fs.open(...args)
+    if (args[0] !== noSpace.file) return handle
+    return new Proxy(handle, { get(target, key) {
+      if (key === 'sync') return async () => {
+        if (noSpace.file === args[0]) {
+          noSpace.file = ''
+          noSpace.failures++
+          throw Object.assign(new Error('Private journal sync has no space'), { code: 'ENOSPC' })
+        }
+        await target.sync()
+      }
+      const value = Reflect.get(target, key, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    } })
+  } }
+})
+
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { const errors: unknown[] = []; for (const close of cleanup.splice(0).reverse()) try { await close() } catch (error) { errors.push(error) }; vi.restoreAllMocks(); vi.unstubAllEnvs(); if (errors.length) throw new AggregateError(errors) })
+afterEach(() => { noSpace.file = ''; noSpace.failures = 0 })
 async function settled(client: unknown) {
   const core = client as { inputWaitingRecipients: Map<string, { pending: Promise<void> }> }
   for (;;) { const entries = [...core.inputWaitingRecipients.values()]; if (!entries.length) return; await Promise.all(entries.map(value => value.pending)) }
@@ -43,18 +66,26 @@ it.each(['sdk', 'hosted', 'cli'] as const)('continues an original frozen PTY gat
   vi.spyOn(f.queue, 'authorizeInputDispatch').mockImplementationOnce(async (...args) => { await gate(...args); throw Error('Original gate durable; claim callback never entered') })
   await f.client.submitAgentPrompt(f.input); await settled(f.client)
   const before = (await f.client.inspectAgentInput({ key: f.key }))!
-  expect(before).toMatchObject({ status: 'unknown', admission: null, control: { state: 'dispatch-authorized', handoff: { version: 1, carrier: { kind: 'pty', plan: f.plan } } } })
+  expect(before).toMatchObject({ status: 'unknown', admission: null, continuation: 'continue-handoff', control: { state: 'dispatch-authorized', handoff: { version: 1, carrier: { kind: 'pty', plan: f.plan } } } })
+  expect(parseAgentInputSubmissionReceipt(before)).toEqual(before)
+  expect(() => parseAgentInputSubmissionReceipt({ ...before, persistence: 'observed' })).toThrow()
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
   f.planner.mockImplementation(() => { throw Error('A newer Provider must not reselect this original carrier') })
   if (route === 'sdk') await f.client.rejoinAgentInputWaiting({ ref: before.ref })
   else if (route === 'hosted') await f.hosted.rejoinAgentInputWaiting({ ref: before.ref })
   else {
-    const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + f.server.path, 'agent', 'input', 'rejoin', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify({ ref: before.ref }))
+    const params = JSON.stringify({ key: f.key })
+    const read = await runCompiledObjectCli(['--endpoint', 'unix:' + f.server.path, 'agent', 'input', 'inspect', '--input', '-'], objectCliEnvironment(f.root), params)
+    expect(read.code, read.stdout + read.stderr).toBe(0)
+    const original = JSON.parse(read.stdout).result.input
+    expect(original).toMatchObject({ continuation: 'continue-handoff', ref: before.ref })
+    const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + f.server.path, 'agent', 'input', 'rejoin', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify({ ref: original.ref }))
     expect(cli.code, cli.stdout + cli.stderr).toBe(0)
   }
   await settled(f.client)
   const after = (await f.client.inspectAgentInput({ key: f.key }))!
   expect(after).toMatchObject({ key: before.key, ref: before.ref, status: 'terminal-confirmed', control: before.control })
+  expect(after.continuation).toBeUndefined()
   expect((await f.rpc.call('agent.input.inspect', { key: f.key })).input).toEqual(after)
   const calls = (f.inner.kernel.input as ReturnType<typeof vi.fn>).mock.calls
   expect(calls.map(call => call[1].data)).toEqual(f.plan.kind === 'single-phase' ? [f.plan.data] : [f.plan.payload, f.plan.submit])
@@ -62,6 +93,35 @@ it.each(['sdk', 'hosted', 'cli'] as const)('continues an original frozen PTY gat
   expect(f.inner.kernel.input).toHaveBeenCalledTimes(calls.length)
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 25_000)
+
+it('reports the committed frozen handoff throughout a journal sync failure and continues it once after confirmation', async () => {
+  const f = await fixture()
+  const gate = f.queue.authorizeInputDispatch.bind(f.queue)
+  vi.spyOn(f.queue, 'authorizeInputDispatch').mockImplementationOnce((...args) => {
+    noSpace.file = f.queue.path
+    return gate(...args)
+  })
+  await f.client.submitAgentPrompt(f.input)
+  await settled(f.client)
+  expect(noSpace.failures).toBe(1)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  noSpace.file = f.queue.path
+  const observed = (await f.rpc.call('agent.input.inspect', { key: f.key })).input!
+  expect(noSpace.failures).toBe(2)
+  expect(observed).toMatchObject({ key: f.key, status: 'unknown', persistence: 'observed', admission: null,
+    control: { state: 'dispatch-authorized', handoff: { carrier: { kind: 'pty', plan: f.plan } } } })
+  expect(observed.continuation).toBeUndefined()
+  const confirmed = (await f.rpc.call('agent.input.inspect', { key: f.key })).input!
+  expect(confirmed).toMatchObject({ ref: observed.ref, control: observed.control, continuation: 'continue-handoff', persistence: 'confirmed' })
+  await f.rpc.call('agent.input.rejoin', { ref: confirmed.ref })
+  await settled(f.client)
+  expect((await f.rpc.call('agent.input.inspect', { key: f.key })).input).toMatchObject({
+    ref: confirmed.ref, control: confirmed.control, status: 'terminal-confirmed'
+  })
+  await f.rpc.call('agent.input.rejoin', { ref: confirmed.ref })
+  await settled(f.client)
+  expect(f.inner.kernel.input).toHaveBeenCalledTimes(1)
+})
 
 it('only a live exact private claim lease may mint a resumable gate; legacy or forged origins stay unknown', async () => {
   const owner = await rpcOwnerFixture(['recipient']); cleanup.push(owner.close)
@@ -91,6 +151,7 @@ it('only a live exact private claim lease may mint a resumable gate; legacy or f
   Reflect.set(f.client, 'connected', true)
   const legacy = await f.client.rejoinAgentInputWaiting({ ref: saved.ref })
   expect(legacy, JSON.stringify(legacy)).toMatchObject({ status: 'unknown', admission: null })
+  expect(legacy.continuation).toBeUndefined()
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
