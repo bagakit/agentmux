@@ -285,13 +285,16 @@ export class AgentWorkspaceDirectory {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
-    const leaf = await this.proveLeaf(location)
+    const leaf = await this.proveLeaf(location, undefined, pending.value.root)
     if ((await readdir(location.agentWorkspace.workspacePath)).length !== 0) {
       throw refuse('A pending reservation names a nonempty unknown occupant; it was retained unchanged.')
     }
     await this.syncDirectory(location.agentWorkspace.workspacePath)
     await this.syncDirectory(root.realpath)
-    const witnessedLeaf = await this.proveLeaf(location)
+    const witnessedLeaf = await this.proveLeaf(location, leaf.identity, pending.value.root)
+    if ((await readdir(location.agentWorkspace.workspacePath)).length !== 0) {
+      throw refuse('The pending leaf became nonempty before publication; it was retained unchanged.')
+    }
     const provisioned: Marker = { ...pending.value, phase: 'provisioned', leaf: witnessedLeaf.identity }
     await this.proveMarkerNamespace(location)
     await durableWriteFile(location.markerPath, JSON.stringify(provisioned) + '\n', { mode: 0o600, requireDirectorySync: true })
