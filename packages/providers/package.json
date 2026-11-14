@@ -279,6 +279,10 @@
     "./codex/native-queue": {
       "types": "./dist/codex/native-queue.d.ts",
       "import": "./dist/codex/native-queue.js"
+    },
+    "./codex/input-protocol": {
+      "types": "./dist/codex/input-protocol.d.ts",
+      "import": "./dist/codex/input-protocol.js"
     }
   },
   "files": [
