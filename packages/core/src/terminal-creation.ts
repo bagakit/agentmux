@@ -4,8 +4,8 @@ import { parseCreationRuntime, type AgentMuxCreationRuntime } from './terminal-c
 import { parseRawTerminalRun } from './terminal-observation.js'
 import type { AgentMuxRun } from './types.js'
 
-export type TerminalCreationInspect = { hostId: string; operationId: string; runtimeId?: string }
-export type TerminalCreationRetire = TerminalCreationInspect & { runtimeId: string }
+export type TerminalCreationInspect = { hostId: string; operationId: string; runtimeId?: string; includeRetirementBlocker?: true }
+export type TerminalCreationRetire = Omit<TerminalCreationInspect, 'includeRetirementBlocker'> & { runtimeId: string }
 export type TerminalCreationRetirement = {
   request: {operationId: string; runtimeId: string; dispatchRuntime: AgentMuxCreationRuntime|null}
   phase: 'dispatched'|'observed'|'unconfirmed'
@@ -23,26 +23,28 @@ export type TerminalCreationInspection = {
     diskDurability: 'confirmed' | 'unconfirmed'; issue?: string
     startFailure?: {operationId:string;disposition:'not_applied'|'unknown';code:string;observedAt:number}
     retirement?: TerminalCreationRetirement
+    retirementBlocker?: 'agent-role-unconfirmed'
   }
 }
 const bad = (): never => { throw new AgentMuxError('The original Terminal creation observation is unconfirmed.', 'CONTROL_PROTOCOL_ERROR') }
 const id = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && !/[\0\r\n]/u.test(v)
 export function parseTerminalCreationInspect(value: unknown): TerminalCreationInspect {
-  const r = rpcRecord(value, ['hostId', 'operationId', 'runtimeId'])
-  if (!id(r.hostId) || !id(r.operationId) || r.runtimeId !== undefined && !id(r.runtimeId))
+  const r = rpcRecord(value, ['hostId', 'operationId', 'runtimeId', 'includeRetirementBlocker'])
+  if (!id(r.hostId) || !id(r.operationId) || r.runtimeId !== undefined && !id(r.runtimeId) ||
+      Object.hasOwn(r, 'includeRetirementBlocker') && r.includeRetirementBlocker !== true)
     throw new AgentMuxError('Use the original Host and creation operation ID.', 'INVALID_CONTROL_REQUEST')
   return structuredClone(r) as TerminalCreationInspect
 }
 export function parseTerminalCreationRetire(value: unknown): TerminalCreationRetire {
   const input=parseTerminalCreationInspect(value)
-  if(!input.runtimeId) throw new AgentMuxError('Explicit retirement requires the original persistent Runtime.','INVALID_CONTROL_REQUEST')
+  if(!input.runtimeId || input.includeRetirementBlocker) throw new AgentMuxError('Explicit retirement requires the original persistent Runtime.','INVALID_CONTROL_REQUEST')
   return input as TerminalCreationRetire
 }
 export function parseTerminalCreationInspection(value: unknown, input: TerminalCreationInspect): TerminalCreationInspection {
   const r = rpcRecord(value, ['hostId', 'operationId', 'known', 'admission'], 'CONTROL_PROTOCOL_ERROR')
   if (r.hostId !== input.hostId || r.operationId !== input.operationId || typeof r.known !== 'boolean' || r.known !== (r.admission !== null)) bad()
   if (r.admission === null) return structuredClone(r) as TerminalCreationInspection
-  const a = rpcRecord(r.admission, ['runtime', 'workspacePath', 'phase', 'run', 'observation', 'diskDurability', 'issue', 'startFailure', 'retirement'], 'CONTROL_PROTOCOL_ERROR')
+  const a = rpcRecord(r.admission, ['runtime', 'workspacePath', 'phase', 'run', 'observation', 'diskDurability', 'issue', 'startFailure', 'retirement', 'retirementBlocker'], 'CONTROL_PROTOCOL_ERROR')
   const runtime = parseCreationRuntime(a.runtime)
   const o = rpcRecord(a.observation, ['availability', 'runtime'], 'CONTROL_PROTOCOL_ERROR')
   if (input.runtimeId !== undefined && runtime.runtimeId !== input.runtimeId || typeof a.workspacePath !== 'string' || a.workspacePath.length === 0 || a.workspacePath.includes('\0') ||
@@ -70,5 +72,7 @@ export function parseTerminalCreationInspection(value: unknown, input: TerminalC
     } else if(t.phase==='observed') bad()
   }
   if (a.phase === 'retired' && a.run !== null || a.phase === 'published' && a.run === null) bad()
+  if (Object.hasOwn(a, 'retirementBlocker') && (!input.includeRetirementBlocker || a.retirementBlocker !== 'agent-role-unconfirmed' ||
+      a.phase !== 'dispatched' || a.run !== null || o.availability !== 'not-observed' || o.runtime === null || a.retirement !== undefined)) bad()
   return structuredClone(r) as TerminalCreationInspection
 }

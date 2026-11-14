@@ -86,6 +86,7 @@ export type ToolkitAdmission = ToolkitExecution & {
 }
 export type ToolkitConfirmedResult = ToolkitExecution & {
   state: 'succeeded' | 'failed' | 'stopped'; reason: string | null; endedAt: number; exitCode: number | null
+  cancelledPendingLaunch?: true
 }
 export type ToolkitScriptState = ToolkitAdmission['state'] | ToolkitConfirmedResult['state'] | 'idle' | 'disabled'
 export type ToolkitDisplaySnapshot = {
@@ -96,6 +97,8 @@ export type ToolkitScriptSnapshot = {
   schema: 'agentmux.toolkit.v1'; kind: 'script'; toolId: string; definition: ToolkitToolDefinition
   state: ToolkitScriptState; reason: string | null; admission: ToolkitAdmission | null
   latestConfirmed: ToolkitConfirmedResult | null; consumerCount: number; sequence: number; display?: ToolkitDisplaySnapshot
+  pendingLaunch?: 'not-observed' | 'dispatched' | 'retirement-unconfirmed' | 'retirement-unavailable'
+  releasedLaunch?: ToolkitAdmission
 }
 export type ToolkitPackageUnavailableSnapshot = {
   schema: 'agentmux.toolkit.v1'; kind: 'package-unavailable'; toolId: string
@@ -122,7 +125,10 @@ export type ToolkitRequest = Envelope & (
   | { operation: 'toolkit.run'; toolId: string; input?: ToolkitRunInput | ToolkitPerformanceRecoveryInput }
   | { operation: 'toolkit.evaluate'; toolId: string; input?: ToolkitEvaluateInput }
   | { operation: 'toolkit.action'; toolId: string; actionId: string; input: ToolkitActionInput }
-  | { operation: 'toolkit.stop'; toolId: string; executionId?: string | null }
+  | ({ operation: 'toolkit.stop'; toolId: string } & (
+      | { executionId?: string | null; cancelPendingLaunch?: never; releasePendingLaunch?: never }
+      | { executionId: string; cancelPendingLaunch: true; releasePendingLaunch?: never }
+      | { executionId: string; cancelPendingLaunch?: never; releasePendingLaunch: true }))
   | { operation: 'toolkit.add'; toolId: string; value: ToolkitToolFields | ToolkitPackageCreateFields }
   | { operation: 'toolkit.update'; toolId: string; changes: ToolkitConfigurationChanges; expected?: ToolkitConfigurationChanges }
   | { operation: 'toolkit.remove'; toolId: string; expected?: ToolkitConfigurationFields }
@@ -332,7 +338,8 @@ export function parseToolkitActionInput(value: unknown, code = 'INVALID_CONTROL_
 }
 const EXECUTION_FIELDS = ['executionId', 'invocationId', 'definition', 'expectedLatestExecutionId', 'target', 'run', 'startedAt', 'text'] as const
 function execution(value: unknown, confirmed: boolean): ToolkitAdmission | ToolkitConfirmedResult {
-  const r = envelope(value, [...EXECUTION_FIELDS, 'state', 'reason', ...(confirmed ? ['endedAt', 'exitCode'] : [])], ['action', 'document'])
+  const r = envelope(value, [...EXECUTION_FIELDS, 'state', 'reason', ...(confirmed ? ['endedAt', 'exitCode'] : [])],
+    ['action', 'document', ...(confirmed ? ['cancelledPendingLaunch'] : [])])
   identity(r.executionId); identity(r.invocationId); nullable(r.expectedLatestExecutionId, identity)
   const definition = parseToolkitToolDefinition(r.definition)
   if (r.action !== undefined && r.action !== null) {
@@ -352,12 +359,13 @@ function execution(value: unknown, confirmed: boolean): ToolkitAdmission | Toolk
     if ((r.endedAt as number) < (r.startedAt as number)) invalid()
     if (r.exitCode !== null && !Number.isSafeInteger(r.exitCode)) invalid()
     if (r.state === 'succeeded' && (r.exitCode !== 0 || r.run === null)) invalid()
+    if (Object.hasOwn(r, 'cancelledPendingLaunch') && (r.cancelledPendingLaunch !== true || definition.mode !== 'tui' || r.state !== 'stopped' || r.run !== null || r.exitCode !== null)) invalid()
   } else if (!['pending', 'running', 'stopping', 'unknown'].includes(r.state as string)) invalid()
   return { ...r, definition } as ToolkitAdmission | ToolkitConfirmedResult
 }
 export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
   const source = settingsResourceEnvelope(value, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained',
-    'definition', 'state', 'admission', 'latestConfirmed', 'consumerCount', 'sequence', 'display',
+    'definition', 'state', 'admission', 'latestConfirmed', 'consumerCount', 'sequence', 'display', 'pendingLaunch', 'releasedLaunch',
     'executionId', 'run', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'trend', 'diagnostics', 'previousUnknownExecutionId'], 'CONTROL_PROTOCOL_ERROR')
   if (source.schema !== 'agentmux.toolkit.v1') invalid()
   if (source.kind === 'package-unavailable') {
@@ -371,7 +379,7 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     return { ...r, configuration, retained } as ToolkitPackageUnavailableSnapshot
   }
   if (source.kind === 'script') {
-    const r = envelope(source, ['schema', 'kind', 'toolId', 'definition', 'state', 'reason', 'admission', 'latestConfirmed', 'consumerCount', 'sequence'], ['display'])
+    const r = envelope(source, ['schema', 'kind', 'toolId', 'definition', 'state', 'reason', 'admission', 'latestConfirmed', 'consumerCount', 'sequence'], ['display', 'pendingLaunch', 'releasedLaunch'])
     identity(r.toolId); const definition = parseToolkitToolDefinition(r.definition)
     if (r.toolId !== definition.id || !['idle', 'disabled', 'pending', 'running', 'stopping', 'unknown', 'succeeded', 'failed', 'stopped'].includes(r.state as string)) invalid()
     const admission = r.admission === null ? null : execution(r.admission, false) as ToolkitAdmission
@@ -380,6 +388,15 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     if (admission && r.state !== admission.state) invalid()
     if (!admission && ['pending', 'running', 'stopping'].includes(r.state as string)) invalid()
     if (!admission && ['succeeded', 'failed', 'stopped'].includes(r.state as string) && r.state !== latestConfirmed?.state) invalid()
+    if (Object.hasOwn(r, 'pendingLaunch') && (admission?.definition.mode !== 'tui' || admission.state !== 'unknown' || admission.run !== null ||
+        !['not-observed', 'dispatched', 'retirement-unconfirmed', 'retirement-unavailable'].includes(r.pendingLaunch as string))) invalid()
+    if (Object.hasOwn(r, 'releasedLaunch')) {
+      const released = execution(r.releasedLaunch, false) as ToolkitAdmission
+      if (admission || !['idle', 'disabled'].includes(r.state as string) || released.definition.mode !== 'tui' ||
+          released.definition.id !== definition.id || released.run !== null || released.state !== 'unknown' ||
+          released.executionId === latestConfirmed?.executionId) invalid()
+      r.releasedLaunch = released
+    }
     count(r.consumerCount); count(r.sequence); nullable(r.reason, text); nullable(r.reason, value => encodedText(value, 4096))
     if (Object.hasOwn(r, 'display')) {
       const display = envelope(r.display, ['state', 'reason', 'admission', 'latestConfirmed', 'sequence'], ['lastSucceeded'])
@@ -486,7 +503,7 @@ export function parseToolkitResult(operation: ToolkitOperation, value: unknown):
   return { operation, snapshot }
 }
 /** A valid result must still belong to the tool the caller actually requested. */
-export function assertToolkitResultTarget(request: { operation: string; toolId?: string; executionId?: string | null; input?: unknown }, result: ToolkitResult): void {
+export function assertToolkitResultTarget(request: { operation: string; toolId?: string; executionId?: string | null; input?: unknown; cancelPendingLaunch?: true; releasePendingLaunch?: true }, result: ToolkitResult): void {
   if (request.operation !== result.operation) throw new AgentMuxError('Toolkit operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
   let toolId: string
   switch (result.operation) {
@@ -500,6 +517,13 @@ export function assertToolkitResultTarget(request: { operation: string; toolId?:
   if (request.operation === 'toolkit.get' && request.executionId !== undefined && 'snapshot' in result &&
       (result.snapshot.kind !== 'metrics' || result.snapshot.executionId !== request.executionId)) {
     throw new AgentMuxError('Toolkit result belongs to another execution.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  if (result.operation === 'toolkit.stop' && (request.cancelPendingLaunch === true || request.releasePendingLaunch === true)) {
+    const snapshot = result.snapshot.kind === 'package-unavailable' ? result.snapshot.retained : result.snapshot
+    const execution = snapshot?.kind === 'script' ? snapshot.admission ?? snapshot.releasedLaunch ?? snapshot.latestConfirmed : null
+    if (!execution || execution.executionId !== request.executionId || execution.definition.mode !== 'tui' ||
+        snapshot?.kind !== 'script' || !snapshot.admission && !snapshot.releasedLaunch && !execution.run && !snapshot.latestConfirmed?.cancelledPendingLaunch)
+      throw new AgentMuxError('Toolkit result belongs to another pending launch.', 'CONTROL_PROTOCOL_ERROR')
   }
   if (request.operation === 'toolkit.run' && request.toolId === 'performance' && request.input !== undefined && 'snapshot' in result) {
     const input = parseToolkitPerformanceRecoveryInput(request.input)
@@ -540,7 +564,12 @@ export function parseToolkitRequest(value: unknown): ToolkitRequest {
       record(source, [...base, 'actionId', 'input'], [], code)
       identity(source.actionId, code); parseToolkitActionInput(source.input, code); break
     }
-    case 'toolkit.stop': record(source, source.toolId === 'performance' ? base : [...base, 'executionId'], [], code); if (source.toolId !== 'performance' && source.executionId !== null) identity(source.executionId, code); break
+    case 'toolkit.stop':
+      record(source, source.toolId === 'performance' ? base : [...base, 'executionId'], source.toolId === 'performance' ? [] : ['cancelPendingLaunch', 'releasePendingLaunch'], code)
+      if (source.toolId !== 'performance' && source.executionId !== null) identity(source.executionId, code)
+      if (Object.hasOwn(source, 'cancelPendingLaunch') && (source.cancelPendingLaunch !== true || source.executionId === null)) invalid(code)
+      if (Object.hasOwn(source, 'releasePendingLaunch') && (source.releasePendingLaunch !== true || source.executionId === null || Object.hasOwn(source, 'cancelPendingLaunch'))) invalid(code)
+      break
     case 'toolkit.get':
     case 'toolkit.watch':
       record(source, base, source.operation === 'toolkit.watch' ? ['captureFailure', 'includeFailureEvidence', 'evaluateOnDisplay'] : ['includeFailureEvidence', 'executionId'], code)

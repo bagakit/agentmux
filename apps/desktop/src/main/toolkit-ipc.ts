@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { toolkitConfigurationResult } from '../shared/toolkit-configuration-result.js'
 import type { IpcMainInvokeEvent } from 'electron'
+import { nameChangeRequests } from './name-change-audit.js'
 
 import { AgentMuxError } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, assertToolkitResultTarget, parseToolkitRequest, parseToolkitResult, parseToolkitSnapshot, type ToolkitRequest, type ToolkitResult, type AgentMuxToolkitPort } from '@agentmux/core/control'
@@ -15,7 +16,7 @@ export function registerToolkitIpc(port: AgentMuxToolkitPort,
   }
   const execute = async (raw: unknown): Promise<ToolkitResult> => {
     const request = parseToolkitRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), ...(raw as object) })
-    const result = await port.execute(request, new AbortController().signal)
+    const result = await port.execute(request, new AbortController().signal, nameChangeRequests.getStore()?.context)
     if (result.operation !== request.operation) throw new AgentMuxError('Toolkit IPC operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
     const { operation: _, ...payload } = result
     const parsed = parseToolkitResult(request.operation, payload)
@@ -28,7 +29,17 @@ export function registerToolkitIpc(port: AgentMuxToolkitPort,
   handle('toolkit:script', (_event, toolId: unknown) => execute({ operation: 'toolkit.script', toolId }))
   for (const operation of ['run', 'evaluate'] as const) handle('toolkit:' + operation, (_event, toolId: unknown, input: unknown) => execute({ operation: 'toolkit.' + operation, toolId, ...(input === undefined ? {} : { input }) }))
   handle('toolkit:action', (_event, toolId: unknown, actionId: unknown, input: unknown) => execute({ operation: 'toolkit.action', toolId, actionId, input }))
-  handle('toolkit:stop', (_event, toolId: unknown, executionId: unknown) => execute({ operation: 'toolkit.stop', toolId, ...(executionId === undefined ? {} : { executionId }) }))
+  handle('toolkit:stop', (_event, toolId: unknown, executionId: unknown, options: unknown) => {
+    if (options !== undefined && (typeof options !== 'object' || options === null || Array.isArray(options))) {
+      throw new AgentMuxError('Toolkit stop options are invalid.', 'INVALID_CONTROL_REQUEST')
+    }
+    const pending = options as Record<string, unknown> | undefined
+    if (pending && (Object.keys(pending).length !== 1 || pending.cancelPendingLaunch !== true && pending.releasePendingLaunch !== true))
+      throw new AgentMuxError('Toolkit stop options are invalid.', 'INVALID_CONTROL_REQUEST')
+    return execute({ operation: 'toolkit.stop', toolId, ...(executionId === undefined ? {} : { executionId }),
+      ...(pending?.cancelPendingLaunch === true ? { cancelPendingLaunch: true } : {}),
+      ...(pending?.releasePendingLaunch === true ? { releasePendingLaunch: true } : {}) })
+  })
   handle('toolkit:add', (_event, toolId: unknown, value: unknown) => toolkitConfigurationResult(() => execute({ operation: 'toolkit.add', toolId, value })))
   handle('toolkit:update', (_event, toolId: unknown, changes: unknown, expected: unknown) => toolkitConfigurationResult(() => execute({ operation: 'toolkit.update', toolId, changes, ...(expected === undefined ? {} : { expected }) })))
   handle('toolkit:remove', (_event, toolId: unknown, expected: unknown) => toolkitConfigurationResult(() => execute({ operation: 'toolkit.remove', toolId, ...(expected === undefined ? {} : { expected }) })))

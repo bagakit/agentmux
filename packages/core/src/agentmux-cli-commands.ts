@@ -1625,7 +1625,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   toolkit('script', '<id>', 'Read the original tool script; do not execute it.'),
   toolkit('evaluate', '<id> [--input <file|->]', 'Evaluate the declared display program; service captures its independent baseline once.'),
   toolkit('run', '<id> [--input <file|->]', 'Admit one execution. Performance recovery input {invocationId,expectedExecutionId} explicitly starts a new read-only observation when the original creation has no confirmed Run, retaining the old unknown; reuse the invocation after an unknown reply.'),
-  toolkit('stop', '<id> [--input <file|->]', 'Stop the exact admitted execution or observation.'),
+  toolkit('stop', '<id> [--input <file|->]', 'Stop the exact admitted execution or observation. The local user may pass {executionId,cancelPendingLaunch:true} for an original no-Run TUI launch. If inspect reports retirement-unavailable, {executionId,releasePendingLaunch:true} preserves the unknown launch and restores manual Run. Use only one flag. These pending-launch actions never start a process or stop a late original Run.'),
   toolkit('watch', '<id> [--evaluate] [--capture-failure] [--failure-evidence]', 'Follow results; --evaluate evaluates the declared display program once per reader cycle. Tools without display stay passive.')
 ]
 

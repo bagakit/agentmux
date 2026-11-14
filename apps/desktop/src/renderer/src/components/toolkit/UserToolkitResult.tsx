@@ -51,7 +51,7 @@ type UserToolkitResultProps = { definition: ToolkitToolIdentity; active: boolean
 export function UserToolkitResult(props: UserToolkitResultProps) {
   const [scriptOpen, setScriptOpen] = useState(false)
   const reading = useToolkitScriptObservation(api.toolkit, props.definition.id, props.active && !scriptOpen, true)
-  const execution = reading.snapshot?.admission ?? reading.snapshot?.latestConfirmed
+  const execution = reading.snapshot?.admission ?? reading.snapshot?.releasedLaunch ?? reading.snapshot?.latestConfirmed
   const mode = execution ? execution.definition.mode ?? 'script' : reading.snapshot?.definition.mode ?? props.definition.mode
   return mode === 'tui' ? <TuiToolkitResult definition={props.definition} active={props.active} close={props.close} reading={reading} /> :
     <ScriptToolkitResult {...props} reading={reading} scriptOpen={scriptOpen} setScriptOpen={setScriptOpen} />

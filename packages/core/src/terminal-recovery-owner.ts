@@ -27,6 +27,7 @@ type Port = {
   directoryAdmission?<T>(cwd: string, write: () => Promise<T>): Promise<T>
   runtime(): AgentMuxCreationRuntime
   assertNoAgentKey(key: string, rawRetained: boolean): Promise<void>
+  agentCreationKeyRole?(key: string): Promise<'agent' | 'unclaimed' | 'unknown'>
   retireKey(key:string,runtime:AgentMuxCreationRuntime): Promise<{runtime:AgentMuxCreationRuntime}&({outcome:'retired'}|{outcome:'retained';prepared:AgentMuxPreparedTerminal;run:AgentMuxRun})>
   observeRetirementKey(key:string,runtime:AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirementObservation>
   /** Confirms raw ownership from durable Core bindings and exact Native status. */
@@ -362,7 +363,7 @@ export class TerminalRecoveryOwner {
     if (marker && result.outcome === 'retired') await this.settleInitial(marker, 'retired', null)
     return result
   }
-  async inspectInitial(id: string, runtimeId?: string): Promise<TerminalCreationInspection> {
+  async inspectInitial(id: string, runtimeId?: string, includeRetirementBlocker = false): Promise<TerminalCreationInspection> {
     const marker = await this.readInitialMarker(id)
     if (!marker) {
       try { await readFile(this.initialPath(id)); throw failure('The original admission marker is missing.') }
@@ -397,9 +398,17 @@ export class TerminalRecoveryOwner {
     if (phase === 'retired') { run = null; if (availability === 'retained') availability = 'unavailable' }
     else if (availability !== 'retained' && latest?.run) run = latest.run
     const retirement=await this.retirementSummary(marker)
+    let retirementBlocker: 'agent-role-unconfirmed' | undefined
+    if (includeRetirementBlocker && phase === 'dispatched' && run === null && availability === 'not-observed' && !retirement) {
+      try {
+        if (await this.port.agentCreationKeyRole?.(id) === 'unknown') retirementBlocker = 'agent-role-unconfirmed'
+      } catch {
+        issue ??= 'The original Agent creation-key role could not be read. No retirement or release was authorized.'
+      }
+    }
     return { hostId: 'local', operationId: id, known: true, admission: { runtime: marker.runtime, workspacePath: marker.workspacePath,
       phase, run: phase === 'retired' ? null : run, observation: { availability, runtime: observedRuntime },
-      ...(latest?.startFailure?{startFailure:latest.startFailure}:{}), ...(retirement?{retirement}:{}),
+      ...(latest?.startFailure?{startFailure:latest.startFailure}:{}), ...(retirement?{retirement}:{}), ...(retirementBlocker ? { retirementBlocker } : {}),
       diskDurability: latest && !this.initialUnconfirmed.has(id) && this.initialImages.get(id) === this.initialHash(JSON.stringify(latest) + '\n') ? 'confirmed' : 'unconfirmed', ...(issue ? { issue } : {}) } }
   }
   /** Explicit cold directory reference read; never a Native query or hot-path history scan. */

@@ -477,7 +477,8 @@ export async function registerIpc(args: {
   }), configOwner, args.runtime, join(app.getPath('userData'), 'remote-core-install-adoptions.json'))
   const hostMaintenance = new SettingsHostsMaintenanceOwner(join(app.getPath('userData'), 'host-maintenance-requests'), configOwner, hostInstalls, hostUpgrades)
   toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
-    inspectTuiCreation: prepared => args.runtime.inspectToolkitTuiCreation(prepared),
+    inspectTuiCreation: (prepared, includeRetirementBlocker) => args.runtime.inspectToolkitTuiCreation(prepared, includeRetirementBlocker),
+    retireTuiCreation: (prepared, runtimeId) => args.runtime.retireToolkitTuiCreation(prepared, runtimeId),
     config: configOwner, receiptPath: join(app.getPath('userData'), 'toolkit-receipts.json'),
     enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
   void toolkit.load().catch(error => process.stderr.write('Toolkit loading remains unconfirmed: ' + String(error) + '\n'))
@@ -1499,9 +1500,7 @@ export async function registerIpc(args: {
   handleWithEvent('demands:reconcilePmoInput', async (event, intent: GoalPmoIntent, session: AgentSessionControl, operationId: string) => {
     return confirmPmoParticipation(intent, session, operationId, 'prompt-input')
   })
-  const disposeToolkitIpc = registerToolkitIpc(toolkit, (channel, handler) => handleWithEvent(channel, (event, ...values) => {
-    return handler(event, ...values)
-  }))
+  const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 
   registerPerformanceCaptureIpc(metrics, (channel, handler) => handleWithEvent(channel, (event, input) => {
     return handler(event, input)
@@ -2809,7 +2808,7 @@ export async function registerIpc(args: {
     toolkit: { subscribe: (toolId, onSnapshot, onEnd, signal, options) => toolkit.subscribe(toolId, onSnapshot, onEnd, signal, options),
       execute: (request, signal, context) => nameChangeRequests.run({
       context: context ?? unknownNameContext(request.operation), operationId: request.requestId
-    }, () => toolkit.execute(request, signal)) },
+    }, () => toolkit.execute(request, signal, context)) },
     /**
      * 进度订阅直接接到 journal 上，**不经过 Renderer**。
      *

@@ -496,7 +496,7 @@ const NATIVE_FIELDS = {
   'terminal.input': ['target', 'operationId', 'ownerInstanceId', 'expectedByte', 'dataBase64'], 'terminal.interrupt': ['target', 'operationId', 'ownerInstanceId'], 'terminal.stop': ['target', 'operationId', 'ownerInstanceId'], 'terminal.operation.inspect': ['hostId', 'run', 'operationId', 'runtimeId'],
   'agent.posture.set': ['target', 'operationId', 'controlId', 'modeId', 'expectedControlDigest'], 'agent.posture.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
   'terminal.creation.retire': ['hostId', 'operationId', 'runtimeId'],
-  'terminal.creation.inspect': ['hostId', 'operationId', 'runtimeId'],
+  'terminal.creation.inspect': ['hostId', 'operationId', 'runtimeId', 'includeRetirementBlocker'],
   'terminal.ls': ['hostId', 'cursor', 'limit'], 'terminal.inspect': ['target'], 'terminal.output': ['target', 'afterByte', 'follow'],
   'terminal.recover': ['hostId', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'],
   'skill.ls': ['hostId', 'agentSessionId'],
@@ -2974,6 +2974,16 @@ export class AgentMuxRpcService {
       if (method === 'toolkit.run' || method === 'toolkit.action' || method === 'toolkit.evaluate') {
         await this.assertToolkitExecutionAuthority(p.toolId, context)
       }
+      if (method === 'toolkit.stop' && p.input !== undefined) {
+        const stop = rpcControlRequest('toolkit.stop', p)
+        if (stop.operation === 'toolkit.stop' && (stop.cancelPendingLaunch || stop.releasePendingLaunch)) {
+          if (context.caller !== undefined || context.routeDelegation !== undefined || context.transport !== 'unix' ||
+              context.principal?.kind !== 'user' || context.principal.id !== `local-user:${process.getuid?.() ?? 'current'}`)
+            throw new AgentMuxError('Pending Toolkit launch actions require the original local user without an Agent caller or delegated route.', 'CONTROL_PERMISSION_DENIED')
+          context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+          context.signal?.throwIfAborted()
+        }
+      }
       if (this.ports.spatialState && (method === 'space.ls' || method === 'space.inspect')) {
         const target = rpcRecord(p.target)
         if (!Object.hasOwn(target, 'operationId') && !Object.hasOwn(target, 'requestId') &&
@@ -3084,7 +3094,7 @@ export class AgentMuxRpcService {
         const snapshot = current.snapshot.kind === 'package-unavailable' ? current.snapshot.retained : current.snapshot
         body = { ...body, operationId: baseline.requestId, input: method === 'toolkit.run' && current.snapshot.kind === 'script'
           ? { invocationId: baseline.requestId, expectedRevision: current.snapshot.definition.revision,
-            expectedLatestExecutionId: snapshot?.admission?.executionId ?? snapshot?.latestConfirmed?.executionId ?? null }
+            expectedLatestExecutionId: snapshot?.admission?.executionId ?? snapshot?.releasedLaunch?.executionId ?? snapshot?.latestConfirmed?.executionId ?? null }
           : { executionId: snapshot?.admission?.executionId ?? null } }
       }
       const request = originalResumeRequest ?? rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, body, internalCaller)

@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { isAbsolute, join, resolve, sep } from 'node:path'
-import { AgentMuxError, parsePreparedTerminal, type AgentMuxPreparedTerminal, type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxRunAttachment, type AgentMuxTerminalCreateInput } from '@agentmux/core'
+import { AgentMuxError, parsePreparedTerminal, type AgentMuxPreparedTerminal, type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxRunAttachment, type AgentMuxTerminalCreateInput, type TerminalCreationInspection } from '@agentmux/core'
 import { openToolkitResultChannel } from '@agentmux/core/toolkit-result-channel'
 import { parseToolkitResultDocument, TOOLKIT_RESULT_DOCUMENT_MAX_BYTES, type ToolkitResultDocument } from '@agentmux/core/toolkit-result-document'
 import { AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from '@agentmux/core/control'
@@ -19,7 +19,8 @@ type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void;
 type Tool = { id: string; loading: Promise<void> | null; latest: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null
   error: string | null; sourceError: string | null; definition: ToolkitToolDefinition | null; sequence: number; leases: Set<Lease>; live: Execution | null
   parent: Tool | null; display: Tool | null; displayReaders: number; saving: Promise<void>; successful: ToolkitConfirmedResult | null
-  evaluationRequest: Promise<ToolkitSnapshot> | null; createIntent: unknown; loadError: string | null; launchSaveError: string | null }
+  evaluationRequest: Promise<ToolkitSnapshot> | null; createIntent: unknown; loadError: string | null; launchSaveError: string | null
+  pendingLaunch?: ToolkitScriptSnapshot['pendingLaunch']; releasedLaunches: ToolkitAdmission[]; manualStartRequired: boolean }
 type Execution = { capture: CapturedToolkitPackage | null; snapshotRoot: string | null; tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
   decoder: TextDecoder; replayText: string | null; failure: string | null; creating: boolean; attaching: boolean; ended: boolean; stopRequested: boolean
   terminalHint: boolean; uncertain: boolean; done: Promise<void>; complete(): void
@@ -28,8 +29,10 @@ type Execution = { capture: CapturedToolkitPackage | null; snapshotRoot: string 
   drainTimer: ReturnType<typeof setTimeout> | null
   finishing: Promise<'running' | void> | null; starting: Promise<void> | null; stopSubmission: Promise<void> | null
   releaseLifecycle: (() => void) | null; statusAgain: boolean }
-type LaneReceipt = { latestConfirmed: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null; lastSucceeded?: ToolkitConfirmedResult; createIntent?: unknown }
+type LaneReceipt = { latestConfirmed: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null; lastSucceeded?: ToolkitConfirmedResult; createIntent?: unknown
+  releasedLaunches?: ToolkitAdmission[]; manualStartRequired?: boolean }
 type Receipt = LaneReceipt & { display?: LaneReceipt }
+type PendingLaunchAction = { kind: 'cancel' | 'release'; signal: AbortSignal }
 // A code unit may cost six JSON bytes; leave room for the fixed owner explanation.
 const message = (error: unknown) => String(error instanceof Error ? error.message : error).slice(0, 512)
 const ref = (execution: Execution) => {
@@ -44,7 +47,8 @@ export class CustomToolkitOwner {
   private loadWork: Promise<void> = Promise.resolve()
   private closed = false
   constructor(private readonly args: { config: ConfigOwner; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>
-    inspectTuiCreation?(prepared: AgentMuxPreparedTerminal): Promise<AgentMuxRun | null>
+    inspectTuiCreation?(prepared: AgentMuxPreparedTerminal, includeRetirementBlocker?: true): Promise<TerminalCreationInspection>
+    retireTuiCreation?(prepared: AgentMuxPreparedTerminal, runtimeId: string): Promise<TerminalCreationInspection>
     openRunPort(): Promise<ToolkitRunPort>; runner: string; env: Record<string, string>; snapshotRoot?: string; bundled?: () => ToolkitToolDefinition[]; now?: () => number }) {}
   private now() { return (this.args.now ?? Date.now)() }
   private configurations() { return [...(this.args.bundled?.() ?? []), ...toolkitTools(this.args.config.current)] }
@@ -54,11 +58,13 @@ export class CustomToolkitOwner {
   }
   private newTool(id: string, parent: Tool | null = null): Tool {
     return { id, parent, display: null, displayReaders: 0, saving: Promise.resolve(), successful: null, evaluationRequest: null, loading: null,
-      latest: null, admission: null, error: null, sourceError: null, definition: null, sequence: 0, leases: new Set(), live: null, createIntent: undefined, loadError: null, launchSaveError: null }
+      latest: null, admission: null, error: null, sourceError: null, definition: null, sequence: 0, leases: new Set(), live: null, createIntent: undefined, loadError: null, launchSaveError: null,
+      releasedLaunches: [], manualStartRequired: false }
   }
   private displayTool(tool: Tool): Tool { return tool.display ??= this.newTool(tool.id, tool) }
   private state(tool: Tool, definition: ToolkitToolDefinition) {
-    return tool.error || tool.parent && tool.sourceError ? 'unknown' as const : tool.admission?.state ?? (!definition.enabled ? 'disabled' as const : tool.latest?.state ?? 'idle' as const)
+    return tool.error || tool.parent && tool.sourceError ? 'unknown' as const : tool.admission?.state ?? (!definition.enabled ? 'disabled' as const
+      : tool.manualStartRequired ? 'idle' as const : tool.latest?.state ?? 'idle' as const)
   }
   private displaySnapshot(tool: Tool, definition: ToolkitToolDefinition): ToolkitDisplaySnapshot {
     return { state: this.state(tool, definition), reason: tool.error ?? tool.sourceError ?? (tool.admission ?? tool.latest)?.reason ?? null,
@@ -68,11 +74,15 @@ export class CustomToolkitOwner {
   private scriptSnapshot(tool: Tool, definition: ToolkitToolDefinition): ToolkitScriptSnapshot {
     const display = definition.display || tool.display?.admission || tool.display?.latest || tool.display?.error
       ? this.displaySnapshot(this.displayTool(tool), definition) : undefined
-    const reason = tool.error ?? tool.loadError ?? (tool.admission ?? tool.latest)?.reason ?? null
+    const releasedLaunch = !tool.admission && tool.manualStartRequired ? tool.releasedLaunches.at(-1) : undefined
+    const reason = tool.error ?? tool.loadError ?? (tool.admission ?? releasedLaunch ?? tool.latest)?.reason ?? null
     return structuredClone({ schema: 'agentmux.toolkit.v1', kind: 'script', toolId: tool.id, definition,
       state: this.state(tool, definition),
       reason: tool.launchSaveError ? [reason, tool.launchSaveError].filter(Boolean).join(' ') : reason, admission: tool.admission,
-      latestConfirmed: tool.latest, consumerCount: tool.leases.size, sequence: tool.sequence, ...(display ? { display } : {}) })
+      latestConfirmed: tool.latest, consumerCount: tool.leases.size, sequence: tool.sequence,
+      ...(tool.admission?.state === 'unknown' && !tool.admission.run && tool.pendingLaunch ? { pendingLaunch: tool.pendingLaunch } : {}),
+      ...(releasedLaunch ? { releasedLaunch } : {}),
+      ...(display ? { display } : {}) })
   }
   /** Output publication consumes captured facts, never the live filesystem. */
   private current(tool: Tool): ToolkitSnapshot {
@@ -80,7 +90,7 @@ export class CustomToolkitOwner {
     const record = this.configuration(tool.id)
     if (!('kind' in record)) return this.scriptSnapshot(tool, record)
     if (!tool.sourceError && tool.definition?.package?.configRevision === record.revision) return this.scriptSnapshot(tool, tool.definition)
-    const retained = tool.admission?.definition ?? tool.latest?.definition ?? tool.display?.admission?.definition ??
+    const retained = tool.admission?.definition ?? tool.latest?.definition ?? tool.releasedLaunches.at(-1)?.definition ?? tool.display?.admission?.definition ??
       tool.display?.latest?.definition ?? tool.display?.successful?.definition
     return structuredClone({ schema: 'agentmux.toolkit.v1', kind: 'package-unavailable', toolId: tool.id,
       configuration: record, reason: tool.sourceError ?? 'Package source has not been inspected.',
@@ -142,7 +152,7 @@ export class CustomToolkitOwner {
           if (tool.admission) return
         }
         const { definition } = await this.resolve(tool)
-        if (!definition.enabled || definition.autoStart === false || this.closed) return
+        if (!definition.enabled || definition.autoStart === false || tool.manualStartRequired || tool.latest?.cancelledPendingLaunch || this.closed) return
         await this.admit(id, { invocationId: mintObjectId(), expectedRevision: definition.revision,
           expectedLatestExecutionId: tool.latest?.executionId ?? null }, null, new AbortController().signal)
       } catch (error) {
@@ -210,13 +220,14 @@ export class CustomToolkitOwner {
         if (receipt === null) return
         if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
             !Object.hasOwn(receipt, 'admission') || !Object.hasOwn(receipt, 'latestConfirmed') ||
-            Object.keys(receipt).some(key => !['admission', 'latestConfirmed', 'display', 'createIntent'].includes(key))) {
+            Object.keys(receipt).some(key => !['admission', 'latestConfirmed', 'display', 'createIntent', 'releasedLaunches', 'manualStartRequired'].includes(key))) {
           throw new AgentMuxError('Tool receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
         }
         const saved = receipt as Receipt
         const { createIntent: displayIntent, ...displayReceipt } = saved.display ?? {}
         const record = this.configuration(id)
         const definition = saved.admission?.definition ?? saved.latestConfirmed?.definition ??
+          (Array.isArray(saved.releasedLaunches) ? saved.releasedLaunches.at(-1)?.definition : undefined) ??
           saved.display?.admission?.definition ?? saved.display?.latestConfirmed?.definition ?? (!('kind' in record) ? record : null)
         if (!definition) throw new AgentMuxError('Tool receipt has no captured definition.', 'CONTROL_PROTOCOL_ERROR')
         const parsed = parseToolkitSnapshot({ ...this.scriptSnapshot(value, definition), admission: saved.admission,
@@ -224,6 +235,18 @@ export class CustomToolkitOwner {
           ...(saved.display ? { display: { ...displayReceipt, state: saved.display.admission?.state ?? saved.display.latestConfirmed?.state ?? 'idle',
             reason: saved.display.admission?.reason ?? saved.display.latestConfirmed?.reason ?? null, sequence: 0 } } : {}) })
         if (parsed.kind !== 'script') throw new AgentMuxError('Tool receipt has another kind.', 'CONTROL_PROTOCOL_ERROR')
+        if (saved.releasedLaunches !== undefined && !Array.isArray(saved.releasedLaunches) ||
+            saved.manualStartRequired !== undefined && (saved.manualStartRequired !== true || !saved.releasedLaunches?.length || saved.admission !== null))
+          throw new AgentMuxError('The original released Tool launch receipt is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+        const seen = new Set<string>()
+        value.releasedLaunches = (saved.releasedLaunches ?? []).map(releasedLaunch => {
+          const old = parseToolkitSnapshot({ ...this.scriptSnapshot(value, definition), admission: null, latestConfirmed: null, state: 'idle', releasedLaunch })
+          if (old.kind !== 'script' || !old.releasedLaunch || seen.has(old.releasedLaunch.executionId))
+            throw new AgentMuxError('The original released Tool launch identity changed.', 'CONTROL_PROTOCOL_ERROR')
+          seen.add(old.releasedLaunch.executionId)
+          return old.releasedLaunch
+        })
+        value.manualStartRequired = saved.manualStartRequired === true
         value.latest = parsed.latestConfirmed; value.admission = parsed.admission
         // Launch material is private and consumed only by an explicit original create continuation.
         value.createIntent = saved.createIntent
@@ -276,8 +299,10 @@ export class CustomToolkitOwner {
   }
   private receipt(tool: Tool, replacement?: { lane: Tool; value: LaneReceipt }): Receipt {
     const facts = (lane: Tool): LaneReceipt => {
-      const value = replacement?.lane === lane ? replacement.value : { latestConfirmed: lane.latest, admission: lane.admission }
+      const { releasedLaunches = lane.releasedLaunches, manualStartRequired = lane.manualStartRequired, ...value } = replacement?.lane === lane
+        ? replacement.value : { latestConfirmed: lane.latest, admission: lane.admission }
       return { ...value, ...(value.admission && lane.createIntent !== undefined ? { createIntent: lane.createIntent } : {}),
+        ...(releasedLaunches.length ? { releasedLaunches } : {}), ...(manualStartRequired ? { manualStartRequired: true } : {}),
         ...(lane.parent && lane.successful && value.latestConfirmed?.executionId !== lane.successful.executionId ? { lastSucceeded: lane.successful } : {}) }
     }
     return structuredClone({ ...facts(tool), ...(tool.display ? { display: facts(tool.display) } : {}) })
@@ -424,6 +449,8 @@ export class CustomToolkitOwner {
     const root = await this.load(id), tool = display ? this.displayTool(root) : root
     const repeated = await this.args.config.inspect(current => {
       const record = this.configurationFrom(current, id)
+      if (tool.releasedLaunches.some(old => old.invocationId === input.invocationId))
+        throw new AgentMuxError('The original launch is retained as unconfirmed. A fresh manual Run needs a new invocation.', 'CONFIG_CONFLICT')
       const fact = tool.admission?.invocationId === input.invocationId ? tool.admission : tool.latest?.invocationId === input.invocationId ? tool.latest : null
       if (fact && fact !== tool.admission && ('kind' in record ? fact.definition.package?.configRevision : fact.definition.revision) !== record.revision) {
         throw new AgentMuxError('Invocation belongs to a previous tool configuration.', 'CONFIG_CONFLICT')
@@ -435,6 +462,7 @@ export class CustomToolkitOwner {
       // creation whose reply was lost. Passive get/watch never dispatch create.
       if (!tool.error && tool.admission?.invocationId === input.invocationId && tool.admission.run === null && !this.closed) {
         if (tool.live?.starting) await tool.live.starting
+        else if (tool.pendingLaunch && tool.pendingLaunch !== 'not-observed') await this.observeOriginalExecution(tool)
         else if (tool.admission.state === 'unknown') {
           const retained = this.execution(tool, tool.admission)
           tool.live = retained; retained.replayText = ''
@@ -465,7 +493,7 @@ export class CustomToolkitOwner {
         throw new AgentMuxError('Action result, configuration or target changed; inspect it before acting.', 'CONFIG_CONFLICT')
       }
       if (tool.error || tool.admission) throw new AgentMuxError('Tool has an in-use or unconfirmed execution.', 'SETTING_RESOURCE_IN_USE')
-      const latest = tool.latest?.executionId ?? null
+      const latest = (tool.manualStartRequired ? tool.releasedLaunches.at(-1)?.executionId : tool.latest?.executionId) ?? null
       if (latest !== input.expectedLatestExecutionId) throw new AgentMuxError('Tool result changed; inspect it before running.', 'CONFIG_CONFLICT')
       if (!definition.enabled) throw new AgentMuxError('Tool is disabled.', 'CONTROL_UNAVAILABLE')
       if (display && !definition.display) throw new AgentMuxError('Tool has no display evaluation entry.', 'SETTING_RESOURCE_NOT_FOUND')
@@ -478,11 +506,14 @@ export class CustomToolkitOwner {
         target: { workspacePath: definition.workspacePath }, run: null, startedAt: this.now(), text: '', state: 'pending', reason: null }
       tool.admission = admission
       tool.loadError = null
+      tool.pendingLaunch = undefined
       execution = this.execution(tool, admission); execution.capture = resolved.capture; tool.live = execution
       const admitted = execution
       // Register the entire admitted work before any durable wait, so disposal cannot return ahead of a late create.
       admitted.starting = Promise.resolve().then(async () => {
-        try { await this.save(tool) }
+        try {
+          await this.save(tool, { latestConfirmed: tool.latest, admission, manualStartRequired: false }, () => { tool.manualStartRequired = false })
+        }
         catch (error) { this.unknown(admitted, 'Tool admission save is unconfirmed: ' + message(error)); throw error }
         if (this.closed) await this.confirm(admitted, 'stopped', 'Owner closed before the script started.', null)
         else await this.start(admitted)
@@ -685,29 +716,90 @@ export class CustomToolkitOwner {
     if (!tool.live) await this.recover(tool)
     else if (tui) { this.observeTui(tool.live); await this.checkTui(tool.live) }
   }
-  private async recover(tool: Tool): Promise<void> {
+  private reportTuiLaunch(tool: Tool, pending: Tool['pendingLaunch'], issue?: string) {
+    const reason = issue ? [tool.admission?.reason?.slice(0, 256), issue.slice(0, 255)].filter(Boolean).join(' ') : null
+    if (tool.pendingLaunch !== pending || tool.loadError !== reason) {
+      tool.pendingLaunch = pending; tool.loadError = reason; this.publish(tool)
+    }
+  }
+  private async reconcileTuiLaunch(execution: Execution, action?: PendingLaunchAction) {
+    const tool = execution.tool
+    if (tool.launchSaveError) await this.saveTuiLaunchFailure(execution)
+    if (this.closed || tool.live !== execution) return false
+    const inspectOriginal = this.args.inspectTuiCreation
+    if (tool.createIntent === undefined || !inspectOriginal) {
+      if (action) throw new AgentMuxError('The exact original launch receipt is unavailable.', 'CONTROL_UNAVAILABLE')
+      return false
+    }
+    const prepared = this.tuiPreparation(execution)
+    const readOriginal = async (checkBlocker?: true) => {
+      const receipt = checkBlocker ? await inspectOriginal(prepared, checkBlocker) : await inspectOriginal(prepared)
+      if (receipt.hostId !== 'local' || receipt.operationId !== prepared.createOperationId ||
+          receipt.admission && receipt.admission.workspacePath !== prepared.workspacePath) {
+        throw new AgentMuxError('The launch observation belongs to another Tool Run.', 'CONTROL_PROTOCOL_ERROR')
+      }
+      return receipt
+    }
+    let receipt = await readOriginal(action?.kind === 'release' || tool.pendingLaunch === 'retirement-unavailable' ? true : undefined)
+    if (this.closed || tool.live !== execution) return false
+    let original = receipt.admission
+    let cancellationIssue: string | undefined
+    if (action?.kind === 'cancel' && original?.phase === 'dispatched' && original.run === null && !original.retirement) {
+      this.reportTuiLaunch(tool, 'dispatched')
+      action.signal.throwIfAborted()
+      if (!this.args.retireTuiCreation) throw new AgentMuxError('The original launch cancellation owner is unavailable.', 'CONTROL_UNAVAILABLE')
+      // Native arbitrates the same persistent Runtime/operation against a late Start.
+      try { receipt = await this.args.retireTuiCreation(prepared, original.runtime.runtimeId) }
+      catch (error) {
+        cancellationIssue = 'Cancellation receipt check: ' + message(error)
+        try { receipt = await readOriginal(true) }
+        catch (readError) { cancellationIssue += '; receipt observation failed: ' + message(readError) }
+      }
+      if (this.closed || tool.live !== execution) return false
+      original = receipt.admission
+    }
+    const retirement = original?.retirement?.native
+    if (retirement?.outcome === 'retired') {
+      // Native's durable fence is authoritative even if Core's receipt write lost its acknowledgement.
+      // Toolkit must still save its own finished execution before it releases admission.
+      await this.confirm(execution, 'stopped', execution.admission.reason, null, true)
+      return false
+    }
+    const run = original?.observation.availability === 'retained' ? original.run : retirement?.outcome === 'retained' ? retirement.run : null
+    if (!run) {
+      const originalRunUnobserved = original?.phase === 'dispatched' && original.run === null &&
+        original.observation.availability === 'not-observed' && original.observation.runtime?.runtimeId === original.runtime.runtimeId
+      const canRelease = originalRunUnobserved && (original.retirement?.native === null || original.retirementBlocker === 'agent-role-unconfirmed')
+      if (action?.kind === 'release' && canRelease) {
+        action.signal.throwIfAborted()
+        await this.releaseOriginalTuiLaunch(execution)
+        return false
+      }
+      const pending = canRelease ? 'retirement-unavailable' : original?.retirement ? 'retirement-unconfirmed'
+        : original?.phase === 'dispatched' && original.run === null ? 'dispatched' : !receipt.known ? 'not-observed' : undefined
+      const issue = cancellationIssue ?? (action?.kind === 'release' ? 'The original Native no-Run observation and retirement blocker were not both confirmed.' : undefined)
+        ?? original?.issue ?? (original?.startFailure ? `Core retained the original Start failure (${original.startFailure.code}).`
+          : action && !original ? 'No original Core launch admission has been observed. The original outcome remains unconfirmed.' : undefined)
+      if (action || issue || pending !== tool.pendingLaunch) this.reportTuiLaunch(tool, pending, issue)
+      return false
+    }
+    if (run.kind !== 'terminal' || run.workspacePath !== execution.admission.target.workspacePath) {
+      throw new AgentMuxError('The launch observation belongs to another Tool Run.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    execution.admission.run = { hostId: 'local', runId: run.runId }
+    tool.pendingLaunch = undefined
+    tool.loadError = null
+    if (run.state !== 'running') { await this.confirmTuiRun(execution, run); return false }
+    await this.save(tool)
+    tool.launchSaveError = null
+    return true
+  }
+  private async recover(tool: Tool, action?: PendingLaunchAction): Promise<void> {
     const execution = this.execution(tool, tool.admission!); tool.live = execution
     if (execution.admission.definition.mode === 'tui') {
       execution.starting = Promise.resolve().then(async () => {
         try {
-          if (!execution.admission.run) {
-            if (tool.launchSaveError) await this.saveTuiLaunchFailure(execution)
-            if (tool.createIntent === undefined || !this.args.inspectTuiCreation || this.closed || tool.live !== execution) return
-            const original = await this.args.inspectTuiCreation(this.tuiPreparation(execution))
-            if (this.closed || tool.live !== execution) return
-            if (!original) {
-              if (tool.loadError) { tool.loadError = null; this.publish(tool) }
-              return
-            }
-            if (original.kind !== 'terminal' || original.workspacePath !== execution.admission.target.workspacePath) {
-              throw new AgentMuxError('The launch observation belongs to another Tool Run.', 'CONTROL_PROTOCOL_ERROR')
-            }
-            execution.admission.run = { hostId: 'local', runId: original.runId }
-            tool.loadError = null
-            if (original.state !== 'running') { await this.confirmTuiRun(execution, original); return }
-            await this.save(tool)
-            tool.launchSaveError = null
-          }
+          if (!execution.admission.run && !await this.reconcileTuiLaunch(execution, action)) return
           if (this.closed || tool.live !== execution) return
           // Only a confirmed original Run may use the existing connection and lifecycle path.
           execution.port = await this.args.openRunPort()
@@ -716,10 +808,7 @@ export class CustomToolkitOwner {
         } catch (error) {
           if (this.closed || tool.live !== execution) return
           if (execution.admission.run) this.unknown(execution, error)
-          else {
-            const reason = `${execution.admission.reason ?? 'Original launch outcome is unconfirmed.'} Receipt check: ${message(error)}`.slice(0, 512)
-            if (tool.loadError !== reason) { tool.loadError = reason; this.publish(tool) }
-          }
+          else this.reportTuiLaunch(tool, undefined, 'Receipt check: ' + message(error))
         } finally {
           // A failed or empty observation remains eligible for the next exact read.
           if (!execution.port && tool.live === execution) tool.live = null
@@ -872,20 +961,23 @@ export class CustomToolkitOwner {
     })().finally(() => { execution.finishing = null })
     return await execution.finishing
   }
-  private async confirm(execution: Execution, state: ToolkitConfirmedResult['state'], reason: string | null, exitCode: number | null) {
+  private async confirm(execution: Execution, state: ToolkitConfirmedResult['state'], reason: string | null, exitCode: number | null, cancelledPendingLaunch?: true) {
     const tool = execution.tool, { state: _state, reason: _reason, ...captured } = execution.admission
     const confirmed: ToolkitConfirmedResult = tool.latest?.executionId === execution.admission.executionId ? tool.latest
-      : { ...captured, state, reason, endedAt: this.now(), exitCode }
+      : { ...captured, state, reason, endedAt: this.now(), exitCode, ...(cancelledPendingLaunch ? { cancelledPendingLaunch } : {}) }
     if (execution.admission.definition.mode === 'tui') {
       try {
         await this.save(tool, { latestConfirmed: confirmed, admission: null }, () => {
           tool.latest = confirmed; tool.admission = null; tool.live = null; tool.createIntent = undefined; tool.loadError = null
-          tool.launchSaveError = null
+          tool.launchSaveError = null; tool.pendingLaunch = undefined
           execution.ended = true; execution.complete()
         })
         execution.releaseLifecycle?.(); execution.releaseLifecycle = null
         this.publish(tool)
-      } catch (error) { this.unknown(execution, 'TUI result persistence is unconfirmed: ' + message(error)) }
+      } catch (error) {
+        if (cancelledPendingLaunch) this.reportTuiLaunch(tool, 'retirement-unconfirmed', 'Saving the confirmed launch cancellation is unconfirmed: ' + message(error))
+        else this.unknown(execution, 'TUI result persistence is unconfirmed: ' + message(error))
+      }
       return
     }
     // Publishing success before durable acknowledgement would discard the old confirmed fact on save failure.
@@ -919,6 +1011,39 @@ export class CustomToolkitOwner {
     const root = await this.load(id)
     const tool = root.display?.admission?.executionId === executionId ? root.display : root
     return await this.stopLane(tool, executionId)
+  }
+  private async releaseOriginalTuiLaunch(execution: Execution) {
+    const tool = execution.tool
+    const releasedLaunches = [...tool.releasedLaunches, execution.admission]
+    try {
+      await this.save(tool, { latestConfirmed: tool.latest, admission: null, releasedLaunches, manualStartRequired: true }, () => {
+        tool.releasedLaunches = releasedLaunches; tool.manualStartRequired = true
+        tool.admission = null; tool.live = null; tool.createIntent = undefined; tool.loadError = null
+        tool.launchSaveError = null; tool.pendingLaunch = undefined
+        execution.complete()
+      })
+      this.publish(tool)
+    } catch (error) {
+      this.reportTuiLaunch(tool, 'retirement-unavailable', 'Saving the original launch release is unconfirmed: ' + message(error))
+    }
+  }
+  async changePendingLaunch(id: string, executionId: string, kind: PendingLaunchAction['kind'], signal: AbortSignal): Promise<ToolkitSnapshot> {
+    const tool = await this.load(id)
+    // Wait for the original local Start/read lease to finish, then compare the same captured execution.
+    while (tool.live?.starting) await tool.live.starting
+    signal.throwIfAborted()
+    if (this.closed || tool.error) throw new AgentMuxError(tool.error ?? 'Toolkit owner is closed.', 'CONTROL_UNAVAILABLE')
+    const released = tool.manualStartRequired ? tool.releasedLaunches.at(-1) : undefined
+    const original = tool.admission ?? released ?? tool.latest
+    if (original?.executionId !== executionId || original.definition.mode !== 'tui' ||
+        !tool.admission && !released && !tool.latest?.cancelledPendingLaunch && !original.run) {
+      throw new AgentMuxError('The original pending TUI launch changed; check the Tool before acting.', 'CONFIG_CONFLICT')
+    }
+    if (tool.admission) {
+      if (original.run) await this.observeOriginalExecution(tool)
+      else await this.recover(tool, { kind, signal })
+    }
+    return this.current(tool)
   }
   private async stopLane(tool: Tool, executionId: string | null): Promise<ToolkitSnapshot> {
     if (tool.admission?.executionId !== executionId && !(tool.admission === null && executionId === null)) {

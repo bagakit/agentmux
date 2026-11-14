@@ -96,7 +96,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     const p = rpcRecord(body.input, ['scheme']); delete body.input; Object.assign(body, p)
   }
   if (method === 'toolkit.stop' && body.input !== undefined) {
-    const p = rpcRecord(body.input, ['executionId']); delete body.input; Object.assign(body, p)
+    const p = rpcRecord(body.input, ['executionId', 'cancelPendingLaunch', 'releasePendingLaunch']); delete body.input; Object.assign(body, p)
   }
   if ((isBrowserProfileStorageOperation(operation) || isBrowserProfileExtensionOperation(operation) || (isBrowserProfileBookmarkOperation(operation) || isBrowserProfileCookieFileOperation(operation))) && operationId !== undefined) body.operationId = operationId
   if (operation !== 'browser.restore' && operation !== 'browser.release' && operation !== 'browser.agent-workspace.prepare' &&

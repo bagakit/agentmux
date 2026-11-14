@@ -4,6 +4,7 @@ export type { ToolkitScript, ToolkitSnapshot, ToolkitMetricsSnapshot, ToolkitScr
   ToolkitToolDefinition, ToolkitToolFields, ToolkitToolConfiguration, ToolkitConfigurationFields, ToolkitConfigurationChanges, ToolkitPackageCreateFields, ToolkitRunInput, ToolkitActionInput } from '@agentmux/core/control'
 export const TOOLKIT_CHANGED_CHANNEL = 'agentmux:toolkit-changed'
 export const TOOLKIT_ENDED_CHANNEL = 'agentmux:toolkit-ended'
+type ToolkitPendingLaunchAction = { cancelPendingLaunch: true } | { releasePendingLaunch: true }
 export interface ToolkitDesktopApi {
   list(): Promise<ToolkitDescriptor[]>
   get(toolId: string, executionId?: string): Promise<ToolkitSnapshot>
@@ -14,6 +15,6 @@ export interface ToolkitDesktopApi {
   run(toolId: string, input?: ToolkitRunInput | ToolkitPerformanceRecoveryInput): Promise<ToolkitSnapshot>
   evaluate(toolId: string, input?: ToolkitRunInput): Promise<ToolkitSnapshot>
   action(toolId: string, actionId: string, input: ToolkitActionInput): Promise<ToolkitSnapshot>
-  stop(toolId: string, executionId?: string | null): Promise<ToolkitSnapshot>
+  stop(toolId: string, executionId?: string | null, options?: ToolkitPendingLaunchAction): Promise<ToolkitSnapshot>
   observe(toolId: string, onSnapshot: (value: ToolkitSnapshot) => void, onEnd?: (reason: string) => void, options?: { evaluateOnDisplay?: boolean }): { dispose(): void }
 }

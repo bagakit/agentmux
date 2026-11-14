@@ -4,12 +4,18 @@
 .toolkit-tui__status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-2) var(--sp-6) var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); }
 .toolkit-tui__notices { padding: 0 var(--sp-6) var(--sp-3); max-height: 100px; overflow: auto; color: var(--amber-text); font-size: var(--fs-meta); }
 .toolkit-tui__notices p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
-.toolkit-tui__notice { margin: 0; padding: var(--sp-3) var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); }
 .toolkit-tui__terminal { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-top: 1px solid var(--line-soft); }
 .toolkit-tui__terminal > .terminal-view { flex: 1; }
 .toolkit-tui__empty { margin: auto; padding: var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); }
+.toolkit-tui__recovery { box-sizing: border-box; width: 100%; max-width: 520px; margin: auto; padding: var(--sp-6); align-self: safe center; max-height: 100%; overflow: auto; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.toolkit-tui__recovery p { margin: 0 0 var(--sp-4); }
+.toolkit-tui__recovery-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.toolkit-tui__recovery-details { margin-top: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.toolkit-tui__recovery-details summary { cursor: pointer; }
+.toolkit-tui__recovery-details p { margin: var(--sp-2) 0 0; }
 .toolkit-tui--compact { flex: none; border: 1px solid var(--line-soft); border-radius: var(--radius); }
 .toolkit-tui--compact .toolkit-tui__status { padding-top: var(--sp-4); }
+.toolkit-tui--compact .toolkit-tui__recovery { max-width: none; padding-top: 0; }
 
 .toolkit-tui__header { display: flex; align-items: center; flex: none; min-width: 0; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-5); }
 .toolkit-tui__header > svg { flex: none; color: var(--text-2); }

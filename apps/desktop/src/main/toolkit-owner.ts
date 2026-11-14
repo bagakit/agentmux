@@ -3,9 +3,9 @@ import { parseToolkitResultDocument } from '@agentmux/core/toolkit-result-docume
 import { openToolkitResultChannel } from '@agentmux/core/toolkit-result-channel'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { dirname, join } from 'node:path'
-import { AgentMuxError, DurableWriteError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
+import { AgentMuxError, DurableWriteError, type AgentMuxClientEvent, type AgentMuxPreparedTerminal, type AgentMuxRunRef, type TerminalCreationInspection } from '@agentmux/core'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, type AgentMuxToolkitPort,
-  type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot,
+  type AgentMuxNameContext, type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot,
 } from '@agentmux/core/control'
 import { ToolkitFailureCapture, toolkitFailureError, parseToolkitPerformanceFailure, parseToolkitPerformanceFailureDetails,
   type ToolkitPerformanceIssue, type ToolkitPerformanceFailure, type ToolkitPerformanceFailureDetails, type ToolkitPerformanceFailureStage } from '@agentmux/core/toolkit-performance-failure'
@@ -661,13 +661,15 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   private readonly performance: PerformanceToolkitOwner
   private readonly custom: CustomToolkitOwner
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
-    inspectTuiCreation?(prepared: import('@agentmux/core').AgentMuxPreparedTerminal): Promise<import('@agentmux/core').AgentMuxRun | null>
+    inspectTuiCreation?(prepared: AgentMuxPreparedTerminal, includeRetirementBlocker?: true): Promise<TerminalCreationInspection>
+    retireTuiCreation?(prepared: AgentMuxPreparedTerminal, runtimeId: string): Promise<TerminalCreationInspection>
     enabled(): boolean; config: ConfigOwner; receiptPath: string; mainPid?: number; now?: () => number }) {
     const receipts = new ToolkitReceiptStore(args.receiptPath, () => ['performance', ...bundledToolkitTools(args.launch(), args.config.current).map(tool => tool.id), ...toolkitTools(args.config.current).map(tool => tool.id)])
     this.performance = new PerformanceToolkitOwner({ ...args, receipts, failures: new PerformanceFailureStore(join(dirname(args.receiptPath), 'toolkit-performance-failure.json')) })
     const launch = args.launch()
     this.custom = new CustomToolkitOwner({ config: args.config, openRunPort: args.openRunPort,
       ...(args.inspectTuiCreation ? { inspectTuiCreation: args.inspectTuiCreation } : {}),
+      ...(args.retireTuiCreation ? { retireTuiCreation: args.retireTuiCreation } : {}),
       runner: launch.runner, env: launch.env, snapshotRoot: join(dirname(args.receiptPath), 'toolkit-snapshots'), bundled: () => bundledToolkitTools(args.launch(), args.config.current), ...(args.now ? { now: args.now } : {}),
       receipts })
   }
@@ -677,7 +679,7 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   configurationChanged() { this.custom.configurationChanged() }
   /** Load enabled TUI intents once; passive list/get/watch remain observations. */
   async load(): Promise<void> { await this.custom.loadConfigured() }
-  async execute(request: ToolkitRequest, signal: AbortSignal): Promise<ToolkitResult> {
+  async execute(request: ToolkitRequest, signal: AbortSignal, context?: AgentMuxNameContext): Promise<ToolkitResult> {
     if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [
       { kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true },
       ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.mode ? { mode: tool.mode } : {}), ...(tool.display ? { display: true } : {}) })),
@@ -700,6 +702,15 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
       const result = await executeToolkitConfig(request, this.args.config)
       await this.load()
       return result
+    }
+    if (request.operation === 'toolkit.stop' && (request.cancelPendingLaunch || request.releasePendingLaunch)) {
+      if (!request.executionId || request.toolId === 'performance') throw new AgentMuxError('Use the exact pending TUI execution.', 'INVALID_CONTROL_REQUEST')
+      if (!context?.actor.verified || context.actor.kind !== 'device' || context.actor.id !== `local-user:${process.getuid?.() ?? 'current'}` ||
+          context.location.callerSessionId || (context.transport !== 'unix' && context.transport !== 'electron-ipc')) {
+        throw new AgentMuxError('Changing a pending launch requires a verified local user action.', 'CONTROL_PERMISSION_DENIED')
+      }
+      return { operation: request.operation, snapshot: await this.custom.changePendingLaunch(request.toolId, request.executionId,
+        request.cancelPendingLaunch ? 'cancel' : 'release', signal) }
     }
     if (request.toolId === 'performance') return await this.performance.execute(request, signal)
     if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: await this.custom.get(request.toolId) }

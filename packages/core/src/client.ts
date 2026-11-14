@@ -5095,14 +5095,19 @@ export class AgentMuxClient {
   private terminalRecoveryOwner(): TerminalRecoveryOwner {
     if (this.terminalRecoveryOwnerInstance) return this.terminalRecoveryOwnerInstance
     const rawOwnership = (ref: AgentMuxRunRef) => this.assertRawTerminal({ runId: ref.runId })
+    const agentCreationKeyRole = async (key: string) => {
+      if (!this.store.agentCreationKeyRole) throw new AgentMuxError('Original Agent creation-key reads are unsupported; no retirement was submitted.', 'AGENT_CREATION_ROLE_UNCONFIRMED')
+      return await this.store.agentCreationKeyRole(key)
+    }
     const owner = new TerminalRecoveryOwner(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'terminal-recoveries'), {
       directoryAdmission: (cwd, write) => this.withExecutionDirectoryAdmission(cwd, write),
       runtime: () => this.terminalCreationRuntimeIdentity(),
       assertNoAgentKey: async (key,rawRetained)=>{
-        if(!this.store.agentCreationKeyRole)throw new AgentMuxError('Original Agent creation-key reads are unsupported; no retirement was submitted.','AGENT_CREATION_ROLE_UNCONFIRMED')
-        const role=await this.store.agentCreationKeyRole(key)
-        if(role==='agent'||role==='unknown'&&!rawRetained) throw new AgentMuxError('This original creation key is Agent-owned or its role is unconfirmed. The Agent and reservation are retained.','RUN_KIND_MISMATCH')
+        const role = await agentCreationKeyRole(key)
+        if (role === 'agent') throw new AgentMuxError('This original creation key is Agent-owned. The Agent and reservation are retained.', 'RUN_KIND_MISMATCH')
+        if (role === 'unknown' && !rawRetained) throw new AgentMuxError('Original Agent creation-key coverage is incomplete; no retirement was submitted. The original key is retained.', 'AGENT_CREATION_ROLE_UNCONFIRMED')
       },
+      agentCreationKeyRole,
       retireKey: async (key,runtime)=>{
         const value=await this.kernel.retireOriginalCreationKey(key,runtime)
         if(value.outcome==='retired')return value
@@ -5154,7 +5159,7 @@ export class AgentMuxClient {
   async inspectTerminalCreation(value: TerminalCreationInspect): Promise<TerminalCreationInspection> {
     const input = parseTerminalCreationInspect(value)
     if (input.hostId !== 'local') throw new AgentMuxError('Read this creation at its original execution Core.', 'INVALID_CONTROL_REQUEST')
-    return await this.terminalRecoveryOwner().inspectInitial(input.operationId, input.runtimeId)
+    return await this.terminalRecoveryOwner().inspectInitial(input.operationId, input.runtimeId, input.includeRetirementBlocker)
   }
 
   private async startPreparedTerminalNative(input: AgentMuxPreparedTerminal, initialRuntime?: AgentMuxCreationRuntime): Promise<AgentMuxRun> {

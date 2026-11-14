@@ -1689,19 +1689,28 @@ export class RuntimeController {
     } catch (error) { dispose(); throw error }
   }
 
-  async inspectToolkitTuiCreation(prepared: import('@agentmux/core').AgentMuxPreparedTerminal): Promise<AgentMuxRun | null> {
+  async inspectToolkitTuiCreation(prepared: import('@agentmux/core').AgentMuxPreparedTerminal, includeRetirementBlocker?: true) {
+    return await this.toolkitTuiCreationReceipt(prepared, undefined, includeRetirementBlocker)
+  }
+
+  async retireToolkitTuiCreation(prepared: import('@agentmux/core').AgentMuxPreparedTerminal, runtimeId: string) {
+    return await this.toolkitTuiCreationReceipt(prepared, runtimeId)
+  }
+
+  private async toolkitTuiCreationReceipt(prepared: import('@agentmux/core').AgentMuxPreparedTerminal, runtimeId?: string, includeRetirementBlocker?: true) {
     const client = this.configuredClient('local')
-    // This Hosted method is owner-only and does not start an unavailable Native Runtime.
-    const receipt = await client.inspectTerminalCreation({ hostId: 'local', operationId: prepared.createOperationId })
+    // The existing owner may check or retire this key without starting an unavailable Runtime.
+    const target = { hostId: 'local', operationId: prepared.createOperationId }
+    const receipt = runtimeId === undefined ? await client.inspectTerminalCreation({ ...target, ...(includeRetirementBlocker ? { includeRetirementBlocker } : {}) })
+      : await client.retireTerminalCreation({ ...target, runtimeId })
     if (this.configuredClient('local') !== client) throw new AgentMuxError('The original Toolkit Host changed during the launch check.', 'RUNTIME_OWNER_MISMATCH')
     if (receipt.hostId !== 'local' || receipt.operationId !== prepared.createOperationId || receipt.admission && receipt.admission.workspacePath !== prepared.workspacePath) {
       throw new AgentMuxError('The launch observation belongs to another Tool request.', 'CONTROL_PROTOCOL_ERROR')
     }
-    const admission = receipt.admission
-    if (admission?.observation.availability === 'retained') return admission.run
-    if (admission?.startFailure) throw new AgentMuxError(admission.issue ?? 'Core retained the original Start failure.', admission.startFailure.code)
-    if (admission?.issue) throw new AgentMuxError(admission.issue, 'CONTROL_UNAVAILABLE')
-    return null
+    if (runtimeId !== undefined && receipt.admission?.runtime.runtimeId !== runtimeId) {
+      throw new AgentMuxError('The retirement receipt belongs to another persistent Runtime.', 'RUNTIME_OWNER_MISMATCH')
+    }
+    return receipt
   }
 
   async toolkitRunPort(): Promise<ToolkitRunPort> {
