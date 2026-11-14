@@ -41,8 +41,11 @@
 
 先定位所属表面的行为与呈现专题，再沿下表复用现有入口。源码链接用于核对当前实现与真实调用，不证明整页已经符合规范；几何与手机差异仍由原专题持有。
 
+公共用法、模式与路线由[组件库入口](../../packages/client-ui/README.md)维护。AgentMux 的业务映射和真实消费者由本项目维护。对话与资源阅读见[阅读调用链](../architecture/conversation.md)，弹层与窗口适配见[实现归属](../architecture/ui-layering.md)。
+
 | 要做什么 | 规格 | 源码 Owner | 真实消费者示例 |
 | --- | --- | --- | --- |
+| 找到 Agent 已打开的工作面 | [通用位置模式](../../packages/client-ui/docs/patterns/agent-work-location.md)与[AgentMux 空间寻址](behavior/spaces-and-layout.md#统一概念与空间寻址) | [Desktop 位置与导航](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)、[Mobile 位置核对](../../apps/mobile/src/navigation/mobile-agent-locations.ts) | [Desktop 详情](../../apps/desktop/src/renderer/src/components/AgentLocationsButton.tsx)、[Mobile 选择面板](../../apps/mobile/src/navigation/MobileAgentLocations.tsx) |
 | 文字或图标动作 | [控件语言与逐态职责](presentation/shared-rules.md#控件语言) | [Button](../../packages/client-ui/src/components/Button.tsx)、[IconButton](../../packages/client-ui/src/components/IconButton.tsx)、[共享按钮样式](../../packages/client-ui/src/styles/buttons.css) | [SettingsSaveBar](../../apps/desktop/src/renderer/src/components/settings/SettingsSaveBar.tsx) |
 | 单字段或组合输入 | [输入与焦点规格](presentation/shared-rules.md#控件语言) | [TextInput](../../packages/client-ui/src/input/TextInput.tsx)、[InputGroup](../../packages/client-ui/src/input/InputGroup.tsx)、[输入样式](../../packages/client-ui/src/input/input.css) | [MoteRenameDialog](../../apps/desktop/src/renderer/src/components/MoteRenameDialog.tsx)、[MoteFirstCooperation](../../apps/desktop/src/renderer/src/components/MoteFirstCooperation.tsx) |
 | 紧凑多行编辑 | [正文与底栏](presentation/shared-rules.md#控件语言) | [ComposerTextarea](../../packages/client-ui/src/input/ComposerTextarea.tsx)、[ComposerEditFooter](../../packages/client-ui/src/components/ComposerEditFooter.tsx)、[用法示例](../../packages/client-ui/README.md#compact-editors) | [待发消息编辑](../../apps/desktop/src/renderer/src/components/ComposerQueuedMessageEditor.tsx)、[对话批注](../../apps/desktop/src/renderer/src/components/ConversationAnnotationNote.tsx) |

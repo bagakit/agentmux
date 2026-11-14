@@ -127,7 +127,7 @@ pnpm test:reliability # native chaos/stress plus Core resource receipt
 pnpm test:resources  # isolated Desktop resource receipt
 pnpm --filter @agentmux/desktop package:mac # mounted DMG + LaunchServices workspace-file oracle (skipped for ad-hoc signing)
 pnpm test:nightly    # native package + security + fuzz + reliability + resources, each exactly once
-CODEX_HOME="$private_seed" pnpm test:real-codex # opt-in；必须显式给出独立 seed（不能是 ~/.codex），fixture 把其中 auth.json 与 config.toml 复制到私有 Root
+CODEX_HOME="$private_seed" pnpm test:real-codex # 显式使用独立 seed，与用户默认配置目录分开。fixture 把 auth.json 与 config.toml 复制到私有 Root
 pnpm check           # typecheck + fast + native + all builds
 ```
 
@@ -196,6 +196,8 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 - 原生产物平台从 [artifact contract](../../packages/core/src/ctxmux-artifact-contract.json) 与对应 manifest 取得；每个平台必须有同源 Native proof，不能从本机结果推断。portable 空间 API 的可安装性与 Native Run 能力分别验证。
 
 ## 界面规则与真实行为
+
+共享 UI 的宿主集成可从仓库根运行 `node packages/client-ui/scripts/verify-shared-conversation.mjs --mutation-and-callers` 和 `node packages/client-ui/scripts/verify-browser-context-reading.mjs`。前者构建共享包、检查 Renderer 类型、渲染交互并验证变异与实际消费者。后者验证对话、资源与邮箱对同一原记录的读取。对应的 `capture-shared-conversation.mjs` 与 `capture-browser-context-reading.mjs` 在独立的 Electron profile 中采集常规与窄窗，由[独立视觉评审](../guides/agent-visual-e2e-review.md)核对实图。认证、原生设备、终端挂载和持久恢复分别沿各自场景验收。
 
 空间呈现的视觉约束归[空间与布局](../design/presentation/spaces-and-layout.md#工作面与注意力密度)。本节描述样式与输入的失效形态和 oracle；以下原事故样本只说明当时的假绿边界，不代表当前候选已验收。静态扫描、类型检查和静态渲染各有证明范围，真实状态变化与输入写回仍按任务场景操作验证。
 

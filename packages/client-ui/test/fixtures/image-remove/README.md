@@ -6,4 +6,4 @@ Trusted Enter removes only the first node, returns focus to the original editor 
 
 The same scene includes landscape, portrait and square inline images beside text, using the production Composer owner and the collapsed AgentComposer. Real pointer input opens each preview; geometry and hit checks reject a trailing action column, clipped corner control or a removal target over adjacent text. Touch input precisely removes the original landscape and portrait references with their controls visible.
 
-Behavior and presentation belong to docs/design/behavior/conversation-input.md and docs/design/presentation/conversation-input.md. Private profiles/build output are removed after the probe exits; no real Session, filesystem deletion or installed Host behavior is claimed. Final full frames need independent visual review.
+Private profiles/build output are removed after the probe exits; no real Session, filesystem deletion or installed Host behavior is claimed. Final full frames need independent visual review.

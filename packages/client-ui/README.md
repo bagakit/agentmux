@@ -1,6 +1,44 @@
 # @agentmux/client-ui
 
-`@agentmux/client-ui` holds the React UI and document-format helpers that AgentMux clients share. It owns presentation, editing and shared Note syntax: Core and the Host keep every Agent, Session and Run fact, and the package contains no conversation log, Runtime client, Provider adapter or Session store. Core does not depend on it.
+`@agentmux/client-ui` is the design system shared by AgentMux clients. Its **components** give an individual action, field or reading surface consistent behavior. Its **interaction patterns** describe how a person completes a task that spans several controls, such as finding the work surfaces for an Agent. A host can implement a pattern with its own layout and navigation.
+
+The package is private to the AgentMux workspace. The React entries use React and React DOM `^19.2.0`. The package also owns shared Note syntax and document-format helpers. Some domain-specific entries depend on the public types and functions of the workspace’s `@agentmux/core` package. Hosts supply observations and perform actions. The library has no application store, conversation log or Runtime client.
+
+## Start here
+
+| What you want to do | Where to start |
+| --- | --- |
+| Use a button, text field or compact editor | [Native actions](#native-actions) and [Inputs](#inputs) cover the import, stylesheet and who owns the value. |
+| Apply a pattern in another interface | [Find an Agent's work](docs/patterns/agent-work-location.md) gives the question, required inputs, actions and observable results. It includes cases a host can run with its own data. |
+| Understand what the library aims to support next | The [roadmap](ROADMAP.md) explains the milestones for controls, Agent patterns and independent distribution. |
+| Add a control, propose a pattern or change a public behavior | The [maintainer guide](CONTRIBUTING.md) covers ownership, evidence and compatibility. |
+
+For example, a host can label a field and submit its current value. The host supplies its theme tokens and owns the draft.
+
+```tsx
+import { useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { TextInput } from '@agentmux/client-ui/input'
+import '@agentmux/client-ui/input/styles.css'
+import '@agentmux/client-ui/styles/buttons.css'
+
+export function DraftForm({ onSave }: { onSave: (text: string) => void }) {
+  const [draft, setDraft] = useState('')
+  return (
+    <form onSubmit={event => {
+      event.preventDefault()
+      onSave(draft)
+    }}>
+      <label>Draft <TextInput value={draft} onChange={event => setDraft(event.currentTarget.value)} /></label>
+      <Button type="submit">Save draft</Button>
+    </form>
+  )
+}
+```
+
+## Modules
+
+Imports in the table use the prefix `@agentmux/client-ui/` unless written in full.
 
 | Module | Import | What it provides |
 | --- | --- | --- |
@@ -13,13 +51,11 @@
 | Menu and avatars | `components/HoverDropdownMenu`, `components/AvatarGroup` | Menu disclosure and keyboard focus in the host document, plus avatar stacking and overflow |
 | Brand assets | `@agentmux/client-ui/brand/*` | App icons, hero art and illustrations ([brand sources](brand/README.md)) |
 
-Use the [component index](../../docs/design/agentmux-surface-density.md#按控件开始贡献) to find import paths, current consumers and design requirements. `components/` contains renderable components, `input/` owns native field primitives and their styles, and `lib/` provides the hooks and formatting that those components consume. Client adapters supply overlays, file and clipboard access, and business actions.
-
-Product requirements are defined by the [conversation behavior SSOT](../../docs/design/behavior/conversation-mode.md) and [presentation SSOT](../../docs/design/presentation/conversation-mode.md). The [mechanism map](../../docs/architecture/conversation.md) traces the current Desktop, Mobile, resource and public API consumers; sharing a component does not by itself make the two clients equivalent. How these components read and render today is described in the [Desktop reading chain](../../docs/architecture/conversation.md#desktop-阅读链): `useConversationView` reads accepted windows through Core's public Reader; `projectConversationRecordSequence` groups the ordered records into messages and process groups with stable display identities; `useConversationRecordLayout` is the one commit owner per reading position and protects selection, focus and the scroll anchor while a new layout is applied; and `ConversationBodyWork` mounts at most one heavy body per animation frame, so heavy content renders progressively inside a bounded window rather than through a full virtual list.
+Use the named entry for the control or capability you need. The `components/` entries render UI, and `input` owns native field primitives. Import component CSS or the shared stylesheet. Hosts supply their theme, overlay container and actions.
 
 ## Platform adapter
 
-Applications wrap their view in `ClientUiProvider` with an explicit `ClientUiPlatform`. The adapter supplies clipboard error reporting, the overlay target, editor focus registration and identity and icon rendering. File opening, HTTP navigation, pasted-image IO, send / queue / interrupt and permission responses are typed component props. `DescribeSpeaker` may supply an already rendered avatar; Mote and project discovery stay in Desktop.
+Views that need platform services use `ClientUiProvider` with an explicit `ClientUiPlatform`. The adapter supplies clipboard error reporting, an overlay target, editor focus registration and identity rendering. File opening, HTTP navigation, pasted-image IO, send, queue, interrupt and permission responses are typed callbacks. A host can supply a rendered avatar through `DescribeSpeaker`.
 
 ## Node consumers
 
@@ -29,23 +65,23 @@ The package builds ESM JavaScript for Node consumers, and its `browser` export c
 | --- | --- |
 | `pasted-images`, `terminal-path-link` | Pure value helpers; their import graphs contain no React, Tiptap or DOM runtime. |
 | `agent-avatar-svg`, `mote-avatar-svg` and their static artwork dependencies | Shared static avatar rendering, including React and `react-dom/server` where needed. The Host supplies saved appearance and owned raster resources; rendering does not mount an editor or browser DOM. |
-| `note/*` document codecs, merge and provenance helpers, including `note-content-schema` | Read and serialize the shared Note format and validate it with the same Tiptap schema as the editor. The Host's [Note writer](../../apps/host/src/note-file-writer.ts) uses these without creating an editor DOM; the original Files owner keeps IO, revision checks, CAS and write receipts. |
+| `note/*` document codecs, merge and provenance helpers, including `note-content-schema` | Read and serialize the shared Note format and validate it with the same Tiptap schema as the editor. These work without an editor DOM. The host owns file IO, revision checks, compare-and-swap and write receipts. |
 
-These entries do not make the package root, interactive components or every wildcard export suitable for Node. Host code imports the required entry directly; Core remains independent of `client-ui` and its UI dependencies.
+Node consumers import a supported subpath directly. Interactive components require a rendering host.
 
 ## Conversation reading
 
 `ConversationRecordSequence` shows native turn and response metrics from records Core has already read. It keeps source order and the mounted reading nodes, shows each loaded turn's latest cumulative sample once, and reuses the `NativeProcessObservation` disclosure; response-only reports keep their own record identity. Import the shared styles (or `styles/conversation-metrics.css` with the host's individual style imports); no extra reader, timer or execution channel is needed.
 
-`ConversationMessage` accepts Core's `inputContext` and `inputContextSource` and shows them as a compact Browser observation disclosure. `ConversationView`, captured messages, complete text resources and mailbox records use the same reading surface. Wire declarations are parsed by the [Core reader](../core/src/agent-message-render.ts); a body already confirmed as authored is not parsed again. A structured producer qualifies only the context it matches, independently of recorded authorship, and a selection keeps its own Browser, navigation and step association. Reading never navigates, fetches an image, sends input or grants Browser control; the data format belongs to the [amux protocol](../../docs/specs/amux-protocol.md#场景数据).
+`ConversationMessage` accepts `inputContext` and `inputContextSource` and shows a compact browser-observation disclosure. Supply parsed records with their original authorship and provenance. Each selection keeps its browser, navigation and step association. Reading a record performs no navigation, input or permission action.
 
-Copy keeps the original parts or the caller's `copyText`. Mailbox reading uses a stored frozen wire when there is one and never rebuilds a message from the displayed context.
+Copy uses the original parts or the caller’s `copyText`. A host with a frozen source record can pass that original text.
 
-The optional `renderObjectLink` adapter receives an exact `amux://agent|region|tab|space|zone|capsule/…` URI and its Core-parsed target. Conversation prose and Markdown links share this inline presentation; code, read-only previews and document mode keep plain text. Without the adapter, Markdown stays readable as text. The host resolves current names, Mote appearance, state, details and navigation; stored messages and Copy keep the original source.
+The optional `renderObjectLink` adapter receives an object URI and its parsed target. Markdown and conversation prose share inline rendering. Code, read-only previews and document mode keep plain text. The host resolves names, appearance, details and navigation. Stored text and Copy retain the original source.
 
 ## Terminal
 
-Desktop and Mobile render Agent terminals with the same modules:
+The optional xterm entries cover replay, output and input.
 
 - **Replay** writes retained Run bytes to xterm in 128 KiB batches and yields between batches, so a large scrollback never blocks input, navigation or closing the view. A batch boundary is only a scheduling boundary; xterm continues an escape sequence across writes.
 - **Live output** coalesces small Runtime events into writes of at most 64 KiB. The unparsed backlog is capped at 2 MiB: on overflow the oldest queued events are dropped, not Runtime history, and the drain recovers the retained bytes from its last parsed cursor before consuming the newer tail. Only a Runtime Gap or a failed recovery produces an omission notice.
@@ -54,7 +90,7 @@ Desktop and Mobile render Agent terminals with the same modules:
 
 ## Notes
 
-`note/` holds the `.note.md` Markdown codec with stable block IDs and wiki links ([file format](../../docs/specs/note-markdown.md)), rich-block validation, draft includes and the live merge used when a person and Agents edit the same Note. Rich validation and the diff3 merge run in a worker, off the input thread. `NoteReader` renders bytes the host has already read; every file read stays with the host.
+The `note/*` entries provide the `.note.md` Markdown codec with stable block IDs and wiki links, rich-block validation, draft includes and live three-way merge. Rich validation and merging run in a worker, off the input thread. `NoteReader` renders bytes supplied by the host.
 
 ## Icons and themes
 
@@ -68,13 +104,13 @@ Semantic icons come from `@agentmux/client-ui/icons` and the shared styles. Inst
 
 The animation presets are `none`, `work`, `stream`, `execute`, `wait`, `orbit`, `feedback`, `selection` and `spin`. A preset affects only that instance, respects reduced motion and does not change saved themes or imply Runtime state. `createSemanticIconElement` takes the same options: a static call returns an SVG, and an animated call can return an HTML element that contains the SVG, so keep the returned node rather than assuming it is an SVG.
 
-To choose a meaning, add a semantic ID or glyph, or open the live catalog with `pnpm icons:dev`, follow the [semantic icon guide](../../docs/guides/semantic-icons.md). The shared catalog owns the defaults; Settings, public discovery and the workbench derive their lists from it.
+The shared catalog owns semantic IDs and glyph defaults. Hosts can use the same catalog for their icon pickers and theme settings.
 
 ## Styles and dialogs
 
-Import `@agentmux/client-ui/styles.css` together with the client's theme tokens, font and shell. Styles are also exported individually so Desktop keeps its cascade order; Mobile uses these surface rules without Desktop's application stylesheet or Zustand store.
+Import `@agentmux/client-ui/styles.css` alongside the host’s theme tokens and fonts. Individual styles are also exported for hosts that manage their own cascade order.
 
-Dialogs import `@agentmux/client-ui/components/Modal`; hosts that import individual styles also include `@agentmux/client-ui/styles/overlays.css`. The shared module owns modal presentation, attachment slots and focus lifetime on top of Radix. Use `useModalOverlayContainer` for attached custom portals; a `null` result means the slot is not ready yet and must not fall back to the document body. Desktop components use its `DocumentOverlayPortal` / `WindowOverlayPortal` adapters. Business requests and drafts stay with the caller. Layer roles and materials follow the [presentation owner](../../docs/design/presentation/shared-rules.md#弹层作用域与层级), and document, native projection and contribution checks are described in the [implementation map](../../docs/architecture/ui-layering.md). New consumers should not import Radix Dialog directly, copy window ranks or keep manual visibility counters.
+Import dialogs from `@agentmux/client-ui/components/Modal`. Hosts that load styles individually also include `@agentmux/client-ui/styles/overlays.css`. The shared module owns modal presentation, attachment slots and focus lifetime on top of Radix. Use `useModalOverlayContainer` for attached custom portals. A `null` target means the slot is still being prepared. Keep the attachment there once ready. Business requests and drafts stay with the caller.
 
 ## Native actions
 
@@ -102,7 +138,7 @@ import { ComposerEditFooter } from '@agentmux/client-ui/components/ComposerEditF
 </ComposerEditFooter>
 ```
 
-The [queued message editor](../../apps/desktop/src/renderer/src/components/ComposerQueuedMessageEditor.tsx) and [conversation annotation](../../apps/desktop/src/renderer/src/components/ConversationAnnotationNote.tsx) show the same field and footer with different action, draft and error owners.
+Two hosts can use this same field and footer with different drafts, error handling and save actions.
 
 ### Labels and single fields
 
@@ -110,10 +146,10 @@ The [queued message editor](../../apps/desktop/src/renderer/src/components/Compo
 
 `src/input/` is the shared native field module: import `TextInput`, `Textarea` and `InputGroup` from `@agentmux/client-ui/input`, plus `@agentmux/client-ui/input/styles.css` when not using the full stylesheet. Each component forwards native props and React 19 refs; callers keep labels, values, validation and actions. `InputGroup` is the field container with one focus boundary, not an extra wrapper or form-state provider. Surface classes keep their own geometry.
 
-`Textarea` is the native presentation layer. Desktop's controlled drafts use `ComposerTextarea`, which delegates to it while keeping the composition mirror and final-value writeback. Rich messages use `AgentComposer` with `InlineComposer` (Tiptap): controlled value and change, references, commands, attachments, submit / queue / interrupt and feedback are explicit props. Desktop's `AgentSessionComposer` adapts draft persistence, native file IO and delivery; Core keeps Session and Run authority. These responsibilities stay out of the native input module.
+`Textarea` is the native field. `ComposerTextarea` delegates to it while preserving composition and final-value writeback in a controlled draft. Rich messages can use `AgentComposer` with `InlineComposer` (Tiptap). The value and change, references, commands, attachments, actions and feedback are explicit props. The host owns draft persistence, file IO and delivery.
 
 ## Verification
 
-`node packages/client-ui/scripts/verify-shared-conversation.mjs --mutation-and-callers` builds the package, type-checks the Desktop Renderer, exercises rendered behavior, runs isolated mutations and checks that real Desktop call sites exist outside definitions, imports and tests; it does not modify the source tree during the experiments. The Renderer configuration covers all Renderer and shared sources, while the original Desktop configuration continues to check Main and preload too. It covers the shared UI integration only; Mobile authentication, native devices, terminal attachment and durable recovery are verified separately. `node packages/client-ui/scripts/verify-browser-context-reading.mjs` exercises the conversation, resource and mailbox readers with isolated production mutations.
+From a source checkout of this package, run `pnpm run typecheck` and `pnpm test`. Use the documented public entries in a host fixture. Exercise the real action, focus and result alongside the rendered state. Consumer applications maintain their own integration checks.
 
-`node packages/client-ui/scripts/capture-shared-conversation.mjs` and `capture-browser-context-reading.mjs` record normal and narrow scenes in a private Electron profile using the real theme runtime. Captures are inputs to an [independent visual review](../../docs/guides/agent-visual-e2e-review.md); a successful capture is not an aesthetic approval and does not cover full Desktop, native Browser, input delivery or recovery.
+The [maintainer guide](CONTRIBUTING.md) covers interaction, visual review, compatibility and standalone verification.
