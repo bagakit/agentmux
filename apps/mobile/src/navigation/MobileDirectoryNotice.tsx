@@ -5,10 +5,15 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 
 /** The existing directory owner retains issues; this header entry only discloses them. */
-export function MobileDirectoryNotice({ issues, retry }: { issues: { source: string; message: string }[]; retry(): void }) {
+export function MobileDirectoryNotice(props: DirectoryNoticeProps) {
+  return props.issues.length ? <DirectoryIssueDialog {...props} /> : null
+}
+
+type DirectoryNoticeProps = { issues: { source: string; message: string }[]; retry(): void }
+
+function DirectoryIssueDialog({ issues, retry }: DirectoryNoticeProps) {
   const description = useId()
   const [open, setOpen] = useState(false)
-  if (!issues.length) return null
   return <Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Trigger asChild><button type="button" className="mobile-directory-notice"
     aria-label={`目录信息 · ${issues.length} 项待确认`} title="查看目录问题与处理方式">
     <SemanticIcon name="status.warning" size={16} /><span>{issues.length}</span>
