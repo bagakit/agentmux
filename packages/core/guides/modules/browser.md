@@ -139,6 +139,17 @@ Read only the matching local help:
   outside-scope and unsupported Cookie entries are reported individually without clearing
   original data. CHIPS, host-only/domain/path, Secure/HttpOnly/SameSite and session/expiry
   remain distinct. After an unknown reply keep the original ID; do not retry its native effects.
+- amux browser profile storage --help: inspect the original Profile's website offline disk cache,
+  separately from Renderer memory. Both leaves use `--input FILE|-` JSON. `inspect` takes
+  `profileId` and optional original `operationId`; read coverage, unattributed bytes and issues
+  alongside site sizes. `clear` takes `profileId`, `expectedRevision`, `operationId` and
+  `sites:[{origin,storageKeys}]` copied from that inspection. Select one site or all identified
+  sites in one operation; unknown data is outside that selection. Only the original Main human
+  confirmation approves deletion. Cache API entries in the frozen keys at execution time are
+  in scope; cookies, IndexedDB, localStorage, Service Worker registrations and other
+  Profiles remain. Pending IDs survive restart; inspect the original ID after an unknown reply
+  and never replay deletion automatically. Native acknowledgements and before/after disk
+  measurements are separate; active pages can rebuild caches.
 - amux browser profile bookmark --help: managed bookmarks in the original Profile metadata.
   All five leaf commands use `--input FILE|-` JSON; `ls` requires `profileId` and `folderId`
   (`null` for root), optionally `operationId` to check an original receipt. It returns the exact
