@@ -885,9 +885,7 @@ export class ContinuousProgressLoopManager {
     }
   }
   private async runDue(checkAt: number, now: number | undefined, onlyLoopId?: string): Promise<void> {
-    const pending = this.scheduler.due(checkAt, onlyLoopId).map(selected => {
-      const existing = this.checks.get(selected.loopId)
-      if (existing) return Promise.resolve()
+    const pending = this.scheduler.due(checkAt, onlyLoopId, id => !this.checks.has(id)).map(selected => {
       const controller = new AbortController(), target = this.targetKey(selected)
       this.activeDeliveries.set(selected.loopId, controller)
       const previous = this.targetChecks.get(target)
@@ -898,7 +896,8 @@ export class ContinuousProgressLoopManager {
         }
         if (!controller.signal.aborted) await this.runLoop(selected.loopId, checkAt, now, controller)
       }
-      const checking = run().finally(() => {
+      // Publish the active check before any provider or persistence callback runs.
+      const checking = Promise.resolve().then(run).finally(() => {
         if (this.checks.get(selected.loopId) === checking) this.checks.delete(selected.loopId)
         if (this.targetChecks.get(target) === checking) this.targetChecks.delete(target)
         if (this.activeDeliveries.get(selected.loopId) === controller) this.activeDeliveries.delete(selected.loopId)

@@ -222,10 +222,11 @@ export class ContinuousProgressScheduler {
   }
   stop(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'stopped' }) }
 
-  due(now = this.now(), onlyLoopId?: string): ContinuousProgressLoop[] {
+  due(now = this.now(), onlyLoopId?: string, eligible?: (loopId: string) => boolean): ContinuousProgressLoop[] {
     const selected = onlyLoopId === undefined ? this.loops.values() : [this.loops.get(onlyLoopId)]
     return [...selected]
-      .filter((loop): loop is ContinuousProgressLoop => !!loop && loop.status === 'active' && loop.nextCheckAt <= now)
+      .filter((loop): loop is ContinuousProgressLoop => !!loop && loop.status === 'active' &&
+        loop.nextCheckAt <= now && (eligible?.(loop.loopId) ?? true))
       .map((loop) => structuredClone(loop))
   }
 
