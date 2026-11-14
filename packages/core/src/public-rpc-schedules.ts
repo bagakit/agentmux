@@ -116,11 +116,14 @@ export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
   for (const key of ['lastOccurrenceAt','lastTickAt']) if (p[key] !== undefined) integer(p[key], code)
   if (p.lastOutcome !== undefined && !['sent','skipped','unknown'].includes(p.lastOutcome as string)) invalid('Schedule outcome is invalid.', code)
   if (p.lastMutation !== undefined) {
-    const m = rpcRecord(p.lastMutation, ['operationId','action','expectedRevision','requestDigest'], code)
-    string(m.operationId, code); integer(m.expectedRevision, code, m.action === 'update' ? 0 : 1)
+    const m = rpcRecord(p.lastMutation, ['operationId','action','expectedRevision','requestDigest','phase'], code)
+    const progress = p.calendar === undefined && p.afterMs === undefined && p.everyMs === undefined && (p.taskSource as { kind?: string } | undefined)?.kind !== 'goal'
+    string(m.operationId, code); integer(m.expectedRevision, code, m.action === 'update' || progress ? 0 : 1)
     if (m.action === 'update') {
-      if (p.calendar !== undefined || p.afterMs !== undefined || p.taskSource && (p.taskSource as {kind?: string}).kind === 'goal' || typeof m.requestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(m.requestDigest)) invalid('Progress update receipt is invalid.', code)
-    } else if (!['pause','resume','cancel'].includes(m.action as string) || m.requestDigest !== undefined) invalid('Schedule action is invalid.', code)
+      if (p.calendar !== undefined || p.afterMs !== undefined || p.taskSource && (p.taskSource as {kind?: string}).kind === 'goal' || m.phase !== undefined || typeof m.requestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(m.requestDigest)) invalid('Progress update receipt is invalid.', code)
+    } else if (progress) {
+      if (!['pause','resume','stop','check'].includes(m.action as string) || typeof m.requestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(m.requestDigest) || !['prepared','settled'].includes(m.phase as string)) invalid('Progress action receipt is invalid.', code)
+    } else if (!['pause','resume','cancel'].includes(m.action as string) || m.requestDigest !== undefined || m.phase !== undefined) invalid('Schedule action is invalid.', code)
   }
   if (p.pendingCompletion !== undefined) {
     const claim = rpcRecord(p.pendingCompletion, ['id','operationId','condition','inputByte','prompt','agentMuxNote','futureIntent'], code)

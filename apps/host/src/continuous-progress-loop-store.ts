@@ -31,6 +31,7 @@ export class ContinuousProgressLoopStore {
         if (item.pause !== undefined) validateContinuousProgressPause(item.pause)
         if (isAgentSchedule(item)) parseScheduleRecord(item)
         if (item.taskSource?.kind === 'goal') parseGoalContinuationLoop(item)
+        else if (!isAgentSchedule(item) && item.lastMutation !== undefined) parseScheduleRecord(item)
       }
       return raw as ContinuousProgressLoop[]
     } catch (error) {

@@ -1,3 +1,4 @@
+import { sha256 } from '@noble/hashes/sha2.js'
 import { optionalInputEpoch } from './agent-prompt-condition.js'
 export * from './continuous-progress-definition.js'
 import type { ContinuousProgressDefinition, ContinuousProgressGuidanceAdoption } from './continuous-progress-definition.js'
@@ -6,6 +7,13 @@ import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import { parseAgentScheduleTiming, type AgentScheduleCalendar, type AgentScheduleCheckInPolicy, type AgentScheduleCheckInState, type AgentScheduleTiming } from './agent-schedule.js'
+
+/** Canonical receipt digest for the complete original progress request. */
+export function continuousProgressRequestDigest(input: unknown): string {
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, v]) => [key, canonical(v)])) : value
+  return Array.from(sha256(new TextEncoder().encode(JSON.stringify(canonical(input)))), byte => byte.toString(16).padStart(2, '0')).join('')
+}
 
 export type ContinuousProgressTarget = {
   hostId: string
@@ -52,7 +60,8 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   checkInState?: AgentScheduleCheckInState
   revision?: number
   creationOperationId?: string
-  lastMutation?: { operationId: string; action: 'pause' | 'resume' | 'cancel' | 'stop' | 'check'; expectedRevision: number } | { operationId: string; action: 'update'; expectedRevision: number; requestDigest: string }
+  /** Original action processing is separate from any Native input receipt. */
+  lastMutation?: { operationId: string; action: 'pause' | 'resume' | 'cancel' | 'stop' | 'check'; expectedRevision: number; requestDigest?: string; phase?: 'prepared' | 'settled' } | { operationId: string; action: 'update'; expectedRevision: number; requestDigest: string }
   /** Initial input is saved in this same loop before the original input queue may send. */
   initialDelivery?: { operationId: string; prompt: string; condition: AgentPromptCondition; state: 'prepared' | 'unknown' | 'confirmed'; startedAt: number }
   futureIntentId?: string

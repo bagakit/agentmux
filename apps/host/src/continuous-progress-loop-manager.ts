@@ -3,9 +3,8 @@ import { awaitUntilCancelled } from './await-until-cancelled.js'
 import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
 import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import { isDeepStrictEqual } from 'node:util'
-import { createHash } from 'node:crypto'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
-import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressPause, type ContinuousProgressPauseReason, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
+import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, continuousProgressRequestDigest, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressPause, type ContinuousProgressPauseReason, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { nextCalendarOccurrence, latestCalendarOccurrence, nextIntervalOccurrence, latestIntervalOccurrence } from '@agentmux/core/schedule-calendar'
 import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord, type GoalProgressDecision } from './continuous-progress-task-source.js'
@@ -48,13 +47,6 @@ const actionBasis = (loop: ContinuousProgressLoop) => ({ loopId: loop.loopId, ho
   providerId: loop.providerId, workspacePath: loop.workspacePath, intervalMs: loop.intervalMs, prompt: loop.prompt,
   taskSource: loop.taskSource, creationOperationId: loop.creationOperationId, status: loop.status, pause: loop.pause, revision: loop.revision ?? 0 })
 
-// Canonicalize the complete original RPC request, including its expected loop.
-const updateDigest = (input: unknown): string => {
-  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
-    ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, v]) => [key, canonical(v)])) : value
-  return createHash('sha256').update(JSON.stringify(canonical(input))).digest('hex')
-}
-
 /** A maintenance source's answer for one due occurrence. Only a confirmed change pauses; a gap only defers. */
 export type MaintenanceSourceDecision = { action: 'continue' } | { action: 'pause'; reason: string; pauseReason?: ContinuousProgressPauseReason } | { action: 'defer'; reason: string }
 /** The first wait after an unconfirmed source, doubling to the limit. Shared by the scheduler and its maintenance owner. */
@@ -88,7 +80,6 @@ export class ContinuousProgressLoopManager {
   private readonly adoptingDefinitions = new Set<string>()
   private disposeGoals: (() => void) | undefined
   private readonly mutations = new Map<string, Promise<unknown>>()
-  private readonly progressActions = new Map<string, { input: import('@agentmux/core').AgentProgressParams['agent.progress.action']; result: Promise<ContinuousProgressLoop> }>()
   private readonly goalLoops = new Map<string, Set<string>>()
   private goalRevision = -1
   constructor(private readonly store: ContinuousProgressLoopStore, private readonly onTick: LoopTickHandler, private readonly now: (() => number) = Date.now, private readonly observe: LoopObservationProvider, private readonly futureInputs?: FutureProgressInputOwner, private readonly goals?: GoalProgressOwner) {
@@ -123,8 +114,9 @@ export class ContinuousProgressLoopManager {
     return starting
   }
   private async startOnce(): Promise<void> {
-    const loops = (await this.store.load()).map((loop) => loop.pendingCompletion && loop.status === 'active'
-      ? { ...loop, status: 'paused' as const, pause: this.pauseFacts(loop, 'input-unconfirmed'), lastOutcome: 'unknown' as const } : loop)
+    const loops = (await this.store.load()).map((loop) => (loop.pendingCompletion && loop.status === 'active' ||
+      loop.lastMutation?.action !== 'update' && loop.lastMutation?.phase === 'prepared')
+      ? { ...loop, status: loop.status === 'stopped' ? loop.status : 'paused' as const, pause: this.pauseFacts(loop, 'input-unconfirmed'), lastOutcome: 'unknown' as const } : loop)
     this.scheduler.restore(loops)
     this.goalLoops.clear()
     for (const loop of loops) this.indexGoalLoop(loop)
@@ -579,7 +571,7 @@ export class ContinuousProgressLoopManager {
       return { ...scope, schedule: this.require(loop.loopId), diskDurability: 'confirmed' } as ScheduleResultMap[M]
     }
     if (method === 'schedule.update') {
-      const p = params as ScheduleParamsMap['schedule.update'], loop = this.require(p.scheduleId), digest = updateDigest(p)
+      const p = params as ScheduleParamsMap['schedule.update'], loop = this.require(p.scheduleId), digest = continuousProgressRequestDigest(p)
       if (loop.managedSource && context?.caller) throw new AgentMuxError('Only the original standing configuration owner can edit this managed arrangement.', 'CONTROL_PERMISSION_DENIED')
       if (!isAgentSchedule(loop) || loop.everyMs === undefined || loop.status === 'stopped') throw new AgentMuxError('Only the original retained repeating arrangement can change interval.', 'SCHEDULE_CANCELLED')
       await this.authorizeCaller(loop, context)
@@ -638,15 +630,22 @@ export class ContinuousProgressLoopManager {
       ['hostId','agentSessionId','providerId','workspacePath'].every(key => loop[key as keyof ContinuousProgressTarget] === target[key as keyof ContinuousProgressTarget])
     const value = await this.serialize('progress:' + target.hostId + ':' + target.agentSessionId, async () => {
       await this.start(); await this.authorizeCaller(target, context)
-      if (method === 'agent.progress.list') return { loops: this.list(target).filter(matches) }
+      if (method === 'agent.progress.list') {
+        const query = input as import('@agentmux/core').AgentProgressParams['agent.progress.list']
+        // Only an explicit original-operation query reads durable evidence.
+        // Ordinary polling keeps the live scheduler's current state.
+        const records = query.operationId === undefined ? this.list(target) : await this.store.load()
+        return { loops: records.filter(loop => matches(loop) && (query.operationId === undefined ||
+          loop.creationOperationId === query.operationId || loop.lastMutation?.operationId === query.operationId)) }
+      }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       if (method === 'agent.progress.update') {
         const update = input as import('@agentmux/core').AgentProgressParams['agent.progress.update']
         const loop = this.require(update.loopId)
         if (!matches(loop)) throw new AgentMuxError('This progress update belongs to another exact loop target.', 'CONTROL_REQUEST_CONFLICT')
-        if (loop.creationOperationId === update.operationId || this.progressActions.has(update.operationId)) throw new AgentMuxError('This operation identity belongs to another progress request.', 'CONTROL_REQUEST_CONFLICT')
-        const digest = updateDigest(update), expectedRevision = update.expectedLoop.revision ?? 0
-        if (loop.lastMutation?.operationId === update.operationId) {
+        if (loop.creationOperationId === update.operationId) throw new AgentMuxError('This operation identity belongs to the original progress creation.', 'CONTROL_REQUEST_CONFLICT')
+        const digest = continuousProgressRequestDigest(update), expectedRevision = update.expectedLoop.revision ?? 0
+        if (loop.lastMutation?.operationId === update.operationId && loop.lastMutation.expectedRevision === expectedRevision) {
           if (loop.lastMutation.action !== 'update' || loop.lastMutation.requestDigest !== digest || loop.lastMutation.expectedRevision !== expectedRevision || loop.revision !== expectedRevision + 1) throw new AgentMuxError('The original progress update changed content.', 'CONTROL_REQUEST_CONFLICT')
         } else {
           if (loop.status === 'stopped' || !Number.isSafeInteger(expectedRevision + 1) || !isDeepStrictEqual(actionBasis(loop), actionBasis(update.expectedLoop))) throw new AgentMuxError('The original loop changed. Read its current record before another explicit update.', 'CONTROL_REQUEST_CONFLICT')
@@ -677,13 +676,15 @@ export class ContinuousProgressLoopManager {
       const loop = this.require(pAction.loopId)
       if (!matches(loop)) throw new AgentMuxError('This progress action belongs to another exact loop target.', 'CONTROL_REQUEST_CONFLICT')
       const p = pAction
-      if (loop.lastMutation?.action === 'update' && loop.lastMutation.operationId === p.operationId) throw new AgentMuxError('This operation identity belongs to another progress request.', 'CONTROL_REQUEST_CONFLICT')
-      const prior = this.progressActions.get(p.operationId)
-      if (prior) {
-        if (!isDeepStrictEqual(prior.input, p)) throw new AgentMuxError('The original progress action changed target or content.', 'CONTROL_REQUEST_CONFLICT')
-        return { loop: await prior.result, diskDurability: 'confirmed' as const }
+      const requestDigest = continuousProgressRequestDigest(p), expectedRevision = p.expectedLoop.revision ?? 0
+      if (loop.lastMutation?.operationId === p.operationId && loop.lastMutation.expectedRevision === expectedRevision) {
+        if (loop.lastMutation.action !== p.action || loop.lastMutation.requestDigest !== requestDigest || loop.lastMutation.expectedRevision !== expectedRevision)
+          throw new AgentMuxError('The original progress action changed target or content.', 'CONTROL_REQUEST_CONFLICT')
+        if (loop.lastMutation.phase === 'prepared') await this.persist(loop.loopId)
+        return { loop: this.require(loop.loopId), diskDurability: 'confirmed' as const }
       }
       const mutate = async (assertCurrent: () => void) => {
+        if (!Number.isSafeInteger(expectedRevision + 1)) throw new AgentMuxError('The original loop revision is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
         if (!isDeepStrictEqual(actionBasis(this.require(loop.loopId)), actionBasis(p.expectedLoop))) throw new AgentMuxError('The original loop changed. Read its current record before another explicit action.', 'CONTROL_REQUEST_CONFLICT')
         if (p.action === 'resume' || p.action === 'check') {
           const observed = await this.observe(loop, p.operationId, this.now(), context.signal ?? new AbortController().signal)
@@ -692,14 +693,28 @@ export class ContinuousProgressLoopManager {
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         assertCurrent()
         if (!isDeepStrictEqual(actionBasis(this.require(loop.loopId)), actionBasis(p.expectedLoop))) throw new AgentMuxError('The original loop changed during action preparation. Read its current record before another explicit action.', 'CONTROL_REQUEST_CONFLICT')
-        if (p.action === 'pause') return this.pause(loop.loopId)
-        if (p.action === 'stop') return this.stopLoop(loop.loopId)
+        this.patch(loop.loopId, { revision: expectedRevision + 1, lastMutation: { operationId: p.operationId, action: p.action,
+          expectedRevision, requestDigest, phase: p.action === 'pause' || p.action === 'stop' ? 'settled' : 'prepared' } })
+        // Pure state and operation share one write. A check/resume records its
+        // original operation before any check; recovery never re-executes it.
+        if (p.action === 'pause') { this.pauseWithReason(loop.loopId, 'manual'); this.patch(loop.loopId, { lastDecision: 'Explicitly paused.' }); this.cancelDelivery(loop.loopId) }
+        if (p.action === 'stop') { this.scheduler.stop(loop.loopId); this.cancelDelivery(loop.loopId) }
+        const persistAction = async () => {
+          try { await this.persist(loop.loopId) }
+          catch (error) {
+            this.patch(loop.loopId, { lastMutation: { operationId: p.operationId, action: p.action, expectedRevision, requestDigest, phase: 'prepared' } })
+            throw error
+          }
+        }
+        await persistAction()
+        if (p.action === 'pause' || p.action === 'stop') return this.require(loop.loopId)
         if (p.action === 'resume') await this.resume(loop.loopId, context)
-        return this.checkNow(loop.loopId, () => { context.signal?.throwIfAborted(); assertCurrent() })
+        await this.checkNow(loop.loopId, () => { context.signal?.throwIfAborted(); assertCurrent() })
+        this.patch(loop.loopId, { lastMutation: { operationId: p.operationId, action: p.action, expectedRevision, requestDigest, phase: 'settled' } })
+        await persistAction()
+        return this.require(loop.loopId)
       }
-      const result = p.action === 'resume' || p.action === 'check' ? this.activation(loop.loopId, mutate) : mutate(() => {})
-      this.progressActions.set(p.operationId, { input: structuredClone(p), result })
-      return { loop: await result, diskDurability: 'confirmed' as const }
+      return { loop: await (p.action === 'resume' || p.action === 'check' ? this.activation(loop.loopId, mutate) : mutate(() => {})), diskDurability: 'confirmed' as const }
     })
     return value as import('@agentmux/core').AgentProgressResults[M]
   }

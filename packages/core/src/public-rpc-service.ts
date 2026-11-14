@@ -524,7 +524,7 @@ const NATIVE_FIELDS = {
   'agent.input.epoch': ['hostId'],
   'agent.input.ls': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes'],
   'agent.input.submit': AGENT_INPUT_SUBMIT_FIELDS,
-  'agent.progress.list': ['target'],
+  'agent.progress.list': ['target','operationId'],
   'agent.progress.create': ['inputEpoch','target','intervalMs','prompt','taskSource','operationId'],
   'agent.progress.action': ['target','loopId','action','expectedLoop','operationId'],
   'agent.progress.update': ['target','loopId','expectedLoop','intervalMs','prompt','operationId'],
