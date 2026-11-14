@@ -279,7 +279,14 @@ confirms a different creator, a former unlimited person uses the current finite 
 with prior usage retained; existing finite allocations stay unchanged. Unknown extra observation
 keeps the same application's confirmed creator. Each adapter's receive, profile and reply effects
 remain separate observations; missing native creator support does not imply all abilities are absent.
-Guests keep their independent private lanes. Without Main, the original message waits for setup;
+Ordinary configure saves policy without an online profile read, retaining confirmed creator proof
+only for the same application. Add refreshCreator:true only to explicitly request current native
+creator qualification; the flag is an action, not a stored preference. Missing proof refuses that
+original combined intent before writing and preserves existing configuration and creator proof.
+A new policy revision conflicts with an older refresh; keep original operation IDs, never retarget
+or replay it with a later revision. Identity refresh and ordinary guest policy are independent
+intents; an unknown refresh is not a guest-policy draft or a reason to stop existing chat.
+Guests keep their independent private lanes. Without Main, the creator’s original message waits for setup;
 no separate creator Agent is created. Existing admitted messages keep their original recipient.
 Main's input-only relationship does not publish its ordinary output or grant a native API identity.
 This original Connector owner also checks its own ordinary sharing relationships, including paused
