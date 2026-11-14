@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createRequire } from 'node:module'
-import { access, chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 import { runProbeProcess, stopProbeProcesses } from './probe-process.mjs'
+import { inspectRuntimeApplicationPayload, materializeRuntimePayload, PACKAGED_CTXMUX_ROOT } from './runtime-application-payload.mjs'
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -18,8 +19,8 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const coreRoot = join(repositoryRoot, 'packages', 'core')
 const daemonPath = join(coreRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
 const manifestPath = join(coreRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json')
-const directory = await mkdtemp(join(tmpdir(), 'agentmux-desktop-resource-'))
-const runtimeDirectory = await mkdtemp(_hygiene_fixturePath("tmp/amx-desktop-resource-"))
+const directory = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-desktop-resource-')))
+const runtimeDirectory = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-desktop-resource-")))
 const userData = join(directory, 'user-data')
 const workspaceRoot = join(directory, 'workspaces')
 const measuredWorkspaces = [
@@ -28,13 +29,14 @@ const measuredWorkspaces = [
   { id: 'resource-workspace-c', name: 'Resource Probe C', path: join(workspaceRoot, 'c') }
 ]
 const reportPath = join(directory, 'report.json')
-const entry = resolve(import.meta.dirname, '../out/main/index.js')
+const desktopRoot = join(directory, 'app')
+const entry = join(desktopRoot, 'out', 'main', 'index.js')
+const stagedDaemonPath = join(desktopRoot, PACKAGED_CTXMUX_ROOT, 'darwin-arm64', 'bin', 'ctxmuxd')
 const socketPath = join(runtimeDirectory, 'ctxmux.sock')
 const stateDirectory = join(runtimeDirectory, 'state', 'ctxmux')
 const representativeDirectory = join(directory, 'representative')
 const representativeRuntime = join(runtimeDirectory, 'representative')
 const representativeReportPath = join(representativeDirectory, 'report.json')
-const desktopRoot = resolve(import.meta.dirname, '..')
 
 async function pathExists(path) {
   try {
@@ -66,7 +68,7 @@ async function assertProbePathsRemoved() {
   }
 }
 
-async function ownedDaemonPids(daemonSocket = socketPath, daemonState = stateDirectory) {
+async function ownedDaemonPids(daemonSocket = socketPath, daemonState = stateDirectory, executable = daemonPath) {
   // Private cleanup is authorized by this invocation's exact socket/process scope.
   // Product provenance files are independent observations, not cleanup ownership.
   const processes = await execFileAsync('/usr/sbin/lsof', ['-n', '-P', '-a', '-U', '-Fpcn'], {
@@ -83,7 +85,7 @@ async function ownedDaemonPids(daemonSocket = socketPath, daemonState = stateDir
     else if (current && line === `n${daemonSocket}`) current.ownsSocket = true
   }
   const expectedCommand = [
-    daemonPath,
+    executable,
     '--socket', daemonSocket,
     '--state-dir', daemonState,
     '--readiness-fd', '3'
@@ -256,9 +258,14 @@ async function runStage(stage, identity, run) {
     let ready
     while (!ready && Date.now() < deadline) {
       if (hostError) throw hostError
-      if (host.exitCode !== null || host.signalCode !== null) throw new Error('Private resource Host exited before its ready receipt.')
+      if (host.exitCode !== null || host.signalCode !== null) {
+        throw new Error(`Private resource Host exited before its ready receipt (${host.exitCode ?? host.signalCode}).`)
+      }
       ready = stdout.split('\n').find(line => {
-        try { const value = JSON.parse(line); return value.protocol === 'jsonrpc-2.0' && value.pid === host.pid }
+        try {
+          const value = JSON.parse(line)
+          return value.protocol === 'jsonrpc-2.0' && value.pid === host.pid && value.owner?.processId === host.pid
+        }
         catch { return false }
       })
       if (!ready) await delay(100)
@@ -294,12 +301,12 @@ async function runStage(stage, identity, run) {
     if (result.exitCode !== 0 || run.report.error) throw new Error(run.report.error ?? `Desktop resource probe exited ${result.exitCode}.`)
     if (fixturePath && run.report.mainPid !== desktopPid) throw new Error('Representative probe reported a different Main process.')
   } catch (error) {
-    failures.push(new Error([error.message, stderr.trim(), hostStderr.trim()].filter(Boolean).join('\n'), { cause: error }))
+    failures.push(new Error([error.message, stderr.trim(), hostStderr.trim(), stdout.trim()].filter(Boolean).join('\n'), { cause: error }))
   } finally {
     for (const clean of [
       async () => { if (desktopPid) await stopProbeProcesses(desktopPid, '') },
       async () => { if (host.pid) await stopProbeProcesses(host.pid, '', 2_000) },
-      async () => { run.daemonCount = await stopOwnedDaemons(daemonSocket, daemonState) },
+      async () => { run.daemonCount = await stopOwnedDaemons(daemonSocket, daemonState, stagedDaemonPath) },
       async () => { await stopProbeProcesses(0, root) }
     ]) {
       try { await clean() } catch (error) { failures.push(error); run.cleanup = false }
@@ -336,11 +343,13 @@ async function main() {
         daemonSha256: manifest.binaries.find(binary => binary.name === 'ctxmuxd')?.sha256 ?? null },
       platform: `${process.platform}-${process.arch}`
     }
-    await Promise.all([access(entry), chmod(runtimeDirectory, 0o700),
+    await Promise.all([chmod(runtimeDirectory, 0o700),
       mkdir(representativeRuntime, { recursive: true, mode: 0o700 }),
       ...measuredWorkspaces.map(({ path }) => mkdir(path, { recursive: true, mode: 0o700 }))])
     await exerciseReceiptlessDaemonCleanup()
     receiptlessDaemonCleanup = true
+    await materializeRuntimePayload(await inspectRuntimeApplicationPayload(repositoryRoot), desktopRoot)
+    await access(entry)
     await Promise.all(measuredWorkspaces.map(({ path }) => (
       writeFile(join(path, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
     )))
