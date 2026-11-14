@@ -86,7 +86,10 @@ it('uses the original Parent goal consumer while short and remote-owned choices 
 })
 it('filters original Agent creation directories by description without creating a Session or saving relationships', async () => {
   const { GoalAgentPicker } = await import('../src/renderer/src/components/GoalAgentPicker')
+  const { api } = await import('../src/renderer/src/lib/api')
   const save = vi.fn(), execute = vi.fn()
+  const open = vi.spyOn(api.spaceMounts, 'call')
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('Unexpected Agent creation'))
   useAppStore.setState({ config: { ...composerConfig, workspaces }, executeControl: execute, goalAgentSelectionDrafts: {}, goalAgentCreationDrafts: {} })
   await dom.render(<GoalAgentPicker demand={goal()} role="assignees" onSave={save} onClose={() => {}} />); await settle()
   const createMode = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'New Agent')!
@@ -96,7 +99,7 @@ it('filters original Agent creation directories by description without creating 
   expect(items().map(item => item.dataset.value)).toEqual(['project-12']); expect(field(label).dataset.value).toBe('')
   for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) { const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...modifier }); await act(async () => input().dispatchEvent(event)); expect(event.defaultPrevented).toBe(true); expect(save).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled() }
   await key(input(), 'ArrowDown'); expect(save).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled()
-  await key(document.activeElement as HTMLElement, 'Enter'); expect(field(label).dataset.value).toBe('project-12'); expect(save).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled(); expect(document.querySelector('[role=dialog]')).not.toBeNull(); expect(document.activeElement).toBe(field(label))
+  await key(document.activeElement as HTMLElement, 'Enter'); expect(field(label).dataset.value).toBe('project-12'); expect(save).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled(); expect(open.mock.calls.filter(call => call[0] === 'open')).toEqual([]); expect(launch).not.toHaveBeenCalled(); expect(document.querySelector('[role=dialog]')).not.toBeNull(); expect(document.activeElement).toBe(field(label))
 })
 it('keeps the actual remote room page and explicit server search outside local option filtering', async () => {
   const { ConnectorRoomSelection } = await import('../src/renderer/src/components/ConnectorRoomSelection')
