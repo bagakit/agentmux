@@ -42,6 +42,7 @@ Imports in the table use the prefix `@agentmux/client-ui/` unless written in ful
 
 | Module | Import | What it provides |
 | --- | --- | --- |
+| Agent work location | `patterns/agent-work-location` | Location summary trigger, confirmed position count and distinct descriptions for exact routes. [Pattern and example](docs/patterns/agent-work-location.md#react-entry). |
 | Conversation | `@agentmux/client-ui` (`ConversationView`, `ConversationMessage`), `components/ConversationRecordSequence` | Messages, native-history reading, reasoning and tool traces, permission and question cards, recorded images and files |
 | Composer | `components/AgentComposer`, `components/InlineComposer`, `components/ComposerEditFooter` | Rich message editing and the action row for a compact multiline edit |
 | Terminal | `@agentmux/client-ui/terminal/*` | xterm replay, live output, input encoding and the Unicode width table |

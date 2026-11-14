@@ -2,7 +2,7 @@
 
 “Agent 在哪，工作在哪” describes a question a person might ask from their phone. An Agent is editing a project on a workstation. Its conversation appears in two open views. Which Agent is this, where are the files being changed, and which view will open if I continue?
 
-This is a written interaction contract. The examples use fictional hosts, sessions and views. A host can implement the cases with any UI toolkit. A shared React location chooser is a roadmap item.
+The examples use fictional hosts, sessions and views. A host can implement the contract with any UI toolkit. The React entry provides the disclosed location summary and the descriptions for choices. Keep the choice surface and navigation with the host.
 
 ## What the host supplies
 
@@ -28,6 +28,37 @@ Use a short location summary where people look for Agent details. Offer names th
 | The selected view moved, vanished or changed subject before activation | Keep the chooser and its context. Give a readable result and allow another selection or refresh. Opening a different view requires a new choice. |
 
 Navigation opens the chosen view on the viewing client. On success, focus belongs to that destination. Looking up a location, opening the chooser or selecting a candidate issues **zero** session create, restart, move or stop requests. The session's execution directory continues to come from its execution owner.
+
+## React entry
+
+Import `AgentWorkLocationTrigger`, `summarizeAgentWorkLocations` and `describeAgentWorkLocationChoices` from `@agentmux/client-ui/patterns/agent-work-location`. Import `@agentmux/client-ui/patterns/agent-work-location.css` for the default trigger using the host's theme.
+
+Give the summary the confirmed physical view IDs or the observed unconfirmed or failed state. The trigger takes the host's wording and normal button events. The host gives each route an exact target, a title, visible detail, and the same ordered address fields. The description function adds address details where visible labels collide and preserves the original route data. Use address fields that distinguish otherwise identical choices.
+
+```tsx
+import {
+  AgentWorkLocationTrigger,
+  summarizeAgentWorkLocations
+} from '@agentmux/client-ui/patterns/agent-work-location'
+import '@agentmux/client-ui/patterns/agent-work-location.css'
+
+export function FindBuildAgent({ open }: { open(): void }) {
+  const summary = summarizeAgentWorkLocations({
+    state: 'confirmed',
+    positions: ['review', 'review', 'logs']
+  })
+  return <AgentWorkLocationTrigger
+    agentName="Build agent"
+    actionLabel="Choose location"
+    aria-haspopup="dialog"
+    summary={summary}
+    describeSummary={result => result.state === 'confirmed'
+      ? `${result.count} open locations`
+      : 'Locations unconfirmed'}
+    onClick={open}
+  />
+}
+```
 
 ## Cases an independent host can run
 
