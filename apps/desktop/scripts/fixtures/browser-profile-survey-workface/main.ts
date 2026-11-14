@@ -145,7 +145,7 @@ async function run() {
   receipt.businessPassed=true;receipt.passed=true;return
  }
  if (selectedCase === 'surface-windows') {
-  await surfaceWindowsCase({ phase, directory, window, result, evaluate, workspaceId, pageUrl, core, receipt })
+  await surfaceWindowsCase({ phase, directory, window, result, cli, evaluate, workspaceId, pageUrl, core, receipt })
   await windows.prepareQuit()
   receipt.businessPassed=true; receipt.passed=true; return
  }

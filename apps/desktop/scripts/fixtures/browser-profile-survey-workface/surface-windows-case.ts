@@ -3,12 +3,14 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { BrowserWindow } from 'electron'
 import { nativeInput, nativeUntil } from './native-input'
+import { surfaceWindowNavigation } from './surface-window-navigation'
 
 type Surface = 'survey' | 'recall'
 type Context = {
   phase: string; directory: string; window: BrowserWindow; workspaceId: string; pageUrl: string; receipt: any
   core: { statusAgent(sessionId: string): Promise<{ run?: { runId: string; state: string; pid?: number } }> }
   result(args: string[], input?: string): Promise<any>
+  cli(args: string[]): Promise<any>
   evaluate(expression: string): Promise<any>
 }
 
@@ -17,7 +19,7 @@ const notesText = 'Keep this note beside the research page and Focus.'
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const title = (surface: Surface) => surface === 'survey' ? 'Survey' : 'Recall'
 
-export async function surfaceWindowsCase({ phase, directory, window, result, evaluate, workspaceId, pageUrl, core, receipt }: Context) {
+export async function surfaceWindowsCase({ phase, directory, window, result, cli, evaluate, workspaceId, pageUrl, core, receipt }: Context) {
   const inputs: any[] = []
   const main = nativeInput(window.webContents, inputs)
   const attached = [main]
@@ -108,6 +110,8 @@ export async function surfaceWindowsCase({ phase, directory, window, result, eva
     await nativeUntil(() => recall.inWindow.read(`[...document.querySelectorAll('.ProseMirror')].some(e=>e.checkVisibility()&&e.textContent.includes(${JSON.stringify(notesText)}))`), 'the original Note body is visible and editable')
     await nativeUntil(() => survey.win.contentView.children.find((view: any) =>
       view.webContents?.getURL() === pageUrl && !view.webContents.isLoading() && view.getVisible()), 'live web page visible in original Survey window')
+    if (phase === 'first') receipt.detachedNavigation = await surfaceWindowNavigation({ survey, recall,
+      originalPage: selection, noteId: await noteId(recall.inWindow), notesText, pageUrl, evaluate, result, cli })
     const status = await core.statusAgent(agent.agentSessionId)
     assert.equal(status.run?.runId, agent.runId)
     assert.equal(status.run?.state, 'running')
