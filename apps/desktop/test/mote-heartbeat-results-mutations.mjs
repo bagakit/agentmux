@@ -2,6 +2,7 @@ import {appendFileSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 const base='apps/desktop/src/renderer/src/',reader=base+'lib/mote-heartbeat-reading.ts',quick=base+'components/MoteQuickMode.tsx',save=base+'lib/mote-quick-mode.ts',report=base+'lib/mote-heartbeat-report.ts'
 export const mutations={
+ 'hide-saved-main-with-draft':[quick,[["const originalMain = confirmedSettings ? saved.defaults.conversation : scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.defaults.conversation : undefined","const originalMain = draft.conversation"]],'^keeps the saved Main'],
  'skip-adoption-shared-refresh':[quick,[["if (lifetime.current === epoch) { liveHeartbeat.refresh(); setAttempt(value => value + 1) }",'if (lifetime.current === epoch) { setAttempt(value => value + 1) }']],'^adopting guidance refreshes'],
  'ignore-definition-revision':[reader,[["record.revision !== selectedSchedule.revision || record.futureIntentId !== selectedSchedule.futureIntentId ||",'false ||']],'^a shared lightweight schedule observation'],
  'ignore-adoption-settlement':[reader,[["adoption?.operationId !== selectedAdoption?.operationId || adoption?.state !== selectedAdoption?.state ||",'false ||']],'^a shared lightweight schedule observation'],

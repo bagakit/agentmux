@@ -44,6 +44,27 @@ beforeEach(async () => {
 afterEach(async () => { await app.dispose(); useLauncherState.setState({ drafts: {} }); vi.useRealTimers() })
 function retained() { expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled() }
 async function profile() { await app.mount(); await moteClick(button('Profile')); await vi.waitFor(() => expect(document.querySelector('.mote-quick-mode [aria-label="Mote heartbeat"]')?.textContent, document.querySelector('.mote-quick-mode .mote-heartbeat__issue')?.textContent ?? 'Original heartbeat read').toContain('Sent · acceptance unconfirmed')); return document.querySelector<HTMLElement>('.mote-quick-mode [aria-label="Mote heartbeat"]')! }
+it('keeps the saved Main and Run state visible beside a restored unbound settings draft', async () => {
+  const card = await profile()
+  const target = vi.mocked(api.motePreferences.read).mock.calls.find(([input]) => input.kind === 'quick')![0].target
+  const draftKey = 'mote-quick:' + JSON.stringify(target)
+  await act(async () => {
+    useLauncherState.getState().setMoteQuickDraft(draftKey, { draft: { executorId: 'fixture' }, minutes: '30', rolloverKind: 'keep-current', rolloverMinutes: '' })
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === defaultAgent.id ? { ...session, processState: 'exited' } : session) }))
+  })
+  const save = vi.spyOn(api.motePreferences, 'save')
+  await moteClick(button('Configure heartbeat', card))
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  await vi.waitFor(() => expect(dialog.querySelector('.mote-quick-mode__main')?.textContent).toContain('Run ended'))
+  const main = dialog.querySelector('.mote-quick-mode__main')!
+  expect(main.querySelector('strong')?.title).toBe(defaultAgent.id)
+  expect(dialog.querySelector('[aria-label="Main Agent"]')?.textContent).toContain('No Agent selected in this draft')
+  await moteClick(button('Open discussion', main))
+  expect(document.querySelector('[data-mote-page="discussion"]')).not.toBeNull()
+  expect(save).not.toHaveBeenCalled()
+  expect(useLauncherState.getState().drafts[draftKey]?.moteQuick?.draft).toEqual({ executorId: 'fixture' })
+  retained()
+})
 it('the actual App reads safe input immediately and separates the last input from a newer skipped check', async () => {
   const card = await profile()
   expect(card.textContent).toContain('No input sent on this check'); expect(card.textContent).toContain('Execution result unconfirmed')
