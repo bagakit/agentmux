@@ -37,6 +37,7 @@ export class HostedSessionReaders<R> {
     }
     const id = event.type === 'agent-session' ? event.session.agentSessionId
       : event.type === 'interaction' ? event.request.agentSessionId
+      : event.type === 'agent-input' ? event.receipt.key.agentSessionId
       : 'agentSessionId' in event ? event.agentSessionId : undefined
     const run = 'run' in event ? event.run.runId : 'evidence' in event ? event.evidence.run?.runId : undefined
     for (const reader of id ? this.sessions.get(id) ?? [] : run ? this.runs.get(run) ?? [] : []) found.add(reader)
