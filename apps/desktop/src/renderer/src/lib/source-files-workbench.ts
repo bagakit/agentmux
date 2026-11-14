@@ -34,6 +34,9 @@ function mutationConfirmed(receipt: import('@agentmux/core/files').FilePathMutat
 }
 export const sourceFilesWorkspaceMatches = (left: SourceFilesInput['workspace'], right: SourceFilesInput['workspace'] | undefined) =>
   Boolean(right && left.id === right.id && left.hostId === right.hostId && left.path === right.path)
+const sameFilesLocation = (left: SpaceMountRecord, right: SpaceMountRecord | undefined) => right?.hostId === left.hostId &&
+  right.reference.runtimeId === left.reference.runtimeId && right.reference.spaceId === left.reference.spaceId &&
+  right.zoneId === left.zoneId && right.workspaceId === left.workspaceId
 export function sourceFilesQuery(locator: SourceFilesLocator, path: string) {
   return { zoneId: locator.resource.zoneId, path: path || '.', expectedResource: {
     hostId: locator.resource.hostId, workspaceId: locator.resource.workspaceId, workspacePath: locator.resource.workspacePath
@@ -67,24 +70,29 @@ export function createSourceFilesWorkbench(ports: {
     const workspace = ports.workspace(workspaceId)
     if (!workspace) throw new Error('The original display Workspace is unavailable. Its buffers and requests are retained.')
     let input = ports.get().selections[workspaceId]
-    let observedLocation: string | undefined
     if (!input) {
       const baseline = structuredClone(workspace), runtimeId = await ports.runtime(workspace.hostId)
       if (!sourceFilesWorkspaceMatches(baseline, ports.workspace(workspaceId))) throw new Error('The directory selection changed while observing its Source.')
       // Another explicit selection may have won while discovery awaited.
       input = ports.get().selections[workspaceId]
       if (!input) {
-        const mount = ports.location?.(workspaceId, runtimeId)
-        observedLocation = JSON.stringify(mount ?? null)
         input = { workspace: baseline, target: { hostId: baseline.hostId, expectedRuntimeId: runtimeId },
-          selection: mount ? { kind: 'mount', mount } : { kind: 'directory', path: baseline.path } }
+          selection: { kind: 'directory', path: baseline.path } }
       }
     }
+    // Files follows the exact current Work location. Previously opened documents
+    // and pending effects keep their own original Source addresses.
+    const runtimeId = 'expectedRuntimeId' in input.target ? input.target.expectedRuntimeId : input.target.reference.runtimeId
+    const mount = ports.location?.(workspaceId, runtimeId)
+    const observedLocation = JSON.stringify(mount ?? null)
+    const known = input.selection.kind === 'mount' ? input.selection.mount : input.selection.registration ?? input.locator?.mount
+    if (mount && !sameFilesLocation(mount, known)) input = { workspace: structuredClone(workspace),
+      target: { hostId: mount.hostId, reference: mount.reference }, selection: { kind: 'mount', mount } }
     // A default observation is not a selected Source. Adopt only a confirmed locator;
     // failure must leave the original Workspace's existing Files path available.
     const original = ports.get().selections[workspaceId]
     const owns = () => sourceFilesWorkspaceMatches(input.workspace, ports.workspace(workspaceId)) && ports.get().selections[workspaceId] === original &&
-      (observedLocation === undefined || observedLocation === JSON.stringify(ports.location?.(workspaceId, 'expectedRuntimeId' in input.target ? input.target.expectedRuntimeId : input.target.reference.runtimeId) ?? null))
+      observedLocation === JSON.stringify(ports.location?.(workspaceId, 'expectedRuntimeId' in input.target ? input.target.expectedRuntimeId : input.target.reference.runtimeId) ?? null)
     if (!owns()) return { status: 'unconfirmed', issue: { code: 'SOURCE_FILES_SELECTION_CHANGED', message: 'Restore the original directory selection to check its retained requests.' } }
     const selection = input.registration ? { kind: 'directory' as const, path: input.registration.directory.workspacePath,
       expectedResource: input.registration.directory, ...(input.selection.kind === 'directory' && input.selection.registration ? { registration: input.selection.registration } : {}) } : input.selection
@@ -93,7 +101,11 @@ export function createSourceFilesWorkbench(ports: {
     if (result.status === 'located' || original) {
       const observed = { ...input, ...(result.status === 'located' ? { locator: result.locator, issue: undefined } : {
         issue: result.status === 'unconfirmed' ? result.issue.message : result.status === 'selection-required' ? 'Choose the original Source registration before changing files.' : undefined }) }
-      ports.set(state => state.selections[workspaceId] !== original ? state : { ...state, selections: { ...state.selections, [workspaceId]: observed } })
+      const retained = input !== original && original?.registration && original.registrationStatus !== 'confirmed'
+        ? { workspace: original.workspace, target: original.target, packet: original.registration } : undefined
+      const key = retained ? mintObjectId() : undefined
+      ports.set(state => state.selections[workspaceId] !== original ? state : { ...state, selections: { ...state.selections, [workspaceId]: observed },
+        ...(key && retained ? { folderRequests: { ...state.folderRequests, [key]: retained } } : {}) })
     }
     return result
   }
@@ -197,8 +209,7 @@ export function createSourceFilesWorkbench(ports: {
       const retained = original?.registration && original.registrationStatus !== 'confirmed'
         ? { workspace: original.workspace, target: original.target, packet: original.registration } : undefined
       const known = input.locator?.mount
-      const sameLocation = known?.hostId === registration.hostId && known.reference.runtimeId === registration.reference.runtimeId &&
-        known.reference.spaceId === registration.reference.spaceId && known.zoneId === registration.zoneId && known.workspaceId === registration.workspaceId
+      const sameLocation = sameFilesLocation(registration, known)
       const selected: SourceFilesInput = { workspace: input.workspace, target: input.target, selection, ...(sameLocation ? { locator: input.locator } : {}) }
       const key = mintObjectId()
       ports.set(state => state.selections[workspaceId] !== original ? state : { ...state,

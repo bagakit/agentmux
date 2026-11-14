@@ -8,6 +8,10 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 export function SourceFilesAccess({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
   const displayPath = usePathDisplay()
   const input = useAppStore(state => state.sourceFilesInputs.selections[workspace.id])
+  const workLocation = useAppStore(state => {
+    const choice = state.workbenchSpaceSelection
+    return choice?.workspaceId === workspace.id ? JSON.stringify([choice.spaceId, choice.zoneId, choice.sourceRuntimeId ?? null]) : null
+  })
   const pending = useAppStore(state => state.sourceFilesInputs.pending)
   const creations = useAppStore(state => state.sourceFilesInputs.creations)
   const folderRequests = useAppStore(state => state.sourceFilesInputs.folderRequests)
@@ -22,9 +26,10 @@ export function SourceFilesAccess({ workspace, visible }: { workspace: Workspace
   useEffect(() => {
     if (!visible) return
     let active = true
+    setResult(null); setIssue(null)
     void useAppStore.getState().resolveFilesSource(workspace.id).then(value => { if (active) setResult(value) }, cause => { if (active) setIssue(cause instanceof Error ? cause.message : String(cause)) })
     return () => { active = false }
-  }, [visible, workspace.id, workspace.hostId, workspace.path])
+  }, [visible, workspace.id, workspace.hostId, workspace.path, workLocation])
   useEffect(() => {
     if (!visible || !input?.locator) return
     let active = true, release: (() => void) | undefined
