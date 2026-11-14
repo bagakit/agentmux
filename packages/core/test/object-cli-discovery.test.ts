@@ -17,9 +17,9 @@ import { issueAgentCapability, hashAgentCapability } from '../src/agent-capabili
 
 const goals: AgentMuxDemand[] = [
   { id: 'original-G1', title: 'First', description: 'saved', status: 'in_progress', priority: 'normal', projectId: 'P1', projectName: 'One',
-    assigneeExecutorId: 'E1', activities: [{ id: 'A1', kind: 'progress', message: 'original Goal activity', actorId: null, createdAt: _tailFixtureEpoch(0, 0, 15) }], sessionIds: ['generic-session'], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 20), source: 'session' },
+    assigneeSessionIds: ['generic-session'], supervisorSessionId: null, participations: [], activities: [{ id: 'A1', kind: 'progress', message: 'original Goal activity', actorId: null, createdAt: _tailFixtureEpoch(0, 0, 15) }], sessionIds: ['generic-session'], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 20), source: 'session' },
   { id: 'original-G2', title: 'Second', description: 'saved too', status: 'done', priority: 'low', projectId: 'P2', projectName: 'Two',
-    assigneeExecutorId: 'E2', activities: [{ id: 'A2', kind: 'review', message: 'other Goal activity', actorId: null, createdAt: _tailFixtureEpoch(0, 0, 25) }], sessionIds: ['other-session'], createdAt: _tailFixtureEpoch(0, 0, 2), updatedAt: _tailFixtureEpoch(0, 0, 30), source: 'session' }
+    assigneeSessionIds: ['other-session'], supervisorSessionId: null, participations: [], activities: [{ id: 'A2', kind: 'review', message: 'other Goal activity', actorId: null, createdAt: _tailFixtureEpoch(0, 0, 25) }], sessionIds: ['other-session'], createdAt: _tailFixtureEpoch(0, 0, 2), updatedAt: _tailFixtureEpoch(0, 0, 30), source: 'session' }
 ]
 let root: string, server: AgentMuxControlServer
 const seen: AgentMuxControlRequest[] = []
@@ -30,6 +30,7 @@ beforeEach(async () => {
       seen.push(request)
       if (request.operation === 'demand.list') return { operation: request.operation, demands: structuredClone(goals) }
       if (request.operation === 'demand.show') return { operation: request.operation, demand: goals.find(goal => goal.id === request.demandId) ?? null, goalContinuations: [] }
+      if (request.operation === 'demand.activity.collection') return { operation: request.operation, groups: request.demandIds.map(demandId => ({ demandId, activities: goals.find(goal => goal.id === demandId)!.activities! })), diskDurability: 'confirmed' }
       if (request.operation === 'demand.activity.read') return { operation: request.operation, demandId: request.demandId, activities: goals.find(goal => goal.id === request.demandId)?.activities ?? [], diskDurability: 'confirmed' }
       if (request.operation === 'list.projects') return { operation: request.operation, projects: [
         { projectId: 'P1', name: 'One', hostId: 'fixture', path: root, kind: 'folder', repoPath: null, branch: null, activeAgentSessionIds: [] },
@@ -66,18 +67,18 @@ describe('compiled object discovery through the actual public service and origin
   })
 
   it('filters original Goal links/activity through the service and keeps original durable IDs', async () => {
-    const listed = await run(['goal', 'ls', '--project', 'P1', '--session', 'generic-session', '--executor', 'E1', '--status', 'in_progress', '--limit', '1'])
+    const listed = await run(['goal', 'ls', '--project', 'P1', '--session', 'generic-session', '--assignee', 'generic-session', '--status', 'in_progress', '--limit', '1'])
     expect(listed.code, listed.stderr).toBe(0)
     expect(JSON.parse(listed.stdout)).toMatchObject({ operation: 'goal.ls', result: { goals: [goals[0]] } })
     const activity = await run(['goal', 'activity', '--goal', 'original-G1', '--project', 'P1', '--session', 'generic-session', '--since', '10'])
     expect(activity.code, activity.stderr).toBe(0)
     expect(JSON.parse(activity.stdout)).toEqual({ ok: true, operation: 'goal.activity', result: {
-      activity: [{ goalId: 'original-G1', ...goals[0]!.activities![0] }], diskDurability: 'confirmed'
+      activity: [{ goalId: 'original-G1', ...goals[0]!.activities![0] }], diskDurability: 'confirmed', coverage: { scope: 'matching-goals', observation: 'selected-goals-then-confirmed-activity', order: 'goal-order-then-append', matchedGoalCount: 1, totalActivityCount: 1, returnedActivityCount: 1, limit: 100, truncated: false }
     } })
     const inspected = await run(['goal', 'inspect', '--goal', 'original-G1'])
     expect(inspected.code, inspected.stderr).toBe(0)
     expect(JSON.parse(inspected.stdout)).toEqual({ ok: true, operation: 'goal.inspect', result: { goal: goals[0], goalContinuations: [] } })
-    expect(seen.map(request => request.operation)).toEqual(['demand.list', 'demand.list', 'demand.activity.read', 'demand.show'])
+    expect(seen.map(request => request.operation)).toEqual(['demand.list', 'demand.list', 'demand.activity.collection', 'demand.show'])
   })
 
   it('reads original Desktop facts with exact canonical output, without an Agent caller', async () => {
@@ -90,7 +91,7 @@ describe('compiled object discovery through the actual public service and origin
     expect(seen[0]).toMatchObject({ operation: 'inspect.client' })
   })
 
-  it('preserves exact Region/Tab debugging facts and verified self, while keeping unavailable presentation separate', async () => {
+  it('preserves exact Region/Tab debugging facts and rejects ambiguous self aliases, while keeping unavailable presentation separate', async () => {
     await server.stop()
     const capability = issueAgentCapability(), storePath = join(root, 'sessions.json')
     const store = new AgentMuxFileAgentSessionStore(storePath)
@@ -128,12 +129,11 @@ describe('compiled object discovery through the actual public service and origin
         expect(JSON.parse(reply.stdout).result.presentation[flag.slice(2)]).toEqual(expected)
       }
       const self = await runCompiledObjectCli(['space', 'inspect', '--region', 'self'], managed)
-      expect(self.code, self.stderr).toBe(0)
-      expect(JSON.parse(self.stdout).result.presentation.region).toEqual(region)
-      expect(seen.at(-1)).toMatchObject({ operation: 'space.inspect', target: { regionId: 'R' } })
+      expect(self.code).toBe(1)
+      expect(JSON.parse(self.stderr).error.code).toBe('INVALID_CONTROL_REQUEST')
       const unmanaged = await run(['space', 'inspect', '--region', 'self'])
       expect(unmanaged.code).toBe(1)
-      expect(JSON.parse(unmanaged.stderr).error.code).toBe('MANAGED_AGENT_CONTEXT_REQUIRED')
+      expect(JSON.parse(unmanaged.stderr).error.code).toBe('INVALID_CONTROL_REQUEST')
       viewFailure = 'CONTROL_UNAVAILABLE'
       const unknown = await run(['space', 'inspect', '--region', 'R'])
       expect(unknown.code, unknown.stderr).toBe(0)

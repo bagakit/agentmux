@@ -73,8 +73,8 @@ describe('public service uses the original Core and Desktop business owners', ()
     const filled = new AgentMuxRpcService({ coreClients: h.coreClients })
     await expect(empty.call('goal.activity', { since: -1 })).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
     for (const service of [empty, filled]) await expect(service.call('agent.ls', { executorId: [] } as any)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
-    expect(await empty.call('goal.activity', {})).toEqual({ activity: [], diskDurability: 'confirmed' })
-    expect(await empty.call('agent.ls', {})).toEqual({ sessions: [], errors: [] })
+    expect(await empty.call('goal.activity', {})).toEqual({ activity: [], diskDurability: 'confirmed', coverage: { scope: 'matching-goals', observation: 'selected-goals-then-confirmed-activity', order: 'goal-order-then-append', matchedGoalCount: 0, totalActivityCount: 0, returnedActivityCount: 0, limit: 100, truncated: false } })
+    expect(await empty.call('agent.ls', {})).toEqual({ sessions: [], errors: [], retired: [], unavailableSessions: [], nextCursor: null })
   })
   it('keeps Core Sessions and per-item status failures when no Desktop exists', async () => {
     const h = await owner(), actualStatus = h.client.statusAgent.bind(h.client)
@@ -155,7 +155,7 @@ describe('public service uses the original Core and Desktop business owners', ()
     expect((await service.call('agent.ls', {})).sessions.map(entry => entry.session.agentSessionId)).toEqual([replacementId])
     await service.dispose(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   })
-  it('observes a later durable Native binding and exact status without rebuilding the live registry', async () => {
+  it('observes a later durable Native binding and exact status while preserving original live identities', async () => {
     const h = await owner(), before = h.client.agentSessions(), base = (await loadAgentSessions(h.store))[0]!
     const fresh = { ...base, agentSessionId: 'later-acp-session', run: { runId: 'later-acp-run' },
       nativeHandle: { kind: 'acp' as const, adapterId: 'private-adapter', sessionId: 'later-native-session' } }
@@ -165,9 +165,10 @@ describe('public service uses the original Core and Desktop business owners', ()
       .then(value => value, error => ({ error: error.code }))
     expect(inspected, 'Native lookup reads the late durable binding').toMatchObject({ session: { agentSessionId: fresh.agentSessionId }, status: { run: { runId: fresh.run.runId } } })
     const listed = await service.call('agent.ls', {})
-    expect(listed.sessions.map(entry => entry.session.agentSessionId)).toEqual(['caller', 'recipient', 'later-acp-session'])
+    expect(listed.sessions.map(entry => entry.session.agentSessionId)).toEqual(['caller', 'later-acp-session', 'recipient'])
     expect(listed.errors).toEqual([])
-    expect(h.client.agentSessions()).toEqual(before)
+    expect(h.client.agentSessions().filter(session => session.agentSessionId !== fresh.agentSessionId)).toEqual(before)
+    expect(h.client.agentSession(fresh.agentSessionId)).toMatchObject({ run: fresh.run, nativeHandle: fresh.nativeHandle })
     await service.dispose(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   })
   it('refuses old public Goal and operation names while leaving user text literal', () => {
@@ -178,12 +179,12 @@ describe('public service uses the original Core and Desktop business owners', ()
   })
   it('preserves original Goal activity in both canonical read and snapshot', async () => {
     const goal = { id: 'g', title: 'demandId is literal prose', description: '', status: 'todo', priority: 'normal',
-      projectId: null, projectName: null, assigneeExecutorId: null, sessionIds: [], tags: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 2), source: 'default-topic' as const,
+      projectId: null, projectName: null, assigneeSessionIds: [], supervisorSessionId: null, participations: [], sessionIds: [], tags: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 2), source: 'default-topic' as const,
       activities: [{ id: 'activity-original', kind: 'progress', message: 'Real retained activity', createdAt: _tailFixtureEpoch(0, 0, 1), actorId: 'caller', operationId: 'activity-op' }] }
-    const service = new AgentMuxRpcService({ coreClients: () => [], execute: async request => request.operation === 'demand.activity.read'
-      ? { operation: request.operation, demandId: goal.id, activities: goal.activities, diskDurability: 'confirmed' }
+    const service = new AgentMuxRpcService({ coreClients: () => [], execute: async request => request.operation === 'demand.activity.collection'
+      ? { operation: request.operation, groups: [{ demandId: goal.id, activities: goal.activities }], diskDurability: 'confirmed' }
       : { operation: 'demand.list', demands: [goal] } })
-    expect(await service.call('goal.activity', {})).toEqual({ activity: [{ goalId: 'g', ...goal.activities[0] }], diskDurability: 'confirmed' })
+    expect(await service.call('goal.activity', {})).toEqual({ activity: [{ goalId: 'g', ...goal.activities[0] }], diskDurability: 'confirmed', coverage: { scope: 'matching-goals', observation: 'selected-goals-then-confirmed-activity', order: 'goal-order-then-append', matchedGoalCount: 1, totalActivityCount: 1, returnedActivityCount: 1, limit: 100, truncated: false } })
     const snapshot = await service.call('app.snapshot', { include: ['goals', 'activity'] })
     expect(snapshot.goals).toHaveLength(1); expect(snapshot.goals[0]!.title).toBe(goal.title); expect(snapshot.activity).toHaveLength(1)
   })

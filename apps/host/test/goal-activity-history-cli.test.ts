@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import * as core from '@agentmux/core'
 import { openDemandStore } from '@agentmux/demand'
 import { startAgentMuxHost } from '../src/host.js'
+import { desktopGoalControl } from '../../desktop/src/main/desktop-goals.js'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { pageGoalActivity, parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from '../../../packages/core/src/goal-activity-history.js'
@@ -81,7 +82,7 @@ it('actual Host aggregate reports complete matching scope and truncation; cursor
   expect(tail.code, tail.stderr).toBe(0)
   const result = JSON.parse(tail.stdout).result
   expect(result.activity).toHaveLength(2)
-  expect(result.coverage).toEqual({ scope: 'matching-goals', order: 'goal-order-then-append', matchedGoalCount: 3,
+  expect(result.coverage).toEqual({ scope: 'matching-goals', observation: 'selected-goals-then-confirmed-activity', order: 'goal-order-then-append', matchedGoalCount: 3,
     totalActivityCount: 18, returnedActivityCount: 2, limit: 2, truncated: true })
   const single = await f.cli(['--goal', 'goal-other', '--limit', '2'])
   expect(single.code, single.stderr).toBe(0)
@@ -108,4 +109,41 @@ it('strict public history codec rejects foreign scope, oversized pages and inval
   for (const value of [{ ...page, goalId: 'other' }, { ...page, totalCount: 0 }, { ...page, activities: [activity, activity] },
     { ...page, nextCursor: { goalId: 'other', throughActivityId: 'a', beforeActivityId: 'a' } }])
     expect(() => parseGoalActivityHistoryResult(value, input)).toThrow()
+})
+
+it('actual Host preserves original activity durability failure and confirms one exact batch without replaying input', async () => {
+  const f = await fixture(), sessions = await readFile(f.original.store.path)
+  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.original.root, 'control.sock') } }); cleanup.push(() => rpc.dispose())
+  const confirm = vi.spyOn(Object.getPrototypeOf(f.demands), 'confirmSnapshot')
+  const batch = await rpc.call('goal.activity.collection', { goalIds: ['goal-other', 'goal-original'] })
+  expect(batch.groups.map(group => group.goalId)).toEqual(['goal-other', 'goal-original'])
+  expect(batch.groups.map(group => group.activities.length)).toEqual([1, 17])
+  expect(batch.diskDurability).toBe('confirmed'); expect(confirm).toHaveBeenCalledTimes(1)
+  for (const goalIds of [[], ['goal-original', 'goal-original'], ['missing-goal']])
+    await expect(rpc.call('goal.activity.collection', { goalIds })).rejects.toThrow()
+  const calls: string[] = []
+  const desktopOwner = desktopGoalControl({ callOriginalCore: async (_host, method, params) => {
+    calls.push(method); return await rpc.call(method, params as never)
+  } })
+  const desktop = new core.AgentMuxControlServer({ socketPath: join(f.original.root, 'collection-desktop.sock'), coreClients: () => [], execute: async (request, _name, context) => await desktopOwner(request, context) })
+  await desktop.start(); cleanup.push(() => desktop.stop())
+  const desktopRpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.original.root, 'collection-desktop.sock') } }); cleanup.push(() => desktopRpc.dispose())
+  const forwarded = await desktopRpc.call('goal.activity.collection', { goalIds: ['goal-original'] })
+  expect(forwarded.groups[0]!.goalId).toBe('goal-original'); expect(forwarded.groups[0]!.activities).toHaveLength(17)
+  expect(calls).toEqual(['goal.activity.collection'])
+  const badCollection = vi.spyOn(Object.getPrototypeOf(f.demands), 'readActivityCollection').mockResolvedValue({ groups: [{ demandId: 'foreign-goal', activities: [] }], diskDurability: 'confirmed' })
+  await expect(rpc.call('goal.activity.collection', { goalIds: ['goal-original'] })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+  badCollection.mockRestore()
+  confirm.mockClear()
+  const aggregate = await f.cli(['--limit', '3'])
+  expect(aggregate.code, aggregate.stderr).toBe(0); expect(confirm).toHaveBeenCalledTimes(1)
+  confirm.mockRejectedValue(new Error('Original activity disk confirmation is unavailable'))
+  const failed = await f.cli(['--goal', 'goal-original'])
+  expect(failed.code, failed.stdout).not.toBe(0); expect(JSON.parse(failed.stderr).error.message).toContain('disk confirmation is unavailable')
+  await expect(f.demands.readActivities('goal-original')).rejects.toThrow('disk confirmation is unavailable')
+  expect((await rpc.call('goal.inspect', { goalId: 'goal-original' })).goal!.activities).toHaveLength(17)
+  expect((await rpc.call('goal.ls', { all: true })).goals).toHaveLength(3)
+  expect(await readFile(f.original.store.path)).toEqual(sessions)
+  confirm.mockRestore()
+  expect((await f.demands.readActivities('goal-original')).activities).toHaveLength(17)
 })
