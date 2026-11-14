@@ -1,3 +1,4 @@
+import { BrowserProfileBookmarks } from './BrowserProfileBookmarks'
 import { BrowserProfileExtensions } from './BrowserProfileExtensions'
 import { TextInput } from '@agentmux/client-ui/input'
 import * as RovingFocus from '@radix-ui/react-roving-focus'
@@ -193,7 +194,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
           <button className="small-button settings-resource-back" type="button" onClick={() => { setView('library'); setReturnFocus({ id: selected?.id ?? null }) }}>
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
-          {selected && list.revision !== null ? <ProfileEditor assignment={hueAssignment} key={selected.id} profile={selected} revision={list.revision} folders={folders} proxies={list.proxies ?? []}
+          {selected && list.revision !== null ? <ProfileEditor active={active && !showTrash} assignment={hueAssignment} key={selected.id} profile={selected} revision={list.revision} folders={folders} proxies={list.proxies ?? []}
             uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             onCopy={() => void copy(selected, selected.revision)}
@@ -207,7 +208,8 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   )
 }
 
-function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy, folders, proxies }: {
+function ProfileEditor({ active, assignment, profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy, folders, proxies }: {
+  active: boolean
   profile: BrowserProfileSummary
   folders: BrowserProfileFolder[]
   proxies: import('@agentmux/core/control').BrowserProxyAsset[]
@@ -370,6 +372,7 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
 
       <ProfileEnvironmentEditor profile={profile} />
       <BrowserProfileExtensions profile={profile} />
+      <BrowserProfileBookmarks profile={profile} active={active} />
 
       {/* The editor is already keyed by Profile, so each section starts fresh per Profile without a key of its own. */}
       <ProfileNetworkRoute profile={profile} proxy={proxies.find(proxy => proxy.id === profile.proxyBinding?.proxyId)} baselineRefresh={baselineRefresh} openBrowsers={open.length} run={run} />

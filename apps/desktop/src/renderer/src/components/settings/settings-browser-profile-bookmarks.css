@@ -1,0 +1,28 @@
+.profile-bookmarks { min-width: 0; }
+.profile-bookmarks__heading { display: flex; text-align: left; gap: 6px; align-items: center; width: 100%; padding: 0; border: 0; background: none; color: var(--text-1); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.profile-bookmarks__body { display: grid; gap: 10px; margin-top: 9px; min-width: 0; }
+.profile-bookmarks p { margin: 0; overflow-wrap: anywhere; }
+.profile-bookmarks button { font: inherit; cursor: pointer; }
+.profile-bookmarks button:disabled { opacity: .5; cursor: default; }
+.profile-bookmarks button:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.profile-bookmarks__actions, .profile-bookmarks__crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 12px; min-width: 0; }
+.profile-bookmarks__actions button, .profile-bookmarks__crumbs button, .profile-bookmarks__receipt > button, .profile-bookmarks__browser > button, .profile-bookmarks__draft > button, .profile-bookmarks__issue button { padding: 2px 0; border: 0; background: none; color: var(--text-2); overflow-wrap: anywhere; text-align: left; }
+.profile-bookmarks button:hover { color: var(--text-1); }
+.profile-bookmarks__crumbs { color: var(--text-3); font-size: 11px; gap: 4px; }
+.profile-bookmarks__browser { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: end; min-width: 0; }
+.profile-bookmarks label { display: grid; gap: 5px; min-width: 0; font-size: 11px; color: var(--text-3); }
+.profile-bookmarks__browser label { flex: 1 1 200px; }
+.profile-bookmarks select, .profile-bookmarks input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-1); color: var(--text-1); padding: 6px 7px; font: inherit; }
+.profile-bookmarks__list { list-style: none; margin: 0; padding: 0; display: grid; min-width: 0; }
+.profile-bookmarks__list > li { display: grid; gap: 4px; min-width: 0; border-top: 1px solid var(--line); padding-block: 9px; }
+.profile-bookmarks__entry { display: flex; flex-wrap: wrap; gap: 3px 7px; min-width: 0; text-align: left; padding: 0; border: 0; background: none; color: var(--text-1); overflow-wrap: anywhere; }
+.profile-bookmarks__entry:disabled { opacity: 1; }
+.profile-bookmarks__address { flex-basis: 100%; color: var(--text-3); font-size: 11px; }
+.profile-bookmarks__meta { color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; }
+.profile-bookmarks__draft { display: grid; gap: 9px; min-width: 0; border-left: 2px solid var(--accent); padding-left: 12px; }
+.profile-bookmarks__draft > p { color: var(--text-3); }
+.profile-bookmarks__actions .profile-bookmarks__primary { color: var(--accent); font-weight: 600; }
+.profile-bookmarks__receipt { display: grid; gap: 5px; border-left: 2px solid var(--line); padding-left: 12px; min-width: 0; }
+.profile-bookmarks__receipt code { font-size: 11px; white-space: normal; overflow-wrap: anywhere; }
+.profile-bookmarks__issue { color: var(--amber-text); }
+.profile-bookmarks__issue.profile-bookmarks__receipt { border-color: var(--amber-text); }

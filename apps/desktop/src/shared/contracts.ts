@@ -2069,6 +2069,11 @@ export type AgentMuxDesktopApi = {
     listProfiles(): Promise<BrowserProfileSummary[]>
     /** The same list with the revision Main committed; edits must name this revision. */
     readProfiles(): Promise<BrowserProfileList>
+    listProfileBookmarks(profileId: string, folderId: string | null, operationId?: string): Promise<import('@agentmux/core/control').BrowserProfileBookmarkList>
+    editProfileBookmark(profileId: string, expectedRevision: string, operationId: string, change: import('@agentmux/core/control').BrowserProfileBookmarkChange): Promise<import('@agentmux/core/control').BrowserProfileBookmarkMutation>
+    importProfileBookmarks(profileId: string, folderId: string | null, expectedRevision: string, operationId: string, sourcePath: string): Promise<import('@agentmux/core/control').BrowserProfileBookmarkMutation>
+    exportProfileBookmarks(profileId: string, folderId: string | null, expectedRevision: string, operationId: string, destinationPath: string): Promise<import('@agentmux/core/control').BrowserProfileBookmarkMutation>
+    openProfileBookmark(profileId: string, bookmarkId: string, browserId: string, expectedRevision: string, operationId: string): Promise<import('@agentmux/core/control').BrowserProfileBookmarkMutation>
     listProfileExtensions(profileId: string, operationId?: string): Promise<{ profileId: string; profileRevision: string; extensions: import('@agentmux/core/control').BrowserProfileExtension[]; pending: import('@agentmux/core/control').BrowserProfileExtensionPending[]; receipt?: import('@agentmux/core/control').BrowserProfileExtensionReceipt | null }>
     prepareProfileExtension(profileId: string, expectedRevision: string, operationId: string, sourcePath: string, extensionId?: string): Promise<import('@agentmux/core/control').BrowserProfileExtensionReview>
     applyProfileExtension(profileId: string, expectedRevision: string, reviewId: string): Promise<{ profileId: string; profileRevision: string; outcome: 'applied' | 'cancelled'; receipt: import('@agentmux/core/control').BrowserProfileExtensionReceipt | null; application?: import('@agentmux/core/control').BrowserProfileExtensionApplication }>
