@@ -1,0 +1,35 @@
+/* The original Goal remains one mounted document, with explicit reading destinations. */
+.goals-detail__reading-nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-5); margin: var(--sp-4) 0 var(--sp-5); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); }
+.goals-detail__reading-nav > button { padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: 550 var(--fs-body)/1.5 var(--font-sans); cursor: pointer; }
+.goals-detail__reading-nav > button:hover { color: var(--text); background: var(--surface-2); }
+.goals-detail__reading-nav > button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.goals-detail__reading-nav > .goals-detail__copy { margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }
+.goals-detail__brief, .goals-detail__plan, .goals-detail__activity { min-width: 0; scroll-margin-top: 52px; }
+.goals-detail__brief:focus, .goals-detail__plan:focus, .goals-detail__activity:focus { outline: none; }
+.goal-work-area__overview { display: grid; align-items: start; gap: var(--sp-6); min-width: 0; padding: var(--sp-5) 0; }
+.goal-work-area__overview > .goals-detail__brief { margin: 0; padding: 0; border: 0; }
+.goals-detail__brief .goals-section-heading { margin-bottom: var(--sp-3); }
+.goals-detail__brief .goals-intent__reading { line-height: 1.65; }
+.goals-detail__plan-tools { display: flex; justify-content: flex-end; margin-bottom: var(--sp-2); }
+.goals-detail__plan-tools .small-button { min-height: 24px; font-size: var(--fs-meta); }
+.goal-work-area__records { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--sp-4); padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.goal-work-area__records > .small-button { min-height: 24px; font-size: var(--fs-meta); }
+.goal-work-area__records > details > summary { color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
+.goal-work-area__records > details[open] > summary { margin-bottom: var(--sp-4); }
+.goal-work-area > .goal-responsibility { display: grid; gap: var(--sp-2); }
+.goal-work-area > .goal-responsibility > p { margin: 0; }
+.goal-work-area .goal-delegation__heading { min-height: 0; }
+.goal-work-area .goal-delegation__heading:empty { display: none; }
+.goals-detail__activity { border-top: 1px solid var(--line-soft); }
+.goals-detail__address-issue { margin-bottom: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
+@container goal-detail (width >= 1320px) {
+  .goal-work-area__overview { grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: var(--sp-6); }
+}
+@container goal-detail (960px <= width < 1320px) {
+  .goals-detail__brief .goals-intent__reading--clamped { max-height: calc(min(var(--goals-intent-lines), 8) * 1.65em); }
+}
+@container goal-detail (width < 640px) {
+  .goals-detail__reading-nav { gap: var(--sp-2); }
+  .goals-detail__reading-nav > .goals-detail__copy { margin-left: 0; }
+  .goal-work-area__overview { gap: var(--sp-5); }
+}
