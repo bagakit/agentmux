@@ -37,6 +37,7 @@ import {
   type BrowserScreenshotCapture,
   type BrowserScriptRunReport,
   type BrowserSnapshot,
+  type BrowserZoomStep,
   type BrowserFindInPageRequest,
   type BrowserFindInPageResult,
   type BrowserViewport,
@@ -165,6 +166,8 @@ type BrowserEntry = {
   faviconDataUrl?: string | undefined
   faviconUrl?: string | undefined
   faviconRequest?: AbortController | undefined
+  /** The zoom Chromium applied to this page's site in its Profile, as last published. */
+  zoomFactor?: number | undefined
   recoveryPreviewJob?: AbortController | undefined
   recoveryPreviewNavigation?: string | undefined
   recoveryPreviewRetired?: true
@@ -420,6 +423,15 @@ export interface AppLinkHost {
 }
 
 export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
+/** Chromium's preset page zoom factors, which a common browser's Zoom In and Zoom Out step through. */
+const BROWSER_ZOOM_PRESETS = [0.25, 1 / 3, 0.5, 2 / 3, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5]
+
+/** The next preset beyond the applied zoom, or the product default on reset; either end of the presets stays put. */
+export function steppedBrowserZoom(current: number, step: BrowserZoomStep): number {
+  if (step === 'reset') return DEFAULT_BROWSER_ZOOM_FACTOR
+  const levels = step === 'in' ? BROWSER_ZOOM_PRESETS : [...BROWSER_ZOOM_PRESETS].reverse()
+  return levels.find(level => step === 'in' ? level > current + 0.001 : level < current - 0.001) ?? current
+}
 export interface NativeBrowserOwner { browserId: string; bounds: BrowserBounds; view: WebContentsView; inputShield?: WebContentsView }
 export interface NativeBrowserInputBarrier { ready: Promise<void>; release(): Promise<void> }
 type NativeBrowserInputSurface = {
@@ -2438,8 +2450,6 @@ export class BrowserViewManager {
       }
       this.requireHumanInput(entry)
 
-      const zoomFactor = authoritativeView.webContents.getZoomFactor()
-      candidate.webContents.setZoomFactor(zoomFactor)
       this.applyViewport(entry, candidate, entry.viewport, this.profiles.environmentSettings?.(profileId)?.screen ?? null)
       if (entry.bounds) candidate.setBounds(entry.bounds)
       candidate.setVisible(entry.visible)
@@ -2462,6 +2472,7 @@ export class BrowserViewManager {
       entry.nativeChild?.closing?.settle(false)
       this.sitePermissions?.cancel(entry.id, authoritativeView.webContents)
       entry.view = candidate
+      entry.zoomFactor = candidate.webContents.getZoomFactor()
       this.clearNativeChildWarning(entry, 'placementWarning')
       entry.controlFeedback = candidateControlFeedback
       // Candidate preparation predates current-owner input/media observation. Do not inherit
@@ -2557,6 +2568,29 @@ export class BrowserViewManager {
     }
     this.emit(entry)
     return this.snapshot(entry)
+  }
+
+  /**
+   * A person's reading zoom, which an Agent's control does not hold back. Chromium keeps it for the page's site in
+   * the original Profile, so every live page whose zoom followed is refitted and republished.
+   */
+  zoom(id: string, step: BrowserZoomStep): BrowserSnapshot {
+    if (step !== 'in' && step !== 'out' && step !== 'reset') throw new Error('Unknown Browser zoom step')
+    const entry = this.require(id), contents = entry.view.webContents
+    contents.setZoomFactor(steppedBrowserZoom(contents.getZoomFactor(), step))
+    for (const page of this.entries.values()) if (page.zoomFactor !== undefined) this.observeZoom(page)
+    return this.snapshot(entry)
+  }
+
+  /** Publishes a changed zoom of this page's site and refits its fixed viewport; called once Chromium has applied it. */
+  private observeZoom(entry: BrowserEntry): void {
+    if (entry.view.webContents.isDestroyed()) return
+    const zoomFactor = entry.view.webContents.getZoomFactor(), previous = entry.zoomFactor
+    if (zoomFactor === previous) return
+    entry.zoomFactor = zoomFactor
+    // A new page's first document is fitted once it is ready.
+    if (previous !== undefined) this.applyViewport(entry)
+    this.emit(entry)
   }
 
   async captureScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender }): Promise<BrowserScreenshotCapture> {
@@ -4750,7 +4784,6 @@ export class BrowserViewManager {
     contents.on('media-started-playing', () => this.markResourceRisk(entry, view, 'media'))
     contents.on('did-finish-load', () => {
       if (!this.owns(entry, view)) return
-      contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
       this.applyViewport(entry, view)
       void this.refreshFaviconAfterLoad(entry, view)
     })
@@ -4763,7 +4796,6 @@ export class BrowserViewManager {
         document.committedNavigationId !== entry.navigationId) return
       // The original viewport policy must be active before the first consumer,
       // even when images or child frames keep the full load in progress.
-      contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
       this.applyViewport(entry, view)
       document.resolve()
     })
@@ -4862,6 +4894,8 @@ export class BrowserViewManager {
       entry.error = null
       this.schedulePageMemory(entry, view)
       this.emit(entry)
+      // A site without a zoom of its own reads 100% here; Chromium's commit observer applies the default after this one.
+      setImmediate(() => { if (this.owns(entry, view)) this.observeZoom(entry) })
     })
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (!isMainFrame || !this.owns(entry, view)) return
@@ -5006,7 +5040,9 @@ export class BrowserViewManager {
         ...(capsule?.mode === 'injected' ? { preload: fileURLToPath(new URL('../preload/capsule.cjs', import.meta.url)) } : {}),
         contextIsolation: true,
         sandbox: true,
-        nodeIntegration: false
+        nodeIntegration: false,
+        // Chromium applies it to a site of this Profile that has no zoom of its own, on each navigation.
+        zoomFactor: DEFAULT_BROWSER_ZOOM_FACTOR
       }
     })
     const session = view.webContents.session
@@ -5328,6 +5364,7 @@ export class BrowserViewManager {
       navigationId: entry.navigationId,
       dialogTypes: DESKTOP_BROWSER_DIALOG_TYPES,
       faviconDataUrl: entry.faviconDataUrl,
+      ...(entry.zoomFactor === undefined ? {} : { zoomFactor: entry.zoomFactor }),
       profileId: entry.storage.profileId,
       ...('capsule' in entry.storage ? { capsuleId: entry.storage.capsule.record.capsuleId,
         capsuleOrigin: entry.storage.capsuleOrigin, capsuleOpenOperationIds: [...entry.storage.capsuleOpenOperationIds],

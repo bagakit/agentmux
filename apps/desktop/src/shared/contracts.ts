@@ -1272,6 +1272,9 @@ export const CONTROL_RESPONSE_CHANNEL = 'control:response'
 
 export const BROWSER_FIND_MAX_LENGTH = 1_000
 export type BrowserFindInPageRequest = { forward: boolean; newSession: boolean }
+/** A person's zoom step for a page: the next preset level in or out, or back to the product default. */
+export type BrowserZoomStep = 'in' | 'out' | 'reset'
+
 /** One Chromium find on the exact document it ran against; unconfirmed when no final result arrived. */
 export type BrowserFindInPageResult =
   | { status: 'found'; navigationId: string; activeMatchOrdinal: number; matches: number }
@@ -1289,6 +1292,8 @@ export type BrowserSnapshot = {
   capsuleActive?: boolean
   /** Current document artwork reported by Chromium, fetched through this original Profile session; transient. */
   faviconDataUrl?: string | undefined
+  /** Zoom Chromium applied to the current document's site in this Profile; missing until a commit has settled. */
+  zoomFactor?: number
   /** Original native host capability; missing means unconfirmed. */
   dialogTypes?: readonly import('@agentmux/core').AgentMuxBrowserDialogType[]
   navigationId: string
