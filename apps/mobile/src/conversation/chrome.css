@@ -95,7 +95,7 @@
  * with the needs-you accent, a grouped surface and full-width 48px answers. */
 .mobile-app .mobile-conversation__interaction { max-height: 45%; padding: 0 var(--sp-5) var(--sp-3); }
 .mobile-app .mobile-conversation__interaction .agent-interaction { margin: var(--sp-2) 0 0; padding: 14px var(--sp-6) var(--sp-6); border-radius: var(--mobile-radius-group);
-  background: var(--mobile-attention-wash); box-shadow: inset 3px 0 0 var(--mobile-attention), 0 0 0 1px var(--mobile-attention-line); }
+  border: 0; background: var(--mobile-attention-wash); box-shadow: none; }
 .mobile-app .mobile-conversation__interaction .agent-interaction__heading { color: var(--mobile-attention); }
 .mobile-app .mobile-conversation__interaction .agent-interaction__heading strong { font-size: var(--fs-lead); font-weight: 650; }
 .mobile-app .mobile-conversation__interaction .agent-interaction__heading span { font-size: var(--fs-meta); }
