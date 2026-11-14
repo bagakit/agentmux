@@ -80,7 +80,7 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
       { type: 'data', runId: id, startByte: 0, endByte: 2, data: '', dataBytes: Uint8Array.from([0xe4, 0xb8]) }
     ], close: async () => { observers.delete(listener); closes() } }
   })
-  inner.kernel.attach = vi.fn(); inner.kernel.detach = vi.fn(); inner.kernel.stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
+  inner.kernel.attach = vi.fn(); inner.kernel.detach = vi.fn(); inner.kernel.stop = vi.fn(async (operation: { runId: string }) => ({ disposition: 'graceful' as const, run: { ...run(operation.runId), state: { type: 'exited', exitCode: 0, signal: null } } }))
   return { root, store, client, inner, run, rawInput, waitWritable, observers, closes, capability,
     coreClients: () => [{ hostId: 'local', client }],
     credentials: { agentSessionId: ids[0]!, capability },

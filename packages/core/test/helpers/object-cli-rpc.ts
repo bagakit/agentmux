@@ -87,6 +87,8 @@ export function objectCliSeed(method: string, input: string): string[] {
     'settings.goals.common-actions.inspect': [],
     'settings.goals.common-actions.configure': ['--input','-'],
     'runtime.owner.identity': [],
+    'terminal.input': ['--input', input], 'terminal.interrupt': ['--input', input], 'terminal.stop': ['--input', input],
+    'terminal.operation.inspect': ['--host', 'local', '--run', 'RUN', '--operation-id', 'OP'],
     'terminal.ls': ['--host', 'local'],
     'terminal.inspect': ['--host', 'local', '--runtime', 'runtime-original', '--run', 'RUN'],
     'terminal.output': ['--host', 'local', '--runtime', 'runtime-original', '--run', 'RUN'],

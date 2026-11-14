@@ -38,7 +38,10 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const graph = parseAgentMuxSpatialGraph({ spaces: [], zones: [], tabs: [], regions: [], bindings: [], layouts: {}, tabLayouts: {}, resources: {} })
     const nativeSource = { nativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'saved-native',
       transcriptPath: join(fixture.root, 'saved-native.jsonl') }, workspacePath: fixture.root, revision: 'a'.repeat(64) }
+    const terminalIntent = { target: { hostId: 'local', runtimeId: 'native-original', run: { runId: 'RUN' } }, operationId: 'original-control', ownerInstanceId: 'native-incarnation' }
     const stdinByMethod: Record<string, string> = {
+      'terminal.input': JSON.stringify({ ...terminalIntent, expectedByte: 0, dataBase64: 'YQ==' }),
+      'terminal.interrupt': JSON.stringify(terminalIntent), 'terminal.stop': JSON.stringify(terminalIntent),
       'app.mobile.assets.inspect': JSON.stringify({ hostId: 'local' }),
       'app.mobile.assets.activate': JSON.stringify({ hostId: 'local', operationId: 'original-mobile-publication',
         candidatePath: 'apps/mobile/dist', candidateDigest: 'sha256:' + 'a'.repeat(64), expectedActiveRevision: 0 }),
