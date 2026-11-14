@@ -133,7 +133,7 @@ it('top navigation counts original deduplicated metadata and partial coverage wi
  })
  vi.spyOn(api.connections, 'hostingTarget').mockResolvedValue({ hostId: 'local', runtimeId: 'original-runtime' })
  await open()
- const nav = app.panel().querySelector('.mote-thread-navigation')!
+ const nav = app.panel().querySelector('[role="tablist"][aria-label="Mote 内容"]')!
  await vi.waitFor(() => expect(button(nav, '私聊').textContent).toBe('私聊2+'))
  expect(button(nav, '工作').textContent).toBe('工作2+')
  expect(button(nav, '成员').textContent).toBe('成员1')
@@ -150,7 +150,7 @@ it('top navigation counts original deduplicated metadata and partial coverage wi
 })
 it('unconfirmed work metadata never becomes a confirmed zero and a failed refresh keeps its last count', async () => {
  sourceUnconfirmed = true; await open()
- const nav = app.panel().querySelector('.mote-thread-navigation')!
+ const nav = app.panel().querySelector('[role="tablist"][aria-label="Mote 内容"]')!
  await vi.waitFor(() => expect(button(nav, '工作').getAttribute('aria-description')).toContain('来源暂不可用'))
  expect(button(nav, '工作').textContent).toBe('工作·')
  sourceUnconfirmed = false; links = [originalWork('one', 1)]

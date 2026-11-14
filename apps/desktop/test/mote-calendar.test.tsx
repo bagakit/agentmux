@@ -9,6 +9,8 @@ import { DateTime } from 'luxon'
 import * as scheduleCalendar from '@agentmux/core/schedule-calendar'
 import { MoteCalendar, moteScheduleQueries } from '../src/renderer/src/components/MoteCalendar'
 import { MoteDetailsPanel } from '../src/renderer/src/components/MoteDetailsPanel'
+import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
+import { moteEntryDraftKey } from '../src/renderer/src/lib/mote-entry-hold'
 import { CalendarScheduleControl } from '../src/renderer/src/components/CalendarScheduleControl'
 import { api } from '../src/renderer/src/lib/api'
 import { calendarDayWindow, calendarHourWindows } from '../src/renderer/src/lib/mote-calendar-range'
@@ -583,4 +585,54 @@ describe('Mote calendar original schedule consumer', () => {
     await vi.waitFor(async () => expect(await fixture!.store.load()).toHaveLength(1))
     expect((await fixture!.store.load())[0]?.agentSessionId).toBe(neighborAgent.control.agentSessionId)
   })
+})
+
+
+it('the floating page bar opens its original calendar in place and restores the existing conversation', async () => {
+  await owner([saved('floating-calendar')])
+  const topics = [topic, ...moteTopics.slice(1)]
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
+  vi.spyOn(api.scratch, 'readTopic').mockImplementation(async (_workspace, id) => topics.find(item => item.id === id) ?? null)
+  useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
+    [scratchWorkspace.id]: { ...state.scratchTopicSnapshots[scratchWorkspace.id]!, topics } } }))
+  const select = vi.fn(() => true)
+  const inspect = vi.spyOn(api.moteDialogue, 'inspectRecovery')
+  const recovery = vi.spyOn(api.moteDialogue, 'ensureRecovery')
+  const draftKey = moteEntryDraftKey(scope)
+  useLauncherState.getState().setDraft(draftKey, 'prompt', 'Original unsent message')
+  const render = (visible: boolean) => dom.render(<MoteWorkface floating workspaceId={scratchWorkspace.id} topicId={topic.id}
+    visible={visible} reference={reference} onReferenceSelect={select}><input aria-label="Retained conversation field" /></MoteWorkface>)
+  await render(true)
+  const field = dom.container.querySelector<HTMLInputElement>('input[aria-label="Retained conversation field"]')!
+  field.value = 'Original member reading'
+  const before = useAppStore.getState().workbenchSpaceSelection
+  const nav = (value: string) => dom.click(`[role="tablist"][aria-label="Mote 内容"] [data-surface-mode="${value}"]`)
+  expect(dom.container.querySelector('[aria-label="Mote calendar"]')).toBeNull()
+  expect(api.schedule.list).not.toHaveBeenCalled()
+  await nav('calendar')
+  await button('Upcoming')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-id="floating-calendar"]')).not.toBeNull())
+  expect(api.schedule.list).toHaveBeenCalledWith({ scope: { hostId: target.hostId, workspacePath: target.workspacePath } })
+  expect(field.closest('.mote-composer-stage')?.hasAttribute('hidden')).toBe(true)
+  expect(dom.container.querySelector('.mote-composer-surface')?.hasAttribute('hidden')).toBe(true)
+  expect(dom.container.querySelector('.mote-main-slot')).toBeNull()
+  await nav('discussion')
+  expect(field.closest('.mote-composer-stage')?.hasAttribute('hidden')).toBe(false)
+  expect(dom.container.querySelector('input[aria-label="Retained conversation field"]')).toBe(field)
+  expect(field.value).toBe('Original member reading')
+  expect(useLauncherState.getState().drafts[draftKey]?.prompt).toBe('Original unsent message')
+  expect(select).not.toHaveBeenCalled()
+  expect(inspect).not.toHaveBeenCalled()
+  expect(recovery).not.toHaveBeenCalled()
+  await nav('calendar')
+  await button('Open original discussion')
+  expect(select).toHaveBeenCalledExactlyOnceWith(reference, 'member')
+  expect(dom.container.querySelector('[data-surface-mode="members"]')?.getAttribute('aria-selected')).toBe('true')
+  await nav('calendar'); await nav('members')
+  expect(select).toHaveBeenCalledTimes(1)
+  expect(field.closest('.mote-workface__original')?.hasAttribute('hidden')).toBe(false)
+  expect(field.closest('.mote-composer-stage')?.hasAttribute('hidden')).toBe(false)
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(before)
+  expect(api.schedule.create).not.toHaveBeenCalled()
+  await render(false)
 })
