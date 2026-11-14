@@ -23,7 +23,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'writeTerminalBytes', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'continueAgentCreation', 'listAgentSpawns', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
   'restartAgent', 'inspectAgentRestart', 'inspectAgentStop', 'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'notifyMessages', 'inspectMessageNotification', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
-  'respondAgentInteraction', 'inspectAgentInteractionOperation', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
+  'respondAgentInteraction', 'inspectAgentInteractionOperation', 'inspectAgentPosture', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'checkDeliveries', 'ackDeliveryBatch',
   'answerAsk', 'cancelAsk', 'startDiscussion', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch', 'readMessage', 'listMessages', 'listMessageEvents', 'broadcastMessages', 'inspectMessageBroadcast', 'readDispatch', 'listDispatches'
 ] as const satisfies readonly (keyof AgentMuxClient)[]
@@ -150,7 +150,8 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   replySessionQuestion: 'owner',
   respondAgentInteraction: 'owner',
   inspectAgentInteractionOperation: 'owner',
-  setAgentPosture: 'session-observation',
+  inspectAgentPosture: 'owner',
+  setAgentPosture: 'owner',
   resizeAgent: 'runtime',
   signalAgent: 'runtime',
   stopAgent: 'runtime',
@@ -178,7 +179,7 @@ export const AGENTMUX_HOSTED_PREPARATION = {
 type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource' | 'trustMessageSource'
   ? [input: Parameters<AgentMuxClient[M]>[0]]
   : M extends 'writeTerminal' | 'writeTerminalBytes' ? [ref: Parameters<AgentMuxClient[M]>[0], input: Parameters<AgentMuxClient[M]>[1], observation?: Parameters<AgentMuxClient[M]>[2]]
-  : M extends 'writeAgent' | 'pasteAgent' | 'recordExternalConversationMessage' | 'ensureAgentContinuity' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'broadcastMessages' | 'notifyMessages' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction' | 'replySessionQuestion'
+  : M extends 'setAgentPosture' | 'writeAgent' | 'pasteAgent' | 'recordExternalConversationMessage' | 'ensureAgentContinuity' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'broadcastMessages' | 'notifyMessages' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction' | 'replySessionQuestion'
     ? [input: Parameters<AgentMuxClient[M]>[0]] : Parameters<AgentMuxClient[M]>
 export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {
   method: M; args: HostedArguments<M>

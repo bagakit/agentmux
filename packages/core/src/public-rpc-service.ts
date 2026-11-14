@@ -181,6 +181,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
   type AgentMuxRpcStreamInitial, type AgentMuxRpcStreamEvent, type AgentMuxRpcUnavailable, type AgentMuxRpcPrincipal } from './public-rpc.js'
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
+import { parsePostureSet, parsePostureInspect, parsePostureSetResult, parsePostureInspection } from './agent-posture.js'
 import { parseTerminalTarget, parseTerminalOutputParams, parseTerminalInspection, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
 
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
@@ -191,6 +192,8 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
+    inspectAgentPosture?: AgentMuxClient['inspectAgentPosture']
+    setAgentPosture?: AgentMuxClient['setAgentPosture']
     listTerminals?: AgentMuxClient['listTerminals']
     inspectTerminal?: AgentMuxClient['inspectTerminal']
     observeTerminalOutput?: AgentMuxClient['observeTerminalOutput']
@@ -414,6 +417,7 @@ const NATIVE_FIELDS = {
   'agent.execution.continue': ['bindingId', 'agentSessionId', 'createOperationId'],
   'agent.execution.binding': ['bindingId'],
   'agent.execution.rejoin': ['bindingId'],
+  'agent.posture.set': ['target', 'operationId', 'controlId', 'modeId', 'expectedControlDigest'], 'agent.posture.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
   'terminal.ls': ['hostId', 'cursor', 'limit'], 'terminal.inspect': ['target'], 'terminal.output': ['target', 'afterByte', 'follow'],
   'terminal.recover': ['hostId', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'],
   'skill.ls': ['hostId', 'agentSessionId'],
@@ -2785,6 +2789,44 @@ export class AgentMuxRpcService {
         if ((verified.state === 'active' ? verified.session.hostId : verified.retirement.hostId) !== 'local') throw new AgentMuxError(
           'The recovery control returned another original Host.', 'CONTROL_PROTOCOL_ERROR')
         return verified as AgentMuxRpcResult<M>
+      }
+      case 'agent.posture.inspect': {
+        const input = parsePostureInspect(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The original posture Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!, original = { ...input, hostId: 'local' }
+        if (scope.client.forwardRpc || this.ports.callOriginalCore) {
+          const forwarded = this.ports.callOriginalCore ? await this.ports.callOriginalCore(input.hostId, 'agent.posture.inspect', original, await this.inputForwardContext(context))
+            : await scope.client.forwardRpc!('agent.posture.inspect', original, await this.inputForwardContext(context))
+          const value = parsePostureInspection(forwarded, original)
+          result = value.kind === 'declaration' ? { ...value, target: { ...value.target, hostId: input.hostId } }
+            : { ...value, operation: value.operation ? { ...value.operation, target: { ...value.operation.target, hostId: input.hostId } } : null }
+        } else {
+          if (!scope.client.inspectAgentPosture) throw new AgentMuxError('The original posture owner is unavailable.', 'CONTROL_UNAVAILABLE')
+          const value = await scope.client.inspectAgentPosture(original)
+          result = value.kind === 'declaration' ? { ...value, target: { ...value.target, hostId: input.hostId } }
+            : { ...value, operation: value.operation ? { ...value.operation, target: { ...value.operation.target, hostId: input.hostId } } : null }
+        }
+        result = parsePostureInspection(result, input); break
+      }
+      case 'agent.posture.set': {
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+          throw new AgentMuxError('Posture setting requires the original transport-approved person/device; an Agent cannot grant itself modes.', 'CONTROL_PERMISSION_DENIED')
+        const input = parsePostureSet(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.target.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The original posture Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!, original = { ...input, target: { ...input.target, hostId: 'local' } }
+        if (scope.client.forwardRpc || this.ports.callOriginalCore) {
+          const forwarded = this.ports.callOriginalCore ? await this.ports.callOriginalCore(input.target.hostId, 'agent.posture.set', original, await this.inputForwardContext(context))
+            : await scope.client.forwardRpc!('agent.posture.set', original, await this.inputForwardContext(context))
+          const value = parsePostureSetResult(forwarded, original)
+          result = { ...value, target: { ...value.target, hostId: input.target.hostId } }
+        } else {
+          if (!scope.client.setAgentPosture) throw new AgentMuxError('The original posture intent owner is unavailable.', 'CONTROL_UNAVAILABLE')
+          const restriction = this.inputCallContext(context)
+          const value = await scope.client.setAgentPosture(original, { actor: context.principal,
+            ...(restriction.requestSignal ? { requestSignal: restriction.requestSignal } : {}), ...(restriction.assertCurrent ? { assertCurrent: restriction.assertCurrent } : {}) })
+          result = { ...value, target: { ...value.target, hostId: input.target.hostId } }
+        }
+        result = parsePostureSetResult(result, input); break
       }
       case 'terminal.ls': {
         if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))

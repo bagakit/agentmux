@@ -157,11 +157,7 @@ export type AgentMuxAgentInteractionInput = AgentMuxInteractionOperationIntent &
   response: AgentMuxInteractionResponse
 }
 
-export type AgentMuxAgentPostureInput = {
-  agentSessionId: string
-  expectedRun: AgentMuxRunRef
-  modeId: string
-}
+export type AgentMuxAgentPostureInput = import('./agent-posture.js').PostureSet
 
 export type AgentMuxAgentRespawnInput = Omit<
   AgentMuxAgentCreateInput,

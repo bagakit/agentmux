@@ -2058,9 +2058,8 @@ export async function registerIpc(args: {
     return await args.runtime.respondInteraction(session, response, intent)
   })
   handle('sessions:inspectInteraction', async (session: AgentSessionControl, operationId: string) => await args.runtime.inspectInteraction(session, operationId))
-  handle('sessions:setPosture', async (session: AgentSessionControl, modeId: string) => {
-    await args.runtime.setPosture(session, modeId)
-  })
+  handle('sessions:setPosture', async (session: AgentSessionControl, modeId: string, operationId: string) =>
+    await args.runtime.setPosture(session, modeId, operationId))
   handle('sessions:confirmNativeSession', async (session: AgentSessionControl, input: import('@agentmux/core').AgentMuxNativeSessionConfirmationInput) => (
     args.runtime.confirmNativeSession(session, input)
   ))

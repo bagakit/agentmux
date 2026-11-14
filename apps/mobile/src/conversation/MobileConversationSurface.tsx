@@ -13,6 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createMobileMoteInputReader } from './mote-input-reader'
 import { createPortal } from 'react-dom'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentInputMoteSource, AgentSessionUserMessage } from '@agentmux/core'
 import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
@@ -248,6 +249,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       setCopyNotice(`中断当前回复未确认：${errorMessage(error)}`)
     }
   }
+  const postureAttempts = useRef(new Map<string, { operationId: string; pending: boolean }>())
   async function changePosture(modeId: string) {
     if (!client?.setAgentPosture || !session || !agentSessionId) return
     try {
@@ -256,7 +258,22 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
         setCopyNotice('对话已变化，没有切换模式。')
         return
       }
-      await client.setAgentPosture({ agentSessionId: originalSession.agentSessionId, expectedRun: { ...originalSession.run }, modeId })
+      const key = JSON.stringify([agentSessionId, originalSession.run.runId, modeId])
+      const attempt = postureAttempts.current.get(key) ?? { operationId: mintObjectId(), pending: false }
+      if (attempt.pending) return
+      postureAttempts.current.set(key, attempt); attempt.pending = true
+      try {
+        const original = await client.inspectAgentPosture({ hostId: 'local', agentSessionId, operationId: attempt.operationId })
+        let receipt = original.kind === 'operation' ? original.operation : null
+        if (!receipt) {
+          const declaration = await client.inspectAgentPosture({ hostId: 'local', agentSessionId, expectedRun: { ...originalSession.run } })
+          if (declaration.kind !== 'declaration' || !declaration.control || !declaration.controlDigest) throw new Error('The original Provider declares no addressable posture control.')
+          receipt = await client.setAgentPosture({ target: declaration.target, operationId: attempt.operationId, controlId: declaration.control.id, modeId, expectedControlDigest: declaration.controlDigest })
+        }
+        if (receipt.modeId !== modeId || receipt.target.expectedRun.runId !== originalSession.run.runId || receipt.outcome !== 'applied' || receipt.diskDurability !== 'confirmed')
+          throw new Error(`Original posture intent ${attempt.operationId}: ${receipt.outcome}; durable ${receipt.diskDurability}. Inspect the same operation.`)
+        postureAttempts.current.delete(key)
+      } finally { attempt.pending = false }
       setCopyNotice(null)
     } catch (error) {
       setCopyNotice(`模式切换未完成：${errorMessage(error)}`)

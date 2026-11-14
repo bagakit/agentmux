@@ -729,8 +729,8 @@ const api: AgentMuxPreloadApi = {
     respondInteraction: (session, response, intent) =>
       ipcRenderer.invoke('sessions:respondInteraction', session, response, intent),
     inspectInteraction: (session, operationId) => ipcRenderer.invoke('sessions:inspectInteraction', session, operationId),
-    setPosture: (session: AgentSessionControl, modeId: string) =>
-      ipcRenderer.invoke('sessions:setPosture', session, modeId),
+    setPosture: (session: AgentSessionControl, modeId: string, operationId: string) =>
+      ipcRenderer.invoke('sessions:setPosture', session, modeId, operationId),
     reconcileReopen: async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
       unwrapSessionReopenResult(await ipcRenderer.invoke('sessions:reconcile-reopen', reference, expectedRetiredAt, operationId)),
     reopen: async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>

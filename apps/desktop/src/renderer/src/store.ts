@@ -776,6 +776,7 @@ export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown>; waitingForInteraction: Set<string> }>()
 type SteerDeliveryAttempt = { seed: DeliveryAttemptSeed; stage: string; diagnostic?: { logId: string; notice: string } }
 // A click's diagnostic follows its one ordered consumer; it never grants input.
+const postureAttempts = new Map<string, { operationId: string; pending: Promise<void> | null }>()
 const preparationRetryCalls = new Map<string, AbortController>()
 const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
 
@@ -12815,18 +12816,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return receipt
   },
   async setPosture(sessionId, modeId) {
-    // A fire-and-forget SET: Core resolves the Provider's declared keystroke and writes it in-band. We
-    // never record a "current mode" — the live posture lives in the CLI's own TUI, which AgentMux cannot
-    // read, so claiming to know it would be a lie. The picker sends the intent and the CLI owns the state.
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return
-    try {
-      await api.sessions.setPosture(session.control, modeId)
-    } catch (error) {
-      get().reportError(error)
-      throw error
-    }
+    const key = JSON.stringify([session.control, modeId])
+    const prior = postureAttempts.get(key)
+    if (prior?.pending) return await prior.pending
+    const attempt = prior ?? { operationId: mintObjectId(), pending: null }
+    postureAttempts.set(key, attempt)
+    attempt.pending = (async () => {
+      try {
+        const receipt = await api.sessions.setPosture(session.control, modeId, attempt.operationId)
+        if (receipt.outcome !== 'applied' || receipt.diskDurability !== 'confirmed') throw new Error(
+          `Posture intent ${attempt.operationId} is ${receipt.outcome}; durable receipt ${receipt.diskDurability}. Inspect this original operation before another input. ${receipt.issue ?? ''}`)
+        postureAttempts.delete(key)
+      } catch (error) {
+        get().reportError(new Error(`Original posture operation ${attempt.operationId}: ${presentError(error)}`))
+        throw error
+      } finally { attempt.pending = null }
+    })()
+    await attempt.pending
   },
+
   async interrupt(sessionId) {
     const session = get().sessions.find((item) => item.id === sessionId)
     if (session) await api.sessions.interrupt(session.control).catch((error) => get().reportError(error))

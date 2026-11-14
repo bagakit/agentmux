@@ -287,6 +287,8 @@ type NativeParams = HostRouteParams & SpaceMemberParams & SpaceSessionsParams & 
   'agent.execution.continue': import('./agent-execution-contract.js').AgentExecutionReference
   'agent.execution.binding': { bindingId: string }
   'agent.execution.rejoin': { bindingId: string }
+  'agent.posture.inspect': import('./agent-posture.js').PostureInspect
+  'agent.posture.set': import('./agent-posture.js').PostureSet
   'terminal.ls': import('./terminal-observation.js').TerminalListParams
   'terminal.inspect': { target: import('./terminal-observation.js').TerminalTarget }
   'terminal.output': import('./terminal-observation.js').TerminalOutputParams
@@ -405,6 +407,8 @@ type NativeResult = HostRouteResults & SpaceMemberResults & SpaceSessionsResults
   'agent.execution.continue': AgentMuxRpcResult<'agent.execution.create'>
   'agent.execution.binding': import('./agent-execution-coordinator.js').AgentExecutionInspection | null
   'agent.execution.rejoin': import('./agent-execution-coordinator.js').AgentExecutionInspection
+  'agent.posture.inspect': import('./agent-posture.js').PostureInspection
+  'agent.posture.set': import('./agent-posture.js').PostureReceipt
   'terminal.ls': import('./terminal-observation.js').TerminalListResult
   'terminal.inspect': import('./terminal-observation.js').TerminalInspectResult
   'terminal.output': import('./terminal-observation.js').TerminalOutputInitial
@@ -566,7 +570,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.federation.dispatch-intake': 'long', 'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'goal.activity.history': 'short', 'system.doctor': 'long', 'system.storage': 'short',
-  'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'
+  'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'agent.posture.inspect': 'short', 'agent.posture.set': 'long', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
 export type AgentMuxRpcStreamMethod = 'space.member.watch' | import('./host-route.js').HostRouteStreamMethod | 'space.sessions.watch' | 'space.snapshot' | 'space.watch' | 'goal.watch' | 'agent.conversation.watch' | 'agent.output' | 'terminal.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' | 'connection.metadata.watch' |

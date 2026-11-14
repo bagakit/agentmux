@@ -1,7 +1,8 @@
 import { parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, parseNotesStorageOperationInspection } from './public-rpc-notes-storage.js'
-import { parseProviderCatalogQuery, parseProviderCatalogObservation } from './public-rpc-provider-catalog.js'
+import { parsePostureInspect, parsePostureSet, parsePostureInspection, parsePostureSetResult } from './agent-posture.js'
 import { parseTerminalInspection, parseTerminalTarget, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
+import { parseProviderCatalogQuery, parseProviderCatalogObservation } from './public-rpc-provider-catalog.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { hostedSessionProjection, hostedSessionIds } from './hosted-session-summary.js'
@@ -499,6 +500,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,
       parseAgentMuxRpcDeviceParams(method, params)) as unknown as Record<string, unknown>
+    if (method === 'agent.posture.inspect') return parsePostureInspection(value, parsePostureInspect(params)) as unknown as Record<string, unknown>
+    if (method === 'agent.posture.set') return parsePostureSetResult(value, parsePostureSet(params)) as unknown as Record<string, unknown>
     const p = record(value), input = record(params)
     if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(p, key))) fail()
     switch (method) {

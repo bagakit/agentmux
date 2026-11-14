@@ -2089,15 +2089,21 @@ export class RuntimeController {
   }
 
   async setPosture(
-    control: Extract<SessionControl, { kind: 'agent' }>,
-    modeId: string
-  ): Promise<void> {
-    await this.trackHostOperation(control.hostId, async () => {
-      await (await this.connectedClient(control.hostId)).setAgentPosture({
-        agentSessionId: control.agentSessionId,
-        expectedRun: control.run,
-        modeId
-      })
+    control: Extract<SessionControl, { kind: 'agent' }>, modeId: string, operationId: string
+  ): Promise<import('@agentmux/core').PostureReceipt> {
+    return await this.trackHostOperation(control.hostId, async () => {
+      const client = await this.connectedClient(control.hostId)
+      const original = await callOriginalDesktopHost(client, 'agent.posture.inspect', { hostId: 'local', agentSessionId: control.agentSessionId, operationId }, { transport: 'unix' })
+      if (original.kind === 'operation' && original.operation) {
+        if (original.operation.modeId !== modeId || original.operation.target.expectedRun.runId !== control.run.runId)
+          throw new AgentMuxError('Keep the exact original posture intent and operation.', 'RUN_CONTROL_OPERATION_CONFLICT')
+        return original.operation
+      }
+      const observed = await callOriginalDesktopHost(client, 'agent.posture.inspect', { hostId: 'local', agentSessionId: control.agentSessionId, expectedRun: control.run }, { transport: 'unix' })
+      if (observed.kind !== 'declaration' || !observed.control || !observed.controlDigest)
+        throw new AgentMuxError('The original Provider declares no addressable posture intent.', 'STALE_POSTURE_CONTROL')
+      return await callOriginalDesktopHost(client, 'agent.posture.set', { target: observed.target, operationId,
+        controlId: observed.control.id, modeId, expectedControlDigest: observed.controlDigest }, { transport: 'unix' })
     })
   }
 

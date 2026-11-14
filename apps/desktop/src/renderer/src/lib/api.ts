@@ -1270,14 +1270,7 @@ const mockApi: AgentMuxDesktopApi = {
       session.updatedAt = Date.now()
       return { ...intent, agentSessionId: control.agentSessionId, run: control.run, response, delivery: 'bytes-accepted', nativeAdoption: 'unknown' }
     },
-    // The browser preview carries no posture-capable Provider session (only codex + claude, which declare
-    // no addressable in-band control), so no preview session ever renders the control to drive. Honor the
-    // contract as a faithful no-op after asserting the session exists; the real keystroke is written by
-    // core over the PTY in the Electron build.
-    setPosture: async (control) => {
-      const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
-      if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)
-    },
+    setPosture: async () => { throw new Error('Provider posture intent needs the original Host; this preview has no Native input receipt.') },
     reconcileReopen: async () => { throw new Error('Confirming native continuation requires the original Host. This browser preview does not change Sessions.') },
     reopen: async () => { throw new Error('Continuing retired history requires the original native Host. This browser preview does not start a Run.') },
     resume: async (control, prompt) => {

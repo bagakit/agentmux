@@ -1,4 +1,6 @@
 import { captureExecutorInvocation, readExecutorInvocation } from './agent-executor-invocation.js'
+import { RunControlOperations } from './run-control-operations.js'
+import { parsePostureSet, parsePostureInspect, parseRunControlActor, postureControlDigest, type PostureInspect, type PostureInspection, type PostureReceipt, type RunControlContext } from './agent-posture.js'
 import type { AgentMuxAgentCreateInput, AgentMuxHostAgentCreateInput, AgentMuxTerminalCreateInput, AgentMuxAgentPromptInput, AgentMuxSessionQuestionReplyInput, AgentMuxAgentMessageInput, AgentMuxAgentInteractionInput, AgentMuxAgentPostureInput, AgentMuxAgentRespawnInput, AgentMuxAgentAttachment, AgentMuxClientOptions, AgentMuxAgentRuntimeStatus } from './client-contract.js'
 import { agentSessionRetirementRevision } from './agent-session-store.js'
 import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
@@ -8196,20 +8198,67 @@ export class AgentMuxClient {
    * control, so it takes effect on the running process rather than silently no-oping. Fails closed on a
    * Provider that declares no posture control or a mode it does not declare.
    */
-  async setAgentPosture(input: AgentMuxAgentPostureInput): Promise<void> {
+  private runControls: RunControlOperations | undefined
+  private runControlOperations(): RunControlOperations {
+    return this.runControls ??= new RunControlOperations(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'run-control-operations'))
+  }
+
+  async inspectAgentPosture(value: PostureInspect): Promise<PostureInspection> {
+    const input = parsePostureInspect(value)
+    if (input.hostId !== 'local') throw new AgentMuxError('Use the original Core for this posture observation.', 'INVALID_CONTROL_REQUEST')
+    if (input.operationId !== undefined) {
+      const operation = await this.runControlOperations().inspect(input.operationId)
+      if (operation && operation.target.agentSessionId !== input.agentSessionId) throw new AgentMuxError('The original posture operation belongs to another Session.', 'RUN_CONTROL_OPERATION_CONFLICT')
+      return { kind: 'operation', agentSessionId: input.agentSessionId, operationId: input.operationId, operation }
+    }
     this.requireConnected()
-    const session = this.requireAgentSession(input.agentSessionId)
-    if (!sameRun(session.run, input.expectedRun)) {
-      throw new AgentMuxError(
-        'Agent Session changed before its posture was set.',
-        'STALE_AGENT_SESSION'
-      )
+    const session = await this.registry.refresh(input.agentSessionId, input.expectedRun)
+    if (!sameRun(session.run, input.expectedRun)) throw new AgentMuxError('The original posture Run changed.', 'STALE_AGENT_SESSION')
+    const control = this.providers.get(session.providerId).catalog.postureControl ?? null
+    return { kind: 'declaration', target: { hostId: 'local', runtimeId: this.terminalCreationRuntimeIdentity().runtimeId,
+      agentSessionId: session.agentSessionId, expectedRun: { ...session.run }, providerId: session.providerId },
+      control, controlDigest: control ? postureControlDigest(control) : null, currentMode: { status: 'unknown' } }
+  }
+
+  async setAgentPosture(value: AgentMuxAgentPostureInput, context: RunControlContext): Promise<PostureReceipt> {
+    const input = parsePostureSet(value), actor = parseRunControlActor(context?.actor), operations = this.runControlOperations()
+    const original = await operations.original(input, actor)
+    if (original) return original // Reading an existing result does not revive its old input qualification.
+    this.requireConnected()
+    if (input.target.hostId !== 'local') throw new AgentMuxError('Use the original Core posture owner.', 'INVALID_CONTROL_REQUEST')
+    const session = await this.registry.refresh(input.target.agentSessionId, input.target.expectedRun)
+    if (!sameRun(session.run, input.target.expectedRun) || session.providerId !== input.target.providerId)
+      throw new AgentMuxError('The original posture Session/Run/Provider changed.', 'STALE_AGENT_SESSION')
+    const provider = this.providers.get(session.providerId), control = provider.catalog.postureControl
+    if (!control || control.id !== input.controlId || postureControlDigest(control) !== input.expectedControlDigest)
+      throw new AgentMuxError('The Provider posture declaration changed or is unsupported. Read its original declaration.', 'STALE_POSTURE_CONTROL')
+    if (!control.modes.some(mode => mode.id === input.modeId)) throw new AgentMuxError('This Provider does not declare that posture mode.', 'AGENT_POSTURE_UNSUPPORTED')
+    const plan = provider.planPostureSet(input.modeId)
+    if (!plan.data) throw new AgentMuxError('Provider posture input cannot be empty.', 'INVALID_AGENT_PROVIDER')
+    const runtime = this.terminalCreationRuntimeIdentity()
+    if (runtime.runtimeId !== input.target.runtimeId) throw new AgentMuxError('The original posture Native Runtime changed.', 'TERMINAL_RUNTIME_MISMATCH')
+    const assertCurrent = async () => {
+      context.requestSignal?.throwIfAborted(); await context.assertCurrent?.(); context.requestSignal?.throwIfAborted()
+      if (this.terminalCreationRuntimeIdentity().instanceId !== runtime.instanceId)
+        throw new AgentMuxError('The original posture Native owner changed before input.', 'TERMINAL_RUNTIME_MISMATCH')
     }
-    const plan = this.providers.get(session.providerId).planPostureSet(input.modeId)
-    if (!plan.data) {
-      throw new AgentMuxError('Provider posture keystroke cannot be empty.', 'INVALID_AGENT_PROVIDER')
+    await assertCurrent()
+    await operations.prepare(input, actor, runtime)
+    await assertCurrent()
+    const claim = await operations.claim(input, actor)
+    if (!claim.dispatched) return claim.receipt
+    try {
+      const ack = await this.writeAgentInput(session, plan.data, 'user', 'posture', undefined,
+        this.rawInputCall({ ...(context.requestSignal ? { requestSignal: context.requestSignal } : {}), assertCurrent }), claim.receipt.nativeOperationId)
+      if (ack.runId !== input.target.expectedRun.runId || !ack.appliedByteRange ||
+        ack.appliedByteRange.endByte - ack.appliedByteRange.startByte !== Buffer.byteLength(plan.data))
+        throw new AgentMuxError('The original posture byte receipt does not match its input.', 'CONTROL_PROTOCOL_ERROR')
+      return await operations.settle(input, actor, { outcome: 'applied', acknowledgement: ack })
+    } catch (error) {
+      const notApplied = error instanceof AgentMuxError && (error.detail === 'not_applied' || error.controlFailure?.disposition === 'not_applied')
+      return await operations.settle(input, actor, { outcome: notApplied ? 'not-applied' : 'unknown', acknowledgement: null,
+        issue: 'Original posture operation ' + input.operationId + ': ' + String(error) + '. Inspect the same operation; do not reinput.' })
     }
-    await this.writeAgentInput(session, plan.data, 'user', 'posture')
   }
 
   async resizeAgent(
@@ -10263,7 +10312,8 @@ export class AgentMuxClient {
     source: AgentMuxAgentWriteInput['source'],
     inputKind: 'write' | 'paste' | 'posture',
     observation?: InputObservationReference | null,
-    call: RawInputCall = this.rawInputCall()
+    call: RawInputCall = this.rawInputCall(),
+    retainedOperationId?: string
   ): Promise<AgentMuxRunInputAck> {
     // 空载荷在这里就地收掉，不下到 ctxmux。daemon 的 RecoverableInput 校验会拒绝空载荷
     // （`recoverable native Input must not be empty`），而「按了键但没有字节要发」是**正常**的终端
@@ -10297,7 +10347,7 @@ export class AgentMuxClient {
     const protocolInputs = new Set<AgentPromptProtocolInputBoundary>()
     let preempted = false, protocolSettled = false
     // This is the same operation later passed to ctxmux, before any input-lane or ACK fact exists.
-    const operationId = mintObjectId()
+    const operationId = retainedOperationId ?? mintObjectId()
     const preempt = () => {
       call.check()
       if (source === 'terminal-protocol' || mousePreparation) {
@@ -10405,6 +10455,11 @@ export class AgentMuxClient {
         if (!dispatched || error instanceof AgentMuxError && error.detail === 'not_applied') await observeNativeInput('not_applied')
         throw error
       }
+      if (retainedOperationId && (result.runId !== session.run.runId || result.pid !== run.pid ||
+        result.appliedByteRange.startByte !== expectedByte ||
+        result.appliedByteRange.endByte - result.appliedByteRange.startByte !== Buffer.byteLength(data) ||
+        result.acceptedThroughByte === null || result.acceptedThroughByte < result.appliedByteRange.endByte))
+        throw new AgentMuxError('The original posture native byte acknowledgement belongs to another input.', 'CONTROL_PROTOCOL_ERROR')
       await observeNativeInput('accepted')
       if (dispatch && (protocolObservers.length > 0 || source === 'terminal-protocol')) {
         // Receipt arrival order need not be byte order. Preserve the original
