@@ -10,8 +10,9 @@ import { NativeDesktop } from '@agentmux/native-desktop'
 import { AgentMuxRpcService } from '@agentmux/core'
 
 const interaction = process.env.CAPTURE_INTERACTION_TEST === '1'
+const startRecovery = process.env.CAPTURE_START_RECOVERY === '1'
 const manualInteraction = interaction
-const automatic = process.env.CAPTURE_AUTO_TEST === '1' || interaction
+const automatic = process.env.CAPTURE_AUTO_TEST === '1' || interaction || startRecovery
 const live = process.env.CAPTURE_SEQUENCE_LIVE === '1', recorded = process.env.CAPTURE_RECORDED_NATIVE
 let native: NativeDesktop | undefined, sourceWindow: BrowserWindow | undefined, server: { stop(): Promise<void> } | undefined
 const out = process.env.CAPTURE_SEQUENCE_OUT!, mode = process.env.CAPTURE_SEQUENCE_MODE! as 'scroll' | 'gif'
@@ -36,7 +37,7 @@ function frame(offset: number) {
 }
 async function run() {
   await app.whenReady()
-  let sampleCount = 0
+  let sampleCount = 0, nativeFailure = false
   let retainedFrames: Array<ReturnType<typeof frame>['image']> = []
   let initial = frame(0).image, source = { rect: { x: 10, y: 10, width: 480, height: 260 }, scale: 1, capturedAt: Date.now() }
   if (recorded) {
@@ -52,7 +53,7 @@ async function run() {
   if (live) {
     native = new NativeDesktop({ executablePath: process.env.CAPTURE_SEQUENCE_HELPER!, connectTimeoutMs: 15000, requestTimeoutMs: 15000 })
     const area = screen.getPrimaryDisplay().workArea
-    sourceWindow = new BrowserWindow({ x: area.x + 40, y: area.y + 40, width: 740, height: 520, show: true, alwaysOnTop: !interaction, webPreferences: { backgroundThrottling: false } })
+    sourceWindow = new BrowserWindow({ x: area.x + 40, y: area.y + 40, width: 740, height: 520, show: true, alwaysOnTop: !interaction && !startRecovery, webPreferences: { backgroundThrottling: false } })
     const rows = Array.from({ length: 24 }, (_, index) => `<section style="height:85px;box-sizing:border-box;padding:14px 24px;background:hsl(${(index * 47) % 360} 30% 92%);color:#213044;border-bottom:1px solid #aebbc7"><b>${String(index + 1).padStart(2, '0')} · Capture evidence</b><div>Review the selected region, preserve the source, and annotate the exact frame.</div><small id="counter-${index}">Screen capture · frame 0</small></section>`).join('')
     await sourceWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<body style="margin:0;font:14px/1.5 system-ui">' + rows + '</body>'))
     await sourceWindow.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
@@ -63,11 +64,12 @@ async function run() {
     const shot = first.screenshot!; initial = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + shot.data, width: shot.width, height: shot.height, byteLength: Buffer.byteLength(shot.data, 'base64') }; source.scale = shot.scale
     result.observations.push({ live: true, source: source.rect, scale: shot.scale, helper: process.env.CAPTURE_SEQUENCE_HELPER })
   }
-  if (automatic && !interaction) { sourceWindow = new BrowserWindow({ width: 240, height: 160, show: true }); await sourceWindow.loadURL('data:text/html,<body>Existing host window</body>') }
+  if (automatic && !interaction && !startRecovery) { sourceWindow = new BrowserWindow({ width: 240, height: 160, show: true }); await sourceWindow.loadURL('data:text/html,<body>Existing host window</body>') }
   const owner = new CaptureSequenceOwner({ directory: join(out, 'captures'), home: join(out, 'home'), appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }),
     select: async () => ({ image: initial, source }), native: () => ({ captureScreenshot: async (params: any) => {
-      assert.equal(params.mode, 'rect'); assert.deepEqual(params.rect, source.rect); assert.equal(params.excludeWindowIds.length, mode === 'scroll' && automatic ? interaction ? 2 : 3 : 1, 'the actual excluded background preserves exact host window exclusions')
-      if (automatic && !interaction) {
+      if (nativeFailure) throw new Error('Native fixture capture failed')
+      assert.equal(params.mode, 'rect'); assert.deepEqual(params.rect, source.rect); assert.equal(params.excludeWindowIds.length, mode === 'scroll' && automatic ? interaction || startRecovery ? 2 : 3 : 1, 'the actual excluded background preserves exact host window exclusions')
+      if (automatic && !interaction && !startRecovery) {
         sampleCount++
         const next = recorded ? retainedFrames[sampleCount <= 2 ? 0 : 1]! : frame(sampleCount <= 2 ? 0 : 85).image
         return { state: 'captured' as const, screenshot: { format: 'png' as const, data: next.dataUrl.split(',')[1]!, width: next.width, height: next.height, scale: source.scale }, selectionRect: source.rect }
@@ -85,7 +87,7 @@ async function run() {
       }
       if (live) {
         sampleCount++
-        if (mode === 'scroll' && !interaction) {
+        if (mode === 'scroll' && !interaction && !startRecovery) {
           await sourceWindow!.webContents.executeJavaScript(`window.scrollTo(0, ${sampleCount * 85})`)
           await until('actual source scroll', async () => await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop') >= sampleCount * 85)
         } else if (mode === 'gif') await sourceWindow!.webContents.executeJavaScript(`document.querySelector('#counter-0').textContent='Screen capture · frame ${sampleCount}'`)
@@ -100,7 +102,9 @@ async function run() {
         let matches = 0, count = 0
         for (let i = 0; i < actual.length; i += 148) { count++; if (Math.abs(actual[i]! - expected[i]!) < 16 && Math.abs(actual[i + 1]! - expected[i + 1]!) < 16 && Math.abs(actual[i + 2]! - expected[i + 2]!) < 16) matches++ }
         await writeFile(join(out, `source-native-${sampleCount}.png`), actualImage.toPNG()); await writeFile(join(out, `source-reference-${sampleCount}.png`), expectedImage.toPNG())
-        if (beforeScroll === afterScroll) assert.ok(matches / count > .9, `native capture excludes its control window and preserves the real source pixels: ${matches / count}, actual ${actual.length}, expected ${expected.length}`)
+        // In this scene the fixture deliberately changes GPU content during sampling.
+        // Independent renderer/native observations may straddle that repaint; retain both images.
+        if (!startRecovery && beforeScroll === afterScroll) assert.ok(matches / count > .9, `native capture excludes its control window and preserves the real source pixels: ${matches / count}, actual ${actual.length}, expected ${expected.length}`)
         result.observations.push({ actualNativeFrame: sampleCount, sourcePixelMatch: matches / count, beforeScroll, afterScroll })
         return captured
       }
@@ -108,18 +112,81 @@ async function run() {
       const next = frame(mode === 'scroll' ? sampleCount === 1 ? 85 : 170 : sampleCount * 2).image
       return { state: 'captured' as const, screenshot: { format: 'png' as const, data: next.dataUrl.split(',')[1]!, width: next.width, height: next.height, scale: 1 }, selectionRect: source.rect }
     } }) })
-  const evaluate = (code: string) => window.webContents.executeJavaScript(code)
+  const evaluate = async (code: string) => { try { return await window.webContents.executeJavaScript(code) } catch (error) { throw new Error('Renderer evaluation failed: ' + code + ': ' + error) } }
   let window: BrowserWindow
   const click = async (label: string) => { await evaluate(`(()=>{const button=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(label)});if(!button)throw Error('Missing button '+${JSON.stringify(label)});button.click()})()`); await wait(80) }
   if (mode === 'scroll') {
     let delivered: any = null
     const capture = new ScreenCapture({ home: join(out, 'home'), native: () => ({ captureScreenshot: async () => { throw Error('Wrong source') }, writeClipboardImage: async () => {} }),
-      appActive: () => true, present: async session => { await session.complete(initial, source, 'fixture', automatic && !interaction ? 'excluded' : 'included'); return { state: 'completed' } },
+      appActive: () => true, present: async session => { await session.complete(initial, source, 'fixture', automatic && !interaction && !startRecovery ? 'excluded' : 'included'); return { state: 'completed' } },
       sequence: (kind, selection) => owner.edit(kind, { ...selection, startImmediately: interaction }), reportIssue: error => { throw error }, edit: async image => { delivered = image } })
     const closed = capture.capture(false, 'scroll')
     window = await until('capture window', () => BrowserWindow.getAllWindows().find(w => w !== sourceWindow && !w.webContents.getURL().startsWith('data:')))
     if (live) window.setAlwaysOnTop(true, 'floating', 1)
     await until('scrolling controls', async () => await evaluate(interaction ? "!!document.querySelector('.capture-live-controls')" : "document.body.textContent.includes('Capture next')"))
+    if (startRecovery) {
+      // The selection preview stays frozen while the source changes before the actual Start gesture.
+      await sourceWindow!.webContents.executeJavaScript("document.body.style.filter='invert(1)';new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))")
+      await click('Start scrolling capture')
+      const fresh = await until('fresh native baseline', async () => {
+        const snapshot = await evaluate("window.captureSequence.load()")
+        assert.equal(snapshot.issue, null, 'starting must not align a stale frozen preview against live content')
+        assert.equal(snapshot.state, 'recording', 'Start remains in the live state')
+        return snapshot.frames[0]?.capturedAt > source.capturedAt ? snapshot : false
+      })
+      assert.notEqual(fresh.frames[0].image.dataUrl, initial.dataUrl, 'the first long-image frame is live, not the frozen selection preview')
+      assert.equal(fresh.frames.length, 1)
+      if (startRecovery) console.log('start-recovery: fresh-baseline')
+      assert.ok(result.observations.some((row: any) => row.sourcePixelMatch > .9), 'actual native pixels match the owned source during this scene')
+      const baseline = fresh.frames[0]
+      await sourceWindow!.webContents.executeJavaScript("document.body.style.filter='none';new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))")
+      await until('visible recoverable overlap issue', async () => {
+        const snapshot = await evaluate("window.captureSequence.load()")
+        assert.equal(snapshot.state, 'recording', 'a rejected overlap must not return to the large review window')
+        if (!snapshot.issue) return false
+        assert.equal(snapshot.frames.length, 1, 'unconfirmed pixels never enter the long image')
+        return await evaluate("!!document.querySelector('.capture-live-controls') && document.body.textContent.includes('overlap is unclear')")
+      })
+      if (startRecovery) console.log('start-recovery: live-issue')
+      for (const theme of ['dark', 'light']) {
+        await evaluate(`window.setCaptureFixtureTheme('${theme}')`)
+        await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        const file = `scroll-overlap-live-${theme}.png`; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
+      }
+      await sourceWindow!.webContents.executeJavaScript("document.body.style.filter='invert(1)';window.scrollTo(0,85);new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))")
+      await until('trusted overlap recovers without a second Start', async () => {
+        const snapshot = await evaluate("window.captureSequence.load()")
+        assert.equal(snapshot.state, 'recording')
+        return snapshot.frames.length === 2 && snapshot.issue === null
+      })
+      if (startRecovery) console.log('start-recovery: stop')
+      await click('Stop scrolling capture')
+      await until('review with retained frames', async () => (await evaluate("window.captureSequence.load()")).state === 'review')
+      await until('review actions settled', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !document.querySelector('button.primary-button').disabled"))
+      if (startRecovery) console.log('start-recovery: resume')
+      const samplesBeforeResume = sampleCount
+      await click('Start scrolling capture')
+      await until('resumed native sample', () => sampleCount > samplesBeforeResume)
+      const resumed = await evaluate("window.captureSequence.load()")
+      assert.equal(resumed.frames.length, 2, 'resume preserves the confirmed long image')
+      assert.equal(resumed.frames[0].capturedAt, baseline.capturedAt, 'resume does not reset the first confirmed frame')
+      assert.equal(resumed.frames[0].image.dataUrl, baseline.image.dataUrl)
+      if (startRecovery) console.log('start-recovery: native-failure')
+      nativeFailure = true
+      await until('native failure stays distinct from overlap uncertainty', async () => {
+        const snapshot = await evaluate("window.captureSequence.load()")
+        return snapshot.state === 'review' && snapshot.issue === 'Native fixture capture failed'
+      })
+      await until('native failure review actions settled', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !document.querySelector('button.primary-button').disabled"))
+      if (startRecovery) console.log('start-recovery: edit-long-image')
+      await click('Edit long image'); await closed
+      assert.equal(delivered.height, initial.height + 85 * source.scale)
+      const actual = nativeImage.createFromBuffer(Buffer.from(delivered.dataUrl.split(',')[1], 'base64')).toBitmap()
+      const first = nativeImage.createFromBuffer(Buffer.from(baseline.image.dataUrl.split(',')[1], 'base64')).toBitmap()
+      assert.deepEqual(actual.subarray(0, first.length), first, 'the original editor gets the live baseline pixels, not the stale preview')
+      result.observations.push({ actualStart: true, freshNativeBaseline: true, overlapIssueKeptRecording: true, noGuessedFrame: true, laterNativeFrameRecovered: true, resumeKeptFrames: true, nativeFailureDistinct: true, originalEditor: true, output: [delivered.width, delivered.height] })
+      result.passed = true; return
+    }
     if (automatic) {
       if (!interaction) await click('Start scrolling capture')
       if (interaction) {
@@ -161,7 +228,7 @@ async function run() {
       }
       await click('Stop scrolling capture')
       await until('only review and original source remain', () => BrowserWindow.getAllWindows().length === (sourceWindow ? 2 : 1))
-      await until('automatic capture returned to review', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !document.querySelector('button.primary-button').disabled"))
+      await until('automatic capture returned to review', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !!document.querySelector('button.primary-button') && !document.querySelector('button.primary-button').disabled"))
       assert.ok(window.getContentBounds().width > compact.width, 'stop restores review in the same window')
       const snapshot = await evaluate("window.captureSequence.load()")
       if (interaction) assert.ok(snapshot.frames.length >= 2, 'real wheel progress is retained'); else assert.equal(snapshot.frames.length, 2, 'a stopped automatic sequence retains only its actual changed frames')
@@ -175,17 +242,17 @@ async function run() {
       result.observations.push({ automatic: true, exactBackground: true, nativeSamples: sampleCount, acceptedFrames: snapshot.frames.length, outputHeight: delivered.height })
       result.passed = true; return
     }
-    await click('Capture next'); await until('second frame', async () => await evaluate("document.body.textContent.includes('2 frames') && !document.querySelector('button.primary-button').disabled"))
+    await click('Capture next'); await until('second frame', async () => await evaluate("document.body.textContent.includes('2 frames') && !!document.querySelector('button.primary-button') && !document.querySelector('button.primary-button').disabled"))
     if (!live) {
       await click('Capture next')
-      await until('uncertain overlap is explicit', async () => await evaluate("document.body.textContent.includes('overlap is unclear') && !document.querySelector('button.primary-button').disabled"))
+      await until('uncertain overlap is explicit', async () => await evaluate("document.body.textContent.includes('overlap is unclear') && !!document.querySelector('button.primary-button') && !document.querySelector('button.primary-button').disabled"))
       window.setContentSize(440, 640); await evaluate("window.setCaptureFixtureTheme('light')")
       await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
       const file = 'scroll-error-narrow-light.png'; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
-      await click('Undo last frame'); await until('uncertain frame can be undone', async () => await evaluate("document.body.textContent.includes('2 frames') && !document.querySelector('button.primary-button').disabled"))
+      await click('Undo last frame'); await until('uncertain frame can be undone', async () => await evaluate("document.body.textContent.includes('2 frames') && !!document.querySelector('button.primary-button') && !document.querySelector('button.primary-button').disabled"))
       result.observations.push({ ambiguousFrameRetained: true, undoRecovered: true })
     }
-    await click('Capture next'); await until('third frame', async () => await evaluate("document.body.textContent.includes('3 frames') && !document.querySelector('button.primary-button').disabled"))
+    await click('Capture next'); await until('third frame', async () => await evaluate("document.body.textContent.includes('3 frames') && !!document.querySelector('button.primary-button') && !document.querySelector('button.primary-button').disabled"))
     for (const theme of ['dark', 'light']) for (const width of [860, 440]) {
       await evaluate(`window.setCaptureFixtureTheme('${theme}')`); window.setContentSize(width, 640)
       await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
