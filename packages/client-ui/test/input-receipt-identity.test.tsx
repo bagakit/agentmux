@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import type { AgentInputSubmissionReceipt } from '@agentmux/core'
-import { projectInputReceipt } from '../src/lib/input-receipt-projection.js'
+import { originalInputCanRejoin, projectInputReceipt } from '../src/lib/input-receipt-projection.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -15,6 +15,14 @@ function receipt(): AgentInputSubmissionReceipt {
         admissionIntent: { kind: 'native-conversation', source: { providerId: 'codex', nativeSessionId: plan.threadId }, expectedRun: run } },
       native: { plan, outcome: 'unknown' } } } }
 }
+
+it('does not offer a legacy wake when the Core observation is closed', () => {
+  const original = receipt()
+  const waiting: AgentInputSubmissionReceipt = { ...original, admission: null, status: 'waiting', observation: 'rejoin-needed',
+    control: { ref: original.ref, state: 'enabled', at: 1, waiting: { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin' } } }
+  expect(originalInputCanRejoin(waiting)).toBe(true)
+  expect(originalInputCanRejoin({ ...waiting, observation: 'closed' })).toBe(false)
+})
 
 it.each(['both', 'native', 'intent'] as const)('retains the original receipt when %s correlation changes under the same key and generation', where => {
   const prior = receipt(), before = structuredClone(prior), next = structuredClone(prior), claim = next.admission!.admission!

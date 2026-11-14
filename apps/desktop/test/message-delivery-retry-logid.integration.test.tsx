@@ -36,7 +36,7 @@ function action(owner: Element, label: string): HTMLButtonElement {
   return found!
 }
 const card = (op = originalOp) => document.querySelector<HTMLElement>(`.composer-pending__card[data-operation-id="${op}"]`)!
-const row = (op = originalOp) => dom.container.querySelector<HTMLElement>(`.composer-outbox li[data-operation-id="${op}"]`)!
+const row = (op = originalOp) => dom.container.querySelector<HTMLElement>(`.composer-mailbox li[data-operation-id="${op}"]`)!
 async function click(button: HTMLButtonElement) { await act(async () => button.click()) }
 async function settled(check: () => void) { await act(async () => { await vi.waitFor(check) }) }
 async function showMailbox(op = originalOp) {
@@ -49,6 +49,19 @@ async function showMailbox(op = originalOp) {
   await click(action(card(op), '在 Outbox 查看待发消息和操作'))
   expect(row(op)).not.toBeNull()
   expect(row(op).querySelector('.composer-outbox__inline')).not.toBeNull()
+}
+async function showRecordedInputs(op = originalOp) {
+  const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!
+  await act(async () => {
+    for (const name of ['beforetoggle', 'toggle']) {
+      const event = new Event(name, { bubbles: true })
+      Object.defineProperty(event, 'newState', { value: 'open' })
+      panel.dispatchEvent(event)
+    }
+  })
+  expect(panel.dataset.state).toBe('open')
+  await click(action(dom.container, 'Inputs'))
+  expect(row(op), panel.textContent).not.toBeNull()
 }
 function hold() {
   let resolve!: () => void
@@ -280,7 +293,7 @@ it('retries through the actual card then Mailbox with one original request, pres
   expect(submit).toHaveBeenCalledTimes(3)
   const calls = submit.mock.calls
   for (const call of calls) expect(call).toEqual([composerSession().control, body, originalOp, condition,
-    { allowUncertainTurn: true, execution: 'immediate' }, true, undefined, 'message-tool', undefined, undefined, undefined])
+    { allowUncertainTurn: true, execution: 'immediate' }, true, undefined, 'message-tool', undefined, undefined, undefined, undefined, undefined])
   expect(inspectReported(firstId).record).toEqual(first.record)
   expect(inspectReported(secondId).record).toEqual(second.record)
   expect(messageDeliveryDiagnostics.get(firstId)?.record).toEqual(first.record)
@@ -634,11 +647,7 @@ it('uses the current manual terminal without a Native catalog gate and settles i
   expect(queue()[0]).toMatchObject({ operationId: op, archived: true, inputReceipt: receipt })
   await act(async () => useAppStore.getState().setAgentComposerDraft(sid, 'Independent neighbor draft'))
   expect(action(dom.container, 'Send').disabled).toBe(false)
-  const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!
-  await act(async () => {
-    const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' }); panel.dispatchEvent(event)
-  })
-  await click(action(dom.container, 'Outbox'))
+  await showRecordedInputs(op)
   expect(row(op).textContent).toContain('终端输入已确认')
   await click(row(op).querySelector<HTMLButtonElement>('.composer-mailbox__row')!)
   expect(row(op).textContent).toContain('Native 是否采用尚未确认')
@@ -713,9 +722,7 @@ it('does not use a controlled input timeline row to confirm location or prevent 
  const session=composerSession(),binding={expectedRun:session.control.run,admissionIntent:{kind:'manual-actor' as const}}
  useAppStore.setState({sessions:[session],agentSteerQueues:{[sid]:[entry(originalOp,{promptCondition:null,directInputBinding:binding,directInputControl:session.control,archived:true,inputIntakeStarted:true})]},timelines:{[sid]:{agentSessionId:sid,revision:1,items:[{id:'prompt:'+originalOp,agentSessionId:sid,kind:'user_message',status:'complete',source:'agentmux',createdAt:_liveTailFixtureEpoch(0, 0, 1),updatedAt:_liveTailFixtureEpoch(0, 0, 1),title:'Authored input',content:body}]}}})
  await dom.render(<AgentSessionComposer sessionId={sid} />)
- const panel=dom.container.querySelector<HTMLElement>('.composer-mailbox')!
- await act(async()=>{const event=new Event('toggle');Object.defineProperty(event,'newState',{value:'open'});panel.dispatchEvent(event)})
- await click(action(dom.container,'Outbox'))
+ await showRecordedInputs()
  await click(row().querySelector<HTMLButtonElement>('.composer-mailbox__row')!)
  expect(row().textContent).not.toContain('输入已确认')
  expect(row().querySelector<HTMLButtonElement>('[aria-label="恢复为待发"]')!.disabled).toBe(false)
