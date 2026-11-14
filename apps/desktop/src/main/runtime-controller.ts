@@ -2490,6 +2490,11 @@ export class RuntimeController {
         const sessions = await host.client.readAgentSessions()
         if (sessions.length || runs.length) throw new AgentMuxError(
           'Host ' + hostId + ' retains durable Sessions or Runs; its route and all original work were kept.', 'SETTING_RESOURCE_IN_USE')
+        // Retirement still owns the original resume/history locator even when
+        // current Sessions and physical Runs are empty. A failed read stays unknown.
+        const sources = await host.client.sessionHistorySources()
+        if (sources.some(source => source.state !== 'deleted')) throw new AgentMuxError(
+          'Host ' + hostId + ' retains Session recovery references; its original route was kept.', 'SETTING_RESOURCE_IN_USE')
       }
       if (runs.some(run => run.state === 'running')) {
         throw new Error(`Stop sessions on ${hostId} before changing that host`)
