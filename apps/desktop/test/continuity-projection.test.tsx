@@ -170,3 +170,59 @@ it('a mounted retained Resume callback keeps its original control and cannot rep
  expect(current().control.run).toEqual(newRun);expect(current().status).toMatchObject({continuity:'conflict',continuityConflict:'session-run-changed'})
  expect(api.sessions.launchAgent).not.toHaveBeenCalled();expect(api.sessions.write).not.toHaveBeenCalled();expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Original unsent draft')
 })
+it('changed metadata reaches mounted recovery consumers without re-cloning the unchanged large input body',async()=>{
+ const copies:number[]=[]
+ vi.spyOn(globalThis,'structuredClone').mockImplementation((value,options)=>{copies.push(bodyBytes(value));return clone(value,options)})
+ apply(f.core);await dom.render(<Surface/>);const original=current(),before=copies.reduce((a,b)=>a+b,0),callbacks=[retainedHandler('Re-read original')]
+ for(let index=0;index<6;index++){
+  const incoming=clone(f.core)
+  for(const operation of[incoming.continuity!,incoming.continuityOperations![f.operation.operationId]!]){
+   operation.observedAt=10+index;operation.policy={...operation.policy,retryMaxAttempts:2+index}
+   operation.supervision={...operation.supervision!,observedAt:10+index}
+  }
+  await act(async()=>apply(incoming));callbacks.push(retainedHandler('Re-read original'))
+  expect(current().continuity?.policy.retryMaxAttempts).toBe(2+index)
+  expect(current().continuity?.supervision?.observedAt).toBe(10+index)
+  expect(current().continuity?.messageInput).toBe(original.continuity?.messageInput)
+ }
+ const bytes=copies.reduce((a,b)=>a+b,0)-before
+ if(process.env.CONTINUITY_PROJECTION_FACTS)await appendFile(process.env.CONTINUITY_PROJECTION_FACTS,JSON.stringify({testName:'changed metadata with mounted recovery consumers',payloadBytes:Buffer.byteLength(generated),observations:6,projectionBodyCloneBytesAfterWarmup:bytes,boundary:'Logical payload bytes entering the production structuredClone boundary, not V8 allocated or user RSS bytes. Transport input clones excluded; same body across changed metadata.'})+'\n')
+ expect(bytes,'Changed metadata must clone zero unchanged large input body bytes').toBe(0)
+ expect(current().continuity?.messageInput?.message.userContent).toBe(generated)
+ expect(original.continuity?.policy.retryMaxAttempts).toBe(DEFAULT_AGENT_CONTINUITY_POLICY.retryMaxAttempts)
+ vi.spyOn(api.sessions,'refresh').mockImplementation(async()=>current())
+ await act(async()=>callbacks[0]!());expect(api.sessions.refresh).toHaveBeenCalledWith(f.session.control)
+ expect(api.sessions.recover).not.toHaveBeenCalled();expect(api.sessions.write).not.toHaveBeenCalled()
+ expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Original unsent draft')
+})
+it('changed Browser input facts preserve arrays, nulls, own keys and source isolation through actual Session events',()=>{
+ const context={kind:'browser' as const,version:1 as const,capturedAt:2,browser:{hostId:'local',browserId:'original-browser',navigationId:'original-nav'},page:{url:'https://fixture.invalid/',title:'Original page'},selection:{kind:'element' as const,capturedAt:2,source:{hostId:'local',browserId:'original-browser',navigationId:null,association:'unknown' as const},viewport:{width:100,height:80,deviceScaleFactor:null},element:{tagName:'div',role:'region',accessibleName:'Original',selector:'#original',text:'Original',nearbyText:['first','second'],attributes:JSON.parse('{"__proto__":"recorded value","constructor":"recorded constructor","data-id":"first"}') as Record<string,string>,html:'<div />'}}}
+ for(const operation of[f.core.continuity!,f.core.continuityOperations![f.operation.operationId]!])operation.messageInput!.message.inputContext=clone(context)
+ apply(f.core);const original=current()
+ const incoming=clone(f.core)
+ for(const operation of[incoming.continuity!,incoming.continuityOperations![f.operation.operationId]!]){
+  operation.observedAt=3
+  const input=operation.messageInput!.message.inputContext!
+  delete input.page.title;input.browser.navigationId=null
+  input.selection!.element!.nearbyText=['second','first','third']
+  input.selection!.element!.attributes=Object.fromEntries([['__proto__','changed own value'],['constructor','changed constructor'],['data-id','second']])
+ }
+ apply(incoming);const projected=current().continuity!.messageInput!.message.inputContext!
+ expect(projected.selection!.element!.nearbyText,'Changed arrays retain their full order and length').toEqual(['second','first','third'])
+ expect(projected.page,'Optional clearing must remove the old own property').not.toHaveProperty('title')
+ expect(projected.browser.navigationId,'A changed null is a complete recorded fact').toBeNull()
+ const attrs=projected.selection!.element!.attributes
+ expect(Object.keys(attrs),'Arbitrary own JSON keys must survive projection').toEqual(['__proto__','constructor','data-id'])
+ expect(Object.hasOwn(attrs,'__proto__'),'__proto__ must remain an own data property').toBe(true)
+ expect(attrs['__proto__']).toBe('changed own value');expect(attrs.constructor).toBe('changed constructor')
+ expect(Object.getPrototypeOf(attrs)).toBe(Object.prototype)
+ incoming.continuity!.messageInput!.message.inputContext!.selection!.element!.nearbyText.push('caller mutation')
+ incoming.continuityOperations![f.operation.operationId]!.messageInput!.message.inputContext!.selection!.element!.attributes['data-id']='caller mutation'
+ expect(projected.selection!.element!.nearbyText,'Source arrays must stay isolated').toEqual(['second','first','third'])
+ expect(attrs['data-id'],'Source own data must stay isolated').toBe('second')
+ expect(original.continuity!.messageInput!.message.inputContext).toEqual(context)
+ const cleared=clone(incoming)
+ for(const operation of[cleared.continuity!,cleared.continuityOperations![f.operation.operationId]!])operation.messageInput!.message.inputContext!.selection!.element!.nearbyText=[]
+ apply(cleared);expect(current().continuity!.messageInput!.message.inputContext!.selection!.element!.nearbyText,'Empty arrays clear all old entries').toEqual([])
+ expect(api.sessions.recover).not.toHaveBeenCalled();expect(api.sessions.write).not.toHaveBeenCalled()
+})
