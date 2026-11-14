@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
-import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory, defaultAgentMuxSpatialStatePath, defaultAgentMuxStateDirectory, durableWriteFile, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
+import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory, defaultAgentMuxSpatialStatePath, defaultAgentMuxStateDirectory, durableWriteFile, inspectCompatibleAgentMuxRuntime, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
 
 const exec = promisify(execFile)
 const wait = (ms: number) => new Promise<void>(yes => setTimeout(yes, ms))
@@ -142,9 +142,72 @@ export async function inspectMacosHostProcess(pid: number): Promise<MacosHostPro
 
 async function mappedExecutable(pid: number, executable: string): Promise<void> {
   const path = await realpath(executable)
-  const { stdout } = await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-p', String(pid), '-d', 'txt', '-Fn'],
-    { timeout: 5000, maxBuffer: 256 * 1024 })
-  if (!stdout.split('\n').includes(`n${path}`)) throw failure('The original service process does not map the expected executable. No process was stopped.', 'HOST_SERVICE_IDENTITY_MISMATCH')
+  const image = await mappedHostImage(pid, path, AbortSignal.timeout(5000))
+  if (image.path !== path) throw failure('The original service process does not map the expected executable. No process was stopped.', 'HOST_SERVICE_IDENTITY_MISMATCH')
+}
+
+type ExecutableImage = { device: bigint; inode: bigint }
+
+const sameImage = (left: ExecutableImage, right: ExecutableImage) => left.device === right.device && left.inode === right.inode
+
+/** An old App can be renamed or in Trash. Its loaded text vnode retains its original identity. */
+async function mappedHostImage(pid: number, executable: string, signal: AbortSignal): Promise<ExecutableImage & { path: string }> {
+  const { stdout } = await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-p', String(pid), '-d', 'txt', '-FfDin'],
+    { signal, timeout: 5000, maxBuffer: 256 * 1024 })
+  const suffix = `/Contents/MacOS/${basename(executable)}`
+  const images = stdout.split(/^ftxt\n/mu).slice(1).flatMap(record => {
+    const path = /^n(.+)$/mu.exec(record)?.[1]
+    if (!path || !(path === executable || path.endsWith(suffix) && path.slice(0, -suffix.length).endsWith('.app'))) return []
+    const device = /^D(0x[0-9a-f]+)$/imu.exec(record)?.[1], inode = /^i(\d+)$/mu.exec(record)?.[1]
+    return device && inode ? [{ path, device: BigInt(device), inode: BigInt(inode) }] : []
+  })
+  if (images.length !== 1) throw failure('The running Host image is unconfirmed.')
+  return images[0]!
+}
+
+/** Reopen an already-replaced App through the same Host endpoint and lifecycle owner. */
+export async function reloadReplacedMacosHost(service: MacosHostService): Promise<void> {
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: service.socketPath } })
+  const signal = AbortSignal.timeout(10_000)
+  // This observation only authorizes the exact maintenance action. Desktop can
+  // still connect normally when the owner, executable or compatibility is unknown.
+  try {
+    const { owner } = await rpc.call('runtime.owner.identity', {}, { signal })
+    const { processId: pid, runtimeId, ownerInstanceId } = owner
+    const imageAtPath = async (): Promise<ExecutableImage> => {
+      const image = await lstat(service.executable, { bigint: true })
+      if (!image.isFile()) throw failure('The installed App image is unconfirmed.')
+      return { device: image.dev, inode: image.ino }
+    }
+    const installed = await imageAtPath()
+    if (sameImage(installed, await mappedHostImage(pid, service.executable, signal))) return
+
+    const before = await inspectMacosHostProcess(pid)
+    const fence = { runtimeId, ownerInstanceId }
+    const opening = await rpc.call('runtime.bootstrap', { consumerId: 'installed-app-host-reload', fence, agentSessionIds: [] }, { signal })
+    const { stdout } = await exec('/bin/ps', ['-ww', '-p', String(pid), '-o', 'command='], { signal, maxBuffer: 64 * 1024 })
+    const registration = await macosHostServiceRegistration(service, pid)
+    if (owner.availability !== 'connected' || !before || before.uid !== process.getuid!() || opening.hostProcessId !== pid || opening.storePath !== service.storePath ||
+      stdout.trim() !== `${service.executable} ${service.entrypoint} --store ${service.storePath}` || registration && registration.pid !== pid)
+      throw failure('The responding Host is not confirmed for this installation and Store.')
+
+    const native = await inspectCompatibleAgentMuxRuntime(signal)
+    if (owner.ctxmux && (!native || owner.ctxmux.instanceId !== native.daemonInstanceId || owner.ctxmux.buildIdentity !== native.buildId))
+      throw failure('The original CtxMux Runtime could not be confirmed for the installed App.')
+    if ((await inspectMacosHostProcess(pid))?.birth !== before.birth || !sameImage(installed, await imageAtPath()))
+      throw failure('The original Host or installed App changed while preparing the reload.')
+
+    await rpc.call('runtime.owner.shutdown', { fence }, { signal })
+    const deadline = Date.now() + 10_000
+    while ((await inspectMacosHostProcess(pid))?.birth === before.birth) {
+      if (Date.now() >= deadline) throw failure('The previous Host has not finished its graceful shutdown.')
+      await wait(50)
+    }
+    const next = await ensureMacosHostService(service)
+    if (next.owner.runtimeId !== runtimeId || next.owner.ownerInstanceId === ownerInstanceId ||
+      !sameImage(installed, await mappedHostImage(next.process.pid, service.executable, AbortSignal.timeout(5000))))
+      throw failure('The new Host has not confirmed the original Runtime.')
+  } finally { await rpc.dispose() }
 }
 
 /** The documented kickstart -p receipt names the current job PID without replacing a live process. */
@@ -184,7 +247,7 @@ async function publicOwner(service: MacosHostService): Promise<{ owner: AgentMux
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: service.socketPath } })
   try {
     const { owner } = await rpc.call('runtime.owner.identity', {})
-    const opening = await rpc.call('runtime.bootstrap', { consumerId: 'host-service-observer',
+    const opening = await rpc.call('runtime.bootstrap', { consumerId: 'host-service-observer', agentSessionIds: [],
       fence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
     if (opening.storePath !== service.storePath || opening.hostProcessId !== owner.processId) throw failure(
       'The service endpoint belongs to another original Store or Host process. Its healthy capabilities were retained.', 'HOST_SERVICE_IDENTITY_MISMATCH')

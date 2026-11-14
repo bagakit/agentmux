@@ -132,7 +132,7 @@ function startPrimaryInstance(): void {
   const runtime = new RuntimeController(
     new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
     configuredDesktopAgentMuxHost(configStore.filePath, process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
-      ? join(homedir(), '.agentmux', 'connectors') : join(app.getPath('userData'), 'connectors')),
+      ? join(homedir(), '.agentmux', 'connectors') : join(app.getPath('userData'), 'connectors'), app.isPackaged),
     scratchTopics
   )
   const applicationAccess = createDesktopApplicationAccessOwner(runtime, join(app.getPath('userData'), 'application-access.sqlite'))

@@ -558,6 +558,19 @@ export function assertAgentMuxRuntimeCompatibility(runtime: AgentMuxRuntimeCompa
   }
 }
 
+/** Inspect the current listener without borrowing its activation or Run authority. */
+export async function inspectCompatibleAgentMuxRuntime(signal: AbortSignal): Promise<RuntimeIdentity | null> {
+  const socketPath = defaultCtxmuxSocketPath()
+  let runtime: RuntimeIdentity
+  try { runtime = await new CtxmuxClient({ socketPath }).runtimeInfo(signal) }
+  catch (error) {
+    if (signal.aborted || await probeSocketLiveness(socketPath) !== 'dead') throw error
+    return null
+  }
+  assertAgentMuxRuntimeCompatibility(runtime)
+  return runtime
+}
+
 async function verifyOwnerReceipt(
   socketPath: string,
   stateDirectory: string,

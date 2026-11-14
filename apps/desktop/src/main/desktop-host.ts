@@ -1,5 +1,6 @@
 import { join, resolve } from 'node:path'
-import { ensureMacosHostService, macosHostService, type MacosHostServiceOwner } from '@agentmux/host/macos-service'
+import { homedir } from 'node:os'
+import { ensureMacosHostService, macosHostService, reloadReplacedMacosHost, type MacosHostService, type MacosHostServiceOwner } from '@agentmux/host/macos-service'
 import { AgentMuxFileAgentSessionStore, AgentMuxError, connectAgentMuxRpc,
   connectSshAgentMux, defaultAgentMuxControlSocketPath, observeRead, probeSocketLiveness,
   type AgentMuxAgentSessionStore,
@@ -12,6 +13,10 @@ import type { HostConfig } from '../shared/contracts.js'
 export type DesktopRuntimeClient = AgentMuxClient | AgentMuxHostedClient
 export type DesktopRuntimeConnector = (config: HostConfig, store: AgentMuxAgentSessionStore) => Promise<DesktopRuntimeClient>
 const launches = new Map<string, Promise<MacosHostServiceOwner>>()
+type HostConfiguration = {
+  path: string; connectorDirectory: string
+  installedHost?: { executable: string; check?: Promise<void>; issue?: string }
+}
 type OriginalDesktopTransport = {
   call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext, expectedOwner?: AgentMuxRuntimeFence): Promise<AgentMuxRpcResult<M>>
   subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>, expectedOwner?: AgentMuxRuntimeFence): Promise<AgentMuxRpcSubscription>
@@ -63,16 +68,30 @@ export async function subscribeOriginalDesktopHost<M extends AgentMuxRpcStreamMe
   throw new AgentMuxError('The original Host subscription transport is unavailable. Its connections and Agents are retained.', 'CONTROL_UNAVAILABLE')
 }
 
-async function ensureHost(storePath: string, socketPath: string, configuration?: { path: string; connectorDirectory: string }): Promise<void> {
+function hostService(storePath: string, socketPath: string, executable: string, configuration?: HostConfiguration): MacosHostService {
+  return macosHostService({ executable, entrypoint: join(import.meta.dirname, 'agentmux-host.js'), storePath, socketPath,
+    mobileBuildDirectory: join(import.meta.dirname, '../mobile'),
+    workspaceMoveHelper: resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move'),
+    ...(configuration ? { configuration } : {}) })
+}
+
+async function ensureHost(storePath: string, socketPath: string, configuration?: HostConfiguration): Promise<void> {
+  const installed = configuration?.installedHost
+  if (installed) {
+    installed.check ??= (async () => {
+      if (await probeSocketLiveness(socketPath) !== 'alive') return
+      await reloadReplacedMacosHost(hostService(storePath, socketPath, installed.executable, configuration))
+    })().catch(error => {
+      installed.issue = error instanceof Error ? error.message : String(error)
+      console.warn('The installed App could not confirm its Host update. The original connection remains available.', error)
+    })
+    await installed.check
+  }
   const liveness = await probeSocketLiveness(socketPath)
   if (liveness !== 'dead') return
   let launching = launches.get(socketPath)
   if (!launching) {
-    launching = ensureMacosHostService(macosHostService({ executable: process.execPath,
-      entrypoint: join(import.meta.dirname, 'agentmux-host.js'), storePath, socketPath,
-      mobileBuildDirectory: join(import.meta.dirname, '../mobile'),
-      workspaceMoveHelper: resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move'),
-      ...(configuration ? { configuration } : {}) }))
+    launching = ensureMacosHostService(hostService(storePath, socketPath, process.execPath, configuration))
     launches.set(socketPath, launching)
     const retire = () => { if (launches.get(socketPath) === launching) launches.delete(socketPath) }
     void launching.then(retire, retire)
@@ -90,7 +109,7 @@ async function ensureHost(storePath: string, socketPath: string, configuration?:
 }
 
 /** Product connector: the Desktop never constructs a local semantic Core owner. */
-async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAgentSessionStore, configuration?: { path: string; connectorDirectory: string }): Promise<DesktopRuntimeClient> {
+async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAgentSessionStore, configuration?: HostConfiguration): Promise<DesktopRuntimeClient> {
   if (config.kind === 'ssh') return await connectSshAgentMux({ waitForReady: false,
     ...(config.runtimeId ? { expectedRuntimeId: config.runtimeId } : {}), target: { hostId: config.id,
     ...(config.transport === undefined ? {} : { transport: config.transport }), ...(config.tailcat === undefined ? {} : { tailcat: config.tailcat }),
@@ -130,9 +149,16 @@ async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAge
       const confirmed = expectedOwner || method === 'agent.provider.ls' || method === 'runtime.owner.identity'
         ? undefined : await originalOwner(context.signal)
       const fence = expectedOwner ?? confirmed
-      return await rpc.call(method, params, { ...(context.signal ? { signal: context.signal } : {}),
-        ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}),
-        ...(context.caller ? { credentials: context.caller } : {}), ...(fence ? { runtimeFence: fence } : {}) })
+      try {
+        return await rpc.call(method, params, { ...(context.signal ? { signal: context.signal } : {}),
+          ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}),
+          ...(context.caller ? { credentials: context.caller } : {}), ...(fence ? { runtimeFence: fence } : {}) })
+      } catch (error) {
+        const issue = configuration?.installedHost?.issue
+        if (issue && error instanceof AgentMuxError && error.code === 'RPC_METHOD_NOT_FOUND')
+          throw new AgentMuxError(`The background Host update was unconfirmed. Quit and reopen AgentMux to retry. ${issue}`, error.code)
+        throw error
+      }
     },
     subscribe: async (method, params, handlers, expectedOwner) => {
       const fence = expectedOwner ?? await originalOwner(handlers.signal)
@@ -145,8 +171,12 @@ async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAge
 }
 
 export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = (config, store) => connectOriginalDesktopHost(config, store)
-export function configuredDesktopAgentMuxHost(configurationPath: string, connectorDirectory: string): DesktopRuntimeConnector {
-  return (config, store) => connectOriginalDesktopHost(config, store, { path: configurationPath, connectorDirectory })
+export function configuredDesktopAgentMuxHost(configurationPath: string, connectorDirectory: string, installed = false): DesktopRuntimeConnector {
+  const executable = process.execPath
+  const expected = [join('/Applications', 'AgentMux.app/Contents/MacOS/AgentMux'), join(homedir(), 'Applications', 'AgentMux.app/Contents/MacOS/AgentMux')]
+  const configuration: HostConfiguration = { path: configurationPath, connectorDirectory,
+    ...(installed && expected.includes(executable) ? { installedHost: { executable } } : {}) }
+  return (config, store) => connectOriginalDesktopHost(config, store, configuration)
 }
 
 export function desktopBusinessSocketPath(): string {
