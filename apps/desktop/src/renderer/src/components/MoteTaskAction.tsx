@@ -104,9 +104,9 @@ export function MoteTaskAction({ scopeKey, active = true, orientation = 'horizon
     const retainedAgent = recipient.kind === 'new-agent' && original && original.state !== 'not-queued'
     const label = legacy ? busy ? 'Preparing task…' : original?.state === 'queued' ? 'Open queued task'
       : original?.state === 'unconfirmed' ? 'Check original task' : original?.draftSaved ? 'Open task draft' : action.label : action.label
-    return <button type="button" key={action.id} className="launcher-mote__create" data-mote-task-action-id={action.id}
+    return <button type="button" key={action.id} className={orientation === 'vertical' ? 'tab-context-menu__item mote-task-action__button' : 'launcher-mote__create'} title={action.description} aria-description={action.description} data-mote-task-action-id={action.id}
       disabled={busy || Boolean(retainedAgent && !newAgent?.onOpen)} onClick={event => void handoff(action, event.currentTarget)}>
-      <span>{label}</span>{action.description ? <small>{action.description}</small> : null}
+      <span>{label}</span>{orientation !== 'vertical' && action.description ? <small>{action.description}</small> : null}
     </button>
   }
   const content = <div ref={root} className={`mote-task-action mote-task-action--${orientation}`} data-mote-task-action aria-busy={busy || undefined}>

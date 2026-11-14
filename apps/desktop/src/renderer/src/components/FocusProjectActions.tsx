@@ -35,9 +35,9 @@ export function FocusProjectActions({ project }: { project: WorkspaceRecord }) {
     try { await useAppStore.getState().selectWorkspace(current.id) }
     catch (cause) { reportError(cause); setIssue(`The original project could not open in Space: ${presentError(cause)}. Your original work is kept; retry this action.`) }
   }
-  return <div role="group" aria-label="Project actions" style={{ display: 'grid', gap: 'var(--sp-1)' }}>
-    <button type="button" className="small-button" style={{ justifyContent: 'flex-start' }} aria-label="Copy project address" onClick={() => void copy()}><SemanticIcon name="action.copy" size={13} />Copy project address</button>
-    <button type="button" className="small-button" style={{ justifyContent: 'flex-start' }} aria-label="Open project in Space" onClick={() => void open()}><SemanticIcon name="navigation.space" size={13} />Open in Space</button>
+  return <div role="group" aria-label="Project actions">
+    <button type="button" className="tab-context-menu__item focus-project-menu-action" aria-label="Copy project address" onClick={() => void copy()}><SemanticIcon name="action.copy" size={13} />Copy project address</button>
+    <button type="button" className="tab-context-menu__item focus-project-menu-action" aria-label="Open project in Space" onClick={() => void open()}><SemanticIcon name="navigation.space" size={13} />Open in Space</button>
     {issue ? <p role="status" className="focus-project-preferences__notice">{issue}</p> : null}
   </div>
 }

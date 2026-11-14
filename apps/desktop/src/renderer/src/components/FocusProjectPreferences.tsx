@@ -23,6 +23,7 @@ export function FocusProjectPreferences({ projectKey, name, actions, discussion,
   const [pending, setPending] = useState(false), [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const generation = useRef(0), draftVersion = useRef(0), inFlight = useRef(false), resumeDraft = useRef(false)
+  const [appearanceOpen, setAppearanceOpen] = useState(false)
   const [discussionVisited, setDiscussionVisited] = useState(false)
   const [discussionHost, setDiscussionHost] = useState<HTMLDivElement | null>(null)
   const trigger = useRef<HTMLButtonElement>(null), escape = useRef(false)
@@ -45,7 +46,7 @@ export function FocusProjectPreferences({ projectKey, name, actions, discussion,
     ++generation.current
     if (next) {
       setDiscussionVisited(true)
-      if (!resumeDraft.current) { baseline.current = projects ?? []; setDraft(saved); setError(null); setNotice(null); draftVersion.current = 0 }
+      if (!resumeDraft.current) { setAppearanceOpen(false); baseline.current = projects ?? []; setDraft(saved); setError(null); setNotice(null); draftVersion.current = 0 }
       resumeDraft.current = false
     }
     setOpen(next)
@@ -82,18 +83,24 @@ export function FocusProjectPreferences({ projectKey, name, actions, discussion,
   }
   return <><Popover.Root modal={false} open={effectiveOpen} onOpenChange={begin}>
     <Popover.Trigger asChild><button ref={trigger} type="button" className={`icon-button focus-project-preferences__trigger${effectiveOpen ? ' is-menu-open' : ''}`} aria-label={`${subject} preferences · ${name}`} title={projectKey ? 'Project actions, pin, note and color' : 'Collection actions'}><SemanticIcon name="action.more" size={13} /></button></Popover.Trigger>
-    <DocumentOverlayPortal component={Popover.Portal}><Popover.Content ref={attachPanel} className="focus-project-preferences" data-focus-project-preferences="" aria-describedby={undefined} style={{ position: 'fixed', visibility: 'hidden' }}
+    <DocumentOverlayPortal component={Popover.Portal}><Popover.Content ref={attachPanel} className="tab-context-menu focus-project-preferences" data-focus-project-preferences="" aria-describedby={undefined} style={{ position: 'fixed', visibility: 'hidden' }}
       onEscapeKeyDown={() => { escape.current = true }} onCloseAutoFocus={event => { event.preventDefault(); if (escape.current) trigger.current?.focus({ preventScroll: true }); escape.current = false }}>
-      <div className="focus-project-preferences__header"><Popover.Title asChild><strong className="focus-project-preferences__name">{name}</strong></Popover.Title>
-        {projectKey ? <label className="focus-project-preferences__pin"><input type="checkbox" aria-label="Pin project" checked={draft.pinned} onChange={event => edit({ ...draft, pinned: event.target.checked })} />Pin</label> : null}</div>
+      <Popover.Title className="focus-project-preferences__name">{name}</Popover.Title>
       {actions}
-      {projectKey ? <><label className="focus-project-preferences__note"><span>Note</span><input aria-label="Project note" value={draft.note} placeholder="A familiar reminder" onChange={event => edit({ ...draft, note: event.target.value })} /></label>
-      <div role="group" aria-label="Project background color" className="focus-project-preferences__color-row"><span>Color</span><div className="focus-project-preferences__colors">{FOCUS_PROJECT_COLORS.map(color => <button type="button" key={color} aria-label={`Project color · ${color}`} title={color} aria-pressed={draft.color === color}
-        style={{ background: `color-mix(in srgb, ${focusProjectTint(color)} 26%, var(--surface-1))` }} onClick={() => edit({ ...draft, color })}>{draft.color === color ? <SemanticIcon name="status.selected" size={13} /> : null}</button>)}</div></div></> : null}
       {discussion ? <div ref={setDiscussionHost} data-focus-group-discussion-host="" /> : null}
       {error ? <div role="status" className="focus-project-preferences__error">{error}<button type="button" className="small-button" onClick={reviewCurrent} aria-label={`Review current ${subject.toLowerCase()} preferences`}>Review current settings</button></div> : null}
       {notice ? <p role="status">{notice}</p> : null}
-      <div className="focus-project-preferences__actions"><button type="button" className="small-button" onClick={() => begin(false)}>Cancel</button>{projectKey ? <button type="button" className="small-button" disabled={pending} onClick={() => void save()} aria-label={`Save ${subject.toLowerCase()} preferences`}>{pending ? 'Saving…' : error ? 'Retry save' : 'Save'}</button> : null}</div>
+      {projectKey ? <>
+        <button type="button" className="tab-context-menu__item tab-context-menu__item--quiet focus-project-menu-action" aria-expanded={appearanceOpen} aria-label="Project appearance" disabled={pending} onClick={() => setAppearanceOpen(value => !value)}><SemanticIcon name="navigation.disclosure" size={12} /><span>Project appearance</span></button>
+        {appearanceOpen ? <div className="focus-project-preferences__editor" data-focus-project-appearance="">
+          <label className="focus-project-preferences__pin"><input type="checkbox" aria-label="Pin project" checked={draft.pinned} onChange={event => edit({ ...draft, pinned: event.target.checked })} />Pin project</label>
+          <label className="focus-project-preferences__note"><span>Note</span><input aria-label="Project note" value={draft.note} placeholder="A familiar reminder" onChange={event => edit({ ...draft, note: event.target.value })} /></label>
+          <div role="group" aria-label="Project background color" className="focus-project-preferences__color-row"><span>Color</span><div className="focus-project-preferences__colors">{FOCUS_PROJECT_COLORS.map(color => <button type="button" key={color} aria-label={`Project color · ${color}`} title={color} aria-pressed={draft.color === color}
+            style={{ background: `color-mix(in srgb, ${focusProjectTint(color)} 26%, var(--surface-1))` }} onClick={() => edit({ ...draft, color })}>{draft.color === color ? <SemanticIcon name="status.selected" size={13} /> : null}</button>)}</div></div>
+          <div className="focus-project-preferences__actions"><button type="button" className="small-button" onClick={() => begin(false)}>Cancel</button><button type="button" className="small-button" disabled={pending} onClick={() => void save()} aria-label={`Save ${subject.toLowerCase()} preferences`}>{pending ? 'Saving…' : error ? 'Retry save' : 'Save'}</button></div>
+        </div> : null}
+      </> : null}
+
     </Popover.Content></DocumentOverlayPortal>
   </Popover.Root>{discussionVisited ? discussion?.({ active: effectiveOpen, container: effectiveOpen ? discussionHost : null }) : null}</>
 }

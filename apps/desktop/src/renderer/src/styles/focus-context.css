@@ -299,9 +299,14 @@
 .focus-project-pin-handle:hover, .focus-project-pin-handle:focus-visible { background: var(--surface-2); color: var(--text); }
 .focus-project-lanes__personal-note { max-width: 180px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-2); }
 .focus-project-preferences__trigger { flex: none; width: 22px; height: 22px; margin-inline-start: auto; }
-.focus-project-preferences { z-index: 200; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; width: min(248px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface-1); box-shadow: 0 5px 18px #0003; font-size: var(--fs-meta); }
-.focus-project-preferences__header { display: flex; align-items: center; gap: 10px; }
-.focus-project-preferences__name { font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: inherit; }
+.focus-project-preferences { display: flex; flex-direction: column; gap: var(--sp-1); box-sizing: border-box; width: min(248px, calc(100vw - 16px)); min-width: min(176px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; }
+.focus-project-preferences__name { margin: 0; padding: var(--sp-1) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; overflow-wrap: anywhere; }
+.focus-project-menu-action { width: 100%; border: 0; background: transparent; color: var(--text-2); text-align: left; font-family: inherit; cursor: pointer; }
+.focus-project-menu-action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.focus-project-menu-action[aria-expanded] { border-top: 1px solid var(--line-soft); }
+.focus-project-menu-action[aria-expanded='true'] > svg { transform: rotate(90deg); }
+.focus-project-preferences__editor { display: grid; gap: 6px; padding: var(--sp-2) var(--sp-4); }
+.focus-project-preferences__notice { margin: 0; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .focus-project-preferences__pin { display: inline-flex; flex: none; align-items: center; gap: 4px; }
 .focus-project-preferences__pin input { margin: 0; }
 .focus-project-preferences__note { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--text-2); }
