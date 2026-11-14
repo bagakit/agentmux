@@ -248,6 +248,20 @@ Read only the matching local help:
   Imports mint a new local asset and step identities and require review. Packages contain
   the complete definition and parameter declarations, never runtime values, sign-ins,
   recording bodies, Runs or human approvals. Source metadata describes package origin only.
+  Saved `extract` steps declare `extraction:{within?,fields:[{key,type,source:{selector,read,attribute?}}]}`.
+  A field has type string, number or boolean; reads use text, value, checked or attribute.
+  A saved schema cannot retain an ephemeral withinRef. Declare outcomes with
+  `{kind:"field-equals",stepId,key,expected}` in the original completion criteria.
+  False, zero and the empty string are real typed values. Each producer records its check
+  while its own document is current. `task inspect` returns `completions` joined to the
+  original version, run and step operations, including recorded checks from earlier pages.
+  These are historical extraction outcomes, never a claim about today's website state.
+  Use its exact operation id with `browser inspect --operation-id ID --step N
+  [--offset N --max-bytes N]` to read the original JSON artifact in base64 chunks.
+  This read does not run a program, acquire input or re-extract; missing/evicted data leaves
+  the original operation and Browser available. Restart reads recorded facts without replay.
+  Explicit saved extraction retains only its selected data; private invocation values are
+  not saved in definitions, progress, ordinary receipts, automatic observations or logs.
 - amux browser open --help: open a new page only when needed.
   A Profile is a reusable website sign-in environment; network and device settings
   are optional additions. With no explicit Profile, ordinary pages use the original
