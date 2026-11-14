@@ -11,7 +11,7 @@ import { AgentMuxControlServer, parseAgentMuxControlRequest, parseAgentMuxContro
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlRequest } from '../src/control.js'
 import { settingsCliCommand as parseSettingsCommand } from './helpers/settings-command.js'
 
-const exec = promisify(execFile), cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
+const exec = promisify(execFile), cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? fileURLToPath(new URL('../bin/amux', import.meta.url))
 let root: string, server: AgentMuxControlServer
 const seen: AgentMuxControlRequest[] = []
 // Client-owned JSON: Core has no Desktop Host schema or connection defaults.
@@ -20,6 +20,9 @@ beforeEach(async () => {
   root = await mkdtemp(fixturePath("tmp/amux-hosts-cli-")); seen.splice(0)
   server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request) {
     seen.push(request)
+    if (request.operation === 'settings.hosts.create') return { operation: request.operation, host: request.value }
+    if (request.operation === 'settings.hosts.configure' || request.operation === 'settings.hosts.update') return { operation: request.operation, host: request.candidate }
+    if (request.operation === 'settings.hosts.delete') return { operation: request.operation, id: request.id, removed: true }
     if (request.operation === 'settings.hosts.list') return { operation: request.operation, hosts: [saved] }
     if (request.operation === 'settings.hosts.test') return { operation: request.operation,
       input: request.input ?? { ...saved, id: request.id }, outcome: 'unsupported', detail: 'This connection is not supported.' }
@@ -117,3 +120,26 @@ it('strict public envelope rejects ambiguous input and preserves captured diagno
   expect(parseAgentMuxControlReceipt(receipt)).toEqual(receipt)
   expect(() => parseAgentMuxControlReceipt({ ...receipt, result: { ...receipt.result, outcome: 'ready', extra: true } })).toThrow()
 })
+
+
+it('reads Host carrier leaf help offline without RPC while input-bearing option-looking IDs stay literal', async () => {
+  const offline = join(root, 'absent-owner')
+  for (const action of ['create', 'configure', 'delete', 'update', 'upgrade', 'upgrade-inspect', 'upgrade-reconnect']) {
+    for (const flag of ['--help', '-h']) {
+      const help = await run([action, flag], undefined, offline)
+      expect(help.code, help.stderr).toBe(0)
+      expect(help.stdout).toContain('Usage: amux settings hosts ' + action + ' <id>')
+      expect(help.stdout).toContain('unknown')
+    }
+  }
+  expect(seen).toEqual([])
+  const value = { id: '--help', route: 'literal original route' }
+  const input = JSON.stringify({ expected: value, candidate: value })
+  expect((await run(['create', '--help', '--input', '-'], JSON.stringify(value))).code).toBe(0)
+  for (const action of ['configure', 'update']) expect((await run([action, '--help', '--input', '-'], input)).code).toBe(0)
+  expect((await run(['delete', '--help', '--input', '-'], JSON.stringify({ expected: value }))).code).toBe(0)
+  expect(seen.map(request => ({ operation: request.operation, id: 'id' in request ? request.id : undefined }))).toEqual([
+    { operation: 'settings.hosts.create', id: '--help' }, { operation: 'settings.hosts.configure', id: '--help' },
+    { operation: 'settings.hosts.update', id: '--help' }, { operation: 'settings.hosts.delete', id: '--help' }
+  ])
+}, 30_000)
