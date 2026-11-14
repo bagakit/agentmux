@@ -53,11 +53,11 @@ export async function verifyPackagedPreviews(runDesktopConsumer) {
     const named = "'@agentmux/client-ui/components/AgentMarkdown'"
     assert.equal(original.split(named).length, 2)
     await writeFile(notebook, original.replace(named, "'@agentmux/client-ui'"))
-    await assert.rejects(bundle(), /The packaged preview consumed the root Client UI barrel/u)
+    await assert.rejects(bundle(), /Missing "\." specifier in "@agentmux\/client-ui" package/u)
     await writeFile(notebook, original)
     assert.equal(await bundle(), outputs)
     return { archiveSHA256: createHash('sha256').update(await readFile(archivePath)).digest('hex'), outputs,
-      mutation: 'loaded root Client UI barrel', restored: true, privateWorkspaceDependencies: true }
+      mutation: 'rejected unregistered root Client UI entry', restored: true, privateWorkspaceDependencies: true }
   } finally {
     await rm(temporary, { recursive: true, force: true })
   }
