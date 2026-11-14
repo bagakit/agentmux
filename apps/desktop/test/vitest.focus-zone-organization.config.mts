@@ -10,6 +10,7 @@ export const zoneOrganizationMutations = {
   'container-override': ['shared/focus-zone-presentation.ts', 'preferences?.find(item => item.key === key)?.presentation', 'preferences?.find(item => item.key !== key)?.presentation'],
   'mode-consumer': ['renderer/src/components/FocusScanLaneContent.tsx', 'const organization = lane.zonePresentation ?? topicPresentation', 'const organization = topicPresentation'],
   'container-delta': ['shared/config-edit.ts', 'live = index(actual), result = new Map(live)', 'live = index(actual), result = new Map(old)'],
+  'portaled-draft': ['renderer/src/components/FocusProjectPreferences.tsx', "${open ? ' is-menu-open' : ''}", ''],
   'late-save': ['renderer/src/components/FocusProjectPreferences.tsx', 'if (generation.current !== token) return', 'if (false) return'],
   'multiple-zones': ['renderer/src/lib/focus-collection-lanes.ts', 'if (!held.some(item => item.id === heading.id)) held.push(heading)', 'held.splice(0, held.length, heading)']
 } as const
@@ -34,7 +35,7 @@ export default defineConfig({ ...source, cacheDir: '.tmp/focus-zone-organization
       JSON.stringify({ path, original_sha256: sha(original), loaded_sha256: sha(code), mutant: code === original ? null : selected }) + '\n')
     return code === original ? undefined : { code, map: null }
   }, buildEnd() { if (selected && !applied) throw Error('The actual Zone mutation consumer was not loaded') } }],
-  test: { ...source.test, include: process.env.AGENTMUX_FOCUS_ZONE_ADJACENT
+  test: { ...source.test, include: selected === 'portaled-draft' ? ['apps/desktop/test/focus-collection-layout.test.tsx'] : process.env.AGENTMUX_FOCUS_ZONE_ADJACENT
     ? ['apps/desktop/test/focus-project-preferences-races.test.tsx', 'apps/desktop/test/focus-project-appearance.test.tsx']
     : ['apps/desktop/test/focus-zone-organization.test.tsx', 'apps/desktop/test/focus-zone-organization-control.test.ts'],
     maxWorkers: 1, fileParallelism: false, passWithNoTests: false }
