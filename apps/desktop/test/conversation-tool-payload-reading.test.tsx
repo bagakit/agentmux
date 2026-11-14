@@ -4,10 +4,40 @@ import { describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { api } from '../src/renderer/src/lib/api'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
+import { projectConversationReading } from '@agentmux/client-ui/conversation-records'
+import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
 describe('original tool payload reading', () => {
+  it('uses one source and action toolbar in actual captured and native expanded records', async () => {
+    const page: AgentSessionHistoryPage = { agentSessionId: 'payload-session', sourceHostId: 'local', source: { providerId: 'codex', nativeSessionId: 'payload-native' }, nextCursor: null,
+      items: [{ id: 'native-tool', kind: 'activity', contentParts: [{ kind: 'tool-call', name: 'Inspect', input: '{"native":true}', callId: 'original-native-call' }] }] }
+    const timeline: AgentTimelineSnapshot = { agentSessionId: page.agentSessionId, sourceHostId: 'local', revision: 1, items: [{ id: 'captured-tool', agentSessionId: page.agentSessionId, kind: 'tool_call', source: 'native-hook', status: 'streaming', title: 'Inspect', toolInput: '{"captured":true}', createdAt: 1, updatedAt: 1 }] }
+    const value = projectConversationReading({ agentSessionId: page.agentSessionId, executionHostId: 'local', historyPage: page, timeline })
+    const host = document.createElement('div'); document.body.append(host); const root = createClientUiRoot(host)
+    try {
+      await act(async () => root.render(<ConversationView sessionId={page.agentSessionId} executionHostId="local" page={page} records={value.records} originalRecords={value.originalRecords}
+        renderProcess={process => <NativeProcessObservation {...process} compact />} />))
+      for (const selector of ['[data-captured-process-id="captured-tool"]', '[data-native-step-id="native-tool"]']) {
+        const record = host.querySelector(selector)!
+        expect(record, selector).not.toBeNull()
+        await act(async () => record.querySelector<HTMLButtonElement>('.wf-tool-row--observation')!.click())
+        const toolbar = record.querySelector('.conversation-tool-payload__actions')!
+        expect(toolbar.querySelector('.conversation-source-labels'), 'source-must-share-the-payload-action-row').not.toBeNull()
+        expect(toolbar.querySelector('[aria-label="Format JSON"]')).not.toBeNull()
+        expect(toolbar.querySelector('.content-copy')).not.toBeNull()
+        expect(record.querySelector('.md-code-toolbar'), 'one-payload-has-one-toolbar').toBeNull()
+        const originalCall = toolbar.querySelector<HTMLDetailsElement>('.conversation-tool-payload__call')
+        if (originalCall) {
+          await act(async () => { originalCall.open = true; originalCall.dispatchEvent(new Event('toggle')) })
+          expect(originalCall.querySelector('.conversation-tool-payload__call-original')!.textContent).toBe('original-native-call')
+        }
+      }
+    } finally { await act(async () => root.unmount()); host.remove() }
+  })
   it('retains the original tool payload node and format choice through disclosure changes', async () => {
     const host = document.createElement('div'); document.body.append(host)
     const root = createClientUiRoot(host)

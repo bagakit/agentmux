@@ -135,11 +135,13 @@ describe('shared Markdown math and code blocks', () => {
     await act(async () => old.deliver({ data: { id: old.id, result: { html: '<span>Old A</span>' } } }))
     expect(container.querySelector('code')?.textContent).toBe('Current A')
     await act(async () => viewport(false))
-    expect(container.querySelector('code')?.textContent).toBe('A')
+    expect(container.querySelector('code')?.textContent).toBe('Current A')
+    const requests = pending.length
     await act(async () => viewport(true))
-    expect(container.querySelector('.hljs-keyword')).toBeNull()
+    expect(container.querySelector('.hljs-keyword')).not.toBeNull()
+    expect(pending).toHaveLength(requests)
     await act(async () => viewport(false))
-    expect(workers.at(-1)!.terminate).toHaveBeenCalledOnce()
+    expect(workers.every(worker => worker.terminate.mock.calls.length === 1)).toBe(true)
   })
   it('keeps oversized and expansive source readable without generating an unbounded DOM', async () => {
     const code = 'x'.repeat(64 * 1024 + 1)

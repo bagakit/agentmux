@@ -47,9 +47,10 @@ it('omits empty fields, preserves whitespace bytes and keeps purposeful raw audi
   expect(x.button('Copy recorded content')).toBeNull(); expect(x.button('Copy tool input')).toBeNull(); expect(x.button('Copy tool output')).toBeNull()
   const details = x.host.querySelector('details')!
   expect(details.querySelector('summary')?.textContent).toBe('Original record details')
+  expect(x.host.querySelectorAll('pre'), 'raw-audit-body-mounts-only-after-explicit-opening').toHaveLength(0)
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
   expect(x.host.querySelectorAll('pre')).toHaveLength(1)
   expect(x.host.querySelector('pre')?.textContent).toBe(JSON.stringify(item, null, 2))
-  await act(async () => { details.open = true })
   await x.click('Copy original record'); expect(x.copy.mock.calls[0]![0]).toBe(JSON.stringify(item, null, 2))
   await x.show({ content: ' \n\t', toolInput: '', toolOutput: '' })
   expect(x.host.querySelectorAll('pre')).toHaveLength(1)
@@ -98,7 +99,10 @@ it('keeps field actions independent and rejects late feedback from an original A
 
 it('resets feedback when the whole original JSON really changes on a status update', async () => {
   const x = fixture()
-  await x.show(); await x.click('Format JSON'); await x.click('Copy original record')
+  await x.show()
+  const details = x.host.querySelector<HTMLDetailsElement>('details')!
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  await x.click('Format JSON'); await x.click('Copy original record')
   expect(x.button('Copy original record').dataset.copyState).toBe('copied')
   const next = await x.show({ status: 'complete', updatedAt: 2 })
   expect(x.button('Format JSON').getAttribute('aria-pressed')).toBe('false')
@@ -126,6 +130,8 @@ it('keeps original contribution tool fields stable through the real Conversation
   await x.show({ ...item, toolInput: '{"value":2}', updatedAt: 4 }, 'another-source-host', true)
   // The actual card may remount for another original Host. Its feedback must not transfer.
   if (!x.host.querySelector('.conversation-input-details__body')) await x.click('Message details')
+  const currentOriginal = x.host.querySelector<HTMLDetailsElement>('.conversation-input-details__body details')!
+  await act(async () => { currentOriginal.open = true; currentOriginal.dispatchEvent(new Event('toggle')) })
   expect(x.button('Format JSON').getAttribute('aria-pressed')).toBe('false')
   expect(x.button('Copy tool input').dataset.copyState).toBe('idle')
 })
