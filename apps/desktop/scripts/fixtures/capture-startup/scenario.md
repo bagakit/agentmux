@@ -24,11 +24,15 @@ infrastructure failures.
 For each initial background and virtual-display count, four independent baseline/candidate
 process pairs run in an alternating order for first capture, and another four independent
 pairs run for repeat capture. Every process has fresh temporary userData and invokes the
-real registered shortcut callback → GlobalScreenshot → ScreenCapture → CaptureSurface path
-exactly once for its assigned iteration. Thus every first/repeat × one/two-display ×
-included/excluded cell has four independent process pairs, 64 independent processes in all,
-and no outlier removal. The candidate's actualShown median must improve by at least 100 ms
-and 15% in every cell; a missing cell or a threshold miss fails without cross-cell averaging.
+real registered shortcut callback → GlobalScreenshot → ScreenCapture → CaptureSurface path.
+A first-iteration process performs only its measured first capture; a repeat process first
+completes an unmeasured warm-up, then performs its measured second capture, and only that
+second capture enters its receipt. Native lazy setup is measured from the fixture's actual
+call count, and every measured repeat must hash different PNGs from its warm-up. Thus every
+first/repeat × one/two-display × included/excluded cell has four independent process pairs,
+64 independent processes in all, and no outlier removal. The candidate's actualShown median
+must improve by at least 100 ms and 15% in every cell; a missing cell or a threshold miss
+fails without cross-cell averaging.
 
 Each actual Native-port invocation constructs a new solid PNG with a per-capture nonce using
 `nativeImage.createFromBitmap/toPNG`. Every display has its own real producer delay: 200 ms
