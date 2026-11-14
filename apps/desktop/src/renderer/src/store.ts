@@ -19,7 +19,7 @@ import { spaceMountKey, type SpaceMountRecord, type SpaceMountView } from '../..
 import type { SpaceSnapshot } from '@agentmux/core'
 import { parseSpaceCloseReceipt, parseSpaceCloseResult, spaceCloseDecisions, type SpaceClosePrepare, type SpaceCloseReceipt, type SpaceCloseCommitResult } from '@agentmux/core/space-close'
 import { isWorkbenchCloseRendererRequest, type WorkbenchCloseRendererRequest, type WorkbenchCloseRendererResult } from '../../shared/workbench-close-control'
-import { captureWorkbenchClose, validateWorkbenchClose, reconcileWorkbenchClose } from './lib/workbench-close-owner'
+import { captureWorkbenchClose, validateWorkbenchClose, reconcileWorkbenchClose, workbenchCloseBrowsersAlreadyApplied } from './lib/workbench-close-owner'
 import { refreshGoalDelegations } from './lib/goal-delegation-work'
 import { bindAgentConversationFloatingTarget, requestAgentConversationFloatingOpen } from './lib/pmo-teams-topic-floating'
 import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordDelete } from './lib/session-record-delete'
@@ -8590,7 +8590,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const removedOriginal = closesView && record.plan.projection.surfaces.some(s => current.tabs[target.tabId]?.regions[s.owner.regionId] && !committed.tabs[target.tabId]?.regions[s.owner.regionId])
       const unlinkedOriginal = current.layouts[target.displayWorkspaceId]?.groups.some(g => g.id === target.groupId && g.tabOrder.includes(target.tabId)) &&
         !committed.layouts[target.displayWorkspaceId]?.groups.some(g => g.id === target.groupId && g.tabOrder.includes(target.tabId))
-      projection = { ...projection, applied: Boolean(removedOriginal || unlinkedOriginal), removedRegions: closesView ? record.plan.projection.surfaces.filter(s => !committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [],
+      projection = { ...projection, applied: Boolean(removedOriginal || unlinkedOriginal || workbenchCloseBrowsersAlreadyApplied(current, record)), removedRegions: closesView ? record.plan.projection.surfaces.filter(s => !committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [],
         retainedRegions: closesView ? record.plan.projection.surfaces.filter(s => committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [] }
       if (!removedTab) return committed
       return { ...committed, recentMoteAgents: Object.fromEntries(Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTab!.id)) }

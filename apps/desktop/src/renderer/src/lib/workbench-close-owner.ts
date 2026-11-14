@@ -105,6 +105,23 @@ function plannerProjection(record: SpaceCloseReceipt): WorkbenchViewClosePlan {
   // The strict shared codec has already checked these exact resource-key forms.
   return record.plan.projection as WorkbenchViewClosePlan
 }
+/** Native closed events can retire these exact Browsers before their request returns. */
+export function workbenchCloseBrowsersAlreadyApplied(state: State, record: SpaceCloseReceipt): boolean {
+  const target = record.plan.target, lease = state.closingWorkbenchViews[target.tabId], surfaces = record.plan.projection.surfaces
+  if (lease?.operationId !== record.operationId || lease.tabId !== target.tabId ||
+    (target.kind === 'region' ? lease.regionId !== target.regionId : lease.regionId !== undefined) ||
+    !record.plan.projection.closesView || !surfaces.length) return false
+  const regions = new Set<string>(), browsers = new Set<string>()
+  for (const surface of surfaces) {
+    if (surface.owner.kind !== 'browser' || surface.blocker !== null) return false
+    const key = `browser:${surface.owner.browserId}` as const, result = record.resources.find(resource => resource.key === key)
+    if (!surface.resourceKeys.includes(key) || result?.outcome !== 'acknowledged' || !result.receipt || !('kind' in result.receipt) || result.receipt.kind !== 'browser-closed' ||
+      result.receipt.browserId !== surface.owner.browserId) return false
+    regions.add(surface.owner.regionId); browsers.add(surface.owner.browserId)
+  }
+  return !Object.values(state.tabs).some(tab => Object.entries(tab.regions).some(([id, surface]) =>
+    regions.has(id) || surface.kind === 'browser' && browsers.has(surface.browserId)))
+}
 /** Immediately before every child, not only before the first external await. */
 export function validateWorkbenchClose(state: State, record: SpaceCloseReceipt, resourceKey?: string): void {
   const witnesses = new Map<string, string>(), approved = plannerProjection(record), current = originalPlan(state, record.request)
