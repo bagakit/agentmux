@@ -82,6 +82,12 @@ Survey 的 [`createSurveyBrowser`](../../apps/desktop/src/renderer/src/lib/surve
 - **原子交换**。[`migrateTopicDirectories`](../../apps/host/src/mote-directory-maintenance.mjs) 的 `exchange` 调用原生 helper `agentmux-workspace-move --alias-swap <root> <dev> <ino> …`（`AGENTMUX_WORKSPACE_MOVE_HELPER` 可覆盖其路径），在同一卷上以不覆盖目标的一次交换保留原 inode 与完整内容，并把旧地址变为指向同一对象的别名。非 darwin 平台返回 `DIRECTORY_MIGRATION_UNSUPPORTED`，不做非原子迁移；结果无法确认、目标已存在或别名不指向原对象时，分别返回 `DIRECTORY_MIGRATION_RESULT_UNKNOWN`、`DIRECTORY_MIGRATION_TARGET_EXISTS` 与 `DIRECTORY_MIGRATION_ALIAS_INVALID`，保留原内容与交换见证。Host 的 [mote-resources.ts](../../apps/host/src/mote-resources.ts) 与 Desktop 的 [scratch-topics.ts](../../apps/desktop/src/main/scratch-topics.ts) 以 `motesOnly` 调用它。
 - **解析**。[`resolveScratchTopicDirectory`](../../apps/host/src/mote-directories.ts) 在三个根中按完整目录名与 Mote 短名查找候选：短名目录必须有确认的完整内容 ID，别名必须解析到同一物理对象，出现多个物理位置时拒绝并保留全部字节，待确认的交换中间地址只在同一操作的见证一致时接受。
 
+## 独立窗口的宿主与内容
+
+打开整面 Survey、Recall、Tab 或 Region 都经过同一组公共窗口操作。Desktop Main 根据原目标和窗口文档代次打开、复用、归还或恢复展示。Renderer 将原工作面的 DOM 移到新 document，继续使用已有编辑器和状态。窗口生命周期见 [WorkbenchWindows](../../apps/desktop/src/main/workbench-windows.ts)，内容交接见 [StableWorkbenchView](../../apps/desktop/src/renderer/src/components/StableWorkbenchView.tsx)。
+
+接入独立窗口时，内容通过 [useWorkbenchWindowChrome 与 useWorkbenchWindowTitle](../../apps/desktop/src/renderer/src/lib/workbench-document.tsx) 取得当前宿主、设置原生窗口名称，并在自己的顶边排入返回按钮。分割 Tab 只在左上角展示一份窗口控件。返回使用此次交接提供的窗口身份，并沿原窗口操作取得回执。原生安全区、拖动区、窄窗收纳和可点击区域按[独立窗口的呈现](../design/presentation/spaces-and-layout.md#工作面的独立窗口)处理。
+
 ## 准确选择与跨视图导航
 
 Desktop 的 [`workbenchSpaceSelection` / `selectMainRegion` / `activateTab`](../../apps/desktop/src/renderer/src/store.ts) 持有并更新 Work 当前选择。原空间目录经 [`workbenchSelectionCatalog` / `resolveDesktopSpaceSelection` / `resolveWorkbenchOccurrenceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts) 确认对象、成员与准确 occurrence；局部选择与显式导航以原 intent 区分，不按最近 Session 或第一处展示推导目标。

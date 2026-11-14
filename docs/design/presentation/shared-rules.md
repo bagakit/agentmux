@@ -427,7 +427,7 @@ Note 与截图标注工具栏的组内键盘焦点使用原 focus-visible 语汇
 ```
 styles/
   index.css       入口：@import 的顺序即层叠顺序
-  workbench-windows.css  独立原生窗口的工作面外壳与窗口工具条
+  workbench-windows.css  独立窗口宿主与内容顶边共用的窗口控件样式
   tokens.css  导入共享颜色、焦点与表面阴影；持有 Desktop 字号、间距、圆角、动效与宿主几何
   theme-transition.css  切换主题时所有表面同步变色，首帧后恢复控件过渡（packages/client-ui/src/styles）
   semantic-icons.css  语义图标的组合盒、动效与运行态画法（packages/client-ui/src/styles）
