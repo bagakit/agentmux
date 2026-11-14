@@ -28,9 +28,9 @@ function MeshTopologyExplorer({ snapshot, active, actions, reading, stale }: Mes
   const [selected, select] = useState<MeshTopologySelection>(), [view, setView] = useState<'topology' | 'list'>('topology')
   const [scope, setScope] = useState<'network' | 'selection'>('network'), [category, setCategory] = useState<'peers' | 'routes' | 'circuits'>(() => model.routes.length ? 'routes' : 'peers')
   const [query, setQuery] = useState(''), [arrangeAttempt, arrange] = useState(0), [arranging, setArranging] = useState(false), [layoutIssue, setLayoutIssue] = useState('')
-  const [focusRequest, setFocusRequest] = useState(0), focusedRequest = useRef(0)
-  const requestViewport = useCallback(() => setFocusRequest(value => value + 1), [])
-  const positions = useRef(new Map<string, { x: number; y: number }>()), instance = useRef<ReactFlowInstance<PeerNode, Edge> | null>(null)
+  const [focusRequest, setFocusRequest] = useState(0), focusedRequest = useRef(0), focusResizeRevision = useRef(0), canvasResizeRevision = useRef(0)
+  const requestViewport = useCallback(() => { focusResizeRevision.current = canvasResizeRevision.current; setFocusRequest(value => value + 1) }, [])
+  const positions = useRef(new Map<string, { x: number; y: number }>()), instance = useRef<ReactFlowInstance<PeerNode, Edge> | null>(null), canvas = useRef<HTMLDivElement>(null)
   const viewportTouched = useRef(false), cancelLayout = useRef<(() => void) | null>(null), arrangedAttempt = useRef(-1)
   const path = meshSelectionPath(model, selected), pathSet = useMemo(() => new Set(path), [path.join('\0')])
   const pathEdges = useMemo(() => meshPathEdges(path), [path.join('\0')])
@@ -65,14 +65,35 @@ function MeshTopologyExplorer({ snapshot, active, actions, reading, stale }: Mes
       targetHandle: horizontal ? dx > 0 ? Position.Left : Position.Right : dy > 0 ? Position.Top : Position.Bottom,
       className: pathEdges.has(edge.id) ? 'mesh-explorer-edge mesh-explorer-edge--selected' : 'mesh-explorer-edge' }
   })
-  const fit = useCallback(() => { void instance.current?.fitView({ padding: .2, maxZoom: 1 }) }, [])
+  const fit = useCallback(() => { void instance.current?.fitView({ padding: .16, maxZoom: 1 }) }, [])
+  // Container changes are real geometry changes, not new observations. Refit the same nodes while
+  // retaining their positions, so a narrow overview never leaves the original Core off-canvas.
+  useEffect(() => {
+    const element = canvas.current
+    if (!active || view !== 'topology' || !element) return
+    let frame: number | undefined, previous = ''
+    const resize = () => {
+      const { width, height } = element.getBoundingClientRect()
+      if (!width || !height) return
+      const size = `${width}:${height}`
+      if (size === previous) return
+      previous = size
+      canvasResizeRevision.current += 1
+      if (frame !== undefined) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => { frame = undefined; fit() })
+    }
+    resize()
+    const observer = new ResizeObserver(resize)
+    observer.observe(element)
+    return () => { observer.disconnect(); if (frame !== undefined) cancelAnimationFrame(frame) }
+  }, [active, view, fit])
   // A deliberate selection can open the inspector and narrow the canvas after a user pan.
   // Wait for its new dimensions, then fit once. Observations do not request a viewport change.
   useEffect(() => {
     if (!active || view !== 'topology' || focusRequest === focusedRequest.current) return
     focusedRequest.current = focusRequest
     let settled: number | undefined
-    const frame = requestAnimationFrame(() => { settled = requestAnimationFrame(fit) })
+    const frame = requestAnimationFrame(() => { settled = requestAnimationFrame(() => { if (canvasResizeRevision.current === focusResizeRevision.current) fit() }) })
     return () => { cancelAnimationFrame(frame); if (settled !== undefined) cancelAnimationFrame(settled) }
   }, [focusRequest, active, view, fit])
   // Geometry is finite and off-thread. Counters, RTT and selection do not relayout the network.
@@ -128,9 +149,9 @@ function MeshTopologyExplorer({ snapshot, active, actions, reading, stale }: Mes
     <div className="mesh-explorer__body" data-empty={model.peers.length ? undefined : true} data-inspecting={selected ? true : undefined}><div className="mesh-explorer__workspace">
       {view === 'list' ? directory : null}
       {model.peers.length ? <div className="mesh-explorer__graph" hidden={view !== 'topology'}>
-        <div className="mesh-explorer__canvas" aria-label="Network relationship canvas">{visiblePeers.length ? <ReactFlow<PeerNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} onInit={value => { instance.current = value }}
+        <div ref={canvas} className="mesh-explorer__canvas" aria-label="Network relationship canvas">{visiblePeers.length ? <ReactFlow<PeerNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} onInit={value => { instance.current = value }}
           onNodesChange={changes => { if (changes.some(change => change.type === 'position' && change.dragging)) cancelLayout.current?.(); for (const change of changes) if (change.type === 'position' && change.position) positions.current.set(change.id, change.position); onNodesChange(changes) }}
-          onMoveStart={event => { if (event) viewportTouched.current = true }} fitView fitViewOptions={{ padding: .2, maxZoom: 1 }} minZoom={.15} maxZoom={1.6} nodesDraggable nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false} elementsSelectable={false} deleteKeyCode={null} zoomOnScroll={false} proOptions={{ hideAttribution: true }} />
+          onMoveStart={event => { if (event) viewportTouched.current = true }} fitView fitViewOptions={{ padding: .16, maxZoom: 1 }} minZoom={.15} maxZoom={1.6} nodesDraggable nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false} elementsSelectable={false} deleteKeyCode={null} zoomOnScroll={false} proOptions={{ hideAttribution: true }} />
           : <div className="mesh-explorer__empty"><strong>{scope === 'selection' ? 'Choose a peer or path below.' : snapshot ? 'No network peers observed.' : 'Network state has not been observed.'}</strong><p>{scope === 'selection' ? 'The directory remains available while you focus the map.' : 'Network observation does not describe Agent health or grant device access.'}</p></div>}</div>
         <div className="mesh-explorer__canvas-tools"><span>Reciprocal authenticated links{selected?.kind === 'circuit' ? ' · adopted circuit selected' : selected?.kind === 'route' ? ' · available route selected' : ''}</span><button type="button" className="small-button" aria-label="Fit observed topology" onClick={fit}>Fit</button><button type="button" className="small-button" aria-label="Rearrange observed topology" onClick={() => { cancelLayout.current?.(); viewportTouched.current = false; arrange(value => value + 1) }}>{arranging ? 'Arranging…' : 'Arrange'}</button><button type="button" className="small-button" aria-label="Zoom in network" onClick={() => void instance.current?.zoomIn()}>+</button><button type="button" className="small-button" aria-label="Zoom out network" onClick={() => void instance.current?.zoomOut()}>−</button></div>
         {layoutIssue ? <p className="mesh-explorer__layout-issue" role="status">{layoutIssue}</p> : null}

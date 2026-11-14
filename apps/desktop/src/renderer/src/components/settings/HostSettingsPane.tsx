@@ -275,7 +275,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
       <div className="remote-foundation"><div><strong>Your connected machines</strong><p>Select a Host to see its service, resources and access. Use Remote to choose where work runs.</p></div>{onRemoteWork ? <button type="button" className="small-button" onClick={onRemoteWork}>Remote work</button> : null}</div>
       <div className="settings-pane-toolbar remote-management__toolbar">
         {view === 'editor' && <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>}
-        <div className="remote-management__scope"><strong>{hosts.length}</strong><span>hosts</span><small>{hosts.filter(host => host.kind === 'ssh').length} remote</small></div>
+        <div className="remote-management__scope"><strong>{hosts.length}</strong><span>{hosts.length === 1 ? 'host' : 'hosts'}</span><small>{hosts.filter(host => host.kind === 'ssh').length} remote</small></div>
         {showTopology ? <label className="settings-resource-search remote-management__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label="Filter hosts" placeholder="Find a host or project…" value={filter.query} onChange={event => filterHosts(event.target.value)} /></label> : null}
         {wide ? <div className="remote-management__modes" aria-label="Host view">
           <button type="button" aria-label="Topology" aria-pressed={showTopology} onClick={() => setMode('topology')}><ThemeObjectTopologyIcon size={14} /><span>Topology</span></button>

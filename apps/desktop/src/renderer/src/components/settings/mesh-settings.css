@@ -1,6 +1,7 @@
 .mesh-settings-pane { min-width: 0; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .mesh-settings-pane > [data-mesh-view] { flex: 1; min-height: 0; }
-.mesh-settings-pane > [data-mesh-view="network"] { overflow: auto; overscroll-behavior: contain; padding-bottom: var(--sp-4); }
+.mesh-settings-pane > [data-mesh-view="network"] { overflow: auto; overscroll-behavior: contain; padding-bottom: var(--sp-4); scroll-padding-bottom: var(--sp-4); }
+.mesh-network-settings > .settings-pane-actions { position: static; margin-top: 0; }
 .mesh-settings-pane > [data-mesh-view="connections"] { overflow: hidden; }
 .mesh-settings-pane > [hidden] { display: none; }
 .mesh-view-tabs { flex: none; display: flex; gap: 4px; padding-bottom: var(--sp-4); margin-bottom: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
