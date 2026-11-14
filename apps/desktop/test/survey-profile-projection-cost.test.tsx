@@ -112,6 +112,49 @@ function fixture(n: number) {
   return { tabs, sessions, catalog }
 }
 afterEach(() => { meter.countCatalog = false; browserProfiles.reset(); vi.restoreAllMocks(); useAppStore.setState(initial, true); receipts.length = 0 })
+
+it('keeps the original research tabs without rereading unrelated catalog rows on a live page update', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  vi.spyOn(api.browser, 'readProfiles').mockResolvedValue({ revision: 1, sequence: 1,
+    profiles: [{ id: profileId, label: 'Related', createdAt: 1, isDefault: true, source: null }], folders: [], views: [] })
+  const zoneId = 'related-task-zone'
+  let baseline: { tabs: number; zones: number } | undefined
+  for (const unrelatedTabs of [0, 16, 64]) {
+    browserProfiles.reset()
+    const f = fixture(unrelatedTabs)
+    const neighbor = createWorkbenchTab('neighbor-tab', { ...snapshot('Neighbor original page'), browserId: 'neighbor-browser',
+      regionId: 'neighbor-region', kind: 'browser', workspaceId: 'resource' })
+    f.tabs[neighbor.id] = neighbor
+    const catalog = { ...f.catalog,
+      tabs: measuredCatalogArray([...f.catalog.tabs, { tabId: neighbor.id, workspaceId: 'resource', zoneId }], 'tabs'),
+      regions: measuredCatalogArray([...f.catalog.regions, { tabId: neighbor.id, regionId: 'neighbor-region', kind: 'browser' }], 'regions') }
+    const layout = createWorkspaceLayout('original-group', [neighbor.id, 'survey-one-tab'])
+    useAppStore.setState({ config, tabs: f.tabs, sessions: f.sessions, layouts: { resource: layout }, activeWorkspaceId: 'resource',
+      surveyProfileView: { kind: 'profile', profileId }, surveyProfileViewReadRecovery: null,
+      surveyPageReferences: [], surveyCollectedZones: { [zoneId]: true }, surveyZoneSelection: null,
+      surveyToolsOpen: false, surveySidebarCollapsed: false, mainSurface: 'survey' })
+    const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
+    try {
+      await act(async () => root.render(<GlobalSurveySurface visible catalog={catalog as never} projection={null} selection={null} />))
+      const research = () => element.querySelector(`[data-survey-zone-id="${zoneId}"]`)
+      expect(research()?.textContent).toContain('Original related page')
+      expect(research()?.textContent).toContain('Neighbor original page')
+      reset(); meter.countCatalog = true
+      await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: snapshot('Live research title') } as never))
+      const reads = { zones: meter.catalogRecords.zones, tabs: meter.catalogRecords.tabs }
+      meter.countCatalog = false
+      expect(research()?.textContent).toContain('Live research title')
+      expect(research()?.textContent).toContain('Neighbor original page')
+      expect(research()!.textContent!.indexOf('Neighbor original page')).toBeLessThan(research()!.textContent!.indexOf('Live research title'))
+      baseline ??= reads
+      expect(reads, `${unrelatedTabs} unrelated Tabs and Zones after warming the catalog`).toEqual(baseline)
+    } finally {
+      meter.countCatalog = false
+      await act(async () => root.unmount()); element.remove()
+    }
+  }
+})
+
 it('counts the actual helper with one exact reference and unrelated Agent/Terminal tabs', () => {
   for (const unrelatedTabs of [0, 16, 64]) {
     const f = fixture(unrelatedTabs); reset(); meter.countCatalog = true
