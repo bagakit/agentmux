@@ -245,7 +245,14 @@ function SurveyListGroup({ group, model, children, visible, selected, compositio
   useEffect(() => { if (!visible) setMenuOpen(false) }, [visible])
   const cancel = () => { ++generation.current; setEdit(null); model.setRenamingGroupId(null) }
   return <section ref={setNodeRef} className="survey-list-group" data-survey-list-group={group.groupId} data-collapsed={group.collapsed} data-selected={selected || undefined} data-dragging={isDragging || undefined} data-drop-over={isOver && acceptsContainer(active?.data.current as Target | undefined, group.groupId) || undefined} style={{ transform: CSS.Translate.toString(transform), transition }}>
-    <CompositionDestination target={{ kind: 'list-group', groupId: group.groupId }} composition={composition} visible={visible && !edit} label={group.name || 'Unnamed group'}><div className="survey-list-group-heading" data-survey-group-header={group.groupId}>
+    <CompositionDestination target={{ kind: 'list-group', groupId: group.groupId }} composition={composition} visible={visible && !edit} label={group.name || 'Unnamed group'}><div className="survey-list-group-heading" data-survey-group-header={group.groupId} onPointerDown={event => {
+      // The name still clicks to collapse; the original sensor suppresses that click once a drag starts.
+      // Explicit controls and the existing grip keep their own pointer/keyboard activators.
+      const target = event.target
+      if (edit || !(target instanceof Element) || !event.currentTarget.contains(target) ||
+        target.closest('button:not(.survey-list-group-toggle), input, textarea, select, a, [contenteditable]')) return
+      listeners?.onPointerDown?.(event)
+    }}>
       <button type="button" className="survey-drag-handle" {...attributes} {...listeners} aria-label={`Move survey group: ${group.name}`} title="Drag group"><DragIcon size={12} /></button>
       {edit ? <form className="survey-group-name" onSubmit={async event => {
         event.preventDefault(); if (saving) return
