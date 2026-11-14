@@ -16,6 +16,7 @@ import { isBrowserProfileControlOperation, parseBrowserProfileControlPayload, pa
 import { parseDemandPatrols } from '@agentmux/demand'
 import { parseDemandDelegations } from '@agentmux/demand/delegations'
 import { parseGoalPlan } from '@agentmux/demand/goal-plan'
+import { parseOwnerGoalPlanState } from './goal-plan-state.js'
 import { parseDemandDispatches, parseDemandProgressUpdates } from '@agentmux/demand'
 import { parseDemandParticipations, parseDemandCreationOrigin } from '@agentmux/demand/goals'
 import { parseDemandContentReferences } from '@agentmux/demand'
@@ -996,8 +997,9 @@ function parseDemand(value: unknown): AgentMuxDemand {
   } catch (error) {
     throw new AgentMuxError(error instanceof Error ? error.message : 'Control Goal facts are invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
+  const planState = parseOwnerGoalPlanState(source.planState, goalFacts.plan, goalFacts.delegations ?? [])
   return {
-    ...goalFacts,
+    ...goalFacts, ...(planState ? { planState } : {}),
     id: id(source.id, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     title: text(source.title, 'Control demand title', 'CONTROL_PROTOCOL_ERROR'),
     description: text(source.description, 'Control demand description', 'CONTROL_PROTOCOL_ERROR'),

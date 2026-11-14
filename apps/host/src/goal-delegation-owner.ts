@@ -9,6 +9,7 @@ import type { GoalDelegationAuthority, GoalDelegationMethod, GoalDelegationParam
   GoalDelegationResult, GoalDelegationResultMap, GoalDelegationObservation, GoalDelegationsOwner } from '@agentmux/core/goal-delegation'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRun, AgentMuxRpcCallContext } from '@agentmux/core'
 import { delegationWorkerHostId, validateDemandDelegationReport, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
+import { hostGoalPlan } from './goal-projection.js'
 import { submitGoalSourceReport } from './goal-source-report.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
@@ -230,7 +231,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal)))
     const startObservations = quiet || !this.readStart ? undefined
       : await Promise.all((goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => this.readStart!(goal, start)))
-    const result: GoalDelegationResult = { goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [], ...(goal.plan ? { plan: goal.plan } : {}),
+    const result: GoalDelegationResult = { goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [], ...hostGoalPlan(goal),
       goalState: { status: goal.status, supervisorSessionId: goal.supervisorSessionId, ...(goal.alignment ? { alignment: goal.alignment } : {}) },
       ...(startObservations ? { dispatches: goal.dispatches ?? [], startObservations } : {}),
       ...(observations ? { observations } : {}),

@@ -67,6 +67,10 @@ function positive(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new Error(`${label} must be a positive integer`)
   return value
 }
+function count(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error(`${label} must be a non-negative integer`)
+  return value
+}
 function identities(value: unknown, label: string): string[] {
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`)
   const result = value.map((item, index) => identity(item, `${label}[${index}]`))
@@ -187,6 +191,12 @@ export function staleGoalPlanCriteria(node: GoalPlanNodeInput, criteria: readonl
   })
 }
 
+/**
+ * Why a node needs reconciliation: its criteria do not apply as written to the current Goal
+ * (changed, removed or none at all), or its current attempt's original dispatch link is unconfirmed.
+ */
+export const GOAL_PLAN_UNKNOWN_REASONS = ['criteria', 'dispatch-link'] as const
+export type GoalPlanUnknownReason = (typeof GOAL_PLAN_UNKNOWN_REASONS)[number]
 export type GoalPlanNodeProjection = {
   node: GoalPlanNodeInput
   state: GoalPlanNodeState
@@ -197,13 +207,14 @@ export type GoalPlanNodeProjection = {
   attempts: number
   review: GoalPlanReview | null
   staleCriteria: string[]
+  /** Every reason the node needs reconciliation; nonempty exactly when its state is unknown. */
+  unknown: GoalPlanUnknownReason[]
 }
 export type GoalPlanProjection = { revision: number; nodes: GoalPlanNodeProjection[]; done: number; total: number; next: string[] }
 
 /**
  * The only place node state is decided. It reads the plan, this Goal's delegations and the
- * current criteria; delivery or Agent idleness never reaches it. Unknown means the original
- * dispatch link or the work's applicability to current standards needs reconciliation.
+ * current criteria; delivery or Agent idleness never reaches it.
  */
 export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: readonly DemandCriterion[]): GoalPlanProjection {
   const byId = new Map(plan.nodes.map(node => [node.id, node]))
@@ -216,31 +227,78 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
     column.set(id, value)
     return value
   }
-  const states = new Map<string, GoalPlanNodeState>()
-  const attemptsOf = (id: string) => delegations.filter(delegation => delegation.planNodeId === id)
-  const stateOf = (node: GoalPlanNodeInput): GoalPlanNodeState => {
-    const cached = states.get(node.id)
-    if (cached) return cached
-    let state: GoalPlanNodeState
-    const attempts = attemptsOf(node.id), current = attempts.at(-1)
-    const review = current ? plan.reviews.filter(item => item.nodeId === node.id && item.delegationOperationId === current.operationId).at(-1) : undefined
-    if (node.cancelled) state = 'cancelled'
-    else if (staleGoalPlanCriteria(node, criteria, current).length) state = 'unknown'
-    else if (review?.verdict === 'pass') state = 'done'
-    else if (review?.verdict === 'changes') state = 'changes'
-    else if (current) state = current.linkedAt === undefined ? 'unknown' : current.report ? 'review' : 'working'
-    else state = node.dependsOn.every(dependency => stateOf(byId.get(dependency)!) === 'done') ? 'ready' : 'waiting'
-    states.set(node.id, state)
-    return state
-  }
-  const nodes = plan.nodes.map(node => {
-    const attempts = attemptsOf(node.id), current = attempts.at(-1) ?? null
+  const derived = new Map<string, Omit<GoalPlanNodeProjection, 'column'>>()
+  const derive = (node: GoalPlanNodeInput): Omit<GoalPlanNodeProjection, 'column'> => {
+    const known = derived.get(node.id)
+    if (known) return known
+    const attempts = delegations.filter(delegation => delegation.planNodeId === node.id), current = attempts.at(-1) ?? null
     const review = current ? plan.reviews.filter(item => item.nodeId === node.id && item.delegationOperationId === current.operationId).at(-1) ?? null : null
-    return { node, state: stateOf(node), column: depth(node.id), delegation: current, attempts: attempts.length, review, staleCriteria: staleGoalPlanCriteria(node, criteria, current) }
-  })
+    const staleCriteria = staleGoalPlanCriteria(node, criteria, current)
+    const unknown: GoalPlanUnknownReason[] = node.cancelled ? [] : [
+      ...(staleCriteria.length || !node.criterionIds.length ? ['criteria' as const] : []),
+      ...(current && !review && current.linkedAt === undefined ? ['dispatch-link' as const] : [])]
+    const state: GoalPlanNodeState = node.cancelled ? 'cancelled' : unknown.length ? 'unknown'
+      : review ? review.verdict === 'pass' ? 'done' : 'changes'
+      : current ? current.report ? 'review' : 'working'
+      : node.dependsOn.every(dependency => derive(byId.get(dependency)!).state === 'done') ? 'ready' : 'waiting'
+    const value = { node, state, delegation: current, attempts: attempts.length, review, staleCriteria, unknown }
+    derived.set(node.id, value)
+    return value
+  }
+  const nodes = plan.nodes.map(node => ({ ...derive(node), column: depth(node.id) }))
   const live = nodes.filter(item => item.state !== 'cancelled')
   return { revision: plan.revision, nodes, done: live.filter(item => item.state === 'done').length, total: live.length,
     next: nodes.filter(item => item.state === 'ready' || item.state === 'changes').map(item => item.node.id) }
+}
+
+/** The current attempt by its original identities; its thread and report stay with the delegation owner. */
+export type GoalPlanStateAttempt = { delegationOperationId: string; sourceMessageId: string; threadId: string; workerHostId: string; workerAgentSessionId: string; reported: boolean }
+export type GoalPlanStateNode = { id: string; state: GoalPlanNodeState; column: number; attempts: number; staleCriteria: string[]; unknown: GoalPlanUnknownReason[]; attempt: GoalPlanStateAttempt | null }
+/** The read-only form of the derivation that the Goal owner returns with its plan. */
+export type GoalPlanState = { revision: number; done: number; total: number; next: string[]; nodes: GoalPlanStateNode[] }
+export function goalPlanState(projection: GoalPlanProjection): GoalPlanState {
+  return { revision: projection.revision, done: projection.done, total: projection.total, next: projection.next,
+    nodes: projection.nodes.map(item => ({ id: item.node.id, state: item.state, column: item.column, attempts: item.attempts, staleCriteria: item.staleCriteria, unknown: item.unknown,
+      attempt: item.delegation ? { delegationOperationId: item.delegation.operationId, sourceMessageId: item.delegation.sourceMessageId, threadId: item.delegation.threadId,
+        workerHostId: delegationWorkerHostId(item.delegation), workerAgentSessionId: item.delegation.workerAgentSessionId, reported: Boolean(item.delegation.report) } : null })) }
+}
+
+/**
+ * The owner's derivation as it arrives with its plan. Each state follows the owner's rules, which
+ * a reader of another version may not share; the value must still describe exactly the plan and
+ * delegations it accompanies.
+ */
+export function parseGoalPlanState(value: unknown, plan: GoalPlan, delegations: readonly DemandDelegation[]): GoalPlanState {
+  const data = object(value, 'plan state', ['revision', 'done', 'total', 'next', 'nodes'])
+  if (data.revision !== plan.revision) throw new Error('plan state describes another plan revision')
+  if (!Array.isArray(data.nodes) || data.nodes.length !== plan.nodes.length) throw new Error('plan state must describe every plan node')
+  const nodes = data.nodes.map((value, index): GoalPlanStateNode => {
+    const id = plan.nodes[index]!.id, label = `plan state node ${id}`
+    const item = object(value, label, ['id', 'state', 'column', 'attempts', 'staleCriteria', 'unknown', 'attempt'])
+    if (item.id !== id) throw new Error('plan state nodes must follow the plan node order')
+    const state = item.state as GoalPlanNodeState
+    if (!GOAL_PLAN_NODE_STATES.includes(state)) throw new Error(`${label} has an invalid state`)
+    const unknown = identities(item.unknown, `${label} unknown`) as GoalPlanUnknownReason[]
+    if (unknown.some(reason => !GOAL_PLAN_UNKNOWN_REASONS.includes(reason)) || (unknown.length > 0) !== (state === 'unknown'))
+      throw new Error(`${label} must name valid reasons exactly when it is unknown`)
+    const attempts = count(item.attempts, `${label} attempts`)
+    if (attempts > delegations.filter(entry => entry.planNodeId === id).length) throw new Error(`${label} counts attempts beyond its delegations`)
+    const attempt = item.attempt === null ? null : (() => {
+      const named = object(item.attempt, `${label} attempt`, ['delegationOperationId', 'sourceMessageId', 'threadId', 'workerHostId', 'workerAgentSessionId', 'reported'])
+      const delegation = delegations.find(entry => entry.planNodeId === id && entry.operationId === named.delegationOperationId)
+      if (!delegation || named.sourceMessageId !== delegation.sourceMessageId || named.threadId !== delegation.threadId || named.workerHostId !== delegationWorkerHostId(delegation)
+        || named.workerAgentSessionId !== delegation.workerAgentSessionId || typeof named.reported !== 'boolean') throw new Error(`${label} attempt is not one of its delegations`)
+      return { delegationOperationId: delegation.operationId, sourceMessageId: delegation.sourceMessageId, threadId: delegation.threadId,
+        workerHostId: delegationWorkerHostId(delegation), workerAgentSessionId: delegation.workerAgentSessionId, reported: named.reported }
+    })()
+    if (attempt && attempts === 0) throw new Error(`${label} names a current attempt without attempts`)
+    return { id, state, column: count(item.column, `${label} column`), attempts, staleCriteria: identities(item.staleCriteria, `${label} staleCriteria`), unknown, attempt }
+  })
+  const next = identities(data.next, 'plan state next')
+  if (next.some(id => !plan.nodes.some(node => node.id === id))) throw new Error('plan state next names a node outside the plan')
+  const done = count(data.done, 'plan state done'), total = count(data.total, 'plan state total')
+  if (done > total || total > plan.nodes.length) throw new Error('plan state counts exceed its nodes')
+  return { revision: plan.revision, done, total, next, nodes }
 }
 
 /** Whether a node may receive a new delegation now, and why not. */
@@ -248,7 +306,7 @@ export function goalPlanDelegationIssue(plan: GoalPlan, delegations: readonly De
   const projection = projectGoalPlan(plan, delegations, criteria).nodes.find(item => item.node.id === nodeId)
   if (!projection) return `Plan node ${nodeId} is not in the current plan.`
   if (projection.state !== 'ready' && projection.state !== 'changes')
-    return `Plan node ${nodeId} is ${projection.state}; only a ready node or one whose review requested changes can be delegated.`
+    return `Plan node ${nodeId} is ${projection.state}${projection.unknown.length ? ` (${projection.unknown.join(', ')})` : ''}; only a ready node or one whose review requested changes can be delegated.`
   const executor = projection.node.executor
   if (executor && (executor.hostId !== worker.hostId || executor.agentSessionId !== worker.agentSessionId))
     return `Plan node ${nodeId} names ${executor.agentSessionId} on ${executor.hostId} as its executor; revise the plan to reassign it.`
