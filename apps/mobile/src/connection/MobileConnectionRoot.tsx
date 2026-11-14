@@ -66,6 +66,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
     return () => { current = false }
   }, [])
   useEffect(() => {
+    setMetadataPending(false)
     const controller = new AbortController()
     const metadata = new AbortController()
     let owned: AgentMuxHostedClient | undefined, release: (() => void) | undefined, timer: ReturnType<typeof setTimeout> | undefined
