@@ -263,13 +263,13 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
   const cancelDelete = useRef<HTMLButtonElement>(null)
   const accessFocus = useRef<HTMLInputElement | null>(null)
   useLayoutEffect(() => {
-    if (busy !== null) return
+    if (active && busy !== null) return
     const control = accessFocus.current
     accessFocus.current = null
-    if (control && control.ownerDocument.activeElement === control.ownerDocument.body && desktopElementVisible(control)) {
-      control.focus({ preventScroll: true })
-    }
-  }, [busy])
+    if (!active || !control || !desktopElementVisible(control)) return
+    const document = control.ownerDocument
+    if (document.hasFocus() && document.activeElement === document.body) control.focus({ preventScroll: true })
+  }, [active, busy])
   // Opening the color picker or the delete confirmation moves focus into it; closing returns it.
   useEffect(() => { if (hues) huesGroup.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus() }, [hues])
   useEffect(() => { if (confirm) cancelDelete.current?.focus() }, [confirm])
