@@ -93,9 +93,10 @@ export const OPENCODE_HOOKS: AgentNativeHookSpecification = {
 /**
  * OpenCode 的配置根目录。
  *
- * 逐字实现上游的解析（`packages/core/src/global.ts:64`）：`OPENCODE_CONFIG_DIR ?? Path.config`，
- * 其中 `Path.config = join(xdgConfig, 'opencode')`（`global.ts:13`，经 `xdg-basedir`），即
- * `XDG_CONFIG_HOME` 未设时为 `~/.config/opencode`。
+ * 原生插件发现按 `config/paths.ts` 将非空 `OPENCODE_CONFIG_DIR` 原值加入扫描目录；空串不加入。
+ * 默认 `Path.config = join(xdgConfig, 'opencode')`（`global.ts`，经 `xdg-basedir`），即
+ * `XDG_CONFIG_HOME` 未设或为空串时为 `~/.config/opencode`。空白及相对目录均保留原值，
+ * 不能 trim；这与 `Global.make()` 给其他消费者的配置元数据不是同一个判定入口。
  *
  * 注意**不是** `OPENCODE_CONFIG`——那个是「单个配置文件」的路径（`flag/flag.ts:21`），不是目录。
  * 认错变量会把插件写进一个 OpenCode 永远不扫的地方，表现为「装了但一个事件都没有」。
@@ -105,9 +106,9 @@ export const OPENCODE_HOOKS: AgentNativeHookSpecification = {
  * 加载同一个插件。装一处、且是用户不会提交的那一处，是唯一无副作用的选择。
  */
 function openCodeConfigDir(env?: ProviderExecutionEnvironment, workspacePath?: string): string {
-  const override = executionEnvironmentValue(env, 'OPENCODE_CONFIG_DIR')?.trim()
+  const override = executionEnvironmentValue(env, 'OPENCODE_CONFIG_DIR')
   if (override) return executionPath(override, workspacePath)
-  const xdg = executionEnvironmentValue(env, 'XDG_CONFIG_HOME')?.trim()
+  const xdg = executionEnvironmentValue(env, 'XDG_CONFIG_HOME')
   return executionPath(xdg ? join(xdg, 'opencode') : join(executionHomeDirectory(env), '.config', 'opencode'), workspacePath)
 }
 
