@@ -12,6 +12,15 @@ import { decodeResponse, isNativeMutation, NATIVE_PROTOCOL_VERSION, NATIVE_PROVI
 
 const MAX_FRAME_BYTES = 26 * 1024 * 1024
 const RESULT_CACHE_BYTES = 32 * 1024 * 1024
+const MAX_TIMING_MS = 150_000
+const NATIVE_FRAME_TIMING = ['contentMs', 'windowListMs', 'totalMs'] as const
+const DISPLAY_FRAME_TIMING = ['captureMs', 'pngMs', 'base64Ms', 'totalMs'] as const
+const NODE_TIMING = ['requestMs', 'validationMs'] as const
+function hasBoundedTiming(value: unknown, keys: readonly string[]): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const timing = value as Record<string, unknown>
+  return keys.every(key => typeof timing[key] === 'number' && Number.isFinite(timing[key]) && (timing[key] as number) >= 0 && (timing[key] as number) <= MAX_TIMING_MS)
+}
 
 function freezeReceivedJson(value: Json): Json {
   const pending: Json[] = [value]
@@ -296,17 +305,23 @@ export class NativeDesktop {
   }
 
   /** Every active display's frozen pixels, one grab each, for a host capture surface.
-   * `includeHostWindows` makes the window list match a grab taken before the host steps out. */
+   * Native PID filtering includes or excludes host pixels and matching normal-layer window metadata. */
   async captureDisplays({ includeHostWindows = false }: { includeHostWindows?: boolean } = {}): Promise<NativeDisplayFrames> {
+    const requestStarted = performance.now()
     const raw = await this.request('captureDisplays', { includeHostWindows }, { timeoutMs: 120_000 })
+    const requestMs = performance.now() - requestStarted
+    const validationStarted = performance.now()
     const invalid = (message: string) => new NativeRequestError('invalid_display_frames', message)
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.state !== 'captured' || !Number.isFinite(raw.capturedAt)
-      || !Array.isArray(raw.displays) || raw.displays.length === 0) throw invalid('Native display capture did not return its frames')
+      || !Array.isArray(raw.displays) || raw.displays.length === 0 || !hasBoundedTiming(raw.timing, NATIVE_FRAME_TIMING)) throw invalid('Native display capture did not return its frames and native timing')
     const result = raw as unknown as NativeDisplayFrames
     const ids = new Set<number>()
     for (const display of result.displays) {
-      const frame = display?.frame
-      if (!display || typeof display !== 'object' || !Number.isSafeInteger(display.displayId) || display.displayId < 0 || ids.has(display.displayId)
+      if (!display || typeof display !== 'object' || !hasBoundedTiming(display.timing, DISPLAY_FRAME_TIMING)) {
+        throw invalid('Native display frame lost its bounded native timing')
+      }
+      const frame = display.frame
+      if (!Number.isSafeInteger(display.displayId) || display.displayId < 0 || ids.has(display.displayId)
         || !frame || ![frame.x, frame.y, frame.width, frame.height].every(Number.isFinite) || frame.width <= 0 || frame.height <= 0
         || !Number.isFinite(display.scale) || display.scale <= 0 || !Number.isFinite(display.safeTop) || display.safeTop < 0 || display.safeTop >= frame.height) {
         throw invalid('Native display frame lost its exact display identity or geometry')
@@ -337,6 +352,9 @@ export class NativeDesktop {
       } catch (error) { throw invalid(error instanceof Error ? error.message : 'Native display PNG is invalid') }
     }
     if (!result.displays.some(display => display.png !== undefined)) throw invalid('Native display capture returned no pixels')
+    const validationMs = performance.now() - validationStarted
+    result.timing = { ...result.timing, requestMs, validationMs }
+    if (!hasBoundedTiming(result.timing, NODE_TIMING)) throw invalid('Native display capture lost its bounded Node timing')
     return result
   }
 

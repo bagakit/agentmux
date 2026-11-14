@@ -219,11 +219,12 @@ enum NativeDesktopOperations {
     /// show and crop exactly what was on screen. A display that cannot be
     /// captured carries its `issue`; the other displays remain usable. Each
     /// display also lists the normal windows over it, front to back, read once
-    /// beside the grabs. The helper is always excluded; the host chooses whether
-    /// its windows belong to this frozen background before it steps out.
+    /// beside the grabs. Native PID filters remove the helper and, on request,
+    /// every capturable host window without hiding or moving either process's UI.
     static func captureDisplays(hostPID: pid_t, includeHostWindows: Bool = false) throws -> [String: Any] {
         do {
             return try NativeDisplayCaptureLease.shared.withCapture { ownership in
+                let totalStarted = DispatchTime.now().uptimeNanoseconds
                 let capturedAt = Date().timeIntervalSince1970 * 1000
                 // `safeTop` is the band a camera housing covers at the display's top, in points; zero without one.
                 let screens: [(id: CGDirectDisplayID, scale: CGFloat, safeTop: CGFloat)] = onMain {
@@ -232,31 +233,69 @@ enum NativeDesktopOperations {
                     }
                 }
                 guard !screens.isEmpty else { throw ProviderError.coded("display_not_found", "macOS reports no active display") }
+                let excludedOwners: Set<pid_t> = includeHostWindows ? [getpid()] : [getpid(), hostPID]
+                let windowListStarted = DispatchTime.now().uptimeNanoseconds
+                // One window-server snapshot supplies both normal-layer metadata and
+                // host visibility on every display, including non-normal panels.
+                let allWindows = visibleWindows(excludingOwners: [], allLayers: true)
+                let windowListMs = captureMilliseconds(since: windowListStarted)
+                let windows = allWindows.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }
+                let hostWindows = allWindows.filter { $0.pid == hostPID }
                 let pixels: (CGDirectDisplayID, CGRect, CGFloat) throws -> CapturedImage
+                var contentMs = 0.0
                 if #available(macOS 14.0, *) {
-                    // One window enumeration serves every display's grab.
-                    let content = Result { try BlockingAsync.run(timeout: 10) { try await SCShareableContent.current } }
-                    pixels = { id, frame, scale in try displayPixels(id, frame: frame, scale: scale, content: content.get(), ownership: ownership) }
+                    // One ScreenCaptureKit enumeration serves every display's grab and
+                    // the exact same PID-derived exclusion list on every display.
+                    let contentStarted = DispatchTime.now().uptimeNanoseconds
+                    let content = Result {
+                        let shareable = try BlockingAsync.run(timeout: 10) { try await SCShareableContent.current }
+                        let excluded = shareable.windows.filter { window in
+                            guard let pid = window.owningApplication?.processID else { return false }
+                            return excludedOwners.contains(pid)
+                        }
+                        return (shareable: shareable, excludedWindows: excluded)
+                    }
+                    contentMs = captureMilliseconds(since: contentStarted)
+                    pixels = { id, frame, scale in
+                        let resolved = try content.get()
+                        return try displayPixels(id, frame: frame, scale: scale, content: resolved.shareable,
+                            excludingWindows: resolved.excludedWindows, ownership: ownership)
+                    }
                 } else {
-                    pixels = { _, frame, scale in try coreGraphicsDisplayPixels(frame, scale: scale) }
+                    pixels = { _, frame, scale in
+                        // CoreGraphics cannot subtract one process from a display grab.
+                        // Never label pixels that still contain the host as excluded.
+                        if !includeHostWindows && hostWindows.contains(where: { $0.frame.intersects(frame) }) {
+                            throw ProviderError.coded("host_window_exclusion_unavailable", "CoreGraphics cannot exclude the visible host from this display")
+                        }
+                        return try coreGraphicsDisplayPixels(frame, scale: scale)
+                    }
                 }
-                let windows = visibleWindows(excludingOwners: includeHostWindows ? [getpid()] : [getpid(), hostPID])
                 // Every display's pixels share one response frame. The identity envelope and
                 // all displays' metadata stay far below the reserve.
                 var remainingFrameBytes = NativeNDJSONReader.maxFrameBytes - 64 * 1024
                 let displays = screens.map { screen -> [String: Any] in
+                    let displayStarted = DispatchTime.now().uptimeNanoseconds
+                    var captureMs = 0.0, pngMs = 0.0, base64Ms = 0.0
                     let frame = CGDisplayBounds(screen.id)
                     var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale, "safeTop": screen.safeTop,
                         "windows": windows.filter { $0.frame.intersects(frame) }.map(\.entry)]
                     do {
+                        let captureStarted = DispatchTime.now().uptimeNanoseconds
                         let capture = try pixels(screen.id, frame, screen.scale)
+                        captureMs = captureMilliseconds(since: captureStarted)
+                        let pngStarted = DispatchTime.now().uptimeNanoseconds
                         let png = try pngData(capture.image)
+                        pngMs = captureMilliseconds(since: pngStarted)
                         let encodedBytes = (png.count + 2) / 3 * 4
                         guard encodedBytes <= remainingFrameBytes else {
                             throw ProviderError.coded("image_too_large", "this display's pixels do not fit one response beside the displays listed before it")
                         }
+                        let base64Started = DispatchTime.now().uptimeNanoseconds
+                        let encoded = png.base64EncodedString()
+                        base64Ms = captureMilliseconds(since: base64Started)
                         remainingFrameBytes -= encodedBytes
-                        entry["png"] = png.base64EncodedString()
+                        entry["png"] = encoded
                         entry["width"] = capture.image.width
                         entry["height"] = capture.image.height
                         entry["engine"] = capture.engine
@@ -264,36 +303,44 @@ enum NativeDesktopOperations {
                         let payload = nativeErrorPayload(error)
                         entry["issue"] = "\(payload["code"] ?? "capture_failed"): \(payload["message"] ?? "display pixels are unavailable")"
                     }
+                    entry["timing"] = ["captureMs": captureMs, "pngMs": pngMs, "base64Ms": base64Ms,
+                        "totalMs": captureMilliseconds(since: displayStarted)]
                     return entry
                 }
                 guard displays.contains(where: { $0["png"] != nil }) else {
                     throw ProviderError.coded("display_capture_unavailable", displays.compactMap { $0["issue"] as? String }.joined(separator: "\n"))
                 }
-                return ["state": "captured", "capturedAt": capturedAt, "displays": displays]
+                return ["state": "captured", "capturedAt": capturedAt, "displays": displays,
+                    "timing": ["contentMs": contentMs, "windowListMs": windowListMs, "totalMs": captureMilliseconds(since: totalStarted)]]
             }
         } catch is NativeDisplayCaptureLease.Failure {
             throw ProviderError.coded("capture_busy", "an earlier display capture is still producing its pixels")
         }
     }
 
-    /// On-screen normal-layer windows in the window server's front-to-back
-    /// order, with global Quartz frames. Fully transparent windows and windows
-    /// excluded from sharing are absent from the frozen pixels, so they are not listed.
-    private static func visibleWindows(excludingOwners owners: Set<pid_t>) -> [(frame: CGRect, entry: [String: Any])] {
+    /// On-screen windows in the window server's front-to-back order, with global
+    /// Quartz frames. Metadata keeps normal layer 0 only. The same one-shot list
+    /// may retain other layers solely to establish whether exclusion is possible.
+    private static func visibleWindows(excludingOwners owners: Set<pid_t>, allLayers: Bool = false) -> [(pid: pid_t, frame: CGRect, normalLayer: Bool, entry: [String: Any])] {
         guard let infos = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else { return [] }
         return infos.compactMap { info in
             guard let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, !owners.contains(pid),
-                  (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
                   ((info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,
                   (info[kCGWindowSharingState as String] as? NSNumber)?.intValue != 0,
                   let number = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
                   let bounds = info[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: bounds), frame.width > 0, frame.height > 0
             else { return nil }
+            let normalLayer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
+            guard allLayers || normalLayer else { return nil }
             var entry: [String: Any] = ["windowId": number, "frame": renderRect(frame)]
             if let owner = info[kCGWindowOwnerName as String] as? String { entry["owner"] = owner }
-            return (frame, entry)
+            return (pid, frame, normalLayer, entry)
         }
+    }
+
+    private static func captureMilliseconds(since start: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
     }
 
     /// One grab of one exact display. The asynchronous producer keeps
@@ -301,7 +348,7 @@ enum NativeDesktopOperations {
     /// let a second physical grab start while ScreenCaptureKit still runs.
     @available(macOS 14.0, *)
     private static func displayPixels(_ id: CGDirectDisplayID, frame: CGRect, scale: CGFloat, content: SCShareableContent,
-        ownership: NativeDisplayCaptureLease.Ownership) throws -> CapturedImage {
+        excludingWindows: [SCWindow], ownership: NativeDisplayCaptureLease.Ownership) throws -> CapturedImage {
         let width = ceil(frame.width * scale), height = ceil(frame.height * scale)
         guard NativeImageLimits.permits(width: width, height: height) else {
             throw ProviderError.coded("image_too_large", "display pixels exceed the host image allocation limit")
@@ -312,15 +359,16 @@ enum NativeDesktopOperations {
         guard match.frame == frame else {
             throw ProviderError.coded("display_configuration_changed", "the display bounds changed before its pixels were captured")
         }
-        // SCDisplay is an immutable description the producer only reads; the SDK does not mark it Sendable.
+        // SCDisplay and SCWindow are immutable descriptions the producer only reads; the SDK does not mark them Sendable.
         nonisolated(unsafe) let display = match
+        nonisolated(unsafe) let exclusions = excludingWindows
         let image = try BlockingAsync.run(timeout: 10) {
             defer { withExtendedLifetime(ownership) {} }
             let configuration = SCStreamConfiguration()
             configuration.width = Int(width)
             configuration.height = Int(height)
             configuration.showsCursor = false
-            return try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, excludingWindows: []),
+            return try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, excludingWindows: exclusions),
                 configuration: configuration)
         }
         return CapturedImage(image: image, engine: "screenCaptureKit")

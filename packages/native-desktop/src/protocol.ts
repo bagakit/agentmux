@@ -55,6 +55,28 @@ export interface NativeDisplayWindow {
   /** The owning application's name, when the window server reports one. Presentation only. */
   owner?: string
 }
+export interface NativeDisplayFrameTiming {
+  /** Monotonic milliseconds for this display's native pixel grab. */
+  captureMs: number
+  /** Monotonic milliseconds for native PNG encoding, separate from base64. */
+  pngMs: number
+  /** Monotonic milliseconds for PNG base64 encoding; no extra JSON serialization. */
+  base64Ms: number
+  /** Monotonic milliseconds for this display's complete native processing. */
+  totalMs: number
+}
+export interface NativeDisplayFramesTiming {
+  /** ScreenCaptureKit content enumeration; 0 on the CoreGraphics path. */
+  contentMs: number
+  /** The one native window-server list read. */
+  windowListMs: number
+  /** Whole native captureDisplays operation. */
+  totalMs: number
+  /** Node request round trip, including transport and native work. */
+  requestMs: number
+  /** Node result validation, excluding the request. */
+  validationMs: number
+}
 export type NativeDisplayFrame = {
   displayId: number
   /** Global Quartz points. */
@@ -62,8 +84,10 @@ export type NativeDisplayFrame = {
   scale: number
   /** Points at the display's top covered by a camera housing; 0 without one. */
   safeTop: number
-  /** Windows intersecting this display, front to back; the helper is excluded, the host follows includeHostWindows. */
+  /** Windows intersecting this display, front to back; helper and host follow the same PID filter as pixels. */
   windows: NativeDisplayWindow[]
+  /** Bounded native stage timings, present for captured and issue displays. */
+  timing: NativeDisplayFrameTiming
 } & (
   | { png: string; width: number; height: number; engine: string; issue?: never }
   | { issue: string; png?: never; width?: never; height?: never; engine?: never }
@@ -74,6 +98,8 @@ export interface NativeDisplayFrames {
   capturedAt: number
   /** Every active display; at least one carries pixels. */
   displays: NativeDisplayFrame[]
+  /** Bounded native and Node stage timings; no pixels, paths or draft text. */
+  timing: NativeDisplayFramesTiming
 }
 
 export function decodeResponse(input: unknown): NativeResponse {
