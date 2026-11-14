@@ -41,7 +41,7 @@ export function checkRuntimeBoundary(root, mutation) {
 }
 
 /** Compile the actual contracts and their negative consumer; unrelated Store diagnostics stay separate. */
-export function checkTypes(root, mutation, exposeNegativeCases = false) {
+export function checkTypes(root, mutation, exposeNegativeCases = false, identityRuntime) {
   const ts = createRequire(resolve(root, 'apps/desktop/package.json'))('typescript')
   const fixture = 'apps/desktop/test/fixtures/survey-opening-capabilities.ts'
   const originalFixture = readFileSync(resolve(root, fixture), 'utf8')
@@ -59,11 +59,15 @@ export function checkTypes(root, mutation, exposeNegativeCases = false) {
     const name = relative(root, file)
     let code = mutation?.file === name ? original.replace(mutation.before, mutation.after) : original
     if (exposeNegativeCases && name === fixture) code = code.replace(/\/\/ @ts-expect-error[^\n]*/gu, '')
-    if ([...flows, fixture].includes(name)) loaded.push({ file: name, sourceSHA256: hash(original), loadedSHA256: hash(code) })
+    if ([...flows, fixture].includes(name) || file === identityRuntime) loaded.push({ file: name, sourceSHA256: hash(original), loadedSHA256: hash(code) })
     return ts.createSourceFile(file, code, languageVersion, true)
   }
   const candidates = new Map()
   host.resolveModuleNames = (names, containing) => names.map(name => {
+    if (name === '@agentmux/identity/runtime-source') {
+      assert.ok(identityRuntime, 'A privately generated current identity module is required')
+      return { resolvedFileName: identityRuntime, isExternalLibraryImport: false }
+    }
     if (!name.startsWith('@agentmux/')) return ts.resolveModuleName(name, containing, options, host).resolvedModule
     if (!candidates.has(name)) candidates.set(name, candidateResolve(root, name, { source: true, types: true }))
     const file = candidates.get(name)
@@ -71,6 +75,9 @@ export function checkTypes(root, mutation, exposeNegativeCases = false) {
     return /\.(?:[cm]?[jt]sx?|json)$/u.test(file) ? { resolvedFileName: file, isExternalLibraryImport: false } : undefined
   })
   const program = ts.createProgram([resolve(root, fixture), resolve(root, 'apps/desktop/src/renderer/src/global.d.ts')], options, host)
+  const firstPartyFiles = program.getSourceFiles().map(source => relative(root, source.fileName)).filter(file => file.startsWith('packages/'))
+  assert.ok(firstPartyFiles.length > 0 && !firstPartyFiles.some(file => /^packages\/[^/]+\/dist\//u.test(file)), 'TypeScript must consume first-party Source, not dist')
+  assert.ok(program.getSourceFile(identityRuntime), 'TypeScript must consume the same fresh identity module')
   const scoped = [fixture, ...flows], format = diagnostic => ({ file: diagnostic.file ? relative(root, diagnostic.file.fileName) : null,
     code: diagnostic.code, line: diagnostic.file && diagnostic.start !== undefined ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1 : null,
     message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n') })
@@ -80,5 +87,5 @@ export function checkTypes(root, mutation, exposeNegativeCases = false) {
   })
   const store = program.getSourceFile(resolve(root, 'apps/desktop/src/renderer/src/store.ts'))
   const unrelatedStoreDiagnostics = store ? program.getSemanticDiagnostics(store).map(format) : []
-  return { classification: 'scoped-typescript-contract', negativeCases, diagnostics, unrelatedStoreDiagnostics, loaded }
+  return { classification: 'scoped-typescript-contract', negativeCases, diagnostics, unrelatedStoreDiagnostics, loaded, firstPartyFiles }
 }

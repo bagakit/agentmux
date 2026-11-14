@@ -1,19 +1,25 @@
 import { defineConfig } from 'vitest/config'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { relative, resolve } from 'node:path'
+import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { candidateAlias } from '../../candidate-package-resolve.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases'
 
 const root = fileURLToPath(new URL('../../../../../', import.meta.url))
+const identityRuntime = process.env.SURVEY_OPENING_IDENTITY_RUNTIME
+if (!identityRuntime) throw new Error('The fresh private identity module is required')
 const packages = candidateAlias(root, { source: true, browser: true }), candidates = new Map<string, string>()
 const sourcePackages = { ...packages, customResolver(specifier: string) {
+  if (specifier === '@agentmux/identity/runtime-source') {
+    return identityRuntime
+  }
   if (!candidates.has(specifier)) candidates.set(specifier, packages.customResolver(specifier))
   return candidates.get(specifier)!
 } }
 export default defineConfig({
   root,
+  server: { fs: { allow: [root, dirname(identityRuntime)] } },
   resolve: { conditions: ['browser'], alias: [sourcePackages,
     ...Object.entries(radixOverlayAliases).map(([find, replacement]) => ({ find, replacement }))] },
   ssr: { resolve: { conditions: ['browser'] }, noExternal: ['@agentmux/client-ui'] },
@@ -31,7 +37,7 @@ export default defineConfig({
       if (code.split(mutation.before).length !== 2) throw new Error('Expected one loaded production mutation anchor: ' + file)
       code = code.replace(mutation.before, mutation.after)
     }
-    if (process.env.SURVEY_OPENING_LOADED && /^(apps\/desktop\/(src|test)|packages\/[^/]+\/src)\//u.test(file))
+    if (process.env.SURVEY_OPENING_LOADED && (/^(apps\/desktop\/(src|test)|packages)\//u.test(file) || id.split('?')[0] === process.env.SURVEY_OPENING_IDENTITY_RUNTIME))
       appendFileSync(process.env.SURVEY_OPENING_LOADED, JSON.stringify({ file,
         sourceSHA256: createHash('sha256').update(source).digest('hex'), loadedSHA256: createHash('sha256').update(code).digest('hex') }) + '\n')
     return code === source ? null : { code, map: null }

@@ -1,19 +1,22 @@
 import assert from 'node:assert/strict'
 import { appendFileSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire, isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join, relative, resolve } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { candidateResolve } from './candidate-package-resolve.mjs'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
 import { flows, hash, exactMutation, checkRuntimeBoundary, checkTypes } from './fixtures/survey-opening/boundary.mjs'
+import { bundleIdentityRuntime } from '../../../packages/identity/scripts/runtime-bundle.mjs'
 
 const root = fileURLToPath(new URL('../../..', import.meta.url)), args = process.argv.slice(2)
 assert.ok(args.length === 0 || args.length === 1 && args[0] === '--checks=boundary', 'Use --checks=boundary')
+const checks = args.length ? 'boundary' : 'all'
 const output = join(root, '.artifacts/survey-opening-architecture/runs', randomUUID())
-const temporary = await mkdtemp(join(tmpdir(), 'amux-survey-opening-'))
+const temporary = await realpath(await mkdtemp(join(tmpdir(), 'amux-survey-opening-')))
+const identityRuntime = join(temporary, 'identity-runtime.ts')
 const require = createRequire(join(root, 'apps/desktop/package.json'))
 const ts = require('typescript'), { build } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
 const owners = [...flows, 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/main/system-page-ingress.ts']
@@ -21,10 +24,11 @@ const source = Object.fromEntries(owners.map(file => [file, hash(readFileSync(jo
 const verificationFiles = ['apps/desktop/scripts/verify-survey-opening.mjs',
   ...['boundary.mjs', 'boundary.test.ts', 'vitest.config.mts'].map(file => 'apps/desktop/scripts/fixtures/survey-opening/' + file),
   'apps/desktop/test/fixtures/survey-opening-capabilities.ts', 'apps/desktop/scripts/candidate-package-resolve.mjs',
-  'apps/desktop/scripts/fixtures/survey-tab-composition/native-listener.setup.ts']
+  'apps/desktop/scripts/fixtures/survey-tab-composition/native-listener.setup.ts',
+  'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/src/runtime-entry.ts', 'packages/identity/src/index.ts']
 const verificationSource = Object.fromEntries(verificationFiles.map(file => [file, hash(readFileSync(join(root, file)))]))
-const proof = { schema: 'agentmux.survey-opening-boundary.v1', passed: false, checks: 'boundary',
-  source, verificationSource, structures: [], runs: [], cli: null,
+const proof = { schema: 'agentmux.survey-opening-boundary.v1', passed: false, checks,
+  source, verificationSource, structures: [], runs: [], cli: null, identity: null,
   boundary: 'Actual current Source Store/Core, HTTP(S), OS webpage-file/Renderer call sites and original public CLI. Existing typed Native transport and no user App/Run, network performance, installed handler or whole-project typecheck claim.' }
 await mkdir(output, { recursive: true })
 const save = () => writeFile(join(output, 'receipt.json'), JSON.stringify(proof, null, 2) + '\n')
@@ -35,6 +39,7 @@ async function run(name, mutation, pattern) {
   const resultPath = join(output, name + '.json'), loadedPath = join(output, name + '-loaded.jsonl')
   const listenerTrace = join(output, name + '-listener.jsonl')
   const env = { ...process.env, SURVEY_OPENING_CLI: join(temporary, 'cli.mjs'), SURVEY_OPENING_LOADED: loadedPath,
+    SURVEY_OPENING_IDENTITY_RUNTIME: identityRuntime,
     SURVEY_COMPOSITION_LISTENER_TRACE: listenerTrace, SYSTEM_OPEN_RECEIPT: join(output, name + '-cases.jsonl'),
     ...(mutation ? { SURVEY_OPENING_MUTATION: JSON.stringify(mutation) } : {}) }
   if (!mutation) delete env.SURVEY_OPENING_MUTATION
@@ -50,6 +55,8 @@ async function run(name, mutation, pattern) {
     ...(mutation ? { mutation } : {}) }
   proof.runs.push(result); await save()
   assert.ok(passed.length + failed.length > 0, 'No actual cases executed: ' + name)
+  assert.ok(loaded.length > 0 && !loaded.some(row => /^packages\/[^/]+\/dist\//u.test(row.file)), 'Tests must consume first-party Source, not dist')
+  assert.ok(loaded.some(row => row.file === relative(root, identityRuntime) && row.loadedSHA256 === proof.identity.moduleSHA256), 'The tests must load the fresh original identity recipe')
   if (mutation) {
     assert.notEqual(processResult.exitCode, 0, 'Behavior mutation survived: ' + name)
     assert.ok(failed.some(test => test.failureMessages.some(message => /AssertionError/u.test(message))), 'Mutation must fail a business assertion, not import/setup: ' + name)
@@ -73,12 +80,15 @@ async function run(name, mutation, pattern) {
 }
 
 try {
+  const identity = await bundleIdentityRuntime()
+  await writeFile(identityRuntime, `export const identityRuntimeSource = ${JSON.stringify(identity.source)};\n`)
+  proof.identity = { recipe: 'packages/identity/scripts/runtime-bundle.mjs', moduleSHA256: hash(await readFile(identityRuntime)) }
   const boundary = checkRuntimeBoundary(root)
   assert.deepEqual(boundary.violations, []); proof.structures.push({ name: 'runtime-boundary', ...boundary })
-  const types = checkTypes(root)
+  const types = checkTypes(root, null, false, identityRuntime)
   assert.deepEqual(types.diagnostics, [], 'Scoped contract typecheck failed')
   proof.structures.push({ name: 'types', ...types })
-  const negative = checkTypes(root, null, true)
+  const negative = checkTypes(root, null, true, identityRuntime)
   assert.ok(negative.diagnostics.filter(row => row.file.endsWith('/survey-opening-capabilities.ts')).length >= negative.negativeCases,
     'The real negative TypeScript cases must fail without their expect-error directives')
   proof.structures.push({ name: 'exposed-negative-cases', ...negative })
@@ -87,7 +97,7 @@ try {
     const alias = ast.statements.find(node => ts.isTypeAliasDeclaration(node) && node.name.text === typeName)
     assert.ok(alias, 'Expected the actual capability alias: ' + typeName)
     const mutation = exactMutation(root, file, alias.getText(ast), alias.getText(ast).replace(alias.type.getText(ast), 'AppState'))
-    const result = checkTypes(root, mutation)
+    const result = checkTypes(root, mutation, false, identityRuntime)
     assert.ok(result.diagnostics.some(row => row.code === 2578 && row.file.endsWith('/survey-opening-capabilities.ts')), 'Wide AppState escaped negative consumer: ' + typeName)
     assert.ok(changedModule(result.loaded, mutation)); proof.structures.push({ name: 'wide-' + typeName, mutation, ...result })
   }
@@ -103,6 +113,7 @@ try {
     plugins: [{ name: 'survey-opening-original-cli-source', setup(builder) {
       builder.onResolve({ filter: /^[^./]/ }, async args => {
         if (args.pluginData?.surveyOpeningDependency) return
+        if (args.path === '@agentmux/identity/runtime-source') return { path: identityRuntime }
         if (args.path.startsWith('@agentmux/')) return { path: candidateResolve(root, args.path, { source: true }) }
         if (isBuiltin(args.path)) return { path: args.path, external: true }
         // Bundling workspace sources must retain each original dependency owner's
@@ -113,7 +124,10 @@ try {
         return { path: dependency.path, external: true }
       })
     } }] })
-  const cliSources = Object.fromEntries(Object.keys(compiled.metafile.inputs).filter(file => file.startsWith('packages/')).map(file => [file, hash(readFileSync(join(root, file)))]))
+  const cliInputs = Object.keys(compiled.metafile.inputs)
+  assert.ok(!cliInputs.some(file => /^packages\/[^/]+\/dist\//u.test(file)), 'The CLI must consume first-party Source, not dist')
+  assert.ok(cliInputs.some(file => file === relative(root, identityRuntime)), 'The CLI must consume the same fresh identity module')
+  const cliSources = Object.fromEntries(cliInputs.filter(file => file.startsWith('packages/')).map(file => [file, hash(readFileSync(join(root, file)))]))
   assert.ok(cliSources['packages/core/src/agentmux.ts'])
   proof.cli = { entry: 'packages/core/src/agentmux.ts', compiledSHA256: hash(await readFile(join(temporary, 'cli.mjs'))), sources: cliSources }
   await run('normal')
@@ -122,6 +136,21 @@ try {
   await run('generic-save-reintroduced', generic, '^survey-opening boundary:')
   const checkpoint = exactMutation(root, flows[0], '  await checkpointPreparation()', '  await Promise.resolve()')
   await run('required-checkpoint-omitted', checkpoint, '^system-open: the framework appears before Core acknowledgement')
+  if (checks === 'all') {
+    const directory = exactMutation(root, 'apps/desktop/src/renderer/src/store.ts',
+      '      checkpointPreparation: checkpointSpatialWorkbench',
+      '      checkpointPreparation: async () => { await api.scratch.listTopics(SCRATCH_WORKSPACE_ID); await checkpointSpatialWorkbench() }')
+    await run('hidden-directory-wait', directory, '^system-open: (http|https) reaches')
+    const preferences = exactMutation(root, 'apps/desktop/src/renderer/src/store.ts',
+      '    await checkpointWorkbenchUserDocument()\n    clientStateWritten = true',
+      '    await checkpointWorkbenchUserState()\n    clientStateWritten = true')
+    await run('unrelated-save-wait', preferences, '^system-open: (http|https) reaches')
+    const serial = exactMutation(root, 'apps/desktop/src/main/system-page-ingress.ts',
+      'while (this.active.size < 2 && this.pending.length)', 'while (this.active.size < 1 && this.pending.length)')
+    await run('slow-first-blocks-next', serial, '^system-open: a slow first Native creation')
+    const delayed = exactMutation(root, flows[1], 'onPrepared(value) { preparation = value; reveal(value) }', 'onPrepared(value) { preparation = value }')
+    await run('framework-reveal-delayed', delayed, '^system-open: the framework appears before Core acknowledgement')
+  }
   await run('restored')
   for (const [file, sha] of Object.entries(source)) assert.equal(hash(readFileSync(join(root, file))), sha, 'Candidate changed during qualification: ' + file)
   for (const [file, sha] of Object.entries(verificationSource)) assert.equal(hash(readFileSync(join(root, file))), sha, 'Verification source changed during qualification: ' + file)
