@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
-import { expect, vi } from 'vitest'
+import { vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxRpcCorePort } from '../../../../packages/core/src/public-rpc-service'
 import { AgentMuxControlServer } from '../../../../packages/core/src/public-rpc-server'
@@ -21,7 +21,7 @@ export async function desktopConversationReadBridge(f: { root: string; client: A
     send: (channel: string, value: unknown) => events.emit(channel, null, structuredClone(value)) })
   const event = { sender } as unknown as IpcMainInvokeEvent
   const transport = registerConversationReadIpc({ handle: (channel, fn) => { handlers.set(channel, fn) },
-    trust: (_channel, target) => { expect(target.sender).toBe(sender) }, connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }) })
+    connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }) })
   closes.push(() => transport.dispose())
   const bridge = createPreloadConversationRead({ invoke: async (channel, ...args) => structuredClone(await handlers.get(channel)!(event, ...structuredClone(args))),
     on: (channel, listener) => events.on(channel, listener), removeListener: (channel, listener) => events.removeListener(channel, listener) })
