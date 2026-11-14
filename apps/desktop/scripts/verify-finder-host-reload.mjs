@@ -12,8 +12,9 @@ import { ensureMacosHostService, inspectMacosHostProcess, macosHostService, maco
   reloadReplacedMacosHost } from '../../host/dist/macos-service.js'
 
 assert.equal(process.platform + '-' + process.arch, 'darwin-arm64')
-assert.ok(process.argv.slice(2).every(arg => arg === '--foreground'))
+assert.ok(process.argv.slice(2).every(arg => arg === '--foreground' || arg === '--slow-host'))
 const foreground = process.argv.includes('--foreground')
+const slowHost = process.argv.includes('--slow-host')
 const exec = promisify(execFile)
 const root = await mkdtemp(join(await realpath(tmpdir()), 'amux-reload-'))
 const runtime = join(root, 'r'), state = join(root, 's'), socket = join(runtime, 'control.sock')
@@ -52,7 +53,8 @@ try {
     const entry = join(bundle, relativeEntry)
     await mkdir(resolve(entry, '..'), { recursive: true })
     await exec('/bin/cp', ['-c', await realpath(process.execPath), join(bundle, relativeExecutable)])
-    await writeFile(entry, `import(${JSON.stringify(host)}).catch(error => { console.error(error); process.exitCode = 1 })\n`)
+    const delayStartup = slowHost && bundle === staged ? 'await new Promise(resolve => setTimeout(resolve, 12500));\n' : ''
+    await writeFile(entry, `${delayStartup}import(${JSON.stringify(host)}).catch(error => { console.error(error); process.exitCode = 1 })\n`)
   }
   daemon = spawn(daemonPath, ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'],
     { stdio: ['ignore', 'ignore', 'inherit', 'pipe'] })
@@ -86,7 +88,10 @@ try {
   await connect()
   assert.equal((await owner()).processId, before.processId, 'An unconfirmed installation leaves the original Host available')
   await disconnect()
+  const reloadStartedAt = Date.now()
   await reloadReplacedMacosHost(service)
+  const reloadMs = Date.now() - reloadStartedAt
+  if (slowHost) assert.ok(reloadMs >= 12_500, 'The concrete replacement endpoint opened after the old readiness window')
   await connect()
   const after = await observe(owner, value => value.ctxmux !== null, 'The new Host did not connect to Native')
   assert.notEqual(after.processId, before.processId, 'The installed bundle must reload the resident Host')
@@ -110,7 +115,7 @@ try {
   await reloadReplacedMacosHost(service)
   await connect()
   assert.equal((await owner()).processId, after.processId, 'The refreshed Host is stable on another opening')
-  console.log(JSON.stringify({ mode: foreground ? 'foreground' : 'launchd', originalRuntime: before.runtimeId,
+  console.log(JSON.stringify({ mode: foreground ? 'foreground' : 'launchd', reloadMs, originalRuntime: before.runtimeId,
     hostPidBefore: before.processId, hostPidAfter: after.processId, nativeInstance: after.ctxmux.instanceId,
     nativePid: daemon.pid, originalRun: run.runId, originalPtyPid: resumed.run.pid, mesh: 'ready' }))
 } finally {
