@@ -11284,23 +11284,47 @@ export class AgentMuxClient {
     if (!stored || !sameRun(stored.run, session.run)) throw new AgentMuxError('Original initialization source changed.', 'STALE_AGENT_SESSION')
     if (run && !sameRun(session.run, { runId: run.runId })) throw new AgentMuxError('Original native observation names another Run.', 'STALE_AGENT_SESSION')
     let options: { commandOverride?: string; args?: readonly string[]; env?: Readonly<Record<string, string | undefined>> } | undefined
-    const retained = Object.values(stored.continuityOperations ?? {}).filter(operation => operation.kind === 'resumed' && operation.agentSessionId === stored.agentSessionId && operation.newRun?.runId === session.run.runId)
-    const pointer = stored.continuity?.kind === 'resumed' && stored.continuity.newRun?.runId === session.run.runId ? stored.continuity : undefined
-    if (pointer && !retained.some(operation => operation.operationId === pointer.operationId)) retained.push(pointer)
-    if (retained.length > 1) throw new AgentMuxError('Original native execution source is ambiguous.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
-    const resumed = retained[0]
-    const executor = resumed && readContinuityExecutor(stored.continuityExecutors, resumed.intentOperationId ?? resumed.operationId)
-    if (executor && (executor.providerId !== stored.providerId || executor.executorId !== stored.executorId)) throw new AgentMuxError('Original native executor identity changed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
-    if (executor?.source === 'sdk') options = executor.options
-    else if (!resumed || executor?.source === 'creation') {
-      // Current same-named configuration cannot stand in for an original source.
-      if (stored.creation?.executorRevision) {
-        const original = await this.hostExecutorOwner?.resolve(stored.executorId)
-        if (!original || original.descriptor.configRevision !== stored.creation.executorRevision || original.config.providerId !== stored.providerId) throw new AgentMuxError(
-          'Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
-        options = { ...(original.config.command === undefined ? {} : { commandOverride: original.config.command }), args: original.config.args, env: original.config.env }
-      } else if (stored.creation?.executorInvocationDigest) {
-        options = await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(stored, {}, stored.agentSessionId)
+    // A complete original Start is stronger than logical launch overrides.
+    // An explicit transcript locator already stands independently of an environment root.
+    if (run?.lifecycleOperationId && stored.nativeHandle?.kind === 'provider' && !stored.nativeHandle.transcriptPath) {
+      const operationId = run.lifecycleOperationId
+      let retained: Awaited<ReturnType<CtxmuxRunAdapter['inspectRetainedStart']>> = null, runtimeId: string | undefined
+      try {
+        runtimeId = this.kernel.creationRuntimeIdentity().runtimeId
+        retained = await this.kernel.inspectRetainedStart(operationId)
+      } catch (error) {
+        // A failed optional read does not withdraw an independently retained SDK source.
+        // These typed errors already mean a returned witness failed its original validation.
+        if (error instanceof AgentMuxError && ['PREPARED_START_RUNTIME_MISMATCH', 'INVALID_PREPARED_RUN'].includes(error.code)) throw error
+      }
+      if (retained) {
+        if (retained.runtime.runtimeId !== runtimeId || this.kernel.creationRuntimeIdentity().runtimeId !== runtimeId ||
+            retained.run.runId !== session.run.runId || retained.run.lifecycleOperationId !== operationId ||
+            retained.run.workspacePath !== stored.workspacePath) throw new AgentMuxError(
+          'The original retained native execution source is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+        assertPreparedAgentBinding(retained.prepared, stored, operationId, 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+        options = { env: decodePreparedRun(retained.prepared).request.env }
+      }
+    }
+    if (!options) {
+      const retained = Object.values(stored.continuityOperations ?? {}).filter(operation => operation.kind === 'resumed' && operation.agentSessionId === stored.agentSessionId && operation.newRun?.runId === session.run.runId)
+      const pointer = stored.continuity?.kind === 'resumed' && stored.continuity.newRun?.runId === session.run.runId ? stored.continuity : undefined
+      if (pointer && !retained.some(operation => operation.operationId === pointer.operationId)) retained.push(pointer)
+      if (retained.length > 1) throw new AgentMuxError('Original native execution source is ambiguous.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+      const resumed = retained[0]
+      const executor = resumed && readContinuityExecutor(stored.continuityExecutors, resumed.intentOperationId ?? resumed.operationId)
+      if (executor && (executor.providerId !== stored.providerId || executor.executorId !== stored.executorId)) throw new AgentMuxError('Original native executor identity changed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+      if (executor?.source === 'sdk') options = executor.options
+      else if (!resumed || executor?.source === 'creation') {
+        // Current same-named configuration cannot stand in for an original source.
+        if (stored.creation?.executorRevision) {
+          const original = await this.hostExecutorOwner?.resolve(stored.executorId)
+          if (!original || original.descriptor.configRevision !== stored.creation.executorRevision || original.config.providerId !== stored.providerId) throw new AgentMuxError(
+            'Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+          options = { ...(original.config.command === undefined ? {} : { commandOverride: original.config.command }), args: original.config.args, env: original.config.env }
+        } else if (stored.creation?.executorInvocationDigest) {
+          options = await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(stored, {}, stored.agentSessionId)
+        }
       }
     }
     const launch = run ? this.providerLaunch(session, run) : { ...(options?.commandOverride ? { command: options.commandOverride } : {}), args: options?.args ?? [] }
