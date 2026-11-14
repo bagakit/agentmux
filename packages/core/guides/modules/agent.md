@@ -36,6 +36,10 @@ trust and upgrade are distinct reasons only when their native evidence exists.
 Use the original terminal for required confirmation, then inspect or rejoin that same
 input. No check automatically approves a request or resends an unknown delivery.
 
+For a new Agent taking over original work at a chosen destination, read agent open
+--help and space --skill. Core qualifies the source and supplies its context; keep
+the exact operation for inspection. agent takeover ls reads selected-owner relations.
+
 To create from an existing Browser, first read browser --skill and browser agent-workspace
 prepare --help. Its ready receipt supplies the original execution Workspace; preparation
 does not create an Agent. Choose the display target separately through space --skill and

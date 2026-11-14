@@ -20,6 +20,38 @@ Agent-first workflow:
    For File open, retain the original resource and inspect its actual File Regions as
    amux space --skill describes. An unknown original operation stays unconfirmed; do not blindly repeat.
 
+For Takeover, use `agent open --executor EXECUTOR --takeover-source FILE|-` with an
+explicit `--operation-id` and an existing background destination. The source JSON is
+`{hostId,agentSessionId,organization:{runtimeId,spaceId}|null,expectedRun?,expectedRuntimeId?}`. A saved
+native-only source instead retains `{hostId,nativeSource,executorId,organization:null}`
+from native discovery; never invent a managed SID. Preserve `expectedRuntimeId` whenever
+the source route or original execution Region supplies that exact Runtime; unknown
+does not authorize guessing local. Core verifies the original source,
+generates its context prompt and creates a separate Agent. The original Session, Run,
+positions and drafts remain. Choose the execution Host/Runtime independently with the
+original `--agent-host`/`--agent-runtime` pair when needed; a Host alias from the old
+Core is not automatically a route in the new Core. An unavailable history read keeps
+its exact diagnosis and available material rather than asserting empty history.
+
+`agent open describe` reports `contracts.takeover:1` only at a Source implementing
+this typed variant. Missing qualification leaves this action unconfirmed, preserving
+existing work and original requests. Core derives promotion, handson, transfer or
+ordinary takeover from original organization identities. Unknown organization remains
+unknown, and a category display selector does not hide its Zone's Mote membership.
+Promotion still follows the original Host policy. None of these relations grants a
+Main role, Goal authority or another Agent's credentials.
+
+Read `agent takeover ls --input FILE|-` with
+`{expectedRuntimeId,direction:"incoming"|"outgoing",subject:{runtimeId,agentSessionId},limit?}`.
+Select the exact original admission Core and follow each `nextCursor` with that same
+query. Incoming names the created Agent; outgoing names the original managed Agent.
+The page's selected-owner coverage covers retained Takeover admissions there, never
+all Hosts. Native-only sources have no fabricated SID for an outgoing query. A remote
+execution Core may hold no provenance in Session creation; read incoming at the
+known original admission owner. Original facts survive retirement and observation
+failures. Reading never creates, restores or replays input. Retain an unknown operation
+for exact `space inspect` and a separately authorized same-operation continuation.
+
 For an original Mote Main start, agent open --mote-main FILE|- carries its typed Main intent.
 Keep the exact target, original MOTE baseline/role and operation IDs. A frozen deferredInput
 is the person's first Query; handover:true adds context from that original previous Main.
