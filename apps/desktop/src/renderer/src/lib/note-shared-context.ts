@@ -1,7 +1,7 @@
 import type { NoteKnowledge } from './note-knowledge'
 import { createContext, type ReactNode } from 'react'
 import type { Editor } from '@tiptap/core'
-import type { NoteInclude } from '../../../shared/note-document'
+import type { NoteInclude } from '@agentmux/client-ui/note/note-document'
 export type NoteEditorAttachments = { importFiles(files: readonly File[], editor: Editor): void; pending: boolean }
 /** Presentation operations; canonical bytes and writes stay with the original File document. */
 export const NoteSharedContext = createContext<{

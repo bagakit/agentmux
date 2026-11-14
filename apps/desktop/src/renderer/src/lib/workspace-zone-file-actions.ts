@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { groupIds } from '@agentmux/layout'
 import type { WorkspaceRecord } from '../../../shared/contracts'
-import { zoneFileResource } from '../../../shared/zone-file-resource'
+import { zoneFileResource } from '@agentmux/host/file-resource-model'
 import { useAppStore } from '../store'
 import { fileExplorerContains } from './file-explorer-scope'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'

@@ -2,7 +2,7 @@ import type { AgentMuxSpaceCatalog, AgentMuxZoneFact } from '@agentmux/core/cont
 import { useMemo } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { workspaceZoneId } from '../../../shared/space-addresses'
-import { zoneFileResource } from '../../../shared/zone-file-resource'
+import { zoneFileResource } from '@agentmux/host/file-resource-model'
 import { useAppStore } from '../store'
 import { workbenchSelectionCatalog, type NavigationState } from './desktop-focus-navigation'
 import { workspaceProjectId } from './workspace-projects'

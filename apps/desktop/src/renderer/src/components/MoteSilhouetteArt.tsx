@@ -1,6 +1,6 @@
 import { useId } from 'react'
 import type { MoteAvatarSeriesLocator, MoteAvatarSeriesParameters } from '@agentmux/core/mote-avatar-series'
-import type { MoteExpression } from './MoteFace'
+import type { MoteExpression } from '@agentmux/client-ui/components/MoteFace'
 
 export const MOTE_SILHOUETTE_TITLES = {
   'retro-future': 'Retro future',

@@ -3,7 +3,7 @@ import type { ToolkitAgentCard as Card, ToolkitAgentCardField, ToolkitResultDocu
 import { useAppStore } from '../../store'
 import { createToolkitAgentCardSelector, toolkitAgentCardKey, type ToolkitAgentCardFacts } from '../../lib/toolkit-agent-card-facts'
 import { ResolvedAgentAvatar } from '../AgentAvatar'
-import { agentProviderLabel } from '../AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 
 export { toolkitAgentCardKey, type ToolkitAgentCardFacts }
 

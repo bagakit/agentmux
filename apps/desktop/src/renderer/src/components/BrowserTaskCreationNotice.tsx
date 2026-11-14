@@ -1,5 +1,5 @@
 import type { MouseEvent } from 'react'
-import type { BrowserTaskCreateInput } from '../../../shared/browser-task-creation'
+import type { BrowserTaskCreateInput } from '@agentmux/core/control'
 
 export function BrowserTaskCreationNotice({ input, busy, onInspect, onContinue }: {
   input: BrowserTaskCreateInput

@@ -2,7 +2,7 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
-import { MoteIcon } from './MoteIcon'
+import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useSpaceObjectActionsMenu, useSpaceObjectMenu } from './SpaceObjectContextMenu'
 

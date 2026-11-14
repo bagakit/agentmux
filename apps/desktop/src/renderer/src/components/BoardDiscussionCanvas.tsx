@@ -13,7 +13,7 @@ import { configuredExecutors } from '../lib/executors'
 import { currentExecutorDetection } from '../lib/executor-detection'
 import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
-import { agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 

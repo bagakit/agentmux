@@ -4,7 +4,7 @@ import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { fileWorkbenchIdentity } from './file-workbench-state'
 import type { FileOpenPlacement, FileOpenResult, FileWorkbenchState } from './file-workbench-state'
 import { spatialCatalog, zoneContext, type SpatialWorkbench, type SpatialControlOptions } from './space-agent-control'
-import { zoneFileResource } from '../../../shared/zone-file-resource'
+import { zoneFileResource } from '@agentmux/host/file-resource-model'
 import { awaitDesktopPresentation, captureDesktopInput, desktopInputPreserved } from './desktop-presentation'
 import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 

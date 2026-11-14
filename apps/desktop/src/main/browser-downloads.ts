@@ -4,7 +4,7 @@ import { mkdir, open, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { DownloadItem, WebContents } from 'electron'
 import { durableWriteFile } from '@agentmux/core'
-import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
+import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import type {
   BrowserDownloadSource, BrowserDownloadReceipt, BrowserDownloadReference,

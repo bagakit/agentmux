@@ -1,6 +1,6 @@
 import type { WorkspaceFileWriteResult } from '../../../shared/contracts'
-export { NOTE_FILE_EXTENSION } from '../../../shared/note-document'
-import { NOTE_FILE_EXTENSION } from '../../../shared/note-document'
+export { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-document'
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-document'
 export const NOTE_NAME_ATTEMPTS = 100
 export function noteStemForDate(now: Date): string {
   return `note-${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`

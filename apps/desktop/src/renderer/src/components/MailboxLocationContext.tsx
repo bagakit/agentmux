@@ -8,7 +8,7 @@ import { sessionPresentationById } from '../lib/session-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { tabDisplayName } from '../lib/workbench-tabs'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
-import { agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 
 /** A detail-only metadata consumer; it neither owns navigation nor changes its availability. */
 export function MailboxLocationContext({ origin, sessionId, pending = false, children }: {

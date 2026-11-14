@@ -1,4 +1,4 @@
-import type { WorkspaceFileByteRead } from './workspace-file-bytes'
+import type { WorkspaceFileByteRead } from '@agentmux/host/workspace-file-bytes'
 import type { WorkspaceFilePreviewKind } from '@agentmux/editor-extensions/catalog'
 
 export type WorkspaceFilePreviewReadOptions = { expectedRevision?: string; expectedResource?: { hostId: string; workspacePath: string } }

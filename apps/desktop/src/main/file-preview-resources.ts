@@ -1,5 +1,5 @@
 import type { WorkspaceRecord } from '../shared/contracts.js'
-import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
+import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
 import type { WorkspacePreviewResourceRequest, WorkspacePreviewResourceResult } from '../shared/workspace-file-preview.js'
 import type { WorkspaceFiles } from './workspace-files.js'
 

@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { basename, join } from 'node:path'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { BrowserUploadFile, BrowserUploadReceipt, BrowserUploadSource, BrowserRetainedUploadSelection, BrowserRetainedUploads } from '../shared/browser-upload.js'
-import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
+import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
 import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
 import type { WorkspaceFiles } from './workspace-files.js'
 

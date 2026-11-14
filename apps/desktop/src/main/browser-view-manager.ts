@@ -4,7 +4,7 @@ import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/ob
 import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
 import type { BrowserProfileActivityCheckpoint, BrowserProfileActivityGap } from './browser-profile-store.js'
 import type { BrowserProfileEnvironmentApplication } from '@agentmux/core/control'
-import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from '../shared/browser-task-creation.js'
+import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from '@agentmux/core/control'
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'

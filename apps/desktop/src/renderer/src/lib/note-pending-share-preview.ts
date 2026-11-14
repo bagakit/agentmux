@@ -1,5 +1,5 @@
 import type { JSONContent } from '@tiptap/core'
-import type { NoteDocument } from '../../../shared/note-document'
+import type { NoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { PendingNoteShare } from '../../../shared/note-file-editing'
 import { noteBlockFingerprint, noteNodeAtPath, noteShareRange, noteShareRangeContent, noteShareSiblingRange } from '@agentmux/client-ui/note/note-share-range'
 

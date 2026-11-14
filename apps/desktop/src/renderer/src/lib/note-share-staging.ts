@@ -6,7 +6,7 @@ import { parseFileReadParams, type FileReadParams } from '@agentmux/core/files'
 import { validateNoteDocument } from '@agentmux/client-ui/note/note-document-validation'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
 import { isNoteWorkspaceRelativePath } from '@agentmux/core/note-format'
-import { NOTE_SCHEMA, readNoteDocument, serializeNoteDocument, type NoteDocument, type NoteInclude } from '../../../shared/note-document'
+import { NOTE_SCHEMA, readNoteDocument, serializeNoteDocument, type NoteDocument, type NoteInclude } from '@agentmux/client-ui/note/note-document'
 import type { NoteFileTarget } from './file-document-consumers'
 type ProseMirrorNode = Editor['state']['doc']
 const MIME = 'application/x-agentmux-note-share'

@@ -103,7 +103,7 @@ import {
 import { agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, hookDeliveryServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { runServiceProjection, useRunService } from '../lib/run-service-projection'
 import { terminalConnectionNotices } from '../lib/runtime-endpoint-notice'
-import { agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { TerminalServiceNotices } from './TerminalServiceNotices'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {

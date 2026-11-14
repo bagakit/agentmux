@@ -1,6 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentCatalogEntry } from '@agentmux/core'
-import { AgentProviderIcon, agentProviderLabel } from '../AgentProviderIcon'
+import { AgentProviderIcon, agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')

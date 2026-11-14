@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MOTE_FACE_PARTS, type MoteFace as MoteFaceChoice } from '../../../shared/mote-avatars'
-import { MoteFace } from './MoteFace'
+import { MoteFace } from '@agentmux/client-ui/components/MoteFace'
 import { MoteIdentityMotion } from './MoteIdentityMotion'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 

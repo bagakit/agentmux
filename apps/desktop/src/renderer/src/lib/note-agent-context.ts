@@ -1,7 +1,7 @@
 import type { AgentMuxSpaceAddress } from '@agentmux/core/control'
 import type { Notebook, NotebookPage } from '@agentmux/core/notebook-catalog'
 import type { FileDocument } from '../../../shared/contracts'
-import { readNoteDocument, type NoteBlockTarget } from '../../../shared/note-document'
+import { readNoteDocument, type NoteBlockTarget } from '@agentmux/client-ui/note/note-document'
 import { useAppStore } from '../store'
 import { useNotebookLibrary, notebookPageResourceMatches, sameNoteResource } from './notebook-library'
 import { openNotebookPage } from './recall-notebooks'

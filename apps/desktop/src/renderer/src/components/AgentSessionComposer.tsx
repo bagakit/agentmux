@@ -33,7 +33,7 @@ import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanEverDrain } f
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { AgentIdentity } from './AgentIdentity'
-import { agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { sessionServiceNotices } from '../lib/session-service-notices'

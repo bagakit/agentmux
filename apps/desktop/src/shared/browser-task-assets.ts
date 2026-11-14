@@ -1,4 +1,4 @@
-import type { BrowserTaskCreateInput } from './browser-task-creation.js'
+import type { BrowserTaskCreateInput } from '@agentmux/core/control'
 import type { BrowserReplayTarget } from '@agentmux/browser/model/browser-operation'
 import type { BrowserOutcomeHumanFact } from '@agentmux/browser/model/browser-outcome-criteria'
 

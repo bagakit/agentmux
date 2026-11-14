@@ -4,7 +4,7 @@ import type { NoteReaderDraftInclude } from '@agentmux/client-ui/components/Note
 import { sameNoteDraftResource } from '@agentmux/client-ui/note/note-draft-includes'
 import { parseNoteFile } from '@agentmux/client-ui/note/note-knowledge'
 import { isNoteWorkspaceRelativePath } from '@agentmux/core/note-format'
-import type { NoteDocument, NoteInclude } from '../../../shared/note-document'
+import type { NoteDocument, NoteInclude } from '@agentmux/client-ui/note/note-document'
 import type { FileDocument } from '../../../shared/contracts'
 import type { NoteFileTarget } from './file-document-consumers'
 import { notePendingSharePreview } from './note-pending-share-preview'

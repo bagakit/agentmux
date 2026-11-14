@@ -1,6 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { SessionSnapshot, AppConfig } from '../../../shared/contracts'
-import { agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { workbenchSurfaces, type WorkbenchTab } from '../lib/workbench-tabs'
 
 const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')

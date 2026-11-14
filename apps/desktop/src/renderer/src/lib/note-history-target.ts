@@ -1,7 +1,7 @@
 import { parseFileReadResult, type FileReadParams, type FileReadResult, type FileHistoryParams } from '@agentmux/core/files'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import type { FileDocument, ScratchTopicSnapshot } from '../../../shared/contracts'
-import { zoneFileResource } from '../../../shared/zone-file-resource'
+import { zoneFileResource } from '@agentmux/host/file-resource-model'
 import { directoryIdentity, workspaceZoneId } from '../../../shared/space-addresses'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 

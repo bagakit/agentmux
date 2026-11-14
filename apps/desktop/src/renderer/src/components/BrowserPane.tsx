@@ -1,6 +1,6 @@
 import { BrowserSitePermissions } from './BrowserSitePermissions'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { browserTaskCreateInput, type BrowserTaskCreateInput } from '../../../shared/browser-task-creation'
+import { browserTaskCreateInput, type BrowserTaskCreateInput } from '@agentmux/core/control'
 import { submitBrowserTaskCreation, inspectBrowserTaskCreation, type BrowserTaskCreationPorts } from '../lib/browser-task-creation'
 import { BrowserTaskCreationNotice } from './BrowserTaskCreationNotice'
 import { BrowserProfileChip } from './BrowserProfileChip'

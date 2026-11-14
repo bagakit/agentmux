@@ -1,6 +1,6 @@
 import type { NoteLocation } from '@agentmux/client-ui/note/note-knowledge'
 import type { FileDocument } from '../../../shared/contracts'
-import { NOTE_FILE_EXTENSION } from '../../../shared/note-document'
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-document'
 import { documentKey } from './workbench-tabs'
 export * from '@agentmux/client-ui/note/note-knowledge'
 export function loadedNoteFiles(documents: Readonly<Record<string, FileDocument>>): { location: NoteLocation; document: FileDocument }[] {

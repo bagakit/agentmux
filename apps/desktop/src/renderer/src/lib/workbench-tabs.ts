@@ -88,7 +88,7 @@ export type LauncherWorkbenchSurface = {
 
 export type BrowserWorkbenchSurface = BrowserSnapshot & {
   /** Frozen user input retained before task creation; never an asset-owner completion fact. */
-  taskCreationInputs?: import('../../../shared/browser-task-creation').BrowserTaskCreateInput[]
+  taskCreationInputs?: import('@agentmux/core/control').BrowserTaskCreateInput[]
   /** Cold association metadata only; never restores native input authority. */
   agent?: import('@agentmux/core').AgentMuxBrowserControl['agent']
   /** Reference to this Browser's original spatial creation admission. */

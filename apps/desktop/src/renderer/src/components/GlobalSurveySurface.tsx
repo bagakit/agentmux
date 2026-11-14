@@ -1,4 +1,4 @@
-import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { mintObjectId } from '@agentmux/core/object-id'

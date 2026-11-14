@@ -18,8 +18,8 @@ export type NoteFileEditing = {
   shareUndo?: { params: import('@agentmux/core/files').FileShareUndoParams } | undefined
   shareUndoReceipt?: { operationId: string; status?: import('@agentmux/core/files').FileShareUndoResult['status']; retained: { noteId?: string; code: string; message: string }[] } | undefined
 }
-export type NoteShareCopy = { version: 1; source: NoteResource & { noteId: string }; read?: import('@agentmux/core/files').FileReadParams; block: { path: number[]; fingerprint: string; blockId?: string }; proposalId?: string; include?: import('./note-document').NoteInclude }
-export type PendingNoteShare = { copy: NoteShareCopy; operationId: string; include: import('./note-document').NoteInclude }
+export type NoteShareCopy = { version: 1; source: NoteResource & { noteId: string }; read?: import('@agentmux/core/files').FileReadParams; block: { path: number[]; fingerprint: string; blockId?: string }; proposalId?: string; include?: import('@agentmux/client-ui/note/note-document').NoteInclude }
+export type PendingNoteShare = { copy: NoteShareCopy; operationId: string; include: import('@agentmux/client-ui/note/note-document').NoteInclude }
 export type NoteFileInput = {
   baseContent: string
   observedContent: string

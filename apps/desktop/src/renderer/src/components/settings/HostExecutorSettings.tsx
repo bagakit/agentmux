@@ -10,7 +10,7 @@ import { useAppStore } from '../../store'
 import { hostExecutorInventoryMatches, parseExecutorArgs } from '../../lib/executors'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentAvatar } from '../AgentAvatar'
-import { agentProviderLabel } from '../AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { ServiceWindowNotice } from '../ServiceWindowNotice'
 

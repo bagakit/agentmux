@@ -1,5 +1,5 @@
 import type { AppConfig, FileDocument } from '../../../shared/contracts'
-import { NOTE_FILE_EXTENSION } from '../../../shared/note-document'
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-document'
 import type { FileDocumentIssue } from './file-workbench-state'
 import { parseNoteFile } from './note-knowledge'
 import { documentKey } from './workbench-tabs'

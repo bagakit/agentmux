@@ -7,7 +7,7 @@ import { dirname, join, relative, sep } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { FileBuildKind, FileBuildRequest, FileBuildSnapshot } from '../shared/file-build.js'
-import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
+import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
 import type { WorkspaceFiles } from './workspace-files.js'
 
 const BUILD_LOG_MAX_BYTES = 1024 * 1024

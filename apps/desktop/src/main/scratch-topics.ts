@@ -7,7 +7,7 @@ import { decodeObjectAvatar, previewObjectAvatar, objectAvatarPng } from './obje
 import { readObjectAvatarFile, saveObjectAvatarFile } from '@agentmux/host/object-avatar-files'
 import { migrateTopicDirectories } from './scratch-directory-maintenance.mjs'
 import { normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, type DirectoryIdentityWriteOptions } from './scratch-directory-identity.mjs'
-import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchIdentityContext, scratchDirectoryIdentity, scratchDirectoryAddress } from './scratch-topic-directories.js'
+import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchIdentityContext, scratchDirectoryIdentity, scratchDirectoryAddress } from '@agentmux/host/mote-resources'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 function errorCode(error: unknown): string | undefined { return (error as NodeJS.ErrnoException | null)?.code }
 function requireScratchWorkspace(workspace: WorkspaceRecord): void {

@@ -69,7 +69,7 @@ export function NoteFileSurfaceView({ tabId, surface, visible = true }: { tabId:
   const blockPresentation = useMemo(() => presentation.tabHostId && presentation.reference ? { tabHostId: presentation.tabHostId,
     reference: { ...presentation.reference, tabId, regionId: surface.regionId } } : undefined, [presentation.tabHostId, presentation.reference, tabId, surface.regionId])
   const restoredBlock = useAppStore(state => blockPresentation ? state.noteBlockSelections[noteBlockSelectionKey(blockPresentation)] : undefined)
-  const onSelectedBlock = useCallback((target: import('../../../shared/note-document').NoteBlockTarget) => {
+  const onSelectedBlock = useCallback((target: import('@agentmux/client-ui/note/note-document').NoteBlockTarget) => {
     if (blockPresentation) useAppStore.getState().setNoteBlockSelection(blockPresentation, target)
   }, [blockPresentation])
   const [notice, setNotice] = useState<string | null>(null), [choices, setChoices] = useState<SourceChoice[]>([])

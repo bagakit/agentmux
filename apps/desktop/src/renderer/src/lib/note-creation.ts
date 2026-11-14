@@ -38,7 +38,7 @@ import type { ScratchTopicSnapshot } from '@agentmux/host/mote-model'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../shared/space-addresses'
 import { spatialCatalog, zoneContext } from './space-agent-control'
-import { zoneFileResource } from '../../../shared/zone-file-resource'
+import { zoneFileResource } from '@agentmux/host/file-resource-model'
 import { groupIds } from '@agentmux/layout'
 
 export function noteCreationResourceMatches(config: AppConfig | null, target: NoteCreationTarget): boolean {

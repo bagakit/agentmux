@@ -1,7 +1,7 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { MoteIcon } from './MoteIcon'
+import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
 import { MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type SessionSnapshot, type ScratchTopicSnapshot, type WorkspaceRecord } from '../../../shared/contracts'

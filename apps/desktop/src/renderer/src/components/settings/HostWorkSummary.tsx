@@ -9,7 +9,7 @@ import { executorsForHost, hostExecutorInventoryMatches } from '../../lib/execut
 import { executorDetectionLabel } from '../../lib/executor-detection'
 import { usePathDisplay } from '../../hooks/usePathDisplay'
 import { ResolvedAgentAvatar } from '../AgentAvatar'
-import { agentProviderLabel } from '../AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { SettingsNavigation } from '../SettingsNavigation'
 
 const NO_DETECTIONS = {}

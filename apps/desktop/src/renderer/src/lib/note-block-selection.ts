@@ -1,4 +1,4 @@
-import type { NoteBlockTarget } from '../../../shared/note-document'
+import type { NoteBlockTarget } from '@agentmux/client-ui/note/note-document'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 
 /** Semantic selection is durable presentation metadata, never Note content or a reference edge. */

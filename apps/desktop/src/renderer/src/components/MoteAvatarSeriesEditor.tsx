@@ -6,7 +6,7 @@ import type { MoteAvatarSeriesCatalog, MoteAvatarSeriesChoice, MoteAvatarSeriesD
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
 import type { SeriesGlbRenderer } from '../lib/mote-avatar-series-renderer'
-import { MoteFace } from './MoteFace'
+import { MoteFace } from '@agentmux/client-ui/components/MoteFace'
 import { MoteAvatarSeriesCreateDialog } from './MoteAvatarSeriesCreateDialog'
 
 const ThemeObjectModel3dIcon = semanticIconComponent('object.model-3d')

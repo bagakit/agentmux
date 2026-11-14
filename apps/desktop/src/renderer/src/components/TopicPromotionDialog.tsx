@@ -11,7 +11,7 @@ import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import topicArt from '@agentmux/client-ui/brand/illustrations/mote-origin/topic-work.png'
 import moteArt from '@agentmux/client-ui/brand/illustrations/mote-origin/grown-team.png'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import { MoteIcon } from './MoteIcon'
+import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
 
 const LoadingIcon = semanticIconComponent('status.loading')
 

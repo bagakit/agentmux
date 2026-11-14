@@ -1,4 +1,4 @@
-import { readNoteDocument } from '../../../shared/note-document'
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { NoteFileEditing } from '../../../shared/note-file-editing'
 
 /** Recovery wording comes from the original intent and confirmed stage summary, including after restart. */

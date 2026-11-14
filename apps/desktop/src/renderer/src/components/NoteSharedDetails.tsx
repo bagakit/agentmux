@@ -5,7 +5,7 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from '@floatin
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { noteInlineLinkContent, noteWikiQueryForLabel } from '@agentmux/client-ui/note/note-wikilinks'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
-import { NOTE_SCHEMA, serializeNoteDocument, type NoteDocument, type NoteInclude } from '../../../shared/note-document'
+import { NOTE_SCHEMA, serializeNoteDocument, type NoteDocument, type NoteInclude } from '@agentmux/client-ui/note/note-document'
 import type { NoteFileTarget } from '../lib/file-document-consumers'
 import { noteSharedRelations } from '../lib/note-shared-relations'
 import { writeNoteShareClipboard } from '../lib/note-share-staging'

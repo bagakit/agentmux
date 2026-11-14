@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { WORKSPACE_FILE_MAX_BYTES } from '../../../shared/workspace-file-bytes'
+import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
 import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { joinWorkspacePath } from '../lib/workspace-paths'

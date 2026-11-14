@@ -24,7 +24,7 @@ import { observeAgentSession, observationSummary } from '../lib/agent-observatio
 import { formatRelativeAge } from '../lib/relative-age'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
-import { agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { FanOutStrip } from './FanOutStrip'
 import { StatusDot } from './StatusDot'
 

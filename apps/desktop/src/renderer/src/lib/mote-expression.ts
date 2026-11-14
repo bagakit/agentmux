@@ -1,7 +1,7 @@
 import { agentActivityRemainingMs, agentEvidenceStale } from '@agentmux/core/agent-status'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { RendererAgentTimelineSnapshot } from './session-state'
-import type { MoteExpression } from '../components/MoteFace'
+import type { MoteExpression } from '@agentmux/client-ui/components/MoteFace'
 import { observeAgentSession } from './agent-observation'
 
 type Presentation = { expression: MoteExpression; activeForMs: number }

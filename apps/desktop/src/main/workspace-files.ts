@@ -2,10 +2,10 @@ import { OrdinaryWorkspaceFiles, WorkspaceFileWriteScope, localPathWithin, local
   assertRealPathWithin, assertMutableRelativePath, fileBytesAreBinary, revisionFor, resultError,
   runWorkspaceFileWorker, type WorkspaceFileWorkerRequest as LocalWorkerRequest } from '@agentmux/host/ordinary-files'
 import { gitIgnoredNames } from './workspace-git-ignore.js'
-import { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
+import { LOCAL_FILE_LIST_SOURCE } from '@agentmux/host/ordinary-files'
 import type { FileNameListing } from '@agentmux/core'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicStorageRoots } from '@agentmux/host/mote-model'
-import { resolveScratchTopicDirectory, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
+import { resolveScratchTopicDirectory, scratchConfirmedDirectoryPaths } from '@agentmux/host/mote-resources'
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
@@ -20,7 +20,7 @@ import type { NoteFileWitness } from '@agentmux/core/note-history'
 import {
   WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES,
   type WorkspaceFileByteRead, type WorkspaceFileByteReadOptions, type WorkspaceFileReadBudget
-} from '../shared/workspace-file-bytes.js'
+} from '@agentmux/host/workspace-file-bytes'
 import type {
   CreateWorkspacePathInput,
   MoveWorkspacePathInput,

@@ -35,7 +35,7 @@ import {
   type WorktreeRemovalRequest
 } from '../lib/worktree-removal-request'
 import { useAppStore } from '../store'
-import { agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { SelectorPresence, SelectorRow } from './SelectorList'
 import { BranchContextMenu } from './BranchContextMenu'
 import { BranchComparisonPanel } from './BranchComparisonPanel'

@@ -1,6 +1,6 @@
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { MoteIcon } from './MoteIcon'
+import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
 import { useState } from 'react'
 import { useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'

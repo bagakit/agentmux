@@ -1,1 +1,1 @@
-export { zoneFileResource } from '../../../shared/zone-file-resource'
+export { zoneFileResource } from '@agentmux/host/file-resource-model'

@@ -1,4 +1,4 @@
-import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
+import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { groupIds, regionIds } from '@agentmux/layout'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'

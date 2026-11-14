@@ -1,6 +1,6 @@
 import { BROWSER_PNG_MAX_BYTES, BROWSER_PNG_MAX_DIMENSION, BROWSER_PNG_MAX_PIXELS,
   type AgentMuxDesktopApi, type WorkspaceFileWriteResult } from '../../../../shared/contracts'
-import { WORKSPACE_FILE_MAX_BYTES } from '../../../../shared/workspace-file-bytes'
+import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
 import { AnnotationDocumentError, encodeEditableAnnotationDocument, parseEditableAnnotationDocument,
   type AnnotationDocumentLimits, type EditableAnnotationDocument } from '../image-annotation/document'
 

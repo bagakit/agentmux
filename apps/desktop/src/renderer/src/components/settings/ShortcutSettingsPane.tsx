@@ -10,7 +10,7 @@ import { COMPOSER_PROMPT_STATES, resolveComposerShortcuts } from '../../../../sh
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
-import { agentProviderLabel } from '../AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'

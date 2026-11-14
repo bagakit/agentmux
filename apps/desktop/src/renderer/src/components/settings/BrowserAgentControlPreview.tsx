@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { browserAgentEffectsCss, type BrowserAgentControlPreferences } from '../../../../shared/browser-agent-control'
-import { AgentProviderIcon } from '../AgentProviderIcon'
+import { AgentProviderIcon } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { BrowserControlBoundary } from '../BrowserControlBoundary'
 import { BrowserOperationStatus } from '../BrowserOperationSurface'
 import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'

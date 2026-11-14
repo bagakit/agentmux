@@ -5,7 +5,7 @@ import type { AgentAvatarAppearance, ComposerShortcut, SessionSnapshot } from '.
 import { describeAgentDisplayState } from '../../../shared/agent-state-presentation'
 import { AgentAvatar } from './AgentAvatar'
 import { AgentStatusPromptActions } from './AgentStatusPromptActions'
-import { agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')

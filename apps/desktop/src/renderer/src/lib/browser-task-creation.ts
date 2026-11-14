@@ -1,5 +1,5 @@
 import type { BrowserTaskAsset } from '../../../shared/browser-task-assets'
-import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from '../../../shared/browser-task-creation'
+import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from '@agentmux/core/control'
 
 export type BrowserTaskCreationPorts = {
   keep(input: BrowserTaskCreateInput | null, expectedOperationId?: string): Promise<boolean>
