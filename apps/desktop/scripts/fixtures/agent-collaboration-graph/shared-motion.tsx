@@ -11,6 +11,7 @@ import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { mountThemeRuntime, updateThemeSelection } from '../../../../../packages/client-ui/src/theme/runtime'
 import { fixtureEpoch } from '../../../../../test/fixture-values.mjs'
 import '../../../src/renderer/src/styles/tokens.css'
+import '../../../src/renderer/src/styles/agent.css'
 import '@agentmux/client-ui/styles.css'
 
 type Mode = 'native-completed' | 'saved' | 'unknown' | 'sending' | 'failure'

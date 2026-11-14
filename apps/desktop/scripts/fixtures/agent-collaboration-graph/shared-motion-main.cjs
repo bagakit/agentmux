@@ -66,7 +66,30 @@ app.whenReady().then(async () => {
         const afterFocus = await read(`(()=>{const details=document.querySelector('.agent-interaction__details-toggle'),panel=document.querySelector('.agent-interaction .conversation-disclosure');return{detailsPresent:Boolean(details),detailsFocused:document.activeElement===details,activeTag:document.activeElement.tagName,panelInert:panel?.inert,completed:document.querySelector('.agent-interaction').dataset.completed}})()`)
         result.requestClosureFocus = { before: beforeFocus, after: afterFocus, boundary: 'Only fixture observation adds tabindex=-1 to the original parameter pre; actual native focus then an exact original deferred receipt changes original Card state. No toggle click, focus shim, inert replacement or product alteration.' }
         if (afterFocus.detailsPresent) result.nativeGuards.push({ name: 'request-state-completion-returns-parameter-focus', passed: beforeFocus.inside === true && afterFocus.detailsFocused === true && afterFocus.panelInert === true, observed: result.requestClosureFocus })
-      } else await transition('shared-request-' + mode, () => click(allow))
+      } else {
+        if (mode === 'unknown') await read(`(() => {
+          const heading=document.querySelector('.agent-interaction__summary-text > strong')
+          const original=heading.textContent; window.receiptHeadingFrames=[]
+          const capture=()=> {
+            const range=document.createRange();range.selectNodeContents(heading)
+            const rect=heading.getBoundingClientRect(), selection=[...range.getClientRects()]
+            const style=getComputedStyle(heading)
+            receiptHeadingFrames.push({sameNode:heading.isConnected&&heading.textContent===original,
+              visible:heading.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&selection.length>0,
+              unclipped:selection.every(r=>r.left>=rect.left-1&&r.right<=rect.right+1),
+              opacity:style.opacity,visibility:style.visibility,transition:style.transitionProperty})
+            if(receiptHeadingFrames.length<16) requestAnimationFrame(capture)
+          }
+          requestAnimationFrame(capture)
+        })()`)
+        await transition('shared-request-' + mode, () => click(allow))
+        if (mode === 'unknown' && !costOnly) {
+          const samples = await read('window.receiptHeadingFrames')
+          assert.equal(samples.length, 16)
+          assert.ok(samples.every(value => value.sameNode && value.visible && value.unclipped && value.opacity === '1' && value.visibility === 'visible'))
+          result.unknownHeading = samples
+        }
+      }
       if (mode !== 'native-completed') assert.notEqual((await facts()).completed, 'true')
       if (mode === 'native-completed' && await read('Boolean(document.querySelector(".agent-interaction__details-toggle"))')) await transition('shared-request-completed-details', () => click('.agent-interaction__details-toggle'))
     }
