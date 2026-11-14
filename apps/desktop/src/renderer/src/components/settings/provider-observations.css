@@ -8,7 +8,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
   padding: 12px;
@@ -31,10 +31,16 @@
 }
 
 .provider-observation header small,
-.provider-observation__time,
-.provider-observation__note {
+.provider-observation__sources {
   color: var(--text-3);
   font-size: 11px;
+}
+
+.provider-observation__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  padding-block-start: 1px;
 }
 
 .provider-observation__total {
@@ -92,6 +98,26 @@
   gap: 8px;
 }
 
+.provider-observation__inventory dt {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.provider-observation__inventory dt::before {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  content: '';
+  flex: none;
+}
+
+.provider-observation__inventory > div:first-child dt::before {
+  background: var(--text-3);
+}
+
 .provider-observation__sessions {
   display: grid;
   grid-template-columns: max-content max-content minmax(16px, 1fr);
@@ -110,7 +136,6 @@
 .provider-observation__session dt { grid-column: 1; grid-row: 1; color: var(--text-2); }
 .provider-observation__count { grid-column: 2; grid-row: 1; justify-self: end; color: var(--text); font-weight: 600; }
 .provider-observation__session .provider-observation__bar { grid-column: 3; grid-row: 1; }
-.provider-observation__time { grid-column: 2 / -1; grid-row: 2; }
 
 .provider-observation__issue {
   color: var(--text-2);

@@ -115,17 +115,17 @@ export function useProviderObservations(host: HostConfig | undefined, active: bo
 function SampleTime({ at }: { at: number }) {
   const date = new Date(at)
   if (!Number.isFinite(date.getTime())) return <>Unknown time</>
-  return <time dateTime={date.toISOString()}>{date.toLocaleTimeString()}</time>
+  return <time dateTime={date.toISOString()} title={date.toLocaleString()}>{date.toLocaleTimeString()}</time>
 }
 
-function SourceStatus({ read }: { read?: SourceRead<{ observedAt: number }> | undefined }) {
-  const at = read?.confirmed?.observedAt
+function SourceStatus({ read, nativeSampleAt }: { read?: SourceRead<{ observedAt: number }> | undefined; nativeSampleAt?: number | undefined }) {
+  const at = nativeSampleAt ?? read?.confirmed?.observedAt
   if (at !== undefined && (read?.busy || read?.error)) {
     return <>Last confirmed <SampleTime at={at} />{read.busy ? ' · Reading…' : null}</>
   }
   if (!read || read.busy) return <>Reading…</>
   if (at === undefined) return <>Unavailable</>
-  return <>Read <SampleTime at={at} /></>
+  return <>{nativeSampleAt === undefined ? 'Read' : 'Native sample'} <SampleTime at={at} /></>
 }
 
 export function ProviderObservations({ observations }: { observations: ProviderObservationSnapshot }) {
@@ -134,7 +134,7 @@ export function ProviderObservations({ observations }: { observations: ProviderO
   const runCount = running?.confirmed
   const rows = [
     { key: 'saved', label: 'Saved', count: recordCounts?.saved, read: records },
-    { key: 'running', label: 'Running saved', count: runCount?.count, read: running },
+    { key: 'running', label: 'Running saved', count: runCount?.count, read: running, detail: 'Saved Sessions with a running Native Run.' },
     { key: 'retired', label: 'Retired', count: recordCounts?.retired, read: records }
   ]
   const maximum = Math.max(1, ...rows.map(row => row.count ?? 0))
@@ -154,25 +154,25 @@ export function ProviderObservations({ observations }: { observations: ProviderO
           <div><dt>Configured or registered</dt><dd>{(executors.total - executors.defaults).toLocaleString()}</dd></div>
         </dl>
       </> : null}
-      {executorRead?.error ? <p className="provider-observation__issue" role="status">Executor inventory: {executorRead.error}</p> : null}
+      {executorRead?.error ? <p className="provider-observation__issue" role="status">Executor inventory · {executorRead.error}</p> : null}
     </section>
     <section className="provider-observation" aria-label="Session states">
       <header><h3>Session states</h3></header>
       <dl className="provider-observation__sessions">
         {rows.map(row => <div key={row.key} className="provider-observation__session" data-reading={readState(row.read)}>
-          <dt>{row.label}</dt>
+          <dt title={row.detail} aria-description={row.detail}>{row.label}</dt>
           <dd className="provider-observation__count">{row.count?.toLocaleString() ?? '—'}</dd>
           {row.count === undefined ? null : <dd className="provider-observation__bar" aria-hidden="true">
             <span style={{ width: `${row.count / maximum * 100}%` }} />
           </dd>}
-          <dd className="provider-observation__time"><SourceStatus read={row.read} /></dd>
         </div>)}
       </dl>
-      {records?.error ? <p className="provider-observation__issue" role="status">Saved and retired records: {records.error}</p> : null}
-      {running?.error ? <p className="provider-observation__issue" role="status">Running saved bindings: {running.error}</p> : null}
-      <p className="provider-observation__note">Running saved counts saved Sessions with a running Native Run.
-        {runCount ? <> Native sample <SampleTime at={runCount.nativeObservedAt} />.</> : null}
-      </p>
+      <div className="provider-observation__sources">
+        <span data-agent-source="records">Records · <SourceStatus read={records} /></span>
+        <span data-agent-source="running">Running · <SourceStatus read={running} nativeSampleAt={runCount?.nativeObservedAt} /></span>
+      </div>
+      {records?.error ? <p className="provider-observation__issue" role="status">Saved and retired records · {records.error}</p> : null}
+      {running?.error ? <p className="provider-observation__issue" role="status">Running saved bindings · {running.error}</p> : null}
     </section>
   </div>
 }
