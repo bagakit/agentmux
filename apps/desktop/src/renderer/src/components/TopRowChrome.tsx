@@ -3,6 +3,9 @@ import { hostIdentityProjection } from '../lib/region-execution-host'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
+import { SurfaceWindowMenu } from './KnowledgeSurfaceWindow'
+import { isWorkbenchSurfaceDetached } from '../lib/workbench-window-registry'
+import { openWorkbenchWindow } from '../lib/workbench-windows'
 import { FocusNavigationButton } from './FocusNavigationButton'
 import { SettingsNavigation } from './SettingsNavigation'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
@@ -246,7 +249,8 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
     const Icon = plugin.icon
     const selected = mainSurface === plugin.surface
     const NavigationButton = plugin.id === 'focus' ? FocusNavigationButton : 'button'
-    return (
+    const knowledgeSurface = plugin.id === 'survey' || plugin.id === 'recall' ? plugin.id : null
+    const button = (
       <NavigationButton
         key={plugin.id}
         type="button"
@@ -269,6 +273,11 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
         }}
         onBlur={(event) => { if (pointerFocus.current === event.currentTarget) pointerFocus.current = null; hideTooltip(plugin.id) }}
         onClick={(event) => {
+          if (knowledgeSurface && isWorkbenchSurfaceDetached(knowledgeSurface)) {
+            hideTooltip(plugin.id)
+            void openWorkbenchWindow({ kind: 'surface', surface: knowledgeSurface })
+            return
+          }
           const start = performance.now()
           const observationId = surfaceSwitchObservation.begin(desktopSurface[useAppStore.getState().mainSurface], plugin.id,
             trustedRendererEventTimestamp(event.nativeEvent, window), start)
@@ -282,6 +291,7 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
         <Icon className="surface-navigation__icon" size={14} animation={selected ? 'selection' : 'none'} aria-hidden="true" />
       </NavigationButton>
     )
+    return knowledgeSurface ? <SurfaceWindowMenu key={plugin.id} surface={knowledgeSurface}>{button}</SurfaceWindowMenu> : button
   }
   return (
     <>

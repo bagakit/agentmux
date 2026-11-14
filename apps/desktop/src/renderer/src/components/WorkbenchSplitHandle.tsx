@@ -1,3 +1,4 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import { PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels'
@@ -14,6 +15,7 @@ export function WorkbenchSplitHandle({ group, committer, sourceKey, ratio, disab
   className: string
   onDragging(active: boolean): void
 }) {
+  const document = useWorkbenchDocument()
   const id = useId()
   const [phase, setPhase] = useState({ generation: 0, dragging: false })
   const gesture = useRef<{ sourceKey: string; ratio: number; persisted: number } | null>(null)
@@ -59,7 +61,7 @@ export function WorkbenchSplitHandle({ group, committer, sourceKey, ratio, disab
     }
     document.addEventListener('keydown', escape, true)
     return () => document.removeEventListener('keydown', escape, true)
-  }, [phase.dragging])
+  }, [phase.dragging, document])
 
   function equalize() {
     if (latest.current.disabled) return

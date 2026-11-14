@@ -1,3 +1,4 @@
+import { detachedFileSurface, knowledgeSurfacePresented } from '../lib/knowledge-surface-navigation'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { NoteSharedFileEditing } from './NoteSharedFileEditing'
 import { noteShareUndoRecoveryMessage } from '../lib/note-share-removal'
@@ -121,7 +122,7 @@ export function NoteFileSurfaceView({ tabId, surface, visible = true }: { tabId:
       displayWorkspaceId: location.displayWorkspaceId, catalog, selection: [reference],
       onSelect() {
         const current = useAppStore.getState()
-        if (current.mainSurface !== 'survey' || current.surveyZoneSelection !== heldSelection) return
+        if (!knowledgeSurfacePresented(current.mainSurface, 'survey') || current.surveyZoneSelection !== heldSelection) return
         const currentCatalog = spatialCatalog(current, [])
         const selection = surveyInitialZoneSelection(currentCatalog, targetTab.space!.zoneId, current.layouts, current.tabs, location.displayWorkspaceId)
         current.setSurveyZoneSelection(surveySelectReference(selection, reference))
@@ -167,16 +168,17 @@ export function NoteFileSurfaceView({ tabId, surface, visible = true }: { tabId:
   async function openOriginal(target: NoteFileTarget, blockId?: string, signal?: AbortSignal) {
     const state = useAppStore.getState(), reference = blockPresentation?.reference, tab = state.tabs[tabId]
     if (!reference || !tab?.space) throw new Error('The original display position is unconfirmed. The Note link and current draft are kept; restore this position and retry.')
+    const navigationSurface = detachedFileSurface(presentation.projection) ?? state.mainSurface
     let placed: import('../lib/workbench-projection').WorkbenchProjectionSelection | undefined
     const original = document && parseNoteFile(document), mapping = state.config?.workspaces.find(value => value.id === surface.workspaceId)
     const opened = await openNotebookFile({ noteId: target.noteId, resource: target }, undefined, reference, blockId ? { noteId: target.noteId, blockId } : undefined,
       { reference, space: tab.space, ...(presentation.projection ? { projection: presentation.projection } : {}), onPlaced: result => { placed = result } }, signal)
     if (!opened) throw new Error('Opening the original file was not confirmed. Your current reading position and exact link are kept; retry when ready.')
     const selected = useAppStore.getState()
-    if (!placed || selected.mainSurface !== state.mainSurface || !noteReadingReferenceIsSelected(selected, placed))
+    if (!placed || !noteReadingReferenceIsSelected(selected, placed, navigationSurface))
       throw new Error('The original file was read, but its display position was not confirmed. Your source and draft are kept; retry opening this exact target.')
     if (original?.status === 'valid' && mapping) {
-      rememberNoteReadingReturn({ from: reference, to: placed, surface: state.mainSurface,
+      rememberNoteReadingReturn({ from: reference, to: placed, surface: navigationSurface,
         original: { hostId: mapping.hostId, workspaceId: mapping.id, workspacePath: mapping.path, path: surface.path, noteId: original.note.noteId },
         title: original.note.title ?? 'original Note' })
     }

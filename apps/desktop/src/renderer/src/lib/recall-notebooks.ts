@@ -1,3 +1,4 @@
+import { detachedFileSurface, knowledgeSurfacePresented } from './knowledge-surface-navigation'
 import type { Notebook, NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { api } from './api'
@@ -65,7 +66,8 @@ async function openNotebookResource(page: Pick<NotebookPage, 'resource' | 'workf
   const reference = selectedMatches.length === 1 ? selectedMatches[0] : inCurrentGroup.length === 1 ? inCurrentGroup[0] : matches.length === 1 ? matches[0] : undefined
   const displayWorkspaceId = reference?.displayWorkspaceId ?? origin?.reference.displayWorkspaceId ?? page.resource.workspaceId
   const heldBook = before.recallNotebookId, heldNote = before.recallNoteId
-  const heldNavigation = fileNavigationSelection(before)
+  const detached = detachedFileSurface(origin ? origin.projection : { presentationId: 'recall-workbench' })
+  const heldNavigation = fileNavigationSelection(before, detached)
   const initial = surveyInitialZoneSelection(catalog, zone.zoneId, before.layouts, before.tabs, page.resource.workspaceId)
   // Keep an already confirmed page visible while the canonical read is pending.
   // The layout's active sibling is not an intermediate navigation destination.
@@ -75,14 +77,14 @@ async function openNotebookResource(page: Pick<NotebookPage, 'resource' | 'workf
   if (signal?.aborted) return false
   if (matches.length && !reference) throw new Error('This page is already open in multiple locations. Choose its Tab in the work surface, then reopen from this Notebook. Your page and all locations are kept.')
   const current = useAppStore.getState()
-  if (signal?.aborted || current.mainSurface !== before.mainSurface) return false
-  if (origin && fileNavigationSelection(current) !== heldNavigation) return false
+  if (signal?.aborted || (detached ? !knowledgeSurfacePresented(current.mainSurface, detached) : current.mainSurface !== before.mainSurface)) return false
+  if (origin && fileNavigationSelection(current, detached) !== heldNavigation) return false
   if (current.recallNotebookId !== heldBook || current.recallNoteId !== heldNote || current.recallZoneSelection !== heldSelection) return false
   const groupId = reference?.groupId ?? origin?.reference.groupId ?? current.prepareWorkbenchLayout(displayWorkspaceId).activeGroupId
   const projection: WorkbenchProjection = { entity: { kind: 'zone', zoneId: zone.zoneId }, presentationId: 'recall-workbench',
     displayWorkspaceId, catalog: catalogNow(), selection: [], onSelect(reference) {
       const now = useAppStore.getState()
-      if (now.mainSurface === 'recall' && now.recallNotebookId === heldBook && now.recallNoteId === heldNote && now.recallZoneSelection === heldSelection)
+      if (knowledgeSurfacePresented(now.mainSurface, 'recall') && now.recallNotebookId === heldBook && now.recallNoteId === heldNote && now.recallZoneSelection === heldSelection)
         { now.setRecallZoneSelection(surveySelectReference(initial, reference)); onSelectReference?.(reference) }
     } }
   // Presentation may be scoped to the source Region. An existing destination must

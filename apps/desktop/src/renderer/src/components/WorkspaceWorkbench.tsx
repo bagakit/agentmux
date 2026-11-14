@@ -516,8 +516,9 @@ function SurfaceContent({ surface, ...props }: SurfaceContentProps) {
   const independentDocument = useWorkbenchDocument() !== document
   const windowDocument = useWorkbenchWindowDocument()
   const windows = useContext(WorkbenchWindowTargetsContext)
-  const nativeWindowTarget = windows.find(window => (!independentDocument || window.windowId === windowDocument?.windowId) &&
-    window.target?.tabId === props.tabId && (window.target.kind === 'tab' || window.target.regionId === surface.regionId))?.target ?? undefined
+  const documentWindow = independentDocument ? windows.find(window => window.windowId === windowDocument?.windowId)?.target : undefined
+  const nativeWindowTarget = independentDocument ? documentWindow : windows.find(({ target }) => target && target.kind !== 'surface' &&
+    target.tabId === props.tabId && (target.kind === 'tab' || target.regionId === surface.regionId))?.target
   return <SurfaceContentBody {...props} surface={surface} monacoReleased={monacoReleased}
     browserReleased={browserReleased} browserPresentation={browserPresentation} browserTargets={browserTargets}
     independentDocument={independentDocument} nativeWindowTarget={nativeWindowTarget} />
@@ -603,10 +604,10 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
     const windowTarget = independentDocument ? workbenchBrowserWindowTarget(browserTargets, browserPresentation, surface.regionId) : undefined
     const presentedTargets = windowTarget ? browserTargets.map(target => target === windowTarget
       ? { ...target, active: browserPresentation.active, visible: nativeSurfacesVisible } : target) : browserTargets
-    const windowReference = nativeWindowTarget ? { displayWorkspaceId: nativeWindowTarget.displayWorkspaceId,
+    const windowReference = nativeWindowTarget && nativeWindowTarget.kind !== 'surface' ? { displayWorkspaceId: nativeWindowTarget.displayWorkspaceId,
       groupId: nativeWindowTarget.groupId, tabId: nativeWindowTarget.tabId, regionId: surface.regionId } : undefined
     const mainReference = browserPresentation.reference ? { ...browserPresentation.reference, regionId: surface.regionId } : undefined
-    const reference = independentDocument ? windowReference : mainReference ?? windowReference
+    const reference = independentDocument && nativeWindowTarget?.kind !== 'surface' ? windowReference : mainReference ?? windowReference
     // The physical primary stage stays in this original tree. A native window
     // supplies its exact occurrence without creating another placement target.
     const primaryTarget: WorkbenchViewTarget | undefined = reference && browserPresentation.tabHostId ? {

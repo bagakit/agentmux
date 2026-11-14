@@ -411,7 +411,7 @@ export function dispatchNextAttention(store: WorkbenchShortcutStore): boolean {
  */
 export function windowShortcutHandlers(
   store: WorkbenchShortcutStore,
-  actions: { toggleQuickSwitch: () => void; openShortcuts: () => void; onWorkfaceNavigation?: (reference: WorkbenchProjectionSelection) => void; originWindow?: WorkbenchWindowDocument | null }
+  actions: { workbenchCommands?: boolean; toggleQuickSwitch: () => void; openShortcuts: () => void; onWorkfaceNavigation?: (reference: WorkbenchProjectionSelection) => void; originWindow?: WorkbenchWindowDocument | null }
 ): Record<string, () => boolean> {
   const handlers: Record<string, () => boolean> = {
     'quick-switch.toggle': () => {
@@ -426,6 +426,7 @@ export function windowShortcutHandlers(
   }
   // 把每条能翻译成 workbench 命令的 window 绑定接成一个 handler：翻译成命令 → 解析落点 → 转发。id 集合
   // 从注册表推导（不手抄），新增一条 workbench.* 绑定就自动接上，不会出现「注册了却没人处理」的漏。
+  if (actions.workbenchCommands === false) return handlers
   for (const id of workbenchWindowBindingIds()) {
     handlers[id] = () => {
       const command = commandForWorkbenchId(id)

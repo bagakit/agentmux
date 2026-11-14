@@ -1,3 +1,4 @@
+import { knowledgeSurfacePresented } from './knowledge-surface-navigation'
 import type { AgentMuxSpaceAddress } from '@agentmux/core/control'
 import type { Notebook, NotebookPage } from '@agentmux/core/notebook-catalog'
 import { formatRegionAddress } from '@agentmux/core/sharing'
@@ -82,7 +83,7 @@ export async function openNoteAgentLauncher(input: NoteAgentTalkInput): Promise<
   const opened = await openNotebookPage(page, onSelectReference, exactReference)
   if (!opened || !permitted()) retained('Opening the selected Note was superseded.')
   const current = confirmed(), selection = current.state.recallZoneSelection
-  if (current.state.mainSurface !== 'recall' || current.state.recallNotebookId !== notebook.notebookId ||
+  if (!knowledgeSurfacePresented(current.state.mainSurface, 'recall') || current.state.recallNotebookId !== notebook.notebookId ||
       current.state.recallNoteId !== page.noteId || !selection || selection.zoneId !== page.workface?.zoneId || !selection.active) retained('The original Note selection changed.')
   const topics = scratchTopicsForConfig(current.state.config, current.state.scratchTopicSnapshots)
   const catalog = spatialCatalog(current.state, topics ?? [])

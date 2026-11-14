@@ -229,6 +229,8 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   pageKey.current = onPageKey
   const pageKeys = onPageKey !== undefined
   const occurrenceLocationKey = JSON.stringify(presentation.occurrence.location)
+  const surface = presentation.target.surface
+  const knowledgeSurface = surface === 'survey' || surface === 'recall' ? surface : undefined
   const windowDocument = useWorkbenchWindowDocument()
   const element = useRef<HTMLDivElement | null>(null)
   const video = useRef<HTMLVideoElement>(null)
@@ -300,7 +302,8 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       attemptedNavigationId = attemptNavigationId
       let registered: BrowserPresentationLease
       try {
-        registered = await api.browser.registerPresentation({ ...(windowDocument ? { window: windowDocument } : {}), browserId, occurrence: presentation.occurrence, geometry: geometry() })
+        registered = await api.browser.registerPresentation({ ...(windowDocument ? { window: windowDocument } : {}), browserId,
+          occurrence: knowledgeSurface ? { ...presentation.occurrence, surface: knowledgeSurface } : presentation.occurrence, geometry: geometry() })
       } catch (error) {
         registrationFailed = true
         if (cancelled) removed.current?.()
@@ -341,7 +344,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       const current = lease.current; lease.current = null
       if (current) void api.browser.removePresentation(current.leaseId).then(() => removed.current?.(), () => removed.current?.())
       else if (!registering) removed.current?.() }
-  }, [browserId, windowDocument?.windowId, windowDocument?.documentGeneration, presentation.occurrence.presentationId, occurrenceLocationKey, returnContextKey, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
+  }, [browserId, windowDocument?.windowId, windowDocument?.documentGeneration, presentation.occurrence.presentationId, occurrenceLocationKey, returnContextKey, knowledgeSurface, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
   useLayoutEffect(() => { registrationRetry.current?.() }, [navigationId])
   useLayoutEffect(() => {
     observe()

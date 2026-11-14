@@ -1,3 +1,4 @@
+import { knowledgeSurfacePresented } from './knowledge-surface-navigation'
 import type { MainSurface } from '../store'
 import type { WorkbenchBrowserPresentation } from '../components/BrowserPresentationStage'
 import type { SurveySelection } from './survey-page-references'
@@ -21,7 +22,7 @@ export function selectedBrowserPresentationId(presentations: readonly WorkbenchB
       : scope?.kind === 'zone' ? true
         : scope?.kind === 'region' && scope.regionId === location.regionId && reference.regionId === location.regionId
     if (!included) return false
-    if (target.surface === 'survey') return state.mainSurface === 'survey'
+    if (target.surface === 'survey' || target.surface === 'recall') return knowledgeSurfacePresented(state.mainSurface, target.surface)
     return target.surface === 'focus' && state.mainSurface === 'agents'
   })
   const current = state.mainSurface === 'survey' ? state.surveyZoneSelection?.active : null

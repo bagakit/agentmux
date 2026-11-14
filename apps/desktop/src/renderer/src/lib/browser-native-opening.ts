@@ -1,3 +1,4 @@
+import { knowledgeSurfacePresented } from './knowledge-surface-navigation'
 import type { BrowserEvent } from '../../../shared/contracts'
 import type { WorkbenchReturnContext } from '../../../shared/workbench-windows'
 import { readWorkbenchReturnContext } from '../../../shared/workbench-windows'
@@ -18,7 +19,7 @@ export function nativeOpeningSourceSelected(state: OpeningState, context: Workbe
   if (!context) return false
   if (context.surface !== 'survey') return state.mainSurface === (context.surface === 'focus' ? 'agents' : 'workbench') &&
     sameWorkbenchProjectionSelection(mainRegionReference(state.workbenchSpaceSelection), context.reference)
-  if (state.mainSurface !== 'survey') return false
+  if (!knowledgeSurfacePresented(state.mainSurface, 'survey')) return false
   const selected = state.surveyZoneSelection
   if (isSurveyPage(selected)) return 'kind' in context.selection && context.selection.kind === 'page' &&
     selected.regionId === context.selection.regionId && selected.browserId === context.selection.browserId &&

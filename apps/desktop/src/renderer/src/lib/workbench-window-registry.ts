@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react'
 import type { AppWindowDescriptor, AppWindowTarget } from '@agentmux/core/control'
 import type { WorkbenchReturnContext, WorkbenchWindowDocument } from '../../../shared/workbench-windows'
 
+export type WorkbenchSurface = Extract<AppWindowTarget, { kind: 'surface' }>['surface']
 export type WorkbenchWindowPlacement = { destination: HTMLElement; window: WorkbenchWindowDocument; returnContext?: WorkbenchReturnContext | null }
 export type WorkbenchHost = {
   target: AppWindowTarget
@@ -40,6 +41,20 @@ export function originalWorkbenchHost(target: AppWindowTarget): WorkbenchHost | 
 export function workbenchWindowPlacement(target: AppWindowTarget | null): WorkbenchWindowPlacement | null {
   return target ? placements.get(workbenchTargetKey(target)) ?? null : null
 }
+const surfaceTargets = { survey: { kind: 'surface', surface: 'survey' }, recall: { kind: 'surface', surface: 'recall' } } as const
+const ignoreChanges = () => () => {}
+/** The committed owner document, including while an opening or return is pending. */
+export function workbenchSurfaceDocument(surface?: string): Document {
+  if (surface === 'survey' || surface === 'recall') return originalWorkbenchHost(surfaceTargets[surface])?.host.ownerDocument ?? document
+  return document
+}
+export function isWorkbenchSurfaceDetached(surface: WorkbenchSurface): boolean { return typeof document !== 'undefined' && workbenchSurfaceDocument(surface) !== document }
+export function useWorkbenchSurfaceDocument(surface?: string): Document {
+  const relevant = surface === 'survey' || surface === 'recall'
+  return useSyncExternalStore(relevant ? subscribeWorkbenchWindows : ignoreChanges, () => workbenchSurfaceDocument(surface))
+}
+export function useWorkbenchSurfaceDetached(surface: WorkbenchSurface): boolean { return useWorkbenchSurfaceDocument(surface) !== document }
+
 /** Remaining exact placements keep their original window's presentation in place. */
 export function workbenchDocumentHasPlacement(doc: Document): boolean {
   return [...placements.values()].some(placement => placement.destination.ownerDocument === doc)
@@ -51,7 +66,12 @@ export async function placeWorkbenchWindow(target: AppWindowTarget, placement: W
   placementRequests.set(key, request)
   if (placement) placements.set(key, placement); else placements.delete(key)
   changed()
-  try { await entry.place(placement) }
+  try {
+    await entry.place(placement)
+    // Sibling React trees can own Regions inside the adopted surface. Refresh
+    // their original document bindings only after the physical move commits.
+    if (target.kind === 'surface') changed()
+  }
   catch (error) {
     if (placementRequests.get(key) === request) {
       if (previous) placements.set(key, previous); else placements.delete(key)

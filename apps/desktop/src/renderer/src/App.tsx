@@ -1,6 +1,6 @@
 import { SpaceSourceReaders } from './components/SpaceSourceReaders'
 import { AgentCollaborationMap } from './components/AgentCollaborationMapEntry'
-import { workbenchDocuments, subscribeWorkbenchWindows, workbenchDocumentIdentity } from './lib/workbench-window-registry'
+import { workbenchDocuments, subscribeWorkbenchWindows, workbenchDocumentIdentity, isWorkbenchSurfaceDetached, useWorkbenchSurfaceDocument, workbenchSurfaceDocument } from './lib/workbench-window-registry'
 import { useWorkbenchWindows, WorkbenchWindowNotices, focusWorkbenchWindow } from './lib/workbench-windows'
 import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
 import { workspaceZoneContext } from './lib/workspace-zone-context'
@@ -35,6 +35,8 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome, WindowSidebarLayoutContext, useWindowSidebarLayout } from './components/TopRowChrome'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
+import { WorkbenchSurfaceHost } from './components/StableWorkbenchView'
+import { SurfaceWindowButton } from './components/KnowledgeSurfaceWindow'
 import { GlobalRecallSurface } from './components/GlobalRecallSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { isSurveyPage, surveyPageOwner, surveyPageProjection, surveySelectionPresentation, type SurveySelection } from './lib/survey-page-references'
@@ -231,14 +233,35 @@ function DesktopApp() {
     })
   }, [])
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)
-  const narrowControls = windowWidth <= 1100
+  const surveyDocument = useWorkbenchSurfaceDocument('survey')
+  const surveyDetached = surveyDocument !== document
+  const recallDocument = useWorkbenchSurfaceDocument('recall')
+  const recallDetached = recallDocument !== document
+  const surveyWindow = surveyDetached ? surveyDocument.defaultView : null
+  const [childControlsCoverPage, setChildControlsCoverPage] = useState(false)
+  useLayoutEffect(() => {
+    if (!surveyWindow) return
+    const media = surveyWindow.matchMedia('(max-width: 1100px)')
+    const sync = () => setChildControlsCoverPage(media.matches)
+    sync(); media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [surveyWindow])
+  const narrowControls = surveyWindow ? childControlsCoverPage : windowWidth <= 1100
   useEffect(() => {
     const resized = () => setWindowWidth(window.innerWidth)
     window.addEventListener('resize', resized)
     return () => window.removeEventListener('resize', resized)
   }, [])
-  const recallVisible = mainSurface === 'recall' && !settingsOpen
-  const surveyVisible = mainSurface === 'survey' && !settingsOpen
+  const recallVisible = recallDetached || mainSurface === 'recall' && !settingsOpen
+  const surveyVisible = surveyDetached || mainSurface === 'survey' && !settingsOpen
+  const previousWorkSurface = useRef<'agents' | 'workbench' | 'board'>('agents')
+  const previousDetached = useRef({ survey: false, recall: false })
+  useLayoutEffect(() => {
+    const previous = previousDetached.current
+    previousDetached.current = { survey: surveyDetached, recall: recallDetached }
+    if (mainSurface !== 'survey' && mainSurface !== 'recall') previousWorkSurface.current = mainSurface
+    else if (!previous[mainSurface] && previousDetached.current[mainSurface]) useAppStore.getState().setMainSurface(previousWorkSurface.current)
+  }, [mainSurface, surveyDetached, recallDetached])
   const focusVisible = mainSurface === 'agents' && focusMode === 'list' && !settingsOpen
   const [focusVisited, setFocusVisited] = useState(false)
   useEffect(() => { if (mainSurface === 'agents') setFocusVisited(true) }, [mainSurface])
@@ -445,7 +468,7 @@ function DesktopApp() {
       }
       surveyOccurrence.current = reference
       state.setSurveyZoneSelection(selected)
-      state.setMainSurface('survey')
+      if (!isWorkbenchSurfaceDetached('survey')) state.setMainSurface('survey')
       return
     }
     if (!state.selectMainRegion(reference)) throw new Error('The original return Region is no longer confirmed. Its window and content are kept.')
@@ -456,7 +479,10 @@ function DesktopApp() {
     } else state.setMainSurface('workbench')
   }, [])
   const focusWindowNavigationStamp = useMemo(() => ({}), [focusWorkfaceView])
-  const workbenchWindows = useWorkbenchWindows(!loading, restoreWindowContext, focusWindowNavigationStamp)
+  const workbenchWindows = useWorkbenchWindows(!loading, restoreWindowContext, focusWindowNavigationStamp, surface => {
+    closeSettings()
+    useAppStore.getState().setMainSurface(surface)
+  })
   const surveyProjection = useMemo(() => {
     if (!surveySelection || !surveyCatalog) return null
     if (isSurveyPage(surveySelection)) {
@@ -595,11 +621,9 @@ function DesktopApp() {
   }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyProjection, surveySelection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
     focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference])
   const [recallVisited, setRecallVisited] = useState(mainSurface === 'recall')
-  useEffect(() => { if (mainSurface === 'recall') setRecallVisited(true) }, [mainSurface])
+  useEffect(() => { if (recallVisible) setRecallVisited(true) }, [recallVisible])
   const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')
-  useEffect(() => {
-    if (mainSurface === 'survey') setSurveyVisited(true)
-  }, [mainSurface])
+  useEffect(() => { if (surveyVisible) setSurveyVisited(true) }, [surveyVisible])
   const compactSidebars = windowWidth <= 760 && mainSurface === 'workbench' && Boolean(config?.workspaces.some(item => item.id === activeWorkspaceId))
   const windowSidebars = useWindowSidebarLayout(compactSidebars)
   const { projectRailOpen, toolsOpen } = windowSidebars
@@ -773,7 +797,8 @@ function DesktopApp() {
         surfaceOwnsChord: surfaceOwnsChord(element, event)
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
-        ...(sourceDocument === document ? {} : { originWindow: workbenchDocumentIdentity(sourceDocument) }),
+        ...(sourceDocument === document ? {} : { originWindow: workbenchDocumentIdentity(sourceDocument),
+          workbenchCommands: sourceDocument !== workbenchSurfaceDocument('survey') && sourceDocument !== workbenchSurfaceDocument('recall') }),
         onWorkfaceNavigation: reference => {
           const choice = useAppStore.getState().workbenchSpaceSelection
           if (choice && sameWorkbenchProjectionSelection(mainRegionReference(choice), reference)) requestDesktopFocusWorkfaceReveal(choice)
@@ -914,9 +939,24 @@ function DesktopApp() {
                   <button className="primary-button" onClick={() => openSettings('hosts')}>Configure a host</button>
                 </section>
               ) : null}
-              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} pageSelection={isSurveyPage(surveySelection)?surveySelection:null} viewTargets={viewTargets}
-                /> : null}
-              {recallVisited || mainSurface === 'recall' ? <GlobalRecallSurface onSelectReference={selectRecallReference} visible={recallVisible} catalog={surveyCatalog} projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
+              <div id="survey-surface-home" className="knowledge-surface-home" hidden={mainSurface !== 'survey'}>
+                <WorkbenchSurfaceHost surface="survey" homeId="survey-surface-home" visible={surveyVisible}>
+                  {surveyVisited || surveyVisible ? <GlobalSurveySurface
+                    windowAction={surveyDetached ? null : <SurfaceWindowButton surface="survey" />}
+                    visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls}
+                    onSelectReference={selectSurveyReference} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds}
+                    catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection}
+                    pageSelection={isSurveyPage(surveySelection) ? surveySelection : null} viewTargets={viewTargets} /> : null}
+                </WorkbenchSurfaceHost>
+              </div>
+              <div id="recall-surface-home" className="knowledge-surface-home" hidden={mainSurface !== 'recall'}>
+                <WorkbenchSurfaceHost surface="recall" homeId="recall-surface-home" visible={recallVisible}>
+                  {recallVisited || recallVisible ? <GlobalRecallSurface
+                    windowAction={recallDetached ? null : <SurfaceWindowButton surface="recall" />}
+                    visible={recallVisible} onSelectReference={selectRecallReference} catalog={surveyCatalog}
+                    projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
+                </WorkbenchSurfaceHost>
+              </div>
               {mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusWorkfaceView !== 'closed' && Boolean(workbenchSpaceSelection || focusWorkfaceView === 'unconfirmed')} onCloseWorkspace={() => setFocusWorkfaceView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusWorkfaceView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusWorkfaceView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {mapVisited || mapVisible ? <AgentCollaborationMap request={mapTarget} active={mapVisible} onViewInFocus={(subject, presentationSessionId) => useAppStore.getState().revealFocusAgent(subject, presentationSessionId)} onOpen={(context, reference) => { if (useAppStore.getState().focusExecutionSession(context.id, reference)) useAppStore.getState().setMainSurface('workbench') }} /> : null}

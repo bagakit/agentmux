@@ -1,3 +1,4 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { DEFAULT_NOTEBOOK_ID, notebookPageArchiveRoot, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { NoteFileLinkContext, type NoteFileLinkOpener } from '@agentmux/client-ui/components/NoteFileContext'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
@@ -46,11 +47,13 @@ const RelationshipsIcon = semanticIconComponent('object.relationships')
 
 
 /** Recall only presents the existing Notebook directory and original file owners. */
-export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible = true, catalog, projection, selection, viewTargets, onSelectReference }: {
+export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAction, visible = true, catalog, projection, selection, viewTargets, onSelectReference }: {
+  windowAction?: import('react').ReactNode
   visible?: boolean; catalog: AgentMuxSpaceCatalog | null; projection: WorkbenchProjection | null; selection: ResolvedSurveyZoneSelection | null
   onSelectReference?: (reference: WorkbenchProjectionSelection) => void
   viewTargets?: Parameters<typeof WorkspaceWorkbench>[0]['viewTargets']
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const library = useNotebookLibrary(state => state.state), libraryIssue = useNotebookLibrary(state => state.issue)
   const notebookId = useAppStore(state => state.recallNotebookId), noteId = useAppStore(state => state.recallNoteId)
   const config = useAppStore(state => state.config), recoveries = useAppStore(state => state.notebookRecoveries)
@@ -72,7 +75,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
     setDirectoryOpen(false); intent.current += 1
     useAppStore.getState().setRecallNotebook(page.notebookId, page.noteId); setError(null)
     const authorize = () => active.current && request === talkIntent.current &&
-      useAppStore.getState().mainSurface === 'recall' && useAppStore.getState().recallNoteId === page.noteId &&
+      useAppStore.getState().recallNoteId === page.noteId &&
       useAppStore.getState().recallNotebookId === page.notebookId
     void openNoteAgentLauncher({ page, notebook, selectedReference, authorize, onSelectReference })
       .catch(cause => { if (authorize()) setError(presentError(cause)) })
@@ -191,7 +194,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
       const scope: WorkbenchProjection = { entity: { kind: 'zone', zoneId }, presentationId: 'recall-workbench', displayWorkspaceId: reference.displayWorkspaceId,
         catalog: spatialCatalog(current, topics), selection: [reference], onSelect(next) {
           const latest = useAppStore.getState()
-          if (latest.mainSurface !== 'recall' || latest.recallZoneSelection !== held || latest.recallNotebookId !== prepared!.notebook.notebookId) return
+          if (!active.current || latest.recallZoneSelection !== held || latest.recallNotebookId !== prepared!.notebook.notebookId) return
           const facts = spatialCatalog(latest, scratchTopicsForWorkspace(latest.scratchTopicSnapshots, latest.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? [])
           const original = held?.zoneId === zoneId ? held : surveyInitialZoneSelection(facts, zoneId, latest.layouts, latest.tabs, next.displayWorkspaceId)
           displayed = true; latest.setRecallZoneSelection(surveySelectReference(original, next)); onSelectReference?.(next)
@@ -212,11 +215,11 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
     <button className="survey-icon-button" aria-label="Save notebook to Topic" title="Save notebook to Topic" onClick={() => setCapture({ title: activeNotebook.name, sources: [{ kind: 'notebook', notebookId: activeNotebook.notebookId }], noteIds: pages.filter(page => page.notebookId === activeNotebook.notebookId).map(page => page.noteId) })}><CollectSourcesIcon size={14} /></button>
     {activeNotebook.notebookId !== DEFAULT_NOTEBOOK_ID ? <button className="survey-icon-button" aria-label="Delete notebook" title="Delete notebook" onClick={() => { if (!deletion.pending) setDeleteTarget({ ...activeNotebook, pageCount: pages.filter(page => page.notebookId === activeNotebook.notebookId).length }); setDeleteOpen(true) }}><ThemeActionRemoveIcon size={14} /></button> : null}
   </div> : null
-  return <section ref={surfaceRef} className="global-recall-surface" aria-label="Recall" hidden={!visible} inert={!visible} aria-hidden={!visible} data-sidebar-collapsed={sidebarCollapsed} data-navigation-stacked={navigationStacked} data-native-window-controls={isMacPlatform()} style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveWidth}px` } as CSSProperties}>
+  return <section ref={surfaceRef} className="global-recall-surface" aria-label="Recall" hidden={!visible} inert={!visible} aria-hidden={!visible} data-sidebar-collapsed={sidebarCollapsed} data-navigation-stacked={navigationStacked} data-native-window-controls={isMacPlatform() && ownerDocument === document} style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveWidth}px` } as CSSProperties}>
     <NotebookCreateDialog active={visible} open={visible && createOpen} onClose={() => setCreateOpen(false)} restoreFocus={() => notebookTrigger.current?.focus()} onCreateIntent={() => { createIntent.current = intent.current }} onCreated={id => { setCreateOpen(false); if (active.current && intent.current === createIntent.current) chooseNotebook(id) }} />
     <ConfirmationDialog open={visible && deleteOpen} title="Delete notebook?" subject={deleteTarget?.name ?? ''} description={deleteTarget?.pageCount ? `${deleteTarget.pageCount} ${deleteTarget.pageCount === 1 ? 'page will' : 'pages will'} move to 随手记. Contents, page hierarchy and archived status stay intact.` : 'This empty notebook will be removed.'} confirmLabel={deletion.pending ? 'Retry deletion' : 'Delete notebook'} busy={deletion.busy} onCancel={() => setDeleteOpen(false)} onConfirm={() => void removeNotebook()} feedback={deletion.issue ? <p className="notebook-create-issue" role="status">{deletion.issue}</p> : null} />
     <nav ref={containerRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Recall navigation" data-collapsed={sidebarCollapsed}>
-      <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Recall window controls"><button className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Recall items' : 'Hide Recall items'} title={sidebarCollapsed ? 'Show Recall items' : 'Hide Recall items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button></div>
+      <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Recall window controls">{!sidebarCollapsed && windowAction}<button className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Recall items' : 'Hide Recall items'} title={sidebarCollapsed ? 'Show Recall items' : 'Hide Recall items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button></div>
       {deletion.issue && !deleteOpen ? <div className="notebook-change-issue" role="status">{!sidebarCollapsed ? <span>Deletion of “{deleteTarget?.name}” is unconfirmed. {deletion.issue}</span> : null}<button className="note-text-button" aria-label="Check notebook deletion" onClick={() => setDeleteOpen(true)}>{sidebarCollapsed ? <ThemeStatusUnknownIcon size={15} /> : 'Check deletion'}</button></div> : null}
       <aside className="survey-tabs" aria-label="Recall items" hidden={sidebarCollapsed} inert={sidebarCollapsed}>
         <NotebookSelector active={visible && !sidebarCollapsed} triggerRef={notebookTrigger} notebooks={notebooks} selectedId={notebookId} onSelect={chooseNotebook} pending={opening} onCreate={() => setCreateOpen(true)} />

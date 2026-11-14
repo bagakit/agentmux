@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react'
 import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
 import { sameWorkbenchProjectionSelection, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
+import { workbenchSurfaceDocument } from './workbench-window-registry'
 import { desktopElementVisible } from './desktop-presentation'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 import type { WorkbenchReturnContext, WorkbenchReturnSelection } from '../../../shared/workbench-windows'
@@ -41,15 +42,28 @@ function committedTabMarkerMatches(tab: WorkbenchTab, prefix: 'primary' | 'view'
   } catch { return false }
 }
 
+function htmlElement(element: Element | null | undefined): element is HTMLElement {
+  return element?.namespaceURI === 'http://www.w3.org/1999/xhtml'
+}
+
+function focusedTargetInput(targets: readonly WorkbenchViewTarget[]): Element | null {
+  for (const surface of ['survey', 'recall'] as const) {
+    if (!targets.some(target => target.visible && target.surface === surface)) continue
+    const doc = workbenchSurfaceDocument(surface)
+    if (doc !== document && doc.hasFocus()) return doc.activeElement
+  }
+  return document.activeElement
+}
+
 /** A mode change retains this exact live Tab placement; it does not claim input. */
 export function committedPrimaryWorkbenchTarget(tab: WorkbenchTab, targets: readonly WorkbenchViewTarget[]): WorkbenchViewTarget | undefined {
   const matches = targets.filter(target => {
     const reference = target.reference
     if (!target.active || target.visible !== true || reference?.tabId !== tab.id ||
       !Object.hasOwn(tab.regions, reference.regionId) || target.projection?.entity.kind === 'region') return false
-    const slot = document.getElementById(target.hostId)
-    const primary = slot && [...slot.children].filter(child => child instanceof HTMLElement && child.dataset.workbenchPrimaryTabId === tab.id)
-    return primary?.length === 1 && primary[0] instanceof HTMLElement && primary[0].isConnected &&
+    const slot = workbenchSurfaceDocument(target.surface).getElementById(target.hostId)
+    const primary = slot && [...slot.children].filter(child => htmlElement(child) && child.dataset.workbenchPrimaryTabId === tab.id)
+    return primary?.length === 1 && htmlElement(primary[0]) && primary[0].isConnected &&
       committedTabMarkerMatches(tab, 'primary', reference, primary[0].dataset.workbenchPrimaryReference)
   })
   return matches.length === 1 ? matches[0] : undefined
@@ -57,8 +71,8 @@ export function committedPrimaryWorkbenchTarget(tab: WorkbenchTab, targets: read
 
 /** Only the actual primary editable input can retain its committed, exact host. */
 export function focusedPrimaryWorkbenchTarget(tab: WorkbenchTab, targets: readonly WorkbenchViewTarget[]): WorkbenchViewTarget | undefined {
-  const input = document.activeElement
-  if (!(input instanceof HTMLElement) || !(input.isContentEditable || input.matches('input, textarea'))) return
+  const input = focusedTargetInput(targets)
+  if (!htmlElement(input) || !(input.isContentEditable || input.matches('input, textarea'))) return
   const host = input.closest<HTMLElement>('[data-workbench-primary-tab-id]')
   const regionId = input.closest<HTMLElement>('[data-workbench-region-id]')?.dataset.workbenchRegionId
   if (host?.dataset.workbenchPrimaryTabId !== tab.id || !regionId || !Object.hasOwn(tab.regions, regionId)) return
@@ -71,8 +85,8 @@ export function focusedPrimaryWorkbenchTarget(tab: WorkbenchTab, targets: readon
 /** Keep an editing secondary in place without moving the original primary into its slot. */
 export function focusedSecondaryWorkbenchTarget(tab: WorkbenchTab, targets: readonly WorkbenchViewTarget[], homeId: string,
   homeReference: WorkbenchProjectionSelection | null | undefined, requestedInputRegionId?: string): WorkbenchViewTarget | undefined {
-  const input = document.activeElement
-  if (!(input instanceof HTMLElement) || !(input.isContentEditable || input.matches('input:not(:disabled):not([readonly]), textarea:not(:disabled):not([readonly])'))) return
+  const input = focusedTargetInput(targets)
+  if (!htmlElement(input) || !(input.isContentEditable || input.matches('input:not(:disabled):not([readonly]), textarea:not(:disabled):not([readonly])'))) return
   const regionId = input.closest<HTMLElement>('[data-workbench-region-id]')?.dataset.workbenchRegionId
   if (!regionId || !Object.hasOwn(tab.regions, regionId) || requestedInputRegionId === regionId) return
   const host = input.closest<HTMLElement>('[data-workbench-view-reference]')
@@ -92,17 +106,17 @@ export function committedSecondaryWorkbenchTarget(tab: WorkbenchTab, target: Wor
   if (target?.visible !== true || reference?.tabId !== tab.id || !Object.hasOwn(tab.regions, reference.regionId) ||
     homeReference?.tabId !== tab.id || !Object.hasOwn(tab.regions, homeReference.regionId)) return
   const home = document.getElementById(homeId)
-  const primary = home && [...home.children].filter(child => child instanceof HTMLElement && child.dataset.workbenchPrimaryTabId === tab.id)
-  if (primary?.length !== 1 || !(primary[0] instanceof HTMLElement) || !primary[0].isConnected ||
+  const primary = home && [...home.children].filter(child => htmlElement(child) && child.dataset.workbenchPrimaryTabId === tab.id)
+  if (primary?.length !== 1 || !htmlElement(primary[0]) || !primary[0].isConnected ||
     !committedTabMarkerMatches(tab, 'primary', homeReference, primary[0].dataset.workbenchPrimaryReference)) return
-  const slot = document.getElementById(target.hostId)
-  const secondary = slot && [...slot.children].filter(child => child instanceof HTMLElement && !child.dataset.workbenchPrimaryTabId &&
+  const slot = workbenchSurfaceDocument(target.surface).getElementById(target.hostId)
+  const secondary = slot && [...slot.children].filter(child => htmlElement(child) && !child.dataset.workbenchPrimaryTabId &&
     (target.projection?.entity.kind === 'region'
       ? child.dataset.workbenchViewReference === workbenchRegionProjectionSlotId('view', reference)
       : committedTabMarkerMatches(tab, 'view', reference, child.dataset.workbenchViewReference)))
   // Positioning can briefly hide a confirmed host. Retaining this exact tree
   // does not claim native input; focused input readers still check visibility.
-  return secondary?.length === 1 && secondary[0] instanceof HTMLElement && secondary[0].isConnected ? target : undefined
+  return secondary?.length === 1 && htmlElement(secondary[0]) && secondary[0].isConnected ? target : undefined
 }
 
 /** A shared entity in multiple Groups has no uniquely proven ordinary home occurrence. */

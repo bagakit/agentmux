@@ -8,7 +8,7 @@ import type { AppWindowDescriptor, AppWindowTarget, AppWindowOperation, AppWindo
 import { readWorkbenchReturnContext, workbenchReturnLabel, type WorkbenchReturnContext, type WorkbenchWindowRequest, type WorkbenchWindowDocument, type WorkbenchWindowStage } from '../../../shared/workbench-windows'
 import { api } from './api'
 import { useAppStore } from '../store'
-import { awaitOriginalWorkbenchHost, originalWorkbenchHost, placeWorkbenchWindow, registerWorkbenchDocument, workbenchTargetKey, workbenchDocumentReturning, observeWorkbenchNativeVisibility, registerWorkbenchNavigationStamp, workbenchNavigationStamp } from './workbench-window-registry'
+import { awaitOriginalWorkbenchHost, originalWorkbenchHost, placeWorkbenchWindow, registerWorkbenchDocument, workbenchTargetKey, workbenchDocumentReturning, observeWorkbenchNativeVisibility, registerWorkbenchNavigationStamp, workbenchNavigationStamp, type WorkbenchSurface } from './workbench-window-registry'
 import { ServiceWindowNotice } from '../components/ServiceWindowNotice'
 import { WorkbenchWindowNotice } from '../components/WorkbenchWindowNotice'
 
@@ -87,12 +87,13 @@ export async function returnWorkbenchWindow(identity: WorkbenchWindowDocument): 
 export async function returnClosedWorkbenchWindows(regions: readonly { tabId: string; regionId: string }[]): Promise<void> {
   for (const record of opened.values()) {
     const target = record.target
-    if (record.returned || !regions.some(region => region.tabId === target.tabId &&
+    if (record.returned || target.kind === 'surface' || !regions.some(region => region.tabId === target.tabId &&
       (target.kind === 'region' ? region.regionId === target.regionId : !useAppStore.getState().tabs[target.tabId]))) continue
     await returnWorkbenchWindow(record.identity)
   }
 }
 function validateTarget(target: AppWindowTarget): void {
+  if (target.kind === 'surface') return
   const state = useAppStore.getState(), group = state.layouts[target.displayWorkspaceId]?.groups.find(group => group.id === target.groupId)
   const tab = state.tabs[target.tabId]
   if (!group?.tabOrder.includes(target.tabId) || !tab || target.kind === 'region' && !Object.hasOwn(tab.regions, target.regionId)) {
@@ -154,11 +155,11 @@ function returnNavigationStamp(): string {
   const state = useAppStore.getState()
   return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.workbenchSpaceSelection, state.surveyZoneSelection, state.focusView])
 }
-async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onReturn?: (context: WorkbenchReturnContext) => void): Promise<WorkbenchReturnContext | null | void> {
+async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onReturn?: (context: WorkbenchReturnContext) => void, onReturnSurface?: (surface: WorkbenchSurface) => void): Promise<WorkbenchReturnContext | null | void> {
   const progress = (stage: WorkbenchWindowStage) => api.ui.workbenchWindows.respond({ requestId: request.requestId,
     windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'pending', stage, message: null })
   const navigationAtStart = returnNavigationStamp(), localNavigationAtStart = workbenchNavigationStamp()
-  if (request.action === 'return' && !originalWorkbenchHost(request.target)) {
+  if (request.action === 'return' && request.target.kind !== 'surface' && !originalWorkbenchHost(request.target)) {
     const record = opened.get(request.windowId)
     if (!record || record.identity.documentGeneration !== request.documentGeneration) throw new Error('The exact original window document is not current.')
     const tab = useAppStore.getState().tabs[request.target.tabId]
@@ -191,6 +192,7 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
     slot.id = 'workbench-window-' + request.windowId
     slot.dataset.workbenchDocumentRoot = ''
     child.document.body.classList.add('workbench-detached-window')
+    if (request.target.kind === 'surface') child.document.title = request.target.surface === 'survey' ? 'Survey · AgentMux' : 'Recall · AgentMux'
     const disposeStyle = mirrorStyles(child.document), disposeDocument = registerWorkbenchDocument(child.document, identity), disposeEvents = documentEvents(child.document)
     const record: OpenWindow = { window: child, document: child.document, identity, target: request.target, returnContext: readWorkbenchReturnContext(request.returnContext, request.target), slot, returned: false, dispose: () => { disposeStyle(); disposeDocument(); disposeEvents() } }
     opened.set(request.windowId, record); child.addEventListener('unload', () => { if (opened.get(request.windowId) === record) { record.dispose(); notify() } }, { once: true }); notify()
@@ -210,9 +212,10 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
     await awaitComposition(host.host, signal)
     // Explicit Return owns its original scene; a delayed/automatic return never supersedes later navigation.
     const context = readWorkbenchReturnContext(request.returnContext, request.target)
-    if (request.navigate === true && context && returnNavigationStamp() === navigationAtStart && workbenchNavigationStamp() === localNavigationAtStart) {
-      if (onReturn) onReturn(context)
-      else publishIssue('The original workface is returning. Its navigation owner is unavailable; current navigation is kept.')
+    if (request.navigate === true && returnNavigationStamp() === navigationAtStart && workbenchNavigationStamp() === localNavigationAtStart) {
+      if (request.target.kind === 'surface') onReturnSurface?.(request.target.surface)
+      else if (context && onReturn) onReturn(context)
+      else if (context) publishIssue('The original workface is returning. Its navigation owner is unavailable; current navigation is kept.')
     }
     progress('placement')
     await placeWorkbenchWindow(request.target, null)
@@ -221,9 +224,9 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
 }
 
 /** One original Renderer owns every shell; no child starts an App or Store. */
-export function useWorkbenchWindows(ready: boolean, onReturn?: (context: WorkbenchReturnContext) => void, localNavigationStamp?: object): readonly WindowTarget[] {
-  const navigator = useRef(onReturn), localNavigation = useRef(localNavigationStamp)
-  useLayoutEffect(() => { navigator.current = onReturn; localNavigation.current = localNavigationStamp })
+export function useWorkbenchWindows(ready: boolean, onReturn?: (context: WorkbenchReturnContext) => void, localNavigationStamp?: object, onReturnSurface?: (surface: WorkbenchSurface) => void): readonly WindowTarget[] {
+  const navigator = useRef(onReturn), surfaceNavigator = useRef(onReturnSurface), localNavigation = useRef(localNavigationStamp)
+  useLayoutEffect(() => { navigator.current = onReturn; surfaceNavigator.current = onReturnSurface; localNavigation.current = localNavigationStamp })
   useLayoutEffect(() => ready ? registerWorkbenchNavigationStamp(() => localNavigation.current) : undefined, [ready])
   const windows = useSyncExternalStore(subscribe, () => windowTargets)
   useEffect(() => {
@@ -237,7 +240,7 @@ export function useWorkbenchWindows(ready: boolean, onReturn?: (context: Workben
     const rootEvents = documentEvents(document)
     let rootDocument: (() => void) | null = null
     const stopRequests = api.ui.workbenchWindows.onRequest(request => {
-      void apply(request, abort.signal, navigate).then(returnContext => api.ui.workbenchWindows.respond({ requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'applied', message: null,
+      void apply(request, abort.signal, navigate, surface => surfaceNavigator.current?.(surface)).then(returnContext => api.ui.workbenchWindows.respond({ requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'applied', message: null,
         ...(request.action === 'prepare' ? { returnContext: returnContext ?? null } : {}) }),
         error => { api.ui.workbenchWindows.respond({ requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'rejected', message: String(error) }) })
     })
@@ -255,7 +258,9 @@ export function useWorkbenchWindows(ready: boolean, onReturn?: (context: Workben
 }
 function WorkbenchWindowToolbar({ record }: { record: OpenWindow }) {
   const warning = useNativeOverlayChrome(record.document, record.identity)
-  return <><header className="workbench-window-toolbar"><strong>AgentMux</strong><button className="small-button" onClick={() => void returnWorkbenchWindow(record.identity)}>{workbenchReturnLabel(record.returnContext)}</button></header>{warning ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Window overlay presentation', mode: warning, restore: 'Keep using the original Browser; close and reopen the floating control.' } }} /> : null}</>
+  const target = record.target
+  const title = target.kind === 'surface' ? (target.surface === 'survey' ? 'Survey' : 'Recall') : 'AgentMux'
+  return <><header className="workbench-window-toolbar"><strong>{title}</strong><button className="small-button" onClick={() => void returnWorkbenchWindow(record.identity)}>{target.kind === 'surface' ? 'Return to main window' : workbenchReturnLabel(record.returnContext)}</button></header>{warning ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Window overlay presentation', mode: warning, restore: 'Keep using the original Browser; close and reopen the floating control.' } }} /> : null}</>
 }
 export function WorkbenchWindowNotices() {
   const state = useSyncExternalStore(subscribe, () => snapshot)

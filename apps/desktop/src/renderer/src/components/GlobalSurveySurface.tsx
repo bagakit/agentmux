@@ -1,3 +1,5 @@
+import { isWorkbenchSurfaceDetached } from '../lib/workbench-window-registry'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { surveyThumbnailStyle } from '../../../shared/survey-thumbnail-layout'
 import * as Menu from '@radix-ui/react-dropdown-menu'
@@ -80,7 +82,8 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const emptyZoneTabs: ReadonlyMap<string, readonly string[]> = new Map()
 
 
-export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, pageSelection = null, viewTargets, onSelectReference }: {
+export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAction, visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, pageSelection = null, viewTargets, onSelectReference }: {
+  windowAction?: import('react').ReactNode
   visible?: boolean
   controlsCoverPage?: boolean
   unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined
@@ -273,6 +276,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   }
   const tabClose = useWorkbenchTabsClose()
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
+  const ownerDocument = useWorkbenchDocument()
   const surfaceRef = useRef<HTMLElement>(null)
   const managementRef = useRef<HTMLElement>(null)
   const resizeHandle = useRef<HTMLDivElement>(null)
@@ -312,11 +316,12 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   useEffect(() => {
     if (controlNavigation) return
     const surface = surfaceRef.current
+    const document = ownerDocument
     if (!visible) { if (surface?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); return }
     const focused = document.activeElement
     // Clearing an incompatible page can mount the start page while the person
     // is still typing in the environment select. That input intent stays put.
-    if (!toolsOpen && !selection && focused instanceof HTMLElement && surface?.contains(focused) &&
+    if (!toolsOpen && !selection && focused && surface?.contains(focused) &&
         focused.matches('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return
     const findTarget = () => {
       const reference = selection?.active
@@ -341,7 +346,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     })
     observer.observe(surface, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [visible, selectionKey, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation])
+  }, [visible, selectionKey, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation, ownerDocument])
 
   function itemTitle(zone: AgentMuxZoneFact): string {
     return surveyExplorationName(explorationNames[zone.zoneId], (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? [tabs[id]!] : []))
@@ -426,7 +431,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       if (admission?.issues.length) setError('The page is available. ' + admission.issues.map(issue => issue.message).join(' '))
       const browser = current.tabs[reference.tabId]?.regions[reference.regionId]
       if (browser?.kind === 'browser' && admission?.outcome !== 'unknown' && intent.current === startedIntent &&
-          current.mainSurface === 'survey' && current.surveyZoneSelection === before.surveyZoneSelection) {
+          (current.mainSurface === 'survey' || isWorkbenchSurfaceDetached('survey')) && current.surveyZoneSelection === before.surveyZoneSelection) {
         setSelection({ kind: 'page', regionId: reference.regionId, browserId: browser.browserId })
       }
     } catch (cause) { setError(`Browser could not open: ${presentError(cause)}. Your input and original work surface are kept; retry here.`) }
@@ -741,10 +746,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
-  return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
+  return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform() && ownerDocument === document}
     style={{ ...surveyThumbnailStyle(config?.browser.surveyThumbnails), '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
     <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={controlsCoverPage}>
-      <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">
+      <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">{!sidebarCollapsed && windowAction}
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>

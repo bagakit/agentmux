@@ -1,3 +1,4 @@
+.knowledge-surface-home { height: 100%; min-height: 0; }
 /* Navigation and controls use one light material; original content keeps its own surface. */
 :is(.global-survey-surface, .global-recall-surface), .survey-topic-menu, .survey-thumbnail-preview {
   --survey-glass: color-mix(in srgb, var(--surface-1) 92%, transparent);

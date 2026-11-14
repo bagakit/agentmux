@@ -1,3 +1,4 @@
+import { detachedFileSurface } from '../lib/knowledge-surface-navigation'
 import { requestDesktopFocusWorkfaceReveal } from '../lib/desktop-presentation'
 import { useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
@@ -10,7 +11,7 @@ import { documentKey } from '../lib/workbench-tabs'
 /** Select the retained original occurrence without opening, saving or revealing it again. */
 export function NoteReadingReturn() {
   const presentation = useWorkbenchBrowserPresentation(), mainSurface = useAppStore(state => state.mainSurface)
-  const journey = useNoteReadingReturn(presentation.reference, mainSurface)
+  const journey = useNoteReadingReturn(presentation.reference, detachedFileSurface(presentation.projection) ?? mainSurface)
   const [issue, setIssue] = useState<string | null>(null)
   if (!journey) return null
   function back() {
@@ -25,7 +26,7 @@ export function NoteReadingReturn() {
     if (presentation.projection) presentation.projection.onSelect(from)
     else state.selectMainRegion(from)
     const selected = useAppStore.getState()
-    if (selected.mainSurface !== journey.surface || !noteReadingReferenceIsSelected(selected, from)) {
+    if (!noteReadingReferenceIsSelected(selected, from, journey.surface)) {
       setIssue('Returning to the original reading position was not confirmed. Its identity and draft are kept; retry from this reading surface.'); return
     }
     if ((!presentation.projection || presentation.projection.presentationId === 'space-workbench') && selected.mainSurface === 'workbench' && selected.workbenchSpaceSelection)

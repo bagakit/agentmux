@@ -1,3 +1,5 @@
+import { detachedFileSurface, knowledgeSurfacePresented } from './lib/knowledge-surface-navigation'
+import { isWorkbenchSurfaceDetached, type WorkbenchSurface as KnowledgeSurface } from './lib/workbench-window-registry'
 import { readBrowserOperationResult } from '@agentmux/browser/browser-operation-result'
 import { parseFocusTaskReference, type AgentMuxFocusTaskReference } from '@agentmux/core/focus-control'
 import { focusTaskHandoffNote } from '@agentmux/core/focus-task-guidance'
@@ -5830,8 +5832,10 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
 }
 
 // File data requests are shared; display intent belongs to each explicit caller.
-let fileOpenIntentVersion = 0
-let fileOpenNavigationUnsubscribe: (() => void) | undefined
+type FileNavigationIntent = { version: number; unsubscribe?: () => void }
+const fileNavigationIntents: Record<'main' | KnowledgeSurface, FileNavigationIntent> = {
+  main: { version: 0 }, survey: { version: 0 }, recall: { version: 0 }
+}
 
 /** The existing Space and Survey selection facts captured by file display intents. */
 function surveyPresentationAfterClose(state: AppState, tabs: AppState['tabs']) {
@@ -5902,18 +5906,23 @@ function collaborationMapSpaceTarget(state: AppState): CollaborationMapTarget {
   return { kind: 'space', workspaceId, choice }
 }
 
-export function fileNavigationSelection(state: AppState): string {
+export function fileNavigationSelection(state: AppState, detached?: KnowledgeSurface): string {
+  if (detached === 'recall' && knowledgeSurfacePresented(state.mainSurface, detached))
+    return JSON.stringify([detached, state.recallNotebookId, state.recallNoteId, state.recallZoneSelection])
+  if (detached === 'survey' && knowledgeSurfacePresented(state.mainSurface, detached))
+    return JSON.stringify([detached, state.surveyProfileView, state.surveyZoneSelection])
+
   // Survey owns its selection; a split changes the underlying Space layout, not user navigation.
   if (state.mainSurface === 'recall') return JSON.stringify([state.mainSurface, state.recallNotebookId, state.recallNoteId, state.recallZoneSelection])
   if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyZoneSelection, state.workbenchSpaceSelection])
   const reference = mainRegionReference(state.workbenchSpaceSelection)
   if (reference) return JSON.stringify([state.mainSurface, state.focusView, state.activeWorkspaceId, state.workbenchSpaceSelection,
-    state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.surveyZoneSelection])
+    state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, isWorkbenchSurfaceDetached('survey') ? null : state.surveyZoneSelection])
   const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
   const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
   return JSON.stringify([state.mainSurface, state.focusView, state.activeWorkspaceId, layout?.activeGroupId, tabId,
     tabId ? state.tabs[tabId]?.layout.activeRegionId : undefined,
-    state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
+    state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, isWorkbenchSurfaceDetached('survey') ? null : state.surveyZoneSelection])
 }
 
 /** UI defaults are captured once; explicit public/projection placements bypass this resolver. */
@@ -7672,11 +7681,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // A local UI action keeps its original presentation. Public focus still
       // navigates Work; creation, execution and placement share the same owner.
       const localFocus = options?.localFocus
+      const detached = localFocus && isWorkbenchSurfaceDetached(localFocus.surface) ? localFocus.surface : undefined
       const localSelection = localFocus ? get().surveyZoneSelection : null
       const localZoneId = localSelection?.zoneId
-      let expectedNavigation = localFocus ? fileNavigationSelection(get()) : '', navigationChanged = false, selecting = false
+      let expectedNavigation = localFocus ? fileNavigationSelection(get(), detached) : '', navigationChanged = false, selecting = false
       const stopObserving = localFocus ? useAppStore.subscribe(state => {
-        if (!selecting && fileNavigationSelection(state) !== expectedNavigation) navigationChanged = true
+        if (!selecting && fileNavigationSelection(state, detached) !== expectedNavigation) navigationChanged = true
       }) : () => {}
       const ownsLocalTarget = (address: AgentMuxSpaceAddress): boolean => {
         if (!localFocus || localFocus.reveal === false || navigationChanged) return false
@@ -7685,7 +7695,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ? isSurveyPage(selected) && selected.regionId === localSelection.regionId && selected.browserId === localSelection.browserId &&
             surveyPageOwner(state.tabs, selected)?.tab.id === localFocus.reference.tabId && localFocus.reference.regionId === selected.regionId
           : selected?.zoneId === localZoneId && address.zoneId === localZoneId
-        return sameSelection && state.mainSurface === localFocus.surface && address.tabId === localFocus.reference.tabId &&
+        return sameSelection && knowledgeSurfacePresented(state.mainSurface, localFocus.surface) && address.tabId === localFocus.reference.tabId &&
           address.displayWorkspaceId === localFocus.reference.displayWorkspaceId && address.groupId === localFocus.reference.groupId
       }
       try { return await executeSpatialControl({
@@ -7780,7 +7790,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 if (surface && isSessionSurface(surface)) get().focusExecutionSession(surface.sessionId, address, { navigate: false })
               } else if (selected) get().setSurveyZoneSelection(surveySelectReference(selected, address))
             }
-            finally { expectedNavigation = fileNavigationSelection(get()); selecting = false }
+            finally { expectedNavigation = fileNavigationSelection(get(), detached); selecting = false }
             return
           }
           void get().selectWorkspace(address.displayWorkspaceId)
@@ -10121,22 +10131,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { tabId: tab.id, space }
     }
     if (!background && !placement?.projection && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
-    const intentVersion = background ? fileOpenIntentVersion : ++fileOpenIntentVersion
-    if (!background) fileOpenNavigationUnsubscribe?.()
-    const selected = fileNavigationSelection(navigation)
+    const detached = detachedFileSurface(placement?.projection)
+    const intent = fileNavigationIntents[detached ?? 'main']
+    const intentVersion = background ? intent.version : ++intent.version
+    if (!background) intent.unsubscribe?.()
+    const selected = fileNavigationSelection(navigation, detached)
     let cancelled = false
     const unsubscribe = background ? () => {} : useAppStore.subscribe(function observeFileNavigation(state) {
-      if (fileNavigationSelection(state) !== selected) {
+      if (fileNavigationSelection(state, detached) !== selected) {
         cancelled = true
         releaseNavigation()
       }
     })
-    if (!background) fileOpenNavigationUnsubscribe = unsubscribe
+    if (!background) intent.unsubscribe = unsubscribe
     const releaseNavigation = () => {
       unsubscribe()
-      if (fileOpenNavigationUnsubscribe === unsubscribe) fileOpenNavigationUnsubscribe = undefined
+      if (intent.unsubscribe === unsubscribe) delete intent.unsubscribe
     }
-    const mayReveal = () => (background || !navigationSignal?.aborted && intentVersion === fileOpenIntentVersion && !cancelled) && resourceCurrent()
+    const mayReveal = () => (background || !navigationSignal?.aborted && intentVersion === intent.version && !cancelled) && resourceCurrent()
     const selectProjection = () => {
       if (explicitBookSource && exactRegionId && expectedSurface?.kind === 'file' && get().tabs[destinationTabId!]?.regions[exactRegionId] === expectedSurface) {
         set(state => ({ editorRegionModes: { ...state.editorRegionModes, [exactRegionId!]: 'edit' } }))
@@ -10144,7 +10156,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (background) return
       // This is an explicit original File action, not discovery or arbitrary selection.
       const document = get().documents[documentKey(workspaceId, path)]
-      if (navigation.mainSurface === 'survey' && placement?.projection?.presentationId === 'survey-workbench' &&
+      if (knowledgeSurfacePresented(navigation.mainSurface, 'survey') && placement?.projection?.presentationId === 'survey-workbench' &&
         placement.projection.entity.kind === 'zone' && placement.projection.entity.zoneId === placement.space.zoneId &&
         path.endsWith(NOTE_FILE_EXTENSION) && document && parseNoteFile(document).status === 'valid') {
         get().setSurveyZoneCollected(placement.space.zoneId, true)
@@ -10245,7 +10257,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           bookmarkOpened = expectedSurface?.kind === 'browser' && expectedSurface.workspaceId === workspaceId && expectedSurface.bookmarkOrigin?.path === path
           result.data = { kind: 'not-file', reason: bookmarkOpened ? null : 'The original bookmark Browser is unconfirmed.' }
           if (bookmarkOpened && mayReveal()) { releaseNavigation(); selectProjection() }
-          return !background && bookmarkOpened && intentVersion === fileOpenIntentVersion
+          return !background && bookmarkOpened && intentVersion === intent.version
         }
       } catch (error) {
         releaseNavigation()
@@ -10275,7 +10287,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         rememberPlacement()
         result.data = { kind: 'text', reason: null }
         selectProjection()
-        return !background && intentVersion === fileOpenIntentVersion
+        return !background && intentVersion === intent.version
       }
       // Media has a File identity, but never a UTF-8 buffer. Only its visible pane reads bytes.
       const format = previewFormat
@@ -10287,7 +10299,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         rememberPlacement()
         result.data = { kind: get().documentIssues[key]?.kind === 'binary' ? 'binary-preview' : 'media-preview', reason: null }
         selectProjection()
-        return !background && intentVersion === fileOpenIntentVersion
+        return !background && intentVersion === intent.version
       }
       while (!get().documents[key]) {
         let request = fileOpenRequests.get(key)
@@ -10396,7 +10408,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, topicId, placement, confirmedExistingSpace(current)))
           rememberPlacement()
           selectProjection()
-          return !background && intentVersion === fileOpenIntentVersion
+          return !background && intentVersion === intent.version
         }
         if (!joinedRequest) return false
       }
@@ -11173,9 +11185,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   async createNote(tabGroupId, launcher, initialContent, projection, retryIntentId, notebook) {
-    const captured = get(), openingIntent = fileOpenIntentVersion, openingSelection = fileNavigationSelection(captured)
+    const detached = detachedFileSurface(projection), intent = fileNavigationIntents[detached ?? 'main']
+    const captured = get(), openingIntent = intent.version, openingSelection = fileNavigationSelection(captured, detached)
     let navigationChanged = false
-    const stopWatching = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== openingSelection) navigationChanged = true })
+    const stopWatching = useAppStore.subscribe(state => { if (fileNavigationSelection(state, detached) !== openingSelection) navigationChanged = true })
     try {
     const tab = launcher ? captured.tabs[launcher.tabId] : undefined
     const launcherSurface = launcher ? tab?.regions[launcher.regionId] : undefined
@@ -11206,7 +11219,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const originalResource = captured.config?.workspaces.find(item => item.id === workspaceId)
     if (!originalResource) throw new Error('The Note resource Workspace is unavailable.')
-    const notebookContext = notebook ?? { notebookId: projection?.presentationId === 'recall-workbench' && captured.mainSurface === 'recall' && captured.recallNotebookId
+    const notebookContext = notebook ?? { notebookId: projection?.presentationId === 'recall-workbench' && knowledgeSurfacePresented(captured.mainSurface, 'recall') && captured.recallNotebookId
       ? captured.recallNotebookId : DEFAULT_NOTEBOOK_ID }
     const noteId = retrying ? previous.noteId : mintObjectId(), blockId = retrying ? previous.blockIds[0]! : mintObjectId(), draft = retrying ? previous.draft : initialContent ?? ''
     let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : mintObjectId(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
@@ -11230,7 +11243,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!currentResource || currentResource.hostId !== originalResource.hostId || currentResource.path !== originalResource.path) throw new Error('The Note resource changed before creation. The original draft is retained.')
     } catch (error) { receipt = { ...receipt, ...(retrying ? { target: previous.target, path: previous.path } : {}), status: 'error', issue: presentError(error) }; publish(); return receipt }
     const target = receipt.target
-    if (captured.mainSurface === 'survey' && projection?.presentationId === 'survey-workbench' &&
+    if (knowledgeSurfacePresented(captured.mainSurface, 'survey') && projection?.presentationId === 'survey-workbench' &&
       projection.entity.kind === 'zone' && projection.entity.zoneId === target.zoneId && target.zoneId) {
       get().setSurveyZoneCollected(target.zoneId, true)
     }
@@ -11249,7 +11262,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     receipt = await registerCreatedNote(receipt); publish()
     set(current => ({ workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId) }))
     // Creation belongs to the captured request; a later navigation never grants it a new reveal intent.
-    if (navigationChanged || fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== openingSelection) { receipt = { ...receipt, issue: 'The Note was created. Open the same file when ready; later navigation was preserved.' }; publish(); return receipt }
+    if (navigationChanged || intent.version !== openingIntent || fileNavigationSelection(get(), detached) !== openingSelection) { receipt = { ...receipt, issue: 'The Note was created. Open the same file when ready; later navigation was preserved.' }; publish(); return receipt }
     if (!noteCreationResourceMatches(get().config, target)) { receipt = { ...receipt, issue: 'The Note was written to its captured resource, but the current resource is different. Restore that resource to check or open the same Note.' }; publish(); return receipt }
     const placement = noteFilePlacement(target, projection, receipt.launcher)
     if (!placement) { receipt = { ...receipt, issue: 'The exact Note display reference is unconfirmed. Its original file and draft are retained.' }; publish(); return receipt }
@@ -11267,7 +11280,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let receipt: NoteCreationReceipt = retained
     const publish = () => useLauncherState.getState().setNoteCreation(launcherId, receipt!)
     const target = receipt.target
-    const selected = fileNavigationSelection(get()), openingIntent = fileOpenIntentVersion
+    const detached = detachedFileSurface(projection), intent = fileNavigationIntents[detached ?? 'main']
+    const selected = fileNavigationSelection(get(), detached), openingIntent = intent.version
     if (receipt.presentation && (!projection || projection.presentationId !== receipt.presentation.presentationId || JSON.stringify(projection.entity) !== JSON.stringify(receipt.presentation.entity) || projection.displayWorkspaceId !== target.displayWorkspaceId)) {
       receipt = { ...receipt, issue: 'Open the same Note from its original presentation. Its captured file and draft are retained.' }; publish(); return receipt
     }
@@ -11285,7 +11299,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         receipt = { ...receipt, status: 'written', write: { status: 'written', revision: observed.document.revision }, issue: undefined }; publish()
       } catch (error) { receipt = { ...receipt, issue: presentError(error) }; publish(); return receipt }
     }
-    if (fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== selected) {
+    if (intent.version !== openingIntent || fileNavigationSelection(get(), detached) !== selected) {
       receipt = { ...receipt, issue: 'The same Note was checked. Later navigation was preserved; choose this file when ready.' }; publish(); return receipt
     }
     receipt = await registerCreatedNote(receipt); publish()

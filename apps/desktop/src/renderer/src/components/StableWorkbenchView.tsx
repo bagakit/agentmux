@@ -9,7 +9,7 @@ import { workbenchReturnLabel, type WorkbenchReturnSelection } from '../../../sh
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { WorkbenchDocumentContext, useWorkbenchDocument } from '../lib/workbench-document'
-import { registerWorkbenchHost, workbenchDocumentIdentity, useWorkbenchDocumentVisibility, type WorkbenchWindowPlacement } from '../lib/workbench-window-registry'
+import { registerWorkbenchHost, workbenchDocumentIdentity, useWorkbenchDocumentVisibility, useWorkbenchSurfaceDocument, type WorkbenchSurface, type WorkbenchWindowPlacement } from '../lib/workbench-window-registry'
 import type { AppWindowTarget } from '@agentmux/core/control'
 import { markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 
@@ -164,6 +164,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   children: ReactNode
 }) {
   const parentDocument = useWorkbenchDocument()
+  const surfaceDocument = useWorkbenchSurfaceDocument(surface)
   const [host] = useState(() => {
     const element = document.createElement('div')
     element.className = kind === 'region' ? 'retained-workbench-region' : 'retained-workbench-view'
@@ -187,6 +188,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   useLayoutEffect(() => {
     if (!originalTarget) return
     return registerWorkbenchHost({ target: originalTarget, host, getReturnContext: () => {
+      if (originalTarget.kind === 'surface') return null
       const hint = returnHint.current
       if (hint.windowPlacement) return workbenchReturnContext({ ...hint, returnContext: hint.windowPlacement.returnContext ?? null },
         hint.reference && originalTarget.kind === 'region' ? { ...hint.reference, regionId: originalTarget.regionId } : hint.reference)
@@ -216,7 +218,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const presentedActive = (windowActive || active) && documentVisible
   const presentedVisible = (windowActive || visible) && documentVisible
   const documentContext = useMemo(() => ({ document: hostDocument, window: windowPlacement?.window ?? workbenchDocumentIdentity(hostDocument) }), [hostDocument, windowPlacement])
-  const displayReference = useMemo(() => windowPlacement && frozenTarget.current && reference
+  const displayReference = useMemo(() => windowPlacement && frozenTarget.current && frozenTarget.current.kind !== 'surface' && reference
     ? { ...reference, displayWorkspaceId: frozenTarget.current.displayWorkspaceId, groupId: frozenTarget.current.groupId, tabId: frozenTarget.current.tabId,
       ...(frozenTarget.current.kind === 'region' ? { regionId: frozenTarget.current.regionId } : {}) } : reference, [windowPlacement, reference])
   const presentation = useMemo(() => ({ active: presentedActive, retainedRegionId, tabHostId: placedHostId, surface, returnSelection, ...(windowPlacement ? { returnContext: windowPlacement.returnContext ?? null } : {}), moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference: displayReference }),
@@ -242,7 +244,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       // View is being reparented. It need not wait in inert parking for body lookup.
       const siblingHome = kind === 'region' && targetId === null
         ? Array.from(parking.current?.parentElement?.children ?? []).find(element => element.id === destinationId) : undefined
-      const destination = windowPlacement?.destination ?? siblingHome ?? host.ownerDocument.getElementById(destinationId) ?? parentDocument.getElementById(destinationId) ?? document.getElementById(destinationId)
+      const destination = windowPlacement?.destination ?? siblingHome ?? host.ownerDocument.getElementById(destinationId) ?? parentDocument.getElementById(destinationId) ?? surfaceDocument.getElementById(destinationId) ?? document.getElementById(destinationId)
       if (!destination) return false
       if (host.parentElement !== destination) {
         // The pre-mutation owner protects same-document reading. This late
@@ -314,16 +316,31 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     if (!host.isConnected && parking.current) parking.current.append(host)
     if (attach()) return
     const observer = new MutationObserver(() => { if (attach()) observer.disconnect() })
-    observer.observe(document.body, { childList: true, subtree: true })
+    for (const doc of new Set([document, parentDocument, surfaceDocument, host.ownerDocument])) {
+      observer.observe(doc.body, { childList: true, subtree: true })
+    }
     return () => observer.disconnect()
   }) // The original layout can replace a slot without changing its exact address.
   useLayoutEffect(() => () => host.remove(), [host])
-  return <WorkbenchReadingSnapshot host={host} active={presentedActive} visible={presentedVisible}><WorkbenchDocumentContext.Provider value={documentContext}><WorkbenchPresentationContext.Provider value={presentation}>
+  const content = <WorkbenchDocumentContext.Provider value={documentContext}><WorkbenchPresentationContext.Provider value={presentation}>
     <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(<DesktopClientUiProvider document={hostDocument}><MotePresentationContext contextKey={moteContextKey} isolated={surface === 'mote'}>{children}</MotePresentationContext></DesktopClientUiProvider>, host)}
-    {windowPlacement && noticeHome ? createPortal(<div className="workbench-restore-notice" role="status">Original {kind === 'tab' ? 'Tab' : 'Region'} is in its independent window.
+    {windowPlacement && noticeHome ? createPortal(<div className="workbench-restore-notice" role="status">{originalTarget?.kind === 'surface' ? (originalTarget.surface === 'survey' ? 'Survey is open in its own window.' : 'Recall is open in its own window.') : `Original ${kind === 'tab' ? 'Tab' : 'Region'} is in its independent window.`}
       <button className="small-button" onClick={() => void focusWorkbenchWindow(windowPlacement.window)}>Show window</button>
-      <button className="small-button" onClick={() => void returnWorkbenchWindow(windowPlacement.window)}>{workbenchReturnLabel(windowPlacement.returnContext)}</button>
+      <button className="small-button" onClick={() => void returnWorkbenchWindow(windowPlacement.window)}>{originalTarget?.kind === 'surface' ? 'Return to main window' : workbenchReturnLabel(windowPlacement.returnContext)}</button>
       {originalTarget && workbenchDocumentIdentity(windowPlacement.destination.ownerDocument) === null ? <button className="small-button" onClick={() => void openWorkbenchWindow(originalTarget)}>Recover original window</button> : null}
     </div>, noticeHome) : targetId !== null && noticeHome && homeNotice ? createPortal(homeNotice, noticeHome) : null}
-  </WorkbenchPresentationContext.Provider></WorkbenchDocumentContext.Provider></WorkbenchReadingSnapshot>
+  </WorkbenchPresentationContext.Provider></WorkbenchDocumentContext.Provider>
+  // A whole surface stays in its own permanent slot until native transfer. Its
+  // cross-document move captures reading once, at attach, for the actual move.
+  if (originalTarget?.kind === 'surface') return content
+  return <WorkbenchReadingSnapshot host={host} active={presentedActive} visible={presentedVisible}>{content}</WorkbenchReadingSnapshot>
+}
+
+/** A knowledge surface keeps its mounted directory, editor and navigation owners across native windows. */
+export function WorkbenchSurfaceHost({ surface, homeId, visible, children }: {
+  surface: WorkbenchSurface; homeId: string; visible: boolean; children: ReactNode
+}) {
+  const target = useMemo(() => ({ kind: 'surface' as const, surface }), [surface])
+  return <StableWorkbenchView homeId={homeId} targetId={null} active={visible} visible={visible} retainedRegionId={null}
+    surface={surface} windowTarget={target}>{children}</StableWorkbenchView>
 }
