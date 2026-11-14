@@ -178,7 +178,7 @@ export class NodePublishingOwner implements NodePublishingPort {
             return { state: 'unavailable', code, message: 'This original Node measurement is unavailable.' };
         } };
         const publication = this.publication(state), landing = publication.landing;
-        const [system, cpu, memory, filesystem, own] = await Promise.all([
+        const [system, cpu, memory, filesystem, own, filesystemIo] = await Promise.all([
             read(() => ({ platform: platform(), architecture: arch(), uptimeSeconds: uptime() }), 'NODE_SYSTEM_UNAVAILABLE'),
             read(() => { const values = cpus(); if (!values.length)
                 throw new Error('No CPU counters'); return { logicalCpus: values.length, userMs: values.reduce((n, c) => n + c.times.user, 0), niceMs: values.reduce((n, c) => n + c.times.nice, 0), systemMs: values.reduce((n, c) => n + c.times.sys, 0), idleMs: values.reduce((n, c) => n + c.times.idle, 0), irqMs: values.reduce((n, c) => n + c.times.irq, 0), loadAverage: loadavg() as [
@@ -202,7 +202,12 @@ export class NodePublishingOwner implements NodePublishingPort {
                 await confirm();
                 return { root: landing?.root ?? null, totalBytes: fs.blocks * fs.bsize, availableBytes: Math.max(0, fs.bavail * fs.bsize) };
             }, 'NODE_FILESYSTEM_UNAVAILABLE'),
-            read(() => { const cpu = process.cpuUsage(), m = process.memoryUsage(); return { cpuUserMicros: cpu.user, cpuSystemMicros: cpu.system, rssBytes: m.rss, heapUsedBytes: m.heapUsed, heapTotalBytes: m.heapTotal, externalBytes: m.external, uptimeSeconds: process.uptime() }; }, 'NODE_PROCESS_UNAVAILABLE')
+            read(() => { const cpu = process.cpuUsage(), m = process.memoryUsage(); return { cpuUserMicros: cpu.user, cpuSystemMicros: cpu.system, rssBytes: m.rss, heapUsedBytes: m.heapUsed, heapTotalBytes: m.heapTotal, externalBytes: m.external, uptimeSeconds: process.uptime() }; }, 'NODE_PROCESS_UNAVAILABLE'),
+            read(() => {
+                const usage = process.resourceUsage();
+                if (![usage.fsRead, usage.fsWrite].every(n => Number.isSafeInteger(n) && n >= 0)) throw new Error('Invalid original I/O counters');
+                return { scope: platform() === 'win32' ? 'process-io' as const : 'filesystem' as const, readOperations: usage.fsRead, writeOperations: usage.fsWrite };
+            }, 'NODE_PROCESS_IO_UNAVAILABLE')
         ]);
         signal?.throwIfAborted();
         const after = await this.state();
@@ -210,7 +215,7 @@ export class NodePublishingOwner implements NodePublishingPort {
             return { node: this.node(after), policyRevision: after.revision, status: 'withheld' };
         if (!owner && after.revision !== state.revision)
             return denied('Node publication changed during this observation. Read the same Node again.', 'NODE_POLICY_CHANGED');
-        const sample: NodeResourceSample = { node, policyRevision, processId: process.pid, observedAt: Date.now(), system, cpu, memory, filesystem, process: own };
+        const sample: NodeResourceSample = { node, policyRevision, processId: process.pid, observedAt: Date.now(), system, cpu, memory, filesystem, process: own, filesystemIo };
         return { node, policyRevision, status: 'available', sample };
     }
     private async exclusions(state: State): Promise<string[]> {

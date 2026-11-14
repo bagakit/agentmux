@@ -100,6 +100,11 @@ export type AgentMuxRuntimeResourceSnapshot = {
   retainedOutputBytes: number
 }
 
+/** Original Core Store records, independent of Native availability or Provider activity. */
+export type AgentMuxAgentSessionResourceSnapshot = { observedAt: number; saved: number; retired: number }
+/** A Native inventory joined to current saved bindings, not a cross-owner atomic cut. */
+export type AgentMuxRunningSavedAgentResourceSnapshot = { observedAt: number; nativeObservedAt: number; nativeInstanceId: string; count: number }
+
 export type AgentSemanticState =
   | 'unknown'
   | 'working'

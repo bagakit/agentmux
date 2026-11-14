@@ -1148,6 +1148,11 @@ export class CtxmuxRunAdapter {
 
   /** Read thin public pages directly: resource observation never needs launch specs or status hydration. */
   async resourceSnapshot(options?: { signal?: AbortSignal }): Promise<AgentMuxRuntimeResourceSnapshot> {
+    return (await this.resourceInventory(options, false)).resources
+  }
+
+  /** Internal thin Native facts; only the semantic Client interprets Session bindings. */
+  async resourceInventory(options?: { signal?: AbortSignal }, retainRunningIds = true): Promise<{ resources: AgentMuxRuntimeResourceSnapshot; runningRunIds: readonly string[] }> {
     options?.signal?.throwIfAborted()
     const snapshot: AgentMuxRuntimeResourceSnapshot = {
       observedAt: unobservedTimestamp,
@@ -1158,6 +1163,7 @@ export class CtxmuxRunAdapter {
       attachments: 0,
       retainedOutputBytes: 0
     }
+    const runningRunIds: string[] = []
     try {
       const client = this.requireClient()
       let cursor: string | null = null
@@ -1167,7 +1173,7 @@ export class CtxmuxRunAdapter {
         options?.signal?.throwIfAborted()
         for (const run of page.runs) {
           snapshot.runCount += 1
-          if (run.state.type === 'running') snapshot.runningRuns += 1
+          if (run.state.type === 'running') { snapshot.runningRuns += 1; if (retainRunningIds) runningRunIds.push(run.id) }
           else {
             snapshot.terminatedRuns += 1
             if (run.attachments === 0) snapshot.terminatedUnattachedRuns += 1
@@ -1178,7 +1184,7 @@ export class CtxmuxRunAdapter {
         cursor = page.nextCursor
       } while (cursor !== null)
       snapshot.observedAt = Date.now()
-      return snapshot
+      return { resources: snapshot, runningRunIds }
     } catch (error) {
       throw translateCtxmuxError(error)
     }

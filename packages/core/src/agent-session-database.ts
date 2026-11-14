@@ -94,7 +94,7 @@ function closeAfterFailure(db: DatabaseSync, failure: unknown): never {
 }
 
 /** Current reads never take the old writer lock or read retained future bodies. */
-export async function readCurrentSessionDatabase(path: string): Promise<DatabaseSync | null> {
+export async function readCurrentSessionDatabase(path: string, options?: { readOnly?: boolean }): Promise<DatabaseSync | null> {
   const acknowledged = await marker(path)
   if (!(await prefix(path))?.equals(sqliteHeader)) {
     if (acknowledged !== null) throw new Error('The acknowledged Session database was removed or replaced. Restore its original file.')
@@ -104,7 +104,7 @@ export async function readCurrentSessionDatabase(path: string): Promise<Database
   // transaction in place; the next writer confirms the marker under the original lock.
   // Treating this file as legacy JSON would fabricate an empty salvage result.
   const { DatabaseSync } = await import('node:sqlite')
-  const db = new DatabaseSync(path)
+  const db = new DatabaseSync(path, { readOnly: options?.readOnly ?? false })
   try { db.exec('PRAGMA busy_timeout = 0'); validate(db, acknowledged); return db }
   catch (error) { return closeAfterFailure(db, error) }
 }

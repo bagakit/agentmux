@@ -4157,6 +4157,30 @@ export class AgentMuxClient {
     return await this.kernel.resourceSnapshot(options)
   }
 
+  /** Original committed records only. This observation does not require or prepare Native. */
+  async agentSessionResourceSnapshot(options?: { signal?: AbortSignal }): Promise<import('./types.js').AgentMuxAgentSessionResourceSnapshot> {
+    options?.signal?.throwIfAborted()
+    if (!this.store.agentSessionResourceCounts) throw new AgentMuxError('This original Store does not provide Agent counts.', 'AGENT_RESOURCE_UNAVAILABLE')
+    const counts = await this.store.agentSessionResourceCounts('local', options?.signal)
+    if (![counts.saved, counts.retired].every(n => Number.isSafeInteger(n) && n >= 0)) throw new AgentMuxError('Invalid original Agent counts.', 'AGENT_RESOURCE_UNAVAILABLE')
+    options?.signal?.throwIfAborted()
+    return { ...counts, observedAt: Date.now() }
+  }
+
+  /** One independent thin inventory; this reader never holds the Native-only or records source. */
+  async runningSavedAgentResourceSnapshot(options?: { signal?: AbortSignal }): Promise<import('./types.js').AgentMuxRunningSavedAgentResourceSnapshot> {
+    options?.signal?.throwIfAborted()
+    this.requireConnected()
+    if (!this.store.runningSavedAgentCount) throw new AgentMuxError('This original Store does not provide Agent counts.', 'AGENT_RESOURCE_UNAVAILABLE')
+    const original = this.kernel.identity().daemonInstanceId
+    const { resources, runningRunIds } = await this.kernel.resourceInventory(options)
+    const count = await this.store.runningSavedAgentCount('local', runningRunIds, options?.signal)
+    options?.signal?.throwIfAborted()
+    if (this.kernel.identity().daemonInstanceId !== original) throw new AgentMuxError('The original Native source changed during this count.', 'CTXMUX_DISCONNECTED')
+    if (!Number.isSafeInteger(count) || count < 0 || count > resources.runningRuns) throw new AgentMuxError('Invalid original Agent count.', 'AGENT_RESOURCE_UNAVAILABLE')
+    return { count, observedAt: Date.now(), nativeObservedAt: resources.observedAt, nativeInstanceId: original }
+  }
+
   /** Read bounded storage facts for the original Run through its public Native owner. */
   async observeRunStorage(run: AgentMuxRunRef): Promise<AgentMuxRunStorageObservation> {
     this.requireConnected()

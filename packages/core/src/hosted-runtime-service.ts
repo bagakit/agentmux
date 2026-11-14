@@ -350,7 +350,7 @@ export class AgentMuxHostedRuntimeService {
       invocation.method === 'inspectAgentSessionRecord' || invocation.method === 'deleteAgentSessionRecord')) invocation.args[1] = { signal: context.signal }
     if (context.signal && (invocation.method === 'readNativeAgentHistory' || invocation.method === 'readHostNativeAgentHistory' ||
       invocation.method === 'readNativeAgentHistoryResource' || invocation.method === 'readHostNativeAgentHistoryResource')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
-    if (context.signal && (invocation.method === 'clientPerformanceDiagnostics' || invocation.method === 'runtimeDiagnostics' || invocation.method === 'runtimeResourceSnapshot')) invocation.args[0] = { signal: context.signal }
+    if (context.signal && (invocation.method === 'clientPerformanceDiagnostics' || invocation.method === 'runtimeDiagnostics' || invocation.method === 'runtimeResourceSnapshot' || invocation.method === 'agentSessionResourceSnapshot' || invocation.method === 'runningSavedAgentResourceSnapshot')) invocation.args[0] = { signal: context.signal }
     if (invocation.method === 'sessionHistorySources') {
       if (invocation.args.length > 1) throw new AgentMuxError('Source observation accepts one exact optional scope.', 'INVALID_CONTROL_REQUEST')
       const scope = record(invocation.args[0] === undefined ? {} : invocation.args[0], ['agentSessionId'])

@@ -134,3 +134,5 @@ export async function observeHostRuntime(routeHostId: string,
     nativeIdentity, diagnostics: diagnosticSource, resources: resourceSource,
     ...(remoteTransport === undefined ? {} : { remoteTransport }) }, routeHostId)
 }
+
+export { source as parseHostRuntimeSource }

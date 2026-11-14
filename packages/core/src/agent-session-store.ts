@@ -210,6 +210,9 @@ export type AgentMuxMetadataTimelineResult =
   | { timelineFailure: unknown }
 
 export type AgentMuxAgentSessionStore = {
+  /** Optional read-only observation. Missing support never triggers Session hydration or repair. */
+  agentSessionResourceCounts?(hostId: string, signal?: AbortSignal): Promise<{ saved: number; retired: number }>
+  runningSavedAgentCount?(hostId: string, runningRunIds: readonly string[], signal?: AbortSignal): Promise<number>
   /** Exclusive in-flight Prompt orchestration; contention rejects without invoking operation. */
   withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T>
   /** Flush the current exact binding; reading bytes alone does not acknowledge persistence. */
@@ -2769,6 +2772,17 @@ type MemoryCapturedHistory = { stream: AgentCapturedTimelinePage['stream'];
   versions: AgentCapturedTimelinePage['records']; retirementAfterSequence?: number }
 
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
+  async agentSessionResourceCounts(hostId: string, signal?: AbortSignal): Promise<{ saved: number; retired: number }> {
+    signal?.throwIfAborted()
+    return { saved: [...this.sessions.values()].filter(s => s.hostId === hostId && s.creation?.persistence !== 'unconfirmed').length,
+      retired: this.retiredAgentSessions.filter(s => s.hostId === hostId && !s.recordDeletion).length }
+  }
+
+  async runningSavedAgentCount(hostId: string, runningRunIds: readonly string[], signal?: AbortSignal): Promise<number> {
+    signal?.throwIfAborted()
+    const running = new Set(runningRunIds)
+    return [...this.sessions.values()].filter(s => s.hostId === hostId && s.creation?.persistence !== 'unconfirmed' && running.has(s.run.runId)).length
+  }
   private readonly spawnQueryOwner = mintObjectId()
   private readonly promptSubmissions = new Set<string>()
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
@@ -3557,6 +3571,21 @@ type MetadataTimelineSettlement = { rolledBackCleanly: boolean; releaseFailure?:
 const CROSS_SESSION_WRITE = Symbol('cross-session-write')
 
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
+  async agentSessionResourceCounts(hostId: string, signal?: AbortSignal): Promise<{ saved: number; retired: number }> {
+    return await this.withReadDatabase(db => ({
+      saved: Number(db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE json_extract(json,'$.hostId')=? AND COALESCE(json_extract(json,'$.creation.persistence'),'')<>'unconfirmed'").get(hostId)!.n),
+      retired: Number(db.prepare("SELECT COUNT(*) AS n FROM retired_sessions WHERE json_extract(json,'$.hostId')=? AND json_extract(json,'$.recordDeletion') IS NULL").get(hostId)!.n)
+    }), () => { throw new AgentMuxError('Original Agent record counts are unavailable.', 'AGENT_RESOURCE_UNAVAILABLE') }, signal, 'observation')
+  }
+
+  async runningSavedAgentCount(hostId: string, runningRunIds: readonly string[], signal?: AbortSignal): Promise<number> {
+    return await this.withReadDatabase(db => {
+      const current = db.prepare("SELECT 1 FROM run_bindings b JOIN sessions s ON s.id=b.session_id WHERE b.run_id=? AND json_extract(s.json,'$.run.runId')=b.run_id AND json_extract(s.json,'$.hostId')=? AND COALESCE(json_extract(s.json,'$.creation.persistence'),'')<>'unconfirmed'")
+      let count = 0
+      for (const id of new Set(runningRunIds)) { signal?.throwIfAborted(); if (current.get(id, hostId)) count += 1 }
+      return count
+    }, () => { throw new AgentMuxError('Original running Agent count is unavailable.', 'AGENT_RESOURCE_UNAVAILABLE') }, signal, 'observation')
+  }
   private tail: Promise<void> = Promise.resolve()
   // Exact reads join preceding writes to their own Session, using the original
   // writer's settlement Promise. This index holds no metadata or receipt facts.
@@ -4590,15 +4619,17 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async withReadDatabase<T>(read: (db: DatabaseSync) => T,
-    rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal, committedOnly = false): Promise<T> {
+    rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal, committedOnly: boolean | 'observation' = false): Promise<T> {
     signal?.throwIfAborted()
     if (this.database && !committedOnly) return read(this.database)
     let db: DatabaseSync | null = null
     let failure: unknown
     try {
-      db = await whileBusy(() => readCurrentSessionDatabase(this.path), signal)
+      db = committedOnly === 'observation' ? await readCurrentSessionDatabase(this.path, { readOnly: true }) : await whileBusy(() => readCurrentSessionDatabase(this.path), signal)
       signal?.throwIfAborted()
       if (!db) {
+        // Metrics never initialize, convert, salvage or repair original user data.
+        if (committedOnly === 'observation') throw new AgentMuxError('The original committed Agent Store is unavailable for observation.', 'AGENT_RESOURCE_UNAVAILABLE')
         let raw: Buffer | undefined
         try { raw = await readFile(this.path, signal ? { signal } : undefined) } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -4620,14 +4651,16 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         if (!db) throw new AgentMuxError('Session persistence identity is unconfirmed; retry the original read.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
       }
       const reader = db
-      return await whileBusy(() => {
+      const consume = () => {
         try { reader.exec('BEGIN'); const result = read(reader); reader.exec('COMMIT'); return result }
         catch (error) {
           try { if (reader.isTransaction) reader.exec('ROLLBACK') }
           catch (cleanup) { throw sessionStorageFailure(error, 'read', [cleanup]) }
           throw error
         }
-      }, signal)
+      }
+      // A busy writer makes only this optional count unavailable, never a wait on its queue.
+      return committedOnly === 'observation' ? consume() : await whileBusy(consume, signal)
     } catch (error) {
       failure = signal?.aborted ? signal.reason : sessionStorageFailure(error, 'read')
       throw failure

@@ -156,6 +156,7 @@ import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryR
 import { parseAgentRestartInput } from './agent-session-recovery/restart-contract.js'
 import { parseAgentStopIdentity } from './agent-stop-receipt.js'
 import { observeHostRuntime, parseTailcatListenerObservation } from './host-runtime-observation.js'
+import { observeHostAgentResources } from './host-agent-resources.js'
 import { observeRead } from './observation-read.js'
 import { observeHostNetwork } from './host-network-observation.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
@@ -176,7 +177,10 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
+    readRuntimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['readRuntimeOwnerIdentity']
     remoteTransportObservation?: import('./hosted-client-contract.js').AgentMuxHostedClient['remoteTransportObservation']
+    agentSessionResourceSnapshot?: AgentMuxClient['agentSessionResourceSnapshot']
+    runningSavedAgentResourceSnapshot?: AgentMuxClient['runningSavedAgentResourceSnapshot']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
       Awaited<ReturnType<AgentMuxClient['handOff']>> | Promise<Awaited<ReturnType<AgentMuxClient['handOff']>>>
@@ -1408,7 +1412,7 @@ export class AgentMuxRpcService {
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)
-      if ((method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home') && !this.ports.coreClients && !this.local) throw new AgentMuxError(
+      if ((method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home' || method === 'settings.hosts.agent-resources') && !this.ports.coreClients && !this.local) throw new AgentMuxError(
         'No existing Host Runtime client is available to observe. This read did not start a Runtime.', 'CONTROL_UNAVAILABLE')
       if ((method === 'settings.hosts.trust-source' || method === 'settings.hosts.trust-message-source') &&
           (context.caller !== undefined || context.principal?.kind !== 'user')) {
@@ -1423,7 +1427,7 @@ export class AgentMuxRpcService {
       }
       if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       const client = targets[0]!.client
-      if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home') {
+      if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home' || method === 'settings.hosts.agent-resources') {
         const query = parseHostSettingsParams(method, params)
         const configuration = structuredClone(this.ports.hostConfiguration?.(input.hostId) ?? null)
         if (query.expected !== undefined && !(method === 'settings.hosts.home'
@@ -1444,7 +1448,9 @@ export class AgentMuxRpcService {
           return owner?.client === client ? (await owner.call('runtime.owner.identity', {})).owner : null
         }
         if (method === 'settings.hosts.network' && configuration === null) throw new AgentMuxError('The saved Host configuration is unavailable. No network probe was sent.', 'HOST_CONFIGURATION_CHANGED')
-        const result = method === 'settings.hosts.inspect'
+        const result = method === 'settings.hosts.agent-resources'
+          ? await observeHostAgentResources(parseHostSettingsParams('settings.hosts.agent-resources', params), client, readOwner, context.signal)
+          : method === 'settings.hosts.inspect'
           ? await observeHostRuntime(input.hostId, client, readOwner, context.signal, configuration)
           : await observeHostNetwork(input.hostId, configuration!, readOwner, async (fence, signal) => {
             // The aggregate authenticated its caller above. Only this fixed read

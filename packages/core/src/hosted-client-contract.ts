@@ -10,7 +10,7 @@ import type { AgentMuxHostedSession, AgentMuxHostedSessionProjection } from './h
 /** The finite SDK surface delegated by a Client to the single semantic Host. */
 export const AGENTMUX_HOSTED_METHODS = [
   'hostEnvironment',
-  'clientPerformanceDiagnostics', 'connectRuntime', 'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'readAgentStartupDiagnostic', 'findAgentStartupDiagnostics', 'inspectAgentPromptSubmission', 'readAgentInputActivity', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
+  'clientPerformanceDiagnostics', 'connectRuntime', 'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'readAgentStartupDiagnostic', 'findAgentStartupDiagnostics', 'inspectAgentPromptSubmission', 'readAgentInputActivity', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'agentSessionResourceSnapshot', 'runningSavedAgentResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
   'inspectAgentInput', 'inspectMoteInput', 'readAgentInputResource', 'readAgentInputMailbox', 'readAgentInputChanges', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting',
   'listHostExecutors', 'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory',
   'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource', 'configureHostExecutor', 'createHostAgentWithDelivery',
@@ -45,6 +45,8 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   readAgentInputActivity: 'runtime',
   runtimeDiagnostics: 'owner',
   runtimeResourceSnapshot: 'owner',
+  agentSessionResourceSnapshot: 'owner',
+  runningSavedAgentResourceSnapshot: 'owner',
   observeRunStorage: 'runtime',
   probeAgent: 'session-observation',
   probeExecutorAvailability: 'session-observation',
@@ -198,6 +200,8 @@ export type AgentMuxHostedClient<P extends AgentMuxHostedSessionProjection = 'fu
   onRunEvent<Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null
+  /** Exact control-plane identity; no Native, Session bootstrap or event lease is required. */
+  readRuntimeOwnerIdentity(options?: { signal?: AbortSignal }): Promise<AgentMuxRuntimeOwnerIdentity>
   remoteTransportObservation(): import('./remote-transport-observation.js').RemoteTransportObservation | null
   forwardRpc?: AgentMuxHostedForwardRpc
   subscribeRpc?: AgentMuxHostedSubscribeRpc

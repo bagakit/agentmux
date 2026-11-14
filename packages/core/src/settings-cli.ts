@@ -66,6 +66,16 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Rec
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['expected', 'candidate'].includes(key))) invalid('Host update input requires complete expected and candidate Host records.')
       return { ...body as Record<string, unknown>, id }
     }
+    if (action === 'agent-resources') {
+      const result: Record<string, unknown> = {}, seen = new Set<string>()
+      for (let i = 2; i < args.length; i += 2) {
+        const flag = args[i]!, value = args[i + 1]
+        if (!['--host', '--kind', '--expected-runtime'].includes(flag) || seen.has(flag) || !value?.length) invalid('Agent resources accepts one exact --host, --kind records|running and optional --expected-runtime.')
+        seen.add(flag); result[flag === '--host' ? 'hostId' : flag === '--kind' ? 'kind' : 'expectedRuntimeId'] = value
+      }
+      if (typeof result.hostId !== 'string' || result.kind !== 'records' && result.kind !== 'running') invalid('Choose one exact --host and --kind records|running.')
+      return result
+    }
     if ((action === 'inspect' || action === 'network' || action === 'home') && args.length === 4 && id === '--host' && args[3]?.length) {
       return { hostId: args[3] }
     }

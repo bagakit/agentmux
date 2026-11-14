@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import type { AgentMuxRuntimeIdentity, AgentMuxRuntimeDiagnostics, AgentMuxRuntimeResourceSnapshot } from './types.js'
+import type { AgentMuxRuntimeIdentity, AgentMuxRuntimeDiagnostics, AgentMuxRuntimeResourceSnapshot, AgentMuxAgentSessionResourceSnapshot } from './types.js'
 
 /** Shared leaves for public Runtime, Hosted and resource observations. */
 function invalid(): never { throw new AgentMuxError('Runtime observation is malformed.', 'CONTROL_PROTOCOL_ERROR') }
@@ -38,4 +38,16 @@ export function parseRuntimeResources(value: unknown): AgentMuxRuntimeResourceSn
   for (const key of ['observedAt', 'runCount', 'runningRuns', 'terminatedRuns', 'terminatedUnattachedRuns', 'attachments', 'retainedOutputBytes']) count(p[key])
   if ((p.runningRuns as number) + (p.terminatedRuns as number) !== p.runCount || (p.terminatedUnattachedRuns as number) > (p.terminatedRuns as number)) invalid()
   return value as AgentMuxRuntimeResourceSnapshot
+}
+
+export function parseAgentSessionResources(value: unknown): AgentMuxAgentSessionResourceSnapshot {
+  const p = record(value, ['observedAt', 'saved', 'retired'])
+  count(p.observedAt); count(p.saved); count(p.retired)
+  return value as AgentMuxAgentSessionResourceSnapshot
+}
+
+export function parseRunningSavedAgentResources(value: unknown): import('./types.js').AgentMuxRunningSavedAgentResourceSnapshot {
+  const p = record(value, ['observedAt', 'nativeObservedAt', 'nativeInstanceId', 'count'])
+  count(p.observedAt); count(p.nativeObservedAt); count(p.count); identity(p.nativeInstanceId)
+  return value as import('./types.js').AgentMuxRunningSavedAgentResourceSnapshot
 }

@@ -78,6 +78,12 @@ export type NodeResourceSample = {
     policyRevision: string;
     processId: number;
     observedAt: number;
+    /** Cumulative operations of this Core process; never transfer bytes or child-process work. */
+    filesystemIo?: NodeMetric<{
+        scope: 'filesystem' | 'process-io';
+        readOperations: number;
+        writeOperations: number;
+    }>;
     system: NodeMetric<{
         platform: string;
         architecture: string;
@@ -346,10 +352,14 @@ export function parseNodePublishingResult<M extends NodePublishingMethod>(method
             return { node, policyRevision, status: 'unavailable', code: text(p.code), message: text(p.message) } as NodePublishingResults[M];
         if (p.status !== 'available' || p.code !== undefined || p.message !== undefined)
             fail();
-        const v = rec(p.sample, ['node', 'policyRevision', 'processId', 'observedAt', 'system', 'cpu', 'memory', 'filesystem', 'process']);
+        const v = rec(p.sample, ['node', 'policyRevision', 'processId', 'observedAt', 'system', 'cpu', 'memory', 'filesystem', 'process', 'filesystemIo']);
         if (!same(identity(v.node), node) || v.policyRevision !== policyRevision || !Number.isSafeInteger(v.processId) || count(v.processId) < 1)
             fail();
         const sample: NodeResourceSample = { node, policyRevision, processId: v.processId as number, observedAt: count(v.observedAt),
+            ...(v.filesystemIo === undefined ? {} : { filesystemIo: metric(v.filesystemIo, p => {
+                if (p.scope !== 'filesystem' && p.scope !== 'process-io' || !Number.isSafeInteger(p.readOperations) || !Number.isSafeInteger(p.writeOperations)) fail();
+                return { scope: p.scope as 'filesystem' | 'process-io', readOperations: count(p.readOperations), writeOperations: count(p.writeOperations) };
+            }, ['scope', 'readOperations', 'writeOperations']) }),
             system: metric(v.system, p => ({ platform: text(p.platform), architecture: text(p.architecture), uptimeSeconds: count(p.uptimeSeconds) }), ['platform', 'architecture', 'uptimeSeconds']),
             cpu: metric(v.cpu, p => { if (!Array.isArray(p.loadAverage) || p.loadAverage.length !== 3 || !Number.isSafeInteger(p.logicalCpus) || count(p.logicalCpus) < 1)
                 fail(); return { logicalCpus: p.logicalCpus as number, userMs: count(p.userMs), niceMs: count(p.niceMs), systemMs: count(p.systemMs), idleMs: count(p.idleMs), irqMs: count(p.irqMs), loadAverage: (p.loadAverage as unknown[]).map(count) as [

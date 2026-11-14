@@ -202,7 +202,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   const invoke = async (method: AgentMuxHostedMethod, args: unknown[]): Promise<unknown> => {
     args = sanitizeInputObservationArguments(method, args)
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
-    const sourceSignal = method === 'sessionHistorySources' || method === 'runtimeDiagnostics' || method === 'runtimeResourceSnapshot'
+    const sourceSignal = method === 'sessionHistorySources' || method === 'runtimeDiagnostics' || method === 'runtimeResourceSnapshot' || method === 'agentSessionResourceSnapshot' || method === 'runningSavedAgentResourceSnapshot'
       ? (args[0] as { signal?: AbortSignal } | undefined)?.signal : undefined
     if (sourceSignal !== undefined && !isAbortSignal(sourceSignal)) throw new AgentMuxError('Source observation requires an AbortSignal.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
     sourceSignal?.throwIfAborted()
@@ -240,7 +240,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       if (isAbortSignal(cancellation)) signal = cancellation
       wireArgs = [scope, ...args.slice(1)]
     }
-    if (method === 'clientPerformanceDiagnostics' || method === 'runtimeDiagnostics' || method === 'runtimeResourceSnapshot') {
+    if (method === 'clientPerformanceDiagnostics' || method === 'runtimeDiagnostics' || method === 'runtimeResourceSnapshot' || method === 'agentSessionResourceSnapshot' || method === 'runningSavedAgentResourceSnapshot') {
       const options = args[0] as { signal?: AbortSignal } | undefined
       if (isAbortSignal(options?.signal)) { signal = options.signal; wireArgs = [] }
     }
@@ -720,6 +720,13 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   const client: Record<string, unknown> = {
     connect,
     runtimeOwnerIdentity: () => controlOwner ? structuredClone(controlOwner) : null,
+    readRuntimeOwnerIdentity: async (options?: { signal?: AbortSignal }) => {
+      options?.signal?.throwIfAborted()
+      await observeRead(connectControl(), options?.signal)
+      options?.signal?.throwIfAborted()
+      if (!controlOwner) throw new AgentMuxError('The original control owner is unavailable.', 'RUNTIME_OWNER_UNCONFIRMED')
+      return structuredClone(controlOwner)
+    },
     remoteTransportObservation: () => {
       const observation = rpc.remoteTransportObservation?.()
       return observation == null ? null : parseRemoteTransportObservation(observation)
