@@ -133,8 +133,8 @@ async function appMenu(missingPresentation = false) {
   await openPrimary(view.element, 'Focus')
   await wait(() => expect(view.element.querySelectorAll('.mobile-agent-row__open')).toHaveLength(rows.length))
   if (missingPresentation) {
-    const summary = [...view.element.querySelectorAll('summary')].find(node => node.textContent === '其他已有会话')!
-    await click(summary)
+    expect(view.element.querySelector('.mobile-focus-available')).not.toBeNull()
+    expect(view.element.querySelector('.mobile-focus-available')?.closest('details:not([open]),[hidden],[inert]')).toBeNull()
     await click(view.element.querySelector('.mobile-agent-row__more')!)
   } else await click(button(view.element, '原未知 Agent · 更多操作'))
   const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!

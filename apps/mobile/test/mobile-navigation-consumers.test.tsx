@@ -99,9 +99,10 @@ it('ignores unrelated Session and Run events and refreshes only the visible orig
 
 it('retains the actual SDK-only fallback row and original DOM across menu suspension and failed directory refreshes', async () => {
   const f = await app(false)
-  const list = [...f.element.querySelectorAll<HTMLElement>('details')].find(item => item.querySelector('summary')?.textContent === '其他已有会话')!
+  const list = f.element.querySelector<HTMLElement>('.mobile-focus-available')!
   expect(list).toBeDefined()
-  const row = [...list.querySelectorAll<HTMLLIElement>('li')].find(item => item.querySelector('.mobile-session-state small')?.textContent === 'Claude')!
+  expect(list.closest('details:not([open]),[hidden],[inert]')).toBeNull()
+  const row = [...list.querySelectorAll<HTMLLIElement>('li')].find(item => item.querySelector('.mobile-agent-row__open')?.textContent?.includes('Claude'))!
   expect(row).toBeDefined()
   const more = button(row, '名称未确认 · 更多操作'), open = row.querySelector<HTMLButtonElement>('.mobile-agent-row__open')!
   const beforeMenu = f.fullDirectory.mock.calls.length
@@ -111,10 +112,10 @@ it('retains the actual SDK-only fallback row and original DOM across menu suspen
   f.fullDirectory.mockImplementation(() => { throw new Error('SDK inventory temporarily unavailable') })
   f.failCatalog()
   await click(button(document.body, '关闭面板'))
-  await click(button(f.element, '刷新空间目录'))
+  await click(button(f.element, '重新读取 Focus'))
   expect(list.contains(row)).toBe(true); expect(row.querySelector('.mobile-agent-row__open')).toBe(open)
   await click(f.element.querySelector('.mobile-directory-notice')!)
-  expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('对话信息暂时读不到')
+  expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('会话目录暂时读不到')
   expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('original catalog unavailable')
   await click(button(document.body, '关闭目录信息'))
   await click(open)

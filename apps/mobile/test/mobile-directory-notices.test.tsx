@@ -60,6 +60,7 @@ it.each(['focus', 'mote', 'space'] as const)('keeps %s issues in the actual App 
   await click(button(directoryDialog(), '重新读取目录'))
   expect(f.rpc).toHaveBeenCalledTimes(before + 1)
   expect(f.rpc.mock.calls.at(-1)).toEqual(['space.ls', { target: {}, presentation: true }])
+  expect(directoryDialog(), 'The original directory sheet remains open after the failed reread').not.toBeNull()
   expect(directoryDialog().textContent).toContain('本次目录读取失败 [READ_FAILED]')
   expect(directoryDialog().textContent).toContain(originalReason)
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')

@@ -5,6 +5,6 @@ export const directoryNoticeMutations = {
   'lost-session-diagnostic': { file: 'apps/mobile/src/conversation/MobileConversationStatus.tsx',
     before: 'return <section className="mobile-session-diagnostic"',
     after: 'return <section hidden className="mobile-session-diagnostic"', target: 'scopes missing selected-session metadata' },
-  'no-directory-refresh': { file: 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', before: 'onClick={retry}', after: 'onClick={() => {}}', target: 'keeps focus issues' },
+  'no-directory-refresh': { file: 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', before: 'className="mobile-text-button mobile-directory-retry" onClick={retry}', after: 'className="mobile-text-button mobile-directory-retry" onClick={() => {}}', target: 'keeps focus issues' },
   'lost-directory-reason': { file: 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', before: '<p>{issue.message}</p>', after: '<p>资料未确认</p>', target: 'keeps focus issues' }
 }
