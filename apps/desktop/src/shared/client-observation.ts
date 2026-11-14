@@ -136,7 +136,10 @@ export function parseDesktopClientObservation(value: unknown): DesktopClientObse
 // Auxiliary payloads are observations, not installation or Run-preservation authority.
 // Retain them verbatim; all facts used by the installer keep their original strict schema.
 const desktopInstallObservationSchema = desktopClientObservationSchema.extend({
-  workbench: desktopWorkbenchObservationSchema.extend({ startupAgentAvailability: z.unknown().optional(), desktop: z.unknown() })
+  workbench: desktopWorkbenchObservationSchema.extend({ startupAgentAvailability: z.unknown().optional(), desktop: z.unknown(),
+    // A producer may observe the Survey without observing its page references yet.
+    // Keep that subfield absent; provided references and all other Survey facts stay strict.
+    survey: survey.extend({ pageReferences: survey.shape.pageReferences.optional() }).optional() })
 })
 export function parseDesktopClientObservationForInstall(value: unknown) {
   return desktopInstallObservationSchema.parse(value)
