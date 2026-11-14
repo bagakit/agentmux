@@ -286,7 +286,7 @@ type PresentationCapture = {
   trackIds: readonly string[] | null
 }
 
-type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep; dialogPrompt?: string }
+type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep; dialogPrompt?: string; authorize?: () => Promise<void> }
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 const BROWSER_DOCUMENT_PAGE_CALLS = new Set(BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
@@ -3362,9 +3362,10 @@ export class BrowserViewManager {
       runTask: async (input, execution) => {
         await authorize(input.browserId, execution.profileId)
         await this.prepareTaskTarget?.(input.browserId, execution.profileId)
+        await authorize(input.browserId, execution.profileId)
         const entry = this.require(input.browserId)
         if (entry.storage.mode !== 'normal' || entry.storage.profileId !== execution.profileId) throw new Error('This target no longer has its explicitly selected Profile. Its page was retained and no task action was sent.')
-        return await this.executeTaskAsset(input, intent, undefined, execution)
+        return await this.executeTaskAsset(input, intent, undefined, execution, () => authorize(input.browserId, execution.profileId))
       }
     })
   }
@@ -3546,7 +3547,7 @@ export class BrowserViewManager {
     return await this.executeTaskAsset(input, 'control')
   }
 
-  private async executeTaskAsset(input: BrowserTaskAssetRunInput, intent: 'human' | 'control', budget?: BrowserTaskRunBudget, parallel?: BrowserTaskParallelExecution): Promise<BrowserTaskAssetRun> {
+  private async executeTaskAsset(input: BrowserTaskAssetRunInput, intent: 'human' | 'control', budget?: BrowserTaskRunBudget, parallel?: BrowserTaskParallelExecution, authorize?: () => Promise<void>): Promise<BrowserTaskAssetRun> {
     const entry = this.require(input.browserId)
     const view = entry.view
     const controlRevision = entry.controlRevision
@@ -3601,7 +3602,12 @@ export class BrowserViewManager {
           if (this.entries.get(id) !== entry) throw new Error('The original Browser owner is unavailable; the task was not replayed.')
           if (parallel && (entry.storage.mode !== 'normal' || entry.storage.profileId !== parallel.profileId || !this.owns(entry, view))) throw new Error('The original execution Profile or native page changed; no action was sent to its replacement.')
           if (!execution.runId) throw new Error('The task cursor is unavailable; the action was not restarted.')
-          const taskPage: BrowserTaskPageExecution = { cursor: { ...cursor } }
+          const authorizePage = async () => {
+            await authorize?.()
+            if (parallel && (entry.storage.mode !== 'normal' || entry.storage.profileId !== parallel.profileId || !this.owns(entry, view))) throw new Error('The original execution Profile or native page changed; no action was sent to its replacement.')
+          }
+          await authorizePage()
+          const taskPage: BrowserTaskPageExecution = { cursor: { ...cursor }, ...(authorize ? { authorize: authorizePage } : {}) }
           try {
             return await this.runScript(id, code, undefined, undefined, undefined, async operation => {
               execution.operationId = operation.id
@@ -4046,7 +4052,9 @@ export class BrowserViewManager {
           // navigate effect) may already have changed it, by input or by script, so its effect is unknown;
           // only a read-only call can say nothing reached the page.
           const changesPage = BROWSER_ACTION_PAGE_CALLS.has(name)
-          const call = () => dispatch(name, args, { beforeAction: () => beforeAction(step),
+          const call = async () => {
+            await taskPage?.authorize?.()
+            return dispatch(name, args, { beforeAction: () => beforeAction(step),
             recordTarget: (target, endpoint) => recordBrowserOperationTarget(step, target, endpoint),
             ...(feedback && action !== undefined && (name === 'click' || name === 'download') ? {
               dispatched: () => feedback.clickConfirmed(action)
@@ -4056,6 +4064,7 @@ export class BrowserViewManager {
               await feedback.showTarget(node, send, action)
               beforeAction(step)
             } } : {}) })
+          }
           // An answer is not raced: the page may open its next dialog before the answer's reply arrives.
           const decision = name === 'click' ? taskPage?.step?.dialog : undefined
           const dialogNavigationId = entry.navigationId

@@ -35,6 +35,9 @@ export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
 type SubflowFrame = { sourceBrowserId: string; parent: BrowserTaskRunParent; rootId: string; depth: number; limits: { operations: number; timeMillis: number }; navigationGuard?: { runId: string; stepId: string; navigationId: string } }
 type TaskBrowserLease = { batchId?: string; parallelId?: string; target?: BrowserTaskParallelRecord['targets'][number]; sourceBrowserId?: string; observedStatus?: BrowserTaskAssetRun['status'] }
 type ActiveTaskParallel = { record: BrowserTaskParallelRecord; input: BrowserTaskParallelInput; host: BrowserTaskParallelHost; targets: Set<string>; finishing: boolean }
+function parallelResultStatus(counts: BrowserTaskParallelCounts): BrowserTaskAssetRun['status'] {
+  return counts.waitingHuman ? 'waiting-human' : counts.ready ? 'ready' : counts.interrupted ? 'interrupted' : counts.failed ? 'failed' : counts.stopped ? 'stopped' : 'completed'
+}
 const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
 const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'upload', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll', 'drag', 'tap', 'longPress', 'swipe', 'pinch', 'subflow']
@@ -92,6 +95,10 @@ export class BrowserTaskAssets {
   private indexedRuns: BrowserTaskAssetRun[] | undefined
   private readonly runIndex = new Map<string, BrowserTaskAssetRun>()
   private indexedRunCount = 0
+  private indexedParallel: BrowserTaskParallelRecord[] | undefined
+  private indexedParallelCount = 0
+  private readonly parallelIndex = new Map<string, BrowserTaskParallelRecord>()
+  private readonly unconfirmedParallel = new Set<string>()
   private readonly listeners = new Set<(browserId: string) => void | Promise<void>>()
   private readonly now: () => number
   private readonly id: () => string
@@ -110,6 +117,17 @@ export class BrowserTaskAssets {
     }
     return id === undefined ? undefined : this.runIndex.get(id)
   }
+  /** Derived references to original mutable records; warm exact reads never traverse unrelated operations. */
+  private findParallel(id: string | undefined): BrowserTaskParallelRecord | undefined {
+    const records = this.document.parallel
+    if (this.indexedParallel !== records || this.indexedParallelCount > (records?.length ?? 0)) {
+      this.indexedParallel = records; this.indexedParallelCount = 0; this.parallelIndex.clear()
+    }
+    while (this.indexedParallelCount < (records?.length ?? 0)) {
+      const record = records![this.indexedParallelCount++]!; this.parallelIndex.set(record.operationId, record)
+    }
+    return id === undefined ? undefined : this.parallelIndex.get(id)
+  }
   private allocateId(): string {
     let id: string
     do { id = identity(this.id()) } while (this.document.assets.some(asset => asset.id === id) ||
@@ -124,7 +142,7 @@ export class BrowserTaskAssets {
   }
   async state(browserId?: string): Promise<BrowserTaskAssetState> {
     await this.ready()
-    const selectedParallel = browserId ? this.document.parallel?.find(record => record.operationId === this.document.selectedParallel?.find(item => item.browserId === browserId)?.operationId) : undefined
+    const selectedParallel = browserId ? this.findParallel(this.document.selectedParallel?.find(item => item.browserId === browserId)?.operationId) : undefined
     return copy({
       ...(browserId ? { parallel: selectedParallel ? this.parallelSummary(selectedParallel) : null } : {}),
       assets: this.document.assets.filter(asset => !browserId || asset.browserId === browserId),
@@ -855,7 +873,7 @@ export class BrowserTaskAssets {
       const asset = this.requireAsset(assetId), version = asset.versions.find(item => item.version === versionNumber)
       if (asset.browserId !== browserId || !version) throw new Error('The exact source task version is unavailable in this Browser library.')
       validateBrowserTaskPath(version.steps); this.subflowDepth(browserId, version.steps)
-      const previous = this.document.parallel?.find(record => record.operationId === input.operationId)
+      const previous = this.findParallel(input.operationId)
       const intent = { browserId, assetId, version: versionNumber, requestedConcurrency: input.concurrency ?? 2,
         targets: input.targets.map(({ id, browserId, profileId }) => ({ id, browserId, profileId })) }
       if (previous) {
@@ -867,6 +885,7 @@ export class BrowserTaskAssets {
         concurrency: Math.min(intent.requestedConcurrency, input.targets.length, this.parallelCapacity()),
         status: 'running', startedAt: this.now(), updatedAt: this.now(), targets: intent.targets.map(target => ({ ...target, phase: 'queued' })) }
       this.document.parallel = [...(this.document.parallel ?? []), record]
+      this.unconfirmedParallel.add(record.operationId)
       this.document.selectedParallel = [...(this.document.selectedParallel ?? []).filter(item => item.browserId !== browserId), { browserId, operationId: record.operationId }]
       try { await this.persist(browserId) }
       catch {
@@ -900,8 +919,8 @@ export class BrowserTaskAssets {
     if (this.loadUnavailable) throw new AgentMuxError(this.warning ?? 'Original task records are unavailable.', 'BROWSER_TASK_RUNS_UNAVAILABLE')
     const selected = operationId ?? this.document.selectedParallel?.find(item => item.browserId === browserId)?.operationId
     if (!selected) return null
-    const record = this.document.parallel?.find(record => record.operationId === selected && record.browserId === browserId)
-    if (!record) throw new AgentMuxError('This original task execution is unavailable in the source Browser library.', 'BROWSER_TASK_PARALLEL_NOT_FOUND')
+    const record = this.findParallel(selected)
+    if (!record || record.browserId !== browserId) throw new AgentMuxError('This original task execution is unavailable in the source Browser library.', 'BROWSER_TASK_PARALLEL_NOT_FOUND')
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw new Error('Task execution page size must be 1–64.')
     const index = after === undefined ? -1 : record.targets.findIndex(target => target.id === after)
     if (after !== undefined && index < 0) throw new Error('The target page boundary does not belong to this original execution.')
@@ -954,7 +973,9 @@ export class BrowserTaskAssets {
       if (run) counts[run.status === 'waiting-human' ? 'waitingHuman' : run.status] += 1
       else counts[target.phase === 'failed' ? 'failed' : target.phase === 'preparing' ? 'preparing' : 'queued'] += 1
     }
-    return { operationId: record.operationId, browserId: record.browserId, assetId: record.assetId, version: record.version, status: record.status,
+    const settled = !this.activeParallel.has(record.operationId) && !counts.queued && !counts.preparing
+    const status = record.status === 'stopped' || !settled ? record.status : parallelResultStatus(counts)
+    return { operationId: record.operationId, browserId: record.browserId, assetId: record.assetId, version: record.version, status,
       targetCount: record.targets.length, concurrency: record.concurrency, requestedConcurrency: record.requestedConcurrency, counts,
       startedAt: record.startedAt, updatedAt: record.updatedAt, admission: this.confirmedParallel.has(record.operationId) ? 'confirmed' : 'unknown',
       ...(record.warning || this.warning ? { warning: record.warning ?? this.warning! } : {}) }
@@ -1011,7 +1032,7 @@ export class BrowserTaskAssets {
     context.finishing = true
     void this.change(async () => {
       const summary = this.parallelSummary(context.record), counts = summary.counts
-      context.record.status = counts.waitingHuman ? 'waiting-human' : counts.ready ? 'ready' : counts.interrupted ? 'interrupted' : counts.failed ? 'failed' : counts.stopped ? 'stopped' : 'completed'
+      context.record.status = parallelResultStatus(counts)
       context.record.updatedAt = this.now()
       try { await this.persist(context.record.browserId) } catch { if (this.warning) context.record.warning = this.warning }
     }).finally(() => { this.activeParallel.delete(context.record.operationId); this.pumpParallel() })
@@ -1186,7 +1207,7 @@ export class BrowserTaskAssets {
       batch.operationCount = related.reduce((sum, run) => sum + run.operationIds.length, 0)
       batch.executedMillis = related.reduce((sum, run) => sum + (run.executedMillis ?? 0), 0)
     }
-    try { await this.store.save(copy(this.document)); this.warning = undefined; for (const record of this.document.parallel ?? []) this.confirmedParallel.add(record.operationId) }
+    try { await this.store.save(copy(this.document)); this.warning = undefined; for (const id of this.unconfirmedParallel) this.confirmedParallel.add(id); this.unconfirmedParallel.clear() }
     catch {
       this.warning = 'Task assets could not be saved. The live draft and previous Browser work remain; restore storage before executing another step.'
       throw new Error(this.warning)
