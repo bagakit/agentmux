@@ -32,7 +32,18 @@ async function fixture() {
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const h = await connectedClient(undefined, 'codex', 'metadata-native')
-  closes.push(async () => { await h.client.dispose(); await (h.client as any).startupDiagnostics.dispose() })
+  const journalReads = new Set<Promise<unknown>>(), queue = (h.client as any).messageQueue
+  const messageChanges = queue.messageChanges.bind(queue)
+  vi.spyOn(queue, 'messageChanges').mockImplementation((...args: any[]) => {
+    const pending = messageChanges(...args); journalReads.add(pending)
+    void pending.then(() => journalReads.delete(pending), () => journalReads.delete(pending))
+    return pending
+  })
+  closes.push(async () => {
+    await h.client.dispose()
+    while (journalReads.size) await Promise.allSettled([...journalReads])
+    await (h.client as any).startupDiagnostics.dispose()
+  })
   vi.spyOn(h.client, 'connect').mockResolvedValue()
   const provider = h.client.providers.get('codex')
   provider.planPromptInput = prompt => ({ kind: 'single-phase', data: prompt + '\r' })
@@ -51,9 +62,14 @@ async function fixture() {
   closes.push(() => service.dispose())
   const wire = (value: unknown) => JSON.parse(JSON.stringify(value))
   const pending = new Set<Promise<unknown>>()
+  let metadataBarrier: ReturnType<typeof deferred<void>> | null = null
   async function tracked<T>(value: Promise<T>): Promise<T> { pending.add(value); try { return await value } finally { pending.delete(value) } }
   const port = {
-    call: (method: string, params: unknown, options?: { signal?: AbortSignal }) => tracked(service.call(method, wire(params), options).then(wire)),
+    call: (method: string, params: unknown, options?: { signal?: AbortSignal }) => tracked((async () => {
+      const value = await service.call(method, wire(params), options)
+      if (method === 'runtime.invoke' && (params as any)?.invocation?.method === 'readAgentSession') await metadataBarrier?.promise
+      return wire(value)
+    })()),
     subscribe: (method: string, params: unknown, handlers: any) => tracked((async () => {
       const stream = await service.subscribe(method, wire(params), event => handlers.onEvent(wire(event)), { signal: handlers.signal })
       handlers.onInitial(wire(stream.initial)); await stream.start?.(); return { dispose: () => stream.dispose() }
@@ -61,11 +77,15 @@ async function fixture() {
   } as AgentMuxHostedRpcPort
   const client = await connectHostedAgentMux({ rpc: port })
   closes.push(async () => { await client.dispose(); while (pending.size) await Promise.allSettled([...pending]) })
+  closes.push(async () => { metadataBarrier?.resolve(); metadataBarrier = null })
   const read = vi.spyOn(h.client, 'readAgentSession'), inventory = vi.spyOn(h.client, 'readAgentSessions')
   const submit = vi.spyOn(h.client, 'submitAgentPrompt'), resume = vi.spyOn(h.client, 'ensureAgentContinuity'), stop = vi.spyOn(h.client, 'stopAgent')
   // Failure injection belongs only to the synchronous SDK cache, never a business owner.
   vi.spyOn(client, 'agentSession').mockImplementation(() => { throw new Error('Controlled SDK cache miss') })
-  return { ...h, core: h.client, client, read, inventory, submit, resume, stop }
+  return { ...h, core: h.client, client, read, inventory, submit, resume, stop, holdMetadata() {
+    const held = deferred<void>(); metadataBarrier = held
+    return () => { held.resolve(); if (metadataBarrier === held) metadataBarrier = null }
+  } }
 }
 
 type Observation = { reading: ReturnType<typeof useHostedConversation>; prompt: ReturnType<typeof useMobilePromptController> }
@@ -102,6 +122,18 @@ it('cache-miss active metadata reaches the exact Hosted/Core owner and sends one
   expect(f.submit).toHaveBeenCalledOnce()
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ agentSessionId: sid, expectedRun: { runId: RUN_ID }, execution: 'immediate', admissionIntent: { kind: 'manual-actor' } })
   expect(f.resume).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  const release = f.holdMetadata()
+  await act(async () => view.observation().prompt.setDraft('Unsent draft before its reader closes'))
+  const before = f.read.mock.calls.length
+  let sending!: Promise<void>
+  await act(async () => { sending = view.observation().prompt.submit() })
+  await wait(() => expect(f.read.mock.calls.length).toBeGreaterThan(before))
+  const index = mounted.findIndex(item => item.element === view.element), originalView = mounted.splice(index, 1)[0]!
+  await act(async () => originalView.root.unmount()); view.element.remove()
+  await act(async () => { release(); await sending })
+  expect(f.submit).toHaveBeenCalledOnce()
+  expect(f.writes.join('')).not.toContain('Unsent draft before its reader closes')
+  expect(getDeviceWorkface().snapshot().record.conversation.drafts).toContainEqual([JSON.stringify(['draft', sid]), 'Unsent draft before its reader closes'])
 })
 
 it('retired exact descriptors preserve original history and draft without sending or reopening the isolated Session', async () => {
@@ -157,18 +189,17 @@ it('explicit metadata refresh while parked clears only the resolved metadata iss
   expect(view.observation().prompt.draft).toBe('Later draft during metadata failure')
   expect(f.inventory).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
   expect(f.resume).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
-  // Keep the real metadata owner; delay its leaf while the same SDK object
+  // Keep the real metadata owner; delay its transport reply while the same SDK object
   // observes a different Core instance. No old completion may be accepted there.
-  const owner = f.client.runtimeOwnerIdentity()!, held = deferred<void>()
+  const owner = f.client.runtimeOwnerIdentity()!, release = f.holdMetadata()
   let observedOwner = owner
   vi.spyOn(f.client, 'runtimeOwnerIdentity').mockImplementation(() => observedOwner)
-  vi.mocked(f.store.readMetadata).mockImplementationOnce(async id => { await held.promise; return normalRead(id) })
   const priorMetadata = view.observation().reading.metadata, beforeLateRead = f.read.mock.calls.length
   let checking!: Promise<void>
   await act(async () => { checking = view.observation().reading.refresh() })
   await wait(() => expect(f.read.mock.calls.length).toBeGreaterThan(beforeLateRead))
   observedOwner = { ...owner, ownerInstanceId: 'isolated-replacement-instance' }
-  await act(async () => { held.resolve(); await checking })
+  await act(async () => { release(); await checking })
   expect(view.observation().reading.metadata).toBe(priorMetadata)
   expect(view.observation().prompt.draft).toBe('Later draft during metadata failure')
   observedOwner = owner
