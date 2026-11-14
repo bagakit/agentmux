@@ -1382,11 +1382,14 @@ it.runIf(business)('Topic and Mote mutations use their own directory when the co
   f.store.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, workspace] },
     scratchTopicSnapshots: { [workspace.id]: { scope: JSON.stringify([workspace.hostId, workspace.path]), revision: 1, topics: [a, b], error: null, reading: false } },
     sourceFilesInputs: { ...state.sourceFilesInputs, selections: { [workspace.id]: common } } }))
+  const invalidate = vi.fn(f.store.getState().invalidateScratchTopicPaths)
+  f.store.setState({ invalidateScratchTopicPaths: invalidate })
   const app = f.store.getState()
-  await app.createPath({ kind: 'file', path: first + '/new.txt' }, workspace.id)
+  await app.createPath({ kind: 'file', path: first + '/new.txt' }, workspace.id, first)
   expect(await readFile(join(aPath, 'new.txt'), 'utf8')).toBe('')
+  expect(invalidate).toHaveBeenCalledWith(workspace.id, [first + '/new.txt'], true)
   await expect(stat(join(bPath, 'new.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
-  await expect(app.renamePath(first + '/entry.txt', second + '/moved.txt', workspace.id)).rejects.toThrow('original Topic directory')
+  await expect(app.renamePath(first + '/entry.txt', second + '/moved.txt', workspace.id, first)).rejects.toThrow('original Topic directory')
   const target = { zoneId: (await import('@agentmux/host/topic-categories')).topicContentZoneId(workspace, a), path: 'entry.txt',
     expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } }
   const original = await f.source.rpc.call('file.read', target)
@@ -1396,12 +1399,12 @@ it.runIf(business)('Topic and Mote mutations use their own directory when the co
   f.store.setState(state => ({ documents: { ...state.documents, [key]: { ...baseline,
     path: first + '/entry.txt', content: 'unsaved first draft' } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: true } }))
-  await app.renamePath(first + '/entry.txt', first + '/moved.txt', workspace.id)
+  await app.renamePath(first + '/entry.txt', first + '/moved.txt', workspace.id, first)
   expect(f.store.getState().documents[movedKey]).toMatchObject({ content: 'unsaved first draft' })
   expect(f.store.getState().documents[movedKey]?.readSource).toBeUndefined()
   expect(await readFile(join(aPath, 'moved.txt'), 'utf8')).toBe('the first original')
   expect(await readFile(join(bPath, 'entry.txt'), 'utf8')).toBe('the second original')
-  await app.deletePath(first + '/moved.txt', workspace.id)
+  await app.deletePath(first + '/moved.txt', workspace.id, first)
   expect(f.store.getState().documentIssues[movedKey]?.kind).toBe('deleted')
   expect(f.store.getState().documents[movedKey]?.content).toBe('unsaved first draft')
   await expect(stat(join(aPath, 'moved.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -1415,12 +1418,12 @@ it.runIf(business)('Topic and Mote mutations use their own directory when the co
     if (method === 'file.mkdir' && loseReply) { loseReply = false; throw new Error('Original reply unavailable') }
     return response
   })
-  await expect(app.createPath({ kind: 'directory', path: first + '/result' }, workspace.id)).rejects.toThrow('Original reply unavailable')
+  await expect(app.createPath({ kind: 'directory', path: first + '/result' }, workspace.id, first)).rejects.toThrow('Original reply unavailable')
   const [operationId, held] = Object.entries(f.store.getState().sourceFilesInputs.pending)[0]!
   expect(held.request.expectedResource.path).toBe(first + '/result')
-  await app.createPath({ kind: 'directory', path: second + '/result' }, workspace.id)
-  await app.createPath({ kind: 'directory', path: first + '/other' }, workspace.id)
-  await expect(app.createPath({ kind: 'directory', path: first + '/result' }, workspace.id)).rejects.toThrow('retained original request')
+  await app.createPath({ kind: 'directory', path: second + '/result' }, workspace.id, second)
+  await app.createPath({ kind: 'directory', path: first + '/other' }, workspace.id, first)
+  await expect(app.createPath({ kind: 'directory', path: first + '/result' }, workspace.id, first)).rejects.toThrow('retained original request')
   expect(await Promise.all([aPath, bPath].map(async path => (await stat(join(path, 'result'))).isDirectory()))).toEqual([true, true])
   await app.inspectFilesMutation(operationId)
   const inspected = vi.mocked(call).mock.settledResults.at(-1)
@@ -1428,19 +1431,40 @@ it.runIf(business)('Topic and Mote mutations use their own directory when the co
   expect(f.store.getState().sourceFilesInputs.pending[operationId]?.request).toEqual(held.request)
   expect(f.store.getState().sourceFilesInputs.selections[workspace.id]).toBe(common)
   expect(vi.mocked(call).mock.calls.filter(([, method]) => method === 'file.mkdir')).toHaveLength(3)
+  // A Source may contain an ordinary folder whose name happens to look like this Mote's address.
+  await connectFolder(f)
+  const otherSource = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!
+  f.store.setState(state => ({ sourceFilesInputs: { ...state.sourceFilesInputs, selections: { ...state.sourceFilesInputs.selections,
+    [workspace.id]: { ...otherSource, workspace } } } }))
+  const mainFile = await f.source.rpc.call('file.read', { ...target, path: 'new.txt' })
+  if (mainFile.result.status !== 'read') throw new Error('The Main draft baseline is required')
+  const mainKey = workspace.id + '\0' + first + '/new.txt', mainDraft = { ...mainFile.result.document, path: first + '/new.txt', content: 'Kept Main draft' }
+  f.store.setState(state => ({ documents: { ...state.documents, [mainKey]: mainDraft }, dirtyDocuments: { ...state.dirtyDocuments, [mainKey]: true } }))
+  await mkdir(join(f.source.project, first))
+  invalidate.mockClear()
+  await app.createPath({ kind: 'file', path: first + '/new.txt' }, workspace.id)
+  await writeFile(join(f.source.project, first, 'new.txt'), 'Source file')
+  await app.renamePath(first + '/new.txt', first + '/source.txt', workspace.id)
+  expect(await readFile(join(f.source.project, first, 'source.txt'), 'utf8')).toBe('Source file')
+  await app.deletePath(first + '/source.txt', workspace.id)
+  expect(invalidate).not.toHaveBeenCalled()
+  expect(f.store.getState().documents[mainKey]).toBe(mainDraft)
+  expect(f.store.getState().documentIssues[mainKey]).toBeUndefined()
+  expect(await readFile(join(aPath, 'new.txt'), 'utf8')).toBe('')
+  await expect(stat(join(aPath, 'source.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+
 }, 60000)
 
 it.runIf(business)('a pending file move serializes saves only inside its own Topic', async () => {
   const { fileMutationTail, withWorkspaceFileMutation } = await import('../src/renderer/src/lib/file-document-bookkeeping')
   const { scratchTopicDirectoryName } = await import('@agentmux/host/mote-model')
-  const paths = [mintObjectId(), mintObjectId()].map(id => scratchTopicDirectoryName(id) + '/entry.txt')
-  const [a, b] = paths as [string, string]
+  const first = scratchTopicDirectoryName(mintObjectId()), second = scratchTopicDirectoryName(mintObjectId())
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
-  const operation = withWorkspaceFileMutation('__scratch__', a, () => gate)
+  const operation = withWorkspaceFileMutation('__scratch__', first + '/entry.txt', () => gate, first)
   let waiting = true, independent = false
-  const same = fileMutationTail('__scratch__', a).then(() => { waiting = false })
-  const other = fileMutationTail('__scratch__', b).then(() => { independent = true })
+  const same = fileMutationTail('__scratch__', first).then(() => { waiting = false })
+  const other = fileMutationTail('__scratch__', second).then(() => { independent = true })
   try {
     await Promise.resolve()
     expect(independent).toBe(true)
