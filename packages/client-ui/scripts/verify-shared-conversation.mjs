@@ -8,9 +8,11 @@ import ts from 'typescript'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const sourceRoot = resolve(root, 'packages/client-ui/src')
-const evidenceRoot = resolve(root, '.tmp/agentmux-private-mobile-client/shared-ui')
+const interactionReceipts = process.argv.includes('--interaction-receipts')
+const evidenceRoot = resolve(root, '.tmp/agentmux-private-mobile-client/shared-ui', ...(interactionReceipts ? ['interaction-receipts'] : []))
 const mutationAndCallers = process.argv.includes('--mutation-and-callers')
 const log = []
+assert.ok(!interactionReceipts || mutationAndCallers, 'Original interaction receipts require the mutation-and-callers proof')
 const sha = source => createHash('sha256').update(source).digest('hex')
 async function files(folder, pattern = /\.tsx?$/) {
   const result = []
@@ -21,8 +23,8 @@ async function files(folder, pattern = /\.tsx?$/) {
   }
   return result
 }
-function run(args, expected = 'green') {
-  const result = spawnSync('pnpm', args, { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
+function run(args, expected = 'green', env = process.env) {
+  const result = spawnSync('pnpm', args, { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, env })
   if (result.error) throw result.error
   const output = result.stdout + result.stderr
   log.push({ command: ['pnpm', ...args], status: result.status, expected, output })
@@ -49,7 +51,7 @@ function runtimeImports(sf) {
 async function checkDependencyBoundary() {
   const sources = await files(sourceRoot)
   assert.ok(sources.length > 20, 'The real shared source surface must exist')
-  const known = new Set(sources)
+  const known = new Set([...sources, ...await files(sourceRoot, /\.css$/)])
   const graph = new Map()
   for (const path of sources) {
     const source = await readFile(path, 'utf8')
@@ -89,7 +91,8 @@ async function callers(candidateRoot = root) {
   const candidateSourceRoot = resolve(candidateRoot, 'packages/client-ui/src')
   const desktopSourceRoot = resolve(candidateRoot, 'apps/desktop/src/renderer/src')
   const all = [...await files(candidateSourceRoot), ...await files(desktopSourceRoot)]
-  const symbols = ['ConversationMessage', 'ConversationView', 'AgentComposer', 'AgentInteractionCard', 'InlineComposer', 'ClientUiProvider']
+  const symbols = interactionReceipts ? ['AgentInteractionCard', 'MessageDeliveryFailure']
+    : ['ConversationMessage', 'ConversationView', 'AgentComposer', 'AgentInteractionCard', 'InlineComposer', 'ClientUiProvider']
   const result = {}
   for (const symbol of symbols) {
     const definition = symbol === 'ClientUiProvider' ? resolve(candidateSourceRoot, 'platform.tsx') : resolve(candidateSourceRoot, 'components', symbol + '.tsx')
@@ -112,19 +115,29 @@ async function callers(candidateRoot = root) {
   return result
 }
 const tests = ['exec', 'vitest', 'run', '--config', 'packages/client-ui/vitest.config.ts']
+const receiptTests = ['shared-conversation', 'affectui-motion-consumers', 'message-delivery-failure']
+const desktopReceiptTests = ['exec', 'vitest', 'run', '--config', 'apps/desktop/test/vitest.interaction-receipts.config.mts',
+  'apps/desktop/test/attention-request-panel.test.tsx', 'apps/desktop/test/launch-input-consumers.test.tsx']
+const desktopReceiptTestNames = ['keeps .*attached to the original request', 'renders only the original Outbox']
+const selectedSharedTests = interactionReceipts
+  ? [...tests, ...receiptTests.map(name => 'packages/client-ui/test/' + name + '.test.tsx')] : tests
 await mkdir(evidenceRoot, { recursive: true })
 try {
   run(['--filter', '@agentmux/client-ui', 'typecheck'])
   run(['--filter', '@agentmux/client-ui', 'build'])
   run(['exec', 'tsc', '--noEmit', '-p', 'apps/desktop/tsconfig.renderer.json'])
-  run(tests)
+  run(selectedSharedTests)
+  if (interactionReceipts) run([...desktopReceiptTests, '-t', desktopReceiptTestNames.join('|')])
   const boundary = await checkDependencyBoundary()
   const mutationResults = []
   let productCallers = {}
   if (mutationAndCallers) {
     const mutations = [
-      { name: 'copy-port-disconnected', path: 'components/ConversationMessage.tsx', start: '    const accepted = await platform.copyText(text, () => {', end: '\n    if (activeCopyActionRef.current !== actionId)', replacement: '    const accepted = true', test: 'copy failure' },
-      { name: 'permission-response-disconnected', path: 'components/AgentInteractionCard.tsx', needle: 'await onRespond(response)', replacement: 'await Promise.resolve()', test: 'original request option' },
+      { name: 'copy-port-disconnected', path: 'lib/use-content-copy-action.ts', needle: 'await write(text, failed) === true', replacement: 'true', test: 'copy failure' },
+      { name: 'permission-response-disconnected', path: 'components/AgentInteractionCard.tsx', needle: 'await onRespond(response, original)', replacement: 'await Promise.resolve()', test: 'original request option' },
+      { name: 'saved-is-completion', path: 'lib/interaction-receipt-presentation.ts', needle: "if (receipt.delivery === 'saved') return 'saved'", replacement: "if (receipt.delivery === 'saved') return 'completed'", test: 'does not turn a saved delivery' },
+      { name: 'foreign-interaction-receipt', path: 'components/AgentInteractionCard.tsx', needle: 'const matched = value !== null && matches(original, value)', replacement: 'const matched = value !== null', test: 'keeps rejecting unrelated inspection receipts' },
+      { name: 'original-operation-inspection-removed', path: 'components/AgentInteractionCard.tsx', needle: "const needsInspection = retainedReceipt === null && phase", replacement: "const needsInspection = false && retainedReceipt === null && phase", test: 'converges an exact inspected completion' },
       { name: 'composer-writeback-disconnected', path: 'components/AgentComposer.tsx', needle: 'onValueChange={onChange}', replacement: 'onValueChange={() => {}}', test: 'maintained editor controlled' }
     ]
     const originalSources = Object.fromEntries(await Promise.all((await files(sourceRoot)).map(async path => [relative(sourceRoot, path), sha(await readFile(path))])))
@@ -163,7 +176,9 @@ try {
       }
       const isolatedConfig = resolve(isolatedPackage, 'vitest.config.ts')
       const isolatedTests = ['exec', 'vitest', 'run', '--config', isolatedConfig]
-      for (const mutation of mutations) {
+      const selectedMutations = interactionReceipts
+        ? mutations.filter(value => ['saved-is-completion', 'foreign-interaction-receipt', 'original-operation-inspection-removed'].includes(value.name)) : mutations
+      for (const mutation of selectedMutations) {
         const path = resolve(isolatedPackage, 'src', mutation.path)
         const original = await readFile(path, 'utf8')
         let changed
@@ -183,23 +198,38 @@ try {
       }
       await cp(resolve(root, 'apps/desktop/src/renderer/src'), resolve(isolatedRoot, 'apps/desktop/src/renderer/src'), { recursive: true })
       await callers(isolatedRoot)
-      // Removing every Desktop consuming block leaves the import/definition/shared package present.
-      // It must still fail the zero-caller check: an isolated library is not the Desktop capability.
-      for (const path of await files(resolve(isolatedRoot, 'apps/desktop/src/renderer/src'))) {
-        const source = await readFile(path, 'utf8')
-        if (/<AgentComposer(?:\s|>)/u.test(source)) await writeFile(path, '')
+      if (interactionReceipts) {
+        const trace = resolve(isolatedRoot, 'actual-outbox-mutation.jsonl')
+        const scenario = [...desktopReceiptTests, '-t', desktopReceiptTestNames[1]]
+        run(scenario, 'red', { ...process.env, AGENTMUX_TEST_OUTBOX_REFERENCE_MUTATION: trace })
+        const records = (await readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+        assert.equal(records.length, 1)
+        const [loaded] = records
+        assert.equal(sha(await readFile(resolve(root, loaded.file))), loaded.before)
+        assert.notEqual(loaded.before, loaded.after)
+        run(scenario)
+        mutationResults.push({ name: 'outbox-stop-compares-only-generation', changedSource: loaded.file, red: true, assertionError: true,
+          originalSha256: loaded.before, mutatedSha256: loaded.after, restoredGreen: true })
+      } else {
+        // Removing every Desktop consuming block leaves the import/definition/shared package present.
+        // It must still fail the zero-caller check: an isolated library is not the Desktop capability.
+        for (const path of await files(resolve(isolatedRoot, 'apps/desktop/src/renderer/src'))) {
+          const source = await readFile(path, 'utf8')
+          if (/<AgentComposer(?:\s|>)/u.test(source)) await writeFile(path, '')
+        }
+        await assert.rejects(() => callers(isolatedRoot), error => error.name === 'AssertionError' && error.message.includes('AgentComposer has no Desktop product invocation'))
+        mutationResults.push({ name: 'all-desktop-composer-consumers-removed', isolatedCandidate: true, red: true, assertionError: true, sharedDefinitionKept: true })
       }
-      await assert.rejects(() => callers(isolatedRoot), error => error.name === 'AssertionError' && error.message.includes('AgentComposer has no Desktop product invocation'))
-      mutationResults.push({ name: 'all-desktop-composer-consumers-removed', isolatedCandidate: true, red: true, assertionError: true, sharedDefinitionKept: true })
     } finally { await rm(isolatedRoot, { recursive: true, force: true }) }
     const sourcesAfter = Object.fromEntries(await Promise.all((await files(sourceRoot)).map(async path => [relative(sourceRoot, path), sha(await readFile(path))])))
     assert.deepEqual(sourcesAfter, originalSources, 'Current package source must remain byte-identical; the verifier never writes the live candidate')
 
     productCallers = await callers()
   }
-  const proof = { schema: 'agentmux.shared-conversation-verification.v1', passed: true, scope: 'T009 shared UI consumed by Desktop; no mobile authentication/native-device claim', boundary, mutations: mutationResults, productCallers, commands: log }
+  const proof = { schema: 'agentmux.shared-conversation-verification.v1', passed: true, scope: interactionReceipts ? 'Original shared receipts and Desktop response and Outbox consumers'
+    : 'Shared conversation and Desktop product consumers', boundary, mutations: mutationResults, productCallers, commands: log }
   await writeFile(resolve(evidenceRoot, 'verification.json'), JSON.stringify(proof, null, 2) + '\n')
-  console.log(JSON.stringify({ passed: true, tests: 5, mutations: mutationResults.length, callerSymbols: Object.keys(productCallers).length, evidence: relative(root, resolve(evidenceRoot, 'verification.json')) }))
+  console.log(JSON.stringify({ passed: true, testFiles: interactionReceipts ? receiptTests.length + 2 : null, mutations: mutationResults.length, callerSymbols: Object.keys(productCallers).length, evidence: relative(root, resolve(evidenceRoot, 'verification.json')) }))
 } catch (error) {
   await writeFile(resolve(evidenceRoot, 'failed-verification.json'), JSON.stringify({ passed: false, error: String(error), commands: log }, null, 2) + '\n')
   throw error
