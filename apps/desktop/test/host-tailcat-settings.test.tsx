@@ -69,6 +69,25 @@ it('strict Host codec round trips original local/SSH and optional transport reco
   expect(parseHostConfiguration({ ...config.hosts[0], tailcat: { enabled: false, keyFile: '', allowedClients: [] } }).success).toBe(true)
 })
 
+it('keeps an unknown transport raw without inferring SSH or creating a draft', async () => {
+  config.hosts[1] = { ...remote, transport: 'other' as never }
+  await show()
+  const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Connection transport"]')!
+  expect(trigger.dataset.value).toBe('other')
+  expect(trigger.textContent).toContain('Not in current options')
+  expect(trigger.title).toContain('other')
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelector('[data-missing]')).not.toBeNull())
+  expect(document.querySelector('[data-missing]')?.textContent).toContain('Not in current options')
+  expect(document.querySelector('[data-missing] [title="other"]')).not.toBeNull()
+  await act(async () => document.querySelector<HTMLElement>('[data-missing]')!.click())
+  expect(trigger.dataset.value).toBe('other')
+  expect(useAppStore.getState().tailcatConnectionDrafts).toEqual({ hostSelection: { hostId: remote.id } })
+  expect(onSave).not.toHaveBeenCalled()
+  await transport('ssh')
+  expect(trigger.dataset.value).toBe('ssh')
+})
+
 it('the real Host editor saves Tailcat-only with no SSH hostname and tests the same original bound Host', async () => {
   const test = vi.spyOn(api.hosts, 'check').mockImplementation(async host => ({ input: host, outcome: 'ready', detail: 'Original Runtime confirmed' }))
   const upgrade = vi.spyOn(api.hosts, 'upgradeCheck')
@@ -83,6 +102,8 @@ it('the real Host editor saves Tailcat-only with no SSH hostname and tests the s
   expect(document.querySelector('.selection-field__menu')).toBeNull()
   expect(document.activeElement).toBe(trigger)
   expect(trigger.dataset.value).toBe('ssh')
+  expect(useAppStore.getState().tailcatConnectionDrafts).toEqual({ hostSelection: { hostId: remote.id } })
+  expect([...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Save hosts')?.disabled).toBe(true)
   const describedBy = trigger.getAttribute('aria-describedby')!.split(/\s+/)
   expect(describedBy).toContain('host-transport-hint')
   expect(describedBy).toHaveLength(2)
@@ -91,6 +112,7 @@ it('the real Host editor saves Tailcat-only with no SSH hostname and tests the s
   expect(dom.container.querySelector('[data-tailcat-client]')).toBeNull()
   await transport('tailcat')
   expect(trigger.dataset.value).toBe('tailcat')
+  expect(useAppStore.getState().tailcatConnectionDrafts).toMatchObject({ hosts: { [remote.id]: { value: { tailcat: { address: '', keyFile: '' } } } } })
   upgrade.mockClear()
   await fill(input('Tailcat address'), 'tcfixturecredential')
   await fill(input('Tailcat client key'), 'saved-client')
