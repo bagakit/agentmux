@@ -889,6 +889,21 @@ export type AgentSessionControl = {
   run: AgentMuxRunRef
 }
 
+/** Strict new input routes. Existing configured controls remain the configured arm
+ * until their producer is cut over; both arms use the same Main/Core implementation. */
+export type ConfiguredAgentInputTarget = {
+  kind: 'configured-control'
+  control: AgentSessionControl
+}
+export type SpaceMemberAgentInputTarget = {
+  kind: 'space-member-target'
+  target: {
+    hostId: string
+    target: import('@agentmux/core/space-member').PinnedSpaceMemberIdentity & { expectedRun: AgentMuxRunRef }
+  }
+}
+export type AgentInputTarget = ConfiguredAgentInputTarget | SpaceMemberAgentInputTarget
+
 /** One trusted person-facing transfer, fenced to the original page and exact Core Run. */
 export type BrowserControlHandoff = {
   agent: AgentSessionControl
@@ -2087,14 +2102,14 @@ export type AgentMuxDesktopApi = {
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource; moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'> }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference, inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference | import('@agentmux/core/mote-dialogue').MoteDialogueInputReference>
+    submitPrompt(session: AgentSessionControl | AgentInputTarget, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource; moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'> }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference, inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference | import('@agentmux/core/mote-dialogue').MoteDialogueInputReference>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
     inputMailbox(session: SessionHistoryReference, options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>): Promise<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxPage>
     inspectMoteInput(session: SessionHistoryReference, observationId: string): Promise<import('@agentmux/core').MoteInputInspection | null>
-    inspectInput(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentInputSubmissionReceipt | null>
-    inspectSubmission(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentPromptSubmissionRecord | null>
-    stopInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string): Promise<import('@agentmux/core').AgentInputWaitStopReceipt>
-    rejoinInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef): Promise<import('@agentmux/core').AgentInputSubmissionReceipt>
+    inspectInput(session: AgentSessionControl | AgentInputTarget, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentInputSubmissionReceipt | null>
+    inspectSubmission(session: AgentSessionControl | AgentInputTarget, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentPromptSubmissionRecord | null>
+    stopInputWaiting(session: AgentSessionControl | AgentInputTarget, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string): Promise<import('@agentmux/core').AgentInputWaitStopReceipt>
+    rejoinInputWaiting(session: AgentSessionControl | AgentInputTarget, ref: import('@agentmux/core').AgentInputWaitRef): Promise<import('@agentmux/core').AgentInputSubmissionReceipt>
     respondInteraction(
       session: AgentSessionControl,
       response: AgentMuxInteractionResponse,
@@ -2108,7 +2123,7 @@ export type AgentMuxDesktopApi = {
     reconcileReopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
     resume(session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string): Promise<SessionSnapshot>
     restart(session: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<SessionRestartResult>
-    interrupt(session: SessionControl): Promise<void>
+    interrupt(session: SessionControl | AgentInputTarget): Promise<void>
     resize(
       attachmentId: string,
       cols: number,

@@ -1,5 +1,7 @@
 import { parseFocusTaskReference } from '@agentmux/core/focus-control'
 import { createSpaceMemberSurface } from './space-member-surface.js'
+import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space-member-client'
+import { parseSpaceMemberTarget } from '@agentmux/core/space-member-codec'
 import { readSpaceSnapshot, observeSpace, type AgentMuxRpcClient } from '@agentmux/core'
 import type { SpaceMountSourceTarget, SpaceMountTarget, SpaceMountResources, SpaceMountWatch, SpaceMountEvent } from '../shared/space-mount.js'
 import { SOURCE_FILES_METHODS, type SourceFilesMethod, type SourceFilesResult, type SourceFilesSelection } from '../shared/source-files.js'
@@ -55,6 +57,8 @@ import type {
   NativeAgentHistoryResourceInput,
   NativeAgentHistoryResourceResult,
   AgentSessionControl,
+  AgentInputTarget,
+  SpaceMemberAgentInputTarget,
   AgentWorkPlacement,
   SessionHistoryDescriptor,
   AgentSessionRecoveryCandidate,
@@ -396,6 +400,52 @@ async function observeProgressRead<T>(signal: AbortSignal | undefined, read: () 
   try { return await Promise.race([read(), cancelled]) }
   finally { signal.removeEventListener('abort', abort) }
 }
+
+type ResolvedAgentInputTarget =
+  | { kind: 'configured-control'; hostId: string; control: AgentSessionControl }
+  | { kind: 'space-member-target'; hostId: string; target: SpaceMemberAgentInputTarget['target'] }
+type AgentInputClient = Pick<SpaceMemberClient, 'statusAgent' | 'submitAgentPrompt' | 'inspectAgentInput' |
+  'inspectAgentPromptSubmission' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'signalAgent'>
+
+function inputRouteRecord(value: unknown, fields: readonly string[]): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+    (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) ||
+    Reflect.ownKeys(value).some(key => typeof key !== 'string' || !fields.includes(key))) throw new AgentMuxError(
+      'The Agent input route must contain only its declared identity fields.', 'INVALID_CONTROL_REQUEST')
+  return value as Record<string, unknown>
+}
+function inputRouteString(value: unknown): string {
+  if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value)) throw new AgentMuxError(
+    'The Agent input route identity is invalid.', 'INVALID_CONTROL_REQUEST')
+  return value
+}
+function configuredAgentInputControl(value: unknown): AgentSessionControl {
+  const control = inputRouteRecord(value, ['kind', 'hostId', 'agentSessionId', 'run'])
+  if (control.kind !== 'agent') throw new AgentMuxError('The configured input route must name its original Agent Session.', 'INVALID_CONTROL_REQUEST')
+  const run = inputRouteRecord(control.run, ['runId'])
+  return { kind: 'agent', hostId: inputRouteString(control.hostId), agentSessionId: inputRouteString(control.agentSessionId),
+    run: { runId: inputRouteString(run.runId) } }
+}
+function parseAgentInputTarget(value: AgentSessionControl | AgentInputTarget): ResolvedAgentInputTarget {
+  const route = inputRouteRecord(value, value?.kind === 'agent' ? ['kind', 'hostId', 'agentSessionId', 'run'] : ['kind', 'control', 'target'])
+  if (route.kind === 'agent') {
+    const control = configuredAgentInputControl(route)
+    return { kind: 'configured-control', hostId: control.hostId, control }
+  }
+  if (route.kind === 'configured-control') {
+    const exact = inputRouteRecord(value, ['kind', 'control']), control = configuredAgentInputControl(exact.control)
+    return { kind: 'configured-control', hostId: control.hostId, control }
+  }
+  if (route.kind !== 'space-member-target') throw new AgentMuxError('Select an exact configured Agent control or original Space member input target.', 'INVALID_CONTROL_REQUEST')
+  const exact = inputRouteRecord(value, ['kind', 'target']), member = inputRouteRecord(exact.target, ['hostId', 'target'])
+  const target = parseSpaceMemberTarget(member.target)
+  if (!target.expectedAdmission) throw new AgentMuxError(
+    'Source input must retain its original creation C or association L. No current placement is substituted.', 'SPACE_MEMBER_ADMISSION_UNCONFIRMED')
+  return { kind: 'space-member-target', hostId: inputRouteString(member.hostId),
+    target: { hostId: inputRouteString(member.hostId), target: { ...target, expectedAdmission: target.expectedAdmission } } }
+}
+const agentInputSessionId = (route: ResolvedAgentInputTarget) => route.kind === 'configured-control' ? route.control.agentSessionId : route.target.target.agentSessionId
+const agentInputRun = (route: ResolvedAgentInputTarget) => route.kind === 'configured-control' ? route.control.run : route.target.target.expectedRun
 
 export class RuntimeController {
   private readonly hosts = new Map<string, RuntimeHost>()
@@ -1935,8 +1985,25 @@ export class RuntimeController {
     }
   }
 
+  private async withAgentInputClient<T>(route: ResolvedAgentInputTarget, connected: boolean | 'runtime',
+    operation: (client: AgentInputClient) => Promise<T>): Promise<T> {
+    if (route.kind === 'configured-control') {
+      const client = connected === false ? this.configuredClient(route.hostId)
+        : await this.connectedClient(route.hostId, connected === 'runtime' ? 'runtime' : undefined)
+      return await operation(client)
+    }
+    const carrier = this.spaceMountHost(route.hostId)
+    const client = await connectSpaceMember(carrier.retainedRpc, route.target.target)
+    let failed = false
+    try { return await operation(client) }
+    catch (error) { failed = true; throw error }
+    finally {
+      try { await client.dispose() } catch (error) { if (!failed) throw error }
+    }
+  }
+
   async submitPrompt(
-    control: Extract<SessionControl, { kind: 'agent' }>,
+    control: Extract<SessionControl, { kind: 'agent' }> | AgentInputTarget,
     prompt: string,
     operationId: string,
     condition: AgentPromptInputBinding,
@@ -1949,12 +2016,14 @@ export class RuntimeController {
     inputImages?: readonly import('@agentmux/core').AgentInputImageReference[],
     authorProfile?: import('@agentmux/core').AgentPreparedAuthorProfile
   ): Promise<void | AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference | MoteDialogueInputReference> {
-    const capturedCondition = validateAgentPromptInputBinding(condition)
+    const route = parseAgentInputTarget(control), capturedCondition = validateAgentPromptInputBinding(condition)
+    const agentSessionId = agentInputSessionId(route), run = agentInputRun(route)
     if (choice?.moteMain) {
-      if (automation || authorHuman !== true || control.run.runId !== capturedCondition.expectedRun.runId) throw new AgentMuxError(
+      if (route.kind !== 'configured-control') throw new AgentMuxError('A Source member cannot replace the original logical Mote Main route.', 'INVALID_AGENT_PROMPT')
+      if (automation || authorHuman !== true || run.runId !== capturedCondition.expectedRun.runId) throw new AgentMuxError(
         'This logical main input retains its original human intent, Session and Run.', 'INVALID_AGENT_PROMPT')
       const content = {
-        agentSessionId: control.agentSessionId, operationId, prompt, sourceChannel,
+        agentSessionId, operationId, prompt, sourceChannel,
         ...(choice.focusTask ? { focusTask: parseFocusTaskReference(choice.focusTask) } : {}),
         ...(choice.allowUncertainTurn ? { allowUncertainTurn: true } : {}),
         ...(choice.moteSource ? { moteSource: choice.moteSource } : {}),
@@ -1964,7 +2033,7 @@ export class RuntimeController {
       const input: import('@agentmux/core').AgentInputSubmit = 'admissionIntent' in capturedCondition
         ? { ...content, ...capturedCondition, execution: 'immediate' }
         : { ...content, ...capturedCondition, ...(choice.execution ? { execution: choice.execution } : {}), ...(choice.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}) }
-      const result = await this.trackHostOperation(control.hostId, () => this.callOriginalCore(
+      const result = await this.trackHostOperation(route.hostId, () => this.callOriginalCore(
         choice.moteMain!.target.expectedResource.hostId, 'space.mote.dialogue.input.submit', { ...choice.moteMain!, input }, { transport: 'unix' }))
       if (result.disposition === 'rollover-required' && result.rollover?.status === 'due' && result.rollover.decision) throw Object.assign(
         new AgentMuxError('The original Mote policy requires a new Main period. This Query was not delivered to the previous Main.', 'MOTE_MAIN_ROLLOVER_REQUIRED'),
@@ -1979,26 +2048,27 @@ export class RuntimeController {
         'The original exact main input is unconfirmed. Its role, condition and operation are retained; inspect the original request before sending again.', 'MOTE_MAIN_INPUT_UNCONFIRMED')
       return { inputKey: result.route.key, record: result.record, outcome }
     }
+    const content = {
+      agentSessionId, operationId, prompt,
+      ...(choice?.moteSource ? { moteSource: choice.moteSource } : {}),
+      ...(agentMuxNote === undefined ? {} : { agentMuxNote }), sourceChannel,
+      ...(inputContextCapture ? { inputContextCapture } : {}),
+      ...(inputImages?.length ? { inputImages } : {}),
+      ...(authorHuman === true ? { authorHuman: true, ...(authorProfile ? { authorProfile } : {}) } : {})
+    }
     if ('admissionIntent' in capturedCondition) {
       if (automation || choice?.execution !== 'immediate' || choice.preparationRetry || choice.allowUncertainTurn) throw new AgentMuxError(
         'The original automatic or conditional prompt cannot become a new manual input.', 'INVALID_AGENT_PROMPT')
-      if (control.run.runId !== capturedCondition.expectedRun.runId) throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
-      return await this.trackHostOperation(control.hostId, async () => await this.configuredClient(control.hostId).submitAgentPrompt({
-        agentSessionId: control.agentSessionId, ...capturedCondition, execution: 'immediate', operationId, prompt,
-        ...(choice?.moteSource ? { moteSource: choice.moteSource } : {}),
-        ...(agentMuxNote === undefined ? {} : { agentMuxNote }), sourceChannel,
-        ...(inputContextCapture ? { inputContextCapture } : {}),
-        ...(inputImages?.length ? { inputImages } : {}),
-        ...(authorHuman === true ? { authorHuman: true, ...(authorProfile ? { authorProfile } : {}) } : {})
-      }))
+      if (run.runId !== capturedCondition.expectedRun.runId) throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
+      return await this.trackHostOperation(route.hostId, async () => await this.withAgentInputClient(route, false,
+        async client => await client.submitAgentPrompt({ ...content, ...capturedCondition, execution: 'immediate' })))
     }
-    return await this.trackHostOperation(control.hostId, async () => {
-      const client = await observeProgressRead(automation?.signal, () => this.connectedClient(control.hostId))
-      if (control.run.runId !== capturedCondition.expectedRun.runId) {
+    return await this.trackHostOperation(route.hostId, async () => await this.withAgentInputClient(route, true, async client => {
+      if (run.runId !== capturedCondition.expectedRun.runId) {
         throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
       }
-      const status = await observeProgressRead(automation?.signal, () => client.statusAgent(control.agentSessionId))
-      if (status.run.runId !== control.run.runId) {
+      const status = await observeProgressRead(automation?.signal, () => client.statusAgent(agentSessionId))
+      if (status.run.runId !== run.runId) {
         throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
       }
       if (status.run.state !== 'running') {
@@ -2009,20 +2079,12 @@ export class RuntimeController {
           throw new AgentMuxError('Automatic delivery was cancelled.', 'AGENT_COMPLETION_CHANGED')
         }
         return await client.submitAgentPrompt({
-          agentSessionId: control.agentSessionId,
+          ...content,
           ...capturedCondition,
-          operationId,
           ...(automation ? { ...(automation.futureIntent ? { expectedFutureIntent: automation.futureIntent } : automation.completionId === undefined ? {} : { expectedCompletionId: automation.completionId }), ...(automation.inputByte === undefined ? {} : { expectedInputByte: automation.inputByte }), signal: automation.signal } : {}),
-          prompt,
-          ...(choice?.moteSource ? { moteSource: choice.moteSource } : {}),
-          ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
-          sourceChannel,
-          ...(inputContextCapture ? { inputContextCapture } : {}),
-        ...(inputImages?.length ? { inputImages } : {}),
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),
-          ...(!automation && choice?.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}),
-          ...(authorHuman === true ? { authorHuman: true, ...(authorProfile ? { authorProfile } : {}) } : {})
+          ...(!automation && choice?.preparationRetry ? { preparationRetry: choice.preparationRetry } : {})
         })
       } catch (error) {
         // A process can exit in the small window after the first status check. Re-read the same
@@ -2033,8 +2095,8 @@ export class RuntimeController {
           error.code === 'AGENT_PROMPT_SUBMISSION_BUSY'
         )) {
           try {
-            const latest = await observeProgressRead(automation?.signal, () => client.statusAgent(control.agentSessionId))
-            if (latest.run.runId === control.run.runId) {
+            const latest = await observeProgressRead(automation?.signal, () => client.statusAgent(agentSessionId))
+            if (latest.run.runId === run.runId) {
               if (latest.run.state !== 'running') runState = 'ended'
 
             }
@@ -2046,7 +2108,7 @@ export class RuntimeController {
           ...(runState ? { runState } : {})
         })
       }
-    })
+    }))
   }
 
   async replyQuestion(control: AgentSessionControl, input: SessionQuestionReplyInput, config: AppConfig): Promise<AgentSessionQuestionReplyReceipt> {
@@ -2066,9 +2128,11 @@ export class RuntimeController {
     })
   }
 
-  private assertInputControl(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): void {
-    if (control.agentSessionId !== key.agentSessionId || control.run.runId !== key.expectedRun.runId) throw new AgentMuxError(
+  private assertInputControl(control: AgentSessionControl | AgentInputTarget, key: import('@agentmux/core').AgentPromptInputKey): ResolvedAgentInputTarget {
+    const route = parseAgentInputTarget(control)
+    if (agentInputSessionId(route) !== key.agentSessionId || agentInputRun(route).runId !== key.expectedRun.runId) throw new AgentMuxError(
       'The original input control names another Session or Run.', 'STALE_AGENT_SESSION')
+    return route
   }
   /** Read the original journal across its Runs; reading never starts or rejoins an input. */
   async inputMailbox(control: SessionHistoryReference, options: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'> = {}) {
@@ -2081,21 +2145,22 @@ export class RuntimeController {
   async inspectMoteInput(control: SessionHistoryReference, observationId: string) {
     return await this.configuredClient(control.hostId).inspectMoteInput({agentSessionId:control.agentSessionId,observationId})
   }
-  async inspectInput(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) {
-    this.assertInputControl(control, key)
-    return await this.configuredClient(control.hostId).inspectAgentInput({ key })
+  async inspectInput(control: AgentSessionControl | AgentInputTarget, key: import('@agentmux/core').AgentPromptInputKey) {
+    const route = this.assertInputControl(control, key)
+    return await this.withAgentInputClient(route, false, async client => await client.inspectAgentInput({ key }))
   }
-  async inspectSubmission(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) {
-    this.assertInputControl(control, key)
-    return await this.configuredClient(control.hostId).inspectAgentPromptSubmission(key)
+  async inspectSubmission(control: AgentSessionControl | AgentInputTarget, key: import('@agentmux/core').AgentPromptInputKey) {
+    const route = this.assertInputControl(control, key)
+    return await this.withAgentInputClient(route, false, async client => await client.inspectAgentPromptSubmission(key))
   }
-  async stopInputWaiting(control: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string) {
-    this.assertInputControl(control, ref.key)
-    return await this.configuredClient(control.hostId).stopAgentInputWaiting({ ref, cancelOperationId })
+  async stopInputWaiting(control: AgentSessionControl | AgentInputTarget, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string) {
+    const route = this.assertInputControl(control, ref.key)
+    return await this.withAgentInputClient(route, false, async client => await client.stopAgentInputWaiting({ ref, cancelOperationId }))
   }
-  async rejoinInputWaiting(control: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef) {
-    this.assertInputControl(control, ref.key)
-    return await this.trackHostOperation(control.hostId, async () => await this.configuredClient(control.hostId).rejoinAgentInputWaiting({ ref }))
+  async rejoinInputWaiting(control: AgentSessionControl | AgentInputTarget, ref: import('@agentmux/core').AgentInputWaitRef) {
+    const route = this.assertInputControl(control, ref.key)
+    return await this.trackHostOperation(route.hostId, async () => await this.withAgentInputClient(route, false,
+      async client => await client.rejoinAgentInputWaiting({ ref })))
   }
 
   async respondInteraction(
@@ -2239,15 +2304,15 @@ export class RuntimeController {
     return receipt
   }
 
-  async interrupt(control: SessionControl): Promise<void> {
+  async interrupt(control: SessionControl | AgentInputTarget): Promise<void> {
     if (control.kind === 'terminal') {
       const receipt = await this.terminalControlIntent(control, 'terminal-interrupt', mintObjectId())
       if (receipt.outcome !== 'applied' || receipt.diskDurability !== 'confirmed') throw new AgentMuxError(
         `Raw Interrupt ${receipt.operationId}: Native outcome ${receipt.outcome}, receipt durability ${receipt.diskDurability}. Read amux terminal operation inspect --host ${control.hostId} --run ${control.run.runId} --operation-id ${receipt.operationId}; this read does not resignal.`, 'TERMINAL_CONTROL_UNCONFIRMED')
       return
     }
-    const client = await this.connectedClient(control.hostId, 'runtime')
-    await client.signalAgent(control.agentSessionId, control.run, 'SIGINT')
+    const route = parseAgentInputTarget(control)
+    await this.withAgentInputClient(route, 'runtime', async client => { await client.signalAgent(agentInputSessionId(route), agentInputRun(route), 'SIGINT') })
   }
 
   async observeStorage(control: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation> {
