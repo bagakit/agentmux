@@ -27,4 +27,9 @@ it('keeps on-demand libraries out of the static Renderer startup graph', async (
   expect([...startup].filter(path => /renderer\/src\/(App|store)\.tsx?$/.test(path)).sort()).toEqual(['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts'])
   expect(new Set(imports(Object.keys(inputs), () => true).map(line => line.split(' -> ')[1]!.split(/[./]/)[0]))).toEqual(new Set(['three', 'react-dom']))
   expect(imports(startup, loads)).toEqual([])
+  const gallery = ['apps/desktop/src/renderer/src/components/WorkflowComponentGallery.tsx',
+    'apps/desktop/src/renderer/src/components/ObservationSurfaceGallery.tsx']
+  expect(gallery.every(path => path in inputs)).toBe(true)
+  expect(gallery.filter(path => startup.has(path))).toEqual([])
+  expect(Object.keys(inputs).filter(path => path.startsWith('test/'))).toEqual([])
 }, 120_000)

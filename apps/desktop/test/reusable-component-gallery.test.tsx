@@ -1,17 +1,23 @@
-import { createElement } from 'react'
-import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createClientUiRoot } from './helpers/client-ui-render'
 import { describe, expect, it, vi } from 'vitest'
 
 // The gallery intentionally runs as the standalone web entry, not the Electron bridge.
-vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
+vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true) })
 import { WorkflowComponentGallery } from '../src/renderer/src/components/WorkflowComponentGallery.js'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 describe('Workflow component gallery production reachability', () => {
-  it('uses the real reusable components for every reference state and scale fixture', () => {
-    const markup = renderToStaticMarkup(createElement(WorkflowComponentGallery))
+  it('uses the real reusable components for every reference state and scale fixture', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createClientUiRoot(container)
+    try {
+    await act(async () => { root.render(createElement(WorkflowComponentGallery)) })
+    const markup = container.innerHTML
     for (const state of ['running', 'completed', 'failed', 'killed', 'paused']) {
       expect(markup).toContain(`data-status="${state}"`)
     }
@@ -19,6 +25,10 @@ describe('Workflow component gallery production reachability', () => {
     expect(markup).toContain('daemon 版本较旧，暂无阶段明细')
     expect(markup).toContain('wf-card--dock')
     expect(markup).toContain('aria-label="主题切换"')
+    } finally {
+      await act(async () => { root.unmount() })
+      container.remove()
+    }
   })
 
   it('keeps the desktop query preview and standalone deployment entry explicit', () => {
@@ -45,23 +55,24 @@ describe('Workflow component gallery production reachability', () => {
     const activity = read('components/ActivityView.tsx')
     const sessionPane = read('components/SessionPane.tsx')
     const consumers = [
-      ['ConversationAxis', activity],
-      ['ConversationMessage', activity],
+      ['ConversationAxis', read('components/ConversationReadingRuler.tsx')],
+      ['CapturedConversationMessage', activity],
+      ['ConversationMessage', readShared('components/CapturedConversationMessage.tsx')],
       ['ConversationMessage', read('components/ObservationSurfaceGallery.tsx')],
-      ['MemoizedAgentMarkdown', readShared('components/ConversationMessage.tsx')],
+      ['MemoizedAgentMarkdown', readShared('components/ConversationReasoningTrace.tsx')],
       ['AgentInteractionCard', sessionPane],
-      ['InlineComposer', readShared('components/AgentComposer.tsx')],
+      ['InlineComposer', readShared('components/ComposerCompletionEditor.tsx')],
       ['AgentComposer', read('components/AgentSessionComposer.tsx')],
       ['InlineRenameField', read('components/FileExplorer.tsx')],
       ['InlineRenameField', read('components/WorkflowComponentGallery.tsx')],
-      ['StatusDot', read('components/GoalExecution.tsx')],
+      ['StatusDot', read('components/ObservationSurfaceGallery.tsx')],
       ['ServiceWindowNotice', sessionPane]
     ]
     expect(consumers.length).toBeGreaterThan(0)
     for (const [name, text] of consumers) expect(text, `${name} has no production consumer`).toContain(`<${name}`)
-    expect(activity).toContain('function Row(')
-    expect(activity).toContain('function Run(')
-    expect(activity).toContain('export function Ruler(')
+    expect(read('components/workflow/index.ts')).not.toContain('ActivityView')
+    expect(read('components/workflow/index.ts')).not.toContain('ConversationRuler')
+    expect(activity).toContain("export { Ruler } from './ConversationRuler'")
     expect(read('components/workflow/index.ts')).toContain('WorkflowCard')
     expect(read('components/WorkflowComponentGallery.tsx')).toContain('<WorkflowCard')
   })
