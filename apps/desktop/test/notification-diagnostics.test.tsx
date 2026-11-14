@@ -41,6 +41,7 @@ vi.mock('@agentmux/core', async original => {
 vi.mock('@agentmux/demand', async original => ({ ...await original<typeof import('@agentmux/demand')>(),
   openDemandStore: () => ({ list: async () => [], snapshot: async () => ({ demands: [] }), subscribe: () => () => {} }) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class {
+  readonly storage = { setConfirmationHandler() {} }
   readonly cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }
   readonly extensions = { setConfirmationHandler() {} }
   onChange() { return () => {} } onEnvironmentApplicationChange() { return () => {} }
@@ -60,7 +61,8 @@ import { CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, CONTROL_CANCEL_CHANN
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { AgentMuxClient } from '../../../packages/core/src/client'
-import { AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity } from '../../../packages/core/src/agent-session-store'
+import { AgentMuxMemoryAgentSessionStore } from '../../../packages/core/src/agent-session-store'
+import { agentLifecycleOperationIdentity } from '../../../packages/core/src/agent-session-identity'
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service'
 import { AgentMuxControlServer as SourceControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
