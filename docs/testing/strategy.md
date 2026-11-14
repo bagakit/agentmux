@@ -19,7 +19,7 @@ Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Too
 | Security | `pnpm test:security` | ACP 默认拒绝、Hook 认证/Secret scope/在途背压、Store 格式与身份、Control endpoint、Hook installer、Workspace 与 Browser 权限边界。 |
 | Seeded fuzz | `pnpm test:fuzz` | 固定 seed/case 数的 Hook/Store/terminal byte 与 Workspace path 边界；失败可由测试名中的 seed 重放。 |
 | Reliability | `pnpm test:reliability` | 16 个真实 Run、并发 Attachment、attach/detach churn、stop/input race、slow/fast Consumer、5 MiB 输出、live daemon `SIGKILL`、恢复与 Core 资源斜率。 |
-| Desktop resources | `pnpm test:resources` | 隔离 runtime 中七轮 reusable Terminal claim、Terminal+Monaco 使用与 ready launcher 回归，另验证 Browser WebContents 释放和进程组 working-set 预算。 |
+| Desktop resources | `pnpm test:resources` | 隔离 runtime 中验证七轮 reusable Terminal、Monaco 和 Browser WebContents 的资源释放，记录工作集诊断，并验收恢复后代表工作面的主 Renderer 预算。 |
 | Mounted Desktop | `pnpm --filter @agentmux/desktop package:mac` | [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs) 持有构建、DMG、挂载及安装身份核对，并内置隔离 packaged probe；ad-hoc 签名的开发候选跳过其中的 LaunchServices 检查（`verifyLaunchServices`）。源码中有 probe 不代表某次候选已执行。打包复用任务验收、不追加前置检查的边界唯一见 [macOS 打包指南](../guides/macos-packaging.md#必要核对与触发式补查)。bundle identity、package report 与 artifact hash 须绑定同一 source commit/tree/version/platform/arch。 |
 | Nightly | `pnpm test:nightly` | Native Package、Security、fuzz、reliability 和 Desktop resources 各执行一次；不重复 packed smoke 冒充 chaos。 |
 
