@@ -2,8 +2,8 @@ import '../styles/preview-common.css'
 import '../styles/media-player.css'
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { classifyStream, describeMediaFailure, formatClock, liveEdgeState, nextPlaybackRate, resolveMediaKey, seekableWindow, spokenDuration,
-  type MediaFailureView, type MediaPlayerAction, type SeekableWindow } from '../engines/media-player'
+import { classifyStream, createSeekQueue, describeMediaFailure, formatClock, liveEdgeState, nextPlaybackRate, resolveMediaKey, seekableWindow, spokenDuration,
+  type MediaFailureView, type MediaPlayerAction, type SeekableWindow, type SeekQueue } from '../engines/media-player'
 import { formatFileBytes } from '../format-file-bytes'
 import { MediaTimeline } from './MediaTimeline'
 
@@ -71,6 +71,15 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
   const [fullscreen, setFullscreen] = useState(false)
   const [remaining, setRemaining] = useState(false)
   const [scrub, setScrub] = useState<number | null>(null)
+  // A pointer held on the timeline of a video with a picture moves the picture with it; playback that was running
+  // pauses while held and resumes on release. Audio and the keyboard jump on release only.
+  const [held, setHeld] = useState<{ lease: string; follow: boolean; resume: boolean } | null>(null)
+  const holding = useRef<{ follow: boolean; resume: boolean } | null>(null)
+  const scrubbed = useRef<number | null>(null)
+  const seeks = useRef<SeekQueue | null>(null)
+  seeks.current ??= createSeekQueue(time => { if (media.current) media.current.currentTime = time })
+  // The pause and play a held drag makes are not changes the person asked for, so they are not announced.
+  const quiet = useRef({ pause: false, play: false })
   const [indicator, setIndicator] = useState<Indicator | null>(null)
   const [announcement, setAnnouncement] = useState<{ key: number; text: string } | null>(null)
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -101,6 +110,7 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
     const element = media.current
     return () => {
       released.current = true
+      holding.current = null; scrubbed.current = null; seeks.current?.reset(false)
       if (element && resume) resume.current = { time: element.ended ? 0 : element.currentTime, volume: element.volume, muted: element.muted, rate: element.playbackRate }
       element?.pause(); element?.removeAttribute('src'); element?.load()
     }
@@ -224,16 +234,42 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
   const sliderVisible = stream === 'on-demand' || stream === 'live-window'
   const valueText = live ? (edge === 'at-live' ? 'Live' : edge === 'behind' && facts.window ? `${spokenDuration(facts.window.end - shown)} behind live` : 'Live position unknown')
     : `${spokenDuration(shown)} of ${spokenDuration(facts.duration)}`
-  const land = () => { const element = media.current; if (element && scrub !== null) element.currentTime = scrub; setScrub(null) }
+  const onHold = () => {
+    const element = media.current
+    if (!element) return
+    const hold = { follow: !audioOnly, resume: !audioOnly && !element.paused && !element.ended }
+    holding.current = hold
+    setHeld({ lease: lease.id, ...hold })
+    seeks.current!.reset(true)
+    if (hold.resume) { quiet.current.pause = true; element.pause() }
+  }
+  const onScrub = (time: number) => {
+    scrubbed.current = time
+    setScrub(time)
+    if (holding.current?.follow) seeks.current!.request(time)
+  }
+  const release = () => {
+    const element = media.current, hold = holding.current, time = scrubbed.current
+    holding.current = null; scrubbed.current = null
+    setHeld(null); setScrub(null)
+    if (!element) return
+    if (time !== null) { if (hold?.follow) seeks.current!.land(time); else element.currentTime = time }
+    // Playing on from the very end would make the engine start over from the beginning.
+    if (hold?.resume && !(time !== null && time >= element.duration)) { quiet.current.play = true; void element.play().catch(() => { quiet.current.play = false }) }
+  }
 
   const playing = !facts.paused && !facts.ended
-  const PlayGlyph = facts.ended ? ReplayIcon : playing ? PauseIcon : PlayIcon
-  const playLabel = facts.ended ? 'Play again' : playing ? 'Pause' : 'Play'
+  const drag = held?.lease === lease.id ? held : null
+  // While held, the play control shows the playback the release brings back, not the hold's own pause.
+  const playingShown = drag ? drag.resume : playing
+  const PlayGlyph = facts.ended ? ReplayIcon : playingShown ? PauseIcon : PlayIcon
+  const playLabel = facts.ended ? 'Play again' : playingShown ? 'Pause' : 'Play'
   const VolumeGlyph = facts.muted || facts.volume === 0 ? MutedIcon : facts.volume < 0.5 ? VolumeLowIcon : VolumeIcon
   const controlsVisible = !playing || active || scrub !== null || failure !== null
   const events = {
     onLoadedMetadata: () => { restore(); update() }, onDurationChange: update, onTimeUpdate: update, onProgress: update, onVolumeChange: update, onRateChange: update,
-    onSeeked: update,
+    // A seeked event queued before a newer seek began is stale; only an element that stopped seeking settles.
+    onSeeked: () => { update(); if (media.current && !media.current.seeking) seeks.current?.settle() },
     onLoadedData: () => {
       update()
       decodedOnce.current = true
@@ -242,9 +278,9 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
       setDecode(current => current !== 'loading' ? current
         : element instanceof HTMLVideoElement && (element.videoWidth === 0 || element.videoHeight === 0) ? 'no-picture' : 'ready')
     },
-    onPlay: () => { update(); announce('Playing') },
+    onPlay: () => { update(); if (quiet.current.play) quiet.current.play = false; else announce('Playing') },
     onPlaying: () => { update(); if (waiting.current) clearTimeout(waiting.current); setBuffering(false); wake() },
-    onPause: () => { update(); if (!released.current) announce('Paused') },
+    onPause: () => { update(); if (quiet.current.pause) quiet.current.pause = false; else if (!released.current) announce('Paused') },
     onEnded: () => { update(); announce('Ended') },
     onWaiting: () => { if (waiting.current) clearTimeout(waiting.current); waiting.current = setTimeout(() => setBuffering(true), BUFFERING_DELAY_MS) },
     onCanPlay: () => { if (waiting.current) clearTimeout(waiting.current); setBuffering(false) },
@@ -263,7 +299,7 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
     onChange={event => { const element = media.current; if (!element) return; element.muted = false; element.volume = Number(event.currentTarget.value) / 100 }} />
   const timeline = sliderVisible ? <MediaTimeline key={lease.id} bounds={sliderBounds} fraction={fraction} buffered={bufferedFraction}
     label={live ? 'Live position' : 'Seek'} valueText={valueText}
-    clock={time => live && facts.window ? `-${formatClock(facts.window.end - time)}` : formatClock(time)} onScrub={setScrub} onLand={land} /> : null
+    clock={time => live && facts.window ? `-${formatClock(facts.window.end - time)}` : formatClock(time)} onHold={onHold} onScrub={onScrub} onLand={release} /> : null
   const liveBadge = live ? <button type="button" className="media-player__live" data-live-edge={edge}
     aria-disabled={edge !== 'behind'} aria-label={edge === 'unknown' ? 'Live position unknown' : edge === 'behind' ? 'Go to live' : 'Playing live'}
     title={edge === 'unknown' ? 'Live position unknown' : edge === 'behind' ? 'Go to live (End)' : 'Live'}
@@ -321,7 +357,7 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
   </div>
 
   const videoChrome = <>
-    {facts.paused && !facts.ended && !failure ? <button type="button" className="media-player__start" aria-label="Play" title="Play (k)" onClick={() => run({ kind: 'toggle-play' }, 'pointer')}><PlayIcon size={22} /></button> : null}
+    {facts.paused && !facts.ended && !failure && !drag ? <button type="button" className="media-player__start" aria-label="Play" title="Play (k)" onClick={() => run({ kind: 'toggle-play' }, 'pointer')}><PlayIcon size={22} /></button> : null}
     {buffering && !failure ? <span className="media-player__buffering" aria-hidden="true"><LoadingIcon size={20} animation="spin" /></span> : null}
     {indicator ? <span key={indicator.key} className="media-player__indicator" data-side={indicator.side ?? 'top'} aria-hidden="true"
       onAnimationEnd={() => setIndicator(current => current?.key === indicator.key ? null : current)}>
