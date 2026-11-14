@@ -18,7 +18,7 @@ import { createWorkbenchTab, addWorkbenchRegion, documentKey } from '../src/rend
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { restorePersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
 import { captureSurveyCompositionSource, planSurveyTabComposition } from '../src/renderer/src/lib/survey-tab-composition'
-import { isSurveyCompositionRecovery } from '../src/renderer/src/lib/survey-composition-recovery'
+import { isSurveyCompositionRecovery, retainSurveyComposition, restoreSurveyCompositionRecoveries } from '../src/renderer/src/lib/survey-composition-recovery'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 import { createWorkbenchUserDocument, WORKBENCH_USER_STATE_KEY } from '../src/renderer/src/lib/workbench-user-storage'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
@@ -555,6 +555,8 @@ it('[composition-browser-cross-resource] original page menu preserves the same v
 function dragGeometry() {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
     if (this.closest('[hidden],[inert]')) return new DOMRect()
+    if (this.matches('[data-survey-independent-target]')) return new DOMRect(10, 900, 230, 38)
+    if (this.matches('[data-survey-list-target]')) return new DOMRect(10, 720 + [...document.querySelectorAll('[data-survey-list-target]')].indexOf(this) * 44, 230, this.querySelector('.survey-list-empty') ? 60 : 36)
     const pages = [...document.querySelectorAll<HTMLElement>('[data-survey-page-region-id]')]
     const page = this.closest<HTMLElement>('[data-survey-page-region-id]')
     if (page) return new DOMRect(10, 80 + pages.indexOf(page) * 44, 230, 36)
@@ -569,12 +571,13 @@ function dragGeometry() {
     return new DOMRect()
   })
 }
-async function dragPointer(element: HTMLElement, destination: { x: number; y: number }) {
+async function dragPointer(element: HTMLElement, destination: { x: number; y: number }, during?: () => Promise<void>) {
   const rect = element.getBoundingClientRect(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2
   const pointer = async (target: EventTarget, type: string, px: number, py: number) => act(async () => target.dispatchEvent(new PointerEvent(type,
     { bubbles: true, cancelable: true, pointerId: 5, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: px, clientY: py })))
   await pointer(element, 'pointerdown', x, y); await pointer(document, 'pointermove', x + 7, y)
   await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.getAttribute('data-dragging')).toBe('true'))
+  await during?.()
   await new Promise(resolve => setTimeout(resolve, 30)); await pointer(document, 'pointermove', destination.x, destination.y)
   await new Promise(resolve => setTimeout(resolve, 30)); await pointer(document, 'pointerup', destination.x, destination.y)
   await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false))
@@ -1193,4 +1196,397 @@ it('[survey-pin-ui] a retained unavailable research can be unpinned without dele
   expect(useAppStore.getState().surveyCollectedZones['retained-missing-zone']).toBe(true)
   expect(useAppStore.getState().tabs).toBe(beforeUnpin.tabs)
   expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
+})
+
+async function prepareDetach(includeNeighbor = true) {
+  const state = useAppStore.getState(), neighbor = createWorkbenchTab('detach-neighbor', { kind: 'launcher', workspaceId: resource.id, regionId: 'detach-neighbor-region' })
+  useAppStore.setState({ tabs: includeNeighbor ? { ...state.tabs, [neighbor.id]: neighbor } : state.tabs, layouts: includeNeighbor ? { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', neighbor.id)! } : state.layouts,
+    surveyOrganization: { ungrouped: [zones.source, zones.target], groups: [{ groupId: 'reading-group', name: 'Reading', collapsed: false, zoneIds: [] }] } })
+  await checkpointSpatialWorkbench(); dragGeometry(); await dom.render(<App />)
+  if (includeNeighbor) await vi.waitFor(() => expect(document.querySelector('[data-survey-tab-id="composition-tab"]')).not.toBeNull())
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Original file input"]')).not.toBeNull())
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Browser address"]')).not.toBeNull())
+  await checkpointSpatialWorkbench()
+  return document.querySelector<HTMLElement>('[data-survey-tab-id="composition-tab"]')!
+}
+async function chooseDetachLocation() {
+  const trigger = document.querySelector<HTMLElement>('[aria-label="Research location"]')
+  if (!trigger) return
+  await menu('Research location')
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"][data-value]')].find(item => {
+    if (!item.dataset.value) return false
+    const tuple = JSON.parse(item.dataset.value)
+    return tuple[1] === resource.id && tuple[2] === resource.id && tuple[3] === 'source-group'
+  })!
+  expect(item).toBeDefined(); const value = item.dataset.value!; await click(item)
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  await vi.waitFor(() => expect(trigger.dataset.value).toBe(value))
+  await click(named('Create research'))
+}
+
+it.each(['independent', 'list group'] as const)('[detach] actual pointer moves one complete Tab to %s and preserves its original input tree and siblings', async targetKind => {
+  const from = await prepareDetach(), before = useAppStore.getState(), graphBefore = (await core.read())!.graph
+  const editor = document.querySelector<HTMLTextAreaElement>('[aria-label="Original file input"]')!
+  const address = document.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!
+  expect(editor).not.toBeNull(); expect(address).not.toBeNull()
+  editor.value = 'Original unsaved detach editor'; editor.setSelectionRange(2, 8)
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(address, 'https://unsubmitted-detach.example.test/'); address.dispatchEvent(new Event('input', { bubbles: true })) })
+  await act(async () => address.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, button: 0 })))
+  address.setSelectionRange(8, 19)
+  const lifecycle = ['create', 'navigate', 'close'].map(name => vi.spyOn(api.browser, name as 'create'))
+  expect(document.querySelector('[data-survey-independent-target]')).toBeNull()
+  vi.mocked(api.spatial.commit).mockClear()
+  const groupBounds = document.querySelector<HTMLElement>('[data-survey-list-target="reading-group"]')!.getBoundingClientRect()
+  await dragPointer(from, targetKind === 'independent' ? { x: 100, y: 918 } : { x: groupBounds.left + 90, y: groupBounds.top + 18 })
+  await vi.waitFor(() => expect(Boolean(document.querySelector('[aria-label="Research location"]')) || catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId !== zones.source).toBe(true))
+  await chooseDetachLocation()
+  await vi.waitFor(() => expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).not.toBe(zones.source))
+  const graph = (await core.read())!.graph, added = graph.zones.filter(zone => !graphBefore.zones.some(original => original.zoneId === zone.zoneId))
+  expect(added).toHaveLength(1); const detached = added[0]!
+  expect(graph.tabs.filter(tab => tab.zoneId === detached.zoneId).map(tab => tab.tabId)).toEqual(['composition-tab'])
+  expect(catalog().tabs.find(tab => tab.tabId === 'detach-neighbor')!.zoneId).toBe(zones.source)
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCollectedZones[detached.zoneId]).toBe(true))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]))
+  expect(graph.resources['zone:' + detached.zoneId]).toHaveProperty('workspaceId', resource.id)
+  for (const region of Object.values(before.tabs['composition-tab']!.regions)) {
+    expect(source().regions[region.regionId]).toBe(region)
+    expect(graph.resources['region:' + region.regionId]).toEqual(graphBefore.resources['region:' + region.regionId])
+  }
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(editor)
+  expect(editor.value).toBe('Original unsaved detach editor'); expect([editor.selectionStart, editor.selectionEnd]).toEqual([2, 8])
+  expect(document.querySelector('[aria-label="Browser address"]')).toBe(address)
+  expect(address.value).toBe('https://unsubmitted-detach.example.test/'); expect([address.selectionStart, address.selectionEnd]).toEqual([8, 19])
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+  for (const call of lifecycle) expect(call).not.toHaveBeenCalled()
+  expect(document.querySelector('[data-survey-independent-target]')).toBeNull()
+  if (targetKind === 'list group') expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toEqual([detached.zoneId])
+})
+
+it('[detach] actual research-body pointer drop on a list heading changes only the original organization', async () => {
+  await prepareDetach()
+  const before = useAppStore.getState(), graph = (await core.read())!.graph
+  const from = [...document.querySelectorAll<HTMLElement>('[data-survey-content-key]')].find(element => element.dataset.surveyContentKey === JSON.stringify(['research', zones.source]))!
+  expect(from).toBeDefined(); vi.mocked(api.spatial.commit).mockClear()
+  await dragPointer(from, { x: 100, y: 782 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toEqual([zones.source]))
+  expect((await core.read())!.graph).toEqual(graph)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().surveyCollectedZones).toBe(before.surveyCollectedZones)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+})
+
+async function detachIntoGroup(from: HTMLElement) {
+  const rect = document.querySelector<HTMLElement>('[data-survey-list-target="reading-group"]')!.getBoundingClientRect()
+  await dragPointer(from, { x: rect.left + 90, y: rect.top + 18 })
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Research location"]')).not.toBeNull())
+  await chooseDetachLocation()
+}
+
+it.each(['unknown', 'partial'] as const)('[detach] pointer %s preserves its exact list group and repairs only preferences without replay', async outcome => {
+  const from = await prepareDetach(), before = (await core.read())!.graph
+  if (outcome === 'unknown') vi.mocked(api.spatial.commit).mockImplementation(async input => {
+    const saved = await core.commit(input)
+    if (input.graph.zones.some(zone => !before.zones.some(original => original.zoneId === zone.zoneId))) throw new Error('Original detach CAS ACK lost')
+    return saved
+  })
+  else vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => {
+    if ((await core.read())!.graph.zones.length > before.zones.length) throw new Error('Original combined Survey save ACK lost')
+  })
+  vi.mocked(api.spatial.commit).mockClear(); await detachIntoGroup(from)
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]?.report.outcome).toBe(outcome))
+  const held = useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]!
+  expect(held.surveyGroupId).toBe('reading-group'); expect(held.sources).toHaveLength(1); expect(held.sources[0]!.tabId).toBe('composition-tab')
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+  expect(catalog().tabs.find(tab => tab.tabId === 'detach-neighbor')!.zoneId).toBe(zones.source)
+  vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined)
+  const state = useAppStore.getState(), unrelated = { groupId: 'later-user-group', name: 'Later user organization', collapsed: true, zoneIds: [zones.target] }
+  await act(async () => { await state.setSurveyOrganization({ ungrouped: state.surveyOrganization.ungrouped.filter(id => id !== zones.target),
+    groups: [...state.surveyOrganization.groups.map(group => ({ ...group, name: 'Renamed destination' })), unrelated] }, state.surveyOrganization) })
+  vi.mocked(api.spatial.commit).mockClear()
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-composition-request]')?.getAttribute('data-survey-composition-request')).toBe(held.requestId))
+  expect(document.querySelector('[data-survey-composition-request]')!.textContent).toContain('reading-group')
+  await click(named('Check current target')); await vi.waitFor(() => expect(named('Repair Survey references').hasAttribute('disabled')).toBe(false))
+  expect(useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]!.requestId).toBe(held.requestId)
+  await click(named('Repair Survey references'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]))
+  expect(useAppStore.getState().surveyOrganization.groups.find(group => group.groupId === 'reading-group')!.zoneIds).toEqual([held.target.zoneId])
+  expect(useAppStore.getState().surveyOrganization.groups.find(group => group.groupId === unrelated.groupId)).toEqual(unrelated)
+  expect(useAppStore.getState().surveyCollectedZones[held.target.zoneId]).toBe(true)
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+})
+
+it('[detach] a list group deleted while the intent saves refuses before the first composition CAS', async () => {
+  const from = await prepareDetach(), before = (await core.read())!.graph
+  let deleted = false
+  vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => {
+    if (!deleted && useAppStore.getState().surveyCompositionRecoveries.length) {
+      deleted = true; await act(async () => useAppStore.setState(state => ({ surveyOrganization: { ...state.surveyOrganization, groups: [] } })))
+    }
+  })
+  vi.mocked(api.spatial.commit).mockClear(); await detachIntoGroup(from)
+  await vi.waitFor(() => expect(document.body.textContent).toContain('list group no longer exists'))
+  expect(deleted).toBe(true); expect((await core.read())!.graph).toEqual(before)
+  expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([])
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+})
+
+it('[detach] a list group deleted after Core commit stays partial and never silently falls into Ungrouped', async () => {
+  const from = await prepareDetach(), before = (await core.read())!.graph
+  vi.mocked(api.spatial.commit).mockImplementation(async input => {
+    const saved = await core.commit(input)
+    if (input.graph.zones.some(zone => !before.zones.some(original => original.zoneId === zone.zoneId)))
+      await act(async () => useAppStore.setState(state => ({ surveyOrganization: { ...state.surveyOrganization, groups: [] } })))
+    return saved
+  })
+  await detachIntoGroup(from)
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]?.report.outcome).toBe('partial'))
+  const held = useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]!
+  expect(held.surveyGroupId).toBe('reading-group')
+  expect(useAppStore.getState().surveyCollectedZones[held.target.zoneId]).toBeUndefined()
+  expect(useAppStore.getState().surveyOrganization.ungrouped).not.toContain(held.target.zoneId)
+  vi.mocked(api.spatial.commit).mockClear()
+  const checked = await useAppStore.getState().reviewSurveyComposition(held.requestId, true)
+  expect(checked).toMatchObject({ targetConfirmed: true, referencesRepaired: false }); expect(checked.issue).toContain('group no longer exists')
+  expect(useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]!.requestId).toBe(held.requestId)
+  const current = useAppStore.getState()
+  await current.setSurveyOrganization({ ...current.surveyOrganization, groups: [{ groupId: 'another-reading-group', name: 'Reading', collapsed: false, zoneIds: [] }] }, current.surveyOrganization)
+  expect((await useAppStore.getState().reviewSurveyComposition(held.requestId, true)).referencesRepaired).toBe(false)
+  const changed = useAppStore.getState()
+  await changed.setSurveyOrganization({ ...changed.surveyOrganization, groups: [...changed.surveyOrganization.groups, { groupId: 'reading-group', name: 'Original destination restored', collapsed: true, zoneIds: [] }] }, changed.surveyOrganization)
+  expect((await useAppStore.getState().reviewSurveyComposition(held.requestId, true)).referencesRepaired).toBe(true)
+  expect(useAppStore.getState().surveyOrganization.groups.find(group => group.groupId === 'reading-group')!.zoneIds).toEqual([held.target.zoneId])
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+})
+
+it('[detach] the named group ID ungrouped and the actual Ungrouped target stay distinct for real pointer drops', async () => {
+  await prepareDetach()
+  await act(async () => useAppStore.setState(state => ({ surveyOrganization: { ...state.surveyOrganization,
+    groups: [{ groupId: 'ungrouped', name: 'Named ungrouped group', collapsed: true, zoneIds: [] }] } })))
+  const sourceButton = () => [...document.querySelectorAll<HTMLElement>('[data-survey-content-key]')].find(element => element.dataset.surveyContentKey === JSON.stringify(['research', zones.source]))!
+  const actual = document.querySelector<HTMLElement>('[data-survey-list-target="ungrouped"][data-survey-list-target-kind="ungrouped"]')!
+  const namedGroup = document.querySelector<HTMLElement>('[data-survey-list-target="ungrouped"][data-survey-list-target-kind="group"]')!
+  expect(actual).not.toBeNull(); expect(namedGroup).not.toBeNull(); expect(actual).not.toBe(namedGroup)
+  vi.mocked(api.spatial.commit).mockClear()
+  const first = namedGroup.getBoundingClientRect(); await dragPointer(sourceButton(), { x: first.left + 90, y: first.top + 18 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toEqual([zones.source]))
+  expect(useAppStore.getState().surveyOrganization.ungrouped).not.toContain(zones.source)
+  // Expand through the original owner so the original source is a reachable second drag source.
+  const state = useAppStore.getState(); await act(async () => { await state.setSurveyOrganization({ ...state.surveyOrganization,
+    groups: state.surveyOrganization.groups.map(group => ({ ...group, collapsed: false })) }, state.surveyOrganization) })
+  const second = actual.getBoundingClientRect(); await dragPointer(sourceButton(), { x: second.left + 90, y: second.top + 18 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toEqual([]))
+  expect(useAppStore.getState().surveyOrganization.ungrouped).toContain(zones.source)
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+})
+
+it.each(['research', 'tab'] as const)('[detach] a %s gesture keeps its original scope when the original owner adds a sibling during pickup', async kind => {
+  const tab = await prepareDetach(kind === 'tab')
+  const research = [...document.querySelectorAll<HTMLElement>('[data-survey-content-key]')].find(element => element.dataset.surveyContentKey === JSON.stringify(['research', zones.source]))!
+  const from = kind === 'research' ? research : tab, targetRect = document.querySelector<HTMLElement>('[data-survey-list-target="reading-group"]')!.getBoundingClientRect()
+  let sibling: string | undefined, afterSibling: import('../../../packages/core/src/spatial-graph').AgentMuxSpatialGraph | undefined
+  await dragPointer(from, { x: targetRect.left + 90, y: targetRect.top + 18 }, async () => {
+    if (kind === 'research') expect(document.querySelector('[data-survey-independent-target]')).toBeNull()
+    await act(async () => { sibling = useAppStore.getState().openLauncher({ workspaceId: resource.id, displayWorkspaceId: resource.id, tabGroupId: 'source-group', zoneId: zones.source, reveal: false }) })
+    expect(sibling).toBeDefined(); await checkpointSpatialWorkbench(); afterSibling = (await core.read())!.graph
+    if (kind === 'research') expect(document.querySelector('[data-survey-independent-target]')).toBeNull()
+    vi.mocked(api.spatial.commit).mockClear()
+  })
+  if (kind === 'research') {
+    await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toEqual([zones.source]))
+    expect((await core.read())!.graph).toEqual(afterSibling); expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+  } else {
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Research location"]')).not.toBeNull()); await chooseDetachLocation()
+    await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]))
+    await vi.waitFor(() => expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).not.toBe(zones.source))
+    expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+  }
+  expect(catalog().tabs.find(tab => tab.tabId === sibling)!.zoneId).toBe(zones.source)
+})
+
+it('[detach] explicit selection of several researches cannot silently combine into one artificial list-group item', async () => {
+  const from = await prepareDetach(), before = useAppStore.getState(), graph = (await core.read())!.graph
+  await menu('Options for Source research'); await click(named('Select content to combine…'))
+  await click(document.querySelector<HTMLElement>('[aria-label="Select all Tabs in Source research"]')!)
+  await click(document.querySelector<HTMLElement>('[aria-label="Select all Tabs in Target research"]')!)
+  expect(document.querySelector('.survey-composition-toolbar')?.textContent).toContain('3 selected')
+  const rect = document.querySelector<HTMLElement>('[data-survey-list-target="reading-group"]')!.getBoundingClientRect()
+  vi.mocked(api.spatial.commit).mockClear(); await dragPointer(from, { x: rect.left + 90, y: rect.top + 18 })
+  expect(document.querySelector('[aria-label="Research location"]')).toBeNull()
+  expect(useAppStore.getState().surveyOrganization).toBe(before.surveyOrganization)
+  expect((await core.read())!.graph).toEqual(graph); expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+  expect(document.querySelector('.survey-composition-toolbar')?.textContent).toContain('3 selected')
+  await menu('Actions for selected content')
+  const groupAction = named('Move selected to list group')
+  expect(groupAction.getAttribute('aria-disabled')).toBe('true')
+  expect(named('Move selected to research…').getAttribute('aria-disabled')).not.toBe('true')
+})
+
+it('[detach] exact single-Tab selection has the same reachable list-group menu action', async () => {
+  const from = await prepareDetach()
+  await menu('Options for Source research'); await click(named('Select content to combine…'))
+  await click(from.closest('.survey-tab-cell')!.querySelector<HTMLElement>('input')!)
+  expect(document.querySelector('.survey-composition-toolbar')?.textContent).toContain('1 selected')
+  await menu('Actions for selected content')
+  const sub = named('Move selected to list group'); await act(async () => { sub.focus(); sub.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true })) })
+  await vi.waitFor(() => expect(named('Reading')).toBeDefined()); await click(named('Reading'))
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Research location"]')).not.toBeNull()); vi.mocked(api.spatial.commit).mockClear(); await chooseDetachLocation()
+  await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toHaveLength(1))
+  const zoneId = useAppStore.getState().surveyOrganization.groups[0]!.zoneIds[0]!
+  expect(catalog().tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId)).toEqual(['composition-tab'])
+  expect(catalog().tabs.find(tab => tab.tabId === 'detach-neighbor')!.zoneId).toBe(zones.source)
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+it('[detach] outside and keyboard cancellation keep the source when the explicit independent target exists', async () => {
+  const from = await prepareDetach(), before = useAppStore.getState(), graph = (await core.read())!.graph
+  vi.mocked(api.spatial.commit).mockClear(); await dragPointer(from, { x: 850, y: 850 }, async () => {
+    expect(document.querySelector('[data-survey-independent-target]')).not.toBeNull()
+  })
+  expect(document.querySelector('[aria-label="Research location"]')).toBeNull()
+  await act(async () => { from.focus(); from.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })) })
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-independent-target]')).not.toBeNull())
+  await act(async () => from.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-independent-target]')).toBeNull())
+  expect(useAppStore.getState().surveyOrganization).toBe(before.surveyOrganization); expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection); expect((await core.read())!.graph).toEqual(graph)
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+})
+
+it.runIf(Boolean(process.env.SURVEY_DETACH_RESTART))('[detach-restart] a second actual process restores the original grouped intent from the native user document and repairs without composition', async () => {
+  const path = process.env.SURVEY_COMPOSITION_RESTART_FILE!, outcome = process.env.SURVEY_DRAG_RESTART_OUTCOME!
+  if (process.env.SURVEY_COMPOSITION_RESTART_PHASE === 'write') {
+    await mkdir(resource.path, { recursive: true }); await writeFile(join(resource.path, 'draft.txt'), 'Original file retained across detach')
+    const from = await prepareDetach(), before = (await core.read())!.graph
+    if (outcome === 'unknown') vi.mocked(api.spatial.commit).mockImplementation(async input => {
+      const saved = await core.commit(input)
+      if (input.graph.zones.some(zone => !before.zones.some(original => original.zoneId === zone.zoneId))) throw new Error('Original detach ACK unknown')
+      return saved
+    })
+    else vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => { if ((await core.read())!.graph.zones.length > before.zones.length) throw new Error('Original grouped save ACK lost') })
+    await detachIntoGroup(from)
+    await vi.waitFor(() => expect(document.querySelector('[data-survey-composition-request]')).not.toBeNull())
+    await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]?.report.outcome).toBe(outcome))
+    const pending = useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]!
+    expect(pending.surveyGroupId).toBe('reading-group')
+    vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined); await prepareRendererUpdate()
+    const user = new WorkbenchUserStateStore(path + '.user.json'); await user.write(JSON.stringify({ state: {}, version: 1 }))
+    const nativeDocument = createWorkbenchUserDocument({ readWorkbenchState: () => user.read(), importWorkbenchState: raw => user.importIfAbsent(raw), writeWorkbenchState: raw => user.write(raw) }, () => localStorage)
+    await nativeDocument.hydrate(); await nativeDocument.persistent.checkpoint(WORKBENCH_USER_STATE_KEY, JSON.parse(localStorage.getItem(WORKBENCH_USER_STATE_KEY)!))
+    const saved = JSON.parse((await user.read())!)
+    expect(saved.state.surveyCompositionRecoveries[0]).toEqual(pending)
+    await writeFile(path, JSON.stringify({ pid: process.pid, graph: (await core.read())!.graph, pending, organization: saved.state.surveyOrganization,
+      drafts: saved.state.agentComposerDrafts, selection: saved.state.surveyZoneSelection,
+      hostBoundary: 'Actual Pointer/App/Store -> preview serialized projection -> original createWorkbenchUserDocument -> Main WorkbenchUserStateStore private file; reader hydrates original document in a fresh process. No installed/native Runtime claim.' }))
+  } else {
+    const saved = JSON.parse(await readFile(path, 'utf8')), state = useAppStore.getState()
+    expect(saved.pid).not.toBe(process.pid); expect((await core.read())!.graph).toEqual(saved.graph)
+    expect(state.surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]).toEqual(saved.pending)
+    expect(state.surveyOrganization).toEqual(saved.organization); expect(state.agentComposerDrafts).toEqual(saved.drafts); expect(state.surveyZoneSelection).toEqual(saved.selection)
+    const file = await restartFiles!.read(resource, 'draft.txt'); expect(file.status).toBe('read')
+    if (file.status === 'read') expect(file.document.content).toBe('Original file retained across detach')
+    expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(saved.pending.target.zoneId)
+    expect(catalog().tabs.find(tab => tab.tabId === 'detach-neighbor')!.zoneId).not.toBe(saved.pending.target.zoneId)
+    await dom.render(<App />); await vi.waitFor(() => expect(document.querySelector('.survey-composition-recovery button')).not.toBeNull())
+    vi.mocked(api.spatial.commit).mockClear(); await click(document.querySelector<HTMLElement>('.survey-composition-recovery button')!)
+    expect(document.querySelector('[data-survey-composition-request]')?.getAttribute('data-survey-composition-request')).toBe(saved.pending.requestId)
+    await click(named('Check current target')); await vi.waitFor(() => expect(named('Repair Survey references').hasAttribute('disabled')).toBe(false))
+    expect(useAppStore.getState().surveyCompositionRecoveries.filter(isSurveyCompositionRecovery)[0]).toEqual(saved.pending)
+    await click(named('Repair Survey references')); await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]))
+    expect(useAppStore.getState().surveyOrganization.groups.find(group => group.groupId === 'reading-group')!.zoneIds).toEqual([saved.pending.target.zoneId])
+    expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled()
+    await writeFile(path + '.read-proof.json', JSON.stringify({ pid: process.pid, writerPid: saved.pid, requestId: saved.pending.requestId, surveyGroupId: saved.pending.surveyGroupId, originalTarget: saved.pending.target, originalSources: saved.pending.sources, referencesRepaired: true, compositionCommits: 0 }))
+  }
+})
+
+it('[detach-public] the actual source-built CLI discovers the same GUI-created independent research and exact manual group', async () => {
+  const from = await prepareDetach(); await detachIntoGroup(from)
+  await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toHaveLength(1))
+  const zoneId = useAppStore.getState().surveyOrganization.groups[0]!.zoneIds[0]!
+  expect((await core.read())!.graph.tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(zoneId)
+  const nodeRequire = createRequire(resolve('packages/core/package.json'))
+  const { browserSourceBuild } = nodeRequire('../browser/scripts/source-build.mjs')
+  const { build } = browserSourceBuild(nodeRequire('esbuild'))
+  const cli = join(directory, 'amux.mjs'), socketDirectory = await mkdtemp('/tmp/acmp-')
+  await symlink(resolve('packages/core/node_modules'), join(directory, 'node_modules'), 'dir')
+  await build({ entryPoints: ['packages/core/src/agentmux.ts'], outfile: cli, bundle: true, packages: 'external', platform: 'node', format: 'esm', logLevel: 'silent',
+    plugins: [{ name: 'composition-cli-source', setup(builder: any) { builder.onLoad({ filter: /\.ts$/ }, (args: { path: string }) => {
+      const file = relative(process.cwd(), args.path), code = readFileSync(args.path, 'utf8')
+      if (!file.startsWith('packages/core/src/')) return null
+      if (process.env.SURVEY_COMPOSITION_LOADED) appendFileSync(process.env.SURVEY_COMPOSITION_LOADED,
+        JSON.stringify({ consumer: 'compiled-cli', file, original: createHash('sha256').update(code).digest('hex'), loaded: createHash('sha256').update(code).digest('hex') }) + '\n')
+      return { contents: code, loader: 'ts' }
+    }) } }] })
+  const socketPath = join(socketDirectory, 'control.sock'), server = new AgentMuxControlServer({ socketPath, execute: request => useAppStore.getState().executeControl(request) })
+  const env = privateEnvironment({ AGENTMUX_RUNTIME_DIRECTORY: socketDirectory, AGENTMUX_STATE_DIRECTORY: join(socketDirectory, 'state'), AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath })
+  const command = (args: string[], input = '', expected = 0) => new Promise<any>((resolve, reject) => {
+    const child = spawn(process.execPath, [cli, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+    let output = '', error = ''; child.stdout.on('data', chunk => { output += chunk }); child.stderr.on('data', chunk => { error += chunk })
+    child.once('error', reject); child.once('close', code => { try { expect(code, error + output).toBe(expected); resolve(objectCliReceipt(JSON.parse(output || error.split('\n').find(line => line.startsWith('{'))!))) } catch (error) { reject(error) } })
+    child.stdin.end(input)
+  })
+  try {
+    await server.start()
+    const list = (await command(['space', 'survey-list'])).result
+    expect(list.scope).toBe('survey-list'); expect(list.collectedZoneIds).toContain(zoneId)
+    expect(list.storedOrganization.groups.find((group: any) => group.groupId === 'reading-group').zoneIds).toEqual([zoneId])
+    const discovery = (await command(['space', 'ls', '--presentation'])).result.catalog.survey
+    expect(discovery.organization).toEqual(useAppStore.getState().surveyOrganization)
+    expect(discovery.items.some((item: any) => item.zoneId === zoneId)).toBe(true)
+    expect(discovery.organization.groups.find((group: any) => group.groupId === 'reading-group').zoneIds).toEqual([zoneId])
+  } finally { await server.stop(); await rm(socketDirectory, { recursive: true, force: true }) }
+})
+
+it('[detach-files] the original filesystem owner reads and saves the same File after actual independent pointer composition', async () => {
+  await mkdir(resource.path, { recursive: true }); await writeFile(join(resource.path, 'draft.txt'), 'Original physical detach file')
+  const { files, read, write } = await originalFilePorts()
+  try {
+    const opened = await files.read(resource, 'draft.txt'); expect(opened.status).toBe('read')
+    if (opened.status !== 'read') throw new Error('Original detach file not read')
+    const key = documentKey(resource.id, 'draft.txt')
+    useAppStore.setState({ documents: { [key]: opened.document }, dirtyDocuments: {}, documentIssues: {}, documentGenerations: {}, savingDocuments: {} })
+    const from = await prepareDetach(); await dragPointer(from, { x: 100, y: 918 }); await vi.waitFor(() => expect(document.querySelector('[aria-label="Research location"]')).not.toBeNull()); await chooseDetachLocation()
+    await vi.waitFor(() => expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).not.toBe(zones.source))
+    await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]))
+    expect(source().regions['composition-file']).toMatchObject({ workspaceId: resource.id, path: 'draft.txt' })
+    useAppStore.getState().updateDocument(source().id, 'Saved through the original File after detach', 'composition-file')
+    await useAppStore.getState().saveDocument(source().id, 'composition-file')
+    expect(write).toHaveBeenCalledOnce(); expect(await readFile(join(resource.path, 'draft.txt'), 'utf8')).toBe('Saved through the original File after detach')
+    expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true)
+    await writeFile(join(resource.path, 'draft.txt'), 'External original file edit after detach')
+    await useAppStore.getState().refreshDocument(resource.id, 'draft.txt')
+    expect(read).toHaveBeenCalledWith(resource.id, 'draft.txt'); expect(useAppStore.getState().documents[key]!.content).toBe('External original file edit after detach')
+  } finally { await files.dispose() }
+})
+
+it('[detach] malformed group intent stays unread with its original bytes instead of becoming an unscoped operation', async () => {
+  await prepareDetach()
+  const held = request(), valid = retainSurveyComposition({ ...held, surveyGroupId: 'reading-group' }, {
+    requestId: held.requestId, targetZoneId: held.target.zoneId, outcome: 'unknown', tabIds: ['composition-tab'] })
+  expect(isSurveyCompositionRecovery({ ...valid, surveyGroupId: null })).toBe(true)
+  const bad = { ...valid, surveyGroupId: { originalUnreadGroup: 'reading-group' } }, raw = [bad, { retainedUnknownRecord: true }]
+  expect(isSurveyCompositionRecovery(bad)).toBe(false)
+  await act(async () => useAppStore.setState({ surveyCompositionRecoveries: restoreSurveyCompositionRecoveries(raw) }))
+  await prepareRendererUpdate()
+  expect(JSON.parse(localStorage.getItem(WORKBENCH_USER_STATE_KEY)!).state.surveyCompositionRecoveries).toEqual(raw)
+  expect(useAppStore.getState().surveyCompositionRecoveries).toEqual(raw)
+  expect(document.querySelector('.survey-composition-recovery')?.textContent).toContain('could not be read')
+})
+
+it('[detach] keyboard arrows can reach the same exact list-group destination and submit the same original Tab', async () => {
+  const from = await prepareDetach(), key = async (key: string, code = key) => {
+    await act(async () => from.dispatchEvent(new KeyboardEvent('keydown', { key, code, bubbles: true })))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  }
+  await act(async () => from.focus()); await key(' ', 'Space')
+  const target = document.querySelector<HTMLElement>('[data-survey-list-target="reading-group"]')!
+  for (let i = 0; i < document.querySelectorAll('.survey-list-item,[data-survey-list-target]').length + 2 && target.dataset.composeOver !== 'true'; ++i) await key('ArrowDown')
+  expect(target.dataset.composeOver).toBe('true'); vi.mocked(api.spatial.commit).mockClear(); await key(' ', 'Space')
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Research location"]')).not.toBeNull()); await chooseDetachLocation()
+  await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toHaveLength(1))
+  expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds[0])
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
 })

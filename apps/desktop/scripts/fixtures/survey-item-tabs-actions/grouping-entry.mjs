@@ -6,7 +6,7 @@ import {spatialCatalog} from '../../../src/renderer/src/lib/space-agent-control'
 import {readSurveyPresentation} from '../../../src/renderer/src/lib/mobile-presentation'
 import {fixturePath} from '../../lib/fixture-values.mjs'
 import {updateThemeSelection} from '@agentmux/client-ui/theme'
-import {moveSurveyListItem} from '../../../src/renderer/src/hooks/useSurveyListOrganization'
+import {moveSurveyListItem} from '../../../src/renderer/src/lib/survey-list'
 import {api} from '../../../src/renderer/src/lib/api'
 
 // Only the exact preview Browser history read has an empty transport. No write or durability is invented.
