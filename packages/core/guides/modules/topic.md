@@ -94,5 +94,8 @@ New Topic promotions also honor the original `promotion.enabled` setting. Disabl
 admission refuses only the new promotion; existing Agents, Motes and original
 partial-operation inspection/explicit continuation remain available. Promotion
 configuration is in Settings → Promotion. For starting from an ordinary Agent,
-read `agent --skill` and `agent promote --help`; that path prefers joining an existing Club; explicitly establishing a new Club
-is a separate choice. It preserves the original project/Topic and appoints no Main.
+read `agent open --help` and use the shared Takeover workflow at an explicitly chosen
+Club. Prefer an existing Club; creating a new Club is a separate first step before
+choosing its new Agent. The original Agent and project/Topic remain. `agent promote`
+only reads or explicitly continues previously accepted records and creates no new
+Agent promotion.

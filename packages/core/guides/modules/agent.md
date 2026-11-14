@@ -248,42 +248,32 @@ The older `agent rename` retains its receiving-client display-override semantics
 and original records. It is not silently redirected to another Core. Local label
 saves do not claim Provider-native title synchronization or Agent health.
 
-## Promote an original Agent into a Mote Club
+## Continue an accepted Agent promotion
 
-After the user explicitly chooses lasting Club membership, the original
-person/device may call `agent promote apply --input FILE|-`. Retain the exact
-Host/Session, source display occurrence, title, operationId and destination.
-Prefer `destination: {"kind":"existing-club","target":CLUB_TARGET}` using an
-original discovery choice. Explicit `destination: {"kind":"new-club"}` establishes
-a separate Club home and then associates that same Agent as its Thread. Neither
-choice appoints or replaces a Main. The original Main settings, Agent history,
-Run, execution cwd and project workface remain. No repository is copied, no
-Agent is started, and no input or standing maintenance is enabled. An Agent
-already organized in a Topic/Club keeps its organization; promotion cannot be
-used as a transfer.
+New Promotion, Handson and transfer use the shared Takeover workflow: explicitly
+choose the destination and a new Agent through `agent open --takeover-source`.
+Prefer an existing Club. Creating a Club is a separate content operation before
+choosing its new Agent; it does not reuse `agent promote apply` or appoint Main.
+Read `agent open --help` and `space --skill` for the original source and destination.
 
-Use `agent promote inspect --input FILE|-` with `{"target":{"hostId":"HOST",
-"agentSessionId":"SID"}}` to discover `pending`, original `clubs` and current
-`memberships`. Club titles may match; retain their exact target and directory.
-An unavailable Main is `main: null`, never a guessed role. `issue` reports gaps;
-it does not invalidate other confirmed Club choices. Follow `nextCursor` with
-the same target and `cursor` until null to finish discovering unfinished
-operations. Do not treat a partial page as a complete set.
+`agent promote inspect --input FILE|-` retains the original accepted record for
+`{"target":{"hostId":"HOST","agentSessionId":"SID"},"operationId":"ORIGINAL"}`.
+Omit operationId only to discover that Agent's one original record. This response
+contains `promotion` or null; it has no Club discovery, memberships or cursor.
+A mismatched operation is refused rather than substituted. A managed Agent may
+inspect only its own retained operation.
 
-Include the original `operationId` to read only that operation; the result has
-`discovery: null`. Unknown operation IDs remain absent rather than adopting
-another action's receipt. A managed Agent can inspect its own target, but cannot
-assign itself membership or a Main role. Partial or unknown results retain their
-complete original request. Inspect before explicitly applying that same request
-and operationId; never mint a new operation to replace an unknown result.
-Historical completion remains inspectable after later membership or file edits.
-Already admitted original operations keep their original promises and durable
-records, including an original Main assignment; new requests always require an
-explicit destination and never inherit that promise.
+Only the original person/device may explicitly continue an accepted operation
+with `agent promote apply --input FILE|-` and its complete original
+`{target,source,title,operationId}`. Preserve every original field after unknown;
+no destination, new operation, migration or second admission is created. The
+frozen record retains its original Mote home, exact Session/Run/occurrence and
+Main assignment promise. New admissions are closed. Disabling `promotion.enabled`
+does not block an already accepted operation's inspection or explicit continuation.
 
-`settings inspect promotion.enabled` reads the global switch for new promotions;
-its default is true. The person/device may change it through Settings → Promotion
-or the public Settings owner. Disabling it retains existing Clubs and original
-operation inspection/continuation. A saved personality does not prove that an
-existing Session has read it; continue the original context and discover Mote
-guidance through the original main/member binding when actually working there.
+Partial results identify the incomplete files, spatial association, Main settings
+or completion acknowledgement. Original Agent work, source positions and unsent
+drafts remain available. A readable completion marker is confirmed by its original
+owner's durability check. Once complete, the original marker proves that historical
+operation; later membership or authored Main edits do not restart it or overwrite
+those edits. Saved personality files do not prove that an existing Session read them.
