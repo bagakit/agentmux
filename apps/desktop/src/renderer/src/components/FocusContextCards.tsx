@@ -120,7 +120,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
     const full = visited.current.has(contextKey(context)) || requested
     const selected = selectedKey === undefined ? selectedId === context.id : selectedKey === contextKey(context)
     const sourceKey = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(sourceKey), section = sections?.get(sourceKey)
-    return <Fragment key={contextKey(context)}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.id} aria-label={`${section.kind === 'worktree' ? 'Zone' : 'Topic'} · ${section.name}`} data-focus-zone-section={section.kind === 'worktree' ? section.id : undefined}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
+    return <Fragment key={contextKey(context)}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.kind === 'worktree' ? undefined : section.id} aria-label={`${section.kind === 'worktree' ? 'Zone' : 'Topic'} · ${section.name}`} data-focus-zone-section={section.kind === 'worktree' ? section.id : undefined}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
     <div className="focus-context-card" style={{ display: 'grid', minHeight: cardHeight + (topic ? 28 : 0) }}
       data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
@@ -130,7 +130,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
         identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} onSelect={onSelect} topic={topic?.content ? undefined : topic} />
         : <button type="button" className={`focus-context focus-context--card${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
-          aria-pressed={selected} aria-label={`${topic ? `Topic · ${topic.name} · ` : ''}${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}`} aria-description={context.originAddress}
+          aria-pressed={selected} aria-label={`${topic ? `${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name} · ` : ''}${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}`} aria-description={context.originAddress}
           onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
           onClick={() => onSelect(context.id)}
           onFocus={event => { reveal(context, event.currentTarget.parentElement as HTMLDivElement) }}
