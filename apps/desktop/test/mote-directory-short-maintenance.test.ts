@@ -79,7 +79,7 @@ it.each(['scratch','motes','topics'] as const)('original %s Mote is shortened wi
   const report = await h.run(); expect(report.success, JSON.stringify(report)).toBe(true)
   expect((await stat(h.canonical, { bigint: true })).ino).toBe(h.original.ino)
   expect(await readFile(join(h.old, 'note.md'))).toEqual(initial)
-  if (role === 'scratch') expect(await readFile(join(h.root, 'motes', scratchTopicDirectoryName(h.id), 'note.md'))).toEqual(initial)
+  if (role === 'scratch') await expect(lstat(join(h.root, 'motes', scratchTopicDirectoryName(h.id)))).rejects.toMatchObject({ code: 'ENOENT' })
   const cold = (await new ScratchTopics(controlledNativeImage).read(h.workspace, h.id))!
   expect(cold.identityDirectoryPath).toBe(identity); expect(cold.id).toBe(h.id); expect(cold.readError).toBeUndefined()
   expect((await h.publicFiles.read(h.input)).result).toMatchObject({ status: 'read', document: { content: initial.toString() } })
@@ -209,6 +209,9 @@ it('a same-text foreign stage arriving inside the real helper window is refused 
 })
 it('real primary deletion protects physical, Scratch and intermediate aliases while internal files and custom Motes remain usable', async () => {
   const h = await fixture(PMO_TEAMS_TOPIC_ID, 'scratch'); expect((await h.run()).success).toBe(true)
+  const middle = join(dirname(h.canonical), scratchTopicDirectoryName(h.id))
+  await symlink(basename(h.canonical), middle)
+  await rm(h.old); await symlink('../motes/' + basename(middle), h.old)
   const outer = { ...h.workspace, id: 'registered-parent', path: h.root }
   for (const path of ['motes/' + moteDirectoryName(h.id), 'scratch/' + scratchTopicDirectoryName(h.id), 'motes/' + scratchTopicDirectoryName(h.id)])
     await expect(h.files.delete(outer, path)).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })

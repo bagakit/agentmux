@@ -1,6 +1,6 @@
 import { access, mkdir, mkdtemp, readFile, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
@@ -10,6 +10,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, sc
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
 import { controlledNativeImage, imageInput, imagePng } from './fixtures/mote-identity-image'
 import { migrateTopicDirectories } from '../scripts/migrate-topic-directories.mjs'
+import { moteDirectoryName } from '../src/main/scratch-directory-identity.mjs'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -35,7 +36,7 @@ it('new Topic, primary and custom Mote creation use separate canonical homes and
   const custom = await h.topics.ensureMote(h.workspace, 'view:custom')
   expect(ordinary.physicalDirectoryPath).toBe(join(h.home, '.agentmux/topics', ordinary.directoryPath))
   for (const mote of [primary, custom]) {
-    expect(mote.physicalDirectoryPath).toBe(join(h.home, '.agentmux/motes', mote.directoryPath))
+    expect(mote.physicalDirectoryPath).toBe(join(h.home, '.agentmux/motes', moteDirectoryName(mote.id)))
     expect(mote.identityDirectoryPath).toBe(mote.physicalDirectoryPath)
     expect(mote.soul?.content.length).toBeGreaterThan(0)
     expect((await h.topics.prepareAgent(h.workspace, mote.id, { providerId: 'codex', sessionId: 'new-cwd' })).absolutePath).toBe(mote.physicalDirectoryPath)
@@ -53,8 +54,8 @@ it('migration preserves old durable Space, Zone, avatar and archive identity aft
   const inode = (await stat(original.physicalDirectoryPath!, { bigint: true })).ino
   const report = await migrateTopicDirectories({ home: h.home, execute: true })
   expect(report.success).toBe(true)
-  expect(await readlink(original.physicalDirectoryPath!)).toBe('../motes/' + original.directoryPath)
   const current = (await h.topics.read(h.workspace, original.id))!
+  expect(await readlink(original.physicalDirectoryPath!)).toBe('../motes/' + basename(current.physicalDirectoryPath!))
   expect(current.identityDirectoryPath).toBe(original.identityDirectoryPath)
   expect((await stat(current.physicalDirectoryPath!, { bigint: true })).ino).toBe(inode)
   expect(current.moteArchive).toEqual(archived)
@@ -106,7 +107,7 @@ it('cross-home material moves retain atomic no-replace and primary Mote protecti
   expect(await readFile(join(topic.physicalDirectoryPath!, 'refs/one.md'), 'utf8')).toBe('Keep competitor')
   const primary = await h.topics.ensureMote(h.workspace, PMO_TEAMS_TOPIC_ID)
   await expect(h.files.delete(h.workspace, primary.directoryPath)).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
-  await expect(h.files.delete({ ...h.workspace, id: 'parent', path: join(h.home, '.agentmux') }, 'motes/' + primary.directoryPath)).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
+  await expect(h.files.delete({ ...h.workspace, id: 'parent', path: join(h.home, '.agentmux') }, 'motes/' + basename(primary.physicalDirectoryPath!))).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
   await access(join(primary.physicalDirectoryPath!, 'SOUL.md'))
 })
 
@@ -127,11 +128,12 @@ it('duplicate homes, forged aliases and broken identity records stay visible wit
   expect((await migrateTopicDirectories({ home: h.home, execute: true })).success).toBe(true)
   const current = (await h.topics.read(h.workspace, original.id))!
   const record = join(current.physicalDirectoryPath!, '.agentmux/directory-identity.json')
+  const identity = await readFile(record)
   const before = await readFile(join(current.physicalDirectoryPath!, 'SOUL.md'))
   await writeFile(record, JSON.stringify({ version: 1, identityDirectoryPath: current.physicalDirectoryPath }))
-  expect((await h.topics.list(h.workspace)).find(topic => topic.id === original.id)?.readError).toContain('identity is unconfirmed')
-  await expect(h.topics.read(h.workspace, original.id)).rejects.toThrow('identity is unconfirmed')
-  await writeFile(record, JSON.stringify({ version: 1, identityDirectoryPath: original.identityDirectoryPath }))
+  expect((await h.topics.list(h.workspace)).find(topic => topic.id === original.id)?.readError).toContain('unconfirmed')
+  await expect(h.topics.read(h.workspace, original.id)).rejects.toThrow('unconfirmed')
+  await writeFile(record, identity)
   await mkdir(join(h.home, '.agentmux/topics', original.directoryPath), { recursive: true })
   await expect(resolveScratchTopicDirectory(h.workspace.path, original.id)).rejects.toThrow('conflict')
   await rm(join(h.home, '.agentmux/topics', original.directoryPath), { recursive: true })

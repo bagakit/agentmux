@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, rename, stat, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, rename, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { join, resolve, dirname, basename } from 'node:path'
 import { once } from 'node:events'
 import { before, test } from 'node:test'
@@ -118,7 +118,8 @@ test('actual helper and script retain cwd, every asset inode, dirty Git and dura
   assert.equal(receipt.success, true, JSON.stringify(receipt))
   assert.equal(receipt.objects[0].state, 'migrated')
   const canonical = join(home, '.agentmux/motes', moteDirectoryName('launcher:live'))
-  assert.equal(await readlink(old), '../motes/' + entityName('live'))
+  assert.equal(await readlink(old), '../motes/' + basename(canonical))
+  await assert.rejects(lstat(join(dirname(canonical), entityName('live'))), { code: 'ENOENT' })
   assert.equal(inode(await stat(old, { bigint: true })), before['.'])
   assert.deepEqual(withoutIdentity(await inventory(canonical)), before)
   assert.equal(git(canonical).replace('?? ' + metadataName + '\n', ''), oldGit)
@@ -150,7 +151,8 @@ test('dry-run is read-only; primary, regular SOUL and archived entities classify
   assert.deepEqual(await inventory(join(home, '.agentmux')), before)
   const moved = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
   assert.equal(moved.success, true, JSON.stringify(moved))
-  for (const path of [primary, custom, archived]) assert.equal(await readlink(path), '../motes/' + path.split('/').at(-1))
+  for (const [path, id] of [[primary, 'leader'], [custom, 'custom'], [archived, 'archived']])
+    assert.equal(await readlink(path), '../motes/' + moteDirectoryName('launcher:' + id))
   assert.equal(await readlink(topic), '../topics/' + entityName('plain'))
   assert.equal(await readFile(join(home, '.agentmux/scratch/loose.md'), 'utf8'), 'loose fixture stays\n')
 })
@@ -286,6 +288,41 @@ test('lost helper receipt after swap resumes only the exact alias and saved orig
   assert.equal(refused.success, false)
   assert.equal(refused.objects[0].issue.code, 'DIRECTORY_IDENTITY_INVALID')
   assert.deepEqual(await inventory(canonical), invalidBefore)
+})
+
+test('a witnessed older exchange finishes at its recorded intermediate address before canonical relocation', async () => {
+  const home = await homeFixture('witnessed-intermediate'), old = await entity(home, 'witnessed', true)
+  const motes = join(home, '.agentmux/motes'), middle = join(motes, entityName('witnessed'))
+  const canonical = join(motes, moteDirectoryName('launcher:witnessed'))
+  await mkdir(motes)
+  const metadata = join(old, metadataName), bytes = JSON.stringify(retainedRecord(old)) + '\n'
+  await writeFile(metadata, bytes, { flag: 'wx', mode: 0o600 })
+  const parent = await stat(dirname(metadata), { bigint: true }), record = await stat(metadata, { bigint: true })
+  const before = await inventory(old)
+  const args = [...await aliasArgs(home, old, 'motes/' + basename(middle)), '--witness', metadataName,
+    '.agentmux/directory-identity.pending.json', '.agentmux/directory-identity.pending.alias',
+    String(parent.dev), String(parent.ino), String(record.dev), String(record.ino), hash(bytes), '--before-commit-barrier']
+  const child = spawn(helper, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] })
+  await Promise.race([once(child.stdio[3], 'data'), once(child, 'exit').then(() => assert.fail('Native exchange never reached its commit barrier.'))])
+  const closed = once(child, 'close'); child.kill('SIGTERM'); await closed
+  assert.equal((await lstat(old)).isDirectory(), true)
+  assert.equal((await lstat(middle)).isSymbolicLink(), true)
+
+  const repair = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
+  assert.equal(repair.success, true, JSON.stringify(repair))
+  assert.equal(await readlink(old), '../motes/' + basename(middle))
+  assert.equal(await readlink(middle), '../motes/' + basename(canonical))
+  assert.deepEqual(await inventory(canonical), before)
+  assert.equal((await migrateTopicDirectories({ home, execute: true, helperPath: helper })).objects[0].state, 'already-migrated')
+
+  await unlink(old)
+  await unlink(middle)
+  const after = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
+  assert.equal(after.success, true, JSON.stringify(after))
+  assert.equal(after.objects[0].identityDirectoryPath, old)
+  await assert.rejects(lstat(old), { code: 'ENOENT' })
+  await assert.rejects(lstat(middle), { code: 'ENOENT' })
+  assert.deepEqual(await inventory(canonical), before)
 })
 
 test('old no-replace action still moves an absent target and refuses an occupied target', async () => {
