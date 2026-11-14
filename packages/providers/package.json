@@ -251,6 +251,10 @@
     "./cursor/payload-consumption": {
       "types": "./dist/cursor/payload-consumption.d.ts",
       "import": "./dist/cursor/payload-consumption.js"
+    },
+    "./claude/native-activity": {
+      "types": "./dist/claude/native-activity.d.ts",
+      "import": "./dist/claude/native-activity.js"
     }
   },
   "files": [

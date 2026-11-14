@@ -9,14 +9,14 @@ import {
   CLAUDE_ASKED_TOOL_END_EVENT,
   CLAUDE_CHILD_ACTIVITY_EVENT,
   claudeNativeActivity,
-  claudePlugin,
   CLAUDE_TURN_END_DECISION,
   CLAUDE_TURN_END_EVENT,
   CLAUDE_NOTICE_ADMISSION_EVENT,
   claudeNativeObservationFailure,
   claudeNativeTurnIdentity,
   withClaudePlugin
-} from './claude-native-activity.js'
+} from '@agentmux/providers/claude/native-activity'
+import { createClaudePlugin } from './claude-plugin.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
@@ -188,9 +188,9 @@ const CLAUDE_PERMISSION_OPTIONS: readonly TerminalPermissionOption[] = [
  * plugin under AgentMux's state directory, loaded by --plugin-dir. Nothing is written into the
  * workspace, so the plan is the same for every workspace.
  */
-export function claudeManagedPlugin(): ReturnType<typeof claudePlugin> {
+export function claudeManagedPlugin(): ReturnType<typeof createClaudePlugin> {
   const command = runScopedHookCommand('claude')
-  return claudePlugin(Object.fromEntries(CLAUDE_HOOK_EVENTS.map((eventName) => [eventName, [{
+  return createClaudePlugin(Object.fromEntries(CLAUDE_HOOK_EVENTS.map((eventName) => [eventName, [{
     // 三个 tool 事件按 matcher 分派（bundle 内嵌文档的 Hook Events 表里，这三行的 Matcher 列都是
     // "Tool name"）。`*` 是「所有工具」；缺了 matcher，Claude 对 tool 事件不会分派到我们这条。
     ...(eventName === 'PreToolUse' || eventName === 'PostToolUse' || eventName === 'PostToolUseFailure'

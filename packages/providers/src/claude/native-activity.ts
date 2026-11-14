@@ -1,10 +1,16 @@
-import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import type { AgentManagedHookMutation } from '../managed-hook-installer.js'
-import { defaultAgentMuxStateDirectory } from '../runtime-paths.js'
-import { HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
-import type { AgentHookObservationFailure, AgentNativeActivityEvent } from '../types.js'
+
+type NativeActivity = {
+  state: 'active' | 'idle' | 'unknown'
+  mainState?: 'active' | 'idle'
+  interruption?: 'interrupted' | 'not-interrupted'
+  nativeSessionId: string
+  nativeTurnId?: string
+  sourceId: string
+  sequence: number
+}
+type Payload = Readonly<Record<string, unknown>>
 
 /**
  * A main tool call that Claude asked the person about has ended. Claude emits no classic Hook
@@ -27,22 +33,22 @@ export const CLAUDE_NOTICE_ADMISSION_EVENT = 'AgentMuxNoticeAdmission'
  * frozen notice, which the module hands to Claude's own idle queue ($.prompt.submit). That queue runs
  * it as its own next turn once idle, after user input already queued, and never touches the draft.
  */
-export const CLAUDE_TURN_END_DECISION: NonNullable<import('../hook-normalizer.js').AgentNativeHookSpecification['turnEndDecision']> = {
+export const CLAUDE_TURN_END_DECISION = {
   eventName: CLAUDE_TURN_END_EVENT,
-  readTurn(payload) {
+  readTurn(payload: Payload) {
     const nativeTurnId = payload.turnId
     if (typeof nativeTurnId !== 'string' || !nativeTurnId.trim() || payload.agent_id !== undefined || payload.reason !== 'answer') return undefined
-    return { nativeTurnId, firstStop: true }
+    return { nativeTurnId, firstStop: true as const }
   },
-  output: (notice, notificationId) => ({ agentmuxNotice: { notificationId, text: notice } }),
+  output: (notice: string, notificationId: string) => ({ agentmuxNotice: { notificationId, text: notice } }),
   admission: {
     eventName: CLAUDE_NOTICE_ADMISSION_EVENT,
-    read(payload) {
+    read(payload: Payload) {
       const id = payload.notificationId
       if (typeof id !== 'string' || !id.trim()) return undefined
-      if (payload.entered === true) return { notificationId: id, admitted: true }
+      if (payload.entered === true) return { notificationId: id, admitted: true as const }
       return typeof payload.dropped === 'string' && payload.dropped.trim()
-        ? { notificationId: id, admitted: false, reason: payload.dropped.slice(0, 300) } : undefined
+        ? { notificationId: id, admitted: false as const, reason: payload.dropped.slice(0, 300) } : undefined
     }
   }
 }
@@ -63,7 +69,7 @@ export function claudeNativeTurnIdentity(payload: Readonly<Record<string, unknow
 export function claudeNativeObservationFailure(
   eventName: string,
   payload: Readonly<Record<string, unknown>>
-): AgentHookObservationFailure | undefined {
+) {
   if (eventName === 'AgentMuxActivityUnavailable' && ['delivery-gap', 'source-changed'].includes(String(payload.reason)) &&
       payload.agent_id === undefined && payload.agentId === undefined) {
     const source = observationIdentity(payload)
@@ -84,7 +90,7 @@ export function claudeNativeObservationFailure(
 export function claudeNativeActivity(
   eventName: string,
   payload: Readonly<Record<string, unknown>>
-): AgentNativeActivityEvent | undefined {
+): NativeActivity | undefined {
   if (!['turn.start', 'turn.complete', 'AgentMuxActivityUnavailable'].includes(eventName) || payload.agent_id !== undefined) return
   const base = observationIdentity(payload)
   if (!base) return
@@ -111,7 +117,7 @@ export function claudeNativeActivity(
  * Callbacks never wait for ingress and return the native middleware result unchanged. Main asks
  * gain their original tool_use_id; child call scopes report permission/question waits separately.
  */
-export function claudeNativeActivitySource(): string {
+export function claudeNativeActivitySource(identityRuntimeSource: string, hookCommandTimeoutSeconds: number): string {
   return `// AgentMux managed native activity observer. Generated; makes no answer or approval decision, and queues
 // only the Inbox notices Core hands it at a turn end, through Claude's own idle prompt queue.
 const { mintObjectId } = ${identityRuntimeSource}
@@ -155,7 +161,7 @@ async function send($, payload) {
     await runner($),
     { stdin: JSON.stringify(payload),
       env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
-      timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
+      timeoutMs: ${hookCommandTimeoutSeconds * 1_000} }
   )
   return result.exitCode === 0 && !result.stderr
 }
@@ -243,7 +249,7 @@ async function askTurnEndNotice($, turnId) {
       await runner($),
       { stdin: JSON.stringify({ hook_event_name: ${JSON.stringify(CLAUDE_TURN_END_EVENT)}, session_id: initialSessionId, turnId, reason: 'answer' }),
         env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
-        timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
+        timeoutMs: ${hookCommandTimeoutSeconds * 1_000} }
     )
     let notice
     try { notice = JSON.parse(asked.stdout || '{}').agentmuxNotice } catch {}
@@ -256,7 +262,7 @@ async function askTurnEndNotice($, turnId) {
       { stdin: JSON.stringify({ hook_event_name: ${JSON.stringify(CLAUDE_NOTICE_ADMISSION_EVENT)}, session_id: initialSessionId,
           notificationId: notice.notificationId, ...(typeof result?.drop === 'string' ? { dropped: result.drop } : { entered: true }) }),
         env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
-        timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
+        timeoutMs: ${hookCommandTimeoutSeconds * 1_000} }
     )
   } catch {
     try { await $.ui.log('AgentMux could not confirm an Inbox notice; the original messages stay in the Inbox.', { to: 'debug' }) } catch {}
@@ -438,17 +444,17 @@ export function register(on) {
  * directory is named by those bytes: a new revision is a new directory, never an edit of a folder a
  * running Claude watches and would hot-reload.
  */
-export function claudePlugin(classicHooks: Readonly<Record<string, readonly unknown[]>>): { directory: string; mutations: AgentManagedHookMutation[] } {
+export function claudePlugin(stateDirectory: string, activitySource: string, classicHooks: Readonly<Record<string, readonly unknown[]>>) {
   const files: Array<[string, string]> = [
     [join('.claude-plugin', 'plugin.json'), `${JSON.stringify({ name: 'agentmux-native-activity', version: '1.0.0',
       description: 'Deliver Claude Hooks to AgentMux and queue AgentMux Inbox notices through the native idle queue.',
       author: { name: 'AgentMux' } }, null, 2)}\n`],
     [join('hooks', 'hooks.json'), `${JSON.stringify({ modules: ['./register.js'], hooks: classicHooks }, null, 2)}\n`],
-    [join('hooks', 'register.js'), claudeNativeActivitySource()]
+    [join('hooks', 'register.js'), activitySource]
   ]
   const revision = createHash('sha256')
   for (const [path, content] of files) revision.update(path).update('\0').update(content).update('\0')
-  const directory = join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'plugins', revision.digest('hex'))
+  const directory = join(stateDirectory, 'providers', 'claude', 'plugins', revision.digest('hex'))
   return { directory, mutations: files.map(([path, content]) => ({ path: join(directory, path), mode: 0o600, content })) }
 }
 
