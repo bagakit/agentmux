@@ -149,9 +149,15 @@
 @keyframes composer-pending-copied { from { opacity: .35; transform: scale(.65); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .composer-pending__card { --queue-view-depth: 0; --queue-view-tilt: 0; animation-name: none; transition: none; } .composer-pending__copy[data-copy-state='copied'] > svg { animation: none; } }
 
-.composer-queued-editor { display: grid; gap: 8px; min-width: 0; }
+.composer-queued-editor { display: grid; gap: var(--sp-2); min-width: 0; }
 .composer-queued-editor__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-queued-editor__heading label { font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
+.composer-queued-editor > .ui-input--compact-editor {
+  min-height: calc(1lh + 2 * var(--sp-2) + 2px);
+  padding: var(--sp-2) var(--sp-3);
+  resize: none;
+}
+.composer-queued-editor [data-bounded-feedback]:not(:has([role='alert'])) { block-size: 1lh; }
 .composer-queued-editor [data-bounded-feedback] > span { display: block; }
 .composer-queued-editor [data-bounded-feedback] svg { margin-inline-end: var(--sp-1); vertical-align: -2px; }
 .composer-edit-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
@@ -184,8 +190,7 @@
 .composer-pending[data-editing='true'] { width: min(360px, calc(100vw - 16px)); }
 /* The positioned surface bounds the combined edit card and existing notice. */
 .composer-pending[data-editing='true'] > .composer-pending__cards { max-height: none; }
-.composer-pending__card[data-editing='true'] { height: auto; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2); }
-.composer-pending__card[data-editing='true'] .ui-input--compact-editor { resize: none; }
+.composer-pending__card[data-editing='true'] { height: auto; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); padding: var(--sp-3); border-color: var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2); }
 .composer-pending__card[data-editing='true'] > .composer-pending__retry { grid-area: auto; }
 .composer-queued-editor .composer-pending__more:disabled { opacity: 1; color: var(--text-3); cursor: default; }
 
