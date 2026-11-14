@@ -8,11 +8,15 @@ import { configNameChanges, configNameValue, type NamedChange, type NameChangeAu
 /** One commit queue around the existing Main fact; long host/Git/dialog work is never an updater. */
 export class ConfigOwner {
   private tail: Promise<void> = Promise.resolve()
+  /** A lost save ACK can leave original resources on disk but absent from the last confirmed cache. */
+  private saveNeedsReadback = false
   private readonly observers = new Set<(saved: AppConfig, previous: AppConfig) => void>()
   constructor(private readonly ports: {
     read(): AppConfig
     prepare?(current: AppConfig, next: AppConfig): AppConfig | Promise<AppConfig>
     save(next: AppConfig): Promise<AppConfig>
+    /** Read/confirm the original document and prepare its Runtime; never replay the original save. */
+    recoverSaved?(): Promise<AppConfig>
     publish(saved: AppConfig): void
     nameAudit?: NameChangeAudit
   }) {}
@@ -36,6 +40,14 @@ export class ConfigOwner {
     return operation
   }
 
+  private publish(saved: AppConfig, previous: AppConfig): void {
+    this.ports.publish(saved)
+    for (const observer of this.observers) {
+      try { observer(saved, previous) }
+      catch { console.warn('Configuration observer failed after a successful commit; configuration and healthy Runs remain available.') }
+    }
+  }
+
   edit(before: AppConfig, after: AppConfig): Promise<AppConfig> {
     return this.update((current) => applyConfigEdit(current, before, after), configNameChanges(before, after))
   }
@@ -43,6 +55,13 @@ export class ConfigOwner {
   update(apply: (current: AppConfig) => AppConfig, nameIntents: readonly Pick<NamedChange, 'target' | 'requested'>[] = []): Promise<AppConfig> {
     const capturedIntents = structuredClone(nameIntents)
     return this.enqueue(async () => {
+      if (this.saveNeedsReadback) {
+        if (!this.ports.recoverSaved) throw new Error('The previous configuration save is unconfirmed and its original storage readback is unavailable. No configuration was overwritten; existing Browser and Agent Runs are kept. Restore that storage capability and retry this edit.')
+        const previous = this.ports.read()
+        const actual = await this.ports.recoverSaved()
+        this.publish(actual, previous)
+        this.saveNeedsReadback = false
+      }
       const current = this.ports.read()
       const intended = capturedIntents.map(intent => ({ ...intent, before: configNameValue(current, intent.target) }))
       let next: AppConfig
@@ -73,12 +92,10 @@ export class ConfigOwner {
       if (unchanged && changes.length === 0) return current
       const commitPrepared = async (): Promise<AppConfig> => {
         if (unchanged) return current
-        const saved = await this.ports.save(next)
-        this.ports.publish(saved)
-        for (const observer of this.observers) {
-          try { observer(saved, current) }
-          catch { console.warn('Configuration observer failed after a successful commit; configuration and healthy Runs remain available.') }
-        }
+        let saved: AppConfig
+        try { saved = await this.ports.save(next) }
+        catch (error) { this.saveNeedsReadback = true; throw error }
+        this.publish(saved, current)
         return saved
       }
       return this.ports.nameAudit

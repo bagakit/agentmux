@@ -1,3 +1,4 @@
+import { parseBrowserAgentWorkspaceParams, parseBrowserAgentWorkspaceResult } from './browser-agent-workspace.js'
 import { isSettingsPreferenceMethod, parseSettingsPreferenceParams, parseSettingsPreferenceResult } from './settings-preferences.js'
 import { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './browser-lifecycle.js'
 import { parseResumeResolution } from './agent-session-recovery/resume-resolution.js'
@@ -739,6 +740,10 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'browser.release') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
     operation: source.operation, browserId: id(source.browserId, 'Browser identity is invalid.', 'INVALID_CONTROL_REQUEST'),
     navigationId: id(source.navigationId, 'Browser navigation identity is invalid.', 'INVALID_CONTROL_REQUEST') }
+  if (source.operation === 'browser.agent-workspace.prepare') {
+    const { operation: _, schemaVersion: _schema, requestId: _request, ...params } = source
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, ...parseBrowserAgentWorkspaceParams(params) }
+  }
   if (source.operation === 'browser.targets') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
     operation: source.operation, ...(source.workspaceId === undefined ? {} : { workspaceId: id(source.workspaceId, 'Browser Workspace is invalid.', 'INVALID_CONTROL_REQUEST') }) }
   if (isBrowserTaskControlOperation(source.operation)) {
@@ -1717,6 +1722,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { target } }
   }
+  if (operation === 'browser.agent-workspace.prepare') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseBrowserAgentWorkspaceResult(result) }
   if (operation === 'browser.targets') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseBrowserTargetsResult(result) }
   if (isBrowserTaskControlOperation(operation)) {
     const { operation: _, ...body } = parseBrowserTaskControlResult(operation, result)

@@ -74,6 +74,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'git.open': 'open.git',
   'browser.create': 'browser.create', 'browser.close': 'browser.close', 'browser.release': 'browser.release', 'browser.restore': 'browser.restore', 'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
   'browser.inspect': 'browser.operation',
+  'browser.agent-workspace.prepare': 'browser.agent-workspace.prepare',
   'browser.profile.proxy.ls': 'browser.profile.proxy.ls', 'browser.profile.proxy.create': 'browser.profile.proxy.create', 'browser.profile.proxy.update': 'browser.profile.proxy.update', 'browser.profile.proxy.delete': 'browser.profile.proxy.delete', 'browser.profile.proxy.assign': 'browser.profile.proxy.assign',
   'browser.profile.ls': 'browser.profile.ls', 'browser.profile.inspect': 'browser.profile.inspect',
   'browser.profile.folder.create': 'browser.profile.folder.create', 'browser.profile.folder.rename': 'browser.profile.folder.rename', 'browser.profile.folder.delete': 'browser.profile.folder.delete',

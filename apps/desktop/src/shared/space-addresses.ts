@@ -81,7 +81,11 @@ export type SpatialRequestBinding = {
   browserAgent?: {
     browserId: string; navigationId: string; controlRevision: number
     source: { displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
+    /** Browser resource remains fixed even when the new Agent uses another execution directory. */
     workspaceId: string; hostId: string; executionPath: string
+    browserResource?: { hostId: string; path: string }
+    executionWorkspaceId?: string
+    environment?: { mode: 'normal' | 'private'; profileId: string | null }
     messageOperationId: string; prompt: string; note: string
     recipient?: import('./contracts').AgentSessionControl
     /** Original queue admitted; further clicks inspect its input rather than recreating it. */

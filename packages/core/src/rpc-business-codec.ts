@@ -97,7 +97,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     const p = rpcRecord(body.input, ['executionId']); delete body.input; Object.assign(body, p)
   }
   if ((isBrowserProfileExtensionOperation(operation) || (isBrowserProfileBookmarkOperation(operation) || isBrowserProfileCookieFileOperation(operation))) && operationId !== undefined) body.operationId = operationId
-  if (operation !== 'browser.restore' && operation !== 'browser.release' &&
+  if (operation !== 'browser.restore' && operation !== 'browser.release' && operation !== 'browser.agent-workspace.prepare' &&
     (!isBrowserProfileControlOperation(operation) || operation === 'browser.profile.network.probe' || operation === 'browser.profile.network.history' || operation === 'browser.profile.creation.inspect' || ['browser.profile.create','browser.profile.copy','browser.profile.folder.create','browser.profile.view.create','browser.profile.proxy.create'].includes(operation)) &&
     operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
@@ -231,6 +231,12 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       const receipt = actual.receipt as import('./browser-lifecycle.js').AgentMuxBrowserLifecycleReceipt
       if (receipt?.operationId !== request.operationId || receipt.intent.kind !== (request.operation === 'browser.create' ? 'create' : 'close')) fail()
       if (request.operation === 'browser.close' && (receipt.browserId !== request.browserId || receipt.intent.kind !== 'close' || receipt.intent.navigationId !== request.navigationId)) fail()
+      break
+    }
+    case 'browser.agent-workspace.prepare': {
+      const source = (result as Extract<AgentMuxControlResult, { operation: 'browser.agent-workspace.prepare' }>).source
+      if (source.browserId !== request.browserId || request.expected && (source.workspaceId !== request.expected.workspaceId ||
+        source.mode !== request.expected.mode || source.profileId !== request.expected.profileId)) fail()
       break
     }
     case 'browser.restore':

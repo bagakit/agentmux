@@ -1179,6 +1179,12 @@ export class ConfigStore {
     return await this.write(value, { enforceExecutorBinding: true })
   }
 
+  /** Read the original saved document without bootstrap, retirement or another write. */
+  async readSaved(): Promise<AppConfig> {
+    await this.saveTail
+    return this.validate(JSON.parse(await readFile(this.path, 'utf8')))
+  }
+
   /** A native appearance publication needs the actual file and parent-directory ACK. */
   async confirmSaved(value: AppConfig): Promise<void> {
     const expected = Buffer.from(`${JSON.stringify(this.validate(value), null, 2)}\n`)

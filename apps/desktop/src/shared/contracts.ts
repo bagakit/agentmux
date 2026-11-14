@@ -2200,6 +2200,7 @@ export type AgentMuxDesktopApi = {
     getDemonstration(id: string): Promise<BrowserDemonstrationState>
     getTaskAssets(id: string): Promise<BrowserTaskAssetState>
     /** Control requests never grant a trusted human checkpoint or return input control. */
+    prepareAgentWorkspace(input: import('@agentmux/core/control').BrowserAgentWorkspaceParams): Promise<import('@agentmux/core/control').BrowserAgentWorkspaceResult>
     controlTask(request: BrowserTaskControlPayload): Promise<BrowserTaskControlResult>
     importTaskAsset(id: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset>
     inspectTaskAssetCreation(id: string, input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus>

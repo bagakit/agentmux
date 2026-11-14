@@ -595,6 +595,8 @@ export type AgentMuxControlBrowserCreateRequest = RequestBase & {
 export type AgentMuxControlBrowserCloseRequest = RequestBase & {
   operation: 'browser.close'; operationId: string; browserId: string; navigationId: string; caller?: AgentMuxControlCaller
 }
+export type { BrowserAgentWorkspaceParams, BrowserAgentWorkspaceResult, BrowserAgentWorkspaceSource } from './browser-agent-workspace.js'
+export type AgentMuxControlBrowserAgentWorkspaceRequest = RequestBase & { operation: 'browser.agent-workspace.prepare' } & import('./browser-agent-workspace.js').BrowserAgentWorkspaceParams
 export type AgentMuxControlBrowserTargetsRequest = RequestBase & { operation: 'browser.targets'; workspaceId?: string }
 export type AgentMuxControlBrowserRunRequest = RequestBase & {
   operation: 'browser.run'
@@ -773,6 +775,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlBrowserReleaseRequest
   | AgentMuxControlBrowserCreateRequest
   | AgentMuxControlBrowserCloseRequest
+  | AgentMuxControlBrowserAgentWorkspaceRequest
   | AgentMuxControlBrowserTargetsRequest
   | AgentMuxControlBrowserHistoryRequest
   | AgentMuxControlBrowserReplayRequest
@@ -921,6 +924,7 @@ export type AgentMuxControlResult =
   | { operation: 'browser.close'; receipt: import('./browser-lifecycle.js').AgentMuxBrowserLifecycleReceipt }
   | { operation: 'browser.restore'; target: AgentMuxBrowserTarget }
   | { operation: 'browser.release'; receipt: AgentMuxBrowserReleaseReceipt }
+  | ({ operation: 'browser.agent-workspace.prepare' } & import('./browser-agent-workspace.js').BrowserAgentWorkspaceResult)
   | ({ operation: 'browser.targets' } & AgentMuxBrowserTargetsResult)
   | { operation: 'browser.history'; operations: AgentMuxControlBrowserOperation[] }
   | {
@@ -1208,6 +1212,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.close': 'long',
   'browser.restore': 'long',
   'browser.release': 'long',
+  'browser.agent-workspace.prepare': 'long',
   'browser.targets': 'short',
   'browser.history': 'short',
   // Profile reads answer from Main's cached list; usage also reads saved Tabs, still local and bounded.

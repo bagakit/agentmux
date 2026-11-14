@@ -1610,6 +1610,7 @@ const mockApi: AgentMuxDesktopApi = {
     stopDemonstration: async () => ({ draft: null, warning: 'Human demonstration recording requires the desktop app.' }),
     getDemonstration: async () => ({ draft: null, warning: 'Saved human demonstrations require the desktop app.' }),
     getTaskAssets: async () => ({ assets: [], runs: [], warning: 'Saved Browser tasks require the desktop app.' }),
+    prepareAgentWorkspace: async () => { throw new Error('Browser execution directory preparation requires the original desktop Host.') },
     controlTask: async () => { throw new Error('Browser task control requires the desktop app.') },
     importTaskAsset: async () => { throw new Error('Browser task assets require the desktop app.') },
     inspectTaskAssetCreation: async () => { throw new Error('Original task creation receipts require the desktop app.') },

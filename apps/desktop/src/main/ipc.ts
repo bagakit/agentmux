@@ -293,6 +293,7 @@ import { RemoteCoreUpgradeManager, RemoteCoreInstallManager, type RemoteCoreInst
 import { executeSettingsExecutorRefreshControl, refreshSettingsExecutor } from './settings-executor-refresh-control.js'
 import { executeSettingsResourcesControl } from './settings-resources-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
+import { prepareBrowserAgentWorkspace } from './browser-agent-workspace.js'
 import { executeBrowserProfileControl, isBrowserProfileControlRequest } from './browser-profile-control.js'
 import { createBrowserProfileNetworkControl } from './browser-profile-network-control.js'
 import { APP_LINK_SCHEME_CHOICES, BROWSER_FIND_MAX_LENGTH, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice, type BrowserZoomStep } from '../shared/contracts.js'
@@ -308,7 +309,7 @@ import { RuntimeController } from './runtime-controller.js'
 import { desktopBusinessSocketPath } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
-import { configWithRuntimeBindings, saveRuntimeConfig } from './runtime-config-transaction.js'
+import { configWithRuntimeBindings, confirmRuntimeConfig, saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles, workspaceFileObserverCount, LOCAL_WORKER_SOURCE } from './workspace-files.js'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 
@@ -411,6 +412,15 @@ export async function registerIpc(args: {
     nameAudit,
     read: () => config,
     prepare: (current, next) => toolkit.prepareConfig(current, next),
+    recoverSaved: async () => {
+      const actual = await args.configStore.readSaved()
+      const release = await args.runtime.reserveExecutorConfigEdit(config, actual)
+      try {
+        const saved = await confirmRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, saved: actual })
+        releaseExecutorConfigEdit = release
+        return saved
+      } catch (error) { release(); throw error }
+    },
     save: async (next) => {
       const validated = args.configStore.validate(next)
       const release = await args.runtime.reserveExecutorConfigEdit(config, validated)
@@ -893,6 +903,15 @@ export async function registerIpc(args: {
       return await executeSettingsBrowserControl(request, configOwner)
     }
     if (isSettingsPreferenceMethod(request.operation)) return executeSettingsPreferencesControl(request as import('@agentmux/core').SettingsPreferenceRequest, configOwner)
+    if (request.operation === 'browser.agent-workspace.prepare') return { operation: request.operation, ...await prepareBrowserAgentWorkspace(request, {
+      config: configOwner, browser: id => browsers.agentWorkspaceSource(id), profileLabel: id => browsers.profileLabel(id),
+      host: id => args.runtime.executionHost(id), home: async id => {
+        if (args.runtime.executionHost(id).kind === 'local') return app.getPath('home')
+        const original = args.runtime.rpcClients().find(item => item.hostId === id)
+        if (!original) throw new Error('The original execution Host is unavailable. No local home was substituted.')
+        return (await original.client.hostEnvironment()).homeDirectory
+      }
+    }) }
     if (isBrowserProfileControlRequest(request)) return await executeBrowserProfileControl(request,
       { profiles: browserProfiles, usage: profileUsage, network: profileNetworkControl, openBookmark: openProfileBookmark }, nameChangeRequests.getStore()?.context.actor, { ...(nameChangeRequests.getStore()?.context.location.hostId ? { hostId: nameChangeRequests.getStore()!.context.location.hostId! } : {}) })
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
@@ -2511,6 +2530,13 @@ export async function registerIpc(args: {
   handleWithEvent('browser:getTaskAssets', async (event, id: string) => {
     await ensureBrowser(id)
     return await browsers.getTaskAssets(id)
+  })
+  handleWithEvent('browser:prepareAgentWorkspace', async (_event, input: unknown) => {
+    const request = parseAgentMuxControlRequest({ ...(input as object), schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'browser.agent-workspace.prepare' })
+    const result = await executeControl(request)
+    if (result.operation !== 'browser.agent-workspace.prepare') throw new Error('Unexpected Browser directory preparation receipt.')
+    const { operation: _, ...receipt } = result
+    return receipt
   })
   handleWithEvent('browser:controlTask', async (event, request: unknown) => {
     return await controlBrowserTask(request)

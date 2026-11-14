@@ -8,10 +8,11 @@ import { browserAgentCreationDraftKey, type BrowserAgentCreationOptions, type br
 import { useLauncherState } from '../lib/launcher-state'
 import { DocumentOverlayPortal, getWindowOverlayHost } from './WindowOverlayHost'
 
-export function BrowserAgentCreationOptionsDialog({ browserId, context, hostLabel, ownerDocument, onCreate, onClose }: {
+export function BrowserAgentCreationOptionsDialog({ browserId, context, hostLabel, ownerDocument, onCreate, onClose, preparationIssue }: {
   browserId: string
   context: ReturnType<typeof browserAgentCreationContext>
   hostLabel: string
+  preparationIssue?: string | undefined
   ownerDocument: Document
   onCreate(options: BrowserAgentCreationOptions): Promise<string | null>
   onClose(): void
@@ -45,7 +46,7 @@ export function BrowserAgentCreationOptionsDialog({ browserId, context, hostLabe
         onOpenAutoFocus={event => { event.preventDefault(); field.current?.focus() }}>
         <Dialog.Title className="confirmation-dialog__title">New Browser Agent</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">Create a collaborator for this page and give it control. A task is optional.</Dialog.Description>
-        <p className="browser-agent-create-options__execution">Runs on <strong>{hostLabel}</strong><code>{context.workspace?.path ?? 'Execution directory unconfirmed'}</code></p>
+        <p className="browser-agent-create-options__execution"><span>{context.profileLabel ? <>{context.profileLabel}{'\u00a0·\u00a0'}</> : null}Runs on <strong>{hostLabel}</strong></span><code>{preparationIssue ? 'Execution directory unconfirmed' : context.workspace?.path ?? 'Execution directory unconfirmed'}</code></p>
         <form onSubmit={event => { event.preventDefault(); void create() }} onKeyDown={event => {
           if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault()
         }}>
@@ -63,6 +64,7 @@ export function BrowserAgentCreationOptionsDialog({ browserId, context, hostLabe
               placeholder="What should this Agent do on this page?" /></label>
           {hostChanged ? <p className="surface-inline-error" role="status">The execution Host changed since these options were saved. Choose its Executor explicitly; your task is kept.</p> : null}
           {persistenceIssue ? <p className="surface-inline-error" role="status">{persistenceIssue}</p> : null}
+          {preparationIssue && !failure && !pending ? <p className="surface-inline-error" role="status">{preparationIssue} Your task and choices remain editable; Create retries this directory preparation.</p> : null}
           {failure ? <p className="surface-inline-error" role="alert">{failure}</p> : null}
           <footer><button type="button" className="small-button confirmation-dialog__cancel" onClick={onClose}>{pending ? 'Close' : 'Cancel'}</button>
             <button type="submit" className="primary-button" disabled={pending}>{pending ? 'Creating…' : 'Create and give control'}</button></footer>

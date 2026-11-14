@@ -64,7 +64,7 @@ export type SpatialControlOptions = { agentMuxNote?: string; purpose?: SpatialRe
   /** Local display order: a new Tab goes right after this exact Tab when it is in the target Group. */
   besideTabId?: string
   /** Local UI activation, independent of public cross-context spatial focus. */
-  localFocus?: { surface: 'survey'; reference: WorkbenchProjectionSelection }
+  localFocus?: { surface: 'survey'; reference: WorkbenchProjectionSelection; reveal?: boolean }
 }
 
 function failure(code: string, message: string, candidates?: AgentMuxSpaceSelector[]): never {

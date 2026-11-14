@@ -6761,6 +6761,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'browser.release') {
       throw Object.assign(new Error('Native Browser release belongs to the Main resource owner.'), { code: 'CONTROL_FAILED' })
     }
+    if (request.operation === 'browser.agent-workspace.prepare') {
+      throw Object.assign(new Error('Browser execution directory preparation belongs to the Main Browser and Host owners.'), { code: 'CONTROL_FAILED' })
+    }
     if (request.operation === 'browser.task.parallel-continue' || request.operation === 'browser.task.parallel-stop' || request.operation === 'browser.task.parallel-list' || request.operation === 'browser.task.parallel' || request.operation === 'browser.task.parallel-inspect' || request.operation === 'browser.task.inspect' || request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') {
       throw Object.assign(new Error('Browser task authoring belongs to the Main asset owner.'), { code: 'CONTROL_FAILED' })
     }
@@ -6891,7 +6894,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!selecting && fileNavigationSelection(state) !== expectedNavigation) navigationChanged = true
       }) : () => {}
       const ownsLocalTarget = (address: AgentMuxSpaceAddress): boolean => {
-        if (!localFocus || navigationChanged) return false
+        if (!localFocus || localFocus.reveal === false || navigationChanged) return false
         const state = get(), selected = state.surveyZoneSelection
         const sameSelection = isSurveyPage(localSelection)
           ? isSurveyPage(selected) && selected.regionId === localSelection.regionId && selected.browserId === localSelection.browserId &&

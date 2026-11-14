@@ -594,6 +594,13 @@ export class BrowserViewManager {
     return this.entries.get(id) === entry && entry.view === view ? target : null
   }
 
+  /** The original resource/environment can be read without acquiring a live page. */
+  agentWorkspaceSource(id: string): import('@agentmux/core/control').BrowserAgentWorkspaceSource | null {
+    const entry = this.entries.get(id) ?? this.releasedEntries.get(id)
+    if (!entry || ('cleanupOnly' in entry && entry.cleanupOnly) || !entry.workspaceId) return null
+    return { browserId: id, workspaceId: entry.workspaceId, mode: entry.storage.mode, profileId: entry.storage.profileId }
+  }
+
   /** Historical appearance can be read for an existing or released owner without acquiring it. */
   recoveryPreviewScope(id: string): BrowserRecoveryPreviewScope | null {
     const entry = this.entries.get(id) ?? this.releasedEntries.get(id)

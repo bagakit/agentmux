@@ -1,3 +1,4 @@
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { BrowserSitePermissions } from './BrowserSitePermissions'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { browserTaskCreateInput, type BrowserTaskCreateInput } from '@agentmux/core/control'
@@ -95,7 +96,7 @@ import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './BrowserWorkfaceBoundary'
 import { createBrowserAgent, type BrowserAgentCreationResult } from '../lib/browser-agent-creation'
-import { browserAgentCreationContext, browserAgentCreationDraftKey, type BrowserAgentCreationOptions } from '../lib/browser-agent-creation'
+import { browserAgentCreationContext, browserAgentCreationDraftKey, prepareBrowserAgentCreationContext, watchBrowserAgentPreparationNavigation, type BrowserAgentCreationOptions } from '../lib/browser-agent-creation'
 import { useLauncherState } from '../lib/launcher-state'
 import { useShallow } from 'zustand/react/shallow'
 import { browserProfiles, useBrowserProfiles } from '../lib/browser-profiles'
@@ -367,10 +368,11 @@ function BrowserPaneContent({
   const creationState = useAppStore(useShallow(state => ({ config: state.config, executorDetections: state.executorDetections, hostExecutorInventories: state.hostExecutorInventories })))
   const creationContext = useMemo(() => browserAgentCreationContext(creationState, tab.workspaceId, preferredExecutor), [creationState, tab.workspaceId, preferredExecutor])
   const creationHost = creationState.config?.hosts.find(host => host.id === creationContext.workspace?.hostId)
-  const creationDescription = [creationContext.executors.find(executor => executor.id === creationContext.defaultExecutorId)?.label ?? 'Choose an Executor',
-    creationHost?.label ?? creationContext.workspace?.hostId ?? 'Host unconfirmed', 'Right'].join(' · ')
   const profileFacts = useBrowserProfiles()
   const profile = profileFacts.profiles?.find(item => item.id === tab.profileId)
+  const creationDescription = [creationContext.executors.find(executor => executor.id === creationContext.defaultExecutorId)?.label ?? 'Choose an Executor',
+    creationHost?.label ?? creationContext.workspace?.hostId ?? 'Host unconfirmed',
+    (primaryPresentation.surface === 'survey' || primaryPresentation.survey) && tab.workspaceId === SCRATCH_WORKSPACE_ID && (tab.mode === 'private' || tab.profileId) ? (tab.mode === 'private' ? 'Private Browser directory' : `${profile?.label ?? 'Profile'} · Survey directory`) : creationContext.workspace?.path, 'Right'].filter(Boolean).join(' · ')
   function openBrowserSettings(sectionId: 'browser' | 'browser-profiles') {
     void executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus',
       target: { kind: 'settings', sectionId }, inputPolicy: 'preserve' }).catch(reportError)
@@ -426,7 +428,7 @@ function BrowserPaneContent({
   const [handoffNotice, setHandoffNotice] = useState<string | null>(null)
   const [agentCreationNotice, setAgentCreationNotice] = useState<Exclude<BrowserAgentCreationResult, { kind: 'confirmed' }> | null>(null)
   const [creationOptions, setCreationOptions] = useState<{ target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'>;
-    context: ReturnType<typeof browserAgentCreationContext>; hostLabel: string; document: Document; expectedPage: NonNullable<BrowserAgentCreationOptions['expectedPage']> } | null>(null)
+    context: ReturnType<typeof browserAgentCreationContext>; hostLabel: string; document: Document; preparationIssue?: string; expectedPage: NonNullable<BrowserAgentCreationOptions['expectedPage']> } | null>(null)
   const browserAgentIntent = useAppStore(state => tab.agentCreationRequestId ? state.spatialRequests[tab.agentCreationRequestId]?.browserAgent : undefined)
   const initialInputQueue = useAppStore(state => agentCreationNotice?.kind === 'input-unconfirmed' ? state.agentSteerQueues[agentCreationNotice.agentSessionId] : undefined)
   const initialInputConfirmed = useMemo(() => {
@@ -439,10 +441,25 @@ function BrowserPaneContent({
   useEffect(() => {
     if (initialInputConfirmed) setAgentCreationNotice(current => current === agentCreationNotice ? null : current)
   }, [agentCreationNotice, initialInputConfirmed])
-  function configureBrowserAgent(target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'>, ownerDocument: Document) {
-    setCreationOptions({ target: { ...target, ...(target.reference ? { reference: { ...target.reference } } : {}) }, context: creationContext,
-      hostLabel: creationHost?.label ?? creationContext.workspace?.hostId ?? 'Host unconfirmed', document: ownerDocument,
-      expectedPage: { navigationId: tab.navigationId, controlRevision: tab.control?.revision ?? -1 } })
+  async function configureBrowserAgent(target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'>, ownerDocument: Document) {
+    setCreatingAgent(true)
+    const navigation = watchBrowserAgentPreparationNavigation()
+    try {
+      const context = tab.agentCreationRequestId ? creationContext : await prepareBrowserAgentCreationContext(tab, target.surface === 'survey' || target.survey ? 'survey' : undefined)
+      if (!navigation.isCurrent()) return
+      const host = useAppStore.getState().config?.hosts.find(item => item.id === context.workspace?.hostId)
+      setCreationOptions({ target: { ...target, ...(target.reference ? { reference: { ...target.reference } } : {}) }, context,
+        hostLabel: host?.label ?? context.workspace?.hostId ?? 'Host unconfirmed', document: ownerDocument,
+        expectedPage: { navigationId: tab.navigationId, controlRevision: tab.control?.revision ?? -1 } })
+    } catch (error) {
+      const message = presentError(error)
+      setAgentCreationNotice({ kind: 'setup-unconfirmed', message })
+      if (!navigation.isCurrent()) return
+      setCreationOptions({ target: { ...target, ...(target.reference ? { reference: { ...target.reference } } : {}) },
+        context: { ...creationContext, profileLabel: tab.mode === 'private' ? 'Private Browser' : profile?.label }, preparationIssue: message,
+        hostLabel: creationHost?.label ?? creationContext.workspace?.hostId ?? 'Host unconfirmed', document: ownerDocument,
+        expectedPage: { navigationId: tab.navigationId, controlRevision: tab.control?.revision ?? -1 } })
+    } finally { navigation.dispose(); setCreatingAgent(false) }
   }
   async function startBrowserAgent(target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'> = primaryPresentation, options?: BrowserAgentCreationOptions): Promise<string | null> {
     const reference = target.reference && { ...target.reference, regionId: tab.regionId }
@@ -1926,8 +1943,8 @@ function BrowserPaneContent({
     {primary ? <div id={primaryHomeId} className="workbench-region-slot" /> : panePresentations.length === 0 ? renderPane() : null}
     {discussion.dialog}
     {creationOptions ? <BrowserAgentCreationOptionsDialog browserId={tab.browserId} context={creationOptions.context} hostLabel={creationOptions.hostLabel}
-      ownerDocument={creationOptions.document} onClose={() => setCreationOptions(null)} onCreate={options => startBrowserAgent(creationOptions.target,
-        { ...options, expectedPage: creationOptions.expectedPage, ...(creationOptions.context.workspace ? { expectedExecution: {
+      ownerDocument={creationOptions.document} preparationIssue={creationOptions.preparationIssue} onClose={() => setCreationOptions(null)} onCreate={options => startBrowserAgent(creationOptions.target,
+        { ...options, expectedPage: creationOptions.expectedPage, ...(!creationOptions.preparationIssue && creationOptions.context.workspace ? { expectedExecution: {
           hostId: creationOptions.context.workspace.hostId, path: creationOptions.context.workspace.path } } : {}) })} /> : null}
     {panePresentations.map(presentation => <BrowserPresentationView key={browserPresentationContentKey(presentation)}
       presentation={presentation} primary={presentation === primary} primaryHomeId={primaryHomeId} slotId={contentSlot(presentation)}

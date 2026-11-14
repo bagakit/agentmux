@@ -41,3 +41,27 @@ export async function saveRuntimeConfig(args: {
   args.runtime.commit(preparation)
   return saved
 }
+
+
+/** Recover a saved document's facts without saving it again or repeating client preparation effects. */
+export async function confirmRuntimeConfig(args: {
+  runtime: RuntimeController
+  configWriter: { confirmSaved(config: AppConfig): Promise<void> }
+  saved: AppConfig
+}): Promise<AppConfig> {
+  const preparation = await args.runtime.prepare(args.saved)
+  try {
+    args.runtime.validatePreparation(preparation)
+    if (configWithRuntimeBindings(args.saved, preparation) !== args.saved) {
+      throw new Error('The original saved configuration has an unconfirmed Runtime binding. No replacement configuration was written; inspect that original Host before retrying the edit.')
+    }
+    await args.configWriter.confirmSaved(args.saved)
+  } catch (error) {
+    try { await args.runtime.discard(preparation) }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Configuration readback and prepared Runtime cleanup both failed.') }
+    throw error
+  }
+  // As with the original save: a committed Runtime is never discarded as failed preparation.
+  args.runtime.commit(preparation)
+  return args.saved
+}
