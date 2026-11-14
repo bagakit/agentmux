@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { webcrypto } from 'node:crypto'
 import { act, createElement } from 'react'
@@ -193,6 +193,56 @@ async function connectFolder(f: Awaited<ReturnType<typeof fixture>>) {
   if (original.status !== 'registration-required') throw new Error('Original directory packet required')
   expect((await f.store.getState().useFilesSourceFolder(f.workspace.id, original.registration)).status).toBe('located')
 }
+
+it.runIf(business)('Source Explorer and Quick Open discover original Native candidates including empty directories without a Main alias', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await mkdir(join(f.source.project, 'empty-source-folder')); await writeFile(join(f.source.project, 'source-only.txt'), 'Original Source candidate')
+  await writeFile(join(f.sources[0]!.project, 'wrong-main-alias.txt'), 'Another actual Source candidate')
+  await symlink('source-only.txt', join(f.source.project, 'source-link'))
+  const ordinary = new OrdinaryWorkspaceFiles(), wrong = { id: 'wrong-alias', hostId: 'local', path: f.sources[0]!.project }
+  const mainDirectories = vi.spyOn(f.api.files, 'readDirectory').mockImplementation(async (_id, path) => ordinary.readDirectory(wrong, path))
+  const mainNames = vi.spyOn(f.api.files, 'list').mockImplementation(async () => ordinary.listFiles(wrong))
+  const { useWorkspaceFileTree } = await import('../src/renderer/src/components/file-tree/useWorkspaceFileTree.js')
+  const { QuickOpenFiles } = await import('../src/renderer/src/components/QuickOpenFiles.js')
+  let tree!: ReturnType<typeof useWorkspaceFileTree>
+  const expanded = new Set<string>(), element = document.createElement('div'), root = createRoot(element); document.body.append(element)
+  cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
+  function Probe() { tree = useWorkspaceFileTree(f.workspace.id, expanded); return createElement(QuickOpenFiles, { onClose() {} }) }
+  await act(async () => root.render(createElement(Probe)))
+  await vi.waitFor(() => expect(tree.rootCache?.children).toEqual(expect.arrayContaining([
+    expect.objectContaining({ name: 'empty-source-folder', isDirectory: true }), expect.objectContaining({ name: 'source-link', isSymlink: true })
+  ])))
+  await vi.waitFor(() => expect(element.textContent).toContain('source-only.txt'))
+  expect(element.textContent).not.toContain('wrong-main-alias.txt'); expect(mainDirectories).not.toHaveBeenCalled(); expect(mainNames).not.toHaveBeenCalled()
+  const locator = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!.locator!, r = locator.resource
+  const flags = ['--endpoint', 'unix:' + f.source.socketPath, 'file', 'ls', '--zone', r.zoneId, '--host', r.hostId, '--workspace', r.workspaceId, '--workspace-path', r.workspacePath]
+  const cli = await runCompiledObjectCli([...flags, '--directory'], objectCliEnvironment(f.source.state))
+  expect(cli.code, cli.stdout + cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result.result).toMatchObject({ status: 'directory-listed', complete: true, entries: expect.arrayContaining([expect.objectContaining({ name: 'empty-source-folder', isDirectory: true })]) })
+  const bounded = await runCompiledObjectCli([...flags, '--directory', '--limit', '1'], objectCliEnvironment(f.source.state))
+  expect(bounded.code, bounded.stdout + bounded.stderr).toBe(0); expect(JSON.parse(bounded.stdout).result.result).toMatchObject({ status: 'directory-listed', complete: false, partialReason: 'limit', entries: [expect.anything()] })
+  const names = await runCompiledObjectCli(flags, objectCliEnvironment(f.source.state))
+  expect(names.code, names.stdout + names.stderr).toBe(0); expect(JSON.parse(names.stdout).result.result).toMatchObject({ status: 'listed', files: expect.arrayContaining(['source-only.txt']) })
+  const call = f.bridge.files.call
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { if (args[1] === 'file.list') throw new Error('Original Source discovery unavailable'); return call(...args) })
+  await act(async () => { await tree.refreshDir('') })
+  expect(tree.rootCache?.children.some(entry => entry.name === 'empty-source-folder')).toBe(true); expect(tree.rootError).toContain('unavailable')
+  expect(mainDirectories).not.toHaveBeenCalled(); expect(mainNames).not.toHaveBeenCalled()
+}, 60000)
+
+it.runIf(business)('a late Source candidate reply cannot survive a new original selection or fall back to Main', async () => {
+  const f = await fixture(); await connectFolder(f)
+  const { listWorkspaceFileNames } = await import('../src/renderer/src/lib/source-files-discovery.js')
+  const call = f.bridge.files.call, main = vi.spyOn(f.api.files, 'list')
+  let entered!: () => void, release!: () => void
+  const held = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+  cleanup.push(() => release())
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { const result = await call(...args); if (args[1] === 'file.list') { entered(); await gate } return result })
+  const pending = listWorkspaceFileNames(f.workspace.id, f.store.getState), refused = expect(pending).rejects.toThrow('original Source directory')
+  await held
+  expect((await f.store.getState().resolveFilesSource(f.workspace.id)).status).toBe('located')
+  release(); await refused; expect(main).not.toHaveBeenCalled()
+}, 60000)
 
 it.runIf(business)('original GUI mkdir, file creation, directory move and delete consume Source receipts once while keeping the same draft and View identities', async () => {
   const f = await fixture(); await connectFolder(f)

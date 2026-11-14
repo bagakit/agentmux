@@ -2,6 +2,17 @@ import { fixturePath } from './helpers/fixture-values.js'
 import { expect, it } from 'vitest'
 import { parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type FileReadParams, type FileReadResult } from '../src/public-rpc-files'
 const params:FileReadParams={zoneId:'original-zone',path:'saved.txt',expectedResource:{hostId:'local',workspaceId:'workspace',workspacePath:fixturePath("workspace")}}
+it('one-level discovery preserves directory facts and rejects mismatched modes or escaped children', () => {
+  const input = { ...params, path: '.', mode: 'directory' as const, limit: 2 }, resource = { ...params.expectedResource, zoneId: params.zoneId, zonePath: params.expectedResource.workspacePath, path: '.' }
+  const row = { name: 'empty\nfolder\\name', path: 'empty\nfolder\\name', isDirectory: true, isSymlink: false, mtimeMs: -1, ignored: false }
+  const result = { resource, result: { status: 'directory-listed', entries: [row], complete: true, partialReason: null } }
+  expect(parseFileListParams(input)).toEqual(input)
+  expect(parseFileListResult(result, input)).toEqual(result)
+  expect(() => parseFileListResult(result, { ...params, path: '.' })).toThrow()
+  for (const entry of [{ ...row, path: '../other' }, { ...row, name: 'nested/child' }, { ...row, isDirectory: 'true' }]) expect(() => parseFileListResult({ ...result, result: { ...result.result, entries: [entry] } }, input)).toThrow()
+  expect(() => parseFileListResult({ ...result, result: { ...result.result, complete: false } }, input)).toThrow()
+  expect(() => parseFileListParams({ ...input, mode: 'recursive' })).toThrow()
+})
 function receipt(logicalDirectory?:string):FileReadResult{return{resource:{...params.expectedResource,zoneId:params.zoneId,zonePath:logicalDirectory===undefined?fixturePath("workspace/inside"):fixturePath("confirmed/physical"),path:(logicalDirectory===undefined?'inside':logicalDirectory)+(logicalDirectory===''?'':'/')+'saved.txt',...(logicalDirectory===undefined?{}:{logicalDirectory})},result:{status:'read',document:{path:(logicalDirectory===undefined?'inside':logicalDirectory)+(logicalDirectory===''?'':'/')+'saved.txt',content:'Original bytes',revision:'sha256:'+'a'.repeat(64)}}}}
 it.each([undefined,'original/namespace',''])('original physical or explicit logical namespace has exact resource/document mapping: %s',logical=>{const value=receipt(logical);expect(()=>parseFileReadResult(value,params)).not.toThrow();expect(parseFileReadResult(value,params)).toBe(value);const list={resource:value.resource,result:{status:'listed',files:['child.txt'],complete:true,omitted:'none',partialReason:null}};expect(parseFileListResult(list,params)).toBe(list)})
 it.each([fixturePath("absolute"),("C:" + (fixturePath("absolute"))),'a\\b','a//b','a/','./a','a/../b','a\nname','a\0name'])('a declared namespace never admits escaped or noncanonical logical directory: %s',logical=>{expect(()=>parseFileReadResult(receipt(logical),params)).toThrow(/logical directory|identity or path/)})
