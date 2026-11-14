@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { constants, createReadStream } from 'node:fs'
-import { access, copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import ts from 'typescript'
 import { buildHookWorker } from './build-hook-worker.mjs'
+import { materializeRuntimeCore } from '../../../scripts/package-dependencies.mjs'
 
 const exec = promisify(execFile)
 const vitest = join(dirname(createRequire(import.meta.url).resolve('vitest/package.json')), 'vitest.mjs')
@@ -23,7 +24,7 @@ async function hashFile(path) { const hash = createHash('sha256'); for await (co
 const binarySHA256 = await hashFile(binary)
 const built = await buildHookWorker(join(root, 'packages/core'))
 const workerSHA256 = await hashFile(built.outfile)
-const owners = ['packages/core/src/providers/grok.ts', 'packages/core/src/providers/shared.ts', 'packages/core/src/client.ts',
+const owners = ['packages/providers/src/grok/provider.ts', 'packages/core/src/providers/shared.ts', 'packages/core/src/client.ts',
   'packages/core/src/managed-hook-runtime.ts', 'packages/core/src/managed-hook-installer.ts']
 const mutations = process.argv.includes('--mutations')
 const compiled = process.argv.includes('--compiled')
@@ -56,27 +57,25 @@ async function qualifyCompiled() {
 const compiledArtifacts = compiled ? await qualifyCompiled() : undefined
 async function stageCompiledDeployment(directory) {
   const original = join(root, 'packages/core')
-  await mkdir(directory, { mode: 0o700 })
-  for (const part of ['dist', 'bin', `vendor/ctxmux/${process.platform}-${process.arch}`]) {
-    const target = join(directory, part)
-    await mkdir(dirname(target), { recursive: true })
-    if (process.platform === 'darwin') await exec('/bin/cp', ['-cR', join(original, part), target])
-    else await cp(join(original, part), target, { recursive: true, dereference: false,
-      verbatimSymlinks: true, mode: constants.COPYFILE_FICLONE })
-  }
-  await copyFile(join(original, 'package.json'), join(directory, 'package.json'), constants.COPYFILE_FICLONE)
-  await symlink(await realpath(join(original, 'node_modules')), join(directory, 'node_modules'), 'dir')
+  const { stdout: commit } = await exec('git', ['rev-parse', 'HEAD'], { cwd: root })
+  await materializeRuntimeCore(root, directory, { sourceCommit: commit.trim() })
   const qualified = {}
   for (const [artifact, identity] of Object.entries(compiledArtifacts)) {
-    const local = artifact.slice('packages/core/'.length)
+    const providerArtifact = artifact.startsWith('packages/providers/')
+    const local = providerArtifact
+      ? 'node_modules/@agentmux/providers/' + artifact.slice('packages/providers/'.length)
+      : artifact.slice('packages/core/'.length)
     assert.equal(await hashFile(join(directory, local)), identity.artifactSHA256, 'Private compiled owner differs from the current candidate: ' + local)
-    assert.equal(await hashFile(join(directory, local + '.map')), identity.sourceMapSHA256)
-    qualified[local] = identity
+    qualified[local] = { sourceSHA256: identity.sourceSHA256, artifactSHA256: identity.artifactSHA256 }
   }
-  for (const part of ['package.json', 'bin/amux', 'bin/agentmux-hook.js', 'dist/agentmux-hook.mjs',
+  const [originalManifest, deployedManifest] = await Promise.all([original, directory].map(async path =>
+    JSON.parse(await readFile(join(path, 'package.json'), 'utf8'))))
+  for (const key of ['name', 'version', 'main', 'exports', 'bin']) assert.deepEqual(deployedManifest[key], originalManifest[key])
+  qualified['package.json'] = { artifactSHA256: await hashFile(join(directory, 'package.json')) }
+  for (const part of ['bin/amux', 'bin/agentmux-hook.js', 'dist/agentmux-hook.mjs',
     `vendor/ctxmux/${process.platform}-${process.arch}/manifest.json`]) {
     const originalSHA256 = await hashFile(join(original, part))
-    assert.equal(await hashFile(join(directory, part)), originalSHA256)
+    assert.equal(await hashFile(join(directory, part)), originalSHA256, part)
     qualified[part] = { artifactSHA256: originalSHA256 }
   }
   return qualified

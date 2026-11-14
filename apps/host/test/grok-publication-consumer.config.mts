@@ -9,7 +9,7 @@ export default defineConfig({ ...original, plugins: [{ name: 'grok-publication-q
   const path = relative(original.root!, id.split('?')[0]!)
   if (!/^(?:packages\/(?:core|connectors)|apps\/host)\/(?:src|test)\/.*\.(?:ts|mts)$/u.test(path)) return
   let loaded = source
-  if (mutation && path === 'packages/core/src/providers/grok.ts') {
+  if (mutation && path === 'packages/core/src/providers/index.ts') {
     const before = '    readConversationChanges: readGrokConversationChanges,'
     if (source.split(before).length !== 2) throw Error('Exact Grok changes registration must load once')
     loaded = source.replace(before, '')

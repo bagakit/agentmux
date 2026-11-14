@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runScopedHookCommand } from '../src/providers/shared.js'
 import { hookResponseFor } from '../src/hook-passive-response.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
-import { createGrokManagedHookPlan } from '../src/providers/grok.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 
 const worker = fileURLToPath(new URL('../dist/agentmux-hook.mjs', import.meta.url))
 const roots: string[] = []
@@ -134,7 +134,7 @@ describe('stable native Hook bridge and original Run environment', () => {
   it('two Core publishers add one stable declaration and preserve previous Run callbacks', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-bridge-config-')); roots.push(root)
     const home = join(root, 'home'); await mkdir(home)
-    const plan = createGrokManagedHookPlan(home)
+    const plan = new AgentProviderRegistry().get('grok').planManagedHooks!({ env: { HOME: home, GROK_HOME: undefined } })!
     const mutation = plan.mutations[0]!
     const initial = JSON.parse(mutation.content)
     for (const definitions of Object.values(initial.hooks) as Array<Array<{ hooks: Array<{ command: string }> }>>) {

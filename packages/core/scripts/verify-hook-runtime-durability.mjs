@@ -13,18 +13,18 @@ const core = path => 'packages/core/' + path, test = path => core('test/' + path
 const source = path => path.startsWith('packages/') ? path : core('src/' + path)
 const worker = core('dist/agentmux-hook.mjs'), self = core('scripts/verify-hook-runtime-durability.mjs'), base = test('vitest.hook-environment.config.mts')
 const grokScript = core('scripts/verify-grok-hook-binding.mjs')
-const grokInputs = ['providers/grok.ts', 'providers/shared.ts', 'client.ts', 'managed-hook-runtime.ts', 'managed-hook-installer.ts'].map(source)
+const grokInputs = ['packages/providers/src/grok/provider.ts', 'providers/shared.ts', 'client.ts', 'managed-hook-runtime.ts', 'managed-hook-installer.ts'].map(source)
   .concat([test('providers/grok-hook-binding.native.test.ts'), test('vitest.grok-hook-binding.config.mts'), grokScript])
   .concat([test('fixtures/grok-hook-core-host.mjs')])
 const regressions = ['managed-hook-installer', 'doctor-hook-installation', 'hook-delivery-recovery', 'provider-event-name-source',
   'unified-identifiers', 'permission-hook-callback'].map(name => test(name + '.test.ts'))
 const definitions = {
   environment: { config: 'vitest.hook-environment.config.mts', env: 'AGENTMUX_HOOK_ENVIRONMENT_MUTATION',
-    owners: ['providers/execution-environment.ts', 'providers/grok.ts', 'client.ts', 'packages/providers/src/gemini/provider.ts', 'providers/claude-hook-activation.ts', 'providers/claude-workspace-trust.ts', 'providers/opencode.ts'],
+    owners: ['providers/execution-environment.ts', 'packages/providers/src/grok/provider.ts', 'client.ts', 'packages/providers/src/gemini/provider.ts', 'providers/claude-hook-activation.ts', 'providers/claude-workspace-trust.ts', 'providers/opencode.ts'],
     inputs: ['agent-provider.ts', 'client.ts', 'providers/execution-environment.ts', 'providers/shared.ts',
       ...['claude', 'claude-hook-activation', 'claude-workspace-trust', 'cursor', 'cursor-native-history',
-        'grok', 'hermes', 'opencode', 'pi'].map(name => 'providers/' + name + '.ts')].map(source)
-      .concat(['antigravity', 'copilot', 'gemini', 'droid'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
+        'hermes', 'opencode', 'pi'].map(name => 'providers/' + name + '.ts')].map(source)
+      .concat(['antigravity', 'copilot', 'gemini', 'droid', 'grok'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
     tests: ['provider-hook-environment.test.ts', 'claude-hook-activation.test.ts'],
     mutants: ['ignore-home', 'inherit-unset', 'drop-provider-env', 'core-cwd-relative', 'ignore-gemini-home', 'drop-inspect-unset',
       'ignore-claude-inspection-home', 'ignore-claude-trust-env', 'ignore-grok-home', 'trim-opencode-override'] },

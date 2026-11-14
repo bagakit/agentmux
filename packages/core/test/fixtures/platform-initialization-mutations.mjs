@@ -31,7 +31,7 @@ export const initializationMutations = {
 }
 const observed = new Set(['packages/core/src/client.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/agent-provider.ts',
   'packages/core/src/agent-input-wait.ts', 'packages/core/src/agent-message-journal.ts', 'packages/core/src/agent-global-message-queue.ts',
-  'packages/core/src/providers/grok.ts', 'packages/core/src/providers/grok-input-initialization.ts',
+  'packages/core/src/providers/index.ts', 'packages/core/src/providers/grok-input-initialization.ts',
   'packages/core/src/agent-native-source.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/client-event-publisher.ts',
   'packages/core/test/platform-initialization-input.test.ts', 'packages/core/test/native-history-input-continuity.test.ts',
   'packages/core/test/platform-initialization-diagnostic-lifetime.test.ts', 'apps/host/test/mote-existing-platform-input.test.ts',

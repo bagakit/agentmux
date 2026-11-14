@@ -15,7 +15,7 @@ const product = ['packages/core/src/agent-status-freshness.ts',
   'apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx',
   'apps/desktop/src/renderer/src/components/FocusContextRow.tsx']
 const files = [...product, 'packages/core/src/client.ts', 'packages/core/src/agent-session-store.ts',
-  'packages/core/src/hook-normalizer.ts', 'packages/core/src/providers/codex.ts', 'packages/core/src/providers/grok.ts',
+  'packages/core/src/hook-normalizer.ts', 'packages/core/src/providers/codex.ts', 'packages/providers/src/grok/provider.ts',
   'packages/core/package.json', 'packages/core/dist/agent-status-freshness.js', 'packages/core/dist/agent-status-freshness.d.ts',
   'packages/client-ui/package.json', 'vitest.dist-freshness.ts',
   'apps/desktop/src/renderer/src/lib/agent-observation.ts',

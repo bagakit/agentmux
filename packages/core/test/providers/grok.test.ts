@@ -9,8 +9,7 @@ const GROK_HOOK_DIALECT = lifecycleProvider.hook.lifecycle ?? {}
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import {  } from '../../src/agent-provider.js'
-import { GROK_HOOK_EVENTS } from '../../src/providers/grok.js'
+import { GROK_HOOK_EVENTS } from '@agentmux/providers/grok/provider'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { hookResponseFor } from '../../src/agent-hook-command.js'
 import { AgentMuxError } from '../../src/errors.js'
@@ -84,7 +83,8 @@ describe('Grok provider', () => {
       const configuredAsWire = GROK_HOOK_EVENTS.map((name) =>
         name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
       ).sort()
-      expect(configuredAsWire).toEqual([...new Set(lifecycleProvider.hook.rules.flatMap(rule => rule.events))].sort())
+      const interpreted = new Set([...Object.keys(GROK_HOOK_DIALECT), ...lifecycleProvider.hook.rules.flatMap(rule => rule.events)])
+      expect(configuredAsWire).toEqual([...interpreted].sort())
 
       // 反过来不能断言「配置名一律认不出」——那是假的：`SessionStart`/`PreToolUse` 这些同时是
       // Claude 一族**真实的 wire 值**，它们本来就在合并表里（走 Claude 那块）。合并表按原始名索引、

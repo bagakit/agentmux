@@ -76,8 +76,8 @@ it('actual public four-state snapshots provide exact scene inputs without a Runt
   expect(rows.every(row => row.session.workspacePath === bare.directory && row.run.state === 'running')).toBe(true)
   const path = process.env.AGENTMUX_ACTIVITY_CERTAINTY_SCENE_SEED
   if (path) {
-    const inputs = Object.fromEntries(await Promise.all(['agent-status-freshness.ts', 'client.ts', 'agent-session-store.ts', 'providers/grok.ts', 'providers/cursor.ts'].map(async name =>
-      ['packages/core/src/' + name, createHash('sha256').update(await readFile(new URL('../src/' + name, import.meta.url))).digest('hex')])))
+    const inputs = Object.fromEntries(await Promise.all(['packages/core/src/agent-status-freshness.ts', 'packages/core/src/client.ts', 'packages/core/src/agent-session-store.ts', 'packages/providers/src/grok/provider.ts', 'packages/core/src/providers/cursor.ts'].map(async name =>
+      [name, createHash('sha256').update(await readFile(new URL('../../../' + name, import.meta.url))).digest('hex')])))
     await writeFile(path, JSON.stringify({ schema: 'agentmux.activity-certainty-public-scene-seed.v1', inputs, rows,
       observerNow: SCENE_NOW, boundary: 'Actual public Client/private FileStore and accepted Hooks; isolated fixed Run transport, not Native Writer or physical Run proof.' }, null, 2) + '\n')
   }

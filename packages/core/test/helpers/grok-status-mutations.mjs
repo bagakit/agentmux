@@ -10,7 +10,7 @@ export const grokStatusMutations = {
   'cold-empty-keeps-old-idle': [leaf, [["if (initial && !latest) throw new AgentMuxError('The original native source has no qualified turn boundary.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')", '']]],
   'grant-idle-before-cut-validation': [leaf, [['if (next) latest = next', 'if (next) { latest = next; emit(next) }']]],
   'descriptor-source-race': [leaf, [['BigInt(actual.dev) !== original.stat.dev || BigInt(actual.ino) !== original.stat.ino', 'false']]],
-  'missing-provider-wiring': ['packages/core/src/providers/grok.ts', [['    observeSessionStatus: observeGrokSessionStatus,', '']]],
+  'missing-provider-wiring': ['packages/core/src/providers/index.ts', [['    observeSessionStatus: observeGrokSessionStatus,', '']]],
   'missing-original-environment': [client, [["return { ...this.providerLaunch(session, run), ...(env ? { env } : {}), workspacePath: session.workspacePath,", "return { ...this.providerLaunch(session, run), workspacePath: session.workspacePath,"]]],
   'foreign-native-record': [leaf, [["!object(params) || params.sessionId !== nativeSessionId", "!object(params)"]]],
   'foreign-source-generation': [leaf, [["context.nativePromptPredecessor && context.nativePromptPredecessor.sourceId !== sourceId", 'false']]],
@@ -34,7 +34,7 @@ export const grokStatusMutationCases = {
   'forget-predecessor': '^same source predecessor', 'old-run-overwrites-successor': '^original private environment',
   'old-end-overwrites-new-hook': '^a newer original Hook', 'older-write-clears-new-ingress': '^an older completion write'
 }
-const owners = new Set([client, leaf, 'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/providers/grok.ts', 'packages/core/src/providers/grok-native-history.ts',
+const owners = new Set([client, leaf, 'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/providers/index.ts', 'packages/core/src/providers/grok-native-history.ts',
   'packages/core/src/public-rpc-service.ts', 'apps/host/src/goal-runtime.ts', 'apps/host/src/continuous-progress-loop-manager.ts', 'apps/host/src/continuous-progress-delivery.ts'])
 export function instrumentGrokStatus(source, file) {
   if (!owners.has(file)) return source

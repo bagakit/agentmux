@@ -6,7 +6,6 @@ import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { decodeHostedValue } from '../src/hosted-value.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
-import { createGrokManagedHookPlan } from '../src/providers/grok.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
@@ -36,7 +35,7 @@ it('checks the exact Host and preserves coexisting legacy entries through a mana
     const inventory = await client.call('settings.executors.discover', { hostId: 'target', executorId: 'private', refresh: false })
     const target = { hostId: 'target', runtimeId: inventory.runtimeId, executorId: 'private',
       configRevision: inventory.executors[0]!.configRevision, workspacePath: fixture.root }
-    const plan = createGrokManagedHookPlan(undefined, grokEnv, fixture.root)
+    const plan = registry.get('grok').planManagedHooks!({ env: grokEnv, workspacePath: fixture.root })!
     const mutation = plan.mutations[0]!
     const current = JSON.parse(mutation.content)
     const legacy = { matcher: '.*', hooks: [{ type: 'command',

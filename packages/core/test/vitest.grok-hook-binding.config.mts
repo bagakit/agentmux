@@ -10,16 +10,16 @@ const compiled = Boolean(process.env.AGENTMUX_GROK_CORE_ENTRY)
 const identitySource = compiled ? undefined : (await bundleIdentityRuntime()).source
 const mutation = process.env.AGENTMUX_GROK_HOOK_MUTATION
 const mutants: Record<string, [string, string, string]> = {
-  'no-retained-runtime': ['packages/core/src/providers/grok.ts', '  retainedRuntime: true,', '  retainedRuntime: false,'],
-  'no-native-tool-hooks': ['packages/core/src/providers/grok.ts',
+  'no-retained-runtime': ['packages/providers/src/grok/provider.ts', '  retainedRuntime: true,', '  retainedRuntime: false,'],
+  'no-native-tool-hooks': ['packages/providers/src/grok/provider.ts',
     "  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',",
     "  'SessionStart', 'UserPromptSubmit', 'PostToolUseFailure',"],
-  'outside-scope-claimed': ['packages/core/src/providers/grok.ts',
+  'outside-scope-claimed': ['packages/providers/src/grok/provider.ts',
     "const command = runScopedHookCommand('grok')", "const command = 'AGENTMUX_ENV=1 ' + runScopedHookCommand('grok')"]
 }
 if (mutation && !mutants[mutation]) throw Error('Unknown Grok Hook mutation: ' + mutation)
 if (compiled && mutation) throw Error('Compiled package consumption does not use source mutation transforms')
-const owners = new Set(['packages/core/src/providers/grok.ts', 'packages/core/src/providers/shared.ts', 'packages/core/src/client.ts',
+const owners = new Set(['packages/providers/src/grok/provider.ts', 'packages/core/src/providers/shared.ts', 'packages/core/src/client.ts',
   'packages/core/src/managed-hook-runtime.ts', 'packages/core/src/managed-hook-installer.ts'])
 export default defineConfig({ root, cacheDir: resolve(root, '.local/hook-durability/grok-vitest', mutation ?? 'positive'),
   plugins: compiled ? [] : [{ name: 'grok-binding-current-source', enforce: 'pre',

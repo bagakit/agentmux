@@ -25,7 +25,7 @@ export const mutations = {
   'use-stale-path-extent': [status, [['if (reader.sourceSizeBytes !== extent)', 'if (reader.sourceSizeBytes !== Number(original.stat.size))']], '^a complete native append.*finite'],
   'emit-before-cut-completes': [status, [['consumed = entry.end; turns.accept(entry)', 'consumed = entry.end; turns.accept(entry); const premature = turns.observation(); if (premature) emit(premature)']], '^a whole native cut']
 }
-const owners = new Set([status, source, 'packages/core/src/providers/grok-native-history.ts', 'packages/core/src/providers/grok.ts',
+const owners = new Set([status, source, 'packages/core/src/providers/grok-native-history.ts', 'packages/core/src/providers/index.ts',
   'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/client.ts', 'packages/core/src/public-rpc-service.ts',
   'apps/host/src/goal-runtime.ts', 'apps/host/src/continuous-progress-loop-manager.ts', 'apps/host/src/continuous-progress-delivery.ts'])
 export function instrument(code, file) {
