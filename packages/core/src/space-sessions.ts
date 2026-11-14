@@ -4,6 +4,15 @@ import type { AgentMuxClientEvent } from './types.js'
 
 /** All aliases belong to the answering Space Core. Runtime/SID are semantic identity;
  * a null Host or Runtime stays unknown and never means the observing client. */
+/** Source-owned presentation only. Access to this Space is a separate route;
+ * an adopted execution chain is never reconstructed from current Host choices. */
+export type SpaceSessionOccurrence = {
+  regionId: string
+  creationOperationId?: string
+  projectRuntimeId: string | null
+  agentRuntimeId: string | null
+  executionRoute: { kind: 'same' } | { kind: 'adopted'; route: import('./host-route.js').AdoptedHostRoute } | { kind: 'unconfirmed' }
+}
 export type SpaceSessionMember = { hostId: string | null; runtimeId: string | null; agentSessionId: string }
 export const spaceSessionMemberKey = (member: SpaceSessionMember) => JSON.stringify([member.runtimeId, member.hostId, member.agentSessionId])
 export type SpaceSessionState =
@@ -15,7 +24,7 @@ export type SpaceSessionsOpening = { reference: SpaceAuthorityRef; source: Space
 /** Membership revision belongs to B; authority belongs to the original Session Core.
  * Observed metadata is not a claim that its Native Run is currently connected. */
 export type SpaceSessionsObservation = SpaceSessionsOpening & (
-  | { type: 'member'; member: SpaceSessionMember; state: SpaceSessionState }
+  | { type: 'member'; member: SpaceSessionMember; occurrences?: SpaceSessionOccurrence[]; state: SpaceSessionState }
   | { type: 'removed'; member: SpaceSessionMember }
   | { type: 'membership-complete' }
   | { type: 'runtime'; hostId: string; runtimeId: string; authority: SpaceAuthoritySource; event: AgentMuxClientEvent }

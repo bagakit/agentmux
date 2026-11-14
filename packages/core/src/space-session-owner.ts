@@ -1,15 +1,15 @@
 import { AgentMuxError } from './errors.js'
 import type { SpaceAuthorityOwner } from './space-authority-owner.js'
 import { applySpaceChange, type SpaceSnapshot, type SpaceAuthoritySource } from './space-authority.js'
-import { spaceSessionMemberKey, type SpaceSessionMember, type SpaceSessionsObservation } from './space-sessions.js'
+import { spaceSessionMemberKey, type SpaceSessionMember, type SpaceSessionOccurrence, type SpaceSessionsOpening, type SpaceSessionsObservation } from './space-sessions.js'
 import type { AdoptedHostRoute } from './host-route.js'
 import type { AgentMuxHostedClient } from './hosted-client-contract.js'
 import type { AgentMuxClientEvent } from './types.js'
 import { hostedAgentSessionSummary } from './hosted-session-summary.js'
 
-export type SpaceSessionSource = { member: SpaceSessionMember; adoptedRoute?: AdoptedHostRoute; issue?: { code: string; message: string } }
+export type SpaceSessionSource = { member: SpaceSessionMember; occurrences?: SpaceSessionOccurrence[]; adoptedRoute?: AdoptedHostRoute; issue?: { code: string; message: string } }
 export type SpaceSessionReader = Pick<AgentMuxHostedClient<'summary'>, 'agentSessions' | 'runtimeOwnerIdentity' | 'sessionObservationScope' | 'dispose'>
-type Group = { key: string; hostId: string; runtimeId: string; sources: SpaceSessionSource[]; adoptedRoute?: AdoptedHostRoute;
+type Group = { key: string; hostId: string; runtimeId: string; cut: SpaceSessionsOpening; sources: SpaceSessionSource[]; adoptedRoute?: AdoptedHostRoute;
   controller: AbortController; stop?: (() => void | Promise<void>) | undefined }
 type Ports = {
   authority: SpaceAuthorityOwner
@@ -18,6 +18,7 @@ type Ports = {
   observe(group: { hostId: string; runtimeId: string; agentSessionIds: string[]; adoptedRoute?: AdoptedHostRoute },
     event: (authority: SpaceAuthoritySource, event: AgentMuxClientEvent) => void, signal: AbortSignal): Promise<SpaceSessionReader>
 }
+const presentation = (source: SpaceSessionSource) => ({ member: source.member, ...(source.occurrences ? { occurrences: source.occurrences } : {}) })
 const issue = (error: unknown) => ({ code: error instanceof AgentMuxError ? error.code : 'SPACE_SESSION_SOURCE_UNAVAILABLE',
   message: error instanceof Error ? error.message : String(error) })
 
@@ -27,6 +28,8 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
   failed: (error: unknown) => void, signal?: AbortSignal) {
   let current: SpaceSnapshot | undefined, closed = false
   const groups = new Map<string, Group>(), members = new Map<string, SpaceSessionSource>()
+  // Business revisions may advance while admission IO is pending. A healthy
+  // reader retains its last confirmed cut until that exact relation is resolved.
   const envelope = () => ({ reference, source: current!.source, revision: current!.revision })
   const send = async (value: SpaceSessionsObservation) => { if (!closed) await emit(value) }
   const stop = (group: Group) => {
@@ -48,7 +51,7 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
       const state = session ? { status: 'observed' as const, authority, session }
         : missing.has(id) ? { status: 'missing' as const, authority }
         : { status: 'unavailable' as const, issue: failure ?? { code: 'SPACE_SESSION_SOURCE_UNAVAILABLE', message: 'The exact original Session read has no confirmed result.' } }
-      await send({ ...envelope(), type: 'member', member: source.member, state })
+      await send({ ...group.cut, type: 'member', ...presentation(source), state })
     }
   }
   const connect = async (group: Group) => {
@@ -68,11 +71,11 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
         }
         if (event.type === 'agent-session') {
           const source = sourceById.get(event.session.agentSessionId)
-          if (source) void send({ ...envelope(), type: 'member', member: source.member,
+          if (source) void send({ ...group.cut, type: 'member', ...presentation(source),
             state: { status: 'observed', authority, session: hostedAgentSessionSummary(event.session) } }).catch(failed)
           return
         }
-        void send({ ...envelope(), type: 'runtime', hostId: group.hostId, runtimeId: group.runtimeId, authority, event }).catch(failed)
+        void send({ ...group.cut, type: 'runtime', hostId: group.hostId, runtimeId: group.runtimeId, authority, event }).catch(failed)
       }, group.controller.signal)
       confirmedReader = reader
       group.stop = () => reader.dispose()
@@ -84,7 +87,7 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
     for (const source of group.sources) {
       const current = members.get(spaceSessionMemberKey(source.member)), replacement = groups.get(group.key)
       if (!closed && (!replacement || replacement === group) && current && !current.issue && JSON.stringify(current.adoptedRoute) === JSON.stringify(source.adoptedRoute)) await send({
-        ...envelope(), type: 'member', member: source.member, state: { status: 'unavailable', issue: issue(error) } })
+        ...group.cut, type: 'member', ...presentation(source), state: { status: 'unavailable', issue: issue(error) } })
     }
   }
   const changed = async (snapshot: SpaceSnapshot) => {
@@ -101,11 +104,16 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
     const next = new Map<string, SpaceSessionSource>()
     for (const source of sources) {
       const key = spaceSessionMemberKey(source.member), previous = next.get(key)
-      if (!previous || previous.issue && !source.issue) next.set(key, source)
-      else if (!previous.issue && !source.issue && JSON.stringify(previous.adoptedRoute) !== JSON.stringify(source.adoptedRoute)) next.set(key, {
-        member: source.member, issue: { code: 'SPACE_SESSION_ROUTE_AMBIGUOUS', message: 'This member has conflicting original route references. Keep both placements and inspect the original source.' } })
+      let selected = previous ?? source
+      if (previous?.issue && previous.issue.code !== 'SPACE_SESSION_ROUTE_AMBIGUOUS' && !source.issue) selected = source
+      else if (previous && !previous.issue && !source.issue && JSON.stringify(previous.adoptedRoute) !== JSON.stringify(source.adoptedRoute)) selected = {
+        member: source.member, issue: { code: 'SPACE_SESSION_ROUTE_AMBIGUOUS', message: 'This member has conflicting original route references. Keep both placements and inspect the original source.' } }
+      const occurrences = previous?.occurrences ?? []
+      occurrences.push(...source.occurrences ?? [])
+      next.set(key, { ...selected, occurrences })
     }
-    const planned = new Map<string, Omit<Group, 'controller'>>()
+    for (const source of next.values()) source.occurrences?.sort((a, b) => a.regionId.localeCompare(b.regionId))
+    const planned = new Map<string, Omit<Group, 'controller' | 'cut'>>()
     for (const source of next.values()) {
       const { member } = source
       if (source.issue || member.hostId === null || member.runtimeId === null) continue
@@ -116,17 +124,19 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
     for (const group of groups.values()) {
       const next = planned.get(group.key)
       const ids = (values: SpaceSessionSource[]) => values.map(value => value.member.agentSessionId).sort().join('\0')
-      if (!next || ids(next.sources) !== ids(group.sources)) stop(group)
+      const references = (values: SpaceSessionSource[]) => JSON.stringify([...values].sort((a, b) => a.member.agentSessionId.localeCompare(b.member.agentSessionId)).map(source => source.occurrences))
+      if (!next || ids(next.sources) !== ids(group.sources) || references(next.sources) !== references(group.sources)) stop(group)
+      else group.cut = envelope()
     }
     const removed = [...members].filter(([key]) => !next.has(key)).map(([, value]) => value.member)
     members.clear(); for (const [key, source] of next) members.set(key, source)
     for (const member of removed) await send({ ...envelope(), type: 'removed', member })
     for (const source of next.values()) if (source.issue || source.member.hostId === null || source.member.runtimeId === null) await send({
-      ...envelope(), type: 'member', member: source.member, state: { status: 'unknown', issue: source.issue ?? { code: 'SPACE_SESSION_IDENTITY_UNCONFIRMED', message: 'The original Session Host or Runtime is unconfirmed. Its membership and Run reference are retained.' } } })
+      ...envelope(), type: 'member', ...presentation(source), state: { status: 'unknown', issue: source.issue ?? { code: 'SPACE_SESSION_IDENTITY_UNCONFIRMED', message: 'The original Session Host or Runtime is unconfirmed. Its membership and Run reference are retained.' } } })
     const opening: Group[] = []
     for (const plan of planned.values()) if (!groups.has(plan.key)) {
-      const group: Group = { ...plan, controller: new AbortController() }; groups.set(plan.key, group); opening.push(group)
-      for (const source of group.sources) await send({ ...envelope(), type: 'member', member: source.member, state: { status: 'pending' } })
+      const group: Group = { ...plan, cut: envelope(), controller: new AbortController() }; groups.set(plan.key, group); opening.push(group)
+      for (const source of group.sources) await send({ ...group.cut, type: 'member', ...presentation(source), state: { status: 'pending' } })
     }
     await send({ ...envelope(), type: 'membership-complete' })
     for (const group of opening) void connect(group).catch(failed)

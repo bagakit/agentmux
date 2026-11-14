@@ -4,7 +4,8 @@ import { parseSpaceAuthorityRef, type SpaceAuthorityRef, type SpaceAuthoritySour
 import { parseHostedAgentSessionRead, parseHostedNativeConnection } from './hosted-value.js'
 import { isHostedAgentSessionSummary } from './hosted-session-summary.js'
 import { parseLifecycleDiagnosticEvent } from './lifecycle-diagnostic.js'
-import type { SpaceSessionMember, SpaceSessionsOpening, SpaceSessionsObservation } from './space-sessions.js'
+import { parseAdoptedHostRoute } from './host-route.js'
+import type { SpaceSessionOccurrence, SpaceSessionMember, SpaceSessionsOpening, SpaceSessionsObservation } from './space-sessions.js'
 import type { AgentMuxClientEvent } from './types.js'
 
 const invalid = (): never => { throw new AgentMuxError('The original Space Session observation is malformed or belongs to another source.', 'CONTROL_PROTOCOL_ERROR') }
@@ -24,28 +25,50 @@ function member(value: unknown): SpaceSessionMember {
   const p = rpcRecord(value, ['hostId', 'runtimeId', 'agentSessionId'], 'CONTROL_PROTOCOL_ERROR')
   return { hostId: p.hostId === null ? null : id(p.hostId), runtimeId: p.runtimeId === null ? null : id(p.runtimeId), agentSessionId: id(p.agentSessionId) }
 }
+function occurrences(value: unknown, runtimeId: string | null): SpaceSessionOccurrence[] {
+  if (!Array.isArray(value)) return invalid()
+  const result = value.map(item => {
+    const p = rpcRecord(item, ['regionId','creationOperationId','projectRuntimeId','agentRuntimeId','executionRoute'], 'CONTROL_PROTOCOL_ERROR')
+    const projectRuntimeId = p.projectRuntimeId === null ? null : id(p.projectRuntimeId), agentRuntimeId = p.agentRuntimeId === null ? null : id(p.agentRuntimeId)
+    if (agentRuntimeId !== runtimeId) return invalid()
+    const r = rpcRecord(p.executionRoute, ['kind','route'], 'CONTROL_PROTOCOL_ERROR')
+    let executionRoute: SpaceSessionOccurrence['executionRoute']
+    if (r.kind === 'adopted') {
+      const route = parseAdoptedHostRoute(r.route)
+      if (route.source.runtimeId !== projectRuntimeId || route.hops.at(-1)!.target.runtimeId !== agentRuntimeId) return invalid()
+      executionRoute = { kind: r.kind, route }
+    } else {
+      rpcRecord(r, ['kind'], 'CONTROL_PROTOCOL_ERROR')
+      if (r.kind !== 'same' && r.kind !== 'unconfirmed' || r.kind === 'same' && (!projectRuntimeId || projectRuntimeId !== agentRuntimeId)) return invalid()
+      executionRoute = { kind: r.kind }
+    }
+    return { regionId: id(p.regionId), ...(p.creationOperationId === undefined ? {} : { creationOperationId: id(p.creationOperationId) }), projectRuntimeId, agentRuntimeId, executionRoute }
+  })
+  if (new Set(result.map(item => item.regionId)).size !== result.length) return invalid()
+  return result
+}
 export function parseSpaceSessionsObservation(value: unknown, opening: SpaceSessionsOpening): SpaceSessionsObservation {
-  const p = rpcRecord(value, ['reference', 'source', 'revision', 'type', 'member', 'state', 'hostId', 'runtimeId', 'authority', 'event'], 'CONTROL_PROTOCOL_ERROR')
+  const p = rpcRecord(value, ['reference', 'source', 'revision', 'type', 'member', 'occurrences', 'state', 'hostId', 'runtimeId', 'authority', 'event'], 'CONTROL_PROTOCOL_ERROR')
   const actual = envelope(p, opening.reference)
   if (actual.source.ownerInstanceId !== opening.source.ownerInstanceId || actual.revision < opening.revision) return invalid()
   if (p.type === 'membership-complete') { rpcRecord(p, ['reference', 'source', 'revision', 'type'], 'CONTROL_PROTOCOL_ERROR'); return { ...actual, type: p.type } }
   if (p.type === 'removed') { rpcRecord(p, ['reference', 'source', 'revision', 'type', 'member'], 'CONTROL_PROTOCOL_ERROR'); return { ...actual, type: p.type, member: member(p.member) } }
   if (p.type === 'member') {
-    rpcRecord(p, ['reference', 'source', 'revision', 'type', 'member', 'state'], 'CONTROL_PROTOCOL_ERROR')
-    const original = member(p.member), state = rpcRecord(p.state, ['status', 'authority', 'session', 'issue'], 'CONTROL_PROTOCOL_ERROR')
-    if (state.status === 'pending') { rpcRecord(state, ['status'], 'CONTROL_PROTOCOL_ERROR'); return { ...actual, type: p.type, member: original, state: { status: state.status } } }
+    rpcRecord(p, ['reference', 'source', 'revision', 'type', 'member', 'occurrences', 'state'], 'CONTROL_PROTOCOL_ERROR')
+    const original = member(p.member), locations = p.occurrences === undefined ? {} : { occurrences: occurrences(p.occurrences, original.runtimeId) }, state = rpcRecord(p.state, ['status', 'authority', 'session', 'issue'], 'CONTROL_PROTOCOL_ERROR')
+    if (state.status === 'pending') { rpcRecord(state, ['status'], 'CONTROL_PROTOCOL_ERROR'); return { ...actual, type: p.type, member: original, ...locations, state: { status: state.status } } }
     if (state.status === 'unknown' || state.status === 'unavailable') {
       rpcRecord(state, ['status', 'issue'], 'CONTROL_PROTOCOL_ERROR'); const issue = rpcRecord(state.issue, ['code', 'message'], 'CONTROL_PROTOCOL_ERROR')
-      return { ...actual, type: p.type, member: original, state: { status: state.status, issue: { code: id(issue.code), message: id(issue.message) } } }
+      return { ...actual, type: p.type, member: original, ...locations, state: { status: state.status, issue: { code: id(issue.code), message: id(issue.message) } } }
     }
     const authority = source(state.authority)
     if (original.hostId === null || original.runtimeId !== authority.runtimeId) return invalid()
-    if (state.status === 'missing') { rpcRecord(state, ['status', 'authority'], 'CONTROL_PROTOCOL_ERROR'); return { ...actual, type: p.type, member: original, state: { status: state.status, authority } } }
+    if (state.status === 'missing') { rpcRecord(state, ['status', 'authority'], 'CONTROL_PROTOCOL_ERROR'); return { ...actual, type: p.type, member: original, ...locations, state: { status: state.status, authority } } }
     if (state.status !== 'observed') return invalid()
     rpcRecord(state, ['status', 'authority', 'session'], 'CONTROL_PROTOCOL_ERROR')
     const session = parseHostedAgentSessionRead(state.session, original.agentSessionId, 'summary')
     if (!session || !isHostedAgentSessionSummary(session)) return invalid()
-    return { ...actual, type: p.type, member: original, state: { status: state.status, authority, session } }
+    return { ...actual, type: p.type, member: original, ...locations, state: { status: state.status, authority, session } }
   }
   if (p.type === 'runtime') {
     rpcRecord(p, ['reference', 'source', 'revision', 'type', 'hostId', 'runtimeId', 'authority', 'event'], 'CONTROL_PROTOCOL_ERROR')
