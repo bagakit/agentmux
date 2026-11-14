@@ -9,7 +9,7 @@ import { categoriesFromSpatial, categoryResource } from '@agentmux/host/topic-ca
 import { reducePersistedTab, type PersistedWorkbench } from './workbench-persistence';
 import { closeWorktreeGraph } from '../../../shared/worktree-closeout';
 import { sessionPresentationById } from './session-presentation';
-import { desktopAgentPresentationFromSpatial } from './desktop-agent-presentation';
+import { desktopAgentExecutionFromSpatial, desktopAgentPresentationFromSpatial } from './desktop-agent-presentation';
 /** Host resource descriptors, never a second entity or topology store. */
 const tabKey = (id: string) => 'tab:' + id;
 const regionKey = (id: string) => 'region:' + id;
@@ -21,7 +21,7 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
   // closeWorktreeGraph once so public Files retain their exact original owner.
   const closingZones = new Set(previous?.zones.filter(zone => closingWorkspaces.has(zone.workspaceId)).map(zone => zone.zoneId));
   const categories = [...new Map([...(previous ? categoriesFromSpatial(previous) : []), ...(state.topicCategories ?? [])].map(category => [category.spaceId, category])).values()];
-  const catalog = spatialCatalog({ ...state, ...(previous ? { originalSpatialGraph: previous } : {}), topicCategories: categories }, topics);
+  const catalog = spatialCatalog({ ...state, topicCategories: categories }, topics);
   const { locations: _, ...facts } = catalog;
   if (state.projectGroups === undefined && previous?.projectGroups) facts.projectGroups = previous.projectGroups;
   const persisted = { tabs: Object.fromEntries(Object.values(state.tabs).map(tab => [tab.id, reducePersistedTab(tab)])), layouts: state.layouts };
@@ -40,6 +40,8 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
         const region = regionFacts.get(surface.regionId);
         const session = sessions.get(surface.sessionId);
         const original = originalRegions.get(surface.regionId);
+        const runtimeId = session && original?.tabId === tab.id ? desktopAgentExecutionFromSpatial(original, session)?.runtimeId : undefined;
+        if (region?.execution && runtimeId !== undefined) region.execution.runtimeId = runtimeId;
         // A local pending surface is not a Core creation receipt. Keep the original
         // Launcher until the real producer confirms its exact Agent and position.
         if (surface.phase === 'launching' && !session && original?.tabId === tab.id && original.kind === 'launcher') {
