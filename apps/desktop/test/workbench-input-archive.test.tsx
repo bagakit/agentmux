@@ -154,6 +154,8 @@ it('Focus opens the global cold archive for copying without an active Session', 
   const row = localRecords().find(item => item.textContent?.includes('Exact original archived message'))!
   expect(row).toBeDefined()
   await disclose(row)
+  expect(row.textContent).toContain('Saved stateArchived')
+  expect(row.textContent).toContain('Delivery receiptTerminal input confirmed')
   await click([...row.querySelectorAll('button')].find(button => button.textContent === 'Copy saved input') ?? null)
   expect(copy).toHaveBeenCalledExactlyOnceWith(originalText)
   expect(send).not.toHaveBeenCalled()
