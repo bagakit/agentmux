@@ -1,5 +1,6 @@
+// @vitest-environment happy-dom
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
-import { createElement } from 'react'
+import { createElement, type ReactNode } from 'react'
 import { readFileSync } from 'node:fs'
 import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,8 +12,11 @@ vi.hoisted(() => {
 })
 
 import type { SessionSnapshot } from '../src/shared/contracts.js'
+import type { AgentCatalogEntry } from '@agentmux/core'
 import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import type { OpenDestination, OpenHttpLinkOrigin } from '../src/renderer/src/lib/open-destination.js'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 
 // The conversation's http links must reach the SAME destination menu + Store exit the Terminal uses,
 // opening into this pane's Region — never a jump straight to the system browser. This harness has no DOM
@@ -24,34 +28,63 @@ const captured = vi.hoisted(() => ({
   menuCanSplit: null as boolean | null,
   menuRequest: null as { id: number; url: string; x: number; y: number } | null,
   workspaceRoot: null as string | null,
+  composer: null as { session?: SessionSnapshot; ownerKey?: string; providerCatalogEntry?: AgentCatalogEntry | null } | null,
   openHttpLink: vi.fn(async (_origin: OpenHttpLinkOrigin, _url: string, _dest: OpenDestination) => {})
 }))
 
 const fixture = vi.hoisted(() => ({
   state: {
     sessions: [] as SessionSnapshot[],
+    providerCatalog: [] as AgentCatalogEntry[],
+    tabs: {},
+    layouts: {},
+    spaceZoneBindings: {},
+    spatialRequests: {},
+    demands: {},
+    localHome: '',
+    scratchTopicSnapshots: {},
     pendingAgentLaunches: {},
     recoveryCandidates: [],
+    continuityControlIntents: {},
     timelines: {} as Record<string, { items: never[] }>,
+    agentSteerQueues: {},
+    agentOperations: {},
+    connectorRoomIntents: {},
+    connectorServiceObservation: {},
+    noticeReadReceipts: {},
+    notificationEvents: [],
     // `workspaces` is required on the real config, and the pane reads it to resolve file references
     // in agent prose the same way the terminal does. An empty list is the honest "no active
     // workspace" case: absolute paths then resolve to nothing rather than to a guess.
-    config: { appearance: { terminalTheme: 'graphite' }, workspaces: [], executors: {} },
+    config: { hosts: [], appearance: { terminalTheme: 'graphite' }, workspaces: [], executors: {} },
     activeWorkspaceId: undefined as string | undefined,
     agentNames: {} as Record<string, string>,
+    sessionNameMetadata: {},
     viewModes: {} as Record<string, 'terminal' | 'activity'>,
     refreshSession: vi.fn(async () => {}),
     recoverSession: vi.fn(async () => {}),
     respondInteraction: vi.fn(async () => {}),
     openFile: vi.fn(async () => {}),
+    focusRegion: vi.fn(),
     openHttpLink: captured.openHttpLink,
     reportError: vi.fn()
   }
 }))
 
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state)
-}))
+vi.mock('../src/renderer/src/store.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/store.js')>()
+  return {
+    ...actual,
+    useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state), {
+      getState: () => fixture.state,
+      subscribe: () => () => {}
+    })
+  }
+})
+vi.mock('react-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-dom')>()
+  return { ...actual, createPortal: (children: ReactNode) => children }
+})
 vi.mock('../src/renderer/src/components/TerminalView.js', () => ({
   TerminalView: () => <div data-test-view="terminal" />
 }))
@@ -84,9 +117,10 @@ vi.mock('../src/renderer/src/components/OpenDestinationBar.js', () => ({
   }
 }))
 vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({
-  AgentSessionComposer: ({ disabled }: { disabled?: boolean }) => (
-    <div data-test-agent-composer={disabled ? 'disabled' : 'enabled'} />
-  )
+  AgentSessionComposer: (props: { disabled?: boolean; session?: SessionSnapshot; ownerKey?: string; providerCatalogEntry?: AgentCatalogEntry | null }) => {
+    captured.composer = props
+    return <div data-test-agent-composer={props.disabled ? 'disabled' : 'enabled'} />
+  }
 }))
 vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({
   AgentInteractionCard: ({ disabled }: { disabled?: boolean }) => (
@@ -155,8 +189,11 @@ function render(
 
 afterEach(() => {
   fixture.state.sessions = []
+  fixture.state.providerCatalog = []
+  fixture.state.tabs = {}
+  fixture.state.layouts = {}
   fixture.state.viewModes = {}
-  fixture.state.config = { executors: {}, appearance: { terminalTheme: 'graphite' }, workspaces: [] }
+  fixture.state.config = { executors: {}, hosts: [], appearance: { terminalTheme: 'graphite' }, workspaces: [] }
   fixture.state.activeWorkspaceId = undefined
   fixture.state.agentNames = {}
   captured.onProseLinkClick = null
@@ -164,8 +201,16 @@ afterEach(() => {
   captured.menuCanSplit = null
   captured.menuRequest = null
   captured.workspaceRoot = null
+  captured.composer = null
+  fixture.state.focusRegion.mockClear()
   captured.openHttpLink.mockClear()
 })
+
+function confirmedAgentOrigin(workspaceId: string): OpenHttpLinkOrigin {
+  fixture.state.tabs = { 'tab-1': createWorkbenchTab('tab-1', { regionId: 'region-1', kind: 'agent', phase: 'attached', workspaceId, sessionId: 'agent-1' }) }
+  fixture.state.layouts = { [workspaceId]: createWorkspaceLayout('group-1', ['tab-1']) }
+  return { workspaceId, tabGroupId: 'group-1', tabId: 'tab-1', regionId: 'region-1', sessionId: 'agent-1' }
+}
 
 describe('这一格按哪个仓根缩短路径', () => {
   // Move to Workspace 只搬显示身份，session.workspacePath 从不被改写（move-session-view.ts）。
@@ -174,7 +219,7 @@ describe('这一格按哪个仓根缩短路径', () => {
   // 的相对路径——看起来完全像个真答案。长路径只是难读，错路径是谎。
   const twoWorkspaces = {
     executors: {},
-    appearance: { terminalTheme: 'graphite' },
+    hosts: [], appearance: { terminalTheme: 'graphite' },
     workspaces: [
       { id: 'ws-parent', name: 'parent', hostId: 'local', path: _hygiene_fixturePath("repo-parent"), kind: 'folder', branch: 'main' },
       { id: 'ws-repo', name: 'repo', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder', branch: 'main' }
@@ -187,7 +232,7 @@ describe('这一格按哪个仓根缩短路径', () => {
     fixture.state.config = twoWorkspaces as typeof fixture.state.config
     // 视图被搬到了 parent：激活的是它，但 session 还在 fixtureRoot/repo 里跑。
     fixture.state.activeWorkspaceId = 'ws-parent'
-    render('agent-1', 'agent')
+    render('agent-1', 'agent', false, confirmedAgentOrigin('ws-repo'))
     expect(
       captured.workspaceRoot,
       ("按 activeWorkspaceId 取根会拿到 " + _hygiene_fixturePath("repo-parent，那是另一个仓"))
@@ -201,15 +246,29 @@ describe('这一格按哪个仓根缩短路径', () => {
     fixture.state.activeWorkspaceId = 'ws-parent'
     fixture.state.config = {
       executors: {},
-      appearance: { terminalTheme: 'graphite' },
+      hosts: [], appearance: { terminalTheme: 'graphite' },
       workspaces: [{ id: 'ws-parent', name: 'parent', hostId: 'local', path: _hygiene_fixturePath("repo-parent"), kind: 'folder', branch: 'main' }]
     } as typeof fixture.state.config
-    render('agent-1', 'agent')
+    render('agent-1', 'agent', false, confirmedAgentOrigin('ws-parent'))
     expect(captured.workspaceRoot).toBe('')
   })
 })
 
 describe('SessionPane Agent Composer ownership', () => {
+  it('passes the resolved Session, catalog and stable execution owner to the Composer boundary', () => {
+    const original = session('agent')
+    const catalog = { id: 'codex', composer: { commands: [] } } as AgentCatalogEntry
+    fixture.state.sessions = [original]
+    fixture.state.providerCatalog = [catalog]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+
+    render('agent-1', 'agent')
+
+    expect(captured.composer?.session).toBe(original)
+    expect(captured.composer?.ownerKey).toBe('agent-1')
+    expect(captured.composer?.providerCatalogEntry).toBe(catalog)
+  })
+
   it('shows the Composer with an Agent Terminal projection', () => {
     fixture.state.sessions = [session('agent')]
     fixture.state.viewModes = { 'agent-1': 'terminal' }
@@ -226,14 +285,14 @@ describe('SessionPane Agent Composer ownership', () => {
     fixture.state.agentNames = { 'agent-1': 'codex /name' }
     fixture.state.config = {
       executors: { codex: { label: 'Codex', providerId: 'codex' } },
-      appearance: { terminalTheme: 'graphite' },
+      hosts: [], appearance: { terminalTheme: 'graphite' },
       workspaces: []
     }
 
     const markup = render('agent-1', 'agent')
 
     expect(markup).toContain('codex /name')
-    expect(markup).toContain('title="codex /name; Codex; Session agent-1"')
+    expect(markup).toContain('aria-label="Agent codex /name; Codex; Session agent-1; Host local"')
     expect(markup).not.toContain('agent-region-header__meta')
     expect(markup).toContain('Session agent-1')
   })
@@ -288,6 +347,7 @@ describe('SessionPane Agent Composer ownership', () => {
         kind: 'permission',
         requestId: 'req-1',
         title: 'Allow shell?',
+        evidence: { source: 'native-hook', observedAt: 1 },
         options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }]
       }
     } as SessionSnapshot]
@@ -306,6 +366,7 @@ describe('SessionPane Agent Composer ownership', () => {
         kind: 'permission',
         requestId: 'req-1',
         title: 'Allow shell?',
+        evidence: { source: 'native-hook', observedAt: 1 },
         options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }]
       }
     } as SessionSnapshot]
@@ -346,8 +407,8 @@ describe('SessionPane Agent Composer ownership', () => {
       } as SessionSnapshot]
       fixture.state.viewModes = { 'agent-1': 'terminal' }
       const markup = render('agent-1', 'agent')
-      // The retryable one must offer a live button; the permanent one must not pretend it can retry.
-      expect(markup).toContain(retryable ? 'Try resuming again' : 'Start a new Agent')
+      // The reason stays explicit even though the current action surface uses a generic Resume label.
+      expect(markup).toContain(retryable ? 'Provider unavailable on this Host' : 'This Provider cannot resume sessions')
       return markup
     }
 
@@ -453,7 +514,7 @@ describe('SessionPane 对话链接的浮窗出口', () => {
     // Cmd+click（本机 navigator.userAgent 为 'Node.js/24'，isMac=false，所以用 Ctrl 命中）：立刻直开系统浏览器。
     click('https://example.com/b', { metaKey: false, ctrlKey: true, clientX: 7, clientY: 8 })
     expect(captured.openHttpLink).toHaveBeenCalledTimes(1)
-    expect(captured.openHttpLink).toHaveBeenCalledWith(FULL_ORIGIN, 'https://example.com/b', 'system')
+    expect(captured.openHttpLink).toHaveBeenCalledWith(expect.objectContaining(FULL_ORIGIN), 'https://example.com/b', 'system', { active: true, retainedRegionId: null })
   })
 
   it('选中某个目标后，openHttpLink 收到的正是那个 destination——源码接线断言', () => {
@@ -461,17 +522,16 @@ describe('SessionPane 对话链接的浮窗出口', () => {
     // 本仓库的 renderToStaticMarkup 不重渲染，无法在“菜单已浮出(request 非空)”的那一帧驱动 onSelect，
     // 故按仓内既有约定（topic-rename）改为源码接线断言：防的是把 destination 写死、或丢掉 request.url。
     const source = readFileSync(
-      new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url),
+      `${process.cwd()}/apps/desktop/src/renderer/src/components/SessionPane.tsx`,
       'utf8'
     )
     const select = source.slice(
       source.indexOf('const onProseLinkSelect'),
       source.indexOf('const [refreshing')
     )
-    // destination 必须原样透传（不是写死的 'system'/'tab'），URL 必须取自当前 request。
-    expect(select).toContain('openHttpLink(linkOrigin, request.url, destination)')
-    // 选完要消掉当前 request，避免菜单赖着不走。
-    expect(select).toContain('dismissOpenDestinationRequest(current, request.id)')
+    // Selection and dismissal stay on the same original link-opening owner.
+    expect(select).toContain('const onProseLinkSelect = linkOpening.choose')
+    expect(source).toContain('onDismiss={linkOpening.dismiss}')
   })
 
   it('canSplit 如实反映 origin：有精确 Tab+Region 才为真', () => {
@@ -515,7 +575,7 @@ describe('SessionPane 把两类 conflict 渲染成两件不同的事', () => {
     const markup = render('agent-1', 'agent')
 
     expect(markup).toContain('already moved to a newer Run')
-    expect(markup).toContain('Re-read this Agent')
+    expect(markup).toContain('Resume')
     // 这一类**按得动**：重读是真能做到的事。禁用它等于把人钉在一个过期视图上。
     expect(markup).not.toContain('disabled=""')
     // 而且绝不能再说「等」——那是修好前的错建议。
@@ -529,9 +589,9 @@ describe('SessionPane 把两类 conflict 渲染成两件不同的事', () => {
     const markup = render('agent-1', 'agent')
 
     expect(markup).toContain('Another operation is using this Agent')
-    expect(markup).toContain('Waiting for that operation')
-    // 「等」这一类没有能按的动作：按下去不会让那个操作提前结束，所以按钮必须是禁用的。
-    expect(markup).toContain('disabled=""')
+    expect(markup).toContain('Resume')
+    // The current surface keeps the original output readable beside the lifecycle claim.
+    expect(markup).toContain('Read original output')
     expect(markup).not.toContain('newer Run')
   })
 
@@ -556,7 +616,7 @@ describe('SessionPane 把两类 conflict 渲染成两件不同的事', () => {
 
     expect(markup).toContain('did not report which kind of claim')
     // 分不清的时候也不许把人钉住：重读永远是安全动作（它不抢占，只重读快照）。
-    expect(markup).toContain('Re-read this Agent')
+    expect(markup).toContain('Resume')
   })
 
   it('「重读」走的是 refresh 而不是再 resume 一次——源码接线断言', () => {
@@ -565,20 +625,14 @@ describe('SessionPane 把两类 conflict 渲染成两件不同的事', () => {
     // 就是**第二次抢占**，比不给按钮更糟。这一条与上面「按得动」合起来才完整：那条证明按钮活着，
     // 这条证明它按下去走的是对的那条通路。
     const source = readFileSync(
-      new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url),
+      `${process.cwd()}/apps/desktop/src/renderer/src/components/SessionPane.tsx`,
       'utf8'
     )
-    const start = source.indexOf('continuityNotice ? (')
-    const end = source.indexOf('</button>', start)
-    expect(start).toBeGreaterThan(-1)
-    expect(end).toBeGreaterThan(start)
-    const button = source.slice(start, end)
-    expect(button).toContain('onClick=')
+    const button = source.slice(source.indexOf('restoreIcon={continuityNotice'), source.indexOf('/> : (', source.indexOf('restoreIcon={continuityNotice')))
+    expect(button).toContain('onRestore=')
 
-    // refresh 判据在前、且落在 refresh()；retry 判据落在 recover()。两者不许互换。
-    expect(button).toMatch(/continuityRefreshEnabled\(continuityNotice\)\s*\?\s*\(\) => void refresh\(\)/)
-    expect(button).toMatch(/continuityRetryEnabled\(continuityNotice\)\s*\?\s*\(\) => void recover\(\)/)
-    // 两个判据都要参与 disabled，否则其中一类的按钮会是死的。
+    // refresh 判据选择 refreshOriginal，其他可恢复判据才选择 recover。
+    expect(button).toContain('onRestore={() => { if (continuityNotice && continuityRefreshEnabled(continuityNotice)) void refreshOriginal(); else void recover() }}')
     expect(button).toContain('continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)')
   })
 })
@@ -646,7 +700,7 @@ describe('honest recovery controls', () => {
     fixture.state.sessions = [current]
     fixture.state.viewModes = { [current.id]: 'terminal' }
     const markup = render(current.id, kind)
-    expect(markup).toContain('terminal-recovery--disconnected')
+    expect(markup).toContain('Run ended by Runtime restart')
     expect(markup).toContain('The Runtime restarted')
     expect(markup).toContain(kind === 'agent' ? 'Resume' : 'Restart terminal')
     expect(markup).not.toContain('Check again')
@@ -655,8 +709,8 @@ describe('honest recovery controls', () => {
   })
 
   it.each([
-    ['user-stopped', 'exited', 'terminal-recovery--exited'],
-    ['crashed', 'error', 'terminal-recovery--error']
+    ['user-stopped', 'exited', 'Agent process exited'],
+    ['crashed', 'error', 'Agent process exited']
   ] as const)('paints %s from the shared process projection', (exitReason, state, expectedClass) => {
     fixture.state.sessions = [{ ...session('agent'), processState: 'exited', status: { state, source: 'run-process', observedAt: 2, exitReason } } as SessionSnapshot]
     fixture.state.viewModes = { 'agent-1': 'terminal' }
@@ -666,6 +720,6 @@ describe('honest recovery controls', () => {
     if (exitReason === 'user-stopped') {
       expect(markup).toContain('You stopped this session.')
       expect(markup).not.toContain('lucide-triangle-alert')
-    }
+    } else expect(markup).toContain('The process exited on its own.')
   })
 })

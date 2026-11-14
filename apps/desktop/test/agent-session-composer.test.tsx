@@ -1,7 +1,8 @@
+// @vitest-environment happy-dom
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { renderComponentBoundary as captureComponentBoundary } from './helpers/render-component-boundary'
-import { createElement, isValidElement, type ComponentProps, type ReactElement } from 'react'
+import { Children, createElement, isValidElement, type ComponentProps, type ReactElement } from 'react'
 import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentCatalogEntry } from '@agentmux/core'
@@ -14,6 +15,8 @@ const fixture = vi.hoisted(() => ({
     sessions: [] as SessionSnapshot[],
     providerCatalog: [] as AgentCatalogEntry[],
     config: {
+      appearance: {},
+      hosts: [],
       workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder' as const }],
       composerShortcuts: [] as ComposerShortcut[]
     },
@@ -28,6 +31,9 @@ const fixture = vi.hoisted(() => ({
     agentComposerHistory: {} as Record<string, readonly string[]>,
     agentComposerHistoryNavigation: {} as Record<string, { cursor: number; stash: string | null }>,
     noticeReadReceipts: {},
+    mailboxNotificationIntents: {},
+    mailboxNotificationFeedback: {},
+    mailboxNotificationHistory: {},
     agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId?: string; text: string; status: 'queued' | 'restoring' | 'deferred' | 'failed'; error?: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
@@ -81,9 +87,10 @@ const nativeApi = vi.hoisted(() => ({
 // This shallow SSR adapter test has no mounted Runtime subscription; actual Runtime reads belong
 // to the mounted composer integration suite, which does not substitute this owner.
 vi.mock('../src/renderer/src/lib/run-service-projection', () => ({ useRunService: () => undefined }))
+vi.mock('../src/renderer/src/lib/workbench-window-registry', () => ({ useWorkbenchDocumentVisibility: () => true }))
 
 vi.mock('../src/renderer/src/lib/api.js', () => ({
-  api: { ui: nativeApi }
+  api: { ui: nativeApi, connections: { hostingTarget: vi.fn() } }
 }))
 
 import {
@@ -102,17 +109,18 @@ function mailboxBoundary(props: ComponentProps<typeof AgentSessionComposer>): Re
   return mailbox as ReactElement<ComponentProps<typeof SessionMailbox>>
 }
 
-// The adapter now returns SessionMailbox. Execute that real component's render prop under React,
-// rather than reading its wrapper props as if they were AgentComposer's callbacks.
+// Execute SessionMailbox's existing render prop and its concrete local surface under React.
 function renderComponentBoundary(Component: typeof AgentSessionComposer, props: ComponentProps<typeof AgentSessionComposer>): ReactElement<AgentComposerProps> {
   if (Component !== AgentSessionComposer) throw new Error('Unexpected adapter under test')
   const mailbox = mailboxBoundary(props)
   return captureComponentBoundary((mailboxProps: ComponentProps<typeof SessionMailbox>) => {
     const composer = SessionMailbox(mailboxProps)
-    if (!isValidElement<AgentComposerProps>(composer) || composer.type !== AgentComposer) {
-      throw new Error('Expected SessionMailbox to return its actual AgentComposer render prop')
-    }
-    return composer
+    if (!isValidElement<AgentComposerProps>(composer)) throw new Error('Expected SessionMailbox to render its Composer surface')
+    if (composer.type === AgentComposer) return composer
+    const surfaces = Children.toArray(composer.props.children).filter(isValidElement<AgentComposerProps>)
+    if (surfaces.length !== 1) throw new Error('Expected one concrete SessionComposerSurface')
+    const surface = surfaces[0]!
+    return captureComponentBoundary(surface.type as (surfaceProps: AgentComposerProps) => ReactElement<AgentComposerProps>, surface.props)
   }, mailbox.props)
 }
 
@@ -223,8 +231,30 @@ describe('AgentSessionComposer adapter', () => {
 
     expect(markup).toContain('data-agent-composer="true"')
     expect(markup).toContain('placeholder="Ask, steer, or paste a command…"')
-    expect(markup).toContain('index.ts')
+    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { activeFile?: string } }
+    expect(composer.props.activeFile).toBe('src/index.ts')
     expect(markup).not.toMatch(/data-disabled="true"/)
+  })
+
+  it('uses the explicit Session and execution owner instead of an observer lookalike', async () => {
+    const original = agentSession({ label: 'Original Core', status: { state: 'running', source: 'run-process', observedAt: 2 },
+      control: { kind: 'agent', hostId: 'origin', agentSessionId: 'agent-1', run: { runId: 'original-run' } } })
+    const observer = agentSession({ label: 'Observer decoy', processState: 'interrupted',
+      control: { kind: 'agent', hostId: 'observer', agentSessionId: 'agent-1', run: { runId: 'decoy-run' } } })
+    fixture.state.sessions = [observer]
+    fixture.state.agentComposerDrafts = { 'runtime-1:agent-1': 'Use the original control' }
+    const composer = renderComponentBoundary(AgentSessionComposer, {
+      sessionId: 'agent-1', session: original, ownerKey: 'runtime-1:agent-1'
+    }) as unknown as { props: { disabled?: boolean; onSubmit?: () => void } }
+
+    expect(composer.props.disabled).not.toBe(true)
+    expect(composer.props.onSubmit).toBeTypeOf('function')
+    composer.props.onSubmit?.()
+
+    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledWith('runtime-1:agent-1', 'Use the original control',
+      expect.any(Function), 'manual', undefined, expect.objectContaining({ originalSession: original })))
+    expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledWith('runtime-1:agent-1', 'Use the original control')
+    expect(fixture.state.recordAgentComposerHistory).toHaveBeenCalledWith('runtime-1:agent-1', 'Use the original control')
   })
 
   it('projects a Browser context handoff from the shared per-session draft', () => {
@@ -248,7 +278,7 @@ describe('AgentSessionComposer adapter', () => {
     composer.props.onSubmit()
 
     await vi.waitFor(() => {
-      expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Browser element context', expect.any(Function), 'manual')
+      expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Browser element context', expect.any(Function), 'manual', undefined, expect.any(Object))
       expect(fixture.state.clearAgentComposerDraftIfUnchanged)
         .toHaveBeenCalledWith('agent-1', 'Browser element context')
     })
@@ -274,7 +304,7 @@ describe('AgentSessionComposer adapter', () => {
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     expect(composer.props.onQueue).toBeTypeOf('function')
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file', expect.any(Function), undefined, 'manual')
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file', expect.any(Function), undefined, 'manual', undefined, expect.any(Object))
   })
 
   it('clears the draft when a message enters the queue, so entering is observable', () => {
@@ -285,7 +315,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.agentComposerDrafts = { 'agent-1': 'queue me and clear the box' }
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box', expect.any(Function), undefined, 'manual')
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box', expect.any(Function), undefined, 'manual', undefined, expect.any(Object))
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledWith('agent-1', 'queue me and clear the box')
   })
 
@@ -298,7 +328,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.enqueueAgentSteer.mockReturnValueOnce(false)
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'too large to queue', expect.any(Function), undefined, 'manual')
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'too large to queue', expect.any(Function), undefined, 'manual', undefined, expect.any(Object))
     expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
   })
 
@@ -309,7 +339,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.send.mockReturnValueOnce(false)
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onSubmit(): void } }
     composer.props.onSubmit()
-    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'same words, distinct intent', expect.any(Function), 'manual')
+    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'same words, distinct intent', expect.any(Function), 'manual', undefined, expect.any(Object))
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
   })
 
@@ -411,7 +441,7 @@ describe('AgentSessionComposer adapter', () => {
   })
 
   it('queues a steer while an interaction is pending without pretending it was sent', () => {
-    // The typed response card owns the interaction. Direct submit stays gated, while the explicit queue
+    // The typed response card owns the interaction. Send remains available, while this explicit queue
     // action preserves the draft for delivery after the interaction is answered.
     const waiting = agentSession({
       status: { state: 'working', source: 'native-hook', observedAt: 2 },
@@ -431,10 +461,11 @@ describe('AgentSessionComposer adapter', () => {
     }
 
     expect(composer.props.disabled).toBe(false)
-    expect(composer.props.onSubmit).toBeUndefined()
+    // The pending card does not remove Send; this explicit queue action still preserves the draft without claiming delivery.
+    expect(composer.props.onSubmit).toBeTypeOf('function')
     expect(composer.props.onQueue).toBeTypeOf('function')
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'This must not go out', expect.any(Function), undefined, 'manual')
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'This must not go out', expect.any(Function), undefined, 'manual', undefined, expect.any(Object))
   })
 
   it('一张待答卡片不许夺走中断——daemon 那条路从来没关过', () => {
@@ -601,10 +632,10 @@ describe('AgentSessionComposer adapter', () => {
     expect(composer.props.onSubmit).toBeTypeOf('function')
     expect(composer.props.postureTool).toBeUndefined()
     composer.props.onChange('draft edit without execution')
-    expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledWith('agent-1', 'draft edit without execution')
+    expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledWith('agent-1', 'draft edit without execution', undefined)
     expect(fixture.state.send).not.toHaveBeenCalled()
     composer.props.onSubmit!()
-    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledWith('agent-1', text, expect.any(Function), 'manual'))
+    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledWith('agent-1', text, expect.any(Function), 'manual', undefined, expect.any(Object)))
     expect(fixture.state.setPosture).not.toHaveBeenCalled()
   })
 
@@ -669,9 +700,10 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.agentComposerDrafts = { 'agent-1': 'Look at this' }
     nativeApi.savePastedImage.mockRejectedValueOnce(new Error('Pasted image exceeds the size limit.'))
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { onPasteImage(file: File, insert: ComposerInsert): void }
+      props: { onPasteImage(file: File, insert: ComposerInsert): void; insertionRef: { current: ComposerInsertionHandle | null } }
     }
 
+    composer.props.insertionRef.current = { insert: async (resolve) => { await resolve() }, replace: vi.fn() }
     composer.props.onPasteImage(new File([new Uint8Array([1, 2, 3])], 'paste.png', { type: 'image/png' }), async (resolve) => { await resolve() })
 
     await vi.waitFor(() => expect(nativeApi.savePastedImage).toHaveBeenCalledOnce())
@@ -698,10 +730,11 @@ describe('AgentSessionComposer adapter', () => {
   it('keeps a successful paste on its existing path-reference behaviour', async () => {
     fixture.state.sessions = [agentSession()]
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { onPasteImage(file: File, insert: ComposerInsert): void }
+      props: { onPasteImage(file: File, insert: ComposerInsert): void; insertionRef: { current: ComposerInsertionHandle | null } }
     }
 
     const inserted: string[] = []
+    composer.props.insertionRef.current = { insert: async (resolve) => { await resolve() }, replace: vi.fn() }
     composer.props.onPasteImage(new File([new Uint8Array([1])], 'paste.png', { type: 'image/png' }), async (resolve) => {
       const value = await resolve()
       if (value) inserted.push(value)
@@ -846,20 +879,16 @@ describe('AgentSessionComposer 的 / 候选是命令与我的 prompt 的并集',
     fixture.state.config.composerShortcuts = [
       { id: 'p-1', keyword: 'review-changes', label: 'Review changes', body: 'Review the working diff.' }
     ]
-    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { onSelectSuggestion?: (text: string, kind: 'command' | 'skill' | 'reference') => string | void }
-    }
-
-    const mine = composer.props.onSelectSuggestion?.('/review-changes', 'command')
-    // 读回来用的是真解析器：正文在 token 里是 URI 编码的，按原文 `toContain` 会因为空格变 `%20`
-    // 而恒假——而更要紧的是，能被 `parseComposerDraft` 读回来才是这个 token 真正要满足的性质。
-    const parts = parseComposerDraft(typeof mine === 'string' ? mine : '')
+    const mine = candidates().find(candidate => candidate.text === '/review-changes')
+    // The current command owner inserts this same insertText through ComposerInsertionHandle.
+    const parts = parseComposerDraft(mine?.insertText ?? mine?.text ?? '')
     const reference = parts.find((part) => 'reference' in part)
     expect(reference && 'reference' in reference ? reference.reference : undefined, '选中后没有带上正文——候选出得来但点了什么也没发生')
       .toEqual({ token: expect.any(String), label: 'Review changes', kind: 'subcommand', reference: 'Review the working diff.' })
 
     // 反面：Provider 命令必须原样填进草稿交给 Provider，不能也被包成 token。
-    expect(composer.props.onSelectSuggestion?.('/diff', 'command')).toBe('/diff')
+    const theirs = candidates().find(candidate => candidate.text === '/diff')
+    expect(theirs?.insertText ?? theirs?.text).toBe('/diff')
   })
 
   it('绑了别的 Provider 的 prompt 不出现在这个 Agent 的候选里', () => {

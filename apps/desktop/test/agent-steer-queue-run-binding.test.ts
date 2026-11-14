@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -25,14 +25,26 @@ import {
  */
 
 const initial = useAppStore.getState()
+let dispose: (() => void) | undefined
+beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
+afterAll(() => dispose?.())
+beforeEach(() => {
+  vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control =>
+    useAppStore.getState().sessions.find(item => item.kind === 'agent' && item.control.agentSessionId === control.agentSessionId)!)
+})
 afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks() })
 
 function agent(runId: string, processState = 'running') {
   return {
     id: 's',
     kind: 'agent',
+    hostId: 'local',
+    capabilities: {},
     control: { kind: 'agent', hostId: 'local', agentSessionId: 's', run: { runId } },
-    status: { state: 'working', observedAt: 1 },
+    status: { state: 'running', observedAt: 1 },
+    promptSubmissionPredecessor: null,
     processState
   }
 }
@@ -42,7 +54,7 @@ describe('排队的 steer 绑定它排队时的 run', () => {
     useAppStore.setState({ sessions: [agent('run-1') as never] })
     useAppStore.getState().enqueueAgentSteer('s', 'typed at run-1')
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), enqueuedAt: expect.any(Number), runId: 'run-1', text: 'typed at run-1', status: 'queued' }
+      { operationId: expect.any(String), enqueuedAt: expect.any(Number), runId: 'run-1', promptCondition: null, text: 'typed at run-1', status: 'queued' }
     ])
   })
 
@@ -68,11 +80,12 @@ describe('排队的 steer 绑定它排队时的 run', () => {
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     useAppStore.getState().enqueueAgentSteer('s', 'fresh steer')
     await useAppStore.getState().flushAgentSteerQueue('s')
+    await useAppStore.getState().flushAgentSteerQueue('s')
 
     // 这一条与上一条互为两侧：把判据收窄成「永远不送」能让上一条绿，却让这一条红。
+    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
     expect(submit).toHaveBeenCalledTimes(1)
     expect(submit.mock.calls[0]?.[1]).toBe('fresh steer')
-    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
 
   it('过期条目被跳过时仍留在队列里，不被悄悄丢弃', async () => {
@@ -85,7 +98,7 @@ describe('排队的 steer 绑定它排队时的 run', () => {
     // 用户写下的字不由这个循环替他决定丢不丢：角标仍要拿得到它们（并标成送不出去）。
     // 变异：把 flush 里的 `continue` 改成删除条目，这里红。
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), enqueuedAt: expect.any(Number), runId: 'run-1', text: 'stale steer', status: 'queued' }
+      { operationId: expect.any(String), enqueuedAt: expect.any(Number), runId: 'run-1', promptCondition: null, text: 'stale steer', status: 'queued' }
     ])
   })
 
@@ -101,7 +114,7 @@ describe('排队的 steer 绑定它排队时的 run', () => {
     expect(submit).toHaveBeenCalledTimes(1)
     expect(submit.mock.calls[0]?.[1]).toBe('fresh tail')
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { operationId: expect.any(String), enqueuedAt: expect.any(Number), runId: 'run-1', text: 'stale head', status: 'queued' }
+      { operationId: expect.any(String), enqueuedAt: expect.any(Number), runId: 'run-1', promptCondition: null, text: 'stale head', status: 'queued' }
     ])
   })
 })

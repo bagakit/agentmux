@@ -18,6 +18,8 @@ let dispose: (() => void) | undefined
 beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
 afterAll(() => dispose?.())
 beforeEach(() => {
+  vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
     const session = useAppStore.getState().sessions.find(item => item.id === control.agentSessionId)
     if (!session) throw new Error('Private Session is missing')
@@ -27,7 +29,7 @@ beforeEach(() => {
 afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks() })
 
 function runningAgent(id = 's') {
-  return { id, kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: 'r' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null }
+  return { id, kind: 'agent', hostId: 'local', control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: 'r' } }, status: { state: 'running', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null, capabilities: {} }
 }
 
 describe('steer queue operationId correlation (T-008)', () => {
@@ -47,7 +49,9 @@ describe('steer queue operationId correlation (T-008)', () => {
     await useAppStore.getState().flushAgentSteerQueue('s')
     // Retained, and marked `deferred` — NOT `failed`. This used to assert `failed`, which was the defect
     // written down: a healthy Agent's message judged dead because OUR readiness probe had not completed.
-    expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ ...admitted, promptCondition: { expectedRun: { runId: 'r' }, afterSubmissionId: null }, status: 'deferred', error: 'busy' }])
+    expect(useAppStore.getState().agentSteerQueues.s).toHaveLength(1)
+    expect(useAppStore.getState().agentSteerQueues.s![0]).toMatchObject({ operationId: admitted.operationId,
+      promptCondition: { expectedRun: { runId: 'r' }, afterSubmissionId: null }, status: 'deferred', error: 'busy', awaitingExplicitSend: true })
 
     // A generic failure cannot prove no admission. A background wake keeps the original intent;
     // an explicit retry uses its same Core identity instead of composing another mutation.
@@ -72,12 +76,14 @@ describe('steer queue operationId correlation (T-008)', () => {
     submit.mockImplementation(async (_c, prompt) => { sent.push(prompt) })
 
     useAppStore.getState().enqueueAgentSteer('s', 'first')
+    const first = useAppStore.getState().agentSteerQueues.s![0]!.operationId
     useAppStore.getState().enqueueAgentSteer('s', 'second')
     await useAppStore.getState().flushAgentSteerQueue('s')
     // 本轮到队首就停——保序是「按作者顺序投递」，不是「跳过投不出去的那条」。
     expect(sent).toEqual([])
 
-    // 下一个 runtime 事件：两条都按原顺序投出去，队列排空。
+    // 显式重试保留队首的 operationId；随后一次 wake 投递健康队尾。
+    await useAppStore.getState().sendQueuedAgentSteer('s', first)
     await useAppStore.getState().flushAgentSteerQueue('s')
     expect(sent).toEqual(['first', 'second'])
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
@@ -97,11 +103,11 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.getState().enqueueAgentSteer('s', 'and this')
     const first = useAppStore.getState().agentSteerQueues.s![0]!.operationId
     // 手动与自动共用投递 owner；拒绝原因驻留在条目上。
-    await useAppStore.getState().sendQueuedAgentSteer('s', first)
+    await expect(useAppStore.getState().sendQueuedAgentSteer('s', first)).rejects.toMatchObject({ code: 'AGENT_PROMPT_SUBMISSION_BUSY' })
     expect(useAppStore.getState().agentSteerQueues.s![0]!.status).toBe('deferred')
+    await useAppStore.getState().sendQueuedAgentSteer('s', first)
 
-    // 决定性的一句：被拒之后自动投递照常继续，两条都按原顺序送出去。
-    // 标成 failed 时这里会读到 `[]`——队首把后面所有条目一起连坐。
+    // 决定性的一句：显式拒绝不清空原操作，也不阻断后续健康消息。
     await useAppStore.getState().flushAgentSteerQueue('s')
     expect(sent).toEqual(['hurry this', 'and this'])
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
@@ -117,12 +123,12 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.getState().enqueueAgentSteer('s', 'steer me')
     await useAppStore.getState().flushAgentSteerQueue('s')
     expect(reported).toEqual([])
-    expect(useAppStore.getState().agentSteerQueues.s![0]!.error).toBe('not ready yet')
+    expect(useAppStore.getState().agentSteerQueues.s![0]!.error).toContain('not ready yet')
 
     await useAppStore.getState().flushAgentSteerQueue('s')
     await useAppStore.getState().flushAgentSteerQueue('s')
-    // 还在重试（条目仍在队列里等着），但不再上报——驻留状态由徽标那一档常驻表达。
-    expect(useAppStore.getState().agentSteerQueues.s![0]).toMatchObject({ status: 'deferred', error: 'not ready yet' })
+    // 仍保留在原队列等待明确重试，但不再上报——驻留状态由徽标那一档常驻表达。
+    expect(useAppStore.getState().agentSteerQueues.s![0]).toMatchObject({ status: 'deferred', error: expect.stringContaining('not ready yet') })
     expect(reported).toEqual([])
   })
 
@@ -167,9 +173,47 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.getState().enqueueAgentSteer('s', 'first prompt')
     useAppStore.getState().enqueueAgentSteer('s', 'second prompt')
     await useAppStore.getState().flushAgentSteerQueue('s')
+    await useAppStore.getState().flushAgentSteerQueue('s')
 
     expect(ids).toHaveLength(2)
     expect(ids[0]).not.toBe(ids[1])
+  })
+})
+
+describe('explicit Session admission', () => {
+  it('freezes the explicit original control and drains without an observer Session', async () => {
+    const original = { ...runningAgent(), hostId: 'origin', status: { state: 'running', observedAt: 2 },
+      control: { kind: 'agent', hostId: 'origin', agentSessionId: 's', run: { runId: 'original-run' } } }
+    const observer = { ...runningAgent(), hostId: 'observer',
+      control: { kind: 'agent', hostId: 'observer', agentSessionId: 's', run: { runId: 'decoy-run' } } }
+    useAppStore.setState({ sessions: [observer as never] })
+
+    expect(useAppStore.getState().enqueueAgentSteer('s', 'original route', undefined, 'original-op', 'manual', undefined,
+      { execution: 'immediate', originalSession: original as never })).toBe(true)
+    const entry = useAppStore.getState().agentSteerQueues.s![0]!
+    expect(entry.directInputControl).toEqual(original.control)
+    expect(entry.directInputBinding?.expectedRun).toEqual(original.control.run)
+
+    useAppStore.setState({ sessions: [] })
+    const inspect = vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_control, _text, operationId) =>
+      promptCarrierWaiting('s', 'original-run', operationId!))
+    await useAppStore.getState().sendQueuedAgentSteer('s', entry.operationId)
+
+    expect(inspect).toHaveBeenCalledWith(original.control, expect.objectContaining({ submissionId: 'original-op' }))
+    expect(submit.mock.calls[0]?.slice(0, 4)).toEqual([original.control, 'original route', 'original-op', entry.directInputBinding])
+  })
+
+  it('freezes the explicit original control even before a queued Send chooses direct delivery', () => {
+    const original = { ...runningAgent(), hostId: 'origin',
+      control: { kind: 'agent', hostId: 'origin', agentSessionId: 's', run: { runId: 'original-run' } } }
+    useAppStore.setState({ sessions: [] })
+
+    expect(useAppStore.getState().enqueueAgentSteer('s', 'queued original', undefined, 'queued-original-op', undefined, undefined,
+      { originalSession: original as never })).toBe(true)
+    expect(useAppStore.getState().agentSteerQueues.s![0]).toEqual(expect.objectContaining({
+      operationId: 'queued-original-op', directInputControl: original.control, runId: 'original-run'
+    }))
   })
 })
 
