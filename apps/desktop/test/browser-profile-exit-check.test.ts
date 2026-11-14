@@ -5,7 +5,7 @@ import { createBrowserProfileExitCheck, validBrowserProfileExitCheckUrl } from '
  * One explicit request through a Profile's own session. It goes out only after the Profile's route is
  * applied, reports status, time and a plain address, and a failure is unknown rather than an error.
  */
-function setup(fetch: (url: string, init: { signal?: AbortSignal }) => Promise<{ status: number; text(): Promise<string> }>) {
+function setup(fetch: (url: string, init: { signal?: AbortSignal }) => Promise<Response>) {
   let clock = 1000
   const order: string[] = []
   const session = { fetch: vi.fn(async (url: string, init: { signal?: AbortSignal }) => { order.push('fetch'); clock += 184; return await fetch(url, init) }) }
@@ -19,15 +19,15 @@ function setup(fetch: (url: string, init: { signal?: AbortSignal }) => Promise<{
 
 describe('Profile exit check', () => {
   it('applies the Profile route first, then sends one request and reads a plain address', async () => {
-    const { check, session, order } = setup(async () => ({ status: 200, text: async () => ' 203.0.113.7\n' }))
+    const { check, session, order } = setup(async () => new Response(' 203.0.113.7\n', { status: 200 }))
     expect(await check('p-work', 'https://ip.example.test/')).toEqual({ status: 'reachable', httpStatus: 200, latencyMs: 184, ip: '203.0.113.7' })
     expect(order).toEqual(['prepare', 'fetch'])
     expect(session.fetch).toHaveBeenCalledExactlyOnceWith('https://ip.example.test/', expect.objectContaining({ method: 'GET', cache: 'no-store' }))
   })
 
   it('reports status and time without inventing an address when the body is a page', async () => {
-    const { check } = setup(async () => ({ status: 204, text: async () => '<html>Your IP is 203.0.113.7 in Tokyo</html>' }))
-    expect(await check('p-work', 'https://ip.example.test/')).toEqual({ status: 'reachable', httpStatus: 204, latencyMs: 184 })
+    const { check } = setup(async () => new Response('<html>Your IP is 203.0.113.7 in Tokyo</html>', { status: 200 }))
+    expect(await check('p-work', 'https://ip.example.test/')).toEqual({ status: 'reachable', httpStatus: 200, latencyMs: 184 })
   })
 
   it('a failed request is unknown with its reason, never an error that blocks', async () => {
@@ -36,12 +36,19 @@ describe('Profile exit check', () => {
   })
 
   it('refuses a missing, plain-http or credentialed address before touching the session', async () => {
-    const { check, session, order } = setup(async () => ({ status: 200, text: async () => '' }))
+    const { check, session, order } = setup(async () => new Response('', { status: 200 }))
     for (const address of ['', 'http://ip.example.test/', 'https://me:pw@ip.example.test/', 'not a url']) {
       await expect(check('p-work', address), address).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXIT_CHECK_INVALID' })
     }
     expect(session.fetch).not.toHaveBeenCalled()
     expect(order).toEqual([])
     expect(validBrowserProfileExitCheckUrl('')).toBe(true)
+  })
+
+  it('does not infer an address from a bounded prefix of a larger response', async () => {
+    const { check } = setup(async () => new Response('203.0.113.7' + ' '.repeat(4000) + '<html>Not a plain address</html>'))
+    expect(await check('p-work', 'https://ip.example.test/')).toEqual({ status: 'reachable', httpStatus: 200, latencyMs: 184 })
+    const invalid = setup(async () => new Response('::::'))
+    expect(await invalid.check('p-work', 'https://ip.example.test/')).not.toHaveProperty('ip')
   })
 })
