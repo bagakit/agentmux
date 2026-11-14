@@ -8,6 +8,16 @@ export const hostedSummaryMutations = {
     kind: 'mobile', file: 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts',
     before: 'const full = await originalClient.readAgentSession(originalId)',
     after: 'const full = originalSession', target: 're-reads the matching summary at the exact Session'
+  },
+  'startup-full-projection': {
+    kind: 'core', file: 'packages/core/src/hosted-client.ts',
+    before: "method: sessionProjection === 'summary' ? 'listRuns' : 'runtimeProjection'",
+    after: "method: 'runtimeProjection'", target: 'keeps full consumers full and summary caches small'
+  },
+  'receipt-full-compare': {
+    kind: 'core', file: 'packages/core/src/hosted-client.ts',
+    before: '!dequal(previous, projected)', after: '!dequal(previous, updated)',
+    target: 'keeps full consumers full and summary caches small'
   }
 }
 export const hostedSummaryTests = {

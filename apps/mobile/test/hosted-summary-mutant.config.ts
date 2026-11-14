@@ -11,7 +11,7 @@ const variant = mutation ? hostedSummaryMutations[mutation as keyof typeof hoste
 const kind = variant?.kind ?? process.env.HOSTED_SUMMARY_TEST_KIND
 if (kind !== 'core' && kind !== 'mobile') throw Error('Choose the core or mobile Hosted summary bearing suite')
 const files = new Set(['packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-session-summary.ts',
-  'packages/core/src/agent-prompt-condition.ts', 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', ...Object.values(hostedSummaryTests)])
+  'packages/core/src/hosted-client.ts', 'packages/core/src/agent-prompt-condition.ts', 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', ...Object.values(hostedSummaryTests)])
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 
 export default defineConfig({ root: resolve(root, 'apps/mobile'), cacheDir: resolve(root, '.tmp/hosted-summary', mutation ?? kind),

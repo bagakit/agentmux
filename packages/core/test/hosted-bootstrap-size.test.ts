@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { AgentMuxClient } from '../src/client.js'
-import type { AgentMuxAgentSession, AgentMuxClientEvent } from '../src/types.js'
+import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRun } from '../src/types.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import type { AgentMuxHostedAgentSessionSummary } from '../src/hosted-session-summary.js'
@@ -21,12 +21,20 @@ function session(id: string, prompt: string): AgentMuxAgentSession {
 }
 function fixture(sessions: AgentMuxAgentSession[]) {
   const listeners = new Set<(event: AgentMuxClientEvent) => void>()
+  const runFor = (value: AgentMuxAgentSession): AgentMuxRun => ({ nativeService: null, ...value.run, kind: 'agent', providerId: value.providerId,
+    executorId: value.executorId, agentSessionId: value.agentSessionId, workspacePath: value.workspacePath,
+    pid: 123, state: 'running', cols: 80, rows: 24, observedAt: 1, latestOutputBytes: 0, acceptedInputBytes: 0 })
   const core = {
+    connectRuntime: vi.fn(async () => {}),
     onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
     runtimeIdentity: () => ({ hostId: 'local', instanceId: 'native', buildIdentity: 'fixture', protocolVersion: 1, processId: 123 }),
     catalog: () => [], agentMessageQueuePath: () => 'messages', readAgentSessions: async () => sessions,
     readAgentSession: vi.fn(async (id: string) => sessions.find(value => value.agentSessionId === id) ?? null),
-    metadata: { pendingIds: () => [] }, runtimeProjection: async () => ({ hostId: 'local', subjects: [] })
+    metadata: { pendingIds: () => [] },
+    listRuns: vi.fn(async () => sessions.map(runFor)),
+    runtimeProjection: vi.fn(async () => ({ hostId: 'local', subjects: sessions.map(value => ({ kind: 'agent', subjectId: value.agentSessionId,
+      hostId: value.hostId, workspacePath: value.workspacePath, providerId: value.providerId, executorId: value.executorId,
+      agentSession: value, run: runFor(value) })) }))
   } as unknown as AgentMuxClient
   const service = new AgentMuxHostedRuntimeService(core, null, () => hostedTestOwner(core))
   const port: AgentMuxHostedRpcPort = {
@@ -86,23 +94,32 @@ describe('consumer-negotiated Hosted Session projection', () => {
 
   it('keeps full consumers full and summary caches small across real bootstrap, events, receipts and exact reads', async () => {
     const original = session('session-original', 'Original full prompt'), f = fixture([original])
+    let statusSession = original
+    Object.assign(f.core, { statusAgent: vi.fn(async () => ({ session: statusSession })) })
     const full = await connectHostedAgentMux({ rpc: f.port, consumerId: 'full-consumer' })
     const summary = await connectHostedAgentMux({ rpc: f.port, consumerId: 'summary-consumer', sessions: 'summary' })
     expectTypeOf<ReturnType<typeof summary.agentSession>>().toEqualTypeOf<AgentMuxHostedAgentSessionSummary>()
     expectTypeOf<Awaited<ReturnType<AgentMuxHostedClient<'summary'>['readAgentSession']>>>().toEqualTypeOf<AgentMuxAgentSession | null>()
     try {
+      await vi.waitFor(() => expect(f.core.listRuns).toHaveBeenCalledOnce())
+      expect(f.core.runtimeProjection).toHaveBeenCalledOnce()
       expect(full.agentSession(original.agentSessionId).promptCompletionAdmission!.intent!.prompt).toBe('Original full prompt')
       expect(summary.agentSession(original.agentSessionId).promptCompletionAdmission!.intent).toBeUndefined()
       const fullEvents: AgentMuxClientEvent[] = [], summaryEvents: AgentMuxClientEvent[] = []
       full.onEvent(event => { if (event.type === 'agent-session') fullEvents.push(event) })
       summary.onEvent(event => { if (event.type === 'agent-session') summaryEvents.push(event) })
+      await summary.statusAgent(original.agentSessionId); await summary.statusAgent(original.agentSessionId)
+      expect(summaryEvents, 'unchanged full read receipts do not feed the summary observer back into its next read').toEqual([])
       const changed = session(original.agentSessionId, 'Changed full prompt')
+      statusSession = changed
       f.emit({ type: 'agent-session', session: changed })
       await vi.waitFor(() => expect(summaryEvents).toHaveLength(1))
       expect(fullEvents).toHaveLength(1)
       expect(full.agentSession(original.agentSessionId).promptCompletionAdmission!.intent!.prompt).toBe('Changed full prompt')
       expect(summary.agentSession(original.agentSessionId).promptCompletionAdmission!.intent).toBeUndefined()
       expect(summary.agentSession(original.agentSessionId).promptCompletionAdmission!.intentSummary!.promptBytes).toBe(Buffer.byteLength('Changed full prompt'))
+      await summary.statusAgent(original.agentSessionId); await summary.statusAgent(original.agentSessionId)
+      expect(summaryEvents, 'reads compare the same negotiated projection before publishing').toHaveLength(1)
       expect((await summary.readAgentSession(original.agentSessionId))!.promptCompletionAdmission!.intent!.prompt).toBe('Original full prompt')
       expect(f.core.readAgentSession).toHaveBeenCalledExactlyOnceWith(original.agentSessionId)
       expect(summary.agentSession(original.agentSessionId).promptCompletionAdmission!.intent).toBeUndefined()
