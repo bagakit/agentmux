@@ -270,7 +270,10 @@ export function createWorkspaceAgentContextsSelector() {
       const timeline = timelines[session.id], name = names[session.id]
       const semantic = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
       const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)
-      if (old && old.semantic === semantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && sameConversationFacts(old.conversation, timeline) && old.name === name && old.model.workspace === workspace && old.model.topicId === topicId) return old.model
+      if (old && old.semantic === semantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && sameConversationFacts(old.conversation, timeline) && old.name === name && old.model.workspace === workspace && old.model.topicId === topicId) {
+        old.session = session
+        return old.model
+      }
       const conversation = focusConversationFacts(timeline, old)
       const model = agentContextWithConversation(session, timeline, name, workspace, topicId, conversation)
       cache.set(key, { session, timeline, conversation, name, semantic, model })
@@ -317,6 +320,7 @@ function createFocusProjectionCache() {
       const deferred = mode === 'metadata' && (session.processState === 'interrupted' || session.runUnobserved === true)
         && !session.pendingInteraction && !isNeedsYouState(session.status.state) && session.status.state !== 'error'
       if (old && (!coordination || old.lane !== 'pmo' || old.coordinationModel) && old.deferred === deferred && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (mode !== undefined ? sameTimelineStamp(old.stamp, timeline) : !old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
+        old.session = session
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
         else if (old.lane === 'pmo') {
           if (coordination) coordinationRows.push(old.coordinationModel!)

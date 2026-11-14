@@ -240,6 +240,14 @@ function useFocusInputWindow(control: SessionHistoryReference | undefined, scope
   return { ...current, window, readers, observeWork, continueReading: () => void current.earlier?.(), refresh: () => void current.refresh?.() }
 }
 
+// Long-lived cleanup must not own the Track render scope and its complete Session.
+function focusTrackPresenceCleanup(key: string, onPresence: (key: string, present: boolean) => void, selected: boolean, onCurrentPresence: (present: boolean) => void) {
+  return () => { onPresence(key, false); if (selected) onCurrentPresence(false) }
+}
+function focusTrackEventCleanup(key: string, onEventChanged: (key: string) => void) {
+  return () => onEventChanged(key)
+}
+
 const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, recordedMessageTracks, retainedWork, observeWork, observing, window, now, scaleWidth, lane, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork, onPresence, onEvent, onEventChanged, onCurrentPresence }: {
   track: FocusTimelineTrack; selected: boolean; window: FocusTimeWindow; now: number; scaleWidth: number
   onEvent(trackKey: string, key: string, facts: FocusTimelineEventFacts, target: HTMLElement, immediate?: boolean): void
@@ -334,13 +342,13 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   useLayoutEffect(() => {
     onPresence(track.key, present)
     if (selected) onCurrentPresence(present)
-    return () => { onPresence(track.key, false); if (selected) onCurrentPresence(false) }
+    return focusTrackPresenceCleanup(track.key, onPresence, selected, onCurrentPresence)
   }, [track.key, present, selected, onPresence, onCurrentPresence])
   // This track already owns these subscriptions. Expire its disposable event
   // intent when its facts change; never change the fixed conversation Reader.
   useLayoutEffect(() => {
     onEventChanged(track.key)
-    return () => onEventChanged(track.key)
+    return focusTrackEventCleanup(track.key, onEventChanged)
   }, [track.key, runId, session?.processState, semantic?.state, semantic?.stateEnteredAt, activitySemantic, ownWorkItems, retainedWork?.items, segments, time.zone, onEventChanged])
   if (!present) return null
   const currentFact = `Run alive · ${currentStateLabel}${working && !work && !workIntervals.some(item => item.segment.end === 'current') ? ' · Work start unknown' : ''} · Run start unknown`
