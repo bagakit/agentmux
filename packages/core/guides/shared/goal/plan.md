@@ -22,12 +22,20 @@ The discussion Agent is not automatically the Supervisor. Only the exact current
 or a person may revise the plan; otherwise preserve the original discussion and explain the
 explicit management selection or coordination needed. Never assign yourself or impersonate
 a person to make the graph appear.
-As Supervisor, write the plan with goal plan revise against the revision you read; a
-refused revision means someone changed it, so read it again. Name each node's outcome,
+As Supervisor, write the plan with goal plan revise against the revision you read. An
+operation replay must keep the original author, expected revision, proposal revision and
+nodes. If a later revision exists, the refusal names where the original operation applied;
+read the current plan instead of repeating that old write. Name each node's outcome,
 dependencies, covered criteria, a check another party can repeat, and its executor
 (Host and AgentSession) when known. Cancel a node with work instead of removing it.
 Once a node has work, keep its outcome, check and criterion set; cancel it and add a
-new node for a different task. A node delegation carries the complete node criterion set.
+new node for a different task. New nodes and changed criterion sets on unrecorded nodes
+must cover at least one criterion and only criteria in the current proposal. Unchanged old
+criterion sets remain readable and may need reconciliation. A node delegation carries the
+complete node criterion set. Explicitly changing a non-null executor supersedes the newest
+unreviewed attempt and permits the new executor once dependencies pass; clearing the
+executor does not supersede it. An old report stays on its original delegation and thread,
+but cannot receive the current node's review. A passed node stays done after reassignment.
 Delegate only a ready node, or one whose review asked for changes, with goal delegate and
 intent.planNodeId, to the executor the plan names. Parallel ready nodes go out together.
 A node is done only after goal plan review by someone other than its executor: run the
