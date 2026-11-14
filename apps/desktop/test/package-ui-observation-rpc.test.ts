@@ -4,7 +4,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { parseDesktopClientObservation, type DesktopClientObservation } from '../src/shared/client-observation'
+import { parseDesktopClientObservation, parseDesktopClientObservationForInstall, type DesktopClientObservation } from '../src/shared/client-observation'
 
 const repository = resolve(import.meta.dirname, '../../..')
 const installerPath = process.env.AGENTMUX_UI_OBSERVATION_SOURCE ?? join(repository, 'apps/desktop/scripts/package-runtime-upgrade.mjs')
@@ -23,7 +23,7 @@ const observation: DesktopClientObservation = {
       localStorage: 'present', detail: null }, runtimes: [] },
   workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
     focus: { executionSessionId: null, pmoSessionId: null },
-    survey: { collectedZoneIds: ['saved-missing-zone', 'original-zone'],
+    survey: { collectedZoneIds: ['saved-missing-zone', 'original-zone'], pageReferences: [],
       organization: { ungrouped: ['original-zone'], groups: [{ groupId: 'original-group', name: 'Retained group', collapsed: true, zoneIds: ['saved-missing-zone', 'closed-slot'] }] },
       selection: { zoneId: 'original-zone', selection: [{ tabId: 'tab', regionId: 'file' }], active: { tabId: 'tab', regionId: 'file' } } },
     desktop: {
@@ -50,7 +50,8 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation', startupDetail?: unknown, desktopDetail?: unknown, readerDelayMs = 0) {
+async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation', startupDetail?: unknown, desktopDetail?: unknown, readerDelayMs = 0,
+  observationPayload: (value: DesktopClientObservation) => unknown = value => value) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-ui-reader-")); roots.push(root)
   const endpoint = join(root, 'rpc.sock'), disposed = join(root, 'disposed.txt')
   const core = join(root, 'current.app/Contents/Resources/app/node_modules/@agentmux/core')
@@ -84,7 +85,7 @@ export async function connectAgentMuxRpc(...args) {
       if (startupDetail !== undefined) Object.assign(current.workbench, { startupAgentAvailability: startupDetail })
       if (desktopDetail !== undefined) Object.assign(current.workbench, { desktop: desktopDetail })
       const body = mode === 'rpc-error' ? { error: { code: -32000, message: 'Private observation unavailable' } }
-        : { result: { observation: mode === 'invalid-observation' ? { ...current, main: { ...current.main, pid: 0 } } : current } }
+        : { result: { observation: mode === 'invalid-observation' ? { ...current, main: { ...current.main, pid: 0 } } : observationPayload(current) } }
       // Keep the server side open: the bounded reader must close its own connection.
       socket.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...body }) + '\n')
     })
@@ -103,6 +104,49 @@ it('reads the current loaded identity and nonempty workbench through the actual 
   expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
   expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
 })
+
+function withoutPageReferences(value: DesktopClientObservation) {
+  const { pageReferences: _pageReferences, ...survey } = value.workbench.survey!
+  return { ...value, workbench: { ...value.workbench, survey } }
+}
+
+it('[install-page-reference-coverage] the actual inspector child retains absent page references and all observed Survey facts', async () => {
+  const legacy = withoutPageReferences(observation), original = JSON.stringify(legacy)
+  expect(() => parseDesktopClientObservation(legacy), 'The current public producer remains strict').toThrow()
+  const f = await fixture('success', undefined, undefined, 0, withoutPageReferences)
+  expect(await installer.observeUiClient(f.app)).toEqual(legacy)
+  const parsed = parseDesktopClientObservationForInstall(legacy)
+  expect(parsed).toEqual(legacy)
+  expect(parsed.workbench.survey).not.toHaveProperty('pageReferences')
+  expect(JSON.stringify(legacy), 'No empty value is manufactured in the original observation').toBe(original)
+  expect(f.requests).toEqual([{ jsonrpc: '2.0', id: expect.any(String), method: 'app.inspect', params: {} }])
+  expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
+  expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
+})
+
+it.each([{ references: [] }, { references: [{ regionId: 'original-region', browserId: 'original-browser' }] }])(
+  '[install-page-reference-coverage] both codecs retain provided page references exactly: %j', ({ references }) => {
+    const current = { ...observation, workbench: { ...observation.workbench,
+      survey: { ...observation.workbench.survey!, pageReferences: references } } }
+    expect(parseDesktopClientObservation(current)).toEqual(current)
+    expect(parseDesktopClientObservationForInstall(current)).toEqual(current)
+  })
+
+it.each([null, 'unknown', [{ regionId: 'original-region' }], [{ regionId: '', browserId: 'original-browser' }],
+  [{ regionId: 'original-region', browserId: 'original-browser', extra: true }]].map(references => ({ references }))) (
+  '[install-page-reference-coverage] the actual inspector child rejects malformed provided page references: %j', async ({ references }) => {
+    const change = (value: DesktopClientObservation) => ({ ...value, workbench: { ...value.workbench,
+      survey: { ...value.workbench.survey!, pageReferences: references } } })
+    const malformed = change(observation), original = JSON.stringify(malformed)
+    expect(() => parseDesktopClientObservation(malformed)).toThrow()
+    expect(() => parseDesktopClientObservationForInstall(malformed)).toThrow()
+    const f = await fixture('success', undefined, undefined, 0, change)
+    await expect(installer.observeUiClient(f.app)).rejects.toThrow('pageReferences')
+    expect(JSON.stringify(malformed)).toBe(original)
+    expect(f.requests).toHaveLength(1)
+    expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
+    expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
+  })
 
 it('[ui-reader-budget] the default inspector child can finish a legitimate read after ten seconds and releases its original RPC client', async () => {
   // Delay only the fixture App's SDK entry before its real public connection.
