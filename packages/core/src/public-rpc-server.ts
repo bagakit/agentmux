@@ -90,7 +90,9 @@ export type AgentMuxControlServerOptions = AgentMuxRpcServiceOptions & {
   onControlEndpointState?(state: AgentMuxControlEndpointState): void
   /** HTTP is absent by default. Binding and authorization must both be explicit. */
   http?: AgentMuxRpcHttpOptions
+  meshEndpoint?: import('./public-rpc-relay-gateway.js').AgentMuxMeshEndpointSource
   relayGateway?: AgentMuxRelayGatewaySource
+  meshState?: { directory: string; owner: import('./mesh-network.js').MeshOwner; write?: typeof import('./durable-write.js').durableWriteFile }
   /** One explicit original local peer. Request bodies cannot select an authority endpoint. */
   forwardingPeer?: RpcForwardingPeer
 }
@@ -122,10 +124,10 @@ export class AgentMuxControlServer {
   private readonly localPrincipal: AgentMuxRpcPrincipal = { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }
   readonly path: string
   constructor(private readonly options: AgentMuxControlServerOptions = {}, path?: string) {
-    this.relayGateway = new CoreRelayGateway(options.relayGateway)
+    this.relayGateway = new CoreRelayGateway(options.relayGateway, options.meshState, options.meshEndpoint ? { source: options.meshEndpoint, server: this } : undefined)
     this.path = path ?? options.socketPath ?? defaultAgentMuxControlSocketPath()
     this.publication = new ControlEndpointPublication(this.path, socket => this.accept(socket), options.onControlEndpointState)
-    this.service = new AgentMuxRpcService({ ...options, endpoint: { transport: 'unix', path: this.path }, endpointPublication: () => this.publication.state(), relayInspection: () => this.relayGateway.inspect() })
+    this.service = new AgentMuxRpcService({ ...options, endpoint: { transport: 'unix', path: this.path }, endpointPublication: () => this.publication.state(), relayInspection: () => this.relayGateway.inspect(), meshNetwork: this.relayGateway })
     this.dispatcher = new AgentMuxRpcDispatcher(this.service)
     if (options.http && (!options.http.host || !Number.isInteger(options.http.port) || options.http.port < 0 || options.http.port > 65535 ||
       (!options.http.authorize && (typeof options.http.token !== 'string' || !options.http.token || /[\r\n]/u.test(options.http.token))) ||

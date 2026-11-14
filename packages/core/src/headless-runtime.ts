@@ -32,6 +32,7 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   /** Borrow the same original Host configuration used by its saved Executor settings. */
   executorConfigurations?: (executorId?: string) => Promise<Readonly<Record<string, import('./types.js').AgentExecutorConfig>>>
   http?: AgentMuxRpcHttpOptions
+  meshEndpoint?: import('./public-rpc-relay-gateway.js').AgentMuxMeshEndpointSource
   relayGateway?: import('./public-rpc-relay-gateway.js').AgentMuxRelayGatewaySource
   forwardingPeer?: AgentMuxControlServerOptions['forwardingPeer']
   /** Existing client-owned business ports mounted on this one public endpoint. */
@@ -218,8 +219,9 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       resolveHost: async (hostId, route, access) => { const host = await executionHost(hostId, route, access); return { runtimeId: host.runtimeId, client: host.executionPort,
         ...(host.adoptedRoute ? { adoptedRoute: host.adoptedRoute } : {}), ...(host.dispose ? { dispose: host.dispose } : {}) } }
     })
-    server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
+    server = new AgentMuxControlServer({ ...options.service, socketPath, meshState: { directory: stateDirectory, owner: { runtimeId, ownerInstanceId } }, ...(options.http ? { http: options.http } : {}),
       ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
+      ...(options.meshEndpoint ? { meshEndpoint: options.meshEndpoint } : {}),
       ...(options.forwardingPeer ? { forwardingPeer: options.forwardingPeer } : {}),
       capsules: options.service?.capsules ?? capsules,
       executionBindings: options.service?.executionBindings ?? executionBindings!,

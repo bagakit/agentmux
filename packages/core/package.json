@@ -513,6 +513,10 @@
     "./relay-gateway": {
       "types": "./dist/public-rpc-relay-gateway.d.ts",
       "import": "./dist/public-rpc-relay-gateway.js"
+    },
+    "./mesh-network": {
+      "types": "./dist/mesh-network.d.ts",
+      "import": "./dist/mesh-network.js"
     }
   },
   "bin": {

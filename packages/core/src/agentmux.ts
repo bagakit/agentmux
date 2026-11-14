@@ -65,6 +65,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (method === 'space.close.ls' && body.availability !== 'complete') return true
   if (method === 'agent.posture.set' && (body.outcome !== 'applied' || body.diskDurability !== 'confirmed')) return true
   if (method === 'node.locate' && body.status === 'unconfirmed') return true
+  if (method === 'settings.mesh.configure' && body.diskDurability !== 'confirmed') return true
   if (method === 'settings.node.configure' && (body.operation as { status?: string } | undefined)?.status !== 'confirmed') return true
   if (method.startsWith('image.')) {
     const operation = body.recordedOperation as { state: string } | null

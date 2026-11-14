@@ -1,4 +1,5 @@
 import { parseAgentPromotionParams } from './agent-promotion.js'
+import { MESH_NETWORK_CLI_COMMANDS } from './mesh-network-cli.js'
 import { NAME_CONTROL_CLI_COMMANDS } from './name-control-cli.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect } from './terminal-creation.js'
 import { parseObjectAvatarParams } from './object-avatar.js'
@@ -265,6 +266,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...NAME_CONTROL_CLI_COMMANDS,
   ...SPACE_MEMBER_CLI_COMMANDS, ...SPACE_FOLDER_CLI_COMMANDS, ...SPACE_AUTHORITY_CLI_COMMANDS,
   ...NODE_PUBLISHING_CLI_COMMANDS,
+  ...MESH_NETWORK_CLI_COMMANDS,
   NODE_LOCATOR_CLI_COMMAND,
   ...AGENTMUX_CAPSULE_CLI_COMMANDS,
   ...(['list','create','action','update'] as const).map(action => ({ method: `agent.progress.${action}` as AgentProgressMethod,

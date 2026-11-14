@@ -22,6 +22,7 @@ import { createHostSnapshotObservation } from './snapshot-observation.js'
 import { createHostSpatialPresentation } from './spatial-presentation.js'
 import { createDesktopInputContextCaptureReader } from './input-context-capture-reader.js'
 import { dirname, join } from 'node:path'
+import { access } from 'node:fs/promises'
 import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxError,
   startHeadlessAgentMux, connectAgentMuxRpc, spatialCatalog, rpcControlResult, defaultAgentMuxControlSocketPath, isMoteChatMethod,
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
@@ -82,7 +83,20 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
   let authority: DeviceAuthority | undefined
   let authorityOpening: Promise<DeviceAuthority> | undefined, authorityAttempted = false
+  let daemonKeyOpening: ReturnType<typeof loadOrCreateRelayKeyPair> | undefined
+  let daemonKey: Awaited<ReturnType<typeof loadOrCreateRelayKeyPair>> | undefined
   let initializingMobile: Promise<void> | undefined, disposal: Promise<void> | undefined
+  let closing = false
+  const resourceShutdown = new AbortController()
+  const identityMutations = new Set<Promise<void>>()
+  function observeOptional<T>(work: Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => reject(new AgentMuxError('The original Host optional observation stopped.', 'CONTROL_CANCELLED'))
+      resourceShutdown.signal.addEventListener('abort', abort, { once: true })
+      work.then(resolve, reject).finally(() => resourceShutdown.signal.removeEventListener('abort', abort))
+      if (resourceShutdown.signal.aborted) abort()
+    })
+  }
   let relay: RelayTransportController | undefined
   let outbound: ReturnType<typeof createOutboundRelayAccess> | undefined
   let local: Awaited<ReturnType<typeof startLocalRelay>> | undefined
@@ -91,9 +105,11 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let mobileIncidents: ReturnType<typeof createHostMobileIncidents> | undefined
   let tailcat: ReturnType<typeof configuredTailcatListener> | undefined
   const closeResources = async () => {
+    closing = true; resourceShutdown.abort(); authority?.close()
+    mobileState = { state: 'unavailable', message: '原 Host 可选连接已停止；Agent 会话保留。' }
     const errors: unknown[] = []
-    for (const close of [() => outbound?.close(), () => initializingMobile, () => authorityOpening?.catch(() => {}), () => tailcat?.close(), () => relay?.stop(), () => local?.stop(), () => authority?.flush(),
-      () => mobileIncidents?.flush(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
+    for (const close of [() => outbound?.close(), () => tailcat?.close(), () => relay?.stop(), () => local?.stop(), () => authority?.flush(),
+      () => mobileIncidents?.flush(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => Promise.allSettled([...identityMutations]), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
     if (errors.length === 1) throw errors[0]
@@ -105,25 +121,51 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const interfacePortLabels = createInterfacePortLabels()
   let offerUrl: ((address?: string) => Promise<{ url: string; offer: ConnectionOffer; candidates: AgentMuxRpcMobileLinkCandidate[] }>) | undefined
   const getAuthority = (): Promise<DeviceAuthority> => {
-    if (disposal) return Promise.reject(new AgentMuxError('This Host device owner is closed. Original Agents are retained.', 'CONTROL_CANCELLED'))
+    if (closing || disposal) return Promise.reject(new AgentMuxError('This Host device owner is closed. Original Agents are retained.', 'CONTROL_CANCELLED'))
     if (authority) return Promise.resolve(authority)
     if (!(options.store instanceof AgentMuxFileAgentSessionStore)) return Promise.reject(new AgentMuxError(
       'Mobile access requires the original durable File Store.', 'CONTROL_UNAVAILABLE'))
     if (!authorityOpening) {
       // Only the initial attempt may create a new identity. A failed read/write
       // cannot turn a later missing original file into first-time enrollment.
-      const createIfMissing = !authorityAttempted
+      const firstAttempt = !authorityAttempted, directory = dirname(options.store.path)
       authorityAttempted = true
-      authorityOpening = DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'), Date.now, { createIfMissing })
-        .then(value => { authority = value; return value })
+      authorityOpening = (async () => {
+        const evidence = await Promise.all(['agentmux-relay-keypair.json', 'agentmux-devices-operations.jsonl'].map(name => access(join(directory, name)).then(() => true, error => {
+          if (error.code === 'ENOENT') return false
+          throw new AgentMuxError('The original Host identity source is unconfirmed. Preserve its original files.', 'CONTROL_UNAVAILABLE')
+        })))
+        resourceShutdown.signal.throwIfAborted()
+        return await DeviceAuthority.open(join(directory, 'agentmux-devices.json'), Date.now, { createIfMissing: firstAttempt && !evidence.some(Boolean), signal: resourceShutdown.signal, observeMutation: work => { identityMutations.add(work); void work.then(() => identityMutations.delete(work), () => identityMutations.delete(work)) } })
+      })()
+        .then(async value => {
+          if (closing) { value.close(); await value.flush(); throw new AgentMuxError('The original Host closed before this authority observation completed.', 'CONTROL_CANCELLED') }
+          authority = value; return value
+        })
         .finally(() => { authorityOpening = undefined })
     }
-    return authorityOpening
+    return observeOptional(authorityOpening)
+  }
+  const getDaemonKey = (): ReturnType<typeof loadOrCreateRelayKeyPair> => {
+    if (closing) return Promise.reject(new AgentMuxError('The original Host identity owner is closed.', 'CONTROL_CANCELLED'))
+    if (daemonKey) return Promise.resolve(daemonKey)
+    if (!authority || !(options.store instanceof AgentMuxFileAgentSessionStore)) return Promise.reject(new AgentMuxError('The original Host device authority is unavailable; no daemon key was created.', 'CONTROL_UNAVAILABLE'))
+    const owner = authority, keyPath = join(dirname(options.store.path), 'agentmux-relay-keypair.json')
+    daemonKeyOpening ??= loadOrCreateRelayKeyPair(keyPath, { signal: resourceShutdown.signal,
+      createIfMissing: owner.daemonPublicKeyB64 === undefined && !owner.devices().some(device => device.keyFingerprint !== undefined),
+      observeMutation: work => { identityMutations.add(work); void work.then(() => identityMutations.delete(work), () => identityMutations.delete(work)) },
+    }).then(async value => {
+      resourceShutdown.signal.throwIfAborted()
+      await owner.adoptDaemonPublicKey(exportPublicKey(value.publicKey))
+      resourceShutdown.signal.throwIfAborted()
+      daemonKey = value; return value
+    }).catch(error => { daemonKeyOpening = undefined; throw error })
+    return observeOptional(daemonKeyOpening)
   }
   outbound = createOutboundRelayAccess({ ...(options.outboundRelayConfigurationPath ? { configurationPath: options.outboundRelayConfigurationPath } : {}),
     authority: getAuthority, keyPair: async () => {
       if (!(options.store instanceof AgentMuxFileAgentSessionStore)) throw new AgentMuxError('Outbound access requires the original durable Host identity.', 'CONTROL_UNAVAILABLE')
-      return await loadOrCreateRelayKeyPair(join(dirname(options.store.path), 'agentmux-relay-keypair.json'))
+      return await getDaemonKey()
     } })
   const desktopClient = async (context: AgentMuxRpcCallContext) => {
     if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
@@ -282,19 +324,22 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   }
   const initializeMobile = (): Promise<void> => {
     if (initializingMobile) return initializingMobile
-    if (disposal || local) return Promise.resolve()
+    if (closing || disposal || local) return Promise.resolve()
     initializingMobile = (async () => {
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
         const owner = await getAuthority()
-        const keyPair = await loadOrCreateRelayKeyPair(join(dirname(options.store.path), 'agentmux-relay-keypair.json'))
-        await mobileAssets.initialize(options.mobileBuildDirectory!)
+        if (closing) return
+        const keyPair = await getDaemonKey()
+        if (closing) return
+        await observeOptional(mobileAssets.initialize(options.mobileBuildDirectory!))
+        if (closing) return
         const linkFor = (address: string) => {
           const endpoint = new URL(`http://${address}:${local!.port}/`).host
           const offer: ConnectionOffer = { v: 2, serverId: owner.hostId, daemonPublicKeyB64: exportPublicKey(keyPair.publicKey), relay: { endpoint, useTls: false } }
           return { offer, url: connectionLinkUrl(`http://${endpoint}/`, offer) }
         }
-        local = await startLocalRelay({ serverId: owner.hostId, port: options.mobilePort ?? 8443, route: (request, response) => {
+        const localOpening = startLocalRelay({ serverId: owner.hostId, port: options.mobilePort ?? 8443, route: (request, response) => {
           let path: URL
           try { path = new URL(request.url ?? '/', 'http://localhost') } catch { mobileAssets.route(request, response); return }
           if (path.pathname !== CONNECTION_METADATA_PATH) { mobileAssets.route(request, response); return }
@@ -303,11 +348,19 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
           try {
             const target = new URL('http://' + request.headers.host)
             const current = Object.values(networkInterfaces()).flat().some(value => value?.family === 'IPv4' && value.address === target.hostname)
-            if (!local || path.search || Number(target.port || 80) !== local.port || target.username || target.password || target.pathname !== '/' || target.search || target.hash || !current) throw new Error('Original listener address is unavailable')
+            if (!local || path.search || Number(target.port || 80) !== local!.port || target.username || target.password || target.pathname !== '/' || target.search || target.hash || !current) throw new Error('Original listener address is unavailable')
             const { offer } = linkFor(target.hostname)
             response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(offer))
           } catch { response.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }); response.end('Original mobile connection description is unavailable.') }
         } })
+        const localListener = await observeOptional(localOpening.then(async value => {
+          if (closing) { await value.stop(); throw new AgentMuxError('The original Host closed before its local listener was acquired.', 'CONTROL_CANCELLED') }
+          // Register ownership before resolving the optional observation, so
+          // shutdown cannot pass this listener between acquisition and adoption.
+          local = value; return value
+        }))
+        local = localListener
+        if (closing) return
         const originalServer = runtime!.server
         offerUrl = async address => {
           const interfaces = networkInterfaces()
@@ -320,8 +373,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         }
         const logger: RelayLogger = { child: () => logger, info: () => {}, debug: () => {}, warn: () => {} }
         relay = startRelayTransport({ logger, serverId: owner.hostId, daemonKeyPair: keyPair,
-          relayEndpoint: `127.0.0.1:${local.port}`, relayUseTls: false, createWebSocket: local.hostWebSocket,
-          onState: state => { mobileState = { state, message: state === 'connected' ? '手机连接已就绪' : state === 'starting' ? '正在连接，自动重试中' : '连接中断，自动重连中；原会话保留。' } },
+          relayEndpoint: `127.0.0.1:${localListener.port}`, relayUseTls: false, createWebSocket: localListener.hostWebSocket,
+          onState: state => { if (closing) return; mobileState = { state, message: state === 'connected' ? '手机连接已就绪' : state === 'starting' ? '正在连接，自动重试中' : '连接中断，自动重连中；原会话保留。' } },
           attachSocket: (socket, metadata) => attachAgentMuxRpcRelaySocket({ socket, ...(metadata ? { metadata } : {}), server: originalServer,
             authorize: async (publicKey, source) => {
               const device = await owner.authorizeKey(publicKey)
@@ -330,6 +383,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
                 assertCurrent: () => owner.assertCurrentKey(device, publicKey), dispose: () => observation.dispose() }
             } }) })
       } catch (error) {
+        if (closing) return
         await relay?.stop(); await local?.stop(); relay = undefined; local = undefined; offerUrl = undefined
         mobileState = { state: 'unavailable', message: authority
           ? `手机连接暂不可用：${error instanceof Error ? error.message : String(error)}。原 Agent 会话可继续使用。`
@@ -345,6 +399,21 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ inputResources: { inspect: identity => fileUploads.inspect(identity), read: (identity, maxBytes) => fileUploads.read?.(identity, maxBytes) ?? Promise.resolve(null) }, ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
       ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
+      meshEndpoint: async signal => {
+        const owner = await getAuthority()
+        signal?.throwIfAborted()
+        if (!(options.store instanceof AgentMuxFileAgentSessionStore)) throw new AgentMuxError('Mesh endpoint access requires the original durable Host identity.', 'CONTROL_UNAVAILABLE')
+        const keyPair = await getDaemonKey()
+          .catch(() => { throw new AgentMuxError('The original Host endpoint key is unconfirmed. Preserve its key file and original Sessions.', 'CONTROL_UNAVAILABLE') })
+        signal?.throwIfAborted()
+        return { serverId: owner.hostId, keyPair, authorize: async (publicKey: string) => {
+          // The Core Mesh owner checks this operator's explicit device-key pin
+          // before this original authority may register the encrypted device.
+          const device = await owner.authorizeKey(publicKey), observation = owner.observe(device)
+          return { principal: { kind: 'device' as const, id: `${owner.hostId}:${device.deviceId}` }, signal: observation.signal,
+            assertCurrent: () => owner.assertCurrentKey(device, publicKey), dispose: () => observation.dispose() }
+        } }
+      },
       ...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),
       ...(configurationPath ? { executorConfigurations: (id?: string) => readConfiguredExecutors(configurationPath, id) } : {}),
       ...(configurationPath ? { ownedWorkspaceRoots: workspacePath => moteOwnedWorkspaceRoots(configurationPath, workspacePath) } : {}),
@@ -371,7 +440,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Host startup failed and some resource releases are unconfirmed. Original Agent Runs are retained.') }
     throw error
   }
-  const retryMobile = setInterval(() => { if (!disposal && !local) void initializeMobile() }, 5000)
+  const retryMobile = setInterval(() => { if (!closing && !disposal && !local) void initializeMobile() }, 5000)
   retryMobile.unref()
 
   return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, mobileAccessState,

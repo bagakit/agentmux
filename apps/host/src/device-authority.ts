@@ -1,3 +1,4 @@
+import { exportPublicKey, importPublicKey } from '@agentmux/relay/e2ee'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { mkdir, open, readFile } from 'node:fs/promises'
@@ -17,6 +18,7 @@ interface AuthorityState {
   readonly schema: 'agentmux.device-authority.v1'
   readonly hostId: string
   readonly devices: readonly DeviceRecord[]
+  readonly daemonPublicKeyB64?: string
 }
 
 function digest(value: string): string { return createHash('sha256').update(value).digest('hex') }
@@ -53,6 +55,7 @@ function stateFrom(value: unknown): AuthorityState {
     || !state.hostId || !Array.isArray(state.devices)) {
     throw new AgentMuxError('The durable Host device identity cannot be read. Preserve this file and restore its original identity.', 'CONTROL_PROTOCOL_ERROR')
   }
+  if (state.daemonPublicKeyB64 !== undefined && (typeof state.daemonPublicKeyB64 !== 'string' || exportPublicKey(importPublicKey(state.daemonPublicKeyB64)) !== state.daemonPublicKeyB64)) throw new AgentMuxError('The original Host daemon public-key binding is unconfirmed. Preserve its files.', 'CONTROL_PROTOCOL_ERROR')
   const ids = new Set<string>(), hashes = new Set<string>()
   for (const device of state.devices) {
     if (!device || typeof device.deviceId !== 'string' || !device.deviceId || ids.has(device.deviceId)
@@ -64,11 +67,13 @@ function stateFrom(value: unknown): AuthorityState {
     }
     ids.add(device.deviceId); hashes.add(device.credentialHash)
   }
-  return { schema: state.schema, hostId: state.hostId, devices: state.devices }
+  return { schema: state.schema, hostId: state.hostId, devices: state.devices, ...(state.daemonPublicKeyB64 === undefined ? {} : { daemonPublicKeyB64: state.daemonPublicKeyB64 }) }
 }
 
 /** Device admission belongs to the Host; it never owns a Session, Run or attachment. */
 export class DeviceAuthority {
+  private closed = false
+  private daemonBindingConfirmed = false
   private readonly activityIssues = new Map<string, string>()
   private readonly connectionIssues = new Map<string, string>()
   /** Latest metadata only: at most one patch per device record, one scheduled writer, no event log. */
@@ -89,19 +94,44 @@ export class DeviceAuthority {
 
   /** Open only after the original Host endpoint is owned. Invalid state is never regenerated. */
   static async open(path: string, now: () => number = Date.now,
-    options: { createIfMissing?: boolean } = {}): Promise<DeviceAuthority> {
+    options: { createIfMissing?: boolean; signal?: AbortSignal; observeMutation?(work: Promise<void>): void } = {}): Promise<DeviceAuthority> {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    options.signal?.throwIfAborted()
     let state: AuthorityState
-    try { state = stateFrom(JSON.parse(await readFile(path, 'utf8'))) }
+    try { state = stateFrom(JSON.parse(await readFile(path, { encoding: 'utf8', ...(options.signal ? { signal: options.signal } : {}) }))) }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || options.createIfMissing === false) throw error
+      options.signal?.throwIfAborted()
       state = { schema: 'agentmux.device-authority.v1', hostId: mintObjectId(), devices: [] }
-      await durableWriteFile(path, JSON.stringify(state) + '\n', { requireDirectorySync: true })
+      const mutation = durableWriteFile(path, JSON.stringify(state) + '\n', { requireDirectorySync: true, ...(options.signal ? { signal: options.signal } : {}) })
+      options.observeMutation?.(mutation)
+      await mutation
     }
     return new DeviceAuthority(path, state, now)
   }
 
+  /** End only this Host instance's device readers; durable devices are not revoked. */
+  close(): void {
+    if (this.closed) return
+    this.closed = true
+    for (const readers of this.readers.values()) for (const reader of readers) reader.abort(denied())
+    this.readers.clear()
+  }
+
   get hostId(): string { return this.state.hostId }
+  get daemonPublicKeyB64(): string | undefined { return this.state.daemonPublicKeyB64 }
+  /** This endpoint's public binding belongs to the original device authority;
+   * private key material remains exclusively in the original daemon key file. */
+  async adoptDaemonPublicKey(publicKey: string): Promise<void> {
+    if (this.closed) throw denied()
+    if (this.state.daemonPublicKeyB64 === publicKey && this.daemonBindingConfirmed) return
+    await this.change(state => {
+      if (state.daemonPublicKeyB64 !== undefined && state.daemonPublicKeyB64 !== publicKey) throw new AgentMuxError('The original Host daemon key differs from its retained publication identity. Restore the original key; it was not replaced.', 'CONTROL_PROTOCOL_ERROR')
+      if (exportPublicKey(importPublicKey(publicKey)) !== publicKey) throw denied()
+      return { ...state, daemonPublicKeyB64: publicKey }
+    })
+    this.daemonBindingConfirmed = true
+  }
   devices(): readonly TrustedDevice[] { return this.state.devices.map(device => ({ ...publicDevice(this.observedDevice(device)),
     online: (this.readers.get(device.deviceId)?.size ?? 0) > 0,
     ...(device.lastSeenAt === undefined ? {} : { lastSeenAt: device.lastSeenAt }), operations: (device.operations ?? []).slice(-DEVICE_OPERATION_WINDOW),
@@ -119,6 +149,7 @@ export class DeviceAuthority {
   }
 
   private noteObservation(deviceId: string, update: DeviceObservation): void {
+    if (this.closed) return
     this.pendingObservations.set(deviceId, { ...this.pendingObservations.get(deviceId), ...update })
     this.saveObservations()
   }
@@ -158,6 +189,7 @@ export class DeviceAuthority {
     try {
       const disk = stateFrom(JSON.parse(await readFile(this.path, 'utf8')))
       if (disk.hostId !== this.state.hostId) return false
+      if (this.state.daemonPublicKeyB64 !== undefined && disk.daemonPublicKeyB64 !== this.state.daemonPublicKeyB64) return false
       const retained = new Map(this.state.devices.map(device => [device.deviceId, device]))
       const current = new Map(disk.devices.map(device => [device.deviceId, device]))
       for (const previous of retained.values()) {
@@ -231,6 +263,7 @@ export class DeviceAuthority {
 
   /** Admission follows a completed encrypted handshake; never accepts a business-supplied identity. */
   async authorizeKey(publicKey: string): Promise<TrustedDevice> {
+    if (this.closed) throw denied()
     if (!/^[A-Za-z0-9+/]{43}=$/.test(publicKey)) throw denied()
     const hash = digest(publicKey)
     const retained = this.state.devices.find(device => device.credentialHash === hash)
@@ -269,6 +302,7 @@ export class DeviceAuthority {
   }
 
   private async change(update: (state: AuthorityState) => AuthorityState | Promise<AuthorityState>): Promise<void> {
+    if (this.closed) throw denied()
     const save = this.saveTail.then(async () => {
       if (this.diskUnconfirmed && !await this.reconcileDisk()) {
         for (const device of this.state.devices) this.noteConnectionStorageIssue(device.deviceId)
@@ -296,6 +330,7 @@ export class DeviceAuthority {
   /** Only the trusted local forwarding receiver supplies this verified principal.
    * Capture the original record generation/key, independently of a reply reader or grant. */
   async bindForwardedDevice(principal: { kind: string; id: string }): Promise<{ assertCurrent(): Promise<void> }> {
+    if (this.closed) throw denied()
     if (principal.kind !== 'device' || !principal.id.startsWith(this.hostId + ':')) throw denied()
     if (this.diskUnconfirmed && !await this.reconcileDisk()) throw new AgentMuxError(
       'The original device authority storage is unconfirmed; the saved input remains waiting.', 'CONTROL_UNAVAILABLE')
@@ -306,6 +341,7 @@ export class DeviceAuthority {
   }
 
   private async assertCurrentRecord(device: Pick<DeviceRecord, 'deviceId' | 'createdAt' | 'credentialHash'>): Promise<void> {
+    if (this.closed) throw denied()
     if (this.diskUnconfirmed && !await this.reconcileDisk()) throw new AgentMuxError(
       'The original device authority storage is unconfirmed; the saved input remains waiting.', 'CONTROL_UNAVAILABLE')
     const current = this.state.devices.find(value => value.deviceId === device.deviceId)
@@ -314,6 +350,7 @@ export class DeviceAuthority {
 
   /** A continuing request/stream observes revocation without affecting any other device or Run. */
   observe(device: TrustedDevice, info?: Pick<DeviceConnection, 'address' | 'userAgent'>): { signal: AbortSignal; dispose(): void } {
+    if (this.closed) throw denied()
     const record = this.state.devices.find(value => value.deviceId === device.deviceId && value.revokedAt === undefined)
     if (!record) throw denied()
     const controller = new AbortController()

@@ -1,4 +1,5 @@
 import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult, type AgentPromotionPort, type AgentPromotionMethod } from './agent-promotion.js'
+import { isMeshNetworkMethod, parseMeshNetworkParams, parseMeshNetworkResult, meshConfigurationNotApplied, type MeshNetworkPort, type MeshNetworkMethod } from './mesh-network.js'
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult, type NameControlParams } from './name-control.js'
 import { parseAgentMuxRelayInspection, type AgentMuxRelayInspection } from './public-rpc-relay-gateway.js'
 import { inspectOwnedName, changeOwnedName, sourceMemberName } from './name-control-owner.js'
@@ -321,6 +322,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Passive facts from this original Core's optional Relay gateway transport owner. */
   relayInspection?(): AgentMuxRelayInspection
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
+  meshNetwork?: MeshNetworkPort
   nodePublishing?: NodePublishingPort
   /** Complete configured locator scope, including routes without a prepared client. Never starts a client. */
   nodeLocatorHosts?(): readonly string[] | Promise<readonly string[]>
@@ -535,7 +537,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [], 'system.relay.inspect': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1648,6 +1650,23 @@ export class AgentMuxRpcService {
       // authenticates that target; A's caller is never presented as B's identity.
       return await locatePublishedNodes(input, hostIds,
         hostId => this.call('node.inspect', { hostId }, { ...(context.signal ? { signal: context.signal } : {}) }), context.signal) as AgentMuxRpcResult<M>
+    }
+    if (isMeshNetworkMethod(method)) {
+      const meshMethod = method
+      let input: import('./mesh-network.js').MeshNetworkParams[typeof meshMethod]
+      try { input = parseMeshNetworkParams(meshMethod, params) } catch (error) { if (meshMethod === 'settings.mesh.configure') throw meshConfigurationNotApplied(error); throw error }
+      const current = async () => {
+        const caller = await this.authenticated(context, true)
+        if (meshMethod.startsWith('settings.mesh.')) {
+          if (caller && caller.hostId !== 'local' || context.principal?.kind !== 'user' || !context.principal.id.trim() || context.routeDelegation) throw new AgentMuxError('Mesh settings require the original user operator transport and verified local caller.', 'CONTROL_PERMISSION_DENIED')
+        } else if (context.routeDelegation || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Mesh observations require the original authenticated user or device.', 'CONTROL_PERMISSION_DENIED')
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      }
+      try {
+        await current()
+        if (!this.ports.meshNetwork) throw new AgentMuxError('This original Core has no composed Mesh owner. Existing services remain available.', 'MESH_OWNER_UNAVAILABLE')
+      } catch (error) { if (meshMethod === 'settings.mesh.configure') throw meshConfigurationNotApplied(error); throw error }
+      return parseMeshNetworkResult(meshMethod, await this.ports.meshNetwork.call(meshMethod, input, current), input) as AgentMuxRpcResult<M>
     }
     if (isNodePublishingMethod(method)) {
       const nodeMethod: NodePublishingMethod = method

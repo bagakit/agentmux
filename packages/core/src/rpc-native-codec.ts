@@ -1,4 +1,5 @@
 import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult } from './agent-promotion.js'
+import { isMeshNetworkMethod, parseMeshNetworkParams, parseMeshNetworkResult } from './mesh-network.js'
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult } from './name-control.js'
 import { parseAgentMuxRelayInspection } from './public-rpc-relay-gateway.js'
 import { parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
@@ -497,6 +498,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isConnectionMethod(method)) return parseConnectionResult(method, value, parseConnectionParams(method, params)) as unknown as Record<string, unknown>
     if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>
     if (method === 'node.locate') return parseNodeLocateResult(value, parseNodeLocateParams(params)) as unknown as Record<string, unknown>
+    if (isMeshNetworkMethod(method)) return parseMeshNetworkResult(method, value, parseMeshNetworkParams(method, params)) as unknown as Record<string, unknown>
     if (isNodePublishingMethod(method)) return parseNodePublishingResult(method, value, parseNodePublishingParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'settings.hosts.tailcat.inspect' || method === 'settings.hosts.tailcat.configure') return parseTailcatConfigurationResult(method, value, parseTailcatConfigurationParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'notebook.storage.inspect' || method === 'notebook.storage.change') return parseNotesStorageInspection(value, parseNotesStorageParams(method, params).operationId) as unknown as Record<string, unknown>
