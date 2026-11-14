@@ -118,6 +118,32 @@ Import `Button` and `IconButton` from `@agentmux/client-ui/components/Button` an
 
 `Button` accepts `variant="secondary" | "primary" | "danger"` (default `secondary`). `IconButton` requires `aria-label`, uses it as the default native title, and accepts `intent="neutral" | "danger"`; an explicit title is kept. The `.small-button`, `.primary-button`, `.danger-button` and `.icon-button` classes have one owner in `styles/buttons.css`; include `@agentmux/client-ui/styles/buttons.css` when importing individual styles. Hosts keep surface-specific geometry and supply the theme tokens.
 
+### Action menu
+
+Use the menu parts when each row invokes an action. The trigger opens the menu with the keyboard or pointer, and the menu moves focus among available rows. Give each row a clear action label and supply the panel and focus styles from the host.
+
+```tsx
+import * as Menu from '@agentmux/client-ui/components/HoverDropdownMenu'
+
+export function ItemActions({ canRename, onRename, onDuplicate }: {
+  canRename: boolean
+  onRename(): void
+  onDuplicate(): void
+}) {
+  return (
+    <Menu.Root>
+      <Menu.Trigger>Item actions</Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Content sideOffset={6}>
+          <Menu.Item disabled={!canRename} onSelect={onRename}>Rename item</Menu.Item>
+          <Menu.Item onSelect={onDuplicate}>Duplicate item</Menu.Item>
+        </Menu.Content>
+      </Menu.Portal>
+    </Menu.Root>
+  )
+}
+```
+
 ## Inputs
 
 ### Compact editors
