@@ -141,6 +141,8 @@ export function objectCliSeed(method: string, input: string): string[] {
     'terminal.open': ['--in-region', ids.region], 'browser.open': ['--url', 'https://example.org', '--in-region', ids.region],
     'browser.targets': [], 'browser.run': ['--browser', 'B', '--operation-id', 'BOP'], 'browser.history': [],
     'browser.task.assets': ['--browser', 'B'], 'browser.task.inspect': ['--browser', 'B', '--run', 'RUN'], 'browser.task.reliability': ['--browser', 'B', '--asset', 'A', '--version', '1'],
+    'browser.task.parallel-continue': ['--browser','B','--operation-id','PARALLEL','--target','TARGET','--input',input],
+    'browser.task.parallel-stop': ['--browser','B','--operation-id','PARALLEL'],
     'browser.task.parallel': ['--browser','B','--asset','A','--version','1','--input',input],
     'browser.task.parallel-inspect': ['--browser','B','--operation-id','PARALLEL'], 'browser.task.parallel-list': ['--browser','B'],
     'browser.task.run': ['--browser', 'B', '--asset', 'A', '--version', '1'], 'browser.task.stop': ['--browser', 'B', '--run', 'RUN'],
