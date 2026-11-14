@@ -99,6 +99,7 @@ export interface AgentMuxCliCommand {
   summary: string
   details?: string
   flags?: FlagSpec
+  /** Leading literal slots; validating a lone token must not perform carrier IO. */
   positionalData?: number
   stream?: boolean
   local?: boolean
@@ -1500,11 +1501,18 @@ export function agentMuxCliMatch(args: readonly string[]): { command: AgentMuxCl
   }
   return selected ? { command: selected, tail: args.slice(length) } : null
 }
-export function agentMuxCliRequestsHelp(command: AgentMuxCliCommand, args: readonly string[]): boolean {
+export async function agentMuxCliRequestsHelp(command: AgentMuxCliCommand, args: readonly string[]): Promise<boolean> {
   // Help is a syntax-only invocation. A data-bearing request cannot hide extra
   // arguments behind a later --help; positional IDs and carrier paths stay literal.
-  return args.length === 1 && command.positionalData !== 1 &&
-    (args[0] === '--help' || args[0] === '-h')
+  if (args.length !== 1 || args[0] !== '--help' && args[0] !== '-h') return false
+  if (command.positionalData !== 1) return true
+  // These single-positional branches validate syntax without carrier IO. Reuse
+  // their actual grammar: a positional slot alone need not be a complete request.
+  try { await command.parse(args); return false }
+  catch (error) {
+    if (error instanceof AgentMuxError && error.code === 'INVALID_CLI_ARGUMENT') return true
+    throw error
+  }
 }
 export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promise<AgentMuxCliInvocation> {
   const { args, endpoint, sourceHost } = agentMuxCliArguments(argv)

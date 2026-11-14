@@ -228,7 +228,7 @@ async function main(): Promise<number> {
     if (!help) throw new AgentMuxError('Unknown command. Run amux --help.', 'INVALID_CLI_ARGUMENT')
     process.stdout.write(help + '\n'); return 0
   }
-  if (match && agentMuxCliRequestsHelp(match.command, match.tail)) {
+  if (match && await agentMuxCliRequestsHelp(match.command, match.tail)) {
     process.stdout.write(agentMuxCommandHelp(match.command.method)! + '\n'); return 0
   }
   if (!match && AGENTMUX_CLI_COMMANDS.some(entry => entry.method.startsWith(args.join('.') + '.'))) {
