@@ -32,12 +32,14 @@ vi.mock('electron', async () => {
     BrowserWindow: class extends EventEmitter {
       dead = false
       webContents = Object.assign(new EventEmitter(), { mainFrame: {}, setWindowOpenHandler: vi.fn(), send: vi.fn() })
-      visible = false; opacity = 1
-      show = vi.fn(() => { this.visible = true }); showInactive = vi.fn(() => { this.visible = true }); focus = vi.fn(); setAlwaysOnTop = vi.fn(); setVisibleOnAllWorkspaces = vi.fn(); setBounds = vi.fn()
+      visible = false; opacity = 1; contentProtected = false; protectionAtShow: boolean[] = []
+      show = vi.fn(() => { this.visible = true }); showInactive = vi.fn(() => { this.protectionAtShow.push(this.contentProtected); this.visible = true }); focus = vi.fn(); setAlwaysOnTop = vi.fn(); setVisibleOnAllWorkspaces = vi.fn(); setBounds = vi.fn()
       setOpacity = vi.fn((value: number) => { this.opacity = value })
       getOpacity() { return this.opacity }
+      setContentProtection = vi.fn((value: boolean) => { this.contentProtected = value })
+      isContentProtected() { return this.contentProtected }
       static getFocusedWindow() { return null }
-      // The capture surface fades the visible windows it finds; tests that need that opt in.
+      // The capture surface only reads host opacity; tests that need a second exposure opt into visible hosts.
       static getAllWindows() { return electron.workbench }
       isVisible() { return this.visible }
       isMinimized() { return false }
@@ -194,7 +196,10 @@ it('Retake from the window editor captures again for the same draft and returns 
   electron.workbench = [editor.window]
   const cancelled = editor.invoke('retake', { requestId: editor.input.requestId })
   const second = await f.overlay(2)
-  expect(editor.window.opacity, 'the old editor steps out of the new frozen frame').toBe(0)
+  expect(second.window.setContentProtection).toHaveBeenCalledExactlyOnceWith(true)
+  expect(second.window.isContentProtected()).toBe(true)
+  expect(editor.window.opacity, 'the old editor keeps its exact prior opacity in both frozen frames').toBe(1)
+  expect(editor.window.setOpacity, 'retake never writes host opacity').not.toHaveBeenCalled()
   expect(f.native.captureDisplays, 'a retake with the visible editor freezes both backgrounds').toHaveBeenCalledTimes(3)
   expect(second.input, 'the same consumer: the original draft and ⌘E').toMatchObject({ attachToDraft: true, expandable: true })
   await second.invoke('cancel', { requestId: second.input.requestId })
@@ -213,6 +218,7 @@ it('Retake from the window editor captures again for the same draft and returns 
   expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(edited)
   expect(f.receiver.complete, 'one delivery to the original draft operation').toHaveBeenCalledExactlyOnceWith(f.receiver.prepare.mock.calls[0]![0], expect.any(String))
   expect(await readFile(f.receiver.complete.mock.calls[0]![1]!)).toEqual(editedBytes)
+  expect(editor.window.setOpacity, 'the complete retake lifecycle never writes host opacity').not.toHaveBeenCalled()
   expect(f.reportIssue).not.toHaveBeenCalled()
 })
 
