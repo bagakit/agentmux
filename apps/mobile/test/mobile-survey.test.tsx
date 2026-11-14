@@ -393,7 +393,7 @@ describe('T-006 existing Note editing and original cross-file references', () =>
     expect(view.fileRead).toHaveBeenCalledTimes(1)
     await vi.waitFor(async () => { await act(async () => new Promise(resolve => setTimeout(resolve, 20))); expect([...view.element.querySelectorAll('button')].some(button => button.textContent === 'original.note.md')).toBe(true) })
     await view.click('original.note.md')
-    expect(view.element.textContent).toContain('所选文件不是这条引用对应的笔记')
+    await vi.waitFor(async () => { await act(async () => {}); expect(view.element.textContent).toContain('所选文件不是这条引用对应的笔记，请重新选择') })
     await view.click('target.note.md')
     await vi.waitFor(() => expect(noteText(view.element.querySelector('.mobile-note-reference .mobile-note-body'))).toBe('跨文件引用正文😀'))
     expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['original.note.md', 'original.note.md', 'target.note.md'])
