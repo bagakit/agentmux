@@ -165,8 +165,8 @@ export async function openMoteMaterialAt(owner: MoteWorkfaceScope, path: string,
   const { displayWorkspaceId, groupId } = destination
   const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace)?.find(item => {
     const root = scratchTopicLogicalPath(owner.workspace, item)
-    return root !== null && fileExplorerContains(root, path)
-  }) ?? (fileExplorerContains(owner.rootPath, path) ? owner.topic : undefined)
+    return root !== null && fileExplorerContains(root, path, owner.workspace.path)
+  }) ?? (fileExplorerContains(owner.rootPath, path, owner.workspace.path) ? owner.topic : undefined)
   const topicId = topic?.id
   const spaceId = directoryIdentity(owner.workspace.hostId, topic ? scratchTopicIdentityPath(owner.workspace, topic) : owner.workspace.path)
   const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic])
@@ -309,10 +309,10 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
     const { displayWorkspaceId, groupId } = destination
     const physicalPath = scratchWorkspaceFilePath(owner.workspace, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace), path)
     if (!physicalPath) { state.reportError(new Error('The original directory read is not confirmed. Refresh materials and retry opening its terminal.')); return }
-    const inMote = fileExplorerContains(owner.rootPath, path)
+    const inMote = fileExplorerContains(owner.rootPath, path, owner.workspace.path)
     const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace)?.find(item => {
       const root = scratchTopicLogicalPath(owner.workspace, item)
-      return root !== null && fileExplorerContains(root, path)
+      return root !== null && fileExplorerContains(root, path, owner.workspace.path)
     }) ?? (inMote ? owner.topic : undefined)
     const spaceId = directoryIdentity(owner.workspace.hostId, topic ? scratchTopicIdentityPath(owner.workspace, topic) : owner.workspace.path)
     const tabId = state.openLauncher({ workspaceId, displayWorkspaceId, tabGroupId: groupId, zoneId: homeZoneId(spaceId), reveal: false })

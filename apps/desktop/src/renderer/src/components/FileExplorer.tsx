@@ -418,8 +418,11 @@ export function FileExplorer({
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const workspaceId = useAppStore((state) => requestedWorkspaceId ?? state.activeWorkspaceId)
   const workspace = useWorkspaceResource(workspaceId)
+  const locator = useAppStore(state => workspaceId && !objectDirectory ? state.sourceFilesInputs.selections[workspaceId]?.locator : undefined)
+  const physicalRoot = locator?.resource.zonePath ?? workspace?.path
+  const containsPath = useCallback((path: string) => fileExplorerContains(rootPath, path, physicalRoot), [rootPath, physicalRoot])
   const activePath = useAppStore((state) =>
-    workspaceId && fileExplorerContains(rootPath, state.lastActiveFileByWorkspace[workspaceId] ?? '') ? state.lastActiveFileByWorkspace[workspaceId] : undefined
+    workspaceId && containsPath(state.lastActiveFileByWorkspace[workspaceId] ?? '') ? state.lastActiveFileByWorkspace[workspaceId] : undefined
   )
   const originalOpenFile = useAppStore((state) => state.openFileAndReveal)
   const fileRevealRef = useRef<AbortController | null>(null)
@@ -440,7 +443,6 @@ export function FileExplorer({
   const reportError = useAppStore((state) => state.reportError)
   const displayPath = usePathDisplay()
   const scratchTopics = useAppStore(state => scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace))
-  const locator = useAppStore(state => workspaceId && !objectDirectory ? state.sourceFilesInputs.selections[workspaceId]?.locator : undefined)
   const fileHostId = locator ? sourceFileNativeHost({ target: locator.mount, resource: locator.resource }) : workspace?.hostId
   const scratchRoot = locator ? locator.resource.hostId === 'local' && locator.resource.zonePath === locator.resource.workspacePath : workspace?.hostId === 'local'
   const canRename = (id: string, node: TreeNode) => canRenameFileExplorerNode(locator?.resource.workspaceId ?? id, node, scratchRoot)
@@ -506,8 +508,8 @@ export function FileExplorer({
   const lastRevealRequestIdRef = useRef<number | null>(null)
   const autoRevealRequestIdRef = useRef(0)
   const observedFileRevisionRef = useRef(workspaceFileRevision)
-  const expanded = useMemo(() => new Set([...explorerState.expandedPaths].filter(path => fileExplorerContains(rootPath, path))), [explorerState.expandedPaths, rootPath])
-  const selection = useMemo(() => updateFileExplorerSelectionPaths(explorerState.selection, path => fileExplorerContains(rootPath, path) ? path : null), [explorerState.selection, rootPath])
+  const expanded = useMemo(() => new Set([...explorerState.expandedPaths].filter(path => containsPath(path))), [explorerState.expandedPaths, containsPath])
+  const selection = useMemo(() => updateFileExplorerSelectionPaths(explorerState.selection, path => containsPath(path) ? path : null), [explorerState.selection, containsPath])
   const selectedPath = selection.activePath
   const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath, active, objectDirectory)
   const isMac = useMemo(() => isMacPlatform(), [])
@@ -533,8 +535,8 @@ export function FileExplorer({
     updateExplorerState(workspaceId, (current) => ({
       ...current,
       expandedPaths: new Set([
-        ...[...current.expandedPaths].filter(path => !fileExplorerContains(rootPath, path)),
-        ...[...(typeof update === 'function' ? update(new Set([...current.expandedPaths].filter(path => fileExplorerContains(rootPath, path)))) : update)].filter(path => fileExplorerContains(rootPath, path))
+        ...[...current.expandedPaths].filter(path => !containsPath(path)),
+        ...[...(typeof update === 'function' ? update(new Set([...current.expandedPaths].filter(path => containsPath(path)))) : update)].filter(path => containsPath(path))
       ])
     }))
   }
@@ -544,7 +546,7 @@ export function FileExplorer({
     if (!workspaceId) return
     updateExplorerState(workspaceId, (current) => ({
       ...current,
-      selection: typeof update === 'function' ? update(updateFileExplorerSelectionPaths(current.selection, path => fileExplorerContains(rootPath, path) ? path : null)) : update
+      selection: typeof update === 'function' ? update(updateFileExplorerSelectionPaths(current.selection, path => containsPath(path) ? path : null)) : update
     }))
   }
 
@@ -595,7 +597,7 @@ export function FileExplorer({
     if (
       !active || !revealRequest ||
       revealRequest.workspaceId !== workspaceId ||
-      !fileExplorerContains(rootPath, revealRequest.path) ||
+      !containsPath(revealRequest.path) ||
       revealRequest.requestId === lastRevealRequestIdRef.current
     ) return
     lastRevealRequestIdRef.current = revealRequest.requestId
@@ -684,13 +686,13 @@ export function FileExplorer({
   }
 
   function isMoveDropDisabled(directoryPath: string): boolean {
-    return !fileExplorerContains(rootPath, directoryPath) || (activeDrag !== null &&
+    return !containsPath(directoryPath) || (activeDrag !== null &&
       planFileExplorerMove(moveIndex, activeDrag.path, directoryPath).status === 'blocked')
   }
 
   async function movePath(sourcePath: string, destinationPath: string): Promise<void> {
     tree.assertCurrent()
-    if (!fileExplorerContains(rootPath, sourcePath) || !fileExplorerContains(rootPath, destinationPath)) return
+    if (!containsPath(sourcePath) || !containsPath(destinationPath)) return
     await runFileExplorerMove({
       sourcePath,
       destinationPath,
@@ -707,7 +709,7 @@ export function FileExplorer({
 
   function handleDragStart(event: DragStartEvent): void {
     const data = event.active.data.current as FileExplorerDragData | undefined
-    if (data?.kind === 'file-explorer-path' && fileExplorerContains(rootPath, data.path)) {
+    if (data?.kind === 'file-explorer-path' && containsPath(data.path)) {
       activeDragScopeRef.current = { workspaceId, rootPath, sourceNamespace: tree.namespace }
       dragVisibilityRef.current = { showHidden, showIgnored, query }
       setSelection(createSingleFileExplorerSelection(data.path))
@@ -722,7 +724,7 @@ export function FileExplorer({
     if (
       drag?.kind !== 'file-explorer-path' ||
       activeDragScopeRef.current?.workspaceId !== workspaceId || activeDragScopeRef.current.rootPath !== rootPath ||
-      directoryPath === null || !fileExplorerContains(rootPath, directoryPath) ||
+      directoryPath === null || !containsPath(directoryPath) ||
       planFileExplorerMove(moveIndex, drag.path, directoryPath).status === 'blocked' ||
       !directoryPath ||
       expanded.has(directoryPath)
@@ -799,14 +801,14 @@ export function FileExplorer({
   }
 
   useEffect(() => {
-    if (active && createRequest && fileExplorerContains(rootPath, createRequest.parentPath)) {
+    if (active && createRequest && containsPath(createRequest.parentPath)) {
       beginCreate('create-file', createRequest.parentPath); onCreateRequestHandled?.()
     }
   }, [active, createRequest, workspaceId, rootPath])
 
   function pathsForContext(node: TreeNode): string[] {
     return selection.selectedPaths.has(node.path)
-      ? [...selection.selectedPaths].filter(path => fileExplorerContains(rootPath, path))
+      ? [...selection.selectedPaths].filter(path => containsPath(path))
       : [node.path]
   }
 
@@ -1197,7 +1199,7 @@ export function FileExplorer({
               void movePathToDirectory(node.path, directoryPath).catch(() => {})
             }}
             getMoveTargets={() => canRename(workspaceId, node)
-              ? fileExplorerMoveTargets(moveIndex, node.path).filter(target => fileExplorerContains(rootPath, target.path)).map(target => target.path === rootPath ? { ...target, label: rootLabel } : target)
+              ? fileExplorerMoveTargets(moveIndex, node.path).filter(target => containsPath(target.path)).map(target => target.path === rootPath ? { ...target, label: rootLabel } : target)
               : []}
             onCollapse={() => setExpanded((current) => {
               const next = new Set(current)

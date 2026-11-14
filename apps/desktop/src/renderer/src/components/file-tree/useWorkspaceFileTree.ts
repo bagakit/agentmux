@@ -44,6 +44,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   const resource = useWorkspaceResource(workspaceId)
   const source = useAppStore(state => objectDirectory ? undefined : state.sourceFilesInputs.selections[workspaceId])
   const readSources = useAppStore(state => objectDirectory ? undefined : state.sourceFilesInputs.readSources)
+  const physicalRoot = source?.locator?.resource.zonePath ?? resource?.path
   const namespace = useMemo(() => JSON.stringify([rootPath, objectDirectory, sourceFilesDiscoveryNamespace(workspaceId, resource, source, readSources)]), [rootPath, objectDirectory, workspaceId, resource?.hostId, resource?.path, source?.target, source?.locator, readSources])
   const cachedNamespace = useRef(namespace)
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
@@ -61,7 +62,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
 
   const loadDir = useCallback(
     async (path: string, options?: { force?: boolean; failOnError?: boolean }) => {
-      if (!isCurrent() || !fileExplorerContains(rootPath, path)) return false
+      if (!isCurrent() || !fileExplorerContains(rootPath, path, physicalRoot)) return false
       const cached = cacheRef.current[path]
       const decision = decideExpandedDirLoad(cached, staleDirsRef.current.has(path))
       if (!options?.force && decision === 'skip') return true
@@ -83,7 +84,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
           ? { entries: await api.files.readDirectory(workspaceId, path), complete: true }
           : await readWorkspaceDirectory(workspaceId, path, useAppStore.getState)
         if (!loadTrackerRef.current.isCurrent(token)) return false
-        const children = entries.filter(entry => fileExplorerContains(rootPath, entry.path)).map((entry) => ({
+        const children = entries.filter(entry => fileExplorerContains(rootPath, entry.path, physicalRoot)).map((entry) => ({
           ...entry,
           relativePath: entry.path,
           depth: pathDepth(path) - pathDepth(rootPath)
@@ -107,7 +108,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         return !options?.failOnError
       }
     },
-    [loadScope, workspaceId, rootPath, objectDirectory, isCurrent]
+    [loadScope, workspaceId, rootPath, objectDirectory, isCurrent, physicalRoot]
   )
 
   useLayoutEffect(() => {

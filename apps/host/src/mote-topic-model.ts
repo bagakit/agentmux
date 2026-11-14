@@ -142,6 +142,7 @@ function absoluteDirectory(path: string): boolean {
 }
 
 function directoryChild(root: string, child: string): string {
+  if (root.startsWith('/')) return root.replace(/\/+$/, '') + '/' + child
   return `${trimTrailingSeparators(root)}${root.includes('\\') && !root.includes('/') ? '\\' : '/'}${child}`
 }
 
@@ -161,7 +162,7 @@ export function scratchTopicLogicalPath(workspace: { path: string }, topic: Pick
 
 /** Convert a logical file address for copy/new terminals; filesystem authority remains in Main. */
 export function scratchWorkspaceFilePath(workspace: { id: string; path: string }, topics: readonly ScratchTopicSnapshot[] | null | undefined, path: string): string | null {
-  if (path.startsWith('/') || path.includes('\\') || path.split('/').some(part => part === '.' || part === '..')) return null
+  if (path.startsWith('/') || (!workspace.path.startsWith('/') && path.includes('\\')) || path.split('/').some(part => part === '.' || part === '..')) return null
   if (workspace.id !== SCRATCH_WORKSPACE_ID || !path) return path ? directoryChild(workspace.path, path) : workspace.path
   const [name, ...parts] = path.split('/')
   const id = scratchTopicIdFromDirectoryName(name!)
