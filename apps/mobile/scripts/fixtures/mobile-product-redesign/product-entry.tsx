@@ -95,6 +95,8 @@ const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变�
   alignment: { revision: 1, summary: '给出小步可验证的建议，保留两种方案的依据。', criteria: [{ id: 'criterion-original', text: '形成可开始的实验步骤' }], openQuestions: [], confirmedAt: goalCreatedAt + 30_000 },
   grounding: { alignmentRevision: 1, submissionId: 'result-original', summary: '建议先做范围更清晰的方案 A；以下是依据和第一步。', acceptedAt: null,
     checks: [{ criterionId: 'criterion-original', outcome: 'met', note: '已整理步骤、比较依据与需要你决定的地方。', evidence: ['原资料/实验建议.md'] }] } }
+let brandGoalScene = 'nonempty', rejectBrandGoalRead: (() => void) | null = null
+const brandOriginalGoal = structuredClone(goal)
 let connected = location.hash !== '#fixture-offline', unknownNext = false, promptReadFails = false, appearanceRevision = 0
 let holdFileUpload = false
 let releaseFileUpload: (() => void) | null = null
@@ -311,7 +313,10 @@ const client = {
       if (inspectFails) throw Error('原生消耗读取暂不可用，原会话仍可使用。')
       return { routeHostId: 'host-original', session: sessions.find(session => session.agentSessionId === (params.target as { agentSessionId: string }).agentSessionId), displayName: { override: '原 Agent', availability: 'observed' } }
     }
-    if (method === 'goal.ls') return { goals: [goal] }
+    if (method === 'goal.ls') {
+      if (brandGoalScene === 'pending') await new Promise<never>((_resolve, reject) => { rejectBrandGoalRead = () => reject(Error('原目标目录读取尚未确认，已读内容和草稿保留。')) })
+      return { goals: brandGoalScene === 'empty' ? [] : [goal] }
+    }
     if (method === 'goal.inspect') return { goal, goalContinuations: [] }
     if (method === 'goal.decisions') return { decisions: [] }
     if (method === 'file.read') {
@@ -369,6 +374,13 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   const [connectScene, setConnectScene] = useState<MobileConnection | null>(null)
   Object.assign(window, { mobileProductScene: {
+    setBrandGoalScene: (scene: 'empty' | 'pending' | 'long') => {
+      brandGoalScene = scene
+      Object.assign(goal, structuredClone(brandOriginalGoal))
+      if (scene === 'long') { goal.title = '把研究资料、两个原始想法和保留完整上下文的长目标一起整理成可以开始的小实验'; goal.alignment!.confirmedAt = null }
+      if (scene === 'pending') remountDensity(value => value + 1)
+    },
+    releaseBrandGoalRead: () => { brandGoalScene = 'nonempty'; rejectBrandGoalRead?.(); rejectBrandGoalRead = null },
     configureSetupRetention: (surface: 'welcome' | 'profile') => {
       if (!moteDialogueCapture || !__AGENTMUX_MOBILE_SETUP_RETENTION__) throw Error('The exact real-consumer retention fixtures are required')
       moteDialogueCapture.configureRetention(__AGENTMUX_MOBILE_SETUP_RETENTION__[surface].result)
