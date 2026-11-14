@@ -3,8 +3,8 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { ClientUiProvider, type ClientUiPlatform } from '../../../packages/client-ui/src/platform'
-import { ConversationMessage } from '../../../packages/client-ui/src/components/ConversationMessage'
+import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationMessageAvatar } from '../src/renderer/src/components/ConversationMessageAvatar'
 vi.mock('../src/renderer/src/store', () => ({useAppStore:(select: (s:unknown)=>unknown)=>select({config:{profile:{avatar:'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><text>User profile</text></svg>'}}})}))
 vi.mock('../src/renderer/src/components/ProjectIcon',()=>({ProjectIcon:()=> <span data-project-avatar/>}))

@@ -22,7 +22,7 @@ const inputs = [...captured, fixture, ...callers, 'apps/desktop/src/main/workspa
   'tsconfig.base.json', 'apps/desktop/tsconfig.json', prefix + 'global.d.ts', 'pnpm-lock.yaml']
 const dependencies = ['packages/core/package.json', 'packages/core/dist/index.js', 'packages/core/dist/index.d.ts',
   'packages/core/dist/execution-host.js', 'packages/core/dist/process-runner.js', 'packages/core/dist/errors.js',
-  'packages/client-ui/package.json', 'packages/client-ui/dist/index.js', 'packages/demand/dist/src/index.js']
+  'packages/client-ui/package.json', 'packages/client-ui/dist/components/InlineRenameField.js', 'packages/demand/dist/src/index.js']
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = file => fs.readFile(path.isAbsolute(file) ? file : path.join(root, file))
 const json = async file => JSON.parse(await read(file))

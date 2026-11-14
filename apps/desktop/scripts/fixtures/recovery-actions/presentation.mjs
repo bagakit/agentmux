@@ -179,7 +179,7 @@ try {
   {find:/^@agentmux\/layout$/,replacement:join(root,'packages/layout/src/index.ts')},{find:/^@agentmux\/client-ui\/styles\/(.+)$/,replacement:join(root,'packages/client-ui/src/styles/$1')},
   {find:/^@agentmux\/client-ui\/styles.css$/,replacement:join(root,'packages/client-ui/src/styles/index.css')},{find:/^@agentmux\/client-ui\/components\/(.+)$/,replacement:join(root,'packages/client-ui/src/components/$1.tsx')},
   {find:/^@agentmux\/client-ui\/platform$/,replacement:join(root,'packages/client-ui/src/platform.tsx')},{find:/^@agentmux\/client-ui\/terminal\/(.+)$/,replacement:join(root,'packages/client-ui/src/terminal/$1.ts')},
-  {find:/^@agentmux\/client-ui\/brand\/(.+)$/,replacement:join(root,'packages/client-ui/brand/$1')},{find:/^@agentmux\/client-ui\/(.+)$/,replacement:join(root,'packages/client-ui/src/lib/$1.ts')},{find:/^@agentmux\/client-ui$/,replacement:join(root,'packages/client-ui/src/index.ts')},
+  {find:/^@agentmux\/client-ui\/brand\/(.+)$/,replacement:join(root,'packages/client-ui/brand/$1')},{find:/^@agentmux\/client-ui\/(.+)$/,replacement:join(root,'packages/client-ui/src/lib/$1.ts')},
   ...Object.entries({react:join(desktop,'node_modules/react'),'react-dom':join(desktop,'node_modules/react-dom'),'lucide-react':join(desktop,'node_modules/lucide-react')}).map(([find,replacement])=>({find,replacement}))]
  const sourcePins={}
  await build({configFile:false,root:desktop,logLevel:'error',worker:{format:'es'},css:{postcss:{plugins:[{

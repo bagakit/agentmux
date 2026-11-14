@@ -29,9 +29,6 @@
       ],
       "@agentmux/relay": [
         "packages/relay/src/index.ts"
-      ],
-      "@agentmux/client-ui": [
-        "packages/client-ui/src/index.ts"
       ]
     }
   },

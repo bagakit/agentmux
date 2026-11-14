@@ -62,7 +62,6 @@ async function native(label, misplaced=false) {
     {find:/^@agentmux\/client-ui\/terminal\/(.+)$/,replacement:join(root,'packages/client-ui/src/terminal/$1.ts')},
     {find:/^@agentmux\/client-ui\/platform$/,replacement:join(root,'packages/client-ui/src/platform.tsx')},
     {find:/^@agentmux\/client-ui\/(.+)$/,replacement:join(root,'packages/client-ui/src/lib/$1.ts')},
-    {find:/^@agentmux\/client-ui$/,replacement:join(root,'packages/client-ui/src/index.ts')},
     {find:/^@xterm\/xterm$/,replacement:wrapper},
     // Current control has a new errors import absent from shared dist. Only this exact public entry
     // uses its actual source; other Runtime entries keep the existing compiled package resolution.

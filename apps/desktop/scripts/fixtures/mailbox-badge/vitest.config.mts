@@ -10,7 +10,6 @@ export default defineConfig({
       { find: /^@agentmux\/client-ui\/components\/(.+)$/, replacement: new URL('../../../../../packages/client-ui/src/components/$1.tsx', import.meta.url).pathname },
       { find: /^@agentmux\/client-ui\/platform$/, replacement: new URL('../../../../../packages/client-ui/src/platform.tsx', import.meta.url).pathname },
       { find: /^@agentmux\/client-ui\/(.+)$/, replacement: new URL('../../../../../packages/client-ui/src/lib/$1.ts', import.meta.url).pathname },
-      { find: /^@agentmux\/client-ui$/, replacement: new URL('../../../../../packages/client-ui/src/index.ts', import.meta.url).pathname },
       ...(sourceConfig.resolve?.alias ?? [])
     ]
   },

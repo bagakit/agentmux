@@ -67,9 +67,6 @@
       "@agentmux/core/agent-interaction-state": [
         "packages/core/src/agent-interaction-state.ts"
       ],
-      "@agentmux/client-ui": [
-        "packages/client-ui/src/index.ts"
-      ],
       "@agentmux/client-ui/components/*": [
         "packages/client-ui/src/components/*.tsx"
       ],

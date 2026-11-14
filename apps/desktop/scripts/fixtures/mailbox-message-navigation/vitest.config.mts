@@ -24,7 +24,6 @@ export default defineConfig({ ...sourceConfig, esbuild: { jsx: 'automatic' }, ca
   { find: /^@agentmux\/client-ui\/components\/(.+)$/, replacement: resolve(root, 'packages/client-ui/src/components/$1.tsx') },
   { find: /^@agentmux\/client-ui\/platform$/, replacement: resolve(root, 'packages/client-ui/src/platform.tsx') },
   { find: /^@agentmux\/client-ui\/(.+)$/, replacement: resolve(root, 'packages/client-ui/src/lib/$1.ts') },
-  { find: /^@agentmux\/client-ui$/, replacement: resolve(root, 'packages/client-ui/src/index.ts') },
   { find: /^@agentmux\/demand\/goals$/, replacement: resolve(root, 'packages/demand/src/goals.ts') },
   ...sourceConfig.resolve!.alias
 ] }, test: { ...sourceConfig.test, reporters: ['default', 'json', discovery], outputFile: { json: resolve(root, '.tmp/mailbox-message-navigation/mounted/results.json') }, environmentMatchGlobs: [['packages/client-ui/test/**', 'happy-dom']], include: [

@@ -176,7 +176,6 @@ try {
   const aliases=[...Object.entries(coreExports).map(([key,value])=>({find:new RegExp('^'+(key==='.'?'@agentmux/core':'@agentmux/core'+key.slice(1))+'$'),replacement:join(repository,'packages/core',value.import.replace('./dist/','./src/').replace(/\.js$/,'.ts'))})),
     {find:/^@agentmux\/layout$/,replacement:join(repository,'packages/layout/src/index.ts')},
     ...clientAliases,
-    {find:/^@agentmux\/client-ui$/,replacement:join(repository,'packages/client-ui/src/index.ts')},
     ...Object.entries({react:join(desktop,'node_modules/react'),'react-dom':join(desktop,'node_modules/react-dom'),'lucide-react':join(desktop,'node_modules/lucide-react')}).map(([find,replacement])=>({find,replacement}))]
   const consumed={}
   await build({configFile:false,root:desktop,logLevel:'error',worker:{format:'es'},resolve:{alias:aliases},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},plugins:[{name:'private-react-classic',enforce:'pre',transform(code,id){if(id.startsWith(repository+'/')&&!id.includes('/node_modules/')&&!id.includes('/.tmp/'))consumed[id.slice(repository.length+1)]=hash(code);return id.endsWith('.tsx')&&id.includes('/src/')?{code:"import React from 'react'\n"+code,map:null}:undefined}},react({jsxRuntime:'classic'})],build:{outDir:temporary,emptyOutDir:false,lib:{entry:join(temporary,'entry.tsx'),formats:['es'],fileName:()=> 'renderer.mjs'}}})

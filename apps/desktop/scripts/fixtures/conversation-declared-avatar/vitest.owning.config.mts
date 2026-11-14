@@ -7,9 +7,7 @@ export default defineConfig({
   root,
   esbuild: { jsx: 'automatic' },
   resolve: { alias: {
-    '@agentmux/core/agent-message-render': resolve(repository, 'packages/core/src/agent-message-render.ts'),
-    '@agentmux/client-ui/components': resolve(repository, 'packages/client-ui/src/components'),
-    '@agentmux/client-ui/conversation-speaker': resolve(repository, 'packages/client-ui/src/lib/conversation-speaker.ts')
+    '@agentmux/core/agent-message-render': resolve(repository, 'packages/core/src/agent-message-render.ts')
   } },
   test: { include: ['test/conversation-declared-avatar.test.tsx'], passWithNoTests: false, environment: 'happy-dom' }
 })

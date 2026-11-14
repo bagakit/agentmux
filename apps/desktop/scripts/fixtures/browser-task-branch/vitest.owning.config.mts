@@ -41,7 +41,6 @@ export default {
   resolve: { alias: [
     { find: /^@agentmux\/client-ui\/components\/(.+)$/, replacement: fileURLToPath(new URL('packages/client-ui/src/components/$1.tsx', rootUrl)) },
     { find: /^@agentmux\/client-ui\/(.+)$/, replacement: fileURLToPath(new URL('packages/client-ui/src/lib/$1.ts', rootUrl)) },
-    { find: '@agentmux/client-ui', replacement: fileURLToPath(new URL('packages/client-ui/src/index.ts', rootUrl)) },
     { find: '@agentmux/layout', replacement: fileURLToPath(new URL('packages/layout/src/index.ts', rootUrl)) }, ...coreAliases] },
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   plugins: [{ name: 'browser-task-owning-source', enforce: 'pre' as const, transform(source: string, id: string) {

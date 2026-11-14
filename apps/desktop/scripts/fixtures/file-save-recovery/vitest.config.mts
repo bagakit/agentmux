@@ -41,7 +41,6 @@ export default defineConfig({
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   resolve: { dedupe: ['react', 'react-dom', 'lucide-react'], alias: [...aliases,
     { find: /^json-rpc-2\.0$/, replacement: resolve(repository, 'node_modules/.pnpm/json-rpc-2.0@1.8.1/node_modules/json-rpc-2.0/dist/index.js') },
-    { find: /^@agentmux\/client-ui$/, replacement: resolve(repository, 'packages/client-ui/src/index.ts') },
     { find: /^@agentmux\/client-ui\/platform$/, replacement: resolve(repository, 'packages/client-ui/src/platform.tsx') },
     { find: /^@agentmux\/client-ui\/styles\/(.+)$/, replacement: resolve(repository, 'packages/client-ui/src/styles/$1') },
     { find: /^@agentmux\/client-ui\/components\/(.+)$/, replacement: resolve(repository, 'packages/client-ui/src/components/$1.tsx') },

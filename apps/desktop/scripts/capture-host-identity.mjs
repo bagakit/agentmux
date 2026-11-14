@@ -15,7 +15,6 @@ alias.push({find:'@agentmux/client-ui/components/ConversationReactionActions',re
 alias.push({find:'papaparse',replacement:path.join(root,'node_modules/.pnpm/papaparse@5.5.3/node_modules/papaparse/papaparse.js')})
 alias.push({find:'pdfjs-dist',replacement:path.join(root,'node_modules/.pnpm/pdfjs-dist@6.3.289/node_modules/pdfjs-dist')})
 alias.push({find:'jsonc-parser',replacement:path.join(root,'node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/main.js')})
-alias.push({find:'@agentmux/client-ui/styles',replacement:path.join(root,'packages/client-ui/src/styles')})
 const result=await build({configFile:false,root:fixture,base:'./',worker:{format:'es'},resolve:{alias},define:{__AGENTMUX_WEB_PREVIEW__:'true'},build:{target:'esnext',outDir:path.join(out,'renderer'),emptyOutDir:true,minify:false,rollupOptions:{input:path.join(fixture,'index.html')}},logLevel:'warn'})
 await fs.writeFile(path.join(out,'compile.json'),JSON.stringify({root,alias,modules:Object.keys(result.output.filter(x=>x.type==='chunk').reduce((a,c)=>Object.assign(a,c.modules),{}))},null,2))
 const env={...process.env};delete env.ELECTRON_RUN_AS_NODE

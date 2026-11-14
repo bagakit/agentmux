@@ -84,9 +84,6 @@
       "json-rpc-2.0": [
         "node_modules/.pnpm/json-rpc-2.0@1.8.1/node_modules/json-rpc-2.0/dist/index.d.ts"
       ],
-      "@agentmux/client-ui": [
-        "packages/client-ui/src/index.ts"
-      ],
       "@agentmux/client-ui/platform": [
         "packages/client-ui/src/platform.tsx"
       ],

@@ -29,7 +29,8 @@ async function bindings() {
     ...['conversation-fixture.tsx', 'conversation-surface.test.tsx', 'conversation-browser.test.tsx'].map(path => join(mobile, 'test', path)),
     ...await files(join(root, 'packages/client-ui/src')),
     ...['package.json', 'vitest.config.ts', 'vite.config.ts', 'tsconfig.json'].map(path => join(mobile, path)),
-    fileURLToPath(import.meta.url), join(root, 'packages/client-ui/package.json'), join(root, 'packages/core/package.json'),
+    fileURLToPath(import.meta.url), join(root, 'test/fixture-values.mjs'),
+    join(root, 'packages/client-ui/package.json'), join(root, 'packages/core/package.json'),
     ...['hosted', 'hosted-client', 'hosted-client-contract', 'hosted-value', 'client-event-publisher', 'errors',
       'agent-prompt-condition', 'session-user-messages', 'agent-message-render'].flatMap(name => [
         join(root, `packages/core/src/${name}.ts`), join(root, `packages/core/dist/${name}.js`)
@@ -105,6 +106,8 @@ try {
   await mkdir(join(candidate, 'apps/mobile'), { recursive: true })
   await mkdir(join(candidate, 'packages/client-ui'), { recursive: true })
   await mkdir(join(candidate, 'packages/core/src'), { recursive: true })
+  await mkdir(join(candidate, 'test'), { recursive: true })
+  await cp(join(root, 'test/fixture-values.mjs'), join(candidate, 'test/fixture-values.mjs'))
   await cp(join(mobile, 'src'), join(candidate, 'apps/mobile/src'), { recursive: true })
   await cp(join(mobile, 'test'), join(candidate, 'apps/mobile/test'), { recursive: true })
   await cp(join(root, 'packages/client-ui/src'), join(candidate, 'packages/client-ui/src'), { recursive: true })
@@ -118,19 +121,11 @@ try {
   for (const path of ['node_modules', 'apps/mobile/node_modules', 'packages/client-ui/node_modules', 'packages/core/node_modules', 'packages/core/dist']) {
     await symlink(join(root, path), join(candidate, path), 'dir')
   }
-  const aliases = [{ find: '@agentmux/client-ui', replacement: join(candidate, 'packages/client-ui/src/index.ts') }]
-  // Derive every pure UI public leaf from its actual source. Exact aliases precede the root
-  // alias: Vite must not externalize an owning pure leaf to old compiled dist.
-  for (const path of await files(join(candidate, 'packages/client-ui/src'))) {
-    const subpath = relative(join(candidate, 'packages/client-ui/src'), path)
-    if (subpath.startsWith('lib/') && subpath.endsWith('.ts')) aliases.unshift({ find: `@agentmux/client-ui/${subpath.slice(4, -3)}`, replacement: path })
-    else if (subpath.startsWith('components/') && subpath.endsWith('.tsx')) aliases.unshift({ find: `@agentmux/client-ui/${subpath.slice(0, -4)}`, replacement: path })
-  }
-  aliases.unshift({ find: '@agentmux/client-ui/platform', replacement: join(candidate, 'packages/client-ui/src/platform.tsx') })
-  aliases.unshift(...['prompt-condition', 'session-user-messages'].map(name => ({ find: `@agentmux/core/${name}`,
-    replacement: join(candidate, `packages/core/src/${name === 'prompt-condition' ? 'agent-prompt-condition' : name}.ts`) })))
+  const aliases = ['prompt-condition', 'session-user-messages'].map(name => ({ find: `@agentmux/core/${name}`,
+    replacement: join(candidate, `packages/core/src/${name === 'prompt-condition' ? 'agent-prompt-condition' : name}.ts`) }))
+  const resolveSource = join(root, 'packages/core/test/helpers/workspace-source-export.mjs')
   const config = join(candidate, 'apps/mobile/vitest.config.ts'), sourceProof = join(candidate, 'transformed.json')
-  await writeFile(config, `import base from './vitest.base.config'\nimport { writeFileSync, readFileSync } from 'node:fs'\nimport { createHash } from 'node:crypto'\nconst seen = new Map()\nexport default { ...base, resolve: { ...base.resolve, alias: ${JSON.stringify(aliases)} }, plugins: [...base.plugins, { name: 'mobile-source-proof', enforce: 'pre', transform(code,id) { const path=id.split('?')[0]; if(path.startsWith(${JSON.stringify(candidate + '/')}) && /\\.(ts|tsx)$/.test(path)) { seen.set(path.slice(${candidate.length + 1}),createHash('sha256').update(readFileSync(path)).digest('hex')); writeFileSync(${JSON.stringify(sourceProof)}, JSON.stringify(Object.fromEntries(seen))) } } }] }\n`)
+  await writeFile(config, `import base from './vitest.base.config'\nimport { writeFileSync, readFileSync } from 'node:fs'\nimport { createHash } from 'node:crypto'\nimport { workspaceSourceExport } from ${JSON.stringify(resolveSource)}\nconst seen = new Map()\nexport default { ...base, resolve: { ...base.resolve, alias: ${JSON.stringify(aliases)} }, plugins: [...base.plugins, { name: 'mobile-source-proof', enforce: 'pre', resolveId(specifier) { if (specifier.startsWith('@agentmux/client-ui/')) return workspaceSourceExport(${JSON.stringify(candidate)}, specifier) }, transform(code,id) { const path=id.split('?')[0]; if(path.startsWith(${JSON.stringify(candidate + '/')}) && /\\.(ts|tsx)$/.test(path)) { seen.set(path.slice(${candidate.length + 1}),createHash('sha256').update(readFileSync(path)).digest('hex')); writeFileSync(${JSON.stringify(sourceProof)}, JSON.stringify(Object.fromEntries(seen))) } } }] }\n`)
   const run = async (name, pattern) => {
     const report = join(output, `${name}.json`)
     const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config,

@@ -5,7 +5,6 @@ const repository = resolve(import.meta.dirname, '../../../../..')
 export default defineConfig({ ...owning, resolve: { ...owning.resolve, alias: [...owning.resolve.alias,
   { find: /^@agentmux\/core\/spatial-layout$/, replacement: resolve(repository, 'packages/core/src/spatial-layout.ts') },
   { find: /^@agentmux\/core\/spatial-graph$/, replacement: resolve(repository, 'packages/core/src/spatial-graph.ts') },
-  { find: /^@agentmux\/client-ui$/, replacement: resolve(repository, 'packages/client-ui/src/index.ts') },
   { find: /^@agentmux\/client-ui\/platform$/, replacement: resolve(repository, 'packages/client-ui/src/platform.tsx') },
   { find: /^@agentmux\/client-ui\/components\/(.*)$/, replacement: resolve(repository, 'packages/client-ui/src/components/$1.tsx') },
   { find: /^@agentmux\/client-ui\/terminal\/(.*)$/, replacement: resolve(repository, 'packages/client-ui/src/terminal/$1.ts') },

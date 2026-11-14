@@ -141,9 +141,6 @@
       "@agentmux/relay/local": [
         "packages/relay/src/local-adapter.ts"
       ],
-      "@agentmux/client-ui": [
-        "packages/client-ui/src/index.ts"
-      ],
       "@agentmux/client-ui/components/*": [
         "packages/client-ui/src/components/*.tsx"
       ],

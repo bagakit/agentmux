@@ -15,16 +15,11 @@ const evidence = resolve(process.env.AGENTMUX_WAIT_ICON_EVIDENCE ?? join(reposit
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-wait-icon-')), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const receipt = { schema: 'agentmux.wait-icon-layout-verification.v1', passed: false, owner, originalSHA256: hash(original), cases: [] }
 await mkdir(evidence, { recursive: true })
-const aliases = [
-  { find: '@agentmux/client-ui/icons', replacement: join(repository, 'packages/client-ui/src/theme/icons.tsx') },
-  { find: '@agentmux/client-ui/styles', replacement: join(repository, 'packages/client-ui/src/styles') },
-  { find: '@agentmux/client-ui/input/styles.css', replacement: join(repository, 'packages/client-ui/src/input/input.css') }
-]
 const protectedInputs = new Map()
 async function run(mode, referenceFile) {
   const root = join(evidence, mode), renderer = join(root, 'renderer'), inputs = new Map(), transformed = new Map()
   await mkdir(root, { recursive: true })
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: aliases }, esbuild: { jsx: 'automatic' },
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, esbuild: { jsx: 'automatic' },
     define: { 'process.env.NODE_ENV': '"production"' },
     css: { postcss: { plugins: [{ postcssPlugin: 'actual-wait-icon-styles', Once(root) {
       const consumed = new Map(), remember = node => { const input = node.source?.input
