@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { AgentMuxDesktopObservation } from '@agentmux/core/control'
+import { parseSurveySelection, type AgentMuxDesktopObservation } from '@agentmux/core/control'
 
 const id = z.string().min(1)
 const nullableId = id.nullable()
@@ -15,6 +15,11 @@ function omitMissingWindow<T extends { windowId?: string | undefined; documentGe
   return windowId === undefined ? rest : { ...rest, windowId, documentGeneration: documentGeneration! }
 }
 const provenance = z.enum(['observed', 'unavailable', 'unknown'])
+/** Core owns the exact page/research wire rules; Shared only adapts their errors to observation. */
+export const surveySelectionSchema = z.unknown().transform((value, context) => {
+  try { return parseSurveySelection(value, 'CONTROL_PROTOCOL_ERROR') }
+  catch (error) { context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid Survey selection.' }); return z.NEVER }
+})
 const desktopSpaceSelectionSchema = z.object({ spaceId: nullableId, zoneId: nullableId, workspaceId: id,
   tabId: nullableId, groupId: nullableId, regionId: nullableId, topicId: nullableId }).strict()
 const desktopInputObservationSchema = z.object({ provenance,
@@ -22,9 +27,10 @@ const desktopInputObservationSchema = z.object({ provenance,
   tabId: nullableId, regionId: nullableId, sessionId: nullableId,
   connected: z.boolean().nullable(), visible: z.boolean().nullable(), inert: z.boolean().nullable() }).strict().superRefine(exactWindowPair).transform(omitMissingWindow)
 const desktopSelectionSchema = z.object({ surface: z.enum(['space', 'focus', 'goals', 'survey', 'recall']), mainSurface: z.enum(['workbench', 'agents', 'board', 'survey', 'recall']),
-  focusView: z.enum(['list', 'map']).nullable(), space: desktopSpaceSelectionSchema.nullable(), goalId: nullableId }).strict().superRefine((value, context) => {
+  focusView: z.enum(['list', 'map']).nullable(), space: desktopSpaceSelectionSchema.nullable(), goalId: nullableId,
+  survey: surveySelectionSchema.optional() }).strict().superRefine((value, context) => {
   if ((value.surface === 'focus') !== (value.focusView !== null)) context.addIssue({ code: 'custom', message: 'Focus view belongs only to the Focus Surface.' })
-})
+}).transform(({ survey, ...selection }) => survey === undefined ? selection : { ...selection, survey })
 export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z.object({
   selection: desktopSelectionSchema,
   presentation: z.object({ provenance, ...windowIdentity, state: z.enum(['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown']),

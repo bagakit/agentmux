@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
-import { desktopObservationSchema } from './desktop-focus-observation.ts'
+import { desktopObservationSchema, surveySelectionSchema } from './desktop-focus-observation.ts'
 import { parseSurveyOrganization, parseSurveyPinnedReferences } from '@agentmux/core/control'
 
 const id = z.string().min(1)
@@ -58,7 +58,6 @@ const region = z.discriminatedUnion('kind', [
     nativeOwner: z.literal('unconfirmed').optional(), error: z.string().nullable(), loading: z.boolean() }).strict()
     .refine(region => (region.nativeOwner === 'unconfirmed') === (region.navigationId === null), 'An unconfirmed Browser owner has no confirmed navigation identity.')
 ])
-const surveyReference = z.object({ tabId: id, regionId: id }).strict()
 /** Exact stored client preferences; catalog availability never filters this observation. */
 const survey = z.object({
   collectedZoneIds: z.array(id).refine(ids => new Set(ids).size === ids.length, 'Survey membership contains duplicate Zone IDs.'),
@@ -73,7 +72,7 @@ const survey = z.object({
     try { return parseSurveyOrganization(value, 'CONTROL_PROTOCOL_ERROR') }
     catch (error) { context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid Survey organization.' }); return z.NEVER }
   }),
-  selection: z.union([z.object({ zoneId: id, selection: z.array(surveyReference), active: surveyReference.nullable() }).strict(),z.object({kind:z.literal('page'),regionId:id,browserId:id}).strict()]).nullable()
+  selection: surveySelectionSchema
 }).strict()
 export const desktopWorkbenchObservationSchema = z.object({
   loading: z.boolean(),
