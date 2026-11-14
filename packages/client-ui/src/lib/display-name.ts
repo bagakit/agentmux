@@ -1,4 +1,5 @@
 import type { AgentTimelineSnapshot } from '@agentmux/core'
+import { splitPastedImageReferences } from './pasted-image-reference.js'
 /** Display-only abbreviation. Original identity and addressing keys keep their full bytes. */
 export function compactReferenceId(value: string): string {
   return value.length > 20 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
@@ -37,13 +38,15 @@ function present(value: string | null | undefined): string | null {
 const PROMPT_DERIVED_MAX_LENGTH = 48
 
 /**
- * 从首条 prompt 派生一个名字：取第一段非空文本、压平内部空白、限长。
+ * 从首条 prompt 派生一个名字：跳过开头粘贴图片，取第一段非空正文、压平内部空白、限长。
  *
  * 这是"从成员/首条 prompt 派生"这一档的一个来源。它比从 Provider·Workspace 派生更贴近这个 Agent
  * 实际在做的事，但仍**低于**用户手改与启动时指定——自动来源绝不越过用户意图。
  */
 function deriveNameFromPrompt(prompt: string | null | undefined): string | null {
-  const trimmed = present(prompt)
+  const parts = splitPastedImageReferences(prompt ?? '')
+  const textStart = parts.findIndex(part => part.kind === 'text' && part.text.trim().length > 0)
+  const trimmed = present(textStart < 0 ? null : parts.slice(textStart).map(part => part.text).join(''))
   if (!trimmed) return null
   const firstLine = trimmed.split('\n').map((line) => line.trim()).find((line) => line.length > 0)
   if (!firstLine) return null
