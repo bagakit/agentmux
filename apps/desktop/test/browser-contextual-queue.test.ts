@@ -88,7 +88,7 @@ it('passes only the original reference through direct manual input and joins Cor
   enqueue(id, 'immediate')
   await expect(send(id)).resolves.toBe('unconfirmed')
   expect(submit).toHaveBeenCalledExactlyOnceWith(session().control, body, id,
-    { expectedRun: session().control.run, admissionIntent: { kind: 'manual-actor' } }, { execution: 'immediate' }, true, note, 'message-tool', undefined, undefined, undefined, reference(id), undefined)
+    { expectedRun: session().control.run, admissionIntent: { kind: 'session-conversation' } }, { execution: 'immediate' }, true, note, 'message-tool', undefined, undefined, undefined, reference(id), undefined)
   expect(useAppStore.getState().agentSteerQueues[session().id]![0]?.inputReceipt?.key).toEqual(receipt.key)
   vi.mocked(api.sessions.inspectInput).mockResolvedValue(receipt)
   const rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting').mockResolvedValue(receipt)
