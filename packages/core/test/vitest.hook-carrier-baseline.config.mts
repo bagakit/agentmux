@@ -23,8 +23,8 @@ export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), {
     const path = relative(base.root!, id.split('?')[0]!)
     const owners = new Set([
       ...['providers/shared', 'managed-hook-installer', 'hook-config-merge',
-        ...['cursor', 'droid'].map(name => 'providers/' + name)].map(name => 'packages/core/src/' + name + '.ts'),
-      ...['antigravity', 'gemini', 'copilot'].map(id => 'packages/providers/src/' + id + '/provider.ts')
+        ...['cursor'].map(name => 'providers/' + name)].map(name => 'packages/core/src/' + name + '.ts'),
+      ...['antigravity', 'gemini', 'copilot', 'droid'].map(id => 'packages/providers/src/' + id + '/provider.ts')
     ])
     if (!owners.has(path)) return
     let code = source

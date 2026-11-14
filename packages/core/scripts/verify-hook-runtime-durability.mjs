@@ -23,8 +23,8 @@ const definitions = {
     owners: ['providers/execution-environment.ts', 'providers/grok.ts', 'client.ts', 'packages/providers/src/gemini/provider.ts', 'providers/claude-hook-activation.ts', 'providers/claude-workspace-trust.ts', 'providers/opencode.ts'],
     inputs: ['agent-provider.ts', 'client.ts', 'providers/execution-environment.ts', 'providers/shared.ts',
       ...['claude', 'claude-hook-activation', 'claude-workspace-trust', 'cursor', 'cursor-native-history',
-        'droid', 'grok', 'hermes', 'opencode', 'pi'].map(name => 'providers/' + name + '.ts')].map(source)
-      .concat(['antigravity', 'copilot', 'gemini'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
+        'grok', 'hermes', 'opencode', 'pi'].map(name => 'providers/' + name + '.ts')].map(source)
+      .concat(['antigravity', 'copilot', 'gemini', 'droid'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
     tests: ['provider-hook-environment.test.ts', 'claude-hook-activation.test.ts'],
     mutants: ['ignore-home', 'inherit-unset', 'drop-provider-env', 'core-cwd-relative', 'ignore-gemini-home', 'drop-inspect-unset',
       'ignore-claude-inspection-home', 'ignore-claude-trust-env', 'ignore-grok-home', 'trim-opencode-override'] },

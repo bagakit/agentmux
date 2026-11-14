@@ -16,7 +16,7 @@ const common = [self, src('client'), src('hook-config-merge'), src('managed-hook
   src('agent-provider'), src('hook-normalizer'), src('hook-server'), src('providers/shared'), src('hook-passive-response'),
   base + 'dist/agentmux-hook.mjs', test('vitest.hook-environment.config.mts')]
 const owners = {
-  shell: common.concat(['cursor', 'droid'].map(name => src('providers/' + name)), ...['antigravity', 'gemini', 'copilot'].map(id => 'packages/providers/src/' + id + '/provider.ts'),
+  shell: common.concat(['cursor'].map(name => src('providers/' + name)), ...['antigravity', 'gemini', 'copilot', 'droid'].map(id => 'packages/providers/src/' + id + '/provider.ts'),
     [test('hook-carrier-baseline.test.ts'), test('vitest.hook-carrier-baseline.config.mts'),
       test('providers/gemini-hook-binding.native.test.ts'), test('fixtures/gemini-hook-native-host.mjs'), base + 'scripts/verify-gemini-hook-binding.mjs']),
   hermes: common.concat([src('providers/hermes'), test('providers/hermes-hook-binding.native.test.ts'), base + 'scripts/verify-hermes-hook-binding.mjs']),

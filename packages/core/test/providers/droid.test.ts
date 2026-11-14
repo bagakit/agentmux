@@ -8,7 +8,8 @@ const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizati
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { DROID_HOOK_EVENTS, DROID_HOOKS, createDroidManagedHookPlan } from '../../src/providers/droid.js'
+import { DROID_HOOK_EVENTS } from '@agentmux/providers/droid/provider'
+const DROID_HOOKS = new AgentProviderRegistry().get('droid').hook
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { renderMergedHookContent } from '../../src/hook-config-merge.js'
@@ -125,7 +126,9 @@ describe('Droid provider', () => {
 
     it('FACTORY_HOME_OVERRIDE 被尊重——忽略它会写出一份该 CLI 永远不读的配置', () => {
       // 本机发行物逐字：`process.env.FACTORY_HOME_OVERRIDE ?? HOME ?? USERPROFILE`，目录名 `.factory`。
-      const overridden = createDroidManagedHookPlan({ FACTORY_HOME_OVERRIDE: fixturePath("tmp/fh") })
+      const overridden = new AgentProviderRegistry().get('droid').planManagedHooks!({
+        workspacePath: fixturePath("repo"), env: { FACTORY_HOME_OVERRIDE: fixturePath("tmp/fh") }
+      })!
       expect(overridden.mutations.map((mutation) => mutation.path)).toEqual([fixturePath("tmp/fh/.factory/hooks.json")])
     })
 

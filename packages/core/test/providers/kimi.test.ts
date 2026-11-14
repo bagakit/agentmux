@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { AgentProviderRegistry, splitLaunchPromptByDelivery } from '../../src/agent-provider.js'
 import { composeAgentLaunchPrompt } from '../../src/agent-outbound-message.js'
-import { KIMI_HOOKS } from '../../src/providers/kimi.js'
 import { AgentMuxError } from '../../src/errors.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
@@ -14,6 +13,7 @@ import type { AgentSemanticState } from '../../src/types.js'
 describe('Kimi provider', () => {
   const providers = new AgentProviderRegistry()
   const kimi = providers.get('kimi')
+  const KIMI_HOOKS = kimi.hook
 
   /**
    * 造一条 Kimi 形状的信封：事件名 PascalCase 走 `hook_event_name`，负载键 snake_case。
