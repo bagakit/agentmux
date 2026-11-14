@@ -20,9 +20,9 @@ async function wait(code, label = code) {
 }
 async function painted() {
   return evaluate(`(async()=>{let timer;try{return await Promise.race([(async()=>{for(;;){
-    const animations=document.getAnimations().filter(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime));
+    const animations=document.getAnimations().filter(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime)&&!a.effect?.target?.closest?.('.xterm'));
     await Promise.all(animations.map(a=>a.finished.catch(()=>{})));await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
-    if(!document.getAnimations().some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime)))return true
+    if(!document.getAnimations().some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime)&&!a.effect?.target?.closest?.('.xterm')))return true
   }})(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Finite animations did not settle: '+JSON.stringify(document.getAnimations().map(a=>({name:a.animationName,state:a.playState,time:a.currentTime,timing:a.effect?.getComputedTiming(),target:a.effect?.target?.className}))))),4000)})])}finally{clearTimeout(timer)}})()`)
 }
 async function point(expression) {
@@ -213,6 +213,12 @@ app.whenReady().then(async () => {
       result.stage = 'unconfirmed-creation'
       await evaluate('takeoverProbe.failure(true)'); await open(1)
       await click(`${picker}.querySelector('.agent-pick[data-executor-id="codex"]')`)
+      await wait(`!${picker}`)
+      await wait(`Boolean(${original(1)}.querySelector('.agent-operation-feedback[data-phase="partial"]'))`)
+      // Submitted operations release the picker; their shared original feedback
+      // persists. Reopening and choosing reads that retained request, never sends again.
+      await open(1)
+      await click(`${picker}.querySelector('.agent-pick[data-executor-id="codex"]')`)
       await wait(`Boolean(${picker}?.querySelector('.session-takeover__issue'))`)
       await frame('05-unconfirmed-creation')
       const unknownBefore = await evaluate('takeoverProbe.facts()')
@@ -247,13 +253,15 @@ app.whenReady().then(async () => {
       assert.deepEqual(afterLaunch.drafts, beforeLaunch.drafts, 'Actual original drafts are retained')
       const launched = afterLaunch.launches.at(-1)
       assert.equal(launched.hostId, 'local'); assert.equal(launched.workspacePath, _hygiene_fixturePath("private/takeover-project"))
-      assert.match(launched.prompt, /agent context --host local --session 'session-codex'/)
+      assert.match(launched.prompt, /agent context --host 'local' --session 'session-codex'/)
       const addedTabs = Object.keys(afterLaunch.tabs).filter(id => !beforeLaunch.tabs[id])
       assert.equal(addedTabs.length, 1, 'Actual production agent.open creates one separate Tab')
       assert.notEqual(addedTabs[0], originalSource.tabId)
-      assert.equal(afterLaunch.layouts[originalSource.workspaceId].groups.find(g => g.tabOrder.includes(addedTabs[0])).activeTabId, addedTabs[0], 'Confirmed creation selects the actual successor Tab')
+      assert.equal(afterLaunch.layouts[originalSource.workspaceId].groups.find(g => g.tabOrder.includes(addedTabs[0])).activeTabId, originalSource.tabId, 'A background creation receipt preserves the original selected workface')
       assert.ok(afterLaunch.trusted.some(event => event.type === 'click' && event.trusted && event.executor === 'gemini' && event.takeover), 'Complete native Enter produces trusted browser button activation')
       result.launch = { before: beforeLaunch, after: afterLaunch, newTabId: addedTabs[0], promptIncluded: true }
+      await click(`document.querySelector('.workbench-tab[data-workbench-tab-id="${addedTabs[0]}"]')`)
+      await wait(`takeoverProbe.facts().layouts[${JSON.stringify(originalSource.workspaceId)}].groups.find(g=>g.tabOrder.includes(${JSON.stringify(addedTabs[0])})).activeTabId===${JSON.stringify(addedTabs[0])}`)
       await frame('06-successor-new-tab')
       await evaluate('takeoverProbe.focus(0)'); await painted(); await frame('07-original-retained')
       const retainedTerminal = result.frameObservations.at(-1).terminal.terminals.find(t => t.regionId === originalSource.regionId)
@@ -271,8 +279,9 @@ app.whenReady().then(async () => {
       assert.ok(retiredBefore.sessions.some(session => session.id === previousTarget), 'The private Native retirement leaves a deliberately stale Renderer projection')
       assert.ok(!retiredBefore.nativeSessions.some(session => session.id === previousTarget), 'The controlled Native active snapshot no longer advertises the retired target')
       await open(0)
-      await click(`${picker}.querySelector('.agent-pick[data-executor-id="codex"]')`)
-      await wait(`${picker}?.querySelector('.session-takeover__issue')?.textContent.includes('Takeover Agent was closed')`)
+      await wait(`${picker}?.querySelector('.session-takeover__heading p')?.textContent==='The earlier takeover Agent was closed. Choose an Agent to take over again.'`)
+      assert.equal(await evaluate(`Boolean(${picker}.querySelector('.session-takeover__issue'))`), false, 'An earlier confirmed retirement is a non-blocking explanation')
+      assert.equal(await evaluate(`${picker}.querySelector('.agent-pick[data-executor-id="claude"]').disabled`), false, 'The next explicit Agent choice stays available')
       const closed = await evaluate('takeoverProbe.facts()')
       assert.equal(closed.launches.length, retiredBefore.launches.length, 'Inspecting a retired target cannot repeat creation')
       assert.deepEqual(Object.keys(closed.requests), Object.keys(retiredBefore.requests), 'Inspection preserves the exact original request')
@@ -286,11 +295,8 @@ app.whenReady().then(async () => {
       await evaluate(`void takeoverProbe.appearance('light')`); await size(360)
       await frame('10-closed-target-light-narrow')
       await evaluate(`void takeoverProbe.appearance('dark')`); await size(940)
-      const chooseAnother = `([...${picker}.querySelectorAll('button')].find(button=>button.textContent.trim()==='Choose another Agent'))`
-      await click(chooseAnother)
-      await wait(`${picker}.querySelector('.agent-pick[data-executor-id="claude"]')?.disabled===false`)
       await frame('11-new-intent-choice')
-      assert.equal((await evaluate('takeoverProbe.facts()')).launches.length, retiredBefore.launches.length, 'Choosing to select again does not launch until the user submits a specific Agent')
+      assert.equal((await evaluate('takeoverProbe.facts()')).launches.length, retiredBefore.launches.length, 'Explaining the earlier retirement does not launch until the user submits a specific Agent')
       await click(`${picker}.querySelector('.agent-pick[data-executor-id="claude"]')`)
       await wait(`takeoverProbe.facts().launches.length===${retiredBefore.launches.length + 1}`)
       await wait(`!${picker}`)
@@ -306,6 +312,8 @@ app.whenReady().then(async () => {
       assert.equal(newInspection.request.report.outcome, 'opened')
       assert.notEqual(newInspection.request.report.agent.agentSessionId, previousTarget)
       assert.equal(newInspection.request.report.agent.createOperationId, nextLaunch.createOperationId)
+      await click(`document.querySelector('.workbench-tab[data-workbench-tab-id="${newInspection.request.report.to.tabId}"]')`)
+      await wait(`takeoverProbe.facts().layouts[${JSON.stringify(originalSource.workspaceId)}].groups.find(g=>g.tabOrder.includes(${JSON.stringify(newInspection.request.report.to.tabId)})).activeTabId===${JSON.stringify(newInspection.request.report.to.tabId)}`)
       await frame('11-new-successor-tab')
       await evaluate('takeoverProbe.focus(0)'); await painted(); await frame('12-original-after-new-intent')
       const originalAfterNew = result.frameObservations.at(-1).terminal.terminals.find(t => t.regionId === originalSource.regionId)

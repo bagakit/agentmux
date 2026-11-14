@@ -322,7 +322,7 @@ it('a partial takeover keeps its real new Agent and exposes a static shared resu
   await act(async () => document.querySelector<HTMLButtonElement>('.agent-pick')!.click())
   await vi.waitFor(async () => { await act(async () => {}); expect(onClose).toHaveBeenCalledOnce() })
   expect(document.querySelector('.session-takeover')).toBeNull()
-  expect(document.querySelector('.agent-operation-feedback')?.textContent).toContain('接手部分完成')
+  await vi.waitFor(() => expect(document.querySelector('.agent-operation-feedback')?.textContent).toContain('接手部分完成'))
   const reference = Object.values(useAppStore.getState().agentOperations).find(item => item.kind === 'takeover')!
   expect(reference.phase).toBe('partial')
   expect(reference.report?.agent?.agentSessionId).toBe(launch.mock.calls[0]![0].agentSessionId)
@@ -701,23 +701,17 @@ function retireTakeover(id: string) {
       workspacePath: original.workspacePath, createdAt: original.createdAt, ...(original.creation ? { creation: original.creation } : {}) } })
 }
 
-it('requires a new explicit choice after retirement and retains both requests across rehydration', async () => {
+it('presents a confirmed earlier retirement and makes the next explicit choice its successor, retaining both requests across rehydration', async () => {
   const launch = launchBoundary(), first = await takeOverSession(source, 'fixture', () => true)
   retireTakeover(first.agent!.agentSessionId)
   const oldBinding = structuredClone(useAppStore.getState().spatialRequests[first.requestId])
   expect(await inspectTakeover(source)).toMatchObject({ requestId: first.requestId, outcome: 'retired' })
   const onClose = await mountPicker()
-  await act(async () => { document.querySelector<HTMLButtonElement>('.agent-pick')!.click() })
-  await vi.waitFor(() => expect(document.querySelector('.session-takeover__issue strong')?.textContent).toBe('Takeover Agent was closed'))
-  expect(onClose).not.toHaveBeenCalled(); expect(launch).toHaveBeenCalledTimes(1)
-  expect(document.querySelector<HTMLButtonElement>('.agent-pick')!.disabled).toBe(true)
-  await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('.session-takeover__issue button')].find(button => button.textContent?.includes('Check again'))!.click() })
+  await vi.waitFor(() => expect(document.querySelector('.session-takeover__heading p')?.textContent).toBe('The earlier takeover Agent was closed. Choose an Agent to take over again.'))
   expect(launch).toHaveBeenCalledTimes(1)
-  await vi.waitFor(() => expect([...document.querySelectorAll<HTMLButtonElement>('.session-takeover__issue button')].find(button => button.textContent === 'Choose another Agent')?.disabled).toBe(false))
-  await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('.session-takeover__issue button')].find(button => button.textContent === 'Choose another Agent')!.click() })
-  expect(document.querySelector<HTMLButtonElement>('.agent-pick')!.disabled).toBe(false)
-  expect(launch).toHaveBeenCalledTimes(1)
+  // This choice follows the exact confirmed retirement presented above.
   await act(async () => { const pick = document.querySelector<HTMLButtonElement>('.agent-pick')!; pick.click(); pick.click() })
+  expect(document.querySelector('.session-takeover__issue')).toBeNull()
   await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(2))
   await vi.waitFor(async () => { await act(async () => {}); expect(onClose).toHaveBeenCalledTimes(1) })
   const second = await inspectTakeover(source)
@@ -839,12 +833,62 @@ it('repairs a request stuck on a never-created Session from the Core operation b
     agentSessionId: 'never-created', originalFailure: { step: 'owner', code: 'SPACE_OPERATION_UNCONFIRMED', message: conflict,
       recovery: 'Inspect this request ID and its existing resources; do not repeat creation or send.' } } } }))
   const onClose = await mountPicker()
-  await act(async () => { document.querySelector<HTMLButtonElement>('.agent-pick')!.click() })
-  await vi.waitFor(() => expect(document.querySelector('.session-takeover__issue strong')?.textContent).toBe('Takeover Agent was closed'))
-  expect(document.querySelector('.session-takeover__issue')!.textContent).not.toContain('belongs to another original Session')
+  await vi.waitFor(() => expect(document.querySelector('.session-takeover__heading p')?.textContent).toBe('The earlier takeover Agent was closed. Choose an Agent to take over again.'))
+  expect(document.querySelector('.session-takeover')!.textContent).not.toContain('belongs to another original Session')
   expect(useAppStore.getState().spatialRequests[first.requestId]).toMatchObject({ agentSessionId: first.agent!.agentSessionId, originalFailure: { message: conflict } })
   expect(launch).toHaveBeenCalledTimes(1); expect(onClose).not.toHaveBeenCalled()
+})
+
+it('still stops on a takeover that closes after this choice was presented', async () => {
+  const launch = launchBoundary(), first = await takeOverSession(source, 'fixture', () => true)
+  let inspected!: () => void
+  const presented = new Promise<void>(resolve => { inspected = resolve })
+  const executeControl = useAppStore.getState().executeControl
+  useAppStore.setState({ executeControl: async (...args) => {
+    const result = await executeControl(...args)
+    if (args[0].operation === 'space.inspect') { useAppStore.setState({ executeControl }); inspected() }
+    return result
+  } })
+  const onClose = await mountPicker()
+  await act(async () => { await presented })
+  expect(document.querySelector('.session-takeover__heading p')?.textContent).toBe('Choose an Agent to take over.')
+  retireTakeover(first.agent!.agentSessionId)
+  await act(async () => { document.querySelector<HTMLButtonElement>('.agent-pick')!.click() })
+  await vi.waitFor(() => expect(document.querySelector('.session-takeover__issue strong')?.textContent).toBe('Takeover Agent was closed'))
+  expect(launch).toHaveBeenCalledTimes(1); expect(onClose).not.toHaveBeenCalled()
   await vi.waitFor(() => expect([...document.querySelectorAll<HTMLButtonElement>('.session-takeover__issue button')].find(button => button.textContent === 'Choose another Agent')?.disabled).toBe(false))
+  await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('.session-takeover__issue button')].find(button => button.textContent === 'Choose another Agent')!.click() })
+  await act(async () => { document.querySelector<HTMLButtonElement>('.agent-pick')!.click() })
+  await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(2))
+  await vi.waitFor(async () => { await act(async () => {}); expect(onClose).toHaveBeenCalledTimes(1) })
+  expect((await inspectTakeover(source))?.outcome).toBe('opened')
+})
+
+it('does not use a retirement learned after the user chose while the initial inspection was pending', async () => {
+  const launch = launchBoundary(), first = await takeOverSession(source, 'fixture', () => true)
+  let started!: () => void, release!: () => void
+  const began = new Promise<void>(resolve => { started = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  const executeControl = useAppStore.getState().executeControl
+  let initialInspection = true
+  useAppStore.setState({ executeControl: async (...args) => {
+    if (initialInspection && args[0].operation === 'space.inspect') {
+      initialInspection = false
+      started()
+      await held
+    }
+    return executeControl(...args)
+  } })
+  const onClose = await mountPicker()
+  await act(async () => { await began })
+  expect(document.querySelector('.session-takeover__heading p')?.textContent).toBe('Choose an Agent to take over.')
+  retireTakeover(first.agent!.agentSessionId)
+  await act(async () => { document.querySelector<HTMLButtonElement>('.agent-pick')!.click() })
+  await act(async () => { release() })
+  useAppStore.setState({ executeControl })
+  await vi.waitFor(() => expect(document.querySelector('.session-takeover__issue strong')?.textContent).toBe('Takeover Agent was closed'))
+  expect(launch).toHaveBeenCalledTimes(1)
+  expect(onClose).not.toHaveBeenCalled()
 })
 
 it('converges concurrent explicit successor choices on one creation and never bypasses unknown', async () => {
@@ -920,6 +964,10 @@ it.each(['managed', 'retired', 'unmanaged'] as const)('takes over a %s saved sou
   expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled()
   const inspected = await takeOverSession(saved, 'fixture', () => true)
   expect(inspected.agent?.agentSessionId).toBe(input.agentSessionId); expect(launch).toHaveBeenCalledOnce()
+  // The launch boundary is earlier than its background creation/name settlement.
+  // Keep this scenario's real spatial owner alive until that original operation settles.
+  await vi.waitFor(() => expect(Object.values(useAppStore.getState().agentOperations)
+    .find(operation => operation.kind === 'takeover' && operation.operationId === input.createOperationId)?.phase).toBe('succeeded'))
 })
 
 it('refuses a saved handover after its Launcher Region is replaced and keeps the original Agent usable', async () => {
