@@ -354,10 +354,6 @@ function SortableWorkbenchTab({
   }, [rename === null, bindingMenuOpen])
 
   async function requestTabsClose(tabIds: readonly string[]): Promise<void> {
-    if (tab.source) {
-      reportError(new Error('The original Source close action is unavailable here. Use the original Core controls; the local workface was not changed.'))
-      return
-    }
     await tabClose.request({ workspaceId, group, tabIds, subject: displayName })
   }
 
@@ -822,10 +818,6 @@ function WorkbenchRegionContent({
 
   // Every close surface reviews the same Main-owned frozen plan as the CLI.
   async function requestRegionClose(): Promise<void> {
-    if (tab.source) {
-      reportError(new Error('The original Source close action is unavailable here. Use the original Core controls; the local workface was not changed.'))
-      return
-    }
     const pinned = browserPresentation.surface === 'mote' ? actualDefaults.conversation : browserPresentation.surface ? undefined : mote?.defaultConversation
     if (pinned && pinned.tabId === tab.id && pinned.regionId === node.regionId && groupId &&
       motePinnedTab(pinned, browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId, groupId, tab.id)) {

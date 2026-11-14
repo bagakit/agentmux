@@ -1,6 +1,6 @@
 import { AgentMuxError } from '@agentmux/core/control'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { parseSpaceCloseParams, parseSpaceCloseReceipt, spaceCloseDecisions, spaceCloseDigest,
+import { parseSpaceCloseParams, parseSpaceClosePlan, parseSpaceCloseReceipt, spaceCloseDecisions, spaceCloseDigest,
   type SpaceCloseMethod, type SpaceCloseParams, type SpaceCloseResults, type SpaceCloseReceipt } from '@agentmux/core/space-close'
 
 /** Browser demonstration transport only. No Main journal, Native ACK or durable claim. */
@@ -17,9 +17,9 @@ export function createPreviewWorkbenchClose() {
       if (!record) {
         const reply = await useAppStore.getState().executeWorkbenchClose({ operation: 'workbench.close.capture', requestId: mintObjectId(), input: request })
         if (reply.operation !== 'workbench.close.capture') throw new Error('The original preview planner did not return a close projection.')
-        const plan = { authority: { ownerId: 'browser-preview', endpoint: 'browser-preview', documentGeneration: 'ephemeral-page' }, target: request.target,
+        const plan = parseSpaceClosePlan({ authority: { ownerId: 'browser-preview', endpoint: 'browser-preview', documentGeneration: 'ephemeral-page' }, target: request.target,
           keepAgentSessions: request.keepAgentSessions, projection: reply.projection, children: reply.projection.resources.map(r => ({ key: r.key, operationId: mintObjectId(), terminal: null,
-            issue: r.kind === 'session' && r.control.kind === 'terminal' ? 'native-unconfirmed' as const : null })) }
+            issue: r.kind === 'session' && r.control.kind === 'terminal' ? 'native-unconfirmed' as const : null })) })
         const at = Date.now()
         record = parseSpaceCloseReceipt({ operationId: id, request, plan, planDigest: spaceCloseDigest(plan), preparedBy: { kind: 'user', id: 'browser-preview' }, approvedBy: null, decisions: [], phase: 'prepared', outcome: 'prepared',
           resources: plan.children.map(c => ({ key: c.key, operationId: c.operationId, outcome: 'pending', receipt: null })),

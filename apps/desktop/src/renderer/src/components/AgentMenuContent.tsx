@@ -14,6 +14,7 @@ const History = semanticIconComponent('object.history')
 const Information = semanticIconComponent('status.info')
 const Restart = semanticIconComponent('action.restart-session')
 const Stop = semanticIconComponent('action.stop')
+const Close = semanticIconComponent('action.close')
 const Refresh = semanticIconComponent('action.refresh')
 const Connections = semanticIconComponent('object.conversations')
 const Promotion = semanticIconComponent('object.promotion')
@@ -33,7 +34,7 @@ export type AgentMenuExtensions = {
 
 /** One Agent menu body for cards, Region context menus and Header More. */
 export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind = 'agent', executionHost, readOnly = false,
-  links, onHistory, onTakeOver, onLearn, onDerived, onCustomize, onPromote, onRestart, onStop, onRefreshObservation, refreshing = false,
+  links, onHistory, onTakeOver, onLearn, onDerived, onCustomize, onPromote, onRestart, onStop, onCloseWorkface, onRefreshObservation, refreshing = false,
   nativeSourceDetails, nativeSourceCheck, extensions = {} }: {
   name: string; executorLabel: string; sessionId: string | undefined; sessionKind?: 'agent' | 'terminal'
   executionHost: RegionExecutionHost; readOnly?: boolean
@@ -44,6 +45,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
   onPromote?: (() => void) | undefined
   onCustomize?: (() => void) | undefined
   onRestart?: (() => void) | undefined; onStop?: (() => void) | undefined
+  onCloseWorkface?: (() => void) | undefined
   onRefreshObservation?: (() => void) | undefined; refreshing?: boolean
   nativeSourceDetails?: ReactNode; nativeSourceCheck?: ReactNode
   extensions?: AgentMenuExtensions
@@ -60,7 +62,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
     if (item.id === 'fork') return extensions.controls ? [<Fragment key="fork">{extensions.controls}</Fragment>] : []
     return canControl && onLearn ? [<Menu.Item key="pass-on-experience" className="tab-context-menu__item" onSelect={onLearn}><PassOn size={14} /><span>Pass on experience</span></Menu.Item>] : []
   }) : []
-  const lifecycle = canControl && (onRestart || onStop)
+  const lifecycle = canControl && (onRestart || onStop) || onCloseWorkface
   const maintenance = nativeSourceCheck || onRefreshObservation || extensions.maintenance
   return <>
     {extensions.context}
@@ -102,8 +104,9 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
     {lifecycle ? <>
       <Menu.Separator className="tab-context-menu__separator" />
       <Menu.Group aria-label="Session lifecycle">
-        {onRestart ? <Menu.Item className="tab-context-menu__item" onSelect={onRestart}><Restart size={14} /><span>Restart Session…</span></Menu.Item> : null}
-        {onStop ? <Menu.Item className="tab-context-menu__item" onSelect={onStop}><Stop size={14} /><span>Stop Agent</span></Menu.Item> : null}
+        {canControl && onRestart ? <Menu.Item className="tab-context-menu__item" onSelect={onRestart}><Restart size={14} /><span>Restart Session…</span></Menu.Item> : null}
+        {canControl && onStop ? <Menu.Item className="tab-context-menu__item" onSelect={onStop}><Stop size={14} /><span>Stop Agent</span></Menu.Item> : null}
+        {onCloseWorkface ? <Menu.Item className="tab-context-menu__item" onSelect={onCloseWorkface}><Close size={14} /><span>Close workface…</span></Menu.Item> : null}
       </Menu.Group>
     </> : null}
     {extensions.workspace ? <>

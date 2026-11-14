@@ -29,6 +29,7 @@ import { useSessionRestart } from './SessionRestart'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 import { useAgentPromotion } from '../lib/use-agent-promotion'
+import { requestWorkbenchReferenceClose } from '../lib/workbench-close-request'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const AgentIcon = semanticIconComponent('object.agent')
@@ -163,6 +164,17 @@ function LocalFocusContextMenu({ open, context, children, onOpenChange, onRename
             onRefreshObservation={session ? refreshObservation : undefined} refreshing={refreshing}
             onRestart={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(context, context.name, origin.current) }}
             onStop={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(context, context.name, origin.current) }}
+            onCloseWorkface={location?.reference ? () => {
+              try {
+                const state = useAppStore.getState(), reference = location.reference!
+                const surface = state.tabs[reference.tabId]?.regions[reference.regionId]
+                if (surface?.kind !== 'agent' || surface.sessionId !== context.id) throw Error('This Agent workface changed. Choose its current exact position before closing.')
+                actionOwnsFocus.current = true
+                state.selectMainRegion(reference)
+                useAppStore.setState({ mainSurface: 'workbench' })
+                requestWorkbenchReferenceClose(reference)
+              } catch (error) { useAppStore.getState().reportError(error) }
+            } : undefined}
             extensions={{ controls: forkAt(), forkAction: action => forkAt(undefined, { id: action.id, label: action.label, instruction: action.instruction }), workspace: location ? <FocusAgentWorkspaceMenu target={context} references={location.references} issue={location.issue} /> : null,
               connections: connector.group ? <RegionMenuEntryView entry={{ kind: 'connector-group', group: connector.group }} index={0} nested
                 Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} Separator={ContextMenu.Separator}
@@ -198,6 +210,7 @@ function SourceFocusContextMenu({ context, children, open, onOpenChange, onRenam
           links={<ContextMenu.Item className="tab-context-menu__item" onSelect={() => { void copyTextToClipboard(JSON.stringify(access.identity), error => useAppStore.getState().reportError(error)) }}>Copy Agent identity</ContextMenu.Item>}
           onHistory={access.conversationPort && access.conversationReference ? () => setReading(true) : undefined}
           onRefreshObservation={access.refresh}
+          onCloseWorkface={access.close ? () => { actionOwnsFocus.current = true; access.close?.() } : undefined}
           extensions={{ workspace: <ContextMenu.Item className="tab-context-menu__item" onSelect={() => access.open()}>View in Space</ContextMenu.Item>,
             identityActions: access.rename && access.nameRevision !== undefined ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item> : undefined,
             context: access.issue ? <ContextMenu.Label className="tab-context-menu__label">{access.issue}</ContextMenu.Label> : undefined }} />
