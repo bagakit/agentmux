@@ -50,20 +50,24 @@ export async function savePastedImage(home: string, input: { bytes: Uint8Array; 
   const directory = pastedDirectory(home), legacyPath = join(directory, `${sha256}.${extension}`)
   const objectId = deriveObjectId('pasted-image.v1', JSON.stringify([sha256, extension]))
   const shortPath = join(directory, `paste-${objectId}.${extension}`)
-  let path = shortPath
+  const path = shortPath
   const temporary = join(directory, `.${sha256}.${mintObjectId()}.partial`)
   try {
     await mkdir(directory, { recursive: true, mode: 0o700 })
-    // Resolve the original long-name object first. Only its confirmed absence permits a new short name.
-    try { await confirm(legacyPath, bytes); path = legacyPath }
+    // Preserve the original object and references, but make every new reference compact.
+    let retainedLegacy = false
+    try { await confirm(legacyPath, bytes); retainedLegacy = true }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-    if (path === shortPath) {
+    if (retainedLegacy) {
+      try { await link(legacyPath, path) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+    } else {
       const file = await open(temporary, 'wx', 0o600)
       try { await file.writeFile(bytes); await file.sync() } finally { await file.close() }
       try { await link(temporary, path) }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
-      await confirm(path, bytes)
     }
+    await confirm(path, bytes)
     await syncDirectory(directory)
     // Also persist newly created pasted/.agentmux directory entries. A later same-byte retry
     // performs these syncs too; it does not infer a prior successful receipt from existence.
