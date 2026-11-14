@@ -74,9 +74,12 @@ are not the serving Core version. Observation never starts Native, resumes a Ses
 attaches a reader or grants source trust. Cancel ends only this read; keep original work.
 settings executors ls lists global saved templates. To choose a remote Executor, use
 settings executors discover --host <id>; routeHostId and runtimeId identify the executing
-Host and descriptors contain its own registered commands and current checks. Unknown
+Host and descriptors contain its original saved configurations, registered commands and current checks.
+Their source is configured, registered or provider-default. A registered override takes precedence
+over a same-ID configuration saved on that Host, then over the Provider default; a saved choice is
+not a registration acknowledgement. Unknown
 means not checked; check-failed is not missing. A failed Host query does not prove an
-empty inventory. Custom wrappers need explicit registration: settings executors register
+empty inventory. To add or override a command on that Host explicitly, settings executors register
 <id> --host <id> --input <file|-> accepts {"config":{label,providerId,command,args,env,
 injectAgentMuxGuide},"expectedRevision"?:string}. The command is a target Host absolute
 path or PATH command name. Replacing a registered entry requires its configRevision;

@@ -366,6 +366,8 @@ Readiness 是 Provider 协议提供并绑定原对象和用途的输入环境事
 
 ## Executor 标识的归属
 
+- 执行清单沿准确执行 Host 的 Core owner，包含该 Host 已保存的 Executor 配置、显式注册与 Provider 默认项；相同 Provider 的不同 Executor ID 保持独立。来源与优先级准确表达为显式注册、原 Host 已保存配置、Provider 默认，不因读取把已保存配置复制成注册或伪造 registrationRevision。精确已确认选择不受无关低优先级配置探测失败阻断；完整清单未确认时明确说明，保留原配置与健康 Agent。Mote 的保存选择仍从原配置读取元数据，启动校验只约束本次准确 Executor。
+
 - 固定 Icon 属于 Executor／Execution 配置，用来标识 Executor，不是显示配置。颜色叠加与左上 Icon 和该 Executor 一起编辑、保存；外观设置不另放一份入口或配置。
 - 所有代表具体 Agent 的图标都显示其 Executor 标识，而不只是 Provider 标识；同 Provider 不同 Executor 可区分。Provider 图形作为未自定义时的默认底图。纯 Provider 能力目录仍表示 Provider，不凭空关联 Executor。
 - 菜单、Tab／Region、Topic、列表、消息工具与设置预览消费同一 Executor 标识；状态角标与身份保持独立，视觉轮廓仍遵循密度 SSOT。

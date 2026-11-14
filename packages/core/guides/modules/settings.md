@@ -12,7 +12,8 @@ exact registered publication on that executing Host. Read registrationRevision f
 configRevision remains the launch/recovery content digest and is not a deletion witness.
 Retained original Session/history and admitted launch references refuse removal without
 stopping work. The result removedRegistration:true can expose effectiveExecutor with the same
-ID and source:provider-default. Provider defaults cannot be removed. After unknown, discover
+ID and source:configured or source:provider-default. These underlying entries are not removed
+by unregister; it removes only the exact registered override. After unknown, discover
 current facts; an absent/changed registration does not prove a lost historical ACK and must
 not trigger automatic replay. No private args/environment are returned.
 
