@@ -24,7 +24,7 @@ export function conversationScrollParent(root: HTMLElement | null): HTMLElement 
   return null
 }
 export function conversationReadingNode(node: HTMLElement): HTMLElement | null {
-  return node.dataset.conversationProcessKey ? node.querySelector<HTMLElement>('.wf-card--observation > .wf-head') : node
+  return node.dataset.conversationProcessKey ? node.querySelector<HTMLElement>('.wf-card--observation > .wf-observation__header > .wf-head') : node
 }
 
 /** One reading position's DOM work. Holds nodes/callbacks, never message bodies or Reader facts. */

@@ -5,6 +5,7 @@ import { APP_APPEARANCE_IDS, type AppAppearanceId } from '../../../shared/contra
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { WorkflowCard, WorkflowDock, WorkflowToolRow } from './workflow'
+import { ObservedProcessDock } from '@agentmux/client-ui/components/WorkflowObservation'
 import { ObservationSurfaceGallery } from './ObservationSurfaceGallery'
 import {
   completedWorkflow,
@@ -21,6 +22,16 @@ const ThemeActionEditIcon = semanticIconComponent('action.edit')
 
 
 const APPEARANCE_LABELS = { light: '浅色', dark: '深色', system: '跟随系统' } satisfies Record<AppAppearanceId, string>
+
+function RecordedDockExample() {
+  const [pinned, setPinned] = useState(true)
+  return <>
+    <button type="button" className="wf-gallery__pin" disabled={pinned} onClick={() => setPinned(true)}>固定示例记录组</button>
+    {pinned ? <ObservedProcessDock title="已固定过程" source="静态组件示例 · 已加载记录组"
+      summary={<><span>执行过程</span><span>3 条已加载记录</span><span>状态未记录</span></>}
+      onClose={() => setPinned(false)} /> : null}
+  </>
+}
 
 function InlineRenameExample() {
   const mounted = useRef(true)
@@ -122,6 +133,8 @@ export function WorkflowComponentGallery() {
       <section id="workflow-dock" className="wf-gallery__section">
         <p className="wf-gallery__caption"><SemanticIcon name="layout.dock" /><b>D · 输入框上方 dock</b><span>同一 WorkflowCard 的 dock 密度变体，内部滚动不复制状态。</span></p>
         <WorkflowDock workflow={runningWorkflow} />
+        <p className="wf-gallery__caption">真实对话复用的记录摘要壳，不要求阶段或总进度。</p>
+        <RecordedDockExample />
       </section>
       <div id="existing-surfaces"><ObservationSurfaceGallery /></div>
       <section id="inline-rename" className="wf-gallery__section">

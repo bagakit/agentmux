@@ -3,19 +3,21 @@ import type { AgentTimelineItemStatus } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
 export type WorkflowObservationStatus = AgentTimelineItemStatus | 'running' | 'interrupted'
 export type WorkflowRecordedTime = { from: string; to: string; offset: string }
+export type RecordedProcessObservation = {
+  id: string
+  stepCount: number
+  countUnit?: 'records'
+  counts?: { complete: number; streaming: number; failed: number; unknown: number }
+  status?: WorkflowObservationStatus
+  recordedTime?: WorkflowRecordedTime
+  label?: string
+  elapsed?: string
+  metrics?: ReactNode
+  streaming?: boolean
+}
 type ObservationProps = {
-  observation: {
-    id: string
-    stepCount: number
-    countUnit?: 'records'
-    counts?: { complete: number; streaming: number; failed: number; unknown: number }
-    status?: WorkflowObservationStatus
-    recordedTime?: WorkflowRecordedTime
-    label?: string
-    elapsed?: string
-    metrics?: ReactNode
-    streaming?: boolean
-  }
+  observation: RecordedProcessObservation
+  actions?: ReactNode
   compact?: boolean
   /** Anchored originals stay mounted; their owner hides individual process entries. */
   keepContentVisible?: boolean
@@ -34,6 +36,8 @@ type ObservedToolProps = {
     recordedTime?: WorkflowRecordedTime
     source: ReactNode
     persistentSource: boolean
+    /** Original result flag; independent of the operation's recorded status. */
+    hasFailedResult?: boolean
   }
   className: string
   icon: ReactNode
@@ -51,7 +55,7 @@ export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { s
     size={size} animation={status === 'running' && !recorded ? 'work' : 'none'} className={`wf-ico wf-ico--${status}`} />
 }
 
-export function RecordedStepsCard({ observation, compact = false, keepContentVisible = false, expanded, onExpandedChange, notice, children }: ObservationProps) {
+export function RecordedStepsCard({ observation, compact = false, keepContentVisible = false, expanded, onExpandedChange, notice, actions, children }: ObservationProps) {
   const contentId = useId()
   const [readOnce, setReadOnce] = useState(expanded)
   useLayoutEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
@@ -60,6 +64,7 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
   const description = [recordedTime ? `${recordedTime.from} – ${recordedTime.to} · ${recordedTime.offset}` : '',
     status === undefined && !observation.metrics ? compact ? '状态未记录' : 'Status not recorded' : ''].filter(Boolean).join(' · ')
   return <article className="wf-card wf-card--observation" data-observation-id={observation.id} data-status={status}>
+    <div className="wf-observation__header">
     <button type="button" className="log-fold wf-head" data-open={expanded ? '' : undefined}
       aria-expanded={expanded} aria-controls={contentId}
       title={description || undefined}
@@ -82,6 +87,8 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
         {status === undefined && !observation.metrics && !compact ? <span className="wf-observation__recorded">Status not recorded</span> : null}
       </span>
     </button>
+    {actions ? <div className="wf-observation__actions">{actions}</div> : null}
+    </div>
     {notice}
     {observation.counts ? <div className="wf-observation__summary" aria-label="Recorded step states">
       <span className="wf-observation__caption">Recorded activity</span>
@@ -114,6 +121,7 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
       : <time className="log-row__time" tabIndex={0} aria-description={recordedTime.offset} title={recordedTime.offset}>{recordedTime.from}</time> : null}
     <span className="log-row__title">{observation.title}</span>
     <span className="log-row__meta">
+      {observation.hasFailedResult && status !== 'failed' ? <span className="log-row__issue">含失败结果</span> : null}
       {status === 'streaming' ? <span className="log-row__chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
       {status === 'running' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
       {status === 'interrupted' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="interrupted" recorded />Interrupted</span> : null}
@@ -162,4 +170,27 @@ export function RecordedAgentRow({ observation }: {
       {observation.message === undefined ? null : <pre className="wf-native-process__text">{observation.message}</pre>}
     </li>
   </>
+}
+
+/** A host-controlled summary of one selected loaded group; owns no records or input. */
+export function ObservedProcessDock({ title, source, summary, action, onClose }: {
+  title: string
+  source: ReactNode
+  summary: ReactNode
+  action?: ReactNode
+  onClose: () => void
+}) {
+  return <aside className="wf-observed-dock" aria-label={title}>
+    <header className="wf-observed-dock__header">
+      <strong>{title}</strong>
+      <button type="button" className="wf-observed-dock__close" aria-label="取消固定过程摘要" onClick={onClose}>
+        <SemanticIcon name="action.close" size={12} />
+      </button>
+    </header>
+    <div className="wf-observed-dock__source">{source}</div>
+    <div className="wf-observed-dock__footer">
+      <div className="wf-observed-dock__summary">{summary}</div>
+      {action ? <div className="wf-observed-dock__actions">{action}</div> : null}
+    </div>
+  </aside>
 }

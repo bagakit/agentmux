@@ -45,15 +45,6 @@ export type WorkflowSnapshot = {
 
 export type WorkflowVariant = 'inline' | 'dock'
 
-/** A recorded step's status, never the lifecycle of the enclosing task or Agent. */
-export type WorkflowObservationStatus = 'streaming' | 'complete' | 'failed' | 'running' | 'interrupted'
-
-export type WorkflowRecordedTime = {
-  from: string
-  to: string
-  offset: string
-}
-
 export const WORKFLOW_STATUS_LABEL: Record<WorkflowStatus | 'queued', string> = {
   running: '运行中',
   completed: '已完成',

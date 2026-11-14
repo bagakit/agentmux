@@ -1,4 +1,3 @@
-import { RecordedStepsCard } from '@agentmux/client-ui/components/WorkflowObservation'
 import { useId, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { WorkflowPhase } from './WorkflowPhase'
@@ -24,16 +23,7 @@ type SnapshotProps = {
   onExpandedChange?: (expanded: boolean) => void
 }
 
-type ObservationProps = Parameters<typeof RecordedStepsCard>[0]
-
-export function WorkflowCard(props: SnapshotProps | ObservationProps) {
-  return 'observation' in props
-    ? <RecordedStepsCard {...props} />
-    : <WorkflowSnapshotCard {...props} />
-}
-
-/** The host owns the records and disclosure; a contiguous observation is not a workflow. */
-function WorkflowSnapshotCard({
+export function WorkflowCard({
   workflow,
   variant = 'inline',
   defaultExpanded,

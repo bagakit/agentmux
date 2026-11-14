@@ -1,4 +1,3 @@
-import { RecordedToolRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { SemanticIcon } from '../semantic-icons'
 import { WorkflowStatusGlyph } from './WorkflowStatusGlyph'
 import type { WorkflowStatus } from './types'
@@ -11,13 +10,7 @@ type WorkflowToolProps = {
   notice?: string
 }
 
-type ObservedToolProps = Parameters<typeof RecordedToolRow>[0]
-
-export function WorkflowToolRow(props: WorkflowToolProps | ObservedToolProps) {
-  return 'observation' in props ? <RecordedToolRow {...props} /> : <NamedWorkflowToolRow {...props} />
-}
-
-function NamedWorkflowToolRow({
+export function WorkflowToolRow({
   title,
   workflowName,
   status,

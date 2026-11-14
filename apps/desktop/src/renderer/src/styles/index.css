@@ -163,6 +163,7 @@
 @import '@agentmux/client-ui/styles/conversation-turn-failure.css';
 @import './workflow.css';
 @import '@agentmux/client-ui/styles/workflow-status.css';
+@import '@agentmux/client-ui/styles/workflow-observation.css';
 @import '@agentmux/client-ui/styles/conversation-avatar.css';
 @import './conversation-axis.css';
 @import './overlays.css';

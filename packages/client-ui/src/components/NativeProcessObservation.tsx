@@ -7,7 +7,7 @@ import { describeActivityRecordTime } from '../lib/activity-record-time.js'
 import { stepTitle } from '../lib/activity-step-summary.js'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
-import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
+import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime, type RecordedProcessObservation } from './WorkflowObservation.js'
 import { ConversationMetricsDetails, ConversationMetricsInline, conversationMetricsLabel } from './ConversationMetrics.js'
 import type { ConversationRecord } from '../lib/conversation-records.js'
 
@@ -65,7 +65,7 @@ function groupRecordTime(records: ConversationProcessProps['records']): Workflow
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
-export function NativeProcessObservation({ id, records: sourceRecords, entries, renderRecord, metrics, disclosure, compact = false }: ConversationProcessProps & { compact?: boolean }) {
+export function NativeProcessObservation({ id, records: sourceRecords, entries, renderRecord, metrics, disclosure, compact = false, actions, renderSummary }: ConversationProcessProps & { compact?: boolean; actions?: ReactNode; renderSummary?: (observation: RecordedProcessObservation) => ReactNode }) {
   const processId = useId()
   const [localExpanded, setExpanded] = useState(!compact)
   const expanded = disclosure?.expanded ?? localExpanded
@@ -112,9 +112,10 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
   const status = nativeOnly ? recordedStepStatus ?? (turnOutcome?.status === 'completed' ? 'complete' : turnOutcome?.status) : undefined
   const first = items[0]
   const recordedTime = groupRecordTime(records)
-  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: records.length, countUnit: 'records',
+  const observation: RecordedProcessObservation = { id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: records.length, countUnit: 'records',
     ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
-    ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
+    ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }
+  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={observation} actions={actions}
     keepContentVisible={anchored} expanded={expanded} onExpandedChange={open => { if (open) setReadOnce(true); setExpanded(open); disclosure?.onExpandedChange(open) }}
     notice={failureCount > 0 ? <p className="native-process-observation__issue" role="status">
       <SemanticIcon name="status.failed" size={12} />
@@ -129,8 +130,8 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
       const members = grouped.get(key), common = members && shared.get(members)
       const bodyId = `${processId}-${encodeURIComponent(key)}`
       const stepDisclosure = common && members ? { ...common.disclosure, stepGroup: {
-        headerHidden: members[0] !== key, bodyId,
-        controls: members[0] === key ? common.controls : bodyId
+        headerHidden: members[0] !== key && !recordedFailure(record), bodyId,
+        controls: common.controls
       } } : disclosure
       return <div key={key} className="native-process-observation__step" hidden={!expanded} inert={!expanded}>{expanded || readOnce ? item ? renderRecord(record, body =>
         <NativeProcessStep item={item} source={record.source.kind === 'native' ? record.source : undefined} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
@@ -140,7 +141,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
         : renderRecord(record, undefined, stepDisclosure) : null}</div>
     })}
   </WorkflowCard>{items.flatMap(item => [item.metricsDiagnostic, item.turnOutcomeDiagnostic].flatMap((diagnostic, index) => diagnostic
-    ? [<p key={JSON.stringify([item.id, index])} className="conversation-metrics__notice" role="status">{diagnostic.message}</p>] : []))}</div>
+    ? [<p key={JSON.stringify([item.id, index])} className="conversation-metrics__notice" role="status">{diagnostic.message}</p>] : []))}{renderSummary?.(observation)}</div>
 }
 
 export function NativeProcessStep({ item, source, origin, children, bodyOnly = false, expanded: controlledExpanded, onExpandedChange, stepGroup }: {
@@ -165,6 +166,7 @@ export function NativeProcessStep({ item, source, origin, children, bodyOnly = f
   const status = recordedStatus(item)
   const call = item.contentParts.find(part => part.kind === 'tool-call')
   const result = item.contentParts.find(part => part.kind === 'tool-result')
+  const hasFailedResult = item.contentParts.some(part => part.kind === 'tool-result' && part.failed === true)
   const title = useMemo(() => collaboration?.kind === 'operation'
     ? operationTitle(collaboration.operation)
     : collaboration?.kind === 'agent-activity'
@@ -178,9 +180,9 @@ export function NativeProcessStep({ item, source, origin, children, bodyOnly = f
   }
   return <div className="wf-native-process" data-native-step-id={item.id} data-body-only={bodyOnly ? '' : undefined}>
     {!bodyOnly ? <WorkflowToolRow observation={{ id: item.id, title, source: NATIVE_CONVERSATION_SOURCE, persistentSource: true,
-      ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
+      ...(status ? { status } : {}), ...(hasFailedResult ? { hasFailedResult } : {}), ...(time ? { recordedTime: time } : {}) }}
       className="log-row" icon={collaboration ? <SemanticIcon name="object.collaboration" size={12} /> : <SemanticIcon name={call ? 'conversation.tool-call' : item.contentParts.some(part => part.kind === 'tool-result') ? 'conversation.tool-result' : 'object.activity'} size={12} />}
-      hidden={stepGroup?.headerHidden ?? false} missingStatusInDetails expanded={expanded} controls={stepGroup?.controls ?? bodyId} onToggle={toggle} /> : null}
+      hidden={Boolean(stepGroup?.headerHidden && !hasFailedResult)} missingStatusInDetails expanded={expanded} controls={stepGroup?.controls ?? bodyId} onToggle={toggle} /> : null}
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {expanded || readOnce ? <>
         {collaboration?.kind === 'operation' ? <>

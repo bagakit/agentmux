@@ -116,8 +116,6 @@
 .log-turn[data-trace-only='true'] { grid-template-columns: minmax(0, 1fr); margin-block: var(--sp-1); }
 .log-turn[data-trace-only='true'] > .log-turn__head,
 .log-turn[data-trace-only='true'] > .log-turn__body { grid-column: 1; }
-.log-turn .wf-card--observation { --conversation-disclosure-padding: var(--sp-3); margin-block: var(--sp-2); border-radius: var(--radius-sm); }
-.log-turn .wf-card--observation > .wf-head { padding-inline: var(--sp-3); gap: var(--sp-3); }
 
 .observation-sample--conversation, .observation-sample--full { min-width: 0; }
 

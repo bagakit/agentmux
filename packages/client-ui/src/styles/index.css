@@ -31,6 +31,7 @@
 @import './conversation-trace-feedback.css';
 @import './conversation-process-collapse.css';
 @import './conversation-native-thread.css';
+@import './workflow-observation.css';
 @import './conversation-metrics.css';
 @import './conversation-turn-failure.css';
 @import './conversation-avatar.css';

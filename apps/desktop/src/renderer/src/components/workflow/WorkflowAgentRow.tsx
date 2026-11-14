@@ -1,4 +1,3 @@
-import { RecordedAgentRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { useId, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SemanticIcon } from '../semantic-icons'
@@ -13,39 +12,15 @@ function safeId(value: string): string {
 }
 
 export function WorkflowAgentRow({
-  observation,
   agent,
   phaseLabel,
   compact = false,
   defaultExpanded = false
 }: {
-  observation?: never
   agent: WorkflowAgent
   phaseLabel: string
   compact?: boolean
   defaultExpanded?: boolean
-} | {
-  observation: {
-    id: string
-    label: string
-    source: string
-    state?: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'stopped' | 'not-found'
-    message?: string
-  }
-  agent?: never
-  phaseLabel?: never
-  compact?: never
-  defaultExpanded?: never
-}) {
-  return observation ? <RecordedAgentRow observation={observation} />
-    : <WorkflowSnapshotAgentRow agent={agent} phaseLabel={phaseLabel!} compact={compact} defaultExpanded={defaultExpanded} />
-}
-
-function WorkflowSnapshotAgentRow({ agent, phaseLabel, compact, defaultExpanded }: {
-  agent: WorkflowAgent
-  phaseLabel: string
-  compact: boolean
-  defaultExpanded: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const generatedId = useId()

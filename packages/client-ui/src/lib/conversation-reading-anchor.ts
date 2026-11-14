@@ -53,8 +53,8 @@ function anchorFromRows(rows: Iterable<HTMLElement>, bounds: DOMRect): ReadingAn
     if (rect.height <= 0 || rect.bottom <= bounds.top || rect.top >= bounds.bottom) continue
     if (row.dataset.segmentKey) return { kind: 'segment', id: row.dataset.segmentKey, offset: rect.top - bounds.top }
     if (row.dataset.nativeRecordId) return { kind: 'record', id: row.dataset.nativeRecordId, offset: rect.top - bounds.top }
-    const head = row.querySelector<HTMLElement>('.wf-card--observation > .wf-head[aria-expanded="false"]')
-    const headRect = head?.getBoundingClientRect(), id = head?.parentElement?.dataset.observationId
+    const head = row.querySelector<HTMLElement>('.wf-card--observation > .wf-observation__header > .wf-head[aria-expanded="false"]')
+    const headRect = head?.getBoundingClientRect(), id = head?.closest<HTMLElement>('.wf-card--observation')?.dataset.observationId
     if (id && headRect && headRect.height > 0 && headRect.bottom > bounds.top && headRect.top < bounds.bottom)
       return { kind: 'group', id, offset: headRect.top - bounds.top }
   }
@@ -68,7 +68,7 @@ export function restoreConversationAnchor(viewport: HTMLElement, anchor: Reading
     : anchor.kind === 'record'
     ? viewport.querySelector<HTMLElement>(`[data-native-record-id='${id}']`)
     : viewport.querySelector<HTMLElement>(`[data-observation-id='${id}']`)
-      ?.querySelector<HTMLElement>(':scope > .wf-head[aria-expanded="false"]')
+      ?.querySelector<HTMLElement>(':scope > .wf-observation__header > .wf-head[aria-expanded="false"]')
   if (!row) return
   const bounds = viewport.getBoundingClientRect(), rect = row.getBoundingClientRect()
   if (bounds.height <= 0 || rect.height <= 0) return
