@@ -40,6 +40,8 @@ Hook 的声明、运行器、解释器及必要依赖必须在原 Run 使用期�
 
 非 AgentMux 启动的调用不得读取 AgentMux 凭证或进入 ingress，并须按该 Provider 的原生协议给出被动响应。此边界要在依赖可能消失的运行器之前成立：脚本内部的早退保护不到 Node 尚未找到脚本的情况。被动响应由 Provider 声明，不能统一假定空 stdout、`{}`、shell 展开或任一权限决定都适用。
 
+命令型载体复用原 Run 选择的完整保留运行器，不在长期声明中固化安装位置；原生以 argv 启动命令时，声明必须自足地表达其解释器与参数，不依赖调用方隐式展开环境。进程内扩展在原生工厂确认受管 Provider 后取得该 Run 的绑定，后续事件保持该原绑定；外部进程或其他 Provider 的继承凭证不构成投递资格。替换共享声明时保留既有健康或依赖未知的回调及其已证归属；普通重复准备不制造重复声明或丢失归属。
+
 这里约束可执行内容与原 Run 的存续结果，不预设新守护进程、全局注册表、租约系统或某种 Node／Electron 复制方式。优先复用现有 Core 安装、绑定和持久状态机制；原生宿主无法提供所需隔离或路由时保留具名缺口，不编造通用 fallback。
 
 ## 交付、主体与原生事实
@@ -70,17 +72,17 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 | [Claude](../../../packages/core/src/providers/claude.ts) | classic Hook 与原生模块使用同一状态目录插件，由启动参数加载；原生模块提供轮次与后台活动。 | 已接入原 `PermissionRequest`。 | 不写 workspace settings。插件需要准备文件，所以 catalog 仍为 `explicit-managed`，同时声明 `launchCarried`；不能因 Stop 到达就认定主轮成功。 |
 | [Grok](../../../packages/core/src/providers/grok.ts) | 工具、状态、子主体与轮末通知；原生配置根 `hooks/agentmux-status.json` 中的稳定声明，由原 Run 环境选择保留运行器。 | 当前仅观察。 | 原生记录与 Hook 各守事实范围；Stop 的通知反馈可让本轮继续，不是权限答复。不向兼容读取的 Claude／Cursor 配置写条目；headless 的 own-hook 加载证据不代签 TUI folder trust。 |
 | [Gemini](../../../packages/core/src/providers/gemini.ts) | 精选 Agent／工具观察；用户 `settings.json` 内合并受管叶子。 | 当前仅观察。 | 不注册没有消费者的高频模型事件。`AfterAgent` 可被否决／重试，不能代签最终成功；与同根其他 Provider 分清配置文件。 |
-| [Antigravity](../../../packages/core/src/providers/antigravity.ts) | 生命周期与工具；`config/hooks.json` 的受管独占键。 | 当前仅观察。 | 与 Gemini 不共用配置合同。其被动 PreToolUse 需要原生 `ask` 响应，Stop 使用空 decision；这不授予 AgentMux 代答权限。 |
+| [Antigravity](../../../packages/core/src/providers/antigravity.ts) | 生命周期与工具；`config/hooks.json` 的原生事件容器中合并受管声明。 | 当前仅观察。 | 与 Gemini 不共用配置合同；容器名参与准确归属，原有回调按叶子保全。其被动 PreToolUse 需要原生 `ask` 响应，Stop 使用空 decision；这不授予 AgentMux 代答权限。 |
 | [Cursor](../../../packages/core/src/providers/cursor.ts) | 工具与状态；数据根下 `hooks.json`。 | 当前仅观察。 | 不写项目／Claude 兼容配置；当前计划还含 workspace trust marker，信任是独立副作用，不能由发现或 Hook 路径推导授权。 |
 | [Copilot](../../../packages/core/src/providers/copilot.ts) | 工具、权限等待、子任务与压缩；配置根下独立 `hooks/agentmux.json`。 | 当前仅观察。 | 事件名经 `--event` 传入，超时等字段沿原生合同。原生可返回决定不证明产品已接通同步答复。 |
 | [Droid](../../../packages/core/src/providers/droid.ts) | 工具、状态与通知；Factory 配置根的 `hooks.json`，事件位于根层。 | 当前仅观察。 | 不套用 `hooks` 包装；Stop 是决策前观察，idle 通知也不能代签本轮成功。 |
-| [Hermes](../../../packages/core/src/providers/hermes.ts) | 模型／工具、授权等待与结果、原轮终局；`config.yaml` 加原生 shell Hook allowlist。 | 当前仅观察；现用授权事件为 observer。 | 原生按 `shlex.split`、`shell=False` 执行，不能套 shell 插值。不注册会改写模型／工具行为的策略 Hook，不声明未证实的子代理追踪。 |
-| [Pi](../../../packages/core/src/providers/pi.ts) | 进程内生成扩展，位于其 agent 配置根的 `extensions/agentmux.js`；运行时读取 ingress 环境。 | 无权限能力声明。 | 复用宿主进程，不额外启动 Node；`agent_settled` 才消费最终结果，`message_end` 不代签收口。当前工具关联与完整结果仍有未接线范围。 |
+| [Hermes](../../../packages/core/src/providers/hermes.ts) | 模型／工具、授权等待与结果、原轮终局；`config.yaml` 加原生 shell Hook allowlist。 | 当前仅观察；现用授权事件为 observer。 | 原生按 `shlex.split`、`shell=False` 执行；稳定声明显式给出解释器与参数，批准项保留同一原生命令，不依赖父 shell 隐式展开。不注册会改写模型／工具行为的策略 Hook，不声明未证实的子代理追踪。 |
+| [Pi](../../../packages/core/src/providers/pi.ts) | 进程内生成扩展，位于其 agent 配置根的 `extensions/agentmux.js`；工厂确认受管 Pi 后快照原 Run ingress。 | 无权限能力声明。 | 复用宿主进程，不额外启动 Node；非受管或其他 Provider 的宿主不读取凭证和注册投递处理器，后续环境变化不改投原绑定。`agent_settled` 才消费最终结果，`message_end` 不代签收口。当前工具关联与完整结果仍有未接线范围。 |
 | [OpenCode](../../../packages/core/src/providers/opencode.ts) | 进程内生成插件，位于原生配置根的 `plugin/agentmux.js`；事件总线与权限观察。 | 当前仅观察。 | 共享插件不保存凭证；普通 TUI 的本地 Server Worker 沿原生继承的 Run 环境快照原绑定。同一 Server 的其他 native Session 仍须按已确认主体隔离，目录不提供会话身份。`attach`／`run --attach` 不把新 Run 的环境交给既有 Server，保留原终端并明确 Hook 未绑定。`session.idle` 不代签成功。 |
 | [Kimi](../../../packages/core/src/providers/kimi.ts) | 已有原生 Hook 解析，策略为 `unmanaged`；不自动写配置。 | 当前仅观察。 | 原生 TOML loader／merge 尚未完整确认；保持不受管，不猜配置。正常主轮完成没有对应 Hook；原生记录读取不自动补成已确认的完成观察，不从可 veto 的 Stop 补造结束。 |
 | [TraeX](../../../packages/core/src/providers/traex.ts) | 不使用 Hook；启动／恢复沿现有原生入口。 | 无权限能力声明。 | 保持 `none`，不为能力表对齐而安装 Hook；当前 timeline 声明仍为 unavailable。 |
 
-当前实现按 Provider 保留明确边界：配置根按执行环境及各家原生 override 解析；Codex、Claude、Grok 经稳定入口使用 AgentMux 状态目录内按内容保留的完整运行器。Pi、OpenCode 复用原生宿主进程，后者按原 Run 环境绑定。其余命令型 Provider 仍有安装目录路径随各自载体固化的缺口，须在各自原生载体中落实，不能由通用入口已存在就宣称完成。[安装器](../../../packages/core/src/managed-hook-installer.ts)只处理有原回执归属的声明，不能替它认领其他副本的旧配置。既有健康 Run 的环境不会被新安装追改；它们在用的旧回调继续保留，清理另按准确归属和终局事实执行。
+当前命令型 Provider 经稳定入口使用 AgentMux 状态目录内按内容保留的完整运行器，长期声明不含 App／worktree 安装路径。Pi、OpenCode 复用原生宿主进程并保持工厂确认的原 Run 绑定。各家仍保留不同的配置根、事件容器、argv、被动响应与信任合同；共享入口不代签原生加载成功。[安装器](../../../packages/core/src/managed-hook-installer.ts)只处理有原回执归属的声明，不能替它认领其他副本的旧配置。既有健康 Run 的环境不会被新安装追改；它们在用的旧回调继续保留，清理另按准确归属和终局事实执行。
 
 ## 验收与公共入口
 
