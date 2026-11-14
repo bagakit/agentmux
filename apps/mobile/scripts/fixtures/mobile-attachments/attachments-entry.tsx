@@ -22,6 +22,8 @@ nativeDevicePorts.filePicker = { pickFiles: async () => {
   return { files: [{ name: image ? '头像参考.png' : '本周研究资料与两个方案的比较.md', mimeType: image ? 'image/png' : 'text/markdown', size: blob.size, blob }] }
 } } as typeof nativeDevicePorts.filePicker
 const client = {
+  readAgentSession: async (id: string) => id === session.agentSessionId ? session : null,
+  sessionHistorySources: async () => [],
   agentSession: () => session, agentSessions: () => [session], catalog: () => posture ? [{ id: session.providerId, capabilities: {},
     composer: { commands: [{ text: '/review', description: '检查原内容，保留草稿' }, { text: '/compare', description: '比较两种方案' }] },
     postureControl: { id: 'controlled-posture', label: '执行模式', modes: [{ id: 'review', label: '审阅', description: '查看原内容', tier: 'safe' }] } }] : [], onEvent: () => () => {},

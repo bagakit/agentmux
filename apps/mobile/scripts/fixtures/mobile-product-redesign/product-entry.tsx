@@ -102,6 +102,7 @@ let holdFileUpload = false
 let releaseFileUpload: (() => void) | null = null
 let directoryComparisons = 0, inspectFails = false
 let directoryReadFails = false, missingSessionMetadata = false
+let conversationStatusScene: 'active' | 'retired' | 'unconfirmed' | 'parallel' = 'active'
 let agentMenuScene = false, densityScene = false, copyFails = false
 let creationUpdateScene = false, rejectUpdatePreflight: (() => void) | null = null
 const copiedTexts: string[] = []
@@ -134,7 +135,19 @@ function publishClientEvent(event: AgentMuxClientEvent) {
   }
 }
 const client = {
-  agentSession: (id: string) => { record('sdk.agentSession', { id }); if (missingSessionMetadata && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable'); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
+  readAgentSession: async (id: string) => {
+    record('sdk.readAgentSession', { id })
+    if ((missingSessionMetadata || ['unconfirmed', 'parallel'].includes(conversationStatusScene)) && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable [METADATA_POINT_READ_FAILED]')
+    if (conversationStatusScene === 'retired' && id === main.agentSessionId) return null
+    return structuredClone(sessions.find(session => session.agentSessionId === id) ?? null)
+  },
+  sessionHistorySources: async (input: { agentSessionId: string }) => {
+    record('sdk.sessionHistorySources', input)
+    return [{ hostId: 'local', agentSessionId: input.agentSessionId,
+      state: conversationStatusScene === 'retired' && input.agentSessionId === main.agentSessionId ? 'retired' as const : 'active' as const,
+      ...(conversationStatusScene === 'retired' ? { retiredAt: 100 } : {}) }]
+  },
+  agentSession: (id: string) => { record('sdk.agentSession', { id }); if ((missingSessionMetadata || conversationStatusScene !== 'active') && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable'); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
   agentSessions: () => { record('sdk.agentSessions'); return structuredClone(sessions) },
   runtimeIdentity: () => ({ hostId: 'host-original', instanceId: 'runtime-original', buildIdentity: 'fixture', protocolVersion: 1, processId: null }),
   reattachAgent: async (id: string) => { record('sdk.reattachAgent', { id }); return { session: client.agentSession(id), attachment: terminalAttachment(id) } },
@@ -202,6 +215,7 @@ const client = {
   },
   observeSessionHistory: async (id: string) => { record('sdk.observeSessionHistory', { id }); return { source: { providerId: 'codex', nativeSessionId: `native-${id}` }, dispose() { record('sdk.releaseHistory', { id }) } } },
   readAgentConversation: async (input: Parameters<AgentMuxHostedClient['readAgentConversation']>[0]) => {
+    if (conversationStatusScene === 'parallel' && input.agentSessionId === main.agentSessionId) throw Error('Original history read failed [HISTORY_READ_FAILED]')
     const sourceHostId = sessions.find(session => session.agentSessionId === input.agentSessionId)?.hostId ?? 'host-original'
     if (joinedNotice) record('sdk.noticeFrameIdentity', { routeHostId: input.hostId, sourceHostId, recipientAgentSessionId: input.agentSessionId })
     const rawHistory = await client.sessionHistoryPage(input.agentSessionId)
@@ -374,6 +388,11 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   const [connectScene, setConnectScene] = useState<MobileConnection | null>(null)
   Object.assign(window, { mobileProductScene: {
+    setConversationStatus: (state: typeof conversationStatusScene) => {
+      conversationStatusScene = state
+      publishClientEvent({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as AgentMuxClientEvent)
+      refresh(value => value + 1)
+    },
     setBrandGoalScene: (scene: 'empty' | 'pending' | 'long') => {
       brandGoalScene = scene
       Object.assign(goal, structuredClone(brandOriginalGoal))
@@ -591,7 +610,7 @@ function Scene() {
   } })
   if (connectScene) return <MobileApp key={'connect-' + connectScene.state + String(connectScene.paired)} client={null} connection={connectScene} platform={platform}
     connectionPanel={connectScene.paired === false ? undefined : connectScene.state === 'unavailable' ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button">重新检查连接</button></> : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
-  const app = <MobileApp key={densityMount} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host' } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
+  const app = <MobileApp key={densityMount} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
   return webUpdateScene ? <MobileWebUpdateSafetyProvider verifyConnection={verifyWebUpdateConnection}>{app}</MobileWebUpdateSafetyProvider> : app
 }
 createRoot(document.getElementById('root')!).render(<Scene />)

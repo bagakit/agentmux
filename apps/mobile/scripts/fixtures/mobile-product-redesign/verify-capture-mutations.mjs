@@ -7,6 +7,8 @@ import { relative, resolve } from 'node:path'
 // load or timeout failure is not mutation proof. Usage: verify-capture-mutations.mjs --<subset> <id>...
 const root = resolve(import.meta.dirname, '../../../../..'), capture = resolve(import.meta.dirname, 'capture-ui.mjs')
 const bearing = {
+  'connection-inline-notice': 'Connection diagnostics never insert a row above the original reader',
+  'metadata-bottom-notice': 'Metadata diagnostics never insert a bottom service row',
   'focus-attention-rail': 'Focus attention cards have no decorative side rail',
   'interaction-attention-rail': 'Interaction cards have no decorative side rail or duplicate outline',
   'header-extra-pixel': 'mote-main keeps one 52px header',
