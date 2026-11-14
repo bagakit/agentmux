@@ -309,8 +309,8 @@ export class CaptureSurface {
       if (!active.session.expandable) throw new Error('This capture returns its selection directly. Finish it with Done or cancel it.')
       const handoff = params.handoff
       if (!handoff || !Array.isArray(handoff.shapes) || typeof handoff.tool !== 'string' || !handoff.crop) throw new Error('Keep the original marks and selection to expand.')
-      const source = this.source(active, frameInput, handoff.crop)
-      active.end({ state: 'expanded', image: captured.image, source, handoff, delivered: () => this.continuation(frameInput, source.rect) })
+      const source = this.source(active, frameInput, handoff.crop), continuation = this.continuation(frameInput, source.rect)
+      active.end({ state: 'expanded', image: captured.image, source, handoff, delivered: () => continuation })
       return
     }
     pngBytes(params.image!)
