@@ -201,6 +201,12 @@ Provider 可以使用原生执行服务，也可以将原生工具接口连接�
 
 拓扑内提供 Fleet map / Selected link 观察范围，与 Topology / List 呈现方式分开。Fleet map 沿原 Host 库展示环境关系；Selected link 只围绕当前所选 Host 投影同一网络观察中的配置中转与分源接口，不另设 Host 选择、草稿或事实 Store。范围切换不触发读取，不改变原焦点、保存、Session 或工作面；返回 Fleet map 保留原视口。
 
+### 原调用者域与远端上下文读取
+
+`agent.context` 先由接收请求的 Core 认证原 managed caller；来源 SID／capability 仅属于该 Core 的语义域，不转交另一 Core 作为其本机 Agent 凭据。只有这个准确只读叶可沿既有 history 读取边界使用所选已保存 Host 的原认证载体，目标 Core 独立核验载体接收者资格。原 principal、device forwarding、取消与 Runtime／owner fence 继续生效；没有原权限时明确拒绝，不伪造目标 Actor、不降级身份，不改变通用转发或写入／输入／维护权限。无效来源 caller 在远端读取前拒绝。
+
+配置 Host 是当前客户端的路由名，目标 Session、原 source namespace 与分页游标保持准确绑定；缺失、不可用、同名或换路由不猜首项、不回退本机。来源 caller 认证失败不是目标 Session 状态。来源定位查询使用原 Store 已有的 exact-SID 读取，避免为单会话上下文枚举无关来源，不另建 cache 或策略 owner。只读和取消不创建、续接、重放输入或停止原 Run，保留原工作面与已有能力。
+
 ### 所选 Host 的只读网络观察
 
 网络观察回答当前路由如何配置、原服务这次回应花了多久、各来源确认了哪些地址。GUI 与 CLI 经同一 Core 公共服务读取；准确 Host 配置、原客户端与 Runtime 身份仍由原 owner 持有，不在 Renderer 执行 shell 或新增网络事实 Store。
