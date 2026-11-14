@@ -57,6 +57,37 @@ it('shows actual scoped input as album cards and preserves the exact selected te
   expect(host.querySelector('.browser-start-history')).toBeNull(); expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
 })
 
+it('[existing-appearance] optional page detail failure keeps the original visible cards and Retry recovers the notice', async () => {
+  const warning = 'Some saved page details could not be read. Your original inputs remain available.'
+  vi.mocked(api.browser.listInputHistory).mockResolvedValueOnce({ ...snapshot, warning })
+  await render(page())
+  expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(3)
+  expect(host.querySelector('[role="status"]')?.textContent).toContain(warning)
+  expect(host.querySelector('input')?.disabled).toBe(false)
+  await click('[aria-label="Open recent input protocol design notes"]')
+  expect(choose).toHaveBeenLastCalledWith('protocol design notes')
+  await click('.browser-start-page__notice button')
+  expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(3)
+  expect(host.querySelector('[role="status"]')).toBeNull()
+})
+
+it('[existing-appearance] cards reuse the confirmed input title and site icon while keeping original submission and a failed-icon glyph', async () => {
+  const appearance = { url: entries[0]!.text, title: 'Original reference title', faviconDataUrl: 'data:image/png;base64,aGVsbG8=' }
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: [{ ...entries[0]!, appearance }, entries[1]!] })
+  await render(page())
+  const card = host.querySelector<HTMLButtonElement>('.browser-start-history__card')!
+  expect(card.querySelector('strong')?.textContent).toBe(appearance.title)
+  expect(card.title).toBe(entries[0]!.text)
+  const image = card.querySelector<HTMLImageElement>('.browser-start-history__favicon img')!
+  expect(image.src).toBe(appearance.faviconDataUrl)
+  await act(async () => image.dispatchEvent(new Event('error')))
+  expect(image.hidden).toBe(true)
+  expect(card.querySelector('.browser-start-history__favicon svg')?.getAttribute('data-semantic-icon')).toBe('object.browser')
+  expect(host.querySelectorAll('.browser-start-history__card strong')[1]!.textContent).toBe(entries[1]!.text)
+  await act(async () => card.click())
+  expect(choose).toHaveBeenLastCalledWith(entries[0]!.text)
+})
+
 it('keeps browsing and provides a retry after history or an image cannot be read', async () => {
   vi.mocked(api.browser.listInputHistory).mockRejectedValueOnce(new Error('history disk unavailable'))
   await render(page({ icon: 'https://images.example.test/icon.png' }))
@@ -88,7 +119,7 @@ it('discards a late history result after the Browser/Profile changes or the gall
 it('opts a non-Survey Browser into the same start page and navigates the original page from a history card', async () => {
   const navigate = vi.spyOn(api.browser, 'navigate').mockImplementation(async (id, url) => ({ ...tab, id, url }))
   const record = vi.spyOn(api.browser, 'recordInputHistory').mockResolvedValue({ ...snapshot, outcome: 'recorded' })
-  const tab = { id: target.browserId, browserId: target.browserId, regionId: 'original-region', kind: 'browser' as const, workspaceId: 'original-workspace', profileId: target.profileId,
+  const tab = { id: target.browserId, browserId: target.browserId, regionId: 'original-region', kind: 'browser' as const, mode: 'normal' as const, workspaceId: 'original-workspace', profileId: target.profileId,
     navigationId: 'navigation-1', url: 'about:blank', title: '', loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null }
   useAppStore.setState({ browserAnnotationsByBrowserId: {}, toolsOpen: false, tabs: {}, config: null })
   await render(<BrowserPane tab={tab} visible startPage={DEFAULT_BROWSER_START_PAGE} regionSplitSurface="space" />)
@@ -106,7 +137,7 @@ it('opts a non-Survey Browser into the same start page and navigates the origina
 })
 
 it('does not read a directly hidden Browser and removes cleared history from the gallery', async () => {
-  const tab = { id: target.browserId, browserId: target.browserId, regionId: 'original-region', kind: 'browser' as const, workspaceId: 'original-workspace', profileId: target.profileId,
+  const tab = { id: target.browserId, browserId: target.browserId, regionId: 'original-region', kind: 'browser' as const, mode: 'normal' as const, workspaceId: 'original-workspace', profileId: target.profileId,
     navigationId: 'navigation-1', url: 'about:blank', title: '', loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null }
   useAppStore.setState({ browserAnnotationsByBrowserId: {}, toolsOpen: false, tabs: {}, config: null })
   await render(<BrowserPane tab={tab} visible={false} startPage={DEFAULT_BROWSER_START_PAGE} />)
@@ -115,7 +146,7 @@ it('does not read a directly hidden Browser and removes cleared history from the
   expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(3)
   await act(async () => { const input = host.querySelector<HTMLInputElement>('[aria-label="Search or enter a web address"]')!; input.focus(); input.click() })
   const clear = document.querySelector<HTMLButtonElement>('.browser-address-history header button')!
-  expect(clear.textContent).toBe('Clear')
+  expect(clear.textContent).toBe('Clear history')
   vi.spyOn(api.browser, 'clearInputHistory').mockImplementation(async (selectedTarget, scope) => {
     expect(selectedTarget).toEqual(target); expect(scope).toEqual(snapshot.scope)
     const empty = { ...snapshot, entries: [] }; vi.mocked(api.browser.listInputHistory).mockResolvedValue(empty); return empty
@@ -138,7 +169,7 @@ it('saves configured fields and retains the draft when its original save fails',
 })
 
 it('invalidates cleared cards even when the popup is dismissed and the gallery reread fails', async () => {
-  const tab = { id: target.browserId, browserId: target.browserId, regionId: 'original-region', kind: 'browser' as const, workspaceId: 'original-workspace', profileId: target.profileId,
+  const tab = { id: target.browserId, browserId: target.browserId, regionId: 'original-region', kind: 'browser' as const, mode: 'normal' as const, workspaceId: 'original-workspace', profileId: target.profileId,
     navigationId: 'navigation-1', url: 'about:blank', title: '', loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null }
   useAppStore.setState({ browserAnnotationsByBrowserId: {}, toolsOpen: false, tabs: {}, config: null })
   await render(<BrowserPane tab={tab} visible startPage={DEFAULT_BROWSER_START_PAGE} />)
@@ -205,7 +236,7 @@ it('opens the original Survey settings and honors the decorative effect switch',
 })
 
 it('keeps toolbar and central drafts synchronized and submits through the original Browser', async () => {
-  const tab = { id: target.browserId, browserId: target.browserId, regionId: 'original-region', kind: 'browser' as const, workspaceId: snapshot.scope.workspaceId, profileId: target.profileId,
+  const tab = { id: target.browserId, browserId: target.browserId, regionId: 'original-region', kind: 'browser' as const, mode: 'normal' as const, workspaceId: snapshot.scope.workspaceId, profileId: target.profileId,
     navigationId: 'navigation-1', url: 'about:blank', title: '', loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null }
   const navigate = vi.spyOn(api.browser, 'navigate').mockImplementation(async (id, url) => ({ ...tab, id, url }))
   const record = vi.spyOn(api.browser, 'recordInputHistory').mockResolvedValue({ ...snapshot, outcome: 'recorded' })
@@ -234,7 +265,7 @@ it('keeps toolbar and central drafts synchronized and submits through the origin
 
 function installPreviewCandidate() {
   const browserId = 'source-browser'
-  const region = { id: browserId, browserId, regionId: 'source-region', kind: 'browser' as const, workspaceId: snapshot.scope.workspaceId, profileId: target.profileId, mode: 'normal' as const,
+  const region = { id: browserId, browserId, regionId: 'source-region', kind: 'browser' as const, mode: 'normal' as const, workspaceId: snapshot.scope.workspaceId, profileId: target.profileId,
     navigationId: 'source-navigation', url: entries[0]!.text, title: 'Reference guide', loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null }
   useAppStore.setState({ tabs: { source: createWorkbenchTab('source', region) } })
   const preview: BrowserRecoveryPreview = { scope: { browserId, workspaceId: snapshot.scope.workspaceId, profileId: target.profileId, mode: 'normal' },

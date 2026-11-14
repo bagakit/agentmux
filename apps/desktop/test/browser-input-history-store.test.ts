@@ -39,6 +39,47 @@ async function fixture() {
 }
 
 describe('actual bounded Browser input history store', () => {
+  it('[existing-appearance] fills one durable batch and keeps newer redirect facts and original input identity', async () => {
+    const f = await fixture(), input = 'https://input.invalid/start', document = 'https://page.invalid/document', other = 'https://page.invalid/other'
+    const icon = 'data:image/png;base64,AA=='
+    await f.store.record(scope, input); await f.store.record(scope, other); await f.store.record(scope, 'human search')
+    await f.store.decorate(scope, input, { url: document, title: 'New live title' })
+    const before = (await f.store.list(scope)).entries
+    fs.rename.mockClear()
+    const after = await f.store.fillAppearance(scope, [
+      { url: input, title: 'Wrong former input title', faviconDataUrl: 'data:image/png;base64,AQ==' },
+      { url: document, title: 'Old stored title', faviconDataUrl: icon },
+      { url: other, title: 'Stored other page', faviconDataUrl: icon }, { url: 'https://unsubmitted.invalid/', title: 'Never admit a visit' }
+    ])
+    expect(after.entries.map(({ appearance: _appearance, ...entry }) => entry)).toEqual(before.map(({ appearance: _appearance, ...entry }) => entry))
+    expect(after.entries.find(entry => entry.text === input)!.appearance).toEqual({ url: document, title: 'New live title', faviconDataUrl: icon })
+    expect(after.entries.find(entry => entry.text === other)!.appearance).toEqual({ url: other, title: 'Stored other page', faviconDataUrl: icon })
+    expect(after.entries.find(entry => entry.text === 'human search')!.appearance).toBeUndefined()
+    expect(fs.rename).toHaveBeenCalledOnce()
+    expect((await new BrowserInputHistoryStore(f.directory).list(scope)).entries).toEqual(after.entries)
+    fs.rename.mockClear(); await f.store.fillAppearance(scope, [{ url: document, title: 'Even older title', faviconDataUrl: 'data:image/png;base64,AQ==' }])
+    expect(fs.rename).not.toHaveBeenCalled()
+  })
+
+  it('[existing-appearance] the batch rereads removals and preserves all input rows before auxiliary byte budgets', async () => {
+    const f = await fixture(), urls = ['https://page.invalid/one', 'https://page.invalid/two', 'https://page.invalid/three']
+    for (const url of urls) await f.store.record(scope, url)
+    const before = (await f.store.list(scope)).entries
+    const icon = 'data:image/png;base64,' + 'a'.repeat(BROWSER_PAGE_MEMORY_MAX_FAVICON_LENGTH - 24)
+    await f.store.decorate(scope, urls[0]!, { url: urls[0]!, title: 'Original live title', faviconDataUrl: icon })
+    const patches = urls.map(url => ({ url, title: 'Real stored title', faviconDataUrl: icon }))
+    const filled = await f.store.fillAppearance(scope, patches)
+    expect(filled.entries.map(({ appearance: _appearance, ...entry }) => entry)).toEqual(before)
+    expect(filled.entries.filter(entry => entry.appearance?.faviconDataUrl).length).toBeLessThan(3)
+    expect(filled.entries.find(entry => entry.text === urls[0])!.appearance).toEqual({ url: urls[0], title: 'Original live title', faviconDataUrl: icon })
+    expect((await stat(f.path)).size).toBeLessThanOrEqual(MAX_BROWSER_INPUT_HISTORY_FILE_BYTES)
+    await f.store.remove(scope, urls[0]!)
+    const after = await f.store.fillAppearance(scope, patches)
+    expect(after.entries.some(entry => entry.text === urls[0])).toBe(false)
+    await f.store.clear(scope)
+    expect((await f.store.fillAppearance(scope, patches)).entries).toEqual([])
+  })
+
   it('[page-appearance] decorates exact original/redirect addresses durably without changing submission identity or search', async () => {
     const f = await fixture(), original = 'https://example.invalid/start?q=%2B#part', final = 'https://other.invalid/final?q=%2B#part'
     await f.store.record(scope, original); await f.store.record(scope, final); await f.store.record(scope, 'human search')

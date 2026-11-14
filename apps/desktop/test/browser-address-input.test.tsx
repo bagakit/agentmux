@@ -379,6 +379,47 @@ it('[address-appearance] stored title survives missing artwork and a bad image k
   expect(rows[1]!.querySelector('.browser-address-history__icon svg')).not.toBeNull()
 })
 
+it('[existing-appearance] a detail warning keeps original history and navigation, then Retry can recover real metadata', async () => {
+  const warning = 'Some saved page details could not be read. Your input history and browsing remain available.'
+  vi.mocked(api.browser.listInputHistory).mockResolvedValueOnce({ ...snapshot, warning })
+  await mount(target, 'kept draft'); await activate()
+  expect(historyTexts()).toEqual(snapshot.entries.map(entry => entry.text))
+  expect(popup()!.querySelector('[role="status"]')?.textContent).toContain(warning)
+  expect(field().value).toBe('kept draft'); expect(document.activeElement).toBe(field())
+  expect(notice).toHaveBeenCalledWith(warning)
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: [{ ...snapshot.entries[0]!, appearance }] })
+  await click('p[role="status"] button')
+  expect(popup()!.querySelector('[role="status"]')).toBeNull()
+  expect(popup()!.textContent).toContain(appearance.title)
+  expect(popup()!.querySelector('img')?.getAttribute('src')).toBe(appearance.faviconDataUrl)
+  expect(field().value).toBe('kept draft')
+  await key('ArrowDown'); await key('Enter')
+  expect(submitted).toHaveBeenCalledExactlyOnceWith(snapshot.entries[0]!.text)
+})
+
+it('[existing-appearance] unknown saved addresses and searches keep their own type glyphs without guessing artwork', async () => {
+  await mount(); await activate()
+  const rows = [...popup()!.querySelectorAll('[role="option"]')]
+  expect(rows[0]!.querySelector('.browser-address-history__icon svg')?.getAttribute('data-semantic-icon')).toBe('object.browser')
+  expect(rows[1]!.querySelector('.browser-address-history__icon svg')?.getAttribute('data-semantic-icon')).toBe('action.search')
+  expect(popup()!.querySelector('img')).toBeNull()
+  expect(historyTexts()).toEqual(snapshot.entries.map(entry => entry.text))
+})
+
+it('[existing-appearance] clearing with a pointer keeps the address anchor focused and clears the original scope once', async () => {
+  await mount(target, 'kept draft'); await activate()
+  const clear = popup()!.querySelector<HTMLButtonElement>('header button')!
+  const press = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 })
+  await act(async () => { clear.dispatchEvent(press) })
+  // Native pointer focus would otherwise shrink the narrow toolbar and move Clear before mouseup.
+  expect(press.defaultPrevented).toBe(true)
+  expect(document.activeElement).toBe(field())
+  await act(async () => { clear.click() })
+  expect(api.browser.clearInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.scope)
+  expect(field().value).toBe('kept draft')
+  expect(popup()!.textContent).toContain('No saved input yet.')
+})
+
 it('[address-suggestions] selecting the last history and removing it never targets the first original entry', async () => {
   await mount(); await activate(); await key('ArrowUp'); await key('Delete', { shiftKey: true })
   expect(api.browser.removeInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.scope, 'original search')
