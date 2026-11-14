@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { validateScheduleRpcResult, type ScheduleHistoryBucket, type ScheduleHistoryGroup } from '@agentmux/core/schedule-rpc'
+import { validateScheduleRpcResult, type ScheduleHistoryQuery, type ScheduleHistoryBucket, type ScheduleHistoryGroup } from '@agentmux/core/schedule-rpc'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import { api } from './api'
 
@@ -65,7 +65,7 @@ export function useCalendarReceipts(records: readonly ContinuousProgressLoop[], 
         let incomplete = false
         try {
           do {
-            const query = { scheduleId: id, from: boundaries[0]!, to, bucketStarts: boundaries, ...(cursor ? { cursor } : {}) }
+            const query: ScheduleHistoryQuery = { scheduleId: id, from: boundaries[0]!, to, bucketStarts: boundaries, ...(cursor ? { cursor } : {}) }
             const page = validateScheduleRpcResult('schedule.history', await api.schedule.history(query), query)
             if (cancelled) return
             if (!page.buckets) { incomplete = true; break }
