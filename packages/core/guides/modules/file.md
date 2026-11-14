@@ -39,6 +39,16 @@ A null birthtimeNs reports missing native generation; implementation.mkdir then 
 generation-unavailable. Only that exact mutation is unavailable; ordinary reads remain usable.
 The original Host supplies actor/caller scope; JSON cannot supply actor.
 
+Use file mutation watch --input FILE|- to observe later positive effects in one original
+Zone/subtree. JSON is {zoneId,path,expectedResource:{hostId,workspaceId,workspacePath},spaceId?};
+path:"." observes the original Zone root. Opening returns the resolved resource and delivery:"live-only".
+Path-mutation frames contain the original action, complete request and positive filesystem receipt.
+Created-file hints have only the resource/revision: file.create has no operationId, and this hint
+cannot settle an unknown creation. Managed readers see only their own actor and original caller Host.
+There is no event history or reconnect replay. Each reader holds at most one bounded frame;
+overflow closes only that observation with a gap. Keep pending requests and inspect their original
+operations. Ctrl-C releases this reader without changing files, drafts or healthy Runs.
+
 Use file move --input FILE|- for one exact entry on the same original Host/Workspace/filesystem.
 Read both source and destination with file stat. JSON is
 {operationId,zoneId,path,expectedResource:COMPLETE_SOURCE_RESOURCE,
