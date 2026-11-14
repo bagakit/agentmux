@@ -1,3 +1,4 @@
+import { NativeSelect } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -52,7 +53,7 @@ export function ConnectionHostingSettings(props: { active: boolean; platform: { 
     <div className="channel-environment">
     <section className="channel-hosting" data-connection-hosting>
       <label className="channel-hosting__selection"><span><HostIcon size={15} />Bot hosting</span>
-        <select aria-label="Connector hosting Host" value={target ? 'original' : target === null ? 'unconfirmed' : 'local'} onChange={event => {
+        <NativeSelect aria-label="Connector hosting Host" value={target ? 'original' : target === null ? 'unconfirmed' : 'local'} onChange={event => {
           if (event.target.value === 'local') setRequest('local')
           else if (event.target.value.startsWith('host:')) setRequest(event.target.value.slice(5))
         }}>
@@ -60,7 +61,7 @@ export function ConnectionHostingSettings(props: { active: boolean; platform: { 
           {target === null ? <option value="unconfirmed">Original Host not recorded</option> : null}
           {target ? <option value="original">{target.hostId === 'local' ? 'Background Host on this device' : hosts?.find(host => host.id === target.hostId)?.label ?? target.hostId}</option> : null}
           {hosts?.filter(host => host.id !== 'local').map(host => <option key={host.id} value={'host:' + host.id}>{host.label}</option>)}
-        </select>
+        </NativeSelect>
       </label>
       {Object.values(intents).filter(item => item.channel === channel && item.pending && JSON.stringify(item.target) !== JSON.stringify(target)).map(item => <button key={item.pending!.operationId + JSON.stringify(item.target)} className="small-button" onClick={() => {
         setRequest(null); selectManualConnectionOwner(channel, item.target); setTarget(item.target); setIssue('')

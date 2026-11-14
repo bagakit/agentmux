@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import { channelHeaderChoice } from '../../../../shared/channel-presentation'
 import { useAppStore } from '../../store'
 import { useSettingDraftRecord } from './use-setting-draft'
@@ -18,7 +19,7 @@ export function ChannelHeaderControl({ platform }: { platform: { adapterId: stri
   }
   return <section className="channel-header-control" aria-label={`${platform.title} display`}>
     <label><span><strong>Show in Agent header</strong><small>This App only. Hiding the icon keeps messages running.</small></span>
-      <input type="checkbox" aria-label={`Show ${platform.title} in Agent header`} checked={draft.value.visible !== false} onChange={event => draft.setField('visible', event.target.checked)} /></label>
+      <Switch aria-label={`Show ${platform.title} in Agent header`} checked={draft.value.visible !== false} onChange={event => draft.setField('visible', event.target.checked)} /></label>
     {draft.dirty || save.state !== 'idle' ? <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} blocked={config ? undefined : 'app settings are still loading.'} label="Save display" onSave={() => void submit()} /> : null}
   </section>
 }
