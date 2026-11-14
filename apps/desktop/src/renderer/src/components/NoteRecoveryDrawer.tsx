@@ -31,6 +31,7 @@ export function NoteRecoverySummary({ surface, observation, onView }: {
   if (attempt) facts.push(attempt.phase === 'sending' ? 'Original save in progress' : attempt.phase === 'written' ? 'Saved result needs review' : 'Original save unconfirmed')
   else if (issue?.kind === 'write-unknown') facts.push('Save outcome unconfirmed')
   if (doc?.noteConversion?.unconfirmedWrite || drafts?.some(draft => draft.noteConversion?.unconfirmedWrite)) facts.push('Earlier save unconfirmed')
+  if (doc?.noteEditing?.shareCleanupIssue) facts.push('Shared-reference cleanup unconfirmed')
   if (drafts?.some(draft => draft.noteEditing?.attempt)) facts.push('Kept save request needs review')
   if (observation.issues.length || observation.observationIssue) facts.push('Conversion check needs review')
   if (!facts.length) return null

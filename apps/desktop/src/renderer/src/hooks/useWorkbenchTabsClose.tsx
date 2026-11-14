@@ -48,7 +48,7 @@ export function useWorkbenchTabsClose() {
   const busyDraft = pending?.record.plan.projection.surfaces.some(s => s.blocker === 'draft-busy')
   const dialog = <ConfirmationDialog open={pending !== null} title={copy?.title ?? ''}
     description={(copy?.description ?? '') + (busyDraft ? ' Pending save, shared input or composition stays open; only confirmed independent content can close.' : '')}
-    subject={pending ? pending.record.plan.target.tabId : ''} confirmLabel={copy?.confirmLabel ?? 'Close'}
+    subject={pending?.request.subject ?? ''} confirmLabel={copy?.confirmLabel ?? 'Close'}
     {...(copy?.secondaryLabel ? { secondaryLabel: copy.secondaryLabel, onSecondary: () => void confirm(true) } : {})}
     busy={closing} onCancel={() => !closing && setPending(null)} onConfirm={() => void confirm()} />
   return { request, dialog, closing }

@@ -228,6 +228,7 @@ export function EditorPane({
   const metadataIssues = [historyIssue && 'History unconfirmed', titleIssue && 'Page-list title unconfirmed',
     (document.noteProvenance?.status === 'unconfirmed' || document.noteWriteAttribution?.status === 'unconfirmed') && 'Authorship unconfirmed'].filter(Boolean)
   const recoveryNotices = <>
+        {!previewing && document.noteEditing?.shareCleanupIssue ? <div className="editor-file-notice" role="status">{document.noteEditing.shareCleanupIssue.message}</div> : null}
         {document.noteProvenance?.status === 'unconfirmed' && document.noteWriteAttribution?.status !== 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship is unconfirmed: {document.noteProvenance.reason} Your Note remains readable and editable. <button className="small-button" onClick={() => void refresh(surface.workspaceId, surface.path)}>Check original file</button></div> : null}
         {document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship from the last confirmed save is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
         {pendingNote ? <div className="editor-file-notice" role="status"><span>{pendingNote.phase === 'written'
