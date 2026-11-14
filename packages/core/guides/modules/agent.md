@@ -19,6 +19,11 @@ owns Run/process/bytes. Executor, durable Session, current Run and display Regio
 Begin with agent ls/inspect for the exact Session and routeHostId; preserve original identities
 and unknown receipts. A failed observation never authorizes stopping a healthy Run.
 
+To create from an existing Browser, first read browser --skill and browser agent-workspace
+prepare --help. Its ready receipt supplies the original execution Workspace; preparation
+does not create an Agent. Choose the display target separately through space --skill and
+agent open --help, retaining the Browser's original source and unknown preparation facts.
+
 Use agent provider ls --host HOST [--provider ID] for the original Host’s pure Provider
 declarations, including launch choices and addressable posture modes. It never probes
 executables, installs hooks or starts Native. An empty catalog is confirmed empty; a failed

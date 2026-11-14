@@ -14,6 +14,15 @@ page, user input and unknown operation identity; do not bypass refusal or human 
 
 [Browser target choice](../shared/browser-target-choice.md "amux:include")
 
+Before creating an Agent from an existing Browser, use browser agent-workspace prepare
+--browser ID. Read that leaf's help for --expected, which freezes the original
+{workspaceId,mode,profileId}. The original Browser and Host owners prepare or reuse its
+execution directory and saved Workspace; no Zone, Agent or Run is created by preparation.
+Continue only from outcome=ready and registration=confirmed, using the returned Workspace
+as the execution resource in agent open --help and space --skill. An unconfirmed result
+keeps its directory/registration observations and original page; inspect that same Browser
+and resource before another explicit attempt, without silently choosing another directory.
+
 Read only the matching local help:
 - amux browser profile --help: original Profile identities, routes and usage.
   Use browser profile copy to create a new identity from the source's saved settings,

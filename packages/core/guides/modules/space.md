@@ -19,6 +19,11 @@ A Project is a repository or directory resource, not a Space. A Zone may hold a 
 a plain directory or a Topic/Mote workface. One Session may have several display positions;
 use IDs verbatim and never infer identity from a name, cwd or the first display position.
 
+For an Agent created from an existing Browser, browser agent-workspace prepare supplies
+the execution Workspace through the original Browser/Host owners. Read browser --skill
+for its preparation and ready receipt; it creates no Zone, Agent or Run. Choose a display
+destination here separately, without replacing that execution resource with a view location.
+
 For a shared business Space, keep its original {runtimeId,spaceId} and select an
 already authorized RPC endpoint to that authority. Host labels, a current local route,
 and an identical Space ID on another Runtime are not replacements.
