@@ -20,7 +20,7 @@ import { agentContextForSession, agentContextForConversation, focusRecordFacts, 
 import type { FocusContextAccess } from './focus-context-access'
 import { focusContextIdentityKey, type FocusContextIdentity, type FocusContextOccurrence } from './focus-context-identity'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
-import { focusSourceContextId, focusSourceHostId, focusSourceKey, focusSourceWorkspace, matchingFocusContext, unobservedFocusContext } from './focus-source-model'
+import { focusSourceContextId, focusSourceHistoryNames, focusSourceHostId, focusSourceKey, focusSourceWorkspace, matchingFocusContext, unobservedFocusContext } from './focus-source-model'
 import { readSourceConversationRecap, sourceConversationPort } from './focus-source-conversation'
 import { originalSpaceResource, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from './original-space-navigation'
 
@@ -154,6 +154,8 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   onFocusContext?: (context: FocusContext) => void }) {
   const inputs = useAppStore(state => state.mountedSpaceInputs), observations = useAppStore(state => state.mountedSpaceObservations)
   const metadata = useAppStore(state => state.mountedSpaceSessions), config = useAppStore(state => state.config)
+  const history = useAppStore(state => state.agentFocus.execution.history)
+  const historyNames = useMemo(() => focusSourceHistoryNames(history), [history])
   const catalog = useAppStore(workbenchSelectionCatalog), tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts), bindings = useAppStore(agentRegionLocationBindings)
   const [facts, setFacts] = useState(new Map<string, ReadFact>())
   const [witnesses, setWitnesses] = useState(new Map<string, { runtimeId: string; host: HostConfig | undefined }>())
@@ -359,6 +361,8 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       const issue = [current?.sessionIssue, current?.nameIssue, current?.nameSaveIssue, current?.readingIssue, candidate.issue].filter(Boolean).join(' · ') || undefined
       const session = !current?.sessionIssue && candidate.target && current?.session?.kind === 'agent' && current.session.control.run.runId === candidate.target.target.expectedRun.runId ? current.session : undefined
       const reading = current?.reading && focusRecordFacts(current.reading.records)
+      // A current name reply, including an explicit clear, supersedes visit-time display facts.
+      const userName = current?.name ? current.name.current.override ?? undefined : historyNames.get(candidate.key)
       const readingCurrent = current?.readingCurrent?.()
       const access: FocusContextAccess = { identity: { runtimeId: candidate.runtimeId ?? null, agentSessionId: candidate.sid },
         locations: candidate.locations, ...(session ? { session } : {}),
@@ -368,10 +372,10 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
         ...(readingCurrent && current?.conversationPort ? { conversationPort: current.conversationPort, conversationReference: { hostId: 'local', agentSessionId: candidate.sid }, ...(current.readConversation ? { readConversation: current.readConversation } : {}) } : {}),
         ...(issue ? { issue } : {}), open: (location?: FocusContextAccess['locations'][number]) => navigate('workbench', location), select: (location?: FocusContextAccess['locations'][number]) => navigate('agents', location), refresh: refreshCandidate, close: (location?: FocusContextAccess['locations'][number]) => navigate('close', location) }
       let context = session ? current?.reading
-        ? agentContextForConversation(session, current.reading.records, current.name?.current.override ?? undefined, workspace, null)
-        : agentContextForSession(session, undefined, current?.name?.current.override ?? undefined, workspace, null)
+        ? agentContextForConversation(session, current.reading.records, userName, workspace, null)
+        : agentContextForSession(session, undefined, userName, workspace, null)
         : { ...unobservedFocusContext(candidate.runtimeId ?? '', candidate.sid, workspace,
-          agentDisplayName({ userName: current?.name?.current.override, firstPrompt: reading?.firstPrompt,
+          agentDisplayName({ userName, firstPrompt: reading?.firstPrompt,
             fallbackLabel: current?.session?.label ?? `Agent · ${candidate.sid}`, providerLabel: current?.session?.kind === 'agent' ? current.session.providerId : 'Agent' }), access.issue, access),
           ...(current?.session?.kind === 'agent' ? { providerId: current.session.providerId, executorId: current.session.executorId } : {}), recap: reading?.recap ?? null }
       const { control: _control, ...readOnly } = context
@@ -389,6 +393,6 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       readers.push(<MemberReader key={'member:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0}  />)
     }
     return { contexts: rows, identities, aliases, issues, readers: <Fragment>{readers}</Fragment> }
-  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, refreshes, inputs, layouts, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
+  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, historyNames, refreshes, inputs, layouts, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
   return result
 }

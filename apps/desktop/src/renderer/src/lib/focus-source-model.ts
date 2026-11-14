@@ -3,12 +3,25 @@ import type { SpaceMountRecord } from '../../../shared/space-mount'
 import type { AppConfig, WorkspaceRecord } from '../../../shared/contracts'
 import type { FocusContext } from './focus-context'
 import type { FocusContextAccess } from './focus-context-access'
+import type { AgentFocusHistoryEntry } from './agent-focus'
 import type { MountedSpaceRegion } from './space-mount-view'
 
 /** Stable semantic identity; presentation, Run and access route never mint another task. */
 export const focusSourceKey = (runtimeId: string, agentSessionId: string) => JSON.stringify([runtimeId, agentSessionId])
 export const focusSourceContextId = (runtimeId: string, agentSessionId: string) => JSON.stringify(['source-agent', runtimeId, agentSessionId])
 export const focusSourceHostId = (runtimeId: string) => JSON.stringify(['source-runtime', runtimeId])
+
+/** Existing visit observations supply display names, never current access or Run facts. */
+export function focusSourceHistoryNames(history: readonly AgentFocusHistoryEntry[]): ReadonlyMap<string, string> {
+  const names = new Map<string, string>()
+  for (const { identity } of history) {
+    const source = identity?.source
+    if (identity?.kind !== 'agent' || !source?.runtimeId || !identity.name.trim()) continue
+    const key = focusSourceKey(source.runtimeId, source.agentSessionId)
+    if (!names.has(key)) names.set(key, identity.name)
+  }
+  return names
+}
 const resourceIndexes = new WeakMap<AppConfig, Map<string, WorkspaceRecord[]>>()
 
 /** These resources are the answering Source's own facts, never a path-name guess. */
