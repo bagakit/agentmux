@@ -1,8 +1,9 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { useEffect, useState } from 'react'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import { NotebookDirectoryContextMenu, type NoteTalkHandler } from './NotebookDirectoryContextMenu'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
-import { NoteCanvas, type NoteCanvasProps } from './NoteCanvas'
+import type { NoteCanvas, NoteCanvasProps } from './NoteCanvas'
 
 const ThemeObjectTreeIcon = semanticIconComponent('object.tree')
 const ThemeLayoutGridIcon = semanticIconComponent('layout.grid')
@@ -30,5 +31,26 @@ export function NotebookCards({ pages, onOpen, onTalk }: { pages: NotebookPage[]
   </button>)}</div></NotebookDirectoryContextMenu>
 }
 export function NotebookGraph({ notebookId, pages, onOpen, onOpenFile, onTalk, active = true, expandOnFirstView = true }: { notebookId: string; pages: NotebookPage[]; onOpen(page: NotebookPage, blockId?: string): void; onOpenFile?: NoteCanvasProps['onOpenFile']; onTalk?: NoteTalkHandler | undefined; active?: boolean; expandOnFirstView?: boolean }) {
-  return <NoteCanvas scope={{ kind: 'notebook', notebookId }} seedNoteIds={pages.map(page => page.noteId)} expandOnFirstView={expandOnFirstView} active={active} onOpen={onOpen} onOpenFile={onOpenFile} onTalk={onTalk} />
+  const [Canvas, setCanvas] = useState<typeof NoteCanvas>()
+  const [loadFailed, setLoadFailed] = useState(false)
+  useEffect(() => {
+    if (!active || Canvas || loadFailed) return
+    let current = true
+    void import('./NoteCanvas').then(({ NoteCanvas }) => {
+      if (current) setCanvas(() => NoteCanvas)
+    }, () => { if (current) setLoadFailed(true) })
+    return () => { current = false }
+  }, [active, Canvas, loadFailed])
+
+  if (!Canvas) return active ? <section className="note-canvas" aria-label="Notebook graph">
+    <div className="note-canvas-stage">
+      <div className="note-canvas-empty" role="status">
+        <ThemeObjectBranchIcon size={24} aria-hidden="true" />
+        <strong>{loadFailed ? 'Could not open the Notebook graph.' : 'Opening Notebook graph…'}</strong>
+        {loadFailed ? <button type="button" onClick={() => setLoadFailed(false)}>Retry graph</button> : null}
+      </div>
+    </div>
+  </section> : null
+
+  return <Canvas scope={{ kind: 'notebook', notebookId }} seedNoteIds={pages.map(page => page.noteId)} expandOnFirstView={expandOnFirstView} active={active} onOpen={onOpen} onOpenFile={onOpenFile} onTalk={onTalk} />
 }
