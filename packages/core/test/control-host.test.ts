@@ -1050,6 +1050,12 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'browser.profile.update': 'long',
       'browser.profile.set-default': 'long',
       'browser.profile.delete': 'long',
+      'browser.profile.cookie-file.prepare-import': 'long',
+      'browser.profile.cookie-file.import': 'long',
+      'browser.profile.cookie-file.export': 'long',
+      'browser.profile.cookie-file.inspect': 'short',
+      'browser.profile.cookie-file.discard': 'long',
+      'browser.profile.cookie-file.reveal': 'short',
       // replay 会把录下来的步骤真的重放到页面上——它就是一次 browser.run，只是程序是我们生成的。
       // 给短预算等于把一次正常回放掐成 CONTROL_TIMEOUT，而此时页面上已经点过几下了。
       'browser.replay': 'long',
