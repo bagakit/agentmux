@@ -38,6 +38,7 @@ it('actual main paints the original connection page while explicit pin metadata 
   const read = vi.fn(() => new Promise<Response>(resolve => { release = resolve })); vi.stubGlobal('fetch', read); ports.connect.mockResolvedValue(f.client)
   const digest = 'sha256:' + '7'.repeat(64)
   await entry(connectionLinkUrl(location.origin + mobileAssetNamespace(digest), original))
+  await wait(() => expect(document.querySelector('.mobile-connect-page')).not.toBeNull())
   expect(document.querySelector('.mobile-connect-page')).not.toBeNull(); expect(document.querySelector('.mobile-connect-dragon')).not.toBeNull()
   expect(document.body.textContent).toContain('正在读取连接'); expect(read).toHaveBeenCalledTimes(1); expect(ports.connect).not.toHaveBeenCalled(); expect(localStorage.getItem(OFFER)).toBeNull()
   await act(async () => release(response(original)))
