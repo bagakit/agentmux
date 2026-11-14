@@ -11,9 +11,15 @@ export type MobileConversationSession = { session: AgentMuxAgentSession | null; 
 /** Read this original owner's exact identity; a cache miss supplies no lifecycle fact. */
 export async function readMobileConversationSession(client: AgentMuxHostedClient, id: string): Promise<MobileConversationSession> {
   try {
-    const session = await client.readAgentSession(id)
+    let session: AgentMuxAgentSession | null = null
+    try { session = await client.readAgentSession(id) }
+    catch (error) {
+      // A deleted current row can reject its point read; still require the exact
+      // retained descriptor before adopting any terminal record state.
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'AGENT_SESSION_RECORD_DELETED') throw error
+    }
     if (session) {
-      if (session.agentSessionId !== id) throw new Error('返回的对话信息与当前选择不一致。')
+      if (session.agentSessionId !== id) throw new Error('对话当前不能投递：返回的对话信息与当前选择不一致。')
       return { session, metadata: { state: 'active', issue: null } }
     }
     const sources = await client.sessionHistorySources({ agentSessionId: id })

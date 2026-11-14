@@ -1,6 +1,7 @@
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { isHostedAgentSessionSummary } from '@agentmux/core/hosted'
 import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
@@ -101,7 +102,7 @@ type MobilePromptControllerOptions = {
   connection: MobileConnection
   disconnected: boolean
   visible: boolean
-  refresh: () => Promise<unknown>
+  refresh: (includeMetadata?: boolean) => Promise<unknown>
 }
 export type MobilePromptPreparation = {
   prepare(body: string): Promise<string>
@@ -502,10 +503,13 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       client, sessionId: session.agentSessionId, hostId: session.hostId, runId: session.run.runId,
       runtimeId: client.runtimeOwnerIdentity?.()?.runtimeId ?? null
     } : null
-    const assertPreparedTarget = () => {
+    const assertPreparedTarget = async () => {
       if (preparing.cancelled) throw new Error('发送准备已取消。')
       if (!preparation) return
+      const selected = preparedTarget ? await readSession(preparedTarget.client, preparedTarget.sessionId) : null
+      if (preparing.cancelled) throw new Error('发送准备已取消。')
       if (!preparedTarget || current.current.client !== preparedTarget.client || current.current.agentSessionId !== preparedTarget.sessionId ||
+          selected?.hostId !== preparedTarget.hostId || selected.run.runId !== preparedTarget.runId ||
           preparedTarget.client.runtimeOwnerIdentity?.()?.runtimeId !== preparedTarget.runtimeId) {
         throw new Error('这条带附件的消息所在的页面、对话、Mac 或工作面已改变，这次没有发送。')
       }
@@ -519,7 +523,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
         if (preparing.cancelled || current.current.client !== source || current.current.agentSessionId !== id || source.runtimeOwnerIdentity?.()?.runtimeId !== runtimeId ||
             session && (session.hostId !== selected.hostId || session.run.runId !== selected.run.runId)) throw new Error('这条带附件的消息所在的页面、对话或 Mac 已改变，这次没有发送。')
         preparedTarget = { client: source, sessionId: id, hostId: selected.hostId, runId: selected.run.runId, runtimeId }
-        body = await preparation.prepare(initialBody); assertPreparedTarget()
+        body = await preparation.prepare(initialBody); await assertPreparedTarget()
       }
       catch (error) {
         if (mounted.current && !preparing.cancelled) setPreparationIssue({ client, sessionId: agentSessionId, message: errorMessage(error) })
@@ -602,12 +606,12 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
         if (!await local.save()) throw new Error('这台手机上的工作面已被替换，这次没有发送。')
         redraw(value => value + 1)
         if (attempts.current.get(originalKey) !== original) throw new Error('另一个页面已保存这条消息，这次没有发送。请核对两份正文。')
-        assertPreparedTarget()
-        if (preparation) { await preparation.commit(); assertPreparedTarget() }
+        await assertPreparedTarget()
+        if (preparation) { await preparation.commit(); await assertPreparedTarget() }
         stage = 'core-submit'
         original.inputRequested = true; if (!await local.save()) throw new Error('这台手机上的工作面已被替换，这次没有发送。')
         if (attempts.current.get(originalKey) !== original) throw new Error('消息记录已在别处更新，这次没有发送。请核对记录。')
-        assertPreparedTarget()
+        await assertPreparedTarget()
         if (current.current.client !== originalClient || current.current.agentSessionId !== originalId || original.originalRuntimeId && originalClient.runtimeOwnerIdentity?.()?.runtimeId !== original.originalRuntimeId) throw Object.assign(new Error('这条消息所在的页面或 Mac 已改变，这次没有发送。'), { code: 'STALE_AGENT_SESSION' })
         rpcRequested = true
         const pendingReceipt = sendOriginalPrompt(originalClient, original, { agentSessionId: originalId, operationId: original.operationId,
@@ -625,7 +629,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
           if (!observeInputReceipt(originalKey, original, receipt)) throw Object.assign(
             new Error('返回的是另一条消息的确认，没有采用。'), { code: 'CONTROL_PROTOCOL_ERROR' })
         } else confirmPrompt(originalKey, original)
-        if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void refresh()
+        if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void refresh(false)
       } catch (error) {
         if (!rpcRequested) original.inputRequested = false
         if (preparing.cancelled && !rpcRequested) {
@@ -688,6 +692,10 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       if (originalRuntimeId && originalClient.runtimeOwnerIdentity?.()?.runtimeId !== originalRuntimeId) {
         throw Object.assign(new Error('当前连接的不是这条消息所在的 Mac，不会发到另一台 Mac。'), { code: 'STALE_AGENT_SESSION' })
       }
+      let cached: AgentMuxAgentSession | undefined
+      try { cached = originalClient.agentSession(originalId) } catch { /* Missing cache is not a gate. */ }
+      if (original.phase === 'unknown' && cached && isHostedAgentSessionSummary(cached) && cached.promptCompletionAdmission?.submissionId !== original.operationId) throw Object.assign(
+        new Error('对话或投递条件无法完整核实，这次没有发送。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
       const originalSession = await readSession(originalClient, originalId)
       if (action.cancelled || attempts.current.get(originalKey) !== original) return
       if (current.current.client !== originalClient || current.current.agentSessionId !== originalId || originalRuntimeId && originalClient.runtimeOwnerIdentity?.()?.runtimeId !== originalRuntimeId) throw Object.assign(
@@ -742,7 +750,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       action.dispatched = true; action.allowUpdate(); if (mounted.current) redraw(value => value + 1)
       await pending
       confirmPrompt(originalKey, original)
-      if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void refresh()
+      if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void refresh(false)
     } catch (error) {
       original.phase = previousPhase
       if (!action.cancelled) await retainFailure(original, seed, error, stage, originalClient, originalKey, true)

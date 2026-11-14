@@ -11,7 +11,13 @@ export type MobileConnection = { state: 'unavailable' | 'connecting' | 'connecte
 type PageOwner = { client: AgentMuxHostedClient; agentSessionId: string; hostId?: string; workspacePath?: string }
 type Metadata = { owner: AgentMuxHostedClient | null; id: string | null; session: AgentMuxAgentSession | null; metadata: MobileConversationMetadata; agentIssue: string | null; disconnected: boolean;
   activity: { owner: object; hostId: string; runId: string; observation: AgentObservation } | null }
-const empty = (id: string | null, owner: AgentMuxHostedClient | null): Metadata => ({ owner, id, session: null, metadata: { state: 'loading', issue: null }, agentIssue: null, disconnected: false, activity: null })
+const empty = (id: string | null, owner: AgentMuxHostedClient | null): Metadata => {
+  // Keep an already accepted bootstrap binding usable while the exact read is
+  // pending. Cached data neither confirms metadata nor clears an earlier issue.
+  let session: AgentMuxAgentSession | null = null
+  try { const cached = id && owner ? owner.agentSession(id) : null; if (cached?.agentSessionId === id) session = cached } catch { /* Point reading owns the result. */ }
+  return { owner, id, session, metadata: { state: 'loading', issue: null }, agentIssue: null, disconnected: false, activity: null }
+}
 const sameSource = (a: AgentSessionHistoryPage, b: AgentSessionHistoryPage) => a.agentSessionId === b.agentSessionId && a.sourceHostId === b.sourceHostId && a.source.providerId === b.source.providerId && a.source.nativeSessionId === b.source.nativeSessionId
 
 /** Complete accepted public Reader frames; transport loss retains the original view and resource owner. */
@@ -40,14 +46,14 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
   metadataScope.current.client = client; metadataScope.current.id = id
   const metadataEpoch = useRef(0)
   useEffect(() => { metadataScope.current.mounted = true; return () => { metadataScope.current.mounted = false } }, [])
-  const readMetadata = useCallback(async (preferCache = false) => {
+  const readMetadata = useCallback(async () => {
     if (!client || !id) return null
     const generation = ++metadataEpoch.current
-    let cached: AgentMuxAgentSession | null = null
-    if (preferCache) { try { cached = client.agentSession(id) } catch { /* Read the exact owner below. */ } }
-    const result = cached?.agentSessionId === id ? { session: cached, metadata: { state: 'active' as const, issue: null } }
-      : await readMobileConversationSession(client, id)
-    if (!metadataScope.current.mounted || metadataScope.current.client !== client || metadataScope.current.id !== id || generation !== metadataEpoch.current) return null
+    const expectedOwner = client.runtimeOwnerIdentity?.()
+    const result = await readMobileConversationSession(client, id)
+    const currentOwner = client.runtimeOwnerIdentity?.()
+    if (!metadataScope.current.mounted || metadataScope.current.client !== client || metadataScope.current.id !== id || generation !== metadataEpoch.current ||
+        (['runtimeId', 'ownerInstanceId'] as const).some(key => expectedOwner?.[key] && expectedOwner[key] !== currentOwner?.[key])) return null
     setMetadata(previous => {
       const original = previous.id === id && previous.owner === client ? previous : empty(id, client)
       return { ...original, session: result.metadata.state === 'unconfirmed' ? original.session : result.session, metadata: result.metadata }
@@ -62,8 +68,8 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
     if (!client || !id || !active) return
     const patch = (next: Partial<Metadata>) => { if (live) setMetadata(value => ({ ...(value.id === id && value.owner === client ? value : empty(id, client)), ...next })) }
     function clearActivity() { epoch++; if (expiry) clearTimeout(expiry); expiry = undefined; patch({ activity: null }) }
-    async function sessionMetadata(exact = false): Promise<void> {
-      const result = await readMetadata(!exact)
+    async function sessionMetadata(): Promise<void> {
+      const result = await readMetadata()
       if (!live || !result) return
       latestSession = result.metadata.state === 'unconfirmed' ? latestSession : result.session
       if (latestSession && result.metadata.state === 'active') void readActivity()
@@ -93,7 +99,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       if (!live) return
       if (event.type === 'connection-state') {
         clearActivity(); patch({ disconnected: event.state !== 'restored' })
-        if (event.state === 'restored') { void sessionMetadata(true); void view.resume(); if (hasQuestion) void answers.resume() }
+        if (event.state === 'restored') { void sessionMetadata(); void view.resume(); if (hasQuestion) void answers.resume() }
       } else if (event.type === 'agent-session' && event.session.agentSessionId === id) {
         clearActivity(); void sessionMetadata()
       } else if ((event.type === 'agent-status' || event.type === 'process-state') && event.agentSessionId === id) {
@@ -101,7 +107,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       } else if (event.type === 'agent-error' && (!event.agentSessionId || event.agentSessionId === id)) {
         patch({ agentIssue: event.message })
       } else if (event.type === 'run-removed' && event.agentSessionId === id || event.type === 'agent-session-record-deleted' && event.agentSessionId === id) {
-        clearActivity(); void sessionMetadata(true)
+        clearActivity(); void sessionMetadata()
       }
     })
     const foreground = () => { if (document.hidden) clearActivity(); else void readActivity() }
@@ -109,7 +115,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
     void sessionMetadata()
     return () => { live = false; if (expiry) clearTimeout(expiry); document.removeEventListener('visibilitychange', foreground); unlisten() }
   }, [client, id, active, activityOwner, view.resume, answers.resume, hasQuestion, readMetadata])
-  const refresh = useCallback(async () => { await Promise.all([view.refresh(), readMetadata()]) }, [view.refresh, readMetadata])
+  const refresh = useCallback(async (includeMetadata = true) => { await Promise.all([view.refresh(), ...(includeMetadata ? [readMetadata()] : [])]) }, [view.refresh, readMetadata])
   const activity = active && selected.activity?.owner === activityOwner &&
     selected.activity.hostId === selected.session?.hostId && selected.activity.runId === selected.session?.run.runId ? selected.activity.observation : null
   return { id: selected.id, metadataClient: selected.owner, agentIssue: selected.agentIssue, session: selected.session, metadata: selected.metadata, disconnected: selected.disconnected, activity, readProcessDetail: view.readProcessDetail, held: view.held, acceptHeld: view.acceptHeld, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
