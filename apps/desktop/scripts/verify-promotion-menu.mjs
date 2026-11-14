@@ -57,5 +57,5 @@ if (process.argv.includes('--prepare')) {
  const design = await json(join(evidence, 'icon-discussion.json')); assert.equal(design.participant, 'UtScXtMzkxky'); assert.ok(design.replyMessageId)
  const receipt = { ...prepared, discussion: design, independentlyReviewed: true, boundary: visual.boundary }
  await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2))
- console.log('Promotion menus: 9 behavior tests, 3 actual implementation mutations, original icon discussion and 16 independently reviewed Renderer frames match the current candidate.')
+ console.log('Promotion menus: 9 behavior tests, 3 actual implementation mutations, original icon discussion and 16 captured Renderer frames with independent review of the affected menus and settings match the current candidate.')
 }
