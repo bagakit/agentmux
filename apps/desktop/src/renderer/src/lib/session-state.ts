@@ -33,6 +33,7 @@ import {
 } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
 import { agentSessionPresentationIndex } from './session-presentation'
+import { shallow } from 'zustand/shallow'
 
 export type SessionViewMode = 'terminal' | 'activity'
 
@@ -797,32 +798,29 @@ export function projectRuntimeEvent(
       observedAt: core.evidence.observedAt,
       ...runExitFacts(core)
     })
-    return { state: {
-      ...state,
-      ...(core.state !== 'running' && existingEventSession && ownsRunEvent(existingEventSession, core.agentSessionId, core.run) && core.evidence.observedAt >= existingEventSession.status.observedAt
-        ? { timelines: clearLiveTool(state.timelines, existingEventSession.id) } : {}),
-      sessions: state.sessions.map((item) =>
-        item.hostId === event.hostId && (core.agentSessionId === undefined || item === existingEventSession) && ownsRunEvent(item, core.agentSessionId, core.run) &&
-        core.evidence.observedAt >= item.status.observedAt
-          ? (() => {
-              const { interruptionReason: _interruptionReason, runUnobserved: _runUnobserved, ...current } = item
-              return {
-                ...current,
-                processState: core.state,
-                ...runInterruptionFact(core),
-                updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
-                ...(
-                  item.kind === 'agent' &&
-                  core.state === 'running' &&
-                  isAgentActivityStatusSource(item.status.source)
-                    ? {}
-                    : { status: retainContinuityFailure(item.status, processStatus, core.state === 'running') }
-                )
-              }
-            })()
-          : item
-      )
-    } }
+    const timelines = core.state !== 'running' && existingEventSession && ownsRunEvent(existingEventSession, core.agentSessionId, core.run) && core.evidence.observedAt >= existingEventSession.status.observedAt
+      ? clearLiveTool(state.timelines, existingEventSession.id) : state.timelines
+    let sessions = state.sessions
+    for (const [index, item] of state.sessions.entries()) {
+      if (item.hostId !== event.hostId || (core.agentSessionId !== undefined && item !== existingEventSession) ||
+        !ownsRunEvent(item, core.agentSessionId, core.run) || !(core.evidence.observedAt >= item.status.observedAt)) continue
+      const incomingStatus = item.kind === 'agent' && core.state === 'running' && isAgentActivityStatusSource(item.status.source)
+        ? item.status : retainContinuityFailure(item.status, processStatus, core.state === 'running')
+      const { interruptionReason: _interruptionReason, runUnobserved: _runUnobserved, ...current } = item
+      const projected = {
+        ...current,
+        processState: core.state,
+        ...runInterruptionFact(core),
+        updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
+        status: shallow(item.status, incomingStatus) ? item.status : incomingStatus
+      }
+      // Compare the complete projection, including optional removal and evidence clocks.
+      // Unchanged nested facts already retain their references; never walk their large bodies.
+      if (shallow(item, projected)) continue
+      if (sessions === state.sessions) sessions = state.sessions.slice()
+      sessions[index] = projected
+    }
+    return { state: sessions === state.sessions && timelines === state.timelines ? state : { ...state, sessions, timelines } }
   }
   if (core.type === 'agent-status') {
     const item = existingEventSession
