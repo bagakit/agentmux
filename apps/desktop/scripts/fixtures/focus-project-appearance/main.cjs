@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), vm = require('node:vm')
 const { app, BrowserWindow, ipcMain, nativeImage } = require('electron')
-const [html, privateRoot, evidence] = process.argv.slice(2)
+const [html, privateRoot, evidence, mode] = process.argv.slice(2)
+const containerOrder = mode === '--container-order'
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { schema: 'agentmux.focus-project-appearance-actual.v1', passed: false, frames: [], scenarios: [], rendererConsole: [],
   boundary: 'Actual App/GlobalFocusSurface/project preference consumer. Private image transport uses original Main projectAppearance on controlled fixture files; PTY/Monaco painting and Runtime are isolated. No user navigation, Session control, restart or installation proof.' }
@@ -67,6 +68,7 @@ app.whenReady().then(async () => { try {
   assert.equal(alpha.entries, 1); assert.equal(alpha.branches, 1); assert.equal(alpha.zones, 3); assert.equal(alpha.watermarks, 1)
   assert.ok(result.initial.groups.every(group => group.entries === 1 && group.watermarks <= 1))
   assert.ok(!result.initial.calls.some(id => id.startsWith('branch-') || id === 'orphan'), 'No branch is probed as a project root')
+  if (!containerOrder) {
   for (const theme of ['dark', 'light']) {
     await read(`window.appearanceProof.theme(${JSON.stringify(theme)})`)
     for (const width of [1440, 640, 360]) { win.setContentSize(width, 900); await ensureFocus();await read("document.querySelector('.focus-project-lanes__rows').scrollTop=0"); await frame(`${theme}-groups-${width}.png`, `${theme} full project grouping at ${width}`) }
@@ -102,8 +104,9 @@ app.whenReady().then(async () => { try {
     await key('Escape'); await until('editor dismissed', () => read('!document.querySelector("[data-focus-project-preferences]")'))
     await read('window.appearanceProof.failSave(false)')
   }
-  await require('./organization-scene.cjs')({ win, read, click, frame, until, settle, result })
-  await require('./reading-scene.cjs')({ win, read, click, frame, until, settle, result })
+  }
+  await require('./organization-scene.cjs')({ win, read, click, frame, until, settle, result, containerOrder })
+  if (!containerOrder) await require('./reading-scene.cjs')({ win, read, click, frame, until, settle, result })
   result.final = await read('window.appearanceProof.facts()'); result.imageCalls = imageCalls
   assert.ok(imageCalls.some(call => call.workspaceId === 'alpha' && call.realImage), 'Original Main recognizer actually loaded a project image')
   result.passed = true

@@ -525,6 +525,7 @@ try {
   const first = await launch('first', seed), before = await surface(first)
   if (workfaceJoin) {
     assert.equal(projectRoutesJoin ? before.projectPreferences : before.topicPresentation, projectRoutesJoin ? '[]' : 'cards'); assert.ok(before.regions.includes(agentRegionId)); assert.ok(before.regions.includes(fileRegionId))
+    if (projectRoutesJoin) assert.equal(before.projectGroup?.organization, 'cards', 'Ordinary Project defaults to Zone tags before authored preferences')
     assert.deepEqual(before.selection, receipt.originalSelection)
     assert.ok(before.workbench.regions.some(region => region.regionId === agentRegionId && region.agentSessionId === session.agentSessionId))
     receipt.workfaceGraphs = { before: await hostArtifact('first-before-core-graph.json', before.workbench) }

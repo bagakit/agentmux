@@ -115,6 +115,6 @@ window.appearanceProof = {
   theme: appAppearance => useAppStore.setState(state => ({ config: { ...state.config, appearance: { ...state.config.appearance, appAppearance } } })),
   failSave(value) { saveFailure = value },
   async finishUnknown() { pending.get('unknown-image')?.({ kind: 'directory', icon: null }) },
-  facts() { const state = useAppStore.getState(); return { mainSurface: state.mainSurface, focusView: state.focusView, calls: [...calls], groups: [...document.querySelectorAll('[data-project-group-key]')].map(group => ({ key: group.dataset.projectGroupKey,
+  facts() { const state = useAppStore.getState(); return { mainSurface: state.mainSurface, focusView: state.focusView, organizationPreferences: state.config.focus?.zonePresentations ?? [], calls: [...calls], groups: [...document.querySelectorAll('[data-project-group-key]')].map(group => ({ key: group.dataset.projectGroupKey,
     entries: group.querySelectorAll('.focus-project-preferences__trigger').length, branches: group.querySelectorAll('[data-lane-id]').length, zones: new Set([...group.querySelectorAll('[data-focus-zone-id]')].map(element => element.dataset.focusZoneId)).size, watermarks: group.querySelectorAll('[data-project-watermark]').length })) } }
 }
