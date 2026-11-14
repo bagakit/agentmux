@@ -30,7 +30,8 @@ for await (const line of createInterface({ input: process.stdin })) {
   const { id, method, params, result } = JSON.parse(line)
   appendFileSync(process.env.ACP_RUN_TRACE, JSON.stringify({ pid: process.pid, id, method: method ?? 'client-response', params, result }) + '\n')
   const reply = result => send({ id, result })
-  if (method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } })
+  if (method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} },
+    ...(process.env.ACP_RUN_IMAGES === 'enabled' ? { promptCapabilities: { image: true } } : {}) } })
   else if (method === 'session/new') {
     while (!existsSync(process.env.ACP_RUN_RELEASE)) await setTimeout(20)
     reply({ sessionId, configOptions: configuration })
@@ -48,7 +49,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     reply({ configOptions: configuration })
   } else if (method === 'session/prompt' && params.sessionId === sessionId && typeof id === 'string' && !pendingPrompt) {
     const draft = params.prompt?.[0]?.text
-    if (draft?.endsWith('Original creation draft') || draft?.endsWith('Original resumed draft')) {
+    if (draft?.endsWith('Original creation draft') || draft?.endsWith('Original resumed draft') || draft?.startsWith('Read the original ')) {
       reply({ stopReason: 'end_turn' })
     } else {
       pendingPrompt = id

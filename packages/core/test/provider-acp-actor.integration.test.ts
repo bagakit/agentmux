@@ -7,6 +7,8 @@ import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import type { AgentMuxRunRef } from '../src/types.js'
 import { AgentMuxSpatialStateStore } from '../src/spatial-state.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { fileUploadRevision } from '../src/public-rpc-files.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 
 const exec = promisify(execFile)
@@ -278,3 +280,83 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     } finally { await scope.cleanup() }
   }
 }, 65_000)
+
+
+it.each([true, false])('delivers an exact Host upload only when the original ACP subprocess advertises images (%s)', async imageSupported => {
+  const scope = await headlessFixture({ ownerEntry: entry('./fixtures/acp-spatial-host.mjs'),
+    ownerNodeArgs: ['--experimental-transform-types', '--import', entry('./fixtures/acp-spatial-host-loader.mjs')] })
+  const core = await scope.client()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: scope.socketPath } })
+  let original: { agentSessionId: string; run: AgentMuxRunRef } | undefined
+  try {
+    const trace = join(scope.root, 'acp-image.ndjson'), release = join(scope.root, 'release-original-session')
+    await writeFile(release, 'ready')
+    const executorId = 'native-acp-image-test'
+    await core.configureHostExecutor({ executorId, config: {
+      providerId: 'antigravity', label: 'Original ACP image fixture', command: entry('./fixtures/acp-run-cli.mjs'),
+      args: [], env: { ACP_RUN_TRACE: trace, ACP_RUN_RELEASE: release, ACP_RUN_IMAGES: imageSupported ? 'enabled' : 'absent' },
+      injectAgentMuxGuide: false
+    } })
+    const spatial = new AgentMuxSpatialStateStore(join(scope.env.AGENTMUX_STATE_DIRECTORY!, 'spatial-state.json'))
+    const { spaceId, zoneId } = (await spatial.read())!.graph.bindings[0]!
+    const options = join(scope.root, 'launch-options.json')
+    await writeFile(options, JSON.stringify({ interaction: 'acp' }))
+    const cli = [entry('../bin/amux'), '--endpoint', `unix:${scope.socketPath}`]
+    const opened = await exec(process.execPath, [...cli, 'agent', 'open', '--space', spaceId, '--zone', zoneId, '--new-tab',
+      '--executor', executorId, '--launch-options', options, '--operation-id', 'original-image-conversation'], { env: scope.env })
+    const { agent } = JSON.parse(opened.stdout).result
+    original = { agentSessionId: agent.agentSessionId, run: { runId: agent.runId } }
+    const { agentSessionId, run } = original
+    const nativeSessionId = 'fixture-original-acp-session'
+    await until(() => core.readAgentSession(agentSessionId), state => state?.nativeHandle?.sessionId === nativeSessionId, 'the exact native image-session endpoint')
+    const calls = async (): Promise<RecordedRequest[]> => (await readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    const nativePid = (await calls())[0]!.pid
+    const dataBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='
+    const bytes = Buffer.from(dataBase64, 'base64')
+    const upload = { hostId: 'local', agentSessionId, expectedRun: run, operationId: 'exact-original-acp-upload',
+      name: 'image.png', mimeType: 'image/png', byteLength: bytes.length, revision: fileUploadRevision(bytes) }
+    expect(await rpc.call('file.upload', { ...upload, dataBase64 })).toMatchObject({ status: 'uploaded' })
+    const prompt = 'Read the original @image.png'
+    const reference = { upload, start: prompt.indexOf('@'), end: prompt.length, bodyRevision: fileUploadRevision(new TextEncoder().encode(prompt)) }
+    const promptFile = join(scope.root, 'prompt.json')
+    const submit = async (operationId: string, inputImages: typeof reference[], promptText = prompt) => {
+      await writeFile(promptFile, JSON.stringify({ expectedRun: run, prompt: promptText, inputImages,
+        admissionIntent: { kind: 'session-conversation' }, execution: 'immediate' }))
+      return JSON.parse((await exec(process.execPath, [...cli, 'agent', 'input', 'submit', '--session', agentSessionId,
+        '--operation-id', operationId, '--input', promptFile], { env: scope.env })).stdout).result
+    }
+    const receipt = await submit('original-prompt-with-image', [reference])
+    const inspect = () => rpc.call('agent.input.inspect', { key: receipt.key })
+    if (imageSupported) {
+      const sent = await until(calls, value => value.some(request => request.method === 'session/prompt'),
+        'the original prompt and image content on the native subprocess', 6_000)
+        .catch(async error => { throw new Error(JSON.stringify(await inspect()), { cause: error }) })
+      const nativePrompt = sent.find(request => request.method === 'session/prompt')!
+      expect(nativePrompt).toMatchObject({ pid: nativePid, params: { sessionId: nativeSessionId,
+        prompt: [{ type: 'text', text: prompt }, { type: 'image', mimeType: 'image/png', data: dataBase64 }] } })
+      const admitted = await until(() => core.inspectAgentPromptSubmission(receipt.key), value => value?.admission?.native?.outcome === 'admitted',
+        'the original native image input acknowledgement')
+      expect(admitted?.admission).toMatchObject({ native: { requestId: nativePrompt.id }, intent: { message: { inputImages: [{ upload }] } } })
+      expect(JSON.stringify(admitted)).not.toContain(dataBase64)
+    } else {
+      const waiting = await until(inspect, value => JSON.stringify(value).includes('AGENT_ACP_PROMPT_CONTENT_UNSUPPORTED'),
+        'confirmed negotiation refusal for this exact original image input')
+      expect(waiting.input).toMatchObject({ key: receipt.key, status: 'waiting', persistence: 'confirmed' })
+      expect(await rpc.call('agent.input.resource', { key: receipt.key, index: 0, revision: upload.revision, maxBytes: bytes.length }))
+        .toMatchObject({ status: 'available', dataBase64 })
+      expect(await core.inspectAgentPromptSubmission(receipt.key)).toBeNull()
+      expect((await calls()).map(request => request.method)).toEqual(['initialize', 'session/new'])
+      await submit('ordinary-text-same-native-session', [], 'Read the original text')
+      const text = await until(calls, value => value.some(request => request.method === 'session/prompt'),
+        'ordinary text still reaches the same native subprocess')
+      expect(text.at(-1)).toMatchObject({ pid: nativePid, params: { sessionId: nativeSessionId, prompt: [{ type: 'text', text: 'Read the original text' }] } })
+    }
+  } finally {
+    try {
+      if (original) await core.stopAgent(original.agentSessionId, original.run, { operationId: 'stop-original-acp-image-session' }).catch(() => {})
+    } finally {
+      await rpc.dispose()
+      await scope.cleanup()
+    }
+  }
+}, 50_000)
