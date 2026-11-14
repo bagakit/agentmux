@@ -65,6 +65,8 @@ export function MediaTimeline({ bounds, fraction, buffered, label, valueText, cl
       onPointerMove={onPointerMove} onPointerLeave={() => { thumbWidth.current = null; setHover(null) }} onPointerDown={onPointerDown}
       onChange={event => { if (bounds) onScrub(bounds.start + Number(event.currentTarget.value) / TIMELINE_STEPS * span) }}
       onPointerUp={land} onPointerCancel={land} onLostPointerCapture={land} onKeyUp={() => { if (!pressed.current) onLand() }} onBlur={land} />
-    {hover ? <output className="media-player__bubble" aria-hidden="true" style={{ left: `${hover.x}px` }}>{clock(hover.time)}</output> : null}
+    {hover ? <div className="media-player__preview" aria-hidden="true" style={{ '--media-preview-x': `${hover.x}px` } as CSSProperties}>
+      <output className="media-player__bubble">{clock(hover.time)}</output>
+    </div> : null}
   </div>
 }
