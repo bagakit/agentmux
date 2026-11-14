@@ -1,3 +1,4 @@
+import { activityEvidenceSupersedes } from '../agent-semantic-state.js'
 import { agentNativeTurnEnd } from '../agent-session-identity.js'
 import type { AgentMuxStoredAgentSession } from '../types.js'
 
@@ -9,6 +10,7 @@ export function agentContinuityLastActivityAt(session: AgentMuxStoredAgentSessio
     if (nativeObservedAt !== undefined) return nativeObservedAt
   }
   const activity = session.recoveryActivity
+  if (activityEvidenceSupersedes(status, activity)) return status?.state === 'working' ? status.observedAt : undefined
   return activity?.run.runId === session.run.runId && activity.state !== 'unknown' &&
     session.nativeHandle?.kind === 'provider' && activity.nativeSessionId === session.nativeHandle.sessionId
     ? activity.observedAt : undefined

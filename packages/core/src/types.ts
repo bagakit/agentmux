@@ -2138,6 +2138,8 @@ export type AgentFailure = {
 }
 
 export type AgentStatus = {
+  /** Acceptance position of this main semantic fact in the original Run; reads/children never advance it. */
+  evidenceRevision?: number
   /** Core-owned order of current activity changes within this Run, not a native activity clock. */
   currentActivityRevision?: number
   /** Current idle evidence was consumed; the historical completion remains intact. */
@@ -2414,6 +2416,8 @@ export type AgentNativeActivityEvent = {
 
 /** Persisted native activity for recovery of this exact Run, independent of live observer availability. */
 export type AgentRecoveryActivity = AgentNativeActivityEvent & {
+  /** Acceptance position of this native fact, using the Session owner's currentActivityRevision sequence. */
+  evidenceRevision?: number
   run: AgentMuxRunRef
   hookReceiptId: string
   observedAt: number
@@ -2422,6 +2426,7 @@ export type AgentRecoveryActivity = AgentNativeActivityEvent & {
 }
 
 export type AgentCurrentActivity = AgentNativeActivityEvent & {
+  evidenceRevision?: number
   source: 'native-hook'
   run: AgentMuxRunRef
   hookReceiptId: string

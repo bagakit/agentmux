@@ -211,7 +211,7 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
     }
     for (const field of ['currentActivity', 'mainSessionActivity'] as const) if (source[field] !== undefined) {
       const activity = record(source[field], ['state', 'source', 'run', 'nativeSessionId', 'nativeTurnId',
-        'sourceId', 'sequence', 'hookReceiptId', 'observedAt', 'interruption', 'mainState'])
+        'sourceId', 'sequence', 'hookReceiptId', 'observedAt', 'interruption', 'mainState', 'evidenceRevision'])
       member(activity.state, ['active', 'idle', 'unknown']); member(activity.source, ['native-hook'])
       if (activity.mainState !== undefined) member(activity.mainState, ['active', 'idle', 'unknown'])
       if (runRef(activity.run).runId !== session.run.runId || session.nativeHandle?.kind !== 'provider' ||
@@ -219,6 +219,7 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
       for (const key of ['nativeSessionId', 'sourceId', 'hookReceiptId']) string(activity[key])
       if (activity.state !== 'unknown' || activity.nativeTurnId !== undefined) string(activity.nativeTurnId)
       count(activity.sequence); if (activity.sequence === 0) fail(); count(activity.observedAt)
+      if (activity.evidenceRevision !== undefined) { count(activity.evidenceRevision); if (activity.evidenceRevision === 0) fail() }
       if (activity.interruption !== undefined) {
         if (activity.state !== 'idle') fail()
         member(activity.interruption, ['interrupted', 'not-interrupted'])

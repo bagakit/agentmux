@@ -178,7 +178,7 @@ import { observeMessageJournal } from './agent-message-observer.js'
 import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from './agent-prompt-condition.js';
 import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, agentNativeInteractionEnd, nativeInteractionEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { finalPromptNativeResult, promptNativeResult, queuedPromptNativeResult } from './prompt-native-result.js'
-import { transitionAgentSemanticStatus } from './agent-semantic-state.js'
+import { transitionAgentSemanticStatus, activityEvidenceSupersedes, nextActivityEvidenceRevision } from './agent-semantic-state.js'
 import { agentEvidenceStale, observeAgent, currentAgentSemanticStatus } from './agent-status-freshness.js';
 import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
@@ -9194,20 +9194,22 @@ export class AgentMuxClient {
   }
 
   private projectCurrentActivity(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' | 'nativeHandle' |
-    'promptCompletionAdmission' | 'nativeSourceObservation' | 'nativeBinding' | 'providerId' | 'nativeSubagents'>): AgentCurrentActivity | undefined {
+    'promptCompletionAdmission' | 'nativeSourceObservation' | 'nativeBinding' | 'providerId' | 'nativeSubagents' | 'semanticStatus'>): AgentCurrentActivity | undefined {
     const activity = this.nativeCurrentActivities.get(session.agentSessionId)
     const childrenUnconfirmed = agentSubagentActivityUnconfirmed(subagentScopeMatches(session.nativeSubagents, session) ? session.nativeSubagents : undefined, activity?.event.sourceId)
     if (activity?.fact && activity.runId === session.run.runId &&
         session.nativeHandle?.kind === 'provider' && activity.fact.nativeSessionId === session.nativeHandle.sessionId &&
         !this.endedRuns.has(session.run.runId)) {
       const fact = structuredClone(activity.fact)
+      const semanticReplaces = activityEvidenceSupersedes(session.semanticStatus, fact) &&
+        (fact.state !== 'active' || session.semanticStatus?.state !== 'working')
       // A later input admission consumes this turn's idle, never its ongoing activity: Claude may
       // merge that input into the running turn. The turn's own end then remains unconfirmed.
-      if (activity.invalidated || childrenUnconfirmed ||
+      if (semanticReplaces || activity.invalidated || childrenUnconfirmed ||
           fact.state === 'idle' && activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
           nativeTargetSourceUnconfirmed(session) && session.nativeSourceObservation?.state !== 'unknown') {
         delete fact.interruption
-        if (activity.invalidated || fact.state === 'idle' && activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
+        if (semanticReplaces || activity.invalidated || fact.state === 'idle' && activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
             nativeTargetSourceUnconfirmed(session) && session.nativeSourceObservation?.state !== 'unknown') delete fact.mainState
         return { ...fact, state: 'unknown' }
       }
@@ -9228,7 +9230,8 @@ export class AgentMuxClient {
     if (projected.semanticStatus?.source === 'native-transcript' && this.providers.get(session.providerId).observeSessionStatus &&
         (!watch || watch.key !== JSON.stringify([session.run.runId, session.nativeHandle]) || watch.unconfirmed)) {
       projected.semanticStatus = transitionAgentSemanticStatus(projected.semanticStatus, {
-        state: 'running', source: 'native-transcript', observedAt: projected.semanticStatus.observedAt })
+        state: 'running', source: 'native-transcript', observedAt: projected.semanticStatus.observedAt,
+        ...(projected.semanticStatus.evidenceRevision === undefined ? {} : { evidenceRevision: projected.semanticStatus.evidenceRevision }) })
     }
     const currentActivity = this.projectCurrentActivity(session)
     if (currentActivity) projected.currentActivity = currentActivity
@@ -10602,6 +10605,7 @@ export class AgentMuxClient {
               if (observation.initialSnapshot && observation.state === 'working' && (observation.nativeObservedAt === undefined ||
                 observation.nativeObservedAt <= (saved.semanticStatus?.observedAt ?? 0))) return saved
               publishedState = observation.state
+              const revision = nextActivityEvidenceRevision(saved)
               const status = transitionAgentSemanticStatus(saved.semanticStatus, {
                 state: publishedState === 'unknown' ? 'running' : publishedState,
                 source: 'native-transcript', observedAt: observation.initialSnapshot || observation.state === 'working' ? observation.nativeObservedAt ?? 0 :
@@ -10609,10 +10613,12 @@ export class AgentMuxClient {
                 nativeTurnId: observation.nativeTurnId,
                 ...(observation.failure ? { failure: structuredClone(observation.failure),
                   detail: `[${observation.failure.code}] ${observation.failure.message}` } : {})
-              })
+              }, revision)
+              status.currentActivityRevision = revision
               if (observation.state === 'working' && observation.nativeObservedAt === undefined) delete status.stateEnteredAt
               displayAccepted = true
-              return { ...saved, semanticStatus: status, updatedAt: Math.max(saved.updatedAt, status.observedAt),
+              return { ...saved, semanticStatus: status,
+                ...(saved.recoveryActivity ? { recoveryActivity: { ...saved.recoveryActivity, evidenceRevision: saved.recoveryActivity.evidenceRevision ?? 1 } } : {}), updatedAt: Math.max(saved.updatedAt, status.observedAt),
                 ...(acceptsAgentActivityState(saved.activityCommit, saved.run, status) ? {
                   activityCommit: advanceAgentActivityCommit(saved.activityCommit, {
                     id: JSON.stringify(['activity-state', 'native-transcript', saved.run.runId, observation.recordId]),
@@ -10687,10 +10693,12 @@ export class AgentMuxClient {
         current.semanticStatus &&
         current.semanticStatus.observedAt > status.observedAt
       ) return current
-      const semanticStatus = transitionAgentSemanticStatus(current.semanticStatus, status)
+      const revision = nextActivityEvidenceRevision(current)
+      const semanticStatus = { ...transitionAgentSemanticStatus(current.semanticStatus, status, revision), currentActivityRevision: revision }
       return {
         ...current,
         semanticStatus,
+        ...(current.recoveryActivity ? { recoveryActivity: { ...current.recoveryActivity, evidenceRevision: current.recoveryActivity.evidenceRevision ?? 1 } } : {}),
         ...(acceptsAgentActivityState(current.activityCommit, expectedRun, semanticStatus) ? {
           activityCommit: advanceAgentActivityCommit(current.activityCommit, {
             id: JSON.stringify(['activity-state', status.source, expectedRun.runId, mintObjectId()]),
@@ -11477,7 +11485,10 @@ export class AgentMuxClient {
         ...(children ? { nativeSubagents: children } : {}) }
       if (main && invalidatesMain) {
         const { interruption: _oldEnd, mainState: _oldMain, ...original } = main
-        next.recoveryActivity = { ...original, state: 'unknown', ...(source ? { sequence: source.sequence } : {}), hookReceiptId: receiptId, observedAt }
+        const revision = nextActivityEvidenceRevision(current)
+        if (next.semanticStatus) next.semanticStatus = { ...next.semanticStatus, currentActivityRevision: revision }
+        next.recoveryActivity = { ...original, state: 'unknown', evidenceRevision: revision,
+          ...(source ? { sequence: source.sequence } : {}), hookReceiptId: receiptId, observedAt }
       }
       return next
     })
@@ -11667,24 +11678,34 @@ export class AgentMuxClient {
       await this.flushAgentActivity(session)
       return
     }
-    // 读与推进的先后**在今天不承重**，别照着「先读后推」写注释骗下一个人：实测调换这两句，7 条断言全绿。
-    // 原因是结构性的——会推进阶段的事件（turn-end / 重开事件）与会被闸门拦的事件
-    // （tool-use-start / tool-use-end）是两个不相交的集合，所以「拿推进前的值还是推进后的值」对任何一条
-    // 事件都算出同一个答案。hook-turn-phase.test.ts 里钉着这条不相交性；哪天有事件同时进两族，那条会先红，
-    // 而**那时**这里的顺序才开始承重。仍写成先读后推，是因为它读起来就是判据本身要说的话。
-    const turnPhase = this.hookTurnPhases.get(envelope.runId) ??
-      (agentTurnEndEvidence(session) ? 'turn-ended' : undefined)
-    const nextTurnPhase = hookTurnPhaseAfter(normalized.lifecycleEvent)
+    // Recheck retained turn facts at ingress and inside CAS; the local phase is only a cache.
+    const phaseFor = (current: AgentMuxStoredAgentSession) => {
+      const activity = current.recoveryActivity
+      const retainedEnd = activity?.run.runId === current.run.runId && activity.mainState === 'idle' &&
+        !activityEvidenceSupersedes(current.semanticStatus, activity)
+      // Another Core owner may have accepted the end after our cached in-turn observation.
+      if (retainedEnd || agentTurnEndEvidence(current) ||
+          current.semanticStatus?.nativeTurnId && (current.semanticStatus.state === 'done' || current.semanticStatus.state === 'error') &&
+          agentNativeTurnEnd(current, current.semanticStatus.nativeTurnId)) return 'turn-ended'
+      if (activity?.run.runId === current.run.runId && activity.mainState === 'active' &&
+          !activityEvidenceSupersedes(current.semanticStatus, activity) ||
+          current.semanticStatus?.state === 'working' && activityEvidenceSupersedes(current.semanticStatus, activity)) return 'in-turn'
+      return this.hookTurnPhases.get(envelope.runId)
+    }
+    const turnPhase = phaseFor(session)
+    // A final native yield ends this main turn even when its background work is unknown.
+    // This suppresses late tools only; it grants no task outcome or input permission.
+    const nextTurnPhase = nativeActivity?.mainState === 'idle' ? 'turn-ended' : hookTurnPhaseAfter(normalized.lifecycleEvent)
     // 闸门的前提是「收尾之后要再动工必先开新一轮」。这家 Provider 若声明不出任何重开事件，前提不成立，
     // 抑制就会从可逆退化成永久——所以把前提可满足性算出来喂进去，而不是让闸门默认它成立。
     // A Provider contributing native turn outcomes owns completion, including after tool Hooks.
     // An ordinary Stop proves a yield; it cannot prove success or overwrite that outcome.
     const nativeEnd = provider.observeSessionStatus !== undefined
-    const updatesSemanticStatus = !interactionAlreadyEnded && !(nativeEnd && normalized.mainSubject && normalized.lifecycleEvent === 'turn-end') && hookEventUpdatesSemanticStatus(
-      turnPhase,
-      normalized.lifecycleEvent,
-      provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent, provider.hook.lifecycle))
-    ) && (normalized.semanticState !== 'unknown' || normalized.lifecycleEvent === 'turn-end')
+    const semanticRuleApplies = !(nativeEnd && normalized.mainSubject && normalized.lifecycleEvent === 'turn-end') &&
+      (normalized.semanticState !== 'unknown' || normalized.lifecycleEvent === 'turn-end')
+    const providerCanReopen = provider.hook.rules.some(rule => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent, provider.hook.lifecycle))
+    let updatesSemanticStatus = !interactionAlreadyEnded && semanticRuleApplies &&
+      hookEventUpdatesSemanticStatus(turnPhase, normalized.lifecycleEvent, providerCanReopen)
     // A tool end reports that one call finished and never starts work, so it cannot retire an accepted
     // native idle, live or durable. Only a start can; a late end still settles its exact request.
     const retiresNativeIdle = normalized.lifecycleEvent !== 'tool-use-end'
@@ -11707,30 +11728,19 @@ export class AgentMuxClient {
         }
       }
     }
-    if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
-    // 「这一 turn 结束了」与「取不到输出光标快照」是两件事，不许共用一个失败出口。
-    //
-    // 这次 status() 图的只是 `latestOutputBytes`——一个给 composer 就绪判定用的光标快照。可它在**断线
-    // 期间**直接抛 CTXMUX_DISCONNECTED（adapter 置 client=null 后 requireClient 恒抛），而这一句原先
-    // 裸在这里：错误一路穿出 onEvent、被 hook-server 应答成 503，发事件的 hook 子进程重试一次仍是
-    // 503，只写一行 stderr 就正常退出——**这条 Stop 永久丢失**。
-    //
-    // 窗口不窄，因为重连**只拆内核**：hookServer.stop() 全仓只在 open() 失败与 dispose() 两处调用，
-    // 所以掉线期间 HTTP 口一直开着、一直收 POST、一直 503，窗口是每轮退避的整个时长（可达 31.5s），
-    // 远大于 hook 客户端 2s 的超时。后果是最坏的那一种且已实测：done 从未落盘（抛出发生在任何持久化
-    // 之前），会话停在 working，衰减只把 working 降到 running 降不到 done，完成通知**永不触发**。
-    //
-    // done 本就不依赖它：done 来自 Provider 的 normalizeHook 规则（claude 的 Stop→done），与内核状态
-    // 无关。所以快照降级为 best-effort——只吞断线这一种，别的错误照旧响亮失败（那是真 bug，不是 wire
-    // 抖动）。光标确实丢了，我们不假装它没丢：缺席保持缺席，绝不编一个 0 冒充「输出到此为止」——那会
-    // 让 screenEvidence 从头扫，把上一轮的提示符误认成这一轮的，于是在 Agent 其实没就绪时放行 prompt。
-    // The native end remains authoritative even when this optional output snapshot is absent.
+    // The end's optional output cursor may be unavailable during a Runtime disconnect.
+    // Preserve the native end without inventing a cursor or swallowing another failure.
     const stopRun = normalized.lifecycleEvent === 'turn-end'
       ? await this.observeHookRun(session.run.runId, signal).catch((error: unknown) => {
           if (error instanceof AgentMuxError && error.code === 'CTXMUX_DISCONNECTED') return null
           throw error
         })
       : null
+    const decision = () => ({ activityApplied: updatesSemanticStatus || normalized.childActivity === true || nativeActivity !== undefined,
+        lifecycleApplied: normalized.lifecycleEvent !== undefined && normalized.lifecycleEvent !== null && (updatesSemanticStatus || normalized.lifecycleEvent === 'turn-end'),
+        reason: nativeActivity ? 'main-current-activity-applied' : updatesSemanticStatus ? 'main-semantic-applied' : normalized.childActivity ? 'proven-child-activity' :
+          normalized.subject?.kind === 'main' ? normalized.semanticState !== 'unknown' ? 'main-turn-already-ended' : 'no-semantic-rule' :
+          normalized.subject?.kind === 'child' ? 'child-observation-only' : normalized.subject?.reason ?? 'no-semantic-rule' })
     const receipt = {
       id: envelope.receiptId,
       providerId: session.providerId,
@@ -11742,11 +11752,7 @@ export class AgentMuxClient {
       ...(normalized.lifecycleEvent !== undefined ? { lifecycleEvent: normalized.lifecycleEvent } : {}),
       observedAt: normalized.status.observedAt,
       ...(normalized.subject ? { subject: normalized.subject } : {}),
-      decision: { activityApplied: updatesSemanticStatus || normalized.childActivity === true || nativeActivity !== undefined,
-        lifecycleApplied: normalized.lifecycleEvent !== undefined && normalized.lifecycleEvent !== null && (updatesSemanticStatus || normalized.lifecycleEvent === 'turn-end'),
-        reason: nativeActivity ? 'main-current-activity-applied' : updatesSemanticStatus ? 'main-semantic-applied' : normalized.childActivity ? 'proven-child-activity' :
-          normalized.subject?.kind === 'main' ? normalized.semanticState !== 'unknown' ? 'main-turn-already-ended' : 'no-semantic-rule' :
-          normalized.subject?.kind === 'child' ? 'child-observation-only' : normalized.subject?.reason ?? 'no-semantic-rule' },
+      decision: decision(),
       ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})
     }
     const completion = normalized.interactionCompletion
@@ -11774,6 +11780,9 @@ export class AgentMuxClient {
       signal.throwIfAborted()
       if (!sameNativeHandle(current.nativeHandle, session.nativeHandle)) throw new AgentMuxError('Native binding changed before Hook publication.', 'AGENT_NATIVE_CONFIRMATION_STALE')
       interactionAlreadyEnded = normalized.interaction !== undefined && retainedInteractionEnd(current, normalized.interaction) !== undefined
+      updatesSemanticStatus = !interactionAlreadyEnded && semanticRuleApplies &&
+        hookEventUpdatesSemanticStatus(phaseFor(current), normalized.lifecycleEvent, providerCanReopen)
+      receipt.decision = decision()
       if (nativeActivity && !this.acceptsNativeCurrentActivity(
         current.nativeHandle || !normalized.nativeHandle ? current : { ...current, nativeHandle: normalized.nativeHandle }, nativeActivity)) return current
       const nativeReadiness = current.terminalPromptReadiness?.source === 'native-stop'
@@ -11872,14 +11881,6 @@ export class AgentMuxClient {
         const promptSubmissionId = this.nativeTurnAdmissionId(next, nativeActivity)
         next.recoveryActivity = { ...structuredClone(nativeActivity), run: { ...current.run }, hookReceiptId: receipt.id,
           observedAt: receipt.observedAt, ...(promptSubmissionId ? { promptSubmissionId } : {}) }
-      } else if (!nativeActivity && updatesSemanticStatus && !interactionAlreadyEnded && !normalized.childActivity && normalized.mainSubject && next.recoveryActivity &&
-          (next.recoveryActivity.state !== 'idle' || retiresNativeIdle)) {
-        // In-turn tools refresh the original main activity. A new prompt or an old idle end
-        // cannot inherit that turn's interruption; neither fact grants live input eligibility.
-        const ongoing = next.recoveryActivity.state === 'active' && normalized.semanticState === 'working' &&
-          normalized.lifecycleEvent !== 'user-prompt-submit' && normalized.lifecycleEvent !== 'turn-start'
-        const { interruption: _previousEnd, mainState: oldMainState, ...original } = next.recoveryActivity
-        next.recoveryActivity = { ...original, ...(ongoing && oldMainState ? { mainState: oldMainState } : {}), state: ongoing ? 'active' : 'unknown', hookReceiptId: receipt.id, observedAt: receipt.observedAt }
       }
       if (next.recoveryActivity && next.nativeHandle?.kind === 'provider' && next.recoveryActivity.nativeSessionId !== next.nativeHandle.sessionId) delete next.recoveryActivity
       const continuity = normalized.continuity, nativeTarget = next.nativeHandle
@@ -11911,9 +11912,17 @@ export class AgentMuxClient {
           }
         }
       }
-      if ((nativeActivity || childState !== undefined) && next.semanticStatus) {
-        next.semanticStatus = { ...next.semanticStatus,
-          currentActivityRevision: (next.semanticStatus.currentActivityRevision ?? 0) + 1 }
+      if ((updatesSemanticStatus || nativeActivity || childState !== undefined) && next.semanticStatus) {
+        const revision = nextActivityEvidenceRevision(current)
+        const mainSemantic = updatesSemanticStatus && normalized.mainSubject && !normalized.childActivity
+        next.semanticStatus = { ...next.semanticStatus, currentActivityRevision: revision,
+          ...(mainSemantic ? { evidenceRevision: revision } : current.semanticStatus?.evidenceRevision === undefined
+            ? {} : { evidenceRevision: current.semanticStatus.evidenceRevision }) }
+        if (next.recoveryActivity && (mainSemantic || nativeActivity)) {
+          // A new main fact orders its retained predecessor; a child cannot order old main evidence.
+          next.recoveryActivity = { ...next.recoveryActivity,
+            evidenceRevision: nativeActivity ? revision : next.recoveryActivity.evidenceRevision ?? 1 }
+        }
       }
       const pending = current.pendingInteraction
       if (completion && interactionSourceConfirmed(next) && next.nativeHandle &&
@@ -12055,9 +12064,11 @@ export class AgentMuxClient {
           admissionId: next.recoveryActivity?.promptSubmissionId,
           ...(nativeActivity.state !== 'unknown' && nativeActivity.nativeTurnId ? { fact: {
             ...nativeActivity, state: nativeActivity.state, nativeTurnId: nativeActivity.nativeTurnId,
-            source: 'native-hook', run: { ...next.run }, hookReceiptId: receipt.id, observedAt: receipt.observedAt
+            source: 'native-hook', run: { ...next.run }, hookReceiptId: receipt.id, observedAt: receipt.observedAt,
+            ...(next.recoveryActivity?.evidenceRevision === undefined ? {} : { evidenceRevision: next.recoveryActivity.evidenceRevision })
           } } : { fact: { ...nativeActivity, state: 'unknown' as const,
-            source: 'native-hook', run: { ...next.run }, hookReceiptId: receipt.id, observedAt: receipt.observedAt } }) })
+            source: 'native-hook', run: { ...next.run }, hookReceiptId: receipt.id, observedAt: receipt.observedAt,
+            ...(next.recoveryActivity?.evidenceRevision === undefined ? {} : { evidenceRevision: next.recoveryActivity.evidenceRevision }) } }) })
         if (nativeActivity.state === 'unknown') {
           const observation = { run: { ...next.run }, phase: 'binding' as const,
             ...(next.nativeHandle ? { nativeTarget: next.nativeHandle } : {}),
@@ -12086,6 +12097,7 @@ export class AgentMuxClient {
     if (!acceptedReceipt || acceptedReceipt.id !== receipt.id) {
       throw new AgentMuxError('Native Hook receipt was not persisted.', 'HOOK_RECEIPT_INVALID')
     }
+    if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
     if (normalized.continuityObservationFailure) this.publisher.publish({ type: 'agent-error', agentSessionId: next.agentSessionId,
       ...normalized.continuityObservationFailure, evidence: { source: 'native-hook', run: { ...next.run }, hookReceiptId: acceptedReceipt.id, observedAt: acceptedReceipt.observedAt } })
     if (normalized.continuity && Object.values(next.continuityOperations ?? {}).some(root =>

@@ -1,3 +1,4 @@
+import { activityEvidenceSupersedes } from './agent-semantic-state.js'
 import { parseNativeSubagents, agentHasActiveSubagents, subagentScopeMatches } from './agent-subagent-state.js'
 import { parseAgentTakeoverProvenance } from './agent-takeover.js'
 import { sessionUsageWindow, sessionUsageMeasurement, type AgentSessionUsagePage } from './agent-session-usage.js'
@@ -412,7 +413,7 @@ function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | und
   const initial = session.initialInput
   if (initial?.state === 'launch-carried' && initial.key) originals.push({ agentSessionId: session.agentSessionId,
     run: initial.key.expectedRun, launch: initial })
-  const idle = session.recoveryActivity
+  const idle = activityEvidenceSupersedes(session.semanticStatus, session.recoveryActivity) ? undefined : session.recoveryActivity
   for (const original of originals) {
     const native = original.admission?.transport === 'native' ? original.admission.native : undefined
     const handle = session.nativeHandle
@@ -1249,6 +1250,7 @@ function semanticStatus(value: unknown): AgentStatus {
     source: source.source,
     observedAt: timestamp(source.observedAt, 'semanticStatus.observedAt'),
     ...(source.currentActivityRevision === undefined ? {} : { currentActivityRevision: positiveInteger(source.currentActivityRevision, 'semanticStatus.currentActivityRevision') }),
+    ...(source.evidenceRevision === undefined ? {} : { evidenceRevision: positiveInteger(source.evidenceRevision, 'semanticStatus.evidenceRevision') }),
     ...(source.stateEnteredAt === undefined ? {} : {
       stateEnteredAt: timestamp(source.stateEnteredAt, 'semanticStatus.stateEnteredAt')
     }),
@@ -2188,7 +2190,7 @@ function recoveryActivity(value: unknown, session: AgentMuxAgentSession): AgentR
   const run = runRef(source.run)
   const handle = session.nativeHandle
   if (Object.keys(source).some(key => !['state', 'interruption', 'nativeSessionId', 'nativeTurnId', 'sourceId',
-    'sequence', 'run', 'hookReceiptId', 'observedAt', 'promptSubmissionId', 'mainState'].includes(key)) ||
+    'sequence', 'run', 'hookReceiptId', 'observedAt', 'promptSubmissionId', 'mainState', 'evidenceRevision'].includes(key)) ||
     !['active', 'idle', 'unknown'].includes(String(source.state)) || run.runId !== session.run.runId ||
     handle?.kind !== 'provider' || handle.providerId !== session.providerId || source.nativeSessionId !== handle.sessionId ||
     source.interruption !== undefined && (source.state !== 'idle' || !['interrupted', 'not-interrupted'].includes(String(source.interruption)))) {
@@ -2200,6 +2202,7 @@ function recoveryActivity(value: unknown, session: AgentMuxAgentSession): AgentR
   }
   if (source.mainState !== undefined && !['active', 'idle', 'unknown'].includes(String(source.mainState))) throw new AgentMuxError('Main activity is invalid.', 'INVALID_AGENT_SESSION_STORE')
   return { run, state: source.state as AgentRecoveryActivity['state'],
+    ...(source.evidenceRevision === undefined ? {} : { evidenceRevision: positiveInteger(source.evidenceRevision, 'recoveryActivity.evidenceRevision') }),
     ...(source.mainState === undefined ? {} : { mainState: source.mainState as AgentRecoveryActivity['state'] }),
     nativeSessionId: string(source.nativeSessionId, 'recoveryActivity.nativeSessionId'),
     sourceId: string(source.sourceId, 'recoveryActivity.sourceId'),

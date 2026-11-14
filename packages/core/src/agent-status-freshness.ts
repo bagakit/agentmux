@@ -1,3 +1,4 @@
+import { activityEvidenceSupersedes } from './agent-semantic-state.js'
 export { hasSelectedNativeTarget, nativeTargetSourceUnconfirmed } from './agent-native-source.js'
 
 import type {
@@ -271,7 +272,7 @@ export function agentActivityRemainingMs(observation: Pick<AgentObservation, 'se
 export function observeAgent(
   input: {
     process: AgentMuxRunState
-    status: Pick<AgentStatus, 'state' | 'source' | 'observedAt' | 'nativeTurnId'>
+    status: Pick<AgentStatus, 'state' | 'source' | 'observedAt' | 'nativeTurnId' | 'evidenceRevision'>
     /** Original native fact, retained when a client has decayed its display status. */
     retainedStatus?: AgentStatus | undefined
     currentActivity?: AgentCurrentActivity | undefined
@@ -286,10 +287,12 @@ export function observeAgent(
   const running = input.process === 'running'
   const state = input.status.state
   const declared = isAgentActivityStatusSource(input.status.source)
-  const durable = input.mainSessionActivity
-  const semanticSupersedes = durable && input.status.observedAt >= durable.observedAt &&
-    ['done', 'error', 'waiting', 'blocked'].includes(input.status.state)
-  const currentActivity = input.currentActivity ?? (semanticSupersedes ? undefined : durable)
+  const activity = !input.currentActivity || activityEvidenceSupersedes(input.mainSessionActivity, input.currentActivity)
+    ? input.mainSessionActivity : input.currentActivity
+  const semanticSupersedes = declared && (activityEvidenceSupersedes(input.status, activity) ||
+    input.status.evidenceRevision === undefined && activity?.evidenceRevision === undefined &&
+    activity && input.status.observedAt >= activity.observedAt && ['done', 'error', 'waiting', 'blocked'].includes(state))
+  const currentActivity = semanticSupersedes ? undefined : activity
   const currentFresh = currentActivity?.state === 'unknown' || currentActivity?.state === 'idle' || currentActivity?.state === 'active' &&
     !agentEvidenceStale({ observedAt: currentActivity.observedAt }, now)
   const mainSemantic: AgentObservation['semantic'] = input.timelineCapability === 'unavailable'
@@ -329,6 +332,9 @@ export function observeAgent(
     : childUnknown ? 'unknown' : mainSemantic
   const childEvidence = childWorking ? childSessions?.sessions.reduce<import('./agent-subagent-state.js').AgentSubagentSession | undefined>((latest, child) =>
     child.phase === 'running' && child.state === 'working' && (!latest || child.observedAt > latest.observedAt) ? child : latest, undefined) : undefined
+  const expiredChild = childSessions?.sessions.reduce<import('./agent-subagent-state.js').AgentSubagentSession | undefined>((latest, child) =>
+    child.phase === 'running' && child.state === 'working' && agentEvidenceStale(child, now) &&
+      (!latest || child.observedAt > latest.observedAt) ? child : latest, undefined)
   const readiness: AgentObservation['readiness'] = !running
     ? 'unknown'
     : input.awaitingRequest || input.terminalCapabilityUnverified
@@ -337,10 +343,12 @@ export function observeAgent(
   const current = currentAgentSemanticStatus(input.retainedStatus) ?? input.status
   const retained = current.state === 'working' ? current : input.retainedStatus ?? input.status
   const reason = running && semantic === 'unknown'
-    ? currentActivity?.state !== 'unknown' && isAgentActivityStatusSource(current.source) && semanticStatusStale(current, now)
+    ? currentActivity?.state !== 'unknown' && (expiredChild || isAgentActivityStatusSource(current.source) && semanticStatusStale(current, now))
       ? 'activity-stale' as const : 'activity-unconfirmed' as const
     : undefined
-  const lastKnownActivity = reason && isAgentActivityStatusSource(retained.source)
+  const lastKnownActivity = reason === 'activity-stale' && expiredChild
+    ? { state: 'working' as const, source: 'native-hook' as const, observedAt: expiredChild.observedAt }
+    : reason && isAgentActivityStatusSource(retained.source)
     && (retained.state === 'working' || retained.state === 'waiting' || retained.state === 'blocked' || retained.state === 'done' || retained.state === 'error')
     ? { state: retained.state, source: retained.source, observedAt: retained.observedAt } : undefined
   const mainTurnId = mainEvidence?.nativeTurnId ?? input.status.nativeTurnId

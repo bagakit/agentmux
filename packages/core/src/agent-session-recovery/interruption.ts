@@ -1,3 +1,4 @@
+import { activityEvidenceSupersedes } from '../agent-semantic-state.js'
 import { nativeTargetSourceUnconfirmed } from '../agent-native-source.js'
 import type { AgentProvider } from '../agent-provider.js'
 import type { AgentMuxContinuityInterruption, AgentMuxContinuityPolicy } from './continuity-contract.js'
@@ -46,7 +47,7 @@ export async function inspectAgentSessionInterruption(
     }
   }
   const activity = session.recoveryActivity
-  if (!activity || activity.run.runId !== session.run.runId || activity.nativeSessionId !== handle.sessionId ||
+  if (activityEvidenceSupersedes(session.semanticStatus, activity) || !activity || activity.run.runId !== session.run.runId || activity.nativeSessionId !== handle.sessionId ||
     activity.promptSubmissionId !== session.promptCompletionAdmission?.submissionId ||
     session.nativeSourceObservation?.state === 'changed' ||
     activity.state !== 'idle' || !activity.interruption) return result
