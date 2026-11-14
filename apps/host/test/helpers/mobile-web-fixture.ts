@@ -30,17 +30,22 @@ async function ready(child: ChildProcess) {
     child.once('exit', code => { clearTimeout(timeout); reject(Error('Private Main exited ' + code + ': ' + errors)) })
   })
 }
-export async function mobileWebFixture(options: { nativeRecord?: boolean; initialBuildId?: string } = {}) {
+export async function mobileWebFixture(options: { nativeRecord?: boolean; initialBuildId?: string; outboundRelayTest?: {
+  relay: { endpoint: string; useTls: boolean }; publisherToken: string; allowedClientKeys: readonly string[]; holdOperationId?: string
+} } = {}) {
   const ownerKey = 'AGENTMUX_TEST_OWNER_ENTRY', previous = process.env[ownerKey]
   process.env[ownerKey] = resolve(import.meta.dirname, '../fixtures/mobile-web-host.mjs')
   const buildKey = 'MOBILE_WEB_INITIAL_BUILD', previousBuild = process.env[buildKey]
   if (options.initialBuildId !== undefined) process.env[buildKey] = JSON.stringify(options.initialBuildId)
+  const outboundKey = 'OUTBOUND_RELAY_TEST', previousOutbound = process.env[outboundKey]
+  if (options.outboundRelayTest !== undefined) process.env[outboundKey] = JSON.stringify(options.outboundRelayTest)
   const loader = resolve(import.meta.dirname, '../mobile-web-node-loader.mjs')
   let native: Awaited<ReturnType<typeof headlessFixture>>
   try { native = await headlessFixture({ ownerNodeArgs: ['--experimental-transform-types', '--import', loader] }) }
   finally {
     if (previous === undefined) delete process.env[ownerKey]; else process.env[ownerKey] = previous
     if (previousBuild === undefined) delete process.env[buildKey]; else process.env[buildKey] = previousBuild
+    if (previousOutbound === undefined) delete process.env[outboundKey]; else process.env[outboundKey] = previousOutbound
   }
   const info = JSON.parse(await readFile(join(native.env.AGENTMUX_STATE_DIRECTORY!, 'mobile-test-owner.json'), 'utf8'))
   let main: ChildProcess | undefined

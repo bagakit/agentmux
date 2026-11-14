@@ -9,6 +9,7 @@ import { existsSync, readFileSync, appendFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
+import { transformSync } from 'esbuild'
 const root = resolve(import.meta.dirname, '../../..')
 const manifest = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json'), 'utf8')).exports
 const observed = /^(?:packages\/core\/src\/(?:mobile-web(?:-codec)?|client-incident|public-rpc-service|public-rpc-server|rpc-native-codec|spatial-state|space-control-parser)\.ts|apps\/host\/src\/(?:host|mobile-assets(?:-owner)?|client-incident-archive|mobile-web-report-owner)\.ts|apps\/desktop\/src\/main\/(?:desktop-host|runtime-controller)\.ts|apps\/desktop\/src\/shared\/space-addresses\.ts)$/u
@@ -33,7 +34,8 @@ registerHooks({
     else if (specifier.startsWith('@agentmux/client-ui/')) {
       const entries = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8')).exports
       const key = './' + specifier.slice('@agentmux/client-ui/'.length)
-      const entry = entries[key]?.types ?? (key.startsWith('./note/') ? entries['./note/*']?.types.replace('*', key.slice(7)) : entries['./*']?.types.replace('*', key.slice(2)))
+      const entry = entries[key]?.types ?? (key.startsWith('./components/') ? entries['./components/*']?.types.replace('*', key.slice('./components/'.length))
+        : key.startsWith('./note/') ? entries['./note/*']?.types.replace('*', key.slice(7)) : entries['./*']?.types.replace('*', key.slice(2)))
       if (entry?.startsWith('./src/')) file = resolve(root, 'packages/client-ui', entry)
     }
     else if (specifier.startsWith('@agentmux/core/')) {
@@ -42,12 +44,15 @@ registerHooks({
     } else if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) {
       const candidate = resolve(dirname(fileURLToPath(context.parentURL)), specifier)
       if (candidate.endsWith('.js') && !existsSync(candidate) && existsSync(candidate.slice(0, -3) + '.ts')) file = candidate.slice(0, -3) + '.ts'
+      else if (candidate.endsWith('.js') && !existsSync(candidate) && existsSync(candidate.slice(0, -3) + '.tsx')) file = candidate.slice(0, -3) + '.tsx'
       else if (!existsSync(candidate) && existsSync(candidate + '.ts')) file = candidate + '.ts'
     }
     return file ? next(pathToFileURL(file).href, context) : next(specifier, context)
   },
   load(url, context, next) {
-    const result = next(url, context)
+    const result = url.startsWith('file:') && url.endsWith('.tsx')
+      ? { format: 'module', source: transformSync(readFileSync(fileURLToPath(url), 'utf8'), { loader: 'tsx', format: 'esm', jsx: 'automatic', target: 'node24' }).code, shortCircuit: true }
+      : next(url, context)
     if (!url.startsWith('file:')) return result
     const path = relative(root, fileURLToPath(url))
     const discoverySource = instrumentCreationSource(instrumentDiagnosticsSource(instrumentGoalsSource(instrumentWorkspaceSource(instrumentDiscoverySource(instrumentContentSource(String(result.source), path), path), path), path, 'node-loader'), path), path)
