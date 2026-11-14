@@ -1,4 +1,4 @@
-import type { AgentTurnUsage } from '@agentmux/core'
+import type { AgentContextWindowUsage, AgentTurnUsage } from '@agentmux/core'
 import { agentUsageScopeLabel, contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
 
 function TokenCounts({ usage }: { usage: Pick<AgentTurnUsage, 'inputTokens' | 'outputTokens' | 'totalTokens'> }) {
@@ -10,8 +10,8 @@ function TokenCounts({ usage }: { usage: Pick<AgentTurnUsage, 'inputTokens' | 'o
 }
 
 /** Held native facts only. The caller owns disclosure, identity, reading and observation lifetime. */
-export function AgentUsageDetails({ usage }: { usage?: AgentTurnUsage | undefined }) {
-  const context = usage?.context, used = contextUsedPercent(context)
+export function AgentUsageDetails({ usage, contextWindowUsage }: { usage?: AgentTurnUsage | undefined; contextWindowUsage?: AgentContextWindowUsage | undefined }) {
+  const context = contextWindowUsage ?? usage?.context, used = contextUsedPercent(context)
   const remaining = used === null ? null : 100 - used
   return <div className="agent-usage-details">
     <section className="agent-usage-details__context">
@@ -20,6 +20,7 @@ export function AgentUsageDetails({ usage }: { usage?: AgentTurnUsage | undefine
         <strong>{used}% used</strong> <span>({remaining}% remaining)</span>
         <p>{formatTokenCount(context.usedTokens)} of {formatTokenCount(context.capacityTokens)} tokens · {formatTokenCount(Math.max(0, context.capacityTokens - context.usedTokens))} remaining</p>
       </> : <p>Used tokens and capacity not reported.</p>}
+      {contextWindowUsage ? <p>Context observed {new Date(contextWindowUsage.observedAt).toLocaleString()}.</p> : null}
     </section>
     <section className="agent-usage-details__section composer__context-turn" data-agent-usage-scope="native-session">
       <h3>Native Session</h3>
@@ -29,6 +30,6 @@ export function AgentUsageDetails({ usage }: { usage?: AgentTurnUsage | undefine
       <h3>{usage ? agentUsageScopeLabel(usage) : 'Last response'}</h3>
       {usage ? <TokenCounts usage={usage} /> : <p>No native response sample.</p>}
     </section>
-    <p className="agent-usage-details__observed">{usage ? <>Last observed {new Date(usage.observedAt).toLocaleString()}.</> : 'Observation unavailable.'} Native readings; context excludes the unsent draft. Compaction threshold unknown.</p>
+    <p className="agent-usage-details__observed">{usage ? <>{contextWindowUsage ? 'Response observed' : 'Last observed'} {new Date(usage.observedAt).toLocaleString()}.</> : contextWindowUsage ? null : 'Observation unavailable.'} Native readings; context excludes the unsent draft. Compaction threshold unknown.</p>
   </div>
 }

@@ -247,7 +247,9 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     ? currentConversationSpeakerMetadata(session.id, { sessions: [session], workspaces: identityFacts.config.workspaces,
       config: identityFacts.config, agentNames: {}, scratchTopicSnapshots: identityFacts.topics ?? {}, spaceObjectIcons: identityFacts.icons ?? {}, spaceZoneBindings: identityFacts.bindings ?? {} }) : undefined,
   [session?.id, session?.kind, session?.hostId, session?.workspacePath, identityFacts])
-  const usage = session?.kind === 'agent' ? session.turnUsage : request.session?.kind === 'agent' ? request.session.turnUsage : undefined
+  const usageSubject = session?.kind === 'agent' ? session : request.session?.kind === 'agent' ? request.session : undefined
+  const usage = usageSubject?.turnUsage
+  const contextWindowUsage = usageSubject?.contextWindowUsage
   const sourceNotice = !sameSource ? `${changedSource ? 'The original Run or source has changed.'
     : context.access?.observation === 'unavailable' || context.runId || request.session ? 'The original Run observation is currently unavailable.'
       : 'The current Run has not been confirmed.'} This reading is kept; new source data is not attached.`
@@ -458,13 +460,13 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
       </div>
       {tab ? <div className="agent-information-reader__metadata">
         <div className="agent-information-reader__metadata-heading"><button ref={back} type="button" onClick={showReading} aria-label="Back to original content"><BackIcon size={13} aria-hidden="true" /></button><h3>Agent information</h3></div>
-        <AgentInformationDetails context={context} goalLinks={request.goalLinks} usage={usage} control={visible && sameSource ? request.control : undefined} tab={tab} onTab={setTab} source={source} />
+        <AgentInformationDetails context={context} goalLinks={request.goalLinks} usage={usage} contextWindowUsage={contextWindowUsage} control={visible && sameSource ? request.control : undefined} tab={tab} onTab={setTab} source={source} />
       </div> : null}
     </div>
     <footer className="agent-information-reader__footer" onPointerDown={event => { if (event.button === 0) event.preventDefault() }}>
       <button type="button" className="agent-information-reader__facts" onClick={() => tab ? showReading() : showMetadata('usage')}
         title="Usage, Goals, messages and source" aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null} aria-describedby={informationSummaryId}>
-        <AgentInformationSummary descriptionId={informationSummaryId} usage={usage} goalLinks={request.goalLinks} /><DetailsIcon size={13} aria-hidden="true" />
+        <AgentInformationSummary descriptionId={informationSummaryId} usage={usage} contextWindowUsage={contextWindowUsage} goalLinks={request.goalLinks} /><DetailsIcon size={13} aria-hidden="true" />
       </button>
       {request.bookmark ? <ReadingCopy text={request.bookmark.sourceRuntimeId === undefined ? formatSessionAddress(request.bookmark.agentSessionId) : JSON.stringify({ runtimeId: request.bookmark.sourceRuntimeId, agentSessionId: request.bookmark.agentSessionId })} label={request.bookmark.sourceRuntimeId === undefined ? 'Copy Agent link' : 'Copy Agent identity'} identity={request.bookmark.key} /> : null}
       {request.bookmark ? <button type="button" className="agent-bookmark__reset" onClick={bookmarkWindow.reset} title="Reset bookmark position and size" aria-label="Reset bookmark position and size"><ResetIcon size={13} aria-hidden="true" /></button> : null}

@@ -7,7 +7,7 @@ import { isAbsolute } from 'node:path'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
 import { acpRecord, initializeAntigravityAcp, launchAntigravityAcp, type AcpWireServices } from './acp-process.js'
 import { readAntigravityAcpHandshake } from './acp-probe.js'
-import { readAntigravityConfiguration, readAntigravityPermission, readAntigravityUpdate } from './acp-events.js'
+import { readAntigravityConfiguration, readAntigravityContextWindow, readAntigravityPermission, readAntigravityUpdate } from './acp-events.js'
 import { antigravityAcpTranscriptPath } from './native-session.js'
 
 export const ANTIGRAVITY_ACP_ACTOR_PROTOCOL = 'antigravity-acp.v1'
@@ -38,6 +38,7 @@ type ActorActivity = {
 }
 type ActorEvent = ActorActivity | NonNullable<ReturnType<typeof readAntigravityPermission>> |
   { type: 'configuration'; snapshot: AgentConfigurationSnapshot } |
+  { type: 'context-window'; context: NonNullable<ReturnType<typeof readAntigravityContextWindow>> } |
   { type: 'permission-settled'; requestId: string } | { type: 'observation-gap' } |
   { type: 'status'; state: 'working' | 'done' | 'waiting' | 'error'; detail?: string }
 type EventEnvelope = { event: ActorEvent; observedAt: number }
@@ -228,6 +229,7 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
     }
     let configuration: AgentConfigurationSnapshot | null = null
     let configurationEvent: EventEnvelope | undefined
+    let contextWindowEvent: (EventEnvelope & { event: Extract<ActorEvent, { type: 'context-window' }> }) | undefined
     let settingConfiguration = false
     const observeConfiguration = (next: AgentConfigurationSnapshot): void => {
       configuration = next
@@ -238,6 +240,15 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
       if (snapshot.state !== 'ready') return false
       if (method === 'session/update' && id === undefined) {
         const session = acpRecord(params), update = acpRecord(session?.update)
+        if (session?.sessionId === snapshot.sessionId && update?.sessionUpdate === 'usage_update') {
+          const context = readAntigravityContextWindow(update)
+          const previous = contextWindowEvent?.event.context
+          if (context && (previous?.usedTokens !== context.usedTokens || previous.capacityTokens !== context.capacityTokens)) {
+            contextWindowEvent = { event: { type: 'context-window', context }, observedAt: Date.now() }
+            for (const watch of watches) watch(contextWindowEvent)
+          }
+          return true
+        }
         if (session?.sessionId === snapshot.sessionId && update?.sessionUpdate === 'config_option_update') {
           const options = readAntigravityConfiguration(update.configOptions)
           if (options) observeConfiguration({ revision: randomUUID(), options })
@@ -397,6 +408,7 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
               if (observationGap) send(observationGap)
               if (status) send(status)
               if (configurationEvent) send(configurationEvent)
+              if (contextWindowEvent) send(contextWindowEvent)
               return
             }
             void apply(command).then(result => {

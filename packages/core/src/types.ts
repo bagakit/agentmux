@@ -610,6 +610,10 @@ export type AgentUsageCapability = {
   transcriptFormat: string
 }
 
+/** A current native Session context-window measurement. */
+export type AgentContextWindow = { usedTokens: number; capacityTokens: number }
+export type AgentContextWindowUsage = AgentContextWindow & { observedAt: number }
+
 /** Latest native usage sample delivered by the existing Hook. It is not a whole-turn total. */
 export type AgentTurnUsage = {
   /** Native response coverage. Older saved samples without scope remain unknown. */
@@ -617,7 +621,7 @@ export type AgentTurnUsage = {
   /** Native Session accounting from the same observation; never response or context usage. */
   cumulative?: { scope: 'native-session'; inputTokens: number; outputTokens: number; totalTokens: number }
   /** Native context observation accompanying this sample; never lifetime billing totals. */
-  context?: { usedTokens: number; capacityTokens: number }
+  context?: AgentContextWindow
   /** Native response output tokens. */
   outputTokens: number
   /** Native response input tokens. */
@@ -1379,6 +1383,8 @@ export type AgentMuxAgentSession = {
   /** This original Run accepts typed conversation prompts through a managed protocol. */
   structuredPromptInput?: true
   nativeConfiguration?: import('./agent-configuration.js').AgentConfigurationSnapshot
+  /** Latest live report from this Run's native Session binding. */
+  contextWindowUsage?: AgentContextWindowUsage
   nativeHandle?: AgentNativeSessionHandle
   /** Live Core save acknowledgement for this locator; readable post-replacement bytes are unconfirmed. Never stored. */
   nativeHandlePersistence?: 'confirmed' | 'unconfirmed'
@@ -1681,7 +1687,7 @@ export type AgentHookDeliveryObservation = {
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
 export type AgentMuxNativeCreationKeys = { keys: readonly string[]; coverage: 'complete' | 'partial' }
 
-export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'hookDeliveryObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'mainSessionActivity' | 'terminalFrontend'> & {
+export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'hookDeliveryObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'mainSessionActivity' | 'terminalFrontend' | 'contextWindowUsage'> & {
   /** Private original adopted machine keys, not Native liveness or a public role catalog. */
   nativeCreationKeys?: AgentMuxNativeCreationKeys
   /** Original creation input frozen before Start; only its key is public. */
@@ -1968,6 +1974,7 @@ export type AgentMuxAcpEvent =
     }
   | { type: 'permission-settled'; requestId: string }
   | { type: 'observation-gap' }
+  | { type: 'context-window'; context: AgentContextWindow }
   | { type: 'configuration'; snapshot: import('./agent-configuration.js').AgentConfigurationSnapshot }
   | {
       type: 'permission'

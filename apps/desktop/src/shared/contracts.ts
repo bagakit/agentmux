@@ -1096,6 +1096,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       terminalOutputChannel?: AgentTerminalOutputChannelState
       structuredPromptInput?: true
       nativeConfiguration?: AgentMuxAgentSession['nativeConfiguration']
+      contextWindowUsage?: AgentMuxAgentSession['contextWindowUsage']
       pendingInteraction?: AgentMuxInteractionRequest
       /** Completed native request whose original typed answer receipt still belongs to Core. */
       completedInteractionResponse?: { requestId: string; operationId: string; acknowledged: boolean }

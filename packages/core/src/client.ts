@@ -245,7 +245,7 @@ import { messagePacketDigest, parseSignedMessage, parseMessageReadAuthority, par
 import type { AgentMuxMessageApplication } from './agent-message-envelope.js'
 import type { AgentMuxCreationOrigin } from './agent-creation-admission.js';
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
-import type { AgentExecutorConfig } from './types.js'
+import type { AgentContextWindowUsage, AgentExecutorConfig } from './types.js'
 import type { AgentMuxHostExecutorConfigureInput, AgentMuxHostExecutorRemoveInput } from './executor-contract.js'
 
 /** Zero means no authoritative observation has been recorded. */
@@ -1139,6 +1139,7 @@ export class AgentMuxClient {
   private readonly historyObservationControllers = new Map<string, Set<NativeHistoryObservationResource>>()
   private readonly historyObservationPool = new SessionHistoryObservationPool()
   private providerReadsDisposed = false
+  private readonly contextWindows = new Map<string, AgentContextWindowUsage>()
   private readonly nativeConfigurations = new Map<string, { run: AgentMuxRunRef; observedAt: number; snapshot: AgentConfigurationSnapshot }>()
   private readonly nativeIdentityCaptures = new Map<string, { controller: AbortController; run: AgentMuxRunRef }>()
   private readonly nativeIdentityPending: Array<() => void> = []
@@ -1359,6 +1360,15 @@ export class AgentMuxClient {
           // As with Hooks, earlier native observations cannot revive an ended Run.
           if (this.endedRuns.has(session.run.runId)) return
           const observed = { ...evidence, run: { ...evidence.run } }
+          if (event.type === 'context-window') {
+            if (session.nativeActor?.actorId !== evidence.acpBindingId) return
+            const previous = this.contextWindows.get(session.run.runId)
+            if (previous && (previous.observedAt > observed.observedAt ||
+                previous.usedTokens === event.context.usedTokens && previous.capacityTokens === event.context.capacityTokens)) return
+            this.contextWindows.set(session.run.runId, { ...event.context, observedAt: observed.observedAt })
+            this.publishSession(session)
+            return
+          }
           if (event.type === 'configuration') {
             if (session.nativeActor?.actorId !== evidence.acpBindingId) return
             const previous = this.nativeConfigurations.get(agentSessionId)
@@ -2449,6 +2459,7 @@ export class AgentMuxClient {
     this.pendingLifecycleBindings.clear()
     await this.acp.dispose()
     this.nativeConfigurations.clear()
+    this.contextWindows.clear()
     this.publisher.dispose()
   }
 
@@ -9637,6 +9648,7 @@ export class AgentMuxClient {
     }
     if (stored) {
       this.recovery.wake(agentSessionId)
+      this.contextWindows.delete(session.run.runId)
       if (this.nativeConfigurations.get(agentSessionId)?.run.runId === session.run.runId) this.nativeConfigurations.delete(agentSessionId)
       this.runPids.delete(session.run.runId)
       if (!this.registry.has(agentSessionId) || sameRun(this.registry.get(agentSessionId).run, session.run)) {
@@ -9854,6 +9866,10 @@ export class AgentMuxClient {
     const provider = this.providers.get(session.providerId)
     if (session.nativeActor && provider.managedAcp?.protocolId === session.nativeActor.protocolId &&
         provider.managedAcp.prepareInput && !this.endedRuns.has(session.run.runId)) projected.structuredPromptInput = true
+    const contextWindow = this.contextWindows.get(session.run.runId)
+    if (contextWindow && !this.endedRuns.has(session.run.runId) && this.acp.hasBinding(session.agentSessionId, session.run)) {
+      projected.contextWindowUsage = { ...contextWindow }
+    }
     const configuration = this.nativeConfigurations.get(session.agentSessionId)
     if (configuration && sameRun(configuration.run, session.run) && !this.endedRuns.has(session.run.runId) &&
         this.acp.hasBinding(session.agentSessionId, session.run)) projected.nativeConfiguration = structuredClone(configuration.snapshot)
@@ -9949,6 +9965,7 @@ export class AgentMuxClient {
 
   /** Both native exit events and reconnected terminal facts release the same exact Hook owner. */
   private releaseEndedRunHook(run: AgentMuxRunRef, session?: AgentMuxStoredAgentSession): void {
+    this.contextWindows.delete(run.runId)
     if (session && this.acp.hasBinding(session.agentSessionId, run)) {
       void this.acp.unbind(session.agentSessionId).catch(error => this.publisher.publish({ type: 'agent-error',
         agentSessionId: session.agentSessionId, code: 'ACP_BINDING_RELEASE_UNCONFIRMED',

@@ -3,7 +3,7 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { AgentTurnUsage } from '@agentmux/core'
+import type { AgentContextWindowUsage, AgentTurnUsage } from '@agentmux/core'
 import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
 import { AgentUsageDetails } from './AgentUsageDetails'
 
@@ -34,7 +34,7 @@ const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
  * capacity or used never renders a fake 0% — it says "unavailable". used% and remaining% are derived
  * from ONE rounded number (`remaining = 100 - used`) so they always sum to 100.
  */
-export function AgentContextUsage({ usage, source, visible = true }: { usage?: AgentTurnUsage | undefined; source?: string; visible?: boolean }) {
+export function AgentContextUsage({ usage, contextWindowUsage, source, visible = true }: { usage?: AgentTurnUsage | undefined; contextWindowUsage?: AgentContextWindowUsage | undefined; source?: string; visible?: boolean }) {
   const document = useWorkbenchDocument()
   const cardId = useId(), anchor = `--context-${cardId.replace(/[^a-zA-Z0-9_-]/gu, '')}`
   const owner = useMemo(() => ({}), [source, visible])
@@ -82,7 +82,7 @@ export function AgentContextUsage({ usage, source, visible = true }: { usage?: A
   if (visible) presented.current = true
   if (!presented.current) return null
 
-  const context = usage?.context
+  const context = contextWindowUsage ?? usage?.context
   // 「这个数知不知道」由 agent-usage 的 contextUsedPercent 独判——全窗口唯一一处。此处曾自己写那 6 行，
   // 项目活动行也照抄过一份；三份同源判定漂移，同一个 Agent 会在输入框、项目行、名册上给出三种说法。
   const used = contextUsedPercent(context)
@@ -112,7 +112,7 @@ export function AgentContextUsage({ usage, source, visible = true }: { usage?: A
           else { cancelClose(); preview.current = false }
           setOpened(event.newState === 'open' ? owner : null)
         } }}>
-        <AgentUsageDetails usage={usage} />
+        <AgentUsageDetails usage={usage} contextWindowUsage={contextWindowUsage} />
       </div>
       <ModalAttachmentDismissal active={Boolean(open && card.current && getModalOverlayContainer(card.current))} targetRef={card}
         onOwnerRemoved={() => card.current?.hidePopover()}

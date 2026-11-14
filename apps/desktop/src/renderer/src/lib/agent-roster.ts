@@ -140,7 +140,7 @@ export function buildAgentRoster(input: {
   const rows: RosterRow[] = []
   for (const session of input.sessions ?? []) {
     if (session.kind !== 'agent') continue
-    const percent = contextUsedPercent(session.turnUsage?.context)
+    const percent = contextUsedPercent(session.contextWindowUsage ?? session.turnUsage?.context)
     rows.push({
       sessionId: session.id,
       label: session.label,

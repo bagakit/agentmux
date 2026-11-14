@@ -339,6 +339,7 @@ function projectSession(
       status,
       ...(subject.agentSession.structuredPromptInput ? { structuredPromptInput: true as const } : {}),
       ...(subject.agentSession.nativeConfiguration ? { nativeConfiguration: structuredClone(subject.agentSession.nativeConfiguration) } : {}),
+      ...(subject.agentSession.contextWindowUsage ? { contextWindowUsage: { ...subject.agentSession.contextWindowUsage } } : {}),
       ...(activeRequest ? { pendingInteraction: structuredClone(activeRequest) } : {}),
       ...(pending?.response && activeRequest?.id !== pending.request.id ? { completedInteractionResponse: {
         requestId: pending.request.id, operationId: pending.response.operationId, acknowledged: pending.response.acknowledged

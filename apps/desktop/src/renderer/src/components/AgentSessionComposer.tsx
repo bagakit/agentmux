@@ -497,7 +497,7 @@ export function AgentSessionComposer({
             : session.processState !== 'running' || session.status.state === 'disconnected'
               ? 'Send to restore this Session.' : 'Send a message to this Session.'}
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
-      contextUsage={<AgentContextUsage visible={visible} source={session?.kind === 'agent' ? JSON.stringify([session.hostId, session.id, session.providerId, session.control.run.runId]) : sessionId} usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
+      contextUsage={<AgentContextUsage visible={visible} source={session?.kind === 'agent' ? JSON.stringify([session.hostId, session.id, session.providerId, session.control.run.runId]) : sessionId} usage={session?.kind === 'agent' ? session.turnUsage : undefined} contextWindowUsage={session?.kind === 'agent' ? session.contextWindowUsage : undefined} />}
       {...(workspace || runtimeWorkspace ? { onActivateSemanticReference: (reference: ComposerSemanticReference) => {
         if (reference.kind === 'agent') { void api.ui.openObjectLink(reference.reference).catch(reportError); return }
         const target = reference.kind === 'file' ? workspace : runtimeWorkspace

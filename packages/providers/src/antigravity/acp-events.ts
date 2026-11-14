@@ -65,6 +65,14 @@ export function readAntigravityUpdate(params: unknown, sessionId: string) {
   return null
 }
 
+/** ACP usage_update carries session context counts. Optional cost is billed separately. */
+export function readAntigravityContextWindow(update: Record<string, unknown>) {
+  const { used, size } = update
+  if (typeof used !== 'number' || !Number.isSafeInteger(used) || used < 0 ||
+      typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) return undefined
+  return { usedTokens: used, capacityTokens: size }
+}
+
 type NativeConfigurationChoice = {
   value: string; name: string; description?: string; group?: { id: string; name: string }
 }

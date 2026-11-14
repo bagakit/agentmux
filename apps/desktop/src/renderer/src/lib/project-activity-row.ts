@@ -35,7 +35,7 @@ export function elapsedShort(ms: number): string {
  */
 function contextPercent(session: SessionSnapshot): number | null {
   if (session.kind !== 'agent') return null
-  return contextUsedPercent(session.turnUsage?.context)
+  return contextUsedPercent(session.contextWindowUsage ?? session.turnUsage?.context)
 }
 
 /**
