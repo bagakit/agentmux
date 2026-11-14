@@ -207,6 +207,11 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   const trigger = useRef<HTMLButtonElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
   const popover = useRef<HTMLDivElement>(null)
+  const [popoverNode, setPopoverNode] = useState<HTMLDivElement | null>(null)
+  const attachPopover = useCallback((node: HTMLDivElement | null) => {
+    popover.current = node
+    setPopoverNode(node)
+  }, [])
   const dock = useRef<HTMLElement>(null)
   const requestedFolder = useRef<Folder | null>(null)
   const preview = useRef(false)
@@ -540,8 +545,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   }, [open, detail, selectedQueue, selection, scope, folder, id])
   useLayoutEffect(() => {
     if (!open || !visible) return
-    const panel = popover.current!, editor = trigger.current!.closest<HTMLElement>('.composer')
-    if (!editor) return
+    const panel = popoverNode, editor = trigger.current?.closest<HTMLElement>('.composer')
+    if (!panel || panel !== popover.current || !panel.isConnected || !editor?.isConnected) return
     const region = editor.closest<HTMLElement>('[data-workbench-region-id]') ?? editor
     const measure = () => {
       const c = editor.getBoundingClientRect(), r = region.getBoundingClientRect()
@@ -554,9 +559,10 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
     const observer = new window.ResizeObserver(measure); observer.observe(editor); observer.observe(region)
     window.addEventListener('resize', measure)
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
-  }, [open, visible, document])
+  }, [open, visible, document, popoverNode])
   useLayoutEffect(() => {
-    const panel = popover.current!
+    const panel = popoverNode
+    if (!panel || panel !== popover.current || !panel.isConnected) return
     if (suspension.current && suspension.current.scope !== scope) {
       suspension.current = null
       if (!panel.matches(':popover-open')) { setOpen(false); return }
@@ -570,11 +576,12 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
         panel.hidePopover()
       }
     } else if (open && suspension.current?.scope === scope && !panel.matches(':popover-open')) {
+      if (!trigger.current?.isConnected) return
       suspension.current = { scope, phase: 'restoring' }
       ;(panel.showPopover as (options: { source: HTMLButtonElement }) => void)
         .call(panel, { source: trigger.current! })
     }
-  }, [open, visible, scope])
+  }, [open, visible, scope, popoverNode])
   const motion = useMailboxMotion(popover, dock, open, visible, scope)
   const readingMounted = open || motion.retaining
   // Retain the original reading DOM through exit paint so its native anchor baseline
@@ -615,7 +622,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
         <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span>
       </span> : null}
     </button>
-    <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox" data-view={folder === 'progress' ? 'automation' : 'messages'}
+    <div ref={attachPopover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox" data-view={folder === 'progress' ? 'automation' : 'messages'}
       data-state={open && visible ? 'open' : 'closed'} inert={!open || !visible}
       onBeforeToggle={event => {
         if (event.target !== event.currentTarget) return
