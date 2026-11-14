@@ -77,12 +77,12 @@ After an unknown write, read the same original Topic/knowledge/migration owner b
 explicit retry. Preserve original files and working surfaces until actual saved results
 are confirmed, and report gaps rather than guessing that absent observations mean deletion.
 
-## Promote an original Topic
+## Promote an original Topic into a Mote Club
 
 Use `amux topic inspect --topic ID` to retain its exact content and Zone. After the
 user authorizes promotion, call `amux topic promote apply --topic ID --operation-id OPERATION`.
 Promotion retains the original Agents, conversations, files, category entry and knowledge.
-It adds a persistent Mote identity; it does not send messages or start Agents.
+It adds a persistent Mote Club identity; it does not send messages or start Agents.
 
 Read `amux topic promote inspect --topic ID` to discover its original operation.
 After a partial or unknown result, inspect with the original `--operation-id`;
@@ -94,5 +94,5 @@ New Topic promotions also honor the original `promotion.enabled` setting. Disabl
 admission refuses only the new promotion; existing Agents, Motes and original
 partial-operation inspection/explicit continuation remain available. Promotion
 configuration is in Settings → Promotion. For starting from an ordinary Agent,
-read `agent --skill` and `agent promote --help`; that path establishes its own
-Mote data home without converting the original project or Topic.
+read `agent --skill` and `agent promote --help`; that path prefers joining an existing Club; explicitly establishing a new Club
+is a separate choice. It preserves the original project/Topic and appoints no Main.

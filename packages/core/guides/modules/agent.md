@@ -244,24 +244,42 @@ The older `agent rename` retains its receiving-client display-override semantics
 and original records. It is not silently redirected to another Core. Local label
 saves do not claim Provider-native title synchronization or Agent health.
 
-## Keep an original Agent as a Mote
+## Promote an original Agent into a Mote Club
 
-After the user explicitly chooses to establish a lasting collaborator, the original
-person/device may call `agent promote apply --input FILE|-`. Inspect the leaf help
-and retain the exact target Host/Session, source display occurrence, title and
-operationId. A managed Agent may inspect its own original result; it cannot assign
-itself a Mote main role. Promotion creates a separate Mote data home and associates
-only that same Session. Original history, Run, execution cwd and project workface
-remain. It does not copy a repository, start another Agent, send input or enable
-standing maintenance. An Agent already in a Topic/Mote keeps that original organization.
+After the user explicitly chooses lasting Club membership, the original
+person/device may call `agent promote apply --input FILE|-`. Retain the exact
+Host/Session, source display occurrence, title, operationId and destination.
+Prefer `destination: {"kind":"existing-club","target":CLUB_TARGET}` using an
+original discovery choice. Explicit `destination: {"kind":"new-club"}` establishes
+a separate Club home and then associates that same Agent as its Thread. Neither
+choice appoints or replaces a Main. The original Main settings, Agent history,
+Run, execution cwd and project workface remain. No repository is copied, no
+Agent is started, and no input or standing maintenance is enabled. An Agent
+already organized in a Topic/Club keeps its organization; promotion cannot be
+used as a transfer.
 
-Use `agent promote inspect --input FILE|-` with the exact target to discover the
-original operation. Partial or unknown results retain their complete original
-request. Inspect before explicitly continuing the same apply and operationId;
-never mint a new operation to replace an unknown result. `settings inspect
-promotion.enabled` reads the global switch for new promotions; its default is true.
-The original person/device may change it through Settings → Promotion or the
-public Settings owner. Disabling it retains existing Motes and original promotion
-inspection/continuation. A saved personality does not prove that an existing
-Session has read it; continue the original context and discover Mote guidance
-through the original main/member binding when actually working there.
+Use `agent promote inspect --input FILE|-` with `{"target":{"hostId":"HOST",
+"agentSessionId":"SID"}}` to discover `pending`, original `clubs` and current
+`memberships`. Club titles may match; retain their exact target and directory.
+An unavailable Main is `main: null`, never a guessed role. `issue` reports gaps;
+it does not invalidate other confirmed Club choices. Follow `nextCursor` with
+the same target and `cursor` until null to finish discovering unfinished
+operations. Do not treat a partial page as a complete set.
+
+Include the original `operationId` to read only that operation; the result has
+`discovery: null`. Unknown operation IDs remain absent rather than adopting
+another action's receipt. A managed Agent can inspect its own target, but cannot
+assign itself membership or a Main role. Partial or unknown results retain their
+complete original request. Inspect before explicitly applying that same request
+and operationId; never mint a new operation to replace an unknown result.
+Historical completion remains inspectable after later membership or file edits.
+Already admitted original operations keep their original promises and durable
+records, including an original Main assignment; new requests always require an
+explicit destination and never inherit that promise.
+
+`settings inspect promotion.enabled` reads the global switch for new promotions;
+its default is true. The person/device may change it through Settings → Promotion
+or the public Settings owner. Disabling it retains existing Clubs and original
+operation inspection/continuation. A saved personality does not prove that an
+existing Session has read it; continue the original context and discover Mote
+guidance through the original main/member binding when actually working there.
