@@ -24,7 +24,7 @@ import { dirname, join } from 'node:path'
 import { access } from 'node:fs/promises'
 import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxError,
   startHeadlessAgentMux, connectAgentMuxRpc, spatialCatalog, rpcControlResult, defaultAgentMuxControlSocketPath, isMoteChatMethod,
-  type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
+  type AgentMuxAgentSessionStore, type AgentMuxClientOptions, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
   type AgentProvider, type AgentMuxRpcMobileAccessState, type AgentMuxRpcMobileLinkCandidate } from '@agentmux/core'
@@ -52,7 +52,7 @@ import { configuredTailcatListener } from './tailcat-listener.js'
 import { prepareTailcatKey } from './tailcat-key.js'
 import { configuredRouteEdge, configuredRouteEdges } from './host-route-edges.js'
 export type AgentMuxHostOptions = {
-  prepareExecutionEnvironment?: () => Promise<void>
+  prepareExecutionEnvironment?: AgentMuxClientOptions['prepareExecutionEnvironment']
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
   socketPath?: string

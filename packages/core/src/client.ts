@@ -656,6 +656,7 @@ export class AgentMuxClient {
 
   async listHostExecutors(input?: { refresh?: boolean; executorId?: string }) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    if (input?.refresh) await this.prepareExecutionEnvironment({ refresh: true })
     const inventory = await this.hostExecutorOwner.list(input)
     // Produced by the same target Core that handles createHostAgentWithDelivery.
     // A calling SDK never adds this contract to another Core's old result.
@@ -1099,7 +1100,7 @@ export class AgentMuxClient {
 
   private readonly retainedServiceExecutionDirectories: AgentMuxClientOptions['retainedServiceExecutionDirectories']
   private readonly spawnFiniteFileProducer: AgentMuxClientOptions['spawnFiniteFileProducer']
-  private readonly prepareExecutionEnvironment: () => Promise<void>
+  private readonly prepareExecutionEnvironment: NonNullable<AgentMuxClientOptions['prepareExecutionEnvironment']>
 
   constructor(options: AgentMuxClientOptions = {}) {
     this.spawnFiniteFileProducer = options.spawnFiniteFileProducer
@@ -4410,7 +4411,7 @@ export class AgentMuxClient {
   }
 
   async probeAgent(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentCapabilitySnapshot> {
-    await this.prepareExecutionEnvironment()
+    await this.prepareExecutionEnvironment({ refresh: true })
     return this.probePreparedAgent(providerId, commandOverride, context)
   }
 
@@ -4444,7 +4445,7 @@ export class AgentMuxClient {
    * （那正是那次误报要防的）。启动仅把准确缺失作为文件前置拒绝；检查失败由原 Native 执行裁定。
    */
   async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentMuxExecutorProbeResult> {
-    await this.prepareExecutionEnvironment()
+    await this.prepareExecutionEnvironment({ refresh: true })
     // 借 probeCapabilities 的命令解析：它把解析后的命令传给 hasExecutable，我们截下那条命令再三态归类，
     // 不在这里重抄一份 commandOverride/catalog 的取舍（重抄一份就是第二处会漂移的命令解析）。
     let resolvedCommand: string | null = null

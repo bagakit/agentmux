@@ -186,8 +186,8 @@ export type AgentMuxClientOptions = {
 
   moteInputResolver?: AgentInputMoteResolver
   inputResources?: AgentInputResourceOwner
-  /** Complete Host exports before freezing a new execution; original reads and healthy Runs stay available. */
-  prepareExecutionEnvironment?: () => Promise<void>
+  /** Complete exports for new execution; explicit discovery may refresh them without taking healthy Runs. */
+  prepareExecutionEnvironment?: (intent?: { refresh: true }) => Promise<void>
   /** Original semantic owner identity, supplied by the Host; never inferred from a path or Run. */
   diagnosticOwner?: AgentStartupDiagnosticOwner
   externalConversationAuthority?: AgentExternalConversationAuthorityPort

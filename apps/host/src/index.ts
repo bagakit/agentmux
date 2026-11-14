@@ -17,20 +17,23 @@ const mobileBuildDirectory = process.env.AGENTMUX_MOBILE_BUILD_DIRECTORY ?? join
 // The long-lived execution owner must load the user's shell environment itself;
 // a Desktop launched from Finder may still be hydrating when it starts this Host.
 // Runtime namespace and Agent identity belong to the original launch context, not shell setup.
-let environmentReady: Promise<void> | undefined
-function prepareExecutionEnvironment(): Promise<void> {
-  return environmentReady ??= prepareProcessEnvironmentFromLoginShell().then(environment => {
-    // Keep complete preparation; incomplete observations belong only to this attempt.
-    // The next execution can retry without replacing this Host or any original Session.
-    if (environment.ok ? environment.mode !== 'interactive-login' : environment.reason !== 'unsupported-platform') {
-      environmentReady = undefined
-    }
+let environmentReady = false
+let environmentPreparation: Promise<void> | undefined
+function prepareExecutionEnvironment(intent?: { refresh: true }): Promise<void> {
+  // A separate diagnostic refresh cannot take a previously prepared launch environment away.
+  if (environmentReady && !intent?.refresh) return Promise.resolve()
+  if (environmentPreparation) return environmentPreparation
+  const preparation = prepareProcessEnvironmentFromLoginShell().then(environment => {
+    // Retain the last complete exports on a failed refresh. Initial incomplete preparation
+    // remains retryable; explicit checks always ask the same owner for current exports.
+    environmentReady ||= environment.ok ? environment.mode === 'interactive-login' : environment.reason === 'unsupported-platform'
     const warning = loginShellEnvironmentWarning(environment)
     if (warning) process.stderr.write(`${warning}\n`)
-  }, error => {
-    environmentReady = undefined
-    throw error
   })
+  environmentPreparation = preparation
+  const release = () => { if (environmentPreparation === preparation) environmentPreparation = undefined }
+  void preparation.then(release, release)
+  return preparation
 }
 void prepareExecutionEnvironment()
 const configured = configuredHostClients(configurationPath)
