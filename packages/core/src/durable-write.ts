@@ -8,6 +8,8 @@ export interface DurableWriteOptions {
   readonly signal?: AbortSignal
   /** Require an acknowledged parent-directory fsync; failure leaves the write unconfirmed. */
   readonly requireDirectorySync?: boolean
+  /** Re-prove the exact destination parent immediately before each publication effect. */
+  readonly assertDirectory?: () => Promise<void>
 }
 
 /** Replacement is a producer fact; a failed directory ACK cannot undo it. */
@@ -51,6 +53,7 @@ export async function durableWriteFile(
 ): Promise<void> {
   const { mode = 0o600, signal } = options
   signal?.throwIfAborted()
+  await options.assertDirectory?.()
   // 独立 ID 后缀让并发写各自拿到独立临时文件，wx（O_EXCL）保证不会误踩已存在的临时残留。
   const temporaryPath = `${path}.${process.pid}.${mintObjectId()}.tmp`
   let committed = false
@@ -69,15 +72,18 @@ export async function durableWriteFile(
       }
     }
     signal?.throwIfAborted()
+    await options.assertDirectory?.()
     await rename(temporaryPath, path)
     committed = true
+    await options.assertDirectory?.()
     const directory = await open(dirname(path), 'r').catch(error => {
       if (options.requireDirectorySync) throw error
       return undefined
     })
     try {
+      await options.assertDirectory?.()
       await directory?.sync()
-    } catch (error) { if (options.requireDirectorySync) throw primary(error) } finally {
+    } catch (error) { if (options.assertDirectory || options.requireDirectorySync) throw primary(error) } finally {
       try { await directory?.close() } catch (error) {
         if (failure) failure.addCleanupFailure('directory-close', error)
         else if (options.requireDirectorySync) throw error
