@@ -44,14 +44,17 @@ async function receipt(child: ChildProcess): Promise<{ owner: AgentMuxRuntimeOwn
     child.once('exit', code => { clearTimeout(timer); reject(new Error(`Private Headless exited ${code}: ${errors}`)) })
   })
 }
-export async function headlessFixture(options: { cli?: boolean; memoryStore?: boolean; ownerNodeArgs?: string[]; ownerEntry?: string } = {}) {
+export async function headlessFixture(options: { cli?: boolean; memoryStore?: boolean; ownerNodeArgs?: string[]; ownerEntry?: string; legacySessionStore?: boolean } = {}) {
   const root = await mkdtemp(fixturePath("tmp/amrr-"))
   const runtimeDirectory = join(root, 'r'), stateDirectory = join(root, 's')
   await Promise.all([mkdir(runtimeDirectory, { mode: 0o700 }), mkdir(join(stateDirectory, 'ctxmux'), { recursive: true, mode: 0o700 }), mkdir(join(root, 'home'), { mode: 0o700 })])
+  const storePath = join(stateDirectory, options.legacySessionStore ? 'agent-sessions.json' : 'sessions.json')
+  if (options.legacySessionStore) await writeFile(storePath,
+    JSON.stringify({ version: 5, sessions: [], reservations: [], retiredRuns: [], retiredAgentSessions: [] }), { mode: 0o600 })
   const env: NodeJS.ProcessEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))),
     HOME: join(root, 'home'), AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: stateDirectory,
     ...(options.memoryStore ? { AGENTMUX_TEST_MEMORY_STORE: '1' } : {}),
-    AGENTMUX_AGENT_SESSION_STORE: join(stateDirectory, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(stateDirectory, 'messages.ndjson') }
+    AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(stateDirectory, 'messages.ndjson') }
   const artifact = resolve(import.meta.dirname, '../../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd')
   let daemon = spawn(artifact, ['--socket', join(runtimeDirectory, 'ctxmux.sock'), '--state-dir', join(stateDirectory, 'ctxmux'), '--readiness-fd', '3'],
     { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
