@@ -87,3 +87,36 @@ it('the equal list projection preserves the same sourced local address', async (
   expect(dom.container.textContent).toContain('192.168.40.12')
   expect(network).toHaveBeenCalledOnce()
 })
+
+it('editing the local listener draft preserves the confirmed address without another network read', async () => {
+  const network = vi.spyOn(api.hosts, 'network').mockImplementation(async host => sample(host))
+  await show()
+  await act(async () => localNode().click())
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-host-panel="connection"]')!.click())
+  const key = dom.container.querySelector<HTMLInputElement>('[aria-label="Tailcat server key"]')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(key, 'draft-server')
+    key.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(localNode().querySelector('.remote-host-node__address')?.textContent).toBe('192.168.40.12')
+  expect(key.value).toBe('draft-server')
+  expect(network).toHaveBeenCalledOnce()
+})
+
+it('keeps measured ReactFlow nodes visible when their source data and parent presentation update', async () => {
+  vi.spyOn(api.hosts, 'network').mockImplementation(async host => sample(host))
+  await show()
+  const wrapper = () => localNode().closest<HTMLElement>('.react-flow__node')!
+  expect(getComputedStyle(wrapper()).visibility).toBe('visible')
+  expect(wrapper().offsetWidth).toBeGreaterThan(0)
+  const mutations: MutationRecord[] = []
+  const observer = new MutationObserver(records => mutations.push(...records))
+  observer.observe(wrapper(), { attributes: true, attributeFilter: ['style'], attributeOldValue: true })
+  config = { ...config, hosts: config.hosts.map(host => host.kind === 'ssh' ? { ...host, label: 'Renamed remote Mac' } : host) }
+  await show()
+  mutations.push(...observer.takeRecords()); observer.disconnect()
+  // vacuous-ok: unchanged healthy geometry may emit no style mutations; updated data and visible nodes are asserted below.
+  expect(mutations.some(change => /visibility:\s*hidden/u.test(change.oldValue ?? '')), 'Measured nodes remain visible throughout the data update').toBe(false)
+  expect(dom.container.querySelector('[data-host-node="other"]')?.textContent).toContain('Renamed remote Mac')
+  expect(getComputedStyle(wrapper()).visibility).toBe('visible')
+})
