@@ -9,7 +9,9 @@ import { inspectGif } from '../../../src/shared/gif-metadata'
 import { NativeDesktop } from '@agentmux/native-desktop'
 import { AgentMuxRpcService } from '@agentmux/core'
 
-const automatic = process.env.CAPTURE_AUTO_TEST === '1'
+const interaction = process.env.CAPTURE_INTERACTION_TEST === '1'
+const manualInteraction = interaction
+const automatic = process.env.CAPTURE_AUTO_TEST === '1' || interaction
 const live = process.env.CAPTURE_SEQUENCE_LIVE === '1', recorded = process.env.CAPTURE_RECORDED_NATIVE
 let native: NativeDesktop | undefined, sourceWindow: BrowserWindow | undefined, server: { stop(): Promise<void> } | undefined
 const out = process.env.CAPTURE_SEQUENCE_OUT!, mode = process.env.CAPTURE_SEQUENCE_MODE! as 'scroll' | 'gif'
@@ -19,7 +21,7 @@ const result: any = { passed: false, mode, observations: [], screenshots: [] }
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 async function until<T>(name: string, read: () => Promise<T> | T): Promise<NonNullable<T>> {
   const start = performance.now()
-  while (performance.now() - start < 10000) { const value = await read(); if (value) return value as NonNullable<T>; await wait(30) }
+  while (performance.now() - start < (manualInteraction ? 120000 : 10000)) { const value = await read(); if (value) return value as NonNullable<T>; await wait(30) }
   const windows = BrowserWindow.getAllWindows(); const body = windows[0] ? await windows[0].webContents.executeJavaScript('document.body.innerText') : 'no window'
   throw new Error('Timed out: ' + name + '\n' + body)
 }
@@ -50,21 +52,22 @@ async function run() {
   if (live) {
     native = new NativeDesktop({ executablePath: process.env.CAPTURE_SEQUENCE_HELPER!, connectTimeoutMs: 15000, requestTimeoutMs: 15000 })
     const area = screen.getPrimaryDisplay().workArea
-    sourceWindow = new BrowserWindow({ x: area.x + Math.round((area.width - 740) / 2), y: area.y + Math.round((area.height - 520) / 2), width: 740, height: 520, show: true, alwaysOnTop: true, webPreferences: { backgroundThrottling: false } })
+    sourceWindow = new BrowserWindow({ x: area.x + 40, y: area.y + 40, width: 740, height: 520, show: true, alwaysOnTop: !interaction, webPreferences: { backgroundThrottling: false } })
     const rows = Array.from({ length: 24 }, (_, index) => `<section style="height:85px;box-sizing:border-box;padding:14px 24px;background:hsl(${(index * 47) % 360} 30% 92%);color:#213044;border-bottom:1px solid #aebbc7"><b>${String(index + 1).padStart(2, '0')} · Capture evidence</b><div>Review the selected region, preserve the source, and annotate the exact frame.</div><small id="counter-${index}">Screen capture · frame 0</small></section>`).join('')
     await sourceWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<body style="margin:0;font:14px/1.5 system-ui">' + rows + '</body>'))
     await sourceWindow.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+    if (interaction) await sourceWindow.webContents.executeJavaScript("document.body.style.userSelect='none';window.sourceClicks=0;window.sourceWheels=[];document.body.addEventListener('pointerdown',()=>{window.sourceClicks++;document.querySelector('#counter-4').textContent='Click received'});document.body.addEventListener('wheel',e=>window.sourceWheels.push(e.deltaY),{passive:true})")
     const bounds = sourceWindow.getContentBounds(); source.rect = { x: bounds.x, y: bounds.y, width: 480, height: 260 }
     const first = await native.captureScreenshot({ mode: 'rect', rect: source.rect })
     assert.equal(first.state, 'captured', JSON.stringify(first.error))
     const shot = first.screenshot!; initial = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + shot.data, width: shot.width, height: shot.height, byteLength: Buffer.byteLength(shot.data, 'base64') }; source.scale = shot.scale
     result.observations.push({ live: true, source: source.rect, scale: shot.scale, helper: process.env.CAPTURE_SEQUENCE_HELPER })
   }
-  if (automatic) { sourceWindow = new BrowserWindow({ width: 240, height: 160, show: true }); await sourceWindow.loadURL('data:text/html,<body>Existing host window</body>') }
+  if (automatic && !interaction) { sourceWindow = new BrowserWindow({ width: 240, height: 160, show: true }); await sourceWindow.loadURL('data:text/html,<body>Existing host window</body>') }
   const owner = new CaptureSequenceOwner({ directory: join(out, 'captures'), home: join(out, 'home'), appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }),
     select: async () => ({ image: initial, source }), native: () => ({ captureScreenshot: async (params: any) => {
-      assert.equal(params.mode, 'rect'); assert.deepEqual(params.rect, source.rect); assert.equal(params.excludeWindowIds.length, automatic ? 2 : 1, 'the actual excluded background preserves exact host window exclusions')
-      if (automatic) {
+      assert.equal(params.mode, 'rect'); assert.deepEqual(params.rect, source.rect); assert.equal(params.excludeWindowIds.length, mode === 'scroll' && automatic ? interaction ? 2 : 3 : 1, 'the actual excluded background preserves exact host window exclusions')
+      if (automatic && !interaction) {
         sampleCount++
         const next = recorded ? retainedFrames[sampleCount <= 2 ? 0 : 1]! : frame(sampleCount <= 2 ? 0 : 85).image
         return { state: 'captured' as const, screenshot: { format: 'png' as const, data: next.dataUrl.split(',')[1]!, width: next.width, height: next.height, scale: source.scale }, selectionRect: source.rect }
@@ -82,21 +85,23 @@ async function run() {
       }
       if (live) {
         sampleCount++
-        if (mode === 'scroll') {
+        if (mode === 'scroll' && !interaction) {
           await sourceWindow!.webContents.executeJavaScript(`window.scrollTo(0, ${sampleCount * 85})`)
           await until('actual source scroll', async () => await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop') >= sampleCount * 85)
-        } else await sourceWindow!.webContents.executeJavaScript(`document.querySelector('#counter-0').textContent='Screen capture · frame ${sampleCount}'`)
+        } else if (mode === 'gif') await sourceWindow!.webContents.executeJavaScript(`document.querySelector('#counter-0').textContent='Screen capture · frame ${sampleCount}'`)
         await sourceWindow!.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        const beforeScroll = interaction ? await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop') : 0
         const captured = await native!.captureScreenshot(params)
         assert.equal(captured.state, 'captured', JSON.stringify(captured.error))
         const actualImage = nativeImage.createFromBuffer(Buffer.from(captured.screenshot!.data, 'base64'))
         const expectedImage = await sourceWindow!.webContents.capturePage({ x: 0, y: 0, width: 480, height: 260 })
         const expected = expectedImage.resize({ width: captured.screenshot!.width, height: captured.screenshot!.height }).toBitmap(), actual = actualImage.toBitmap()
+        const afterScroll = interaction ? await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop') : 0
         let matches = 0, count = 0
         for (let i = 0; i < actual.length; i += 148) { count++; if (Math.abs(actual[i]! - expected[i]!) < 16 && Math.abs(actual[i + 1]! - expected[i + 1]!) < 16 && Math.abs(actual[i + 2]! - expected[i + 2]!) < 16) matches++ }
         await writeFile(join(out, `source-native-${sampleCount}.png`), actualImage.toPNG()); await writeFile(join(out, `source-reference-${sampleCount}.png`), expectedImage.toPNG())
-        assert.ok(matches / count > .9, `native capture excludes its control window and preserves the real source pixels: ${matches / count}, actual ${actual.length}, expected ${expected.length}`)
-        result.observations.push({ actualNativeFrame: sampleCount, sourcePixelMatch: matches / count })
+        if (beforeScroll === afterScroll) assert.ok(matches / count > .9, `native capture excludes its control window and preserves the real source pixels: ${matches / count}, actual ${actual.length}, expected ${expected.length}`)
+        result.observations.push({ actualNativeFrame: sampleCount, sourcePixelMatch: matches / count, beforeScroll, afterScroll })
         return captured
       }
       sampleCount++
@@ -109,37 +114,65 @@ async function run() {
   if (mode === 'scroll') {
     let delivered: any = null
     const capture = new ScreenCapture({ home: join(out, 'home'), native: () => ({ captureScreenshot: async () => { throw Error('Wrong source') }, writeClipboardImage: async () => {} }),
-      appActive: () => true, present: async session => { await session.complete(initial, source, 'fixture', automatic ? 'excluded' : 'included'); return { state: 'completed' } },
-      sequence: (kind, selection) => owner.edit(kind, selection), reportIssue: error => { throw error }, edit: async image => { delivered = image } })
+      appActive: () => true, present: async session => { await session.complete(initial, source, 'fixture', automatic && !interaction ? 'excluded' : 'included'); return { state: 'completed' } },
+      sequence: (kind, selection) => owner.edit(kind, { ...selection, startImmediately: interaction }), reportIssue: error => { throw error }, edit: async image => { delivered = image } })
     const closed = capture.capture(false, 'scroll')
-    window = await until('capture window', () => BrowserWindow.getAllWindows().find(w => w !== sourceWindow))
+    window = await until('capture window', () => BrowserWindow.getAllWindows().find(w => w !== sourceWindow && !w.webContents.getURL().startsWith('data:')))
     if (live) window.setAlwaysOnTop(true, 'floating', 1)
-    await until('scrolling controls', async () => await evaluate("document.body.textContent.includes('Capture next')"))
+    await until('scrolling controls', async () => await evaluate(interaction ? "!!document.querySelector('.capture-live-controls')" : "document.body.textContent.includes('Capture next')"))
     if (automatic) {
-      await click('Start scrolling capture')
-      await until('automatic changed frame', async () => await evaluate("document.body.textContent.includes('2 frames')"))
-      assert.ok(sampleCount >= 3, 'unchanged native samples do not grow the captured sequence')
+      if (!interaction) await click('Start scrolling capture')
+      if (interaction) {
+        assert.equal(await evaluate("document.body.textContent.includes('Start scrolling capture')"), false, 'the explicit selection start opens directly into live capture')
+        await until('transparent frame visible', () => BrowserWindow.getAllWindows().find(candidate => candidate !== sourceWindow && candidate !== window && candidate.isVisible()))
+        assert.equal(window.isFocusable(), false, 'live controls do not take source keyboard focus')
+        sourceWindow!.focus(); await wait(200)
+        const inputMarker = join(out, 'awaiting-input.json')
+        await writeFile(inputMarker, JSON.stringify({ phase: 'awaiting-input', pid: process.pid, app: 'com.github.Electron', windowId: Number(sourceWindow!.getMediaSourceId().split(':')[1]), source: source.rect, bounds: sourceWindow!.getBounds() }))
+        await until('explicit external input completion', async () => { try { await readFile(join(out, 'input-done')); return true } catch { return false } })
+        assert.equal(await sourceWindow!.webContents.executeJavaScript('window.sourceClicks'), 1, 'actual desktop click reaches the source through the capture frame')
+        assert.ok(await sourceWindow!.webContents.executeJavaScript('window.sourceWheels.length') > 0, 'actual desktop wheel reaches the source through the capture frame')
+        await until('source really scrolled', async () => await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop') > 0)
+        result.observations.push({ actualDesktopClick: true, actualDesktopWheel: true, sourceScroll: await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop'), productionDoesNotInjectInput: true })
+      }
+      await until('automatic changed frame', async () => {
+        const snapshot = await evaluate("window.captureSequence.load()")
+        assert.ok(snapshot.state === 'recording' || snapshot.frames.length >= 2, snapshot.issue ?? 'capture stopped before accepting source progress')
+        return snapshot.frames.length >= 2
+      })
+      if (interaction) {
+        const finalScroll = await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop')
+        await until('native pixels at settled source position', () => result.observations.some((row: any) => row.beforeScroll === finalScroll && row.afterScroll === finalScroll && row.sourcePixelMatch > .9))
+      }
+      assert.ok(sampleCount >= (interaction ? 2 : 3), 'native sampling reaches changed source content')
       const compact = window.getContentBounds()
-      assert.ok(compact.width <= 440 && compact.height <= 360, 'automatic capture uses a compact accessible control window')
+      assert.ok(compact.width <= 240 && compact.height <= 300, 'automatic capture uses a compact accessible control window')
       assert.ok(compact.x >= source.rect.x + source.rect.width || compact.x + compact.width <= source.rect.x || compact.y >= source.rect.y + source.rect.height || compact.y + compact.height <= source.rect.y, 'controls use available space outside the selected source')
       for (const theme of ['dark', 'light']) {
         await evaluate(`window.setCaptureFixtureTheme('${theme}')`)
         await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
         const file = `scroll-sampling-${theme}.png`; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
       }
+      if (interaction) {
+        const frameWindow = BrowserWindow.getAllWindows().find(candidate => candidate !== sourceWindow && candidate !== window)!
+        const border = await native!.captureScreenshot({ mode: 'rect', rect: { x: source.rect.x - 3, y: source.rect.y - 3, width: source.rect.width + 6, height: source.rect.height + 6 } })
+        assert.equal(border.state, 'captured'); await writeFile(join(out, 'live-region-native.png'), Buffer.from(border.screenshot!.data, 'base64')); result.screenshots.push('live-region-native.png')
+        result.observations.push({ frameBounds: frameWindow.getBounds(), controls: compact, source: source.rect, focusable: frameWindow.isFocusable() })
+      }
       await click('Stop scrolling capture')
+      await until('only review and original source remain', () => BrowserWindow.getAllWindows().length === (sourceWindow ? 2 : 1))
       await until('automatic capture returned to review', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !document.querySelector('button.primary-button').disabled"))
       assert.ok(window.getContentBounds().width > compact.width, 'stop restores review in the same window')
       const snapshot = await evaluate("window.captureSequence.load()")
-      assert.equal(snapshot.frames.length, 2, 'a stopped automatic sequence retains only its actual changed frames')
+      if (interaction) assert.ok(snapshot.frames.length >= 2, 'real wheel progress is retained'); else assert.equal(snapshot.frames.length, 2, 'a stopped automatic sequence retains only its actual changed frames')
       for (const theme of ['dark', 'light']) for (const width of [860, 440]) {
         await evaluate(`window.setCaptureFixtureTheme('${theme}')`); window.setContentSize(width, 640)
         await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
         const file = `scroll-auto-review-${theme}-${width}.png`; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
       }
       await click('Edit long image'); await closed
-      assert.equal(delivered.height, initial.height + 85 * source.scale, 'automatic deduplication and the actual joined pixels reach the original editor consumer')
-      result.observations.push({ automatic: true, exactBackground: true, nativeSamples: sampleCount, acceptedFrames: 2, outputHeight: delivered.height })
+      assert.equal(delivered.height, initial.height + (interaction ? await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop') : 85) * source.scale, 'automatic deduplication and the actual joined pixels reach the original editor consumer')
+      result.observations.push({ automatic: true, exactBackground: true, nativeSamples: sampleCount, acceptedFrames: snapshot.frames.length, outputHeight: delivered.height })
       result.passed = true; return
     }
     await click('Capture next'); await until('second frame', async () => await evaluate("document.body.textContent.includes('2 frames') && !document.querySelector('button.primary-button').disabled"))
@@ -171,7 +204,7 @@ async function run() {
     const service = new AgentMuxRpcService({ coreClients: () => [], sequences: owner }), input = { hostId: 'local', operationId: 'original-sequence', mode: 'gif' as const }, context = { principal: { kind: 'user' as const, id: `local-user:${process.getuid?.() ?? 'current'}` } }
     const opened = await service.call('capture.sequence.open', input, context); assert.equal(opened.state, 'selecting')
     await service.call('capture.sequence.open', input, context)
-    window = await until('capture window', () => BrowserWindow.getAllWindows().find(w => w !== sourceWindow)); assert.equal(BrowserWindow.getAllWindows().filter(w => w !== sourceWindow).length, 1, 'repeated open never starts a second sequence')
+    window = await until('capture window', () => BrowserWindow.getAllWindows().find(w => w !== sourceWindow && !w.webContents.getURL().startsWith('data:'))); assert.equal(BrowserWindow.getAllWindows().filter(w => w !== sourceWindow).length, 1, 'repeated open never starts a second sequence')
     if (live) window.setAlwaysOnTop(true, 'floating', 1)
     await until('recording controls', async () => await evaluate("document.body.textContent.includes('Start recording')"))
     await click('Start recording'); await until('four captured frames', async () => (await service.call('capture.sequence.inspect', { hostId: 'local', operationId: input.operationId }, context)).frameCount >= 4)
@@ -239,7 +272,7 @@ async function run() {
   }
   result.passed = true
 }
-void run().catch(error => { result.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }).finally(async () => {
+void run().catch(async error => { if (sourceWindow && !sourceWindow.isDestroyed()) result.lastSource = await sourceWindow.webContents.executeJavaScript('({clicks:window.sourceClicks,wheels:window.sourceWheels,scroll:document.scrollingElement.scrollTop})'); result.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }).finally(async () => {
   await server?.stop(); native?.dispose(); sourceWindow?.destroy()
   await writeFile(join(out, 'result.json'), JSON.stringify(result, null, 2))
   app.exit(result.passed ? 0 : 1)
