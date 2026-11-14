@@ -172,12 +172,15 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
         const name = resource?.name ?? first.labels[0] ?? first.name
         const compact = frame.lanes.every(lane => compactLanes.get(lane.id))
         const revealed = frame.lanes.some(lane => revealedLaneIds?.has(lane.id))
+        const currentProject = frame.lanes.some(lane => lane.id === currentLaneId)
+        const activityAt = Math.max(0, ...frame.lanes.map(lane => lane.lastActivityAt ?? 0)) || null
         const title = <button type="button" className="focus-project-lanes__axis" data-focus-project-scope-control aria-pressed={selectedProjectKey === key} title={resource ? displayPath(resource.path, resource.hostId) : name} onClick={() => onSelect(key)}>
           {resource && resourceMenus ? <ProjectIcon workspaceId={resource.id} name={name} visible={visible} backdrop /> : <CollectionIcon size={15} />}
           <span className="focus-project-lanes__label"><strong>{name}</strong></span>
           <HostBadge context="Host" compact host={hostIdentityProjection(first.hostId, hosts?.find(host => host.id === first.hostId))} />
         </button>
         return <div key={frame.key} className={frame.project ? 'focus-project-frame' : undefined} data-project-group-key={frame.project ? key : undefined}
+          data-focus-current={frame.project && currentProject || undefined}
           data-pinned={frame.project && preference.pinned || undefined} data-focus-project-color={frame.project ? preference.color : undefined}
           data-project-drop-target={frame.project && dropTarget?.key === key ? dropTarget.after ? 'after' : 'before' : undefined}
           style={frame.project ? { '--focus-project-color': focusProjectTint(preference.color) } as CSSProperties : undefined}
@@ -191,6 +194,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
               onKeyDown={event => { if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); movePin(key, event.key === 'ArrowUp' ? -1 : 1) } }}><SemanticIcon name="action.pin" size={12} /></button> : null}
             {resource && resourceMenus ? <WorkspaceRowContextMenu workspaceId={resource.id} path={resource.path} branch={resource.branch ?? null} isLocal={Boolean(hosts?.some(host => host.id === resource.hostId && host.kind === 'local'))} onChangeIcon={() => changeIcon(folderSpaceIconTarget({ hostId: resource.hostId, repoPath: resource.repoPath ?? resource.path, name: resource.name }))}>{title}</WorkspaceRowContextMenu> : title}
             {preference.note ? <span className="focus-project-lanes__personal-note" data-focus-project-note="" title={preference.note}>{preference.note}</span> : null}
+            <FocusProjectActivity at={activityAt} now={now} />
             {resourceMenus ? <FocusProjectPreferences projectKey={key} name={name} /> : null}
           </header> : null}
           {frame.lanes.map(lane => {
@@ -217,14 +221,14 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
             {lane.collection.pending ? <span className="focus-project-lanes__recovery focus-project-lanes__collection-notice" role="status" title="Collection membership changed. Finish editing or leave the current card to update its grouping.">Update pending</span> : null}
             <span className="focus-project-lanes__collection-count">{collectionCountLabel(lane)}</span>
           </> : <><FocusProjectOrigin origin={origins?.get(lane.id)} />
-          <FocusLaneHeadingMenu enabled={resourceMenus} lane={lane} onRename={renameCategory} onChangeIcon={changeIcon}><button type="button" className="focus-project-lanes__axis" data-focus-project-scope-control aria-describedby={lane.summary ? descriptionId + lane.id : undefined} aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusLaneProjectKey(lane)} title={[`${lane.name} · ${lane.activeAgentRefs.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId)].filter(Boolean).join('\n')} onClick={() => onSelect(focusLaneProjectKey(lane))}>
+          {!frame.project || lane.labels.length > 1 ? <FocusLaneHeadingMenu enabled={resourceMenus} lane={lane} onRename={renameCategory} onChangeIcon={changeIcon}><button type="button" className="focus-project-lanes__axis" data-focus-project-scope-control aria-describedby={lane.summary ? descriptionId + lane.id : undefined} aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusLaneProjectKey(lane)} title={[`${lane.name} · ${lane.activeAgentRefs.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId)].filter(Boolean).join('\n')} onClick={() => onSelect(focusLaneProjectKey(lane))}>
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
               : <>{(frame.project ? lane.labels.slice(1) : lane.labels).map((label, index) => <span className="focus-project-lanes__label" key={index}><ThemeObjectBranchIcon size={11} /><strong>{label}</strong></span>)}</>}
             {!frame.project ? <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} /> : null}
-          </button></FocusLaneHeadingMenu>
+          </button></FocusLaneHeadingMenu> : null}
           {lane.summary ? <span id={descriptionId + lane.id} className="focus-project-lanes__summary">{lane.summary}</span> : null}</>}
-          <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} />
+          {!frame.project || lane.labels.length > 1 ? <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} /> : null}
           {lane.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
         </span>
