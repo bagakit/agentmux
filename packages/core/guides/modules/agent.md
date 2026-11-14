@@ -12,6 +12,12 @@ owns Run/process/bytes. Executor, durable Session, current Run and display Regio
 Begin with agent ls/inspect for the exact Session and routeHostId; preserve original identities
 and unknown receipts. A failed observation never authorizes stopping a healthy Run.
 
+Use agent provider ls --host HOST [--provider ID] for the original Host’s pure Provider
+declarations, including launch choices and addressable posture modes. It never probes
+executables, installs hooks or starts Native. An empty catalog is confirmed empty; a failed
+source is unavailable, and runtimeId=null means the semantic owner identity is unknown.
+Declarations do not prove current permissions or readiness.
+
 For a complete participant set, page agent ls to nextCursor=null. Narrow by the actual
 Executor/Provider before reading status. Use semantic=active for current work; running alone
 does not mean active. status, semantic, readiness and unavailable facts remain distinct.
