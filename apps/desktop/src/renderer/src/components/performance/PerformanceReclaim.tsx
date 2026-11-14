@@ -5,6 +5,7 @@ import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { api } from '../../lib/api'
 import { useBrowserDirectory } from '../../lib/use-browser-directory'
 import { BrowserResources } from '../browser/BrowserResources'
+import { BrowserOfflineCache } from './BrowserOfflineCache'
 import { currentPerformanceCaptureTarget } from './PerformanceCapture'
 import { performanceBytes as bytes, performanceMemory as memory, performanceReadingTime as readingTime } from './performance-format'
 
@@ -67,9 +68,9 @@ export const PerformanceReclaim = memo(function PerformanceReclaim({ snapshot, a
   const runRss = snapshot?.observation?.runTotals?.rssKib
 
   return <div className="performance-reclaim" data-performance-reclaim>
-    <div className="performance-page-heading"><h3>Reclaim memory</h3></div>
+    <div className="performance-page-heading"><h3>Reclaim resources</h3></div>
     <section className="performance-reclaim-cache" aria-label="Lossless cache cleanup">
-      <div className="performance-reclaim-heading"><h4>Rebuildable cache</h4><span className="performance-reclaim-preserved">Keeps your work</span></div>
+      <div className="performance-reclaim-heading"><h4>Renderer memory cache</h4><span className="performance-reclaim-preserved">Keeps your work</span></div>
       <div className="performance-reclaim-primary"><div><strong data-cache-size>{bytes(cacheSize(observed))}</strong>
         <small>{pending === 'inspect' ? 'Reading cache…' : !target ? 'Waiting for this Renderer' : readError || !observed ? 'Reading unavailable' : `Observed cache · ${readingTime(observed.sampledAt, snapshot?.observedAt)}`}</small></div>
         <button type="button" className="performance-inline-action" data-clean-cache disabled={!active || !target || pending !== null} onClick={() => void run('reclaim')}>{pending === 'reclaim' ? 'Cleaning…' : 'Clean caches'}</button></div>
@@ -87,6 +88,7 @@ export const PerformanceReclaim = memo(function PerformanceReclaim({ snapshot, a
         {issues.map(message => <p key={message}>{message}</p>)}
       </details>
     </section>
+    <BrowserOfflineCache active={active} />
     <section className="performance-reclaim-pages" aria-label="Potentially lossy page release">
       <div className="performance-reclaim-heading"><h4>Browser pages</h4><span className="performance-reclaim-risk">Reloads on use</span></div>
       <p>Forms and temporary page state may be lost.</p>

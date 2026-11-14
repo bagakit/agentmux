@@ -277,3 +277,16 @@
 .performance-reclaim-agents strong { display:block; font-size:var(--fs-meta); font-weight:550; }
 .performance-reclaim-agents small { display:block; color:var(--text-3); font-size:var(--fs-micro); margin-top:var(--sp-1); }
 .performance-reclaim :is(button,summary):focus-visible { outline:2px solid var(--focus-line); outline-offset:2px; }
+.performance-offline-cache { padding:var(--sp-5) 0; border-bottom:1px solid var(--line-soft); }
+.performance-offline-cache > .performance-reclaim-primary { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; }
+.performance-offline-cache > .performance-reclaim-primary > div { min-width:0; }
+.performance-offline-cache > .performance-reclaim-primary > button { min-inline-size:8em; white-space:nowrap; }
+.performance-offline-profile { display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-3); margin-top:var(--sp-3); color:var(--text-3); font-size:var(--fs-micro); }
+.performance-offline-profile select { min-width:0; max-width:100%; flex:1; padding:var(--sp-2) var(--sp-3); border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--wash-2); color:var(--text); font:inherit; }
+.performance-reclaim-primary [data-offline-size] { display:block; color:var(--text); font-size:calc(var(--fs-body) * 2.2); line-height:1.2; font-weight:550; letter-spacing:-.03em; font-variant-numeric:tabular-nums; }
+.performance-offline-sites { list-style:none; padding:0; margin:var(--sp-3) 0; }
+.performance-offline-sites li { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:var(--sp-3); padding:var(--sp-3) 0; border-bottom:1px solid var(--line-soft); }
+.performance-offline-sites li > span { overflow-wrap:anywhere; color:var(--text-2); font-size:var(--fs-meta); }
+.performance-offline-sites li > small { color:var(--text-3); font-size:var(--fs-micro); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.performance-offline-status { margin:var(--sp-3) 0; color:var(--text-3); font-size:var(--fs-micro); overflow-wrap:anywhere; }
+.performance-offline-cache [data-offline-result=unknown] strong, .performance-offline-cache [data-offline-result=partial] strong { color:var(--amber); }
