@@ -202,9 +202,10 @@ export type AgentMuxClientOptions = {
   hookInstaller?: AgentManagedHookInstaller
   /**
    * Directories this Host itself creates and owns (Mote and Topic homes). A Provider that asks for
-   * folder trust is pre-trusted only inside them; user Projects keep their native prompt.
+   * folder trust is pre-trusted only for an exact home, never descendants. The target lets
+   * the Host inspect only this launch's identity; an unavailable source must reject, not return [].
    */
-  ownedWorkspaceRoots?: () => Promise<readonly string[]>
+  ownedWorkspaceRoots?: (workspacePath: string) => Promise<readonly string[]>
 }
 
 export type AgentMuxAgentRuntimeStatus = {

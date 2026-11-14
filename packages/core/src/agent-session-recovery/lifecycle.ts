@@ -562,7 +562,8 @@ export class AgentSessionRunLifecycle {
         hookBinding.endpoint,
         plan.hookLaunchIssue
       )
-      await this.ports.hooks.prepareOwnedWorkspaceTrust(provider, current.workspacePath, current.agentSessionId, input.env ?? {})
+      const workspaceTrust = await this.ports.hooks.prepareOwnedWorkspaceTrust(provider, current.workspacePath, current.agentSessionId, input.env ?? {}, lifecycleOperationId)
+      if (continuity && workspaceTrust) continuity.workspaceTrust = workspaceTrust
       if (reservation.kind === 'reopen') {
         const preparedSession: AgentMuxStoredAgentSession = { ...nativeSession, kind: 'agent', run: current.run, retiredRuns: reopenedPriorRuns(reservation.expectedRetirement),
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,

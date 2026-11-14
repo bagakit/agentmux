@@ -23,6 +23,7 @@ import { validateAgentLaunchPromptInputPlan, validateAgentPromptAdmissionIntent,
 import { browserInputContextFields, parseBrowserInputContext } from '../browser-input-context.js'
 import { AgentMuxError } from '../errors.js'
 import { parseMoteMainEntrySource, type MoteMainEntrySource } from '../mote-main-entry-source.js'
+import { parseWorkspaceTrustPreparation, type AgentWorkspaceTrustPreparation } from '../workspace-trust-preparation.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */
 export type AgentMuxContinuityPolicy = {
@@ -230,6 +231,8 @@ export type AgentMuxContinuitySupervision = {
 }
 
 export type AgentMuxContinuityOperation = {
+  /** This original recovery's pre-launch receipt; not live input qualification. */
+  workspaceTrust?: AgentWorkspaceTrustPreparation
   moteMainEntry?: MoteMainEntrySource
   standingIntent?: AgentStandingIntentReference
   operationId: string
@@ -305,6 +308,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
   if (!value || typeof value !== 'object') throw new TypeError('Invalid continuity operation.')
   const op = value as AgentMuxContinuityOperation
   const trigger = parseAgentContinuityTrigger(op.trigger)
+  if (op.workspaceTrust !== undefined) parseWorkspaceTrustPreparation(op.workspaceTrust)
   if (op.resolution !== undefined) {
     const resolution = parseResumeResolution(op.resolution)
     if (![resolution.operationId, resolution.originalOperationId].includes(op.operationId)) throw new TypeError('Resume resolution belongs to another operation.')

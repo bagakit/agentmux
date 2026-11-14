@@ -308,7 +308,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ inputResources: { inspect: identity => fileUploads.inspect(identity), read: (identity, maxBytes) => fileUploads.read?.(identity, maxBytes) ?? Promise.resolve(null) }, ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
       ...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),
-      ...(configurationPath ? { ownedWorkspaceRoots: () => moteOwnedWorkspaceRoots(configurationPath) } : {}),
+      ...(configurationPath ? { ownedWorkspaceRoots: workspacePath => moteOwnedWorkspaceRoots(configurationPath, workspacePath) } : {}),
       ...(configurationPath && content?.files ? { moteInputResolver: createHostMoteInputSource({configurationPath,spatial:spatialState,files:content.files}) } : {}),
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
       routeEdge: edgeId => configuredRouteEdge(hostId => options.connections?.clients?.(hostId) ?? [], edgeId),

@@ -1,14 +1,15 @@
-import { createHash } from 'node:crypto'
 import type { ProviderExecutionEnvironment } from './execution-environment.js'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { CURSOR_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
-import { cursorDataRoot, cursorWorkspaceSlug, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
+import { cursorDataRoot, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
 import { discoverCursorNativeSession } from './cursor-native-session.js'
+import { prepareCursorOwnedWorkspaceTrust } from './cursor-workspace-trust.js'
+export { cursorTrustMarkerPath } from './cursor-workspace-trust.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -100,40 +101,7 @@ export const CURSOR_HOOKS: AgentNativeHookSpecification = {
   nativeHandle: { sessionIdKeys: ['conversation_id'], transcriptPathKeys: ['transcript_path'] }
 }
 
-/**
- * Cursor 的 workspace trust marker 路径。
- *
- * marker **不在 workspace 里**，而在数据根下按 workspace 路径派生的子目录里：
- * `<root>/projects/<slug>/.workspace-trusted`。slug 是路径的逐字变换（非字母数字换 `-`、连续 `-`
- * 折叠、去掉首尾 `-`）——这三步必须与 Cursor 完全一致，差一步就写到另一个目录、marker 形同不存在。
- * 本机实测目录名如 `<WORKSPACE_SLUG>`。
- */
-export function cursorTrustMarkerPath(
-  workspacePath: string,
-  env?: ProviderExecutionEnvironment
-): string {
-  return join(cursorDataRoot(workspacePath, env), 'projects', cursorWorkspaceSlug(workspacePath), '.workspace-trusted')
-}
-
-/**
- * Cursor 的 managed hook 计划：hooks 配置 + workspace trust marker。
- *
- * **两个 mutation 都必须在这一个计划里**，因为它们要在同一时刻成立：hooks 装好了但 workspace 未
- * 授信，Cursor 会先用一个交互式 trust 提示吃掉第一个 prompt——用户看到的是「AgentMux 把我的第一句
- * 话弄丢了」。marker 是 Cursor 自己写的那份格式（`trustedAt` + `workspacePath`，本机实测逐字如此），
- * 不是我们发明的旗标：Cursor 只做 `existsSync` 判存在，内容供人和它自己诊断用。
- *
- * `trustMethod` 刻意不写。Cursor 自己在 CLI 旗标路径上写 `"cli-flag"`、在继承路径上写
- * `"inherited"`，而 AgentMux 走的是第三条路（预置），冒用它任何一个都是在 marker 里撒谎；这个字段
- * 在 Cursor 侧是可选的（它的读取只判文件存在），所以缺席是如实且无损的。
- *
- * hooks 配置写 `~/.cursor/hooks.json`——Cursor 认四层配置（enterprise / team / **user** / project），
- * user 层是唯一「属于这台机器的这个用户、且与仓库无关」的一层。**绝不**写 project 层的
- * `<workspace>/.cursor/hooks.json`：那是会被提交进用户仓库的文件。也绝不碰它同时会读的
- * `~/.claude/settings.json`（Cursor 为兼容也读那份）——那是用户为 Claude 维护的配置。
- *
- * `version: 1` 跟随本机实测的既有文件。它今天不被校验，但写一个与真实文件不同的形状是无谓的偏离。
- */
+/** User-level Hook declarations contain no directory trust authority. */
 export function createCursorManagedHookPlan(
   workspacePath: string,
   env?: ProviderExecutionEnvironment
@@ -151,40 +119,15 @@ export function createCursorManagedHookPlan(
         content: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
         mode: 0o600,
         merge: { kind: 'json-managed-events' }
-      },
-      {
-        path: cursorTrustMarkerPath(workspacePath, env),
-        // marker 是 Cursor 独占的一个文件（它只判存在），AgentMux 是唯一写它的人，故整文件拥有、
-        // 不需要合并。内容按 workspace 派生，所以对同一个 workspace 幂等——installer 的
-        // unchanged-hash 判定因此在重启后不会白写一次。
-        content: `${JSON.stringify({ trustedAt: cursorTrustStamp(workspacePath), workspacePath: resolve(workspacePath) }, null, 2)}\n`,
-        mode: 0o600
       }
     ]
   }
 }
 
-/**
- * marker 的 `trustedAt`。
- *
- * 必须是**对同一个 workspace 恒定**的值，不能用 `new Date()`：installer 靠「内容 hash 未变」判定
- * 无需重写（见 AgentManagedHookInstaller.ensure）。真实时钟会让每次启动都算出新内容、每次都重写
- * 一遍 marker，还会让 preview/install 两次渲染结果不一致而撞上 HOOK_TARGET_CHANGED。
- *
- * 于是取 workspace 路径的 hash 前 8 位当稳定纪元偏移：它是一个真实、合法、可解析的 ISO 时间戳
- * （Cursor 从不解析它，只判文件存在），却完全由 workspace 决定。不假装那是「真的授信时刻」——
- * AgentMux 的授信时刻就是 workspace 被纳管的时刻，而那正是这个值代表的东西。
- */
-function cursorTrustStamp(workspacePath: string): string {
-  const digest = createHash('sha256').update(resolve(workspacePath)).digest('hex').slice(0, 8)
-  // 保留原固定锚点（Unix 零点后 50 个普通年和 12 个闰日），按 hash 派生秒偏移。
-  const anchor = (50 * 365 + 12) * 86_400_000
-  return new Date(anchor + Number.parseInt(digest, 16) * 1_000).toISOString()
-}
-
 export function createCursorProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const { subagentTracking: _tracking, nativeHandle: _identity, ...observationOnly } = CURSOR_HOOKS
   const provider = defineAgentProvider({
+    prepareOwnedWorkspaceTrust: prepareCursorOwnedWorkspaceTrust,
     planManagedHooks: ({ workspacePath, env }) => createCursorManagedHookPlan(workspacePath, env),
     catalog: catalog({
       id: 'cursor', label: 'Cursor', executable: 'cursor-agent', expectedProcess: 'cursor-agent',

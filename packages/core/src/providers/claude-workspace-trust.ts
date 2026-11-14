@@ -105,6 +105,8 @@ export async function prepareClaudeOwnedWorkspaceTrust(context: AgentWorkspaceTr
   let trustKey: string | null = null, configPath: string | null = null
   try {
     trustKey = await claudeTrustKey(context.workspacePath)
+    if (trustKey !== await claudeTrustKey(context.ownedRoot)) return {
+      status: 'not-applicable', trustKey, configPath, code: 'CLAUDE_TRUST_HOME_MISMATCH' }
     configPath = await claudeGlobalConfigPath(context.env, context.workspacePath)
     const before = await readConfig(configPath)
     // Claude creates and owns a missing configuration during its own onboarding.

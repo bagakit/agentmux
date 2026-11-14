@@ -1401,6 +1401,8 @@ export type AgentMuxAgentCreationSpatialIntent = { tabId: string; regionId: stri
 
 export type AgentMuxAgentCreationFact = {
   createOperationId: string
+  /** Original pre-launch preparation only; this never grants input or native readiness. */
+  workspaceTrust?: import('./workspace-trust-preparation.js').AgentWorkspaceTrustPreparation
   /** Frozen only when supplied by this creation; old Sessions remain without a position claim. */
   spatialIntent?: AgentMuxAgentCreationSpatialIntent
   /** Safe reference to the original input owner; private launch text is never projected here. */

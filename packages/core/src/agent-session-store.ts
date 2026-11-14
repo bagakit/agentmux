@@ -18,6 +18,7 @@ export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from 
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { agentCreationNotAppliedError, finishAgentCreationCleanup } from './agent-creation-failure.js'
+import { parseWorkspaceTrustPreparation } from './workspace-trust-preparation.js'
 import { observeRead } from './observation-read.js'
 import { parseCumulativeUsage } from './agent-usage-transcript.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -1685,6 +1686,7 @@ export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgen
     failure = { step: p.step as NonNullable<typeof failure>['step'], code: string(p.code, 'creation.failure.code'), message: text(p.message, 'creation.failure.message') }
   }
   return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
+    ...(creation.workspaceTrust === undefined ? {} : { workspaceTrust: parseWorkspaceTrustPreparation(creation.workspaceTrust) }),
     ...(creation.spatialIntent === undefined ? {} : { spatialIntent: parseAgentCreationSpatialIntent(creation.spatialIntent) }),
     ...(creation.initialInputKey === undefined ? {} : { initialInputKey: (() => {
       const key = validateAgentPromptInputKey(creation.initialInputKey)

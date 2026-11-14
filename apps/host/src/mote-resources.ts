@@ -768,26 +768,28 @@ export async function moteOwnedWorkspaceHome(path: string, workspacePath: string
 }
 /**
  * All Mote and Topic home directories this Host creates and owns inside the local Scratch workspace.
- * Core uses these as the roots for folder-trust pre-approval; any path inside one of these roots is
- * an AgentMux home, and a Provider that asks for folder trust is pre-trusted there without a prompt.
+ * Only each exact directory is eligible, never its descendants. A targeted launch reads only that
+ * original directory identity, so unrelated unreadable homes cannot delay it. Read failures remain
+ * unknown to Core; returning an empty list would falsely claim ownership was checked.
  * User Projects and every other folder keep their native folder-trust prompt.
  */
-export async function moteOwnedWorkspaceRoots(path: string): Promise<readonly string[]> {
-  let raw: { workspaces?: unknown }
-  try { raw = await readOriginalMoteConfiguration(path) as { workspaces?: unknown } } catch { return [] }
+export async function moteOwnedWorkspaceRoots(path: string, workspacePath?: string): Promise<readonly string[]> {
+  const raw = await readOriginalMoteConfiguration(path) as { workspaces?: unknown }
   const scratch = Array.isArray(raw?.workspaces) ? raw.workspaces.filter((value): value is ScratchWorkspace =>
     !!value && typeof value === 'object' && (value as { id?: unknown }).id === SCRATCH_WORKSPACE_ID &&
     (value as { hostId?: unknown }).hostId === 'local' && typeof (value as { path?: unknown }).path === 'string') : []
-  if (scratch.length !== 1) return []
+  if (scratch.length > 1) throw new AgentMuxError('The original Scratch directory identity is ambiguous.', 'AGENT_WORKSPACE_TRUST_UNCONFIRMED')
+  if (!scratch.length) return []
   const workspace = scratch[0]!
-  let ids: ScratchStorageIds
-  try { ids = await scratchStorageTopicIds(workspace.path) } catch { return [] }
+  if (workspacePath !== undefined) {
+    const physical = await realpath(workspacePath)
+    return await new ScratchTopics().readForDirectory(workspace, physical) ? [physical] : []
+  }
+  const ids: ScratchStorageIds = await scratchStorageTopicIds(workspace.path)
   const roots: string[] = []
   await Promise.all(ids.map(async topicId => {
-    try {
-      const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
-      if (resolved) roots.push(resolved)
-    } catch { /* skip unreadable topic */ }
+    const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (resolved) roots.push(resolved)
   }))
   return roots
 }

@@ -12,6 +12,8 @@ import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-inpu
 import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
+import { parseWorkspaceTrustPreparation, type AgentWorkspaceTrustPreparation } from './workspace-trust-preparation.js'
 import { parseAutomaticInputSource, sameAutomaticInputSource } from './automatic-input-source.js'
 import { decodePreparedRun } from './prepared-run.js'
 import { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
@@ -237,8 +239,6 @@ const unobservedTimestamp = 0
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
-// A native conversation reports its start within the composer readiness window; past it the start is unknown.
-const NATIVE_SESSION_START_WAIT_MS = 120_000
 const NATIVE_STARTED_BINDING_SOURCES: ReadonlySet<NonNullable<AgentMuxStoredAgentSession['nativeBinding']>['source']> = new Set(['native-hook', 'process-witness', 'user-confirmed'])
 // A local event annotation, never serialized or retained as another Session fact owner.
 const localSessionObservation = Symbol('local-session-observation')
@@ -803,7 +803,7 @@ export class AgentMuxClient {
   private readonly hookInstaller: AgentManagedHookInstaller
   private hookRuntimePreparation: Promise<ManagedHookRuntime> | undefined
   private hookRuntime?: ManagedHookRuntime
-  private readonly ownedWorkspaceRoots: () => Promise<readonly string[]>
+  private readonly ownedWorkspaceRoots: (workspacePath: string) => Promise<readonly string[]>
   private unsubscribeKernel: (() => void) | null = null
   private unsubscribeKernelErrors: (() => void) | null = null
   private unsubscribeConnectionLost: (() => void) | null = null
@@ -842,9 +842,6 @@ export class AgentMuxClient {
   // Only pending snapshot readers retain removals. No durable terminal registry or completed-Run set.
   private readonly pendingRunSnapshots = new Map<string | null, Set<Set<string>>>()
   private readonly hookBindings = new Map<string, AgentHookBinding>()
-  /** When each live Hook binding began observing its Run; bounds the native start wait. */
-  private readonly hookBindingActivatedAt = new Map<string, number>()
-  private readonly nativeStartRechecks = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly hookRestorations = new Map<string, { source: string; epoch: number; pending: Promise<void> }>()
   private readonly hookIngressObservations = new Map<string, NonNullable<AgentMuxAgentSession['hookIngressObservation']> & {
     nativeTarget?: AgentNativeSessionHandle
@@ -5504,7 +5501,7 @@ export class AgentMuxClient {
         hookBinding.endpoint,
         plan.hookLaunchIssue
       )
-      await this.prepareOwnedWorkspaceTrust(provider, input.workspacePath, agentSessionId, input.env ?? {})
+      const workspaceTrust = await this.prepareOwnedWorkspaceTrust(provider, input.workspacePath, agentSessionId, input.env ?? {}, lifecycleOperationId)
       const launchOptions = normalizeLaunchOptionSelection(input.launchOptions)
       let preparedCreation: AgentMuxPreparedCreation | undefined
       if (reservation.kind === 'create') {
@@ -5514,7 +5511,7 @@ export class AgentMuxClient {
           ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}),
           ...(initialInput ? { initialInput } : {}),
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
-          creation: { createOperationId, intentDigest, ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}),
+          creation: { createOperationId, intentDigest, ...(workspaceTrust ? { workspaceTrust } : {}), ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}),
             ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
             initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}), ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
@@ -5589,7 +5586,7 @@ export class AgentMuxClient {
         capabilityHash: hashAgentCapability(invocationCapability),
         createdAt: preparedCreation?.createdAt ?? now,
         updatedAt: preparedCreation?.updatedAt ?? now,
-        creation: { createOperationId, ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}), initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
+        creation: { createOperationId, ...(workspaceTrust ? { workspaceTrust } : {}), ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}), initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
           intentDigest, ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
           ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}), ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}),
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
@@ -5731,6 +5728,7 @@ export class AgentMuxClient {
       }
       const creation: NonNullable<AgentMuxAgentSession['creation']> = {
         createOperationId,
+        ...(workspaceTrust ? { workspaceTrust } : {}),
         ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}),
         intentDigest,
         ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}),
@@ -5953,25 +5951,34 @@ export class AgentMuxClient {
     provider: AgentProvider,
     workspacePath: string,
     agentSessionId: string,
-    env: Readonly<Record<string, string>>
-  ): Promise<void> {
+    env: Readonly<Record<string, string>>,
+    lifecycleOperationId: string
+  ): Promise<AgentWorkspaceTrustPreparation | undefined> {
     if (!provider.prepareOwnedWorkspaceTrust) return
-    const target = resolve(workspacePath)
+    let step: AgentWorkspaceTrustPreparation['step'] = 'home-identity'
+    let result: AgentWorkspaceTrustPreparation
     try {
-      const ownedRoot = (await this.ownedWorkspaceRoots()).map(root => resolve(root))
-        .find(root => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep))
+      const target = await realpath(resolve(workspacePath))
+      const roots = await this.ownedWorkspaceRoots(workspacePath)
+      // Host identity is exact. Descendants, including nested repositories and links out of a
+      // home, never inherit permission to mutate the Provider's trust record.
+      let ownedRoot: string | undefined
+      for (const root of roots) {
+        if (await realpath(resolve(root)) === target) { ownedRoot = target; break }
+      }
       if (!ownedRoot) return
+      step = 'trust-record'
       const receipt = await provider.prepareOwnedWorkspaceTrust({ ownedRoot, workspacePath: target, env })
-      if (receipt.status !== 'unconfirmed') return
-      this.publisher.publish({ type: 'agent-error', agentSessionId, code: receipt.code,
-        message: `${provider.label} folder trust for this AgentMux home is unconfirmed, so it may ask whether to trust the folder. ` +
-          `Answer that prompt in the terminal; the Agent launch continues. ${receipt.issue ?? ''}`.trim(),
-        evidence: { source: 'agentmux', observedAt: Date.now() } })
+      result = parseWorkspaceTrustPreparation({ lifecycleOperationId, workspacePath, step, status: receipt.status,
+        trustKey: receipt.trustKey, code: receipt.code, ...(receipt.issue ? { issue: receipt.issue.slice(0, 4096) } : {}), observedAt: Date.now() })
     } catch (error) {
-      this.publisher.publish({ type: 'agent-error', agentSessionId, code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED',
-        message: `${provider.label} folder trust for this AgentMux home is unconfirmed; the Agent launch continues. ${error instanceof Error ? error.message : String(error)}`,
-        evidence: { source: 'agentmux', observedAt: Date.now() } })
+      result = { lifecycleOperationId, workspacePath, step, status: 'unconfirmed', trustKey: null,
+        code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED', issue: (error instanceof Error ? error.message : String(error)).slice(0, 4096), observedAt: Date.now() }
     }
+    if (result.status === 'unconfirmed') this.publisher.publish({ type: 'agent-error', agentSessionId, code: result.code,
+      message: `${provider.label} folder trust preparation is unconfirmed; the Agent launch continues. Inspect the original startup and retained input. ${result.issue ?? ''}`.trim(),
+      evidence: { source: 'agentmux', observedAt: result.observedAt } })
+    return result
   }
 
   async reattachAgent(agentSessionId: string, afterByte?: number, view: AgentMuxRunAttachmentView = 'raw'): Promise<AgentMuxAgentAttachment> {
@@ -6968,53 +6975,32 @@ export class AgentMuxClient {
     return work
   }
 
-  /**
-   * A Run whose Provider reports its native conversation start through Hooks, whose Hook binding is
-   * live, and from which no Hook has arrived yet, may still show first-start prompts (folder trust,
-   * login). Typing a queued input there answers the prompt instead of the Agent, so it waits.
-   * Without a declared start event or a live binding the start cannot be observed, so the original
-   * terminal input path applies. The wait is bounded by the same window the composer readiness
-   * observation uses: after it the start is unknown, not denied, and the input goes through as
-   * before, so a Run whose Hooks never arrive is never kept from its input.
-   */
-  private nativeSessionStarting(session: AgentMuxStoredAgentSession): boolean {
-    if (!this.providers.get(session.providerId).hook.nativeSessionTransition) return false
-    const boundAt = this.hookBindingActivatedAt.get(session.run.runId)
-    if (!this.hookBindings.has(session.run.runId) || boundAt === undefined || Date.now() - boundAt > NATIVE_SESSION_START_WAIT_MS) return false
-    if (session.hookReceipt && sameRun(session.hookReceipt.run, session.run)) return false
-    if (session.nativeSourceObservation && sameRun(session.nativeSourceObservation.run, session.run)) return false
-    // Only a binding this Run observed after it started counts; a resume writes its chosen target before any Hook.
-    return !(session.nativeBinding && sameRun(session.nativeBinding.run, session.run) && NATIVE_STARTED_BINDING_SOURCES.has(session.nativeBinding.source))
+  /** Automatic semantic text must never answer an unknown native setup screen. A live Hook
+   * binding and elapsed time are observation conditions, not input permission. Exact native
+   * transports qualify themselves in the Provider; an explicitly manual terminal intent keeps
+   * its original current-terminal meaning and is never turned into a readiness probe. */
+  private nativeSessionStarting(session: AgentMuxAgentSession, intent: AgentInputJournalIntent['admissionIntent']): boolean {
+    if (intent.kind === 'manual-actor' || intent.kind === 'native-conversation') return false
+    const provider = this.providers.get(session.providerId)
+    if (provider.prepareNativeInput && session.nativeHandle?.kind === 'provider') return false
+    const frontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
+    if (frontend && sameRun(frontend.run, session.run) && frontend.initialization?.phase === 'ready') return false
+    // A current main conversation witness can establish that setup ended. A receipt from an
+    // arbitrary Hook, a selected resume target, or an explicitly unknown source cannot do so.
+    if (session.nativeBinding && sameRun(session.nativeBinding.run, session.run) &&
+        NATIVE_STARTED_BINDING_SOURCES.has(session.nativeBinding.source) &&
+        !(session.nativeSourceObservation && sameRun(session.nativeSourceObservation.run, session.run))) return false
+    return Boolean(provider.hook.nativeSessionTransition ||
+      session.creation?.createdRun && sameRun(session.creation.createdRun, session.run) ||
+      session.continuity?.newRun && sameRun(session.continuity.newRun, session.run))
   }
 
   private activateHookBinding(runId: string, binding: AgentHookBinding): void {
-    if (this.hookBindings.get(runId) !== binding || !this.hookBindingActivatedAt.has(runId)) this.hookBindingActivatedAt.set(runId, Date.now())
     this.hookBindings.set(runId, binding)
   }
 
   private forgetHookBinding(runId: string): void {
     this.hookBindings.delete(runId)
-    this.hookBindingActivatedAt.delete(runId)
-    const timer = this.nativeStartRechecks.get(runId)
-    if (timer) { clearTimeout(timer); this.nativeStartRechecks.delete(runId) }
-  }
-
-  /** Wake the waiting inputs of this Run once its start window ends, so an unobserved start releases them. */
-  private scheduleNativeStartRecheck(session: AgentMuxStoredAgentSession): void {
-    const boundAt = this.hookBindingActivatedAt.get(session.run.runId)
-    if (boundAt === undefined || this.nativeStartRechecks.has(session.run.runId)) return
-    const timer = setTimeout(() => {
-      this.nativeStartRechecks.delete(session.run.runId)
-      const ids = this.inputWaitingByRecipient.get(session.agentSessionId)
-      let requested = false
-      for (const id of ids ?? []) {
-        const value = this.inputWaitingContexts.get(id)
-        if (value?.sessionWake) { value.requested = true; requested = true }
-      }
-      if (requested) void this.scheduleInputWaiting(session.agentSessionId)
-    }, Math.max(0, boundAt + NATIVE_SESSION_START_WAIT_MS - Date.now()) + 1)
-    timer.unref?.()
-    this.nativeStartRechecks.set(session.run.runId, timer)
   }
 
   private canResumeInput(intent: AgentInputJournalIntent, session: AgentMuxAgentSession, recipientContinuation = false): boolean {
@@ -7167,9 +7153,8 @@ export class AgentMuxClient {
           if (receipt) await this.publishInputReceipt(receipt)
           return
         }
-        if (!context.continueGate && this.nativeSessionStarting(current)) {
+        if (!context.continueGate && this.nativeSessionStarting(current, saved.intent.admissionIntent)) {
           await waiting({ phase: 'session', reason: 'native-session-starting', wake: 'session-restored' })
-          this.scheduleNativeStartRecheck(current)
           const receipt = await this.inspectAgentInput({ key })
           if (receipt) await this.publishInputReceipt(receipt)
           return
@@ -9655,7 +9640,12 @@ export class AgentMuxClient {
       // 注意 operation 收到的 session/run 是队列**当下**重取的，不是外面这两个快照：那正是
       // serializeAgentInput 的用处（它顺带验 run 没被换掉、进程还在跑）。所以这里用 current/live。
       const renderObservation = new AbortController()
+      let waitingForStartup = false
       await this.serializeAgentInput(session, async (current, live, diagnostic) => {
+        if (!nativeSource && this.nativeSessionStarting(current, { kind: 'session-conversation', expectedRun: current.run })) {
+          waitingForStartup = true
+          return
+        }
         await this.promptSubmission.submitInputPlan(
           current,
           live,
@@ -9674,6 +9664,7 @@ export class AgentMuxClient {
             ...(nativeSource ? { requiredNativeSource: nativeSource } : {}), ...(assertCurrent ? { authority: { assertCurrent } } : {}) } : undefined, diagnostic
         )
       }, { kind: 'semantic', bytes: null, work: 'launch-prompt' }, { renderObservation })
+      if (waitingForStartup) return false
       return originalKey ? this.postLaunchPromptConfirmed(await this.inspectAgentPromptSubmission(originalKey), text, message) : true
     } catch (error) {
       if (originalKey) {
