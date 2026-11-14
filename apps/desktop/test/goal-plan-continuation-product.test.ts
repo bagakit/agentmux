@@ -45,7 +45,8 @@ async function fixture() {
   const read = vi.fn((id: string) => goals.get(id)), originalSubmit = runtime.submitPrompt, submitted = vi.spyOn(runtime, 'submitPrompt')
   const manager = new ContinuousProgressLoopManager(loops, (saved, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, saved, operationId, isCurrent, signal), () => now,
     async (saved, tickId, at, signal) => { const action = beforeObserve; beforeObserve = undefined; await action?.(); return runtime.observeContinuousProgress(saved, tickId, at, signal) },
-    undefined, { read, inspectInitial: async () => 'confirmed' })
+    undefined, { read, inspectInitial: async () => 'confirmed',
+      subscribe: listener => goals.subscribe((snapshot, _ids, changes) => listener(changes, snapshot.revision, snapshot.demands)) })
   cleanup.push(() => manager.stop()); await manager.start()
   const revise = async (nodes: GoalPlanNodeInput[]) => { const original = await goals.get('goal'); return goals.revisePlan('goal', { operationId: `plan-${(original!.plan?.revision ?? 0) + 1}`, expectedRevision: original!.plan?.revision ?? 0, alignmentRevision: 1, nodes }, supervisor) }
   const report = async (id: string, verdict?: 'pass' | 'changes') => {
@@ -125,4 +126,73 @@ it('a plan whose live nodes passed review pauses without another Core input or h
   await f.manager.check()
   expect(f.manager.list()[0]).toMatchObject({ status: 'paused', lastDecision: expect.stringContaining('Waiting for a person to accept') })
   expect(f.submitted).not.toHaveBeenCalled(); expect((await f.goals.get('goal'))!.grounding?.acceptedAt).toBeUndefined()
+})
+
+it('the authoritative Supervisor change pauses new planned manager input while keeping the original loop and healthy Agent', async () => {
+  const f = await fixture(); await f.revise([node('ready')])
+  const original = f.manager.list()[0]!, session = f.native.core.agentSession('supervisor')
+  await f.goals.update('goal', { supervisorSessionId: 'reviewer' })
+  expect(f.manager.list()[0]).toMatchObject({ loopId: original.loopId, agentSessionId: 'supervisor', status: 'paused', lastDecision: expect.stringContaining('current Supervisor') })
+  await f.manager.check(); expect(f.submitted).not.toHaveBeenCalled()
+  expect(f.native.core.agentSession('supervisor').run).toEqual(session.run)
+  await expect(f.manager.resume(original.loopId)).rejects.toThrow('current Supervisor')
+  // An explicit restoration of the same role permits normal current-Supervisor management again.
+  await f.goals.update('goal', { supervisorSessionId: 'supervisor' }); await f.manager.resume(original.loopId); f.advance(); await f.manager.check()
+  expect(f.submitted).toHaveBeenCalledOnce(); expect(f.submitted.mock.calls[0]![7]).toContain('Goal role: manager')
+  expect(f.submitted.mock.calls[0]![0].agentSessionId).toBe('supervisor')
+})
+
+it('a cold old loop checks the current plan Supervisor before creating a new tick claim', async () => {
+  const f = await fixture(); await f.revise([node('ready')]); await f.manager.stop()
+  await f.goals.update('goal', { supervisorSessionId: 'reviewer' })
+  await f.loops.save([f.loop])
+  const second = new ContinuousProgressLoopManager(f.loops, (loop, op, current, signal) => deliverContinuousProgress(f.runtime, loop, op, current, signal), () => Date.now() + 120_000,
+    (loop, tick, now, signal) => f.runtime.observeContinuousProgress(loop, tick, now, signal), undefined, { read: id => f.goals.get(id), inspectInitial: async () => 'confirmed' })
+  cleanup.push(() => second.stop()); await second.start(); await second.check()
+  expect(second.list()[0]).toMatchObject({ loopId: 'original-loop', status: 'paused', lastDecision: expect.stringContaining('current Supervisor') })
+  expect(second.list()[0]!.pendingCompletion).toBeUndefined(); expect(f.submitted).not.toHaveBeenCalled()
+})
+
+it('a confirmed role removal between source observation and delivery cancels only new management input', async () => {
+  const f = await fixture(); await f.revise([node('ready')])
+  f.observeAfter(() => f.goals.update('goal', { supervisorSessionId: null }).then(() => undefined))
+  await f.manager.check()
+  expect(f.manager.list()[0]).toMatchObject({ loopId: 'original-loop', status: 'paused', lastDecision: expect.stringContaining('current Supervisor') })
+  expect(f.submitted).not.toHaveBeenCalled(); expect(f.native.core.agentSession('supervisor').run.runId).toBe('original-run')
+})
+
+it('unreadable Goal facts defer a new planned tick and retain ordinary manual input', async () => {
+  const f = await fixture(); await f.revise([node('ready')])
+  f.read.mockRejectedValueOnce(new Error('Original Goal owner is temporarily unavailable'))
+  await f.manager.check()
+  expect(f.manager.list()[0]).toMatchObject({ loopId: 'original-loop', status: 'active', lastDecision: expect.stringContaining('temporarily unavailable') })
+  expect(f.submitted).not.toHaveBeenCalled()
+  await f.originalSubmit({ kind: 'agent', hostId: 'local', agentSessionId: 'supervisor', run: { runId: 'original-run' } }, 'Original manual input remains available', 'original-manual-input',
+    { expectedRun: { runId: 'original-run' }, afterSubmissionId: null }, undefined, undefined, true)
+  expect(f.native.writes.length).toBeGreaterThan(0)
+})
+
+it('a role change does not revoke the original no-plan executor continuation', async () => {
+  const f = await fixture(); await f.goals.update('goal', { supervisorSessionId: 'reviewer' }); await f.manager.check()
+  expect(f.submitted).toHaveBeenCalledOnce(); expect(f.submitted.mock.calls[0]![1]).toBe(f.loop.prompt)
+  expect(f.submitted.mock.calls[0]![7]).toContain('Goal role: executor'); expect(f.submitted.mock.calls[0]![7]).not.toContain('Goal role: manager')
+})
+
+it('a changed Supervisor still reconciles the exact frozen unknown claim without a new input', async () => {
+  const f = await fixture(); await f.revise([node('ready')])
+  f.submitted.mockImplementationOnce(async (...args) => { await f.originalSubmit(...args); throw new Error('Original manager ACK lost') })
+  await f.manager.check()
+  const before = f.manager.list()[0]!, pending = before.pendingCompletion!, writes = [...f.native.writes]
+  await f.goals.update('goal', { supervisorSessionId: 'reviewer' })
+  expect(f.manager.list()[0]!.pendingCompletion).toEqual(pending)
+  const resumed = await f.manager.resume(before.loopId).then(() => ({ error: null }), error => ({ error: String(error) }))
+  expect(resumed).toEqual({ error: null })
+  f.advance(); await f.manager.check()
+  expect(f.submitted).toHaveBeenCalledTimes(2)
+  expect(f.submitted.mock.calls[1]!.slice(0, 4)).toEqual(f.submitted.mock.calls[0]!.slice(0, 4))
+  expect(f.submitted.mock.calls[1]![7]).toBe(pending.agentMuxNote); expect(f.native.writes).toEqual(writes)
+  expect(f.manager.list()[0]).toMatchObject({ loopId: before.loopId, agentSessionId: 'supervisor', lastOutcome: 'sent' })
+  // Once the original claim is reconciled, the next fresh manager occurrence loses that old role.
+  f.advance(); await f.manager.check(); expect(f.submitted).toHaveBeenCalledTimes(2)
+  expect(f.manager.list()[0]).toMatchObject({ status: 'paused', lastDecision: expect.stringContaining('current Supervisor') })
 })
