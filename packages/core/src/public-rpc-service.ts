@@ -1575,10 +1575,51 @@ export class AgentMuxRpcService {
       const input = parseNodePublishingParams(nodeMethod, params)
       const caller = await this.authenticated(context)
       const ownerMethod = nodeMethod.startsWith('settings.node.')
-      if (ownerMethod && (caller || context.principal?.kind !== 'user' || !context.principal.id.trim())) {
+      const operatorInspection = nodeMethod === 'settings.node.inspect'
+      if (ownerMethod && (caller && !operatorInspection || context.principal?.kind !== 'user' || !context.principal.id.trim() || operatorInspection && context.routeDelegation)) {
         throw new AgentMuxError('Node owner settings require the original transport-authenticated person; managed callers cannot grant publication.', 'CONTROL_PERMISSION_DENIED')
       }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      if (operatorInspection) {
+        const inspection = input as import('./node-publishing.js').NodePublishingParams['settings.node.inspect']
+        const original = inspection.operationId === undefined ? {} : { operationId: inspection.operationId }
+        const target = inspection.target
+        if (!target || target.hostId === 'local') {
+          if (target && this.ports.nodePublishing) await this.ports.nodePublishing.call('node.inspect', { hostId: 'local', expectedRuntimeId: target.expectedRuntimeId }, context.signal)
+          if (this.ports.nodePublishing) return parseNodePublishingResult('settings.node.inspect', await this.ports.nodePublishing.call('settings.node.inspect', original, context.signal), inspection) as AgentMuxRpcResult<M>
+        } else {
+          const readConfiguration = () => {
+            const saved = this.ports.hostConfiguration?.(target.hostId)
+            if (!saved) return null
+            const { label: _label, ...route } = saved
+            return structuredClone(route)
+          }
+          const configuration = readConfiguration()
+          const routes = (await this.clients()).filter(route => route.hostId === target.hostId)
+          if (!configuration || routes.length !== 1) throw new AgentMuxError('Select one original saved operator Host for this Node policy read.', 'UNKNOWN_HOST')
+          const client = routes[0]!.client
+          const assertCurrent = async () => {
+            context.signal?.throwIfAborted(); await context.assertCurrent?.()
+            const current = (await this.clients()).filter(route => route.hostId === target.hostId)
+            if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, readConfiguration())) throw new AgentMuxError('The original Node policy route changed. Keep the target and read it again.', 'RUNTIME_OWNER_MISMATCH')
+          }
+          // Only this operator inspection borrows the saved carrier. Its receiving
+          // Core independently authenticates that operator; A's capability is not B's.
+          const call = <T extends 'runtime.owner.identity' | 'settings.node.inspect'>(method: T, value: AgentMuxRpcParams<T>, readContext: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<T>> => {
+            if (this.ports.callOriginalCore) return this.ports.callOriginalCore(target.hostId, method, value, readContext)
+            if (client.forwardRpc) return client.forwardRpc(method, value, readContext)
+            throw new AgentMuxError('The original Node operator transport is unavailable.', 'CONTROL_UNAVAILABLE')
+          }
+          const readContext = context.signal ? { signal: context.signal } : {}
+          const { owner } = await call('runtime.owner.identity', { expectedRuntimeId: target.expectedRuntimeId }, readContext)
+          await assertCurrent()
+          if (owner.runtimeId !== target.expectedRuntimeId) throw new AgentMuxError('The original Node Runtime changed before policy inspection.', 'RUNTIME_OWNER_MISMATCH')
+          const result = await call('settings.node.inspect', original, { ...readContext, runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
+          await assertCurrent()
+          if (result.node.runtimeId !== owner.runtimeId || result.node.ownerInstanceId !== owner.ownerInstanceId) throw new AgentMuxError('The original Node owner instance changed during policy inspection. Read this target again.', 'RUNTIME_OWNER_MISMATCH')
+          return parseNodePublishingResult('settings.node.inspect', result, inspection) as AgentMuxRpcResult<M>
+        }
+      }
       const hostId = ownerMethod ? 'local' : (input as import('./node-publishing.js').NodeRoute).hostId
       let result: unknown
       if (hostId === 'local' && this.ports.nodePublishing) result = await this.ports.nodePublishing.call(nodeMethod, input, context.signal)

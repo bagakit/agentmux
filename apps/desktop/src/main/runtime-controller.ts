@@ -2637,7 +2637,7 @@ export class RuntimeController {
     const client = this.configuredClient(hostId)
     const originalParams = (method === 'message.read' || method === 'message.dispatch.read') && 'forwardRpc' in client
       ? { ...params, hostId: 'local' } as AgentMuxRpcParams<M> : params
-    const result = await callOriginalDesktopHost(client, method, originalParams, context)
+    const result = await callOriginalDesktopHost(client, method, originalParams, context, context.runtimeFence)
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
   }
 
@@ -2757,6 +2757,8 @@ export class RuntimeController {
     target: NodeOwnerTarget, method: NodeOwnerMethod,
     params: import('@agentmux/core/node-publishing').NodePublishingParams[NodeOwnerMethod], context: { signal?: AbortSignal } = {}
   ): Promise<import('@agentmux/core/node-publishing').NodePublishingResults[NodeOwnerMethod]> {
+    if (method === 'settings.node.inspect' && 'target' in params) throw new AgentMuxError(
+      'This Node owner call is already bound to its original target. Use the public inspection target only at its original ingress.', 'INVALID_CONTROL_REQUEST')
     const client = this.configuredClient(target.hostId)
     const assertCurrent = () => {
       context.signal?.throwIfAborted()

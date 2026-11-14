@@ -161,8 +161,15 @@ export const NODE_PUBLISHING_METHODS = {
     'node.inspect': 'short', 'node.resources': 'long', 'node.files.list': 'long', 'node.files.read': 'long', 'node.resolve': 'short'
 } as const;
 export type NodePublishingMethod = keyof typeof NODE_PUBLISHING_METHODS;
+/** A saved client route qualified by the original semantic Runtime. */
+export type NodeOwnerTarget = { hostId: string; expectedRuntimeId: string };
+export function parseNodeOwnerTarget(value: unknown): NodeOwnerTarget {
+    const p = rpcRecord(value, ['hostId', 'expectedRuntimeId']);
+    return { hostId: rpcString(p.hostId, 'Exact saved Node Host'), expectedRuntimeId: rpcString(p.expectedRuntimeId, 'Expected original Node Runtime') };
+}
 export type NodePublishingParams = {
     'settings.node.inspect': {
+        target?: NodeOwnerTarget;
         operationId?: string;
     };
     'settings.node.configure': {
@@ -235,8 +242,9 @@ export function nodeRelativePath(value: unknown): string {
 }
 export function parseNodePublishingParams<M extends NodePublishingMethod>(method: M, value: unknown): NodePublishingParams[M] {
     if (method === 'settings.node.inspect') {
-        const p = rpcRecord(value, ['operationId']);
-        return (p.operationId === undefined ? {} : { operationId: rpcString(p.operationId, 'Original policy operation') }) as NodePublishingParams[M];
+        const p = rpcRecord(value, ['operationId', 'target']);
+        return { ...(p.operationId === undefined ? {} : { operationId: rpcString(p.operationId, 'Original policy operation') }),
+            ...(p.target === undefined ? {} : { target: parseNodeOwnerTarget(p.target) }) } as NodePublishingParams[M];
     }
     if (method === 'settings.node.configure') {
         const p = rpcRecord(value, ['expectedRevision', 'operationId', 'policy']);
@@ -306,6 +314,7 @@ export function parseNodePublishingResult<M extends NodePublishingMethod>(method
             operation = { operationId: text(op.operationId), expectedRevision: text(op.expectedRevision), revision: text(op.revision), status: op.status as NodePolicyOperation['status'], updatedAt: count(op.updatedAt), ...(op.cause === undefined ? {} : (() => { const c = rec(op.cause, ['code', 'message']); return { cause: { code: text(c.code), message: text(c.message) } }; })()) };
         }
         const expected = input as NodePublishingParams['settings.node.inspect'] & Partial<NodePublishingParams['settings.node.configure']>;
+        if (expected.target && node.runtimeId !== expected.target.expectedRuntimeId) fail();
         if (expected.operationId !== undefined && operation && operation.operationId !== expected.operationId)
             fail();
         if (method === 'settings.node.configure' && (!operation || operation.operationId !== expected.operationId))
