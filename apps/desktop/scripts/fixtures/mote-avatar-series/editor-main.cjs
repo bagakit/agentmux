@@ -9,12 +9,13 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const sha = value => createHash('sha256').update(value).digest('hex')
 app.whenReady().then(async () => {
   console.log('editor-main: ready')
+  let avatarServer, avatarRpc, avatarRuntimeRoot
   let win, hold = false, releases = [], loseAckOnce = false, historicalChoiceOnce = null, holdReadKey = null, heldReads = [], holdSaveKey = null, heldSaves = [], failNativePublicationOnce = false, failFlushOnce = false, failFlushAt = null
   const starter = scope === 'starter'
   try {
     Menu.setApplicationMenu(null)
     await fs.mkdir(path.join(app.getPath('home'), '.agentmux'), { recursive: true })
-    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeLegacyChromiumStorage, AgentMuxControlServer, assertAppDocumentSender, isAppDocumentSender } = require(path.join(path.dirname(html), 'editor-native.cjs'))
+    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeLegacyChromiumStorage, AgentMuxControlServer, connectAgentMuxRpc, assertAppDocumentSender, isAppDocumentSender, sessionInputOperationResult } = require(path.join(path.dirname(html), 'editor-native.cjs'))
     const builtinRoot = path.join(directory, 'builtin'), userRoot = starter ? path.join(app.getPath('home'), '.agentmux', 'avatars') : path.join(directory, 'avatars')
     await fs.cp(originalBuiltin, builtinRoot, { recursive: true })
     // Existing face editing probes now use a real declared user collection. The
@@ -66,6 +67,10 @@ app.whenReady().then(async () => {
     const sources = new MoteAvatarSeriesOwner({ userRoot, builtinRoot })
     const control = new MoteAvatarControl(sources, ['durable', 'durable-reopen', 'request-label-delta', 'face-entry-delta', 'starter'].includes(scope) ? createMoteAvatarWriter(owner, sources, topics, store) : undefined,
       starter ? async exactPath => { result.revealCalls.push({ path: exactPath, outcome: 'requested', boundary: 'Original OS folder port accepted this exact directory; no Finder window or focus claim.' }) } : undefined)
+    avatarRuntimeRoot = await fs.mkdtemp(path.join(require('node:os').tmpdir(), 'amx-avatar-editor-'))
+    avatarServer = new AgentMuxControlServer({ socketPath: path.join(avatarRuntimeRoot, 'control.sock'), coreClients: () => [], moteAvatars: control })
+    await avatarServer.start()
+    avatarRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: avatarServer.path } })
     if (starter) {
       result.createCalls = []; result.revealCalls = []; result.copyCalls = []; result.ipcTrust = []; result.attemptedSaves = 0
       const sourceCall = control.call.bind(control)
@@ -118,24 +123,28 @@ app.whenReady().then(async () => {
         return value
       } catch (error) { result.sourceCalls.push({ method: 'preview', input, error: error.message, code: error.code }); throw error }
     })
-    ipcMain.handle('moteAvatars:read', async (_event, input) => {
-      const value = await control.call('space.mote.avatar.read', input)
+    ipcMain.handle('moteAvatars:read', async (event, input) => sessionInputOperationResult(async () => {
+      assertAppDocumentSender(event, win.webContents, { current: { mode: 'prod', filePath: html }, loading: null })
+      const value = await avatarRpc.call('space.mote.avatar.read', input)
       result.readCalls.push({ input, value })
       if (input.target.objectKey === holdReadKey) await new Promise(resolve => heldReads.push(resolve))
       return value
-    })
-    ipcMain.handle('moteAvatars:save', async (_event, input) => {
+    }))
+    ipcMain.handle('moteAvatars:save', async (event, input) => sessionInputOperationResult(async () => {
+      const sources = { current: { mode: 'prod', filePath: html }, loading: null }
+      const assertCurrent = async () => assertAppDocumentSender(event, win.webContents, sources)
+      await assertCurrent()
       if (starter) result.attemptedSaves++
       if (!['durable', 'durable-reopen', 'request-label-delta'].includes(scope)) throw new Error('Only the explicit durable product scopes may save.')
       const kept = await win.webContents.executeJavaScript(`seriesEditorFixture.keptRequest(${JSON.stringify(input.target)})`)
       result.requestStorage.push({ operationId: input.operationId, kept, matched: JSON.stringify(kept) === JSON.stringify(input) })
       assert.deepEqual(kept, input, 'The complete original request must be kept before native Save.')
-      const value = await control.call('space.mote.avatar.save', input)
+      const value = await avatarRpc.call('space.mote.avatar.save', input)
       result.saveCalls.push({ input, wireSha256: sha(JSON.stringify(input)), value })
       if (input.target.objectKey === holdSaveKey) await new Promise(resolve => heldSaves.push(resolve))
       if (loseAckOnce) { loseAckOnce = false; throw new Error('The original completed native IPC acknowledgement was withheld by this fixture.') }
       return value
-    })
+    }))
     ipcMain.handle('ui:requestStorageFlush', async () => {
       const authority = await observeLegacyChromiumStorage(win.webContents.session, { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') })
       const interrupted = failFlushOnce || result.flushRequests.length + 1 === failFlushAt
@@ -370,7 +379,7 @@ app.whenReady().then(async () => {
       const original = await control.call('space.mote.avatar.read', { target: targets['launcher:leader'].avatarTarget })
       const input = { target: original.target, operationId: randomUUID(), beforeRevision: original.revision,
         source: prepared.source, definition: prepared.definition, parameters, pngDataUrl: userFaceFrame }
-      const saved = await control.call('space.mote.avatar.save', input)
+      const saved = await control.call('space.mote.avatar.save', input, { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, assertCurrent })
       result.seedCalls.push({ input, value: saved, producer: 'Actual production Series face renderer; actual production native writer seed, outside GUI Save' })
       assert.equal(saved.state, 'saved'); assert.equal(saved.operation.durability, 'confirmed')
       const confirmed = await control.call('space.mote.avatar.read', { target: original.target, operationId: input.operationId })
@@ -749,5 +758,5 @@ app.whenReady().then(async () => {
   } catch (error) {
     result.error = { message: error.message, stack: error.stack, ...(starter && error.code ? { code: error.code } : {}) }
     if (win) { result.failedFrame = await win.webContents.executeJavaScript('({text:document.body.textContent,html:document.body.innerHTML})').catch(() => null); await fs.writeFile(path.join(directory, 'failed.png'), (await win.webContents.capturePage()).toPNG()); if (starter) result.images.push('failed.png') }
-  } finally { await fs.writeFile(path.join(directory, scope === 'durable-reopen' ? 'reader-result.json' : 'renderer-result.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }
+  } finally { await avatarRpc?.dispose(); await avatarServer?.stop(); if (avatarRuntimeRoot) await fs.rm(avatarRuntimeRoot, { recursive: true, force: true }); await fs.writeFile(path.join(directory, scope === 'durable-reopen' ? 'reader-result.json' : 'renderer-result.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }
 })

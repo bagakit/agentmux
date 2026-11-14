@@ -14,6 +14,9 @@ import { formatSpaceAddress } from '@agentmux/core/sharing'
 import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
 import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { categoriesFromSpatial, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
+import { ConfigOwner } from '../src/main/config-owner'
+import { SpaceObjectAvatarOwner } from '../src/main/space-object-avatar'
+import { SpaceObjectImages } from '../src/main/space-object-images'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts'
@@ -39,7 +42,7 @@ import type { FocusScanLane } from '../src/renderer/src/lib/focus-collection-lan
 // Global Focus, its actual source joins, resource menus, Dialogs, Picker and clipboard stay real.
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
-vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw Error('Image encoding is outside this preset and saved-asset Picker proof') } } }))
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true }, nativeImage: { createFromBuffer: () => { throw Error('Image encoding is outside this preset and saved-asset Picker proof') } } }))
 
 const initial = useAppStore.getState()
 const RESEARCH = '11111111-1111-4111-8111-111111111111', ENGINEERING = '22222222-2222-4222-8222-222222222222'
@@ -158,7 +161,7 @@ beforeEach(async () => {
   vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'reveal').mockResolvedValue(undefined)
   vi.spyOn(api.spaceObjects, 'appearance').mockResolvedValue({ local: true, icon: null })
-  vi.spyOn(api.spaceObjects, 'saveAvatar').mockRejectedValue(new Error('No image save was authorized in this cancel scene'))
+  vi.spyOn(api.objectAvatars, 'call').mockRejectedValue(new Error('No image save was authorized in this cancel scene'))
   vi.spyOn(api.workspaces, 'listBranches').mockImplementation(async id => ({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: config.workspaces.find(value => value.id === id)?.path ?? fixtureRoot }))
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'repository', icon: null })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
@@ -242,7 +245,7 @@ it('remote same-ID/same-revision Category only copies its exact Space and never 
   expect(items().map(node => node.textContent?.trim())).toEqual(['Copy Category link', 'Collapse Collection'])
   await click(item('Copy Category link')); await until(() => menus().length === 0)
   expect(api.ui.writeClipboardText).toHaveBeenCalledExactlyOnceWith(formatSpaceAddress({ spaceId: remoteCategory.spaceId }))
-  expect(api.topics.call).not.toHaveBeenCalled(); expect(api.spaceObjects.saveAvatar).not.toHaveBeenCalled()
+  expect(api.topics.call).not.toHaveBeenCalled(); expect(vi.mocked(api.objectAvatars.call).mock.calls.filter(([method]) => method === 'space.object.avatar.save')).toHaveLength(0)
   expect(document.querySelector('.topic-dialog,.space-icon-picker')).toBeNull()
 })
 
@@ -290,11 +293,18 @@ it('Category Picker is the original shared editor and cancelling it preserves th
   expect(menus()).toHaveLength(0)
   await click(button('Cancel', document.querySelector('.space-icon-picker')!)); await until(() => !document.querySelector('.space-icon-picker'))
   await until(() => document.activeElement === original)
-  expect(api.spaceObjects.saveAvatar).not.toHaveBeenCalled(); expect(api.topics.call).not.toHaveBeenCalled(); preserved(before)
+  expect(vi.mocked(api.objectAvatars.call).mock.calls.filter(([method]) => method === 'space.object.avatar.save')).toHaveLength(0); expect(api.topics.call).not.toHaveBeenCalled(); preserved(before)
 })
 
 it('saving a preset through the original Category heading Picker updates that exact heading, and a saved image reads only its original asset', async () => {
-  const saveConfig = vi.spyOn(api.config, 'save').mockImplementation(async next => { config = structuredClone(next); return config })
+  const saved = vi.fn(async next => { config = structuredClone(next); return config })
+  const configOwner = new ConfigOwner({ read: () => config, save: saved, publish: value => { config = value } })
+  const resolver = async target => owner.categoryAppearanceDirectory(target.categoryId, target.objectKey)
+  const avatars = new SpaceObjectAvatarOwner(configOwner, { async confirmSaved() {} }, new SpaceObjectImages(resolver), resolver)
+  vi.mocked(api.objectAvatars.call).mockImplementation((method, value) => avatars.call(method, value, { actor: { kind: 'user', id: 'trusted-private-heading' }, async assertCurrent() {} }))
+  vi.spyOn(api.config, 'get').mockImplementation(async () => config)
+  vi.spyOn(api.config, 'save').mockImplementation((next, before) => configOwner.edit(before, next))
+  vi.spyOn(api.ui, 'readObjectAvatarRequests').mockResolvedValue([])
   const readAvatar = vi.spyOn(api.spaceObjects, 'readAvatar').mockResolvedValue({ width: 256, height: 256, dataUrl: 'data:image/png;base64,SAVED_CATEGORY_ASSET' })
   await render(); const before = preservation(), graph = (await spatial.read())!.graph
   const categories = (await owner.call('topic.category.ls', {})).categories, original = heading('alpha'), originalConfig = config
@@ -304,9 +314,10 @@ it('saving a preset through the original Category heading Picker updates that ex
   expect(preset).toBeTruthy(); await click(preset)
   expect(preset.getAttribute('aria-pressed')).toBe('true')
   expect(original.querySelector('[data-space-icon-source="manual"]')).toBeNull()
+  await until(() => !button('Save avatar', document.querySelector('.space-icon-picker')!).disabled)
   await click(button('Save avatar', document.querySelector('.space-icon-picker')!))
   await until(() => !document.querySelector('.space-icon-picker'))
-  expect(saveConfig).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ appearance: expect.objectContaining({ spaceObjectIcons: { [research.spaceId]: 'book' } }) }), originalConfig)
+  expect(saved).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ appearance: expect.objectContaining({ spaceObjectIcons: { [research.spaceId]: 'book' } }) }))
   expect(useAppStore.getState().spaceObjectIcons).toEqual({ [research.spaceId]: 'book' })
   expect(heading('alpha')).toBe(original)
   expect(original.querySelector<HTMLElement>('[data-space-icon-source="manual"]')?.dataset.spaceIcon).toBe('book')
@@ -322,7 +333,7 @@ it('saving a preset through the original Category heading Picker updates that ex
   await until(() => original.querySelector('img')?.getAttribute('src') === 'data:image/png;base64,SAVED_CATEGORY_ASSET')
   expect(readAvatar).toHaveBeenCalledExactlyOnceWith({ kind: 'category', categoryId: research.categoryId, objectKey: research.spaceId }, image)
   expect(api.spaceObjects.appearance).not.toHaveBeenCalled()
-  expect(api.spaceObjects.saveAvatar).not.toHaveBeenCalled(); expect(api.topics.call).not.toHaveBeenCalled()
+  expect(vi.mocked(api.objectAvatars.call).mock.calls.filter(([method]) => method === 'space.object.avatar.save')).toHaveLength(1); expect(api.topics.call).not.toHaveBeenCalled()
   expect((await owner.call('topic.category.ls', {})).categories).toEqual(categories)
   expect((await spatial.read())!.graph.bindings).toEqual(graph.bindings)
   expect(host.querySelectorAll('button.focus-context[data-session-id]')).toHaveLength(before.sessions.length)
@@ -372,7 +383,7 @@ it('regrouping the source Collection keeps the original shared Picker choice and
   expect(original.isConnected).toBe(false)
   await click(button('Cancel', picker)); await until(() => !document.querySelector('.space-icon-picker'))
   expect(heading('alpha').textContent).toContain(engineering.title)
-  expect(api.spaceObjects.saveAvatar).not.toHaveBeenCalled(); expect(api.topics.call).not.toHaveBeenCalled(); preserved(before)
+  expect(vi.mocked(api.objectAvatars.call).mock.calls.filter(([method]) => method === 'space.object.avatar.save')).toHaveLength(0); expect(api.topics.call).not.toHaveBeenCalled(); preserved(before)
 })
 
 it('the original heading invoker in another ownerDocument receives focus after cancelling its real Category Dialog', async () => {
@@ -420,7 +431,7 @@ it('the actual Settings example stays isolated when example IDs collide with rea
   await click(fold); expect(collection.getAttribute('data-collapsed')).toBeNull()
   expect(api.topics.call).not.toHaveBeenCalled(); expect(api.files.reveal).not.toHaveBeenCalled()
   expect(selectWorkspace).not.toHaveBeenCalled(); expect(launchTerminal).not.toHaveBeenCalled()
-  expect(api.spaceObjects.saveAvatar).not.toHaveBeenCalled(); expect(api.ui.writeClipboardText).not.toHaveBeenCalled(); expect(saveConfig).not.toHaveBeenCalled()
+  expect(vi.mocked(api.objectAvatars.call).mock.calls.filter(([method]) => method === 'space.object.avatar.save')).toHaveLength(0); expect(api.ui.writeClipboardText).not.toHaveBeenCalled(); expect(saveConfig).not.toHaveBeenCalled()
   expect(document.querySelector('.topic-dialog,.space-icon-picker')).toBeNull()
   expect(useAppStore.getState().config).toBe(config); preserved(before)
 })

@@ -1,8 +1,15 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act, type ReactNode } from 'react'
+import { act } from 'react'
 import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir } from 'node:fs/promises'
+import { webcrypto } from 'node:crypto'
+import { ConfigOwner } from '../src/main/config-owner'
+import { ConfigStore } from '../src/main/config-store'
+import { SpaceObjectImages } from '../src/main/space-object-images'
+import { SpaceObjectAvatarOwner } from '../src/main/space-object-avatar'
+import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
+import { controlledNativeImage, imageInput } from './fixtures/mote-identity-image'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
@@ -18,6 +25,9 @@ import { originalTopicAddress, directoryIdentity } from '../src/shared/space-add
 import { SPACE_ICON_CATALOG } from '../src/renderer/src/lib/space-object-appearance'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 
+vi.mock('electron', () => ({ app: { getPath: () => '/private-menu-avatar' }, nativeTheme: { shouldUseDarkColors: true }, nativeImage: { createFromBuffer: (bytes: Buffer) => controlledNativeImage(bytes) } }))
+vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+let avatarStore: ConfigStore
 const workspace = { id: '__scratch__', hostId: 'local', path: _hygiene_fixturePath("private/scratch"), name: 'Topics', kind: 'folder' as const }
 const category: TopicCategory = { categoryId: '00000000-0000-4000-8000-000000000000', hostId: 'local',
   directoryPath: _hygiene_fixturePath("private/categories/unclassified"), spaceId: directoryIdentity('local', _hygiene_fixturePath("private/categories/unclassified")),
@@ -38,6 +48,7 @@ let clipboard: MockInstance<typeof api.ui.writeClipboardText>
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('crypto', webcrypto)
   useAppStore.persist.clearStorage(); useAppStore.setState(baseline, true)
   vi.spyOn(api.spaceObjects, 'appearance').mockResolvedValue({ local: true, icon: null })
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
@@ -47,6 +58,20 @@ beforeEach(async () => {
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
   spatialRoot = await mkdtemp(join(tmpdir(), 'object-menu-spatial-'))
+  avatarStore = new ConfigStore(join(spatialRoot, 'avatar-config.json')); let avatarConfig = await avatarStore.save(structuredClone(config))
+  const avatarConfigOwner = new ConfigOwner({ read: () => avatarConfig, save: value => avatarStore.save(value), publish: value => { avatarConfig = value } })
+  const content = join(spatialRoot, 'original-avatar-content'); await mkdir(content)
+  const resolveAvatar = async () => ({ hostId: 'local', directoryPath: content })
+  const avatarImages = new SpaceObjectImages(resolveAvatar, controlledNativeImage)
+  const avatars = new SpaceObjectAvatarOwner(avatarConfigOwner, avatarStore, avatarImages, resolveAvatar)
+  const avatarContext = { actor: { kind: 'user' as const, id: 'trusted-private-menu' }, async assertCurrent() {} }
+  vi.spyOn(api.objectAvatars, 'call').mockImplementation((method, value) => avatars.call(method, value, avatarContext))
+  vi.mocked(api.config.get).mockImplementation(async () => structuredClone(avatarConfig))
+  vi.spyOn(api.config, 'save').mockImplementation((next, before) => avatarConfigOwner.edit(before, next))
+  const users = new WorkbenchUserStateStore(join(spatialRoot, 'workbench.json'))
+  vi.spyOn(api.ui, 'readObjectAvatarRequests').mockImplementation(value => users.readObjectAvatarRequests(value))
+  vi.spyOn(api.ui, 'keepObjectAvatarRequest').mockImplementation(value => users.keepObjectAvatarRequest(value))
+  vi.spyOn(api.ui, 'retireObjectAvatarRequest').mockImplementation(value => users.retireObjectAvatarRequest(value))
   const owner = new AgentMuxSpatialStateStore(join(spatialRoot, 'spatial.json'))
   await owner.commit({ expectedRevision: 0, graph: { spaces: [], zones: [], bindings: [], layouts: {}, tabs: [], regions: [], tabLayouts: {}, resources: {} } })
   vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.readForLayout())
@@ -74,8 +99,10 @@ function Scene() {
     <WorkspaceTopicsPanel workspace={workspace} categorySpaceId={category.spaceId} onRevealDirectory={() => {}} /></>
 }
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) }) }
+async function waitForUi(ready: () => boolean) { for (let index = 0; index < 100; index++) { await settle(); if (ready()) return }; expect(ready()).toBe(true) }
 async function mount() { await act(async () => root.render(<Scene />)); await settle() }
 function button(label: string) {
+  if (label === 'Save avatar') { const save = document.querySelector<HTMLButtonElement>('.space-icon-picker__save'); if (save) return save }
   const found = [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.getAttribute('aria-label') === label || node.textContent === label)
   expect(found, label).toBeDefined(); return found!
 }
@@ -85,6 +112,7 @@ function topicRow() {
   expect(rows).toHaveLength(1); return rows[0]!
 }
 async function click(element: HTMLElement) {
+  if (element.classList.contains('space-icon-picker__save')) await waitForUi(() => !(element as HTMLButtonElement).disabled)
   await act(async () => element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', button: 0 })))
   await act(async () => element.click()); await settle()
 }
@@ -154,13 +182,13 @@ it('keeps the Category icon draft after save failure, retries via original write
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain(category.title)
   await click(button('Book icon')); await click(button('Cancel')); expect(useAppStore.getState().spaceObjectIcons[category.spaceId]).toBeUndefined(); quiet(before)
   await click(button('Actions for category ' + category.title)); await select('Change avatar…'); await click(button('Book icon'))
-  vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('private flush unavailable'))
-  await click(button('Save avatar')); expect(document.querySelector('[role="alert"]')?.textContent).toContain('Your choice is kept')
+  vi.spyOn(avatarStore, 'save').mockRejectedValueOnce(new Error('private owner save unavailable'))
+  await click(button('Save avatar')); expect(document.querySelector('[data-object-avatar-save-notice]')?.textContent).toContain('private owner save unavailable')
   expect(button('Book icon').getAttribute('aria-pressed')).toBe('true'); expect(useAppStore.getState().spaceObjectIcons[category.spaceId]).toBeUndefined()
   vi.mocked(api.ui.requestStorageFlush).mockResolvedValue()
-  await click(button('Retry saving')); expect(useAppStore.getState().spaceObjectIcons).toEqual({ [category.spaceId]: 'book' })
+  await click(button('Save avatar')); await act(async () => vi.waitFor(() => expect(useAppStore.getState().spaceObjectIcons).toEqual({ [category.spaceId]: 'book' })))
   expect(categoryRow().closest('.space-category-heading')?.querySelector('[data-space-icon="book"]')).not.toBeNull(); quiet(before)
-  await menu(categoryRow()); await select('Change avatar…'); await click(button('Restore automatic')); await click(button('Save avatar'))
+  await menu(categoryRow()); await select('Change avatar…'); await click(button('Restore automatic')); await click(button('Save avatar')); await waitForUi(() => !document.querySelector('.space-icon-picker'))
   expect(useAppStore.getState().spaceObjectIcons[category.spaceId]).toBeUndefined(); expect(categoryRow().closest('.space-category-heading')?.querySelector('[data-space-icon-source="automatic"]')).not.toBeNull(); quiet(before)
 })
 it('reports clipboard failure through the original error owner and keeps the current workface', async () => {
@@ -177,11 +205,12 @@ function browserBitmap() {
     set src(_source: string) { queueMicrotask(() => this.onload?.()) }
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ clearRect: vi.fn(), drawImage: vi.fn() } as never)
-  vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,CROP')
+  vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(imageInput().dataUrl)
 }
 async function upload(name: string) {
   const input = document.querySelector<HTMLInputElement>(`input[aria-label="Choose image for ${name}"]`)
   expect(input).not.toBeNull()
+  await waitForUi(() => !input!.disabled)
   Object.defineProperty(input!, 'files', { configurable: true, value: [new File(['bounded original image'], 'avatar.png', { type: 'image/png' })] })
   await act(async () => input!.dispatchEvent(new Event('change', { bubbles: true }))); await settle()
 }
@@ -189,7 +218,7 @@ const uploaded = { kind: 'image' as const, fileName: 'a'.repeat(64) + '.png' }
 it.each(['category','topic'] as const)('%s uploads through its original target and publishes only after Save', async kind => {
   browserBitmap()
   vi.spyOn(api.spaceObjects, 'previewAvatar').mockResolvedValue({ width: 256, height: 256, dataUrl: 'data:image/png;base64,PREVIEW' })
-  const save = vi.spyOn(api.spaceObjects, 'saveAvatar').mockResolvedValue(uploaded)
+  const save = vi.mocked(api.objectAvatars.call); save.mockClear()
   const read = vi.spyOn(api.spaceObjects, 'readAvatar').mockResolvedValue({ width: 256, height: 256, dataUrl: 'data:image/png;base64,ASSET' })
   const key = kind === 'category' ? category.spaceId : topicAddress.spaceId
   const target = kind === 'category' ? { kind, categoryId: category.categoryId, objectKey: key }
@@ -199,30 +228,30 @@ it.each(['category','topic'] as const)('%s uploads through its original target a
   expect(document.querySelector('[data-avatar-source=face]')).toBeNull()
   await upload(kind === 'category' ? category.title : topic.title)
   expect(api.spaceObjects.previewAvatar).toHaveBeenCalledWith(target, expect.objectContaining({ mimeType: 'image/png' }))
-  expect(document.querySelector('canvas')).not.toBeNull(); expect(save).not.toHaveBeenCalled()
+  expect(document.querySelector('canvas')).not.toBeNull(); expect(save.mock.calls.filter(([method]) => method === 'space.object.avatar.save')).toHaveLength(0)
   expect(useAppStore.getState().spaceObjectIcons[key]).toBeUndefined()
   await click(button('Save avatar'))
-  expect(save).toHaveBeenCalledWith(target, { mimeType: 'image/png', dataUrl: 'data:image/png;base64,CROP' })
-  await act(async () => vi.waitFor(() => expect(useAppStore.getState().spaceObjectIcons).toEqual({ [key]: uploaded })))
-  expect(read).toHaveBeenCalledWith(target, uploaded); quiet(before)
+  await waitForUi(() => save.mock.calls.some(([method]) => method === 'space.object.avatar.save'))
+  expect(save).toHaveBeenCalledWith('space.object.avatar.save', expect.objectContaining({ target, operationId: expect.any(String), choice: { kind: 'png', dataUrl: imageInput().dataUrl } }))
+  await act(async () => vi.waitFor(() => expect(useAppStore.getState().spaceObjectIcons[key]).toMatchObject({ kind: 'image' })))
+  expect(read).toHaveBeenCalledWith(target, useAppStore.getState().spaceObjectIcons[key]); quiet(before)
 })
-it('image failure keeps the crop and same-object retry; a replaced editor cannot publish a late asset', async () => {
+it('image failure keeps the crop and original request; an explicit fresh save can publish after recovery', async () => {
   browserBitmap()
   vi.spyOn(api.spaceObjects, 'previewAvatar').mockResolvedValue({ width: 256, height: 256, dataUrl: 'data:image/png;base64,PREVIEW' })
-  const save = vi.spyOn(api.spaceObjects, 'saveAvatar').mockRejectedValue(new Error('disk unavailable'))
+  vi.spyOn(avatarStore, 'confirmSaved').mockRejectedValueOnce(new Error('disk unavailable'))
   await mount(); await menu(categoryRow()); await select('Change avatar…'); await upload(category.title)
-  await click(button('Save avatar')); expect(document.querySelector('[role=alert]')?.textContent).toContain('Your choice is kept')
+  await click(button('Save avatar')); await waitForUi(() => document.querySelector('.space-icon-picker__save')?.textContent === 'Save avatar')
+  expect(document.querySelector('[data-object-avatar-save-notice]')?.textContent).toContain('disk unavailable')
   expect(document.querySelector('canvas')).not.toBeNull(); expect(useAppStore.getState().spaceObjectIcons).toEqual({})
-  save.mockResolvedValue(uploaded); await click(button('Retry saving'))
-  expect(useAppStore.getState().spaceObjectIcons[category.spaceId]).toEqual(uploaded)
-  await menu(categoryRow()); await select('Change avatar…'); await upload(category.title)
-  let finish!: (ref: typeof uploaded) => void
-  save.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const originalRequests = await api.ui.readObjectAvatarRequests({ kind: 'category', categoryId: category.categoryId, objectKey: category.spaceId })
+  expect(originalRequests).toHaveLength(1); expect(originalRequests[0]!.request.choice.dataUrl).toBe(imageInput().dataUrl)
+  expect(button('Save avatar').disabled).toBe(true)
+  await upload(category.title)
   await click(button('Save avatar'))
-  await act(async () => root.render(<div />)); await settle()
-  await useAppStore.getState().setSpaceObjectIcon(category.spaceId, 'book')
-  await act(async () => finish(uploaded)); await settle()
-  expect(useAppStore.getState().spaceObjectIcons[category.spaceId]).toBe('book')
+  await act(async () => vi.waitFor(() => expect(useAppStore.getState().spaceObjectIcons[category.spaceId]).toMatchObject({ kind: 'image' })))
+  const requests = await api.ui.readObjectAvatarRequests({ kind: 'category', categoryId: category.categoryId, objectKey: category.spaceId })
+  expect(requests).toHaveLength(1)
 })
 it('automatic Category and Topic images read distinct original targets; manual icons do not scan', async () => {
   const read = vi.mocked(api.spaceObjects.appearance).mockImplementation(async target => ({ local: true,
@@ -240,7 +269,7 @@ it('automatic Category and Topic images read distinct original targets; manual i
 
 it('equivalent image targets preserve manual icon memoization through unrelated Session updates', async () => {
   await useAppStore.getState().setSpaceObjectIcon(topicAddress.spaceId, 'book')
-  const book = vi.spyOn(SPACE_ICON_CATALOG.book.Icon as unknown as { render: (...args: unknown[]) => ReactNode }, 'render')
+  const book = vi.spyOn(SPACE_ICON_CATALOG.book, 'Icon')
   await mount(); expect(book.mock.calls.length).toBeGreaterThan(0); book.mockClear()
   vi.mocked(api.spaceObjects.appearance).mockClear()
   for (let revision = 0; revision < 10; revision++) await act(async () => {
