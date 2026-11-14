@@ -18,7 +18,7 @@ async function locate(context: AgentProviderNativeSessionDiscoveryContext): Prom
     if (basename(file.path) !== 'store.db' || !['w', 'u'].includes(file.access ?? '')) continue
     const id = basename(dirname(file.path))
     if (!uuid.test(id)) continue
-    const path = resolveCursorStorePath(context.workspacePath, id, context.env)
+    const path = await resolveCursorStorePath(context.workspacePath, id, context.env)
     let physical: string
     try { physical = await realpath(path) } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue

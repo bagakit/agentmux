@@ -1,6 +1,7 @@
 import { proto3, type AnyMessage } from '@bufbuild/protobuf'
 import { cursorNativeType } from './cursor-native-schema.js'
 import { createHash } from 'node:crypto'
+import { realpath } from 'node:fs/promises'
 import { executionEnvironmentValue, executionHomeDirectory, executionPath } from './execution-environment.js'
 import { isAbsolute, join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
@@ -83,15 +84,17 @@ export function cursorConfigRoot(
 
 /**
  * Deterministic path to the native state SQLite store.db:
- * <configRoot>/chats/<md5(resolve(workspace))>/<nativeSessionId>/store.db
+ * <configRoot>/chats/<md5(physical process cwd)>/<nativeSessionId>/store.db.
+ * Cursor starts in the physical cwd even when the original Core Session retains an alias.
  */
-export function resolveCursorStorePath(
+export async function resolveCursorStorePath(
   workspacePath: string,
   chatId: string,
   env?: Readonly<Record<string, string | undefined>>
-): string {
-  const root = cursorConfigRoot(workspacePath, env)
-  const bucket = createHash('md5').update(resolve(workspacePath)).digest('hex')
+): Promise<string> {
+  const workspace = await cursorPhysicalWorkspace(workspacePath)
+  const root = cursorConfigRoot(workspace, env)
+  const bucket = createHash('md5').update(workspace).digest('hex')
   return join(root, 'chats', bucket, chatId, 'store.db')
 }
 
@@ -99,15 +102,21 @@ export function resolveCursorStorePath(
  * Deterministic path to the supplementary session transcript JSONL:
  * <dataRoot>/projects/<slug>/agent-transcripts/<encodedId>/<encodedId>.jsonl
  */
-export function resolveCursorTranscriptPath(
+export async function resolveCursorTranscriptPath(
   workspacePath: string,
   chatId: string,
   env?: Readonly<Record<string, string | undefined>>
-): string {
-  const root = cursorDataRoot(workspacePath, env)
-  const slug = cursorWorkspaceSlug(workspacePath)
+): Promise<string> {
+  const workspace = await cursorPhysicalWorkspace(workspacePath)
+  const root = cursorDataRoot(workspace, env)
+  const slug = cursorWorkspaceSlug(workspace)
   const encodedId = encodeCursorChatId(chatId)
   return join(root, 'projects', slug, 'agent-transcripts', encodedId, `${encodedId}.jsonl`)
+}
+
+async function cursorPhysicalWorkspace(workspacePath: string): Promise<string> {
+  try { return await realpath(resolve(workspacePath)) }
+  catch { return invalid('The original Cursor workspace directory cannot be resolved. Keep its Session and inspect the original directory.', 'LOCATOR_UNAVAILABLE') }
 }
 
 type CursorDecoded = {
@@ -280,14 +289,14 @@ async function readBlob(reader: NativeSqliteHistoryReader, id: string): Promise<
   return bytes
 }
 
-function historyPath(context: AgentProviderSessionHistoryContext | AgentProviderSessionHistoryObservationContext): string {
+async function historyPath(context: AgentProviderSessionHistoryContext | AgentProviderSessionHistoryObservationContext): Promise<string> {
   context.signal.throwIfAborted()
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(context.source.nativeSessionId)) {
     return invalid('Cursor native Session identity has not been established.', 'LOCATOR_UNAVAILABLE')
   }
-  const path = resolveCursorStorePath(context.workspacePath, context.source.nativeSessionId, context.env)
+  const path = await resolveCursorStorePath(context.workspacePath, context.source.nativeSessionId, context.env)
   if (context.transcriptPath && (!isAbsolute(context.transcriptPath) ||
-    (resolve(context.transcriptPath) !== path && resolve(context.transcriptPath) !== resolveCursorTranscriptPath(context.workspacePath, context.source.nativeSessionId, context.env)))) {
+    (resolve(context.transcriptPath) !== path && resolve(context.transcriptPath) !== await resolveCursorTranscriptPath(context.workspacePath, context.source.nativeSessionId, context.env)))) {
     return invalid('Cursor transcript locator belongs to another native Session.', 'SOURCE_CHANGED')
   }
   return path
@@ -295,7 +304,7 @@ function historyPath(context: AgentProviderSessionHistoryContext | AgentProvider
 
 /** Exact committed native root changes only; no body scan or provider timer. */
 export async function observeCursorSessionHistory(context: AgentProviderSessionHistoryObservationContext) {
-  const path = historyPath(context)
+  const path = await historyPath(context)
   return observeNativeSqliteHistory(context, path, async () => {
     const reader = await NativeSqliteHistoryReader.open(path, context.signal)
     try {
@@ -307,7 +316,7 @@ export async function observeCursorSessionHistory(context: AgentProviderSessionH
 
 /** Typed native history only. Supplementary transcript paths are identity locators, never body fallback. */
 export async function readCursorSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {
-  const path = historyPath(context)
+  const path = await historyPath(context)
   const cursor = context.cursor === undefined ? undefined : parseCursor(context.cursor, context)
   if (cursor && cursor.identity.path !== path) return invalid('Cursor native history path changed.', 'SOURCE_CHANGED')
   const reader = await NativeSqliteHistoryReader.open(path, context.signal)
