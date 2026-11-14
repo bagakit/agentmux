@@ -8,8 +8,10 @@ import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { aliases, browserInstalledDependency, desktopRequire, root } from './fixtures/settings-connections/environment.mjs'
 
+const channel = process.argv[2] ?? 'discord'
+assert.ok(['discord', 'telegram'].includes(channel), 'Choose a registered channel preview')
 const fixture = resolve(root, 'apps/desktop/scripts/fixtures/discord-settings')
-const evidence = resolve(root, '.local/channel-protocol/discord-settings/runs', randomUUID()), temporary = await mkdtemp(resolve(tmpdir(), 'amux-discord-settings-'))
+const evidence = resolve(root, `.local/channel-protocol/${channel}-settings/runs`, randomUUID()), temporary = await mkdtemp(resolve(tmpdir(), 'amux-discord-settings-'))
 await mkdir(evidence, { recursive: true })
 const sha = value => createHash('sha256').update(value).digest('hex')
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), inputs: {} }
@@ -22,7 +24,7 @@ try {
   await cp(compiled, resolve(evidence, 'compiled'), { recursive: true })
   receipt.compiled = Object.fromEntries(await Promise.all((await readdir(compiled, { recursive: true })).filter(name => /\.(?:html|js|css)$/u.test(name)).map(async name => [name, sha(await readFile(resolve(compiled, name)))])))
   const visual = resolve(evidence, 'visual'); await mkdir(visual)
-  const lines = [], execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, 'main.cjs'), resolve(compiled, 'index.html'), temporary, visual], { cwd: root, temporaryRoot: temporary, env, timeoutMs: 60000, onLine: line => lines.push(line) })
+  const lines = [], execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, 'main.cjs'), resolve(compiled, 'index.html'), temporary, visual, channel], { cwd: root, temporaryRoot: temporary, env, timeoutMs: 60000, onLine: line => lines.push(line) })
   await writeFile(resolve(visual, 'capture.log'), lines.join('\n'))
   const render = JSON.parse(await readFile(resolve(visual, 'render.json'), 'utf8'))
   assert.equal(execution.exitCode, 0, JSON.stringify(render.failure)); assert.equal(render.passed, true)
@@ -34,6 +36,6 @@ finally {
   receipt.cleanup = { remaining: await listProbeProcesses(-1, temporary) }; assert.deepEqual(receipt.cleanup.remaining, [])
   await rm(temporary, { recursive: true, force: true })
   await writeFile(resolve(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2))
-  await writeFile(resolve(root, '.local/channel-protocol/discord-settings/latest.json'), JSON.stringify({ evidence, receipt: resolve(evidence, 'receipt.json') }, null, 2))
+  await writeFile(resolve(root, `.local/channel-protocol/${channel}-settings/latest.json`), JSON.stringify({ evidence, receipt: resolve(evidence, 'receipt.json') }, null, 2))
   console.log(JSON.stringify({ passed: receipt.passed, evidence }))
 }

@@ -114,7 +114,7 @@ it('the real Discord settings contribution stores the token through secure IPC a
   expect(await f.services.bindings!.grant({ ...f.grant, actor: { application: record.config.application, idType: 'snowflake', userId: '400' } }, context)).toMatchObject({ state: 'applied' })
   f.wire.message('888', 'Healthy input after an independent credential check failure')
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
-  await act(async () => { dom.container.querySelector<HTMLDetailsElement>('[data-discord-setup]')!.open = true })
+  await act(async () => { dom.container.querySelector<HTMLDetailsElement>('[data-channel-setup=discord]')!.open = true })
   expect(dom.container.textContent).toContain('Message Content Intent')
   expect(dom.container.textContent).toContain('Saving credentials does not confirm Gateway connection')
   await dom.click('[data-management-console]'); expect(f.external).toHaveBeenCalledWith('https://discord.com/developers/applications')

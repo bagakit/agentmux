@@ -11,6 +11,28 @@ const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
 async function fixture(running = false) { const f = await ingressFixture(running); cleanup.push(() => f.close()); return f }
 
+it('retains a source-boundary refusal before ACK and never upgrades it when the same native event or message returns after the cut', async () => {
+  const f = await fixture(true), submit = vi.spyOn(f.client, 'submitAgentMessage'), record = vi.spyOn(f.client, 'recordExternalConversationMessage')
+  const ack = vi.fn(() => {
+    const disk = new DatabaseSync(f.databasePath)
+    try {
+      expect(JSON.parse(String(disk.prepare('SELECT record_json FROM connection_ingress_message').get()!.record_json))).toMatchObject({ state: 'refused', code: 'INGRESS_SOURCE_BOUNDARY_UNCONFIRMED', group: { target: null } })
+      expect(JSON.parse(String(disk.prepare('SELECT event_json FROM connection_ingress_event').get()!.event_json))).not.toHaveProperty('sourceBoundaryUnconfirmed')
+    } finally { disk.close() }
+  })
+  const original = await f.receive({ conversationKind: 'group', sourceBoundaryUnconfirmed: true }, ack)
+  expect(ack).toHaveBeenCalledOnce()
+  expect((await f.ingress.dispatch(original.ingress.ingressId)).ingress).toEqual(original.ingress)
+  expect(await f.receive({ conversationKind: 'group' })).toEqual({ ingress: original.ingress, duplicate: 'event' })
+  expect(await f.receive({ conversationKind: 'group', eventId: 'same-native-message-after-cut' })).toEqual({ ingress: original.ingress, duplicate: 'message' })
+  expect(submit).not.toHaveBeenCalled(); expect(record).not.toHaveBeenCalled()
+  await expect(f.receive({ conversationKind: 'group', sourceBoundaryUnconfirmed: 'yes' as never })).rejects.toMatchObject({ code: 'INGRESS_AUTHENTICATION_FAILED' })
+  const after = await f.receive({ conversationKind: 'group', eventId: 'fresh-after-cut', messageId: 'fresh-after-cut' })
+  expect((await f.ingress.dispatch(after.ingress.ingressId)).ingress).toMatchObject({ state: 'claimed', group: { target: { agentSessionId: f.input.agentSessionId } } })
+  expect(submit).toHaveBeenCalledOnce()
+  expect(JSON.stringify(record.mock.calls)).not.toContain(original.ingress.ingressId)
+})
+
 it('commits complete authenticated payload before ACK, and keeps original event/message identities across redelivery', async () => {
   const f = await fixture(), ack = vi.fn(() => {
     const disk = new DatabaseSync(f.databasePath)

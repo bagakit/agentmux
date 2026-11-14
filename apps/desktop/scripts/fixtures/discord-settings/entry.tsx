@@ -9,11 +9,13 @@ import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
 
 // Production presentation with controlled public DTOs; no token or native side effect leaves this private preview.
+const channel = new URLSearchParams(window.location.search).get('channel') === 'telegram' ? 'telegram' : 'discord'
 const records: ConnectionRecord[] = [], operations = new Map<string, unknown>(), calls: string[] = []
 let checks = 0
 const config = { ...await api.config.get(), workspaces: [] }
 useAppStore.setState({ config, sessions: [], botTaskSelections: {} })
 mountThemeRuntime(window, config.appearance)
+api.connections.hostingTarget = async (hostId = 'local') => ({ hostId, runtimeId: 'channel-preview-runtime' })
 api.connections.inspectCredential = async () => null
 api.connections.storeCredential = async () => { calls.push('secure-credential-write'); return { credentialRef: 'private-preview-reference' } }
 api.ui.openExternal = async () => { calls.push('developer-portal') }
@@ -21,7 +23,7 @@ api.connections.call = async <M extends ConnectionMethod>(method: M, input: Conn
   calls.push(method)
   let value: unknown
   if (method === 'connection.ls') value = { connections: records }
-  else if (method === 'connection.service.get') value = { enabled: true, revision: 1 }
+  else if (method === 'connection.service.get') { const p = input as ConnectionParamsMap['connection.service.get']; value = { ...(p.adapterId ? { adapterId: p.adapterId } : {}), enabled: true, revision: 1 } }
   else if (method === 'connection.inspect') { const p = input as ConnectionParamsMap['connection.inspect']; value = 'operationId' in p ? { connection: null, operation: operations.get(p.operationId!) ?? null } : { connection: records.find(record => record.config.connectionId === p.connectionId) ?? null, operation: null } }
   else if (method === 'connection.configure') {
     const p = input as ConnectionParamsMap['connection.configure']
@@ -35,10 +37,13 @@ api.connections.call = async <M extends ConnectionMethod>(method: M, input: Conn
   else throw Error('Preview does not perform ' + method)
   return structuredClone(value) as ConnectionResultMap[M]
 }
+api.config.get = async () => structuredClone(config)
+api.sessions.snapshot = async () => ({ sessions: [], timelines: {}, recoveryCandidates: [] })
+const stopStartup = await useAppStore.getState().initialize(); stopStartup()
 const proof = { ready: false, calls, errors: [] as string[] }
-Object.assign(window, { discordSettingsProof: proof })
+Object.assign(window, { channelSettingsProof: proof })
 window.addEventListener('error', event => proof.errors.push(event.message))
 window.addEventListener('unhandledrejection', event => proof.errors.push(String(event.reason)))
-function Fixture() { const [visible, setVisible] = useState(true); return <DesktopClientUiProvider><SettingsPanel visible={visible} initialSection="discord" onClose={() => setVisible(false)} /></DesktopClientUiProvider> }
+function Fixture() { const [visible, setVisible] = useState(true); return <DesktopClientUiProvider><SettingsPanel visible={visible} initialSection={channel} onClose={() => setVisible(false)} /></DesktopClientUiProvider> }
 createRoot(document.getElementById('root')!).render(<Fixture />)
 proof.ready = true
