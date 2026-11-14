@@ -17,11 +17,11 @@ export type MobileConversationStatus = {
 export function mobileConversationStatusLabel(status: MobileConversationStatus | null) {
   if (!status) return null
   if (status.connection.state !== 'connected' || status.connection.issue) return 'Mac 连接需要查看'
-  if (status.metadata.state === 'retired') return '历史对话'
-  if (status.metadata.state === 'deleted') return '对话记录已删除'
   if (status.metadata.issue || status.metadata.state === 'unconfirmed') return '对话信息待确认'
   if (status.readingIssue) return '对话记录读取需要重试'
   if (status.agentIssue) return 'Agent 有状态说明'
+  if (status.metadata.state === 'retired') return '历史对话'
+  if (status.metadata.state === 'deleted') return '对话记录已删除'
   return null
 }
 export function MobileConversationStatusDetails({ status, onConnection }: {
