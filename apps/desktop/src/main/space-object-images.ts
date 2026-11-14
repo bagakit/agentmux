@@ -28,7 +28,7 @@ export class SpaceObjectImages {
   async directory(target: SpaceObjectImageTarget): Promise<string> { return await this.requireLocalDirectory(target) }
   async appearance(target: SpaceObjectImageTarget): Promise<SpaceObjectAppearance> {
     const directory = await this.localDirectory(target)
-    return { local: directory !== null, icon: directory ? (await projectAppearance(directory)).icon : null }
+    return { local: directory !== null, icon: directory ? (await projectAppearance(directory, this.createImage)).icon : null }
   }
   async preview(target: SpaceObjectImageTarget, input: ObjectAvatarInput): Promise<ObjectAvatarImage> {
     await this.requireLocalDirectory(target)

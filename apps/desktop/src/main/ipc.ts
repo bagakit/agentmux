@@ -1091,7 +1091,7 @@ export async function registerIpc(args: {
   })
   handle('workspaces:appearance', async (id: string) => {
     const item = workspace(config, id)
-    return item.hostId === 'local' ? await projectAppearance(item.repoPath ?? item.path) : { kind: item.repoPath ? 'repository' : 'directory', icon: null }
+    return item.hostId === 'local' ? await projectAppearance(item.repoPath ?? item.path, bytes => nativeImage.createFromBuffer(bytes)) : { kind: item.repoPath ? 'repository' : 'directory', icon: null }
   })
   handleWithEvent('workspaces:chooseLocalFolder', async (event, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
     const selection = await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), { properties: ['openDirectory'] })

@@ -1,12 +1,15 @@
 import { constants, open, readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
+import { projectIconImage, type ProjectIconDecoder } from './project-icon-image.js'
 
 export type ProjectAppearance = { kind: 'repository' | 'directory'; icon: string | null }
 
 // The renderer's CSP is `img-src 'self' data:` (no `file:`), so a filesystem path in an <img src>
 // never loads — the only channel is a data: URI encoded here in Main. Cap the size BEFORE reading the
 // whole file: these bytes come from arbitrary user repositories, so an unbounded read is a memory DoS.
-const MAX_ICON_BYTES = 256 * 1024
+const MAX_ICON_BYTES = 1024 * 1024
+const MAX_CANDIDATES = 128
+const MAX_PROBE_BYTES = 4 * 1024 * 1024
 // Real icons were measured 3–4 path segments deep (`apps/desktop/resources/icon.png`,
 // `frontend/public-shell/icons/icon-192.png`), so a fixed prefix list alone scores 0/10 — it needs a
 // bounded walk too. Descend at most this many directory levels below the root.
@@ -45,13 +48,16 @@ export function sniffImageMime(bytes: Buffer): string | null {
 }
 
 type Hit = { icon: string; winner: string; winnerSig: string }
+type ProbeBudget = { candidates: Set<string>; bytes: number }
 
 async function fileSig(path: string): Promise<string | null> {
   try { const info = await stat(path); return info.isFile() ? `${info.mtimeMs}:${info.size}` : null } catch { return null }
 }
 
 /** Encode one candidate if it is a real, small-enough image. Returns null so callers try the next. */
-async function tryFile(path: string, root: string): Promise<Hit | null> {
+async function tryFile(path: string, root: string, decode: ProjectIconDecoder, budget: ProbeBudget): Promise<Hit | null> {
+  if (budget.candidates.has(path) || budget.candidates.size >= MAX_CANDIDATES || budget.bytes >= MAX_PROBE_BYTES) return null
+  budget.candidates.add(path)
   let handle
   try {
     // A conventional symlink can identify an asset only inside this original directory.
@@ -60,19 +66,23 @@ async function tryFile(path: string, root: string): Promise<Hit | null> {
     if (isAbsolute(pathWithinRoot) || pathWithinRoot === '..' || pathWithinRoot.startsWith('..' + sep)) return null
     handle = await open(actual, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     const info = await handle.stat()
-    if (!info.isFile() || info.size > MAX_ICON_BYTES) return null
-    const buffer = Buffer.alloc(MAX_ICON_BYTES + 1)
+    if (!info.isFile() || info.size > MAX_ICON_BYTES || info.size > MAX_PROBE_BYTES - budget.bytes) return null
+    const buffer = Buffer.alloc(Math.min(MAX_ICON_BYTES, MAX_PROBE_BYTES - budget.bytes) + 1)
     let count = 0
     while (count < buffer.length) {
       const read = await handle.read(buffer, count, buffer.length - count, count)
       if (!read.bytesRead) break
       count += read.bytesRead
+      budget.bytes += read.bytesRead
+      if (budget.bytes > MAX_PROBE_BYTES) return null
     }
     if (count > MAX_ICON_BYTES) return null
     const bytes = buffer.subarray(0, count)
     const mime = sniffImageMime(bytes)
     if (!mime) return null
-    return { icon: `data:${mime};base64,${bytes.toString('base64')}`, winner: path, winnerSig: `${info.mtimeMs}:${info.size}` }
+    const image = projectIconImage(bytes, mime, decode)
+    if (!image) return null
+    return { icon: `data:${image.mime};base64,${image.bytes.toString('base64')}`, winner: path, winnerSig: `${info.mtimeMs}:${info.size}` }
   } catch (error) {
     // Absence, an invalid mark or an escaping link can try another asset. A storage failure
     // is unknown, not a confirmed directory with no icon.
@@ -81,15 +91,16 @@ async function tryFile(path: string, root: string): Promise<Hit | null> {
   } finally { await handle?.close() }
 }
 
-async function findIcon(root: string): Promise<Hit | null> {
+async function findIcon(root: string, decode: ProjectIconDecoder): Promise<Hit | null> {
+  const budget: ProbeBudget = { candidates: new Set(), bytes: 0 }
   for (const candidate of FIXED_CANDIDATES) {
-    const hit = await tryFile(join(root, candidate), root)
+    const hit = await tryFile(join(root, candidate), root, decode, budget)
     if (hit) return hit
   }
   // Breadth-first so shallower icons win; the fixed list already handled the conventional exact paths.
   const queue: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }]
   let scanned = 0
-  while (queue.length > 0 && scanned < MAX_DIRS_SCANNED) {
+  while (queue.length > 0 && scanned < MAX_DIRS_SCANNED && budget.candidates.size < MAX_CANDIDATES && budget.bytes < MAX_PROBE_BYTES) {
     const { dir, depth } = queue.shift()!
     scanned += 1
     // No annotation: `readdir` is overloaded, and naming the return type picks the Buffer-flavoured
@@ -98,10 +109,11 @@ async function findIcon(root: string): Promise<Hit | null> {
     let entries
     try { entries = await readdir(dir, { withFileTypes: true }) }
     catch (error) { if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) continue; throw error }
+    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
     // Sort for a deterministic winner across filesystems; conventional names sort ahead of the rest.
     const files = entries.filter((entry) => entry.isFile() && ICON_NAME.test(entry.name)).map((entry) => entry.name).sort()
     for (const name of files) {
-      const hit = await tryFile(join(dir, name), root)
+      const hit = await tryFile(join(dir, name), root, decode, budget)
       if (hit) return hit
     }
     if (depth < MAX_DIR_DEPTH) {
@@ -123,7 +135,7 @@ const cache = new Map<string, CacheEntry>()
 const CACHE_TTL_MS = 60_000
 
 /** Probe a project root for its own icon, magic-byte-verified and encoded as a data: URI; cached. */
-export async function projectAppearance(root: string): Promise<ProjectAppearance> {
+export async function projectAppearance(root: string, decode: ProjectIconDecoder): Promise<ProjectAppearance> {
   try { root = await realpath(root) }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'directory', icon: null }; throw error }
   let rootMtime: number
@@ -141,7 +153,7 @@ export async function projectAppearance(root: string): Promise<ProjectAppearance
 
   let kind: ProjectAppearance['kind'] = 'directory'
   try { await stat(join(root, '.git')); kind = 'repository' } catch { /* ordinary folder */ }
-  const hit = await findIcon(root)
+  const hit = await findIcon(root, decode)
   const appearance: ProjectAppearance = { kind, icon: hit?.icon ?? null }
   cache.set(root, { appearance, rootMtime, winner: hit?.winner ?? null, winnerSig: hit?.winnerSig ?? null, probedAt: Date.now() })
   return appearance
