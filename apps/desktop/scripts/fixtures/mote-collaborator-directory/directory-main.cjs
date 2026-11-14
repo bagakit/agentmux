@@ -22,15 +22,52 @@ app.whenReady().then(async () => {
     }
     await pause(600)
     const original = await read('directoryScene.facts()')
+    const activitySelector = '[data-space-nav="topic:launcher:analyst"] ~ .project-activity'
+    const palette = {}
     for (const view of ['collaborators', 'list']) for (const narrow of [false, true]) for (const light of [false, true]) {
       win.setContentSize(narrow ? 720 : 1180, 760)
-      await read(`directoryScene.view(${JSON.stringify(view)});directoryScene.theme(${light})`); await pause(250)
+      await read(`directoryScene.view(${JSON.stringify(view)});directoryScene.theme(${light});directoryScene.rail(${narrow})`); await pause(250)
       const facts = await read(`(()=>{const roster=document.querySelector('[data-mote-directory-view]');const names=[...roster.querySelectorAll('[data-space-nav]')].map(n=>n.getAttribute('data-space-nav'));return {view:roster.dataset.moteDirectoryView,names,appearance:document.documentElement.dataset.appearance,portrait:roster.querySelector('.space-object-icon')?.getBoundingClientRect().width,archive:document.querySelector('[aria-label="Show archived Clubs in Space"]').textContent,overflow:document.body.scrollWidth>innerWidth,...directoryScene.facts()}})()`)
       assert.equal(facts.view,view); assert.equal(facts.names.length,5); assert.equal(facts.archive,'1'); assert.equal(facts.overflow,false)
+      const appearance = light ? 'light' : 'dark'
+      const display = await read(`(()=>{const style=getComputedStyle(document.documentElement);
+        return {rail:Math.round(document.querySelector('.project-rail-shell').getBoundingClientRect().width),
+          scheme:style.colorScheme,surface:style.getPropertyValue('--surface-1').trim(),text:style.getPropertyValue('--text').trim()}})()`)
+      assert.equal(facts.appearance, appearance); assert.equal(display.scheme, appearance)
+      assert.equal(display.rail, narrow ? 180 : 252)
+      assert.ok(display.surface.length > 0 && display.text.length > 0)
+      if (palette[appearance]) assert.deepEqual([display.surface, display.text], palette[appearance])
+      else palette[appearance] = [display.surface, display.text]
       if (view === 'collaborators') assert.ok(facts.portrait>=32 && facts.portrait<54, 'Readable compact round portraits')
       assert.deepEqual(facts.drafts,original.drafts); assert.deepEqual(facts.selection,original.selection); assert.deepEqual(facts.forbidden,[])
+      assert.deepEqual(facts.runs,original.runs)
+      const activity = await read(`(()=>{const trigger=document.querySelector(${JSON.stringify(activitySelector)});
+        const marker=trigger?.querySelector('.project-activity__avatar-marker');
+        return {label:trigger?.getAttribute('aria-label'),mark:marker?.className,metrics:trigger?.querySelector('.project-activity__metrics')?.textContent}})()`)
+      assert.equal(activity.label, '1 Needs you · 1 Error · 1 Working. Agent activity')
+      if (view === 'collaborators') {
+        assert.equal(activity.mark, 'project-activity__avatar-marker project-activity__metric--needs-you')
+        assert.equal(activity.metrics, undefined)
+      } else {
+        assert.equal(activity.mark, undefined)
+        assert.equal(activity.metrics, '11')
+      }
       const file=`directory-${view}-${narrow?'narrow':'wide'}-${light?'light':'dark'}.png`
-      await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file);result.operations.push({file,...facts})
+      await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file);result.operations.push({file,...facts,display,activity})
+    }
+    assert.notEqual(palette.dark[0], palette.light[0], 'Dark and light surfaces use different actual colors')
+    assert.notEqual(palette.dark[1], palette.light[1], 'Dark and light text uses different actual colors')
+    for (const view of ['collaborators', 'list']) {
+      await read(`directoryScene.view(${JSON.stringify(view)});directoryScene.theme(false);directoryScene.rail(${view === 'collaborators'})`)
+      win.setContentSize(view === 'collaborators' ? 720 : 1180, 760); await pause(150)
+      await click(activitySelector)
+      assert.equal(await read('document.querySelector(".project-activity-menu__summary")?.textContent'), '1 Needs you · 1 Error · 1 Working')
+      assert.equal(await read('document.querySelector(".project-activity-menu__heading > span")?.textContent'), '3 Agents')
+      const file = `directory-activity-${view}.png`
+      await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file)
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'ESC'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'ESC'});await pause(150)
+      assert.equal(await read('!!document.querySelector(".project-activity-menu")'),false)
+      assert.deepEqual(await read('directoryScene.facts()'),original)
     }
     await read('directoryScene.view("collaborators");directoryScene.theme(false)'); win.setContentSize(1180,760); await pause(150)
     await click('[aria-label="Show archived Clubs in Space"]')
@@ -67,7 +104,7 @@ app.whenReady().then(async () => {
       const file = `directory-cold-read-${view}.png`
       await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file)
     }
-    result.originalInteractions={method:'Chromium sendInputEvent',archiveReveal:true,originalObjectMenu:true,settingsRadioAndSave:true}
+    result.originalInteractions={method:'Chromium sendInputEvent',archiveReveal:true,originalObjectMenu:true,settingsRadioAndSave:true,originalActivityMenu:true}
     result.passed=true
   } catch (error) { result.error={message:error.message,stack:error.stack}; if(win) await fs.writeFile(path.join(evidence,'failed-renderer.png'),(await win.webContents.capturePage()).toPNG()) }
   finally { await fs.writeFile(path.join(evidence,'renderer-result.json'),JSON.stringify(result,null,2));win?.destroy();app.exit(result.passed?0:1) }

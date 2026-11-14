@@ -10,10 +10,11 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
+import { PROJECT_RAIL_MIN_WIDTH } from '../../../src/renderer/src/lib/project-rail-width'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
-import type { ScratchTopicSnapshot, MoteDirectoryView } from '../../../src/shared/contracts'
+import type { ScratchTopicSnapshot, MoteDirectoryView, SessionSnapshot } from '../../../src/shared/contracts'
 import '../../../src/renderer/src/styles/index.css'
 
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: _hygiene_fixturePath("fixture/topics"), name: 'Topics', kind: 'folder' as const }
@@ -29,6 +30,23 @@ const tabs = Object.fromEntries(topics.map(topic => {
   const tab = { ...createWorkbenchTab('tab-' + topic.id, { kind: 'launcher', regionId: 'region-' + topic.id, workspaceId: workspace.id }, 'Discussion'), topicId: topic.id, space: { spaceId, zoneId } }
   return [tab.id,tab]
 }))
+const activity = [
+  ['waiting-member', 'launcher:analyst', 'waiting'],
+  ['review-member', 'launcher:analyst', 'error'],
+  ['working-member', 'launcher:analyst', 'working'],
+  ['research-member', 'launcher:research', 'working'],
+  ['debug-member', 'launcher:debugger', 'error'],
+  ['offline-member', 'launcher:untitled', 'running']
+] as const
+const sessions = activity.map(([id, topicId, state]): Extract<SessionSnapshot, { kind: 'agent' }> => {
+  const topic = topics.find(item => item.id === topicId)!
+  const now = Date.now()
+  return { id, kind: 'agent', providerId: 'fixture', executorId: 'fixture', hostId: 'local', workspacePath: topic.directoryPath,
+    label: id, createdAt: now, updatedAt: now, agentSessionUpdatedAt: now, latestOutputBytes: 0, processState: 'running',
+    status: { state, source: 'native-hook', observedAt: now }, ...(id === 'offline-member' ? { runUnobserved: true } : {}),
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+    control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: 'original-' + id } } }
+})
 const layout = createWorkspaceLayout('original-group', Object.keys(tabs)), active = tabs['tab-launcher:analyst']!
 const selected = { spaceId: active.space!.spaceId, zoneId: active.space!.zoneId, workspaceId: workspace.id, topicId: active.topicId!, tabId: active.id, groupId: 'original-group', regionId: active.layout.activeRegionId }
 const palettes = ['lavender','sky','mint','peach','sky'] as const
@@ -39,9 +57,10 @@ api.scratch.ensureMote = async (_workspace,id) => topics.find(topic => topic.id 
 api.config.save = async config => { useAppStore.getState().setConfig(config); return config }
 const forbidden: string[] = []
 api.sessions.launchAgent = async () => { forbidden.push('launch'); throw Error('No Agent execution is authorized in this UI capture') }
+api.sessions.stop = async () => { forbidden.push('stop'); throw Error('No Agent stop is authorized in this UI capture') }
 useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], workspaces: [workspace], executors: {},
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } },
-  sessions: [], tabs, layouts: { [workspace.id]: { ...layout, groups: layout.groups.map(group => ({ ...group, activeTabId: active.id })) } }, loading: false,
+  sessions, tabs, layouts: { [workspace.id]: { ...layout, groups: layout.groups.map(group => ({ ...group, activeTabId: active.id })) } }, loading: false,
   initialize: async () => () => {}, detectExecutors: async () => {}, prewarmTerminal: async () => {},
   activeWorkspaceId: workspace.id, mainSurface: 'workbench', projectRailOpen: true, toolsOpen: false,
   scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, topics, reading: false, error: null } },
@@ -60,9 +79,12 @@ function Scene() {
         scope: scratchTopicsScope(workspace), revision: 0, topics: [...topics], reading: false, error: null
       } } })
     },
-    theme: (light: boolean) => { document.documentElement.dataset.appearance = light ? 'light' : 'dark' },
+    theme: (light: boolean) => useAppStore.setState(state => ({ config: { ...state.config!,
+      appearance: { ...state.config!.appearance, appAppearance: light ? 'light' : 'dark' } } })),
+    rail: (narrow: boolean) => useAppStore.getState().setProjectRailWidth(narrow ? PROJECT_RAIL_MIN_WIDTH : 252),
     view: (moteDirectoryView: MoteDirectoryView) => useAppStore.setState({ config: { ...useAppStore.getState().config!, moteDirectoryView } }),
-    facts: () => ({ selection: useAppStore.getState().workbenchSpaceSelection, drafts: useAppStore.getState().agentComposerDrafts, forbidden })
+    facts: () => ({ selection: useAppStore.getState().workbenchSpaceSelection, drafts: useAppStore.getState().agentComposerDrafts,
+      runs: useAppStore.getState().sessions.map(session => session.control.run.runId), forbidden })
   } })
   return <DesktopClientUiProvider><App />{settings ? <div style={{ position: 'fixed', inset: 0, zIndex: 2, background: 'var(--bg)' }}><SettingsPanel initialSection="mote" onClose={() => setSettings(false)} /></div> : null}</DesktopClientUiProvider>
 }

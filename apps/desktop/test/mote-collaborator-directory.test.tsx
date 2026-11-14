@@ -7,7 +7,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { configOwnerFixture } from './helpers/config-owner-fixture'
-import { seedMoteWorkface, scratchWorkspace, moteTopics, customMoteId, quietMoteId, defaultTab, installNativePopover } from './fixtures/mote-workface'
+import { seedMoteWorkface, scratchWorkspace, moteTopics, customMoteId, quietMoteId, defaultAgent, neighborAgent, defaultTab, installNativePopover } from './fixtures/mote-workface'
 const dom = composerDOM()
 let restorePopover: () => void
 beforeEach(() => { restorePopover = installNativePopover() })
@@ -35,6 +35,43 @@ it('both actual presentations retain identical original Mote nodes, selection, d
   expect(dom.container.querySelector('[data-space-nav="topic:' + customMoteId + '"]')).toBe(row)
   expect([...dom.container.querySelectorAll(selector + ' [data-space-nav]')].map(n => n.getAttribute('data-space-nav'))).toEqual(ids)
   for (const key of ['tabs', 'layouts', 'sessions', 'agentComposerDrafts', 'workbenchSpaceSelection'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
+})
+it('uses a single priority marker for mixed activity and keeps the original Activity menu in both directory views', async () => {
+  const { topics } = seed()
+  const primaryId = topics[0]!.id
+  const waiting = { ...neighborAgent, status: { ...neighborAgent.status, observedAt: Date.now() } }
+  const working = { ...defaultAgent, status: { ...defaultAgent.status, observedAt: Date.now() } }
+  const failed = { ...defaultAgent, id: 'failed-member', status: { ...defaultAgent.status, state: 'error' as const },
+    control: { ...defaultAgent.control, agentSessionId: 'failed-member', run: { runId: 'original-failed-run' } } }
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === working.id ? working :
+    session.id === waiting.id ? waiting : session).concat(failed) })))
+  await dom.render(tree())
+  const row = dom.container.querySelector(`[data-space-nav="topic:${primaryId}"]`)!.parentElement!
+  const trigger = row.querySelector<HTMLButtonElement>('.project-activity')!
+  const original = useAppStore.getState()
+  expect(trigger.getAttribute('aria-label')).toBe('1 Needs you · 1 Error · 1 Working. Agent activity')
+  expect([...trigger.querySelectorAll('.project-activity__avatar-marker')]).toHaveLength(1)
+  expect(trigger.querySelector('.project-activity__avatar-marker')?.classList.contains('project-activity__metric--needs-you')).toBe(true)
+  expect(trigger.querySelector('.project-activity__metrics')).toBeNull()
+  for (const view of ['collaborators', 'list'] as const) {
+    if (view === 'list') {
+      await act(async () => useAppStore.setState({ config: { ...original.config!, moteDirectoryView: view } }))
+      expect(row.querySelector('.project-activity')).toBe(trigger)
+      expect(trigger.hasAttribute('data-avatar-marker')).toBe(false)
+      expect(trigger.querySelector('.project-activity__avatar-marker')).toBeNull()
+      expect(trigger.querySelector('.project-activity__metrics')?.textContent).toBe('11')
+    }
+    await act(async () => {
+      trigger.focus()
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    const menu = document.querySelector('.project-activity-menu')!
+    expect(menu.querySelector('.project-activity-menu__summary')?.textContent).toBe('1 Needs you · 1 Error · 1 Working')
+    expect(menu.querySelector('.project-activity-menu__heading')?.textContent).toContain('3 Agents')
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(document.querySelector('.project-activity-menu')).toBeNull()
+  }
+  for (const key of ['tabs', 'layouts', 'sessions', 'agentComposerDrafts', 'workbenchSpaceSelection'] as const) expect(useAppStore.getState()[key]).toBe(original[key])
 })
 it('icon/count archive filter reveals the original archived object and keeps unknown and main objects', async () => {
   seed(); await dom.render(tree())
@@ -69,8 +106,10 @@ it('a collaborator opens its exact original object through the existing navigati
   await dom.render(tree())
   const before = useAppStore.getState()
   await dom.click('[data-space-nav="topic:' + customMoteId + '"]')
-  expect(ensure).toHaveBeenCalledWith(scratchWorkspace.id, customMoteId)
-  expect(open).toHaveBeenCalledWith(customMoteId, scratchWorkspace.id, { signal: expect.any(AbortSignal) })
+  expect(ensure).not.toHaveBeenCalled()
+  expect(open).toHaveBeenCalledExactlyOnceWith(customMoteId, scratchWorkspace.id, {
+    signal: expect.any(AbortSignal), onRevealed: expect.any(Function)
+  })
   for (const key of ['tabs', 'layouts', 'sessions', 'agentComposerDrafts'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
 })
 it('search filters the same Mote list and zero archived remains a discoverable icon', async () => {
@@ -164,7 +203,7 @@ it('a concurrent size edit rejects the stale save and preserves the local draft 
   expect((await f.disk()).moteDirectoryAvatarSize).toBe(40)
 })
 
-it('actual silhouette presets and the fine slider share one draft, saved through the original owner', async () => {
+it('actual size presets, preview and fine slider share one draft, saved through the original owner', async () => {
   const f = await configOwnerFixture(), publish = f.publish.getMockImplementation()!
   f.publish.mockImplementation(config => { publish(config); useAppStore.getState().setConfig(config) })
   useAppStore.setState({ config: f.owner.current })
@@ -173,9 +212,9 @@ it('actual silhouette presets and the fine slider share one draft, saved through
   expect(dom.container.querySelector('output')?.textContent).toBe('45px')
   for (const size of [24, 32, 40, 48]) {
     const button = dom.container.querySelector<HTMLButtonElement>(`[aria-label="${size}px avatar"]`)!
-    const silhouette = button.querySelector<HTMLElement>('.mote-directory-sizes__silhouette')!
-    expect(silhouette.style.width).toBe(`${size}px`); expect(silhouette.querySelector('svg')).not.toBeNull()
     await dom.click(`[aria-label="${size}px avatar"]`)
+    const preview = dom.container.querySelector<HTMLElement>('[aria-label="Avatar size preview"] > span')!
+    expect(preview.style.width).toBe(`${size}px`); expect(preview.querySelector('svg')).not.toBeNull()
     expect(button.getAttribute('aria-pressed')).toBe('true')
     expect(dom.container.querySelector<HTMLInputElement>('.mote-directory-size input')?.value).toBe(String(size))
     expect(f.owner.current.moteDirectoryAvatarSize).toBeUndefined()

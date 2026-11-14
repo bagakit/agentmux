@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync, readdirSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
+import { createHash } from 'node:crypto'
 import { defineConfig } from 'vitest/config'
 
 const repository = resolve(import.meta.dirname, '../../../../..')
@@ -42,9 +43,36 @@ if (!virtualPackage) throw new Error('The existing declared react-virtual depend
 const virtualRoot = resolve(packages, virtualPackage, 'node_modules/@tanstack/react-virtual')
 const virtualEntry = resolve(virtualRoot, JSON.parse(readFileSync(resolve(virtualRoot, 'package.json'), 'utf8')).module)
 const inputs: Record<string, string> = {}
-import { createHash } from 'node:crypto'
+const mutationName = process.env.AGENTMUX_TEST_MOTE_DIRECTORY_MUTATION
+const mutations = {
+  'lowest-priority': { file: 'apps/desktop/src/renderer/src/components/ProjectActivity.tsx', original: 'const primary = metrics[0]', changed: 'const primary = metrics.at(-1)' },
+  'shared-layout-marker': { file: 'apps/desktop/src/renderer/src/components/SpaceTopicsTree.tsx', original: "avatarMarker={directoryView === 'collaborators'}", changed: 'avatarMarker={true}' }
+} as const
+const mutation = mutationName ? mutations[mutationName as keyof typeof mutations] : undefined
+if (mutationName && !mutation) throw Error('Unknown Mote directory mutation: ' + mutationName)
+
 export default defineConfig({
-  plugins: [{ name: 'actual-directory-source', transform(_code, id) { const file = id.split('?')[0]!; if (file.startsWith(repository + '/') && !file.includes('/node_modules/') && /\.[cm]?[jt]sx?$/.test(file)) inputs[relative(repository, file)] = createHash('sha256').update(readFileSync(file)).digest('hex') }, closeBundle() { const out = resolve(repository, '.tmp/mote-collaborator-directory'); mkdirSync(out, { recursive: true }); writeFileSync(resolve(out, 'loaded-source.json'), JSON.stringify(inputs, null, 2)) } }],
+  plugins: [{
+    name: 'actual-directory-source',
+    enforce: 'pre',
+    transform(code, id) {
+      const file = id.split('?')[0]!
+      if (!file.startsWith(repository + '/') || file.includes('/node_modules/') || !/\.[cm]?[jt]sx?$/.test(file)) return
+      const key = relative(repository, file)
+      if (mutation?.file === key) {
+        if (code.split(mutation.original).length !== 2) throw Error('Mutation must select exactly one loaded production expression: ' + key)
+        const mutated = code.replace(mutation.original, mutation.changed)
+        inputs[key] = createHash('sha256').update(mutated).digest('hex')
+        return { code: mutated, map: null }
+      }
+      inputs[key] = createHash('sha256').update(readFileSync(file)).digest('hex')
+    },
+    closeBundle() {
+      const out = resolve(repository, '.tmp/mote-collaborator-directory')
+      mkdirSync(out, { recursive: true })
+      writeFileSync(resolve(out, mutationName ? 'loaded-' + mutationName + '.json' : 'loaded-source.json'), JSON.stringify(inputs, null, 2))
+    }
+  }],
   root: resolve(repository, 'apps/desktop'),
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   resolve: { alias: [{ find: '@tanstack/react-virtual', replacement: virtualEntry }, ...aliases] },
