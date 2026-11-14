@@ -1,5 +1,5 @@
 import { noteParsingAliases } from '../../packages/client-ui/scripts/note-parsing-aliases'
-import { radixOverlayAliases } from './scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../packages/client-ui/scripts/radix-overlay-aliases'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { relative, join } from 'node:path'
 import { defaultExclude, defineConfig } from 'vitest/config'
-import { radixOverlayAliases } from './apps/desktop/scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from './packages/client-ui/scripts/radix-overlay-aliases'
 
 // 下面两个辅助文件跟着**本配置文件**走，不跟着 cwd 走。写成 `./x.ts` 的话，vitest 按 cwd 解析：
 // 从仓根跑没事，而 `pnpm --filter @agentmux/core exec vitest`（gate 命令的形态）把 cwd 切到
