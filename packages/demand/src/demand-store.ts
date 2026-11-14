@@ -1,7 +1,7 @@
 import { parseDemandAgentReference, parseDemandAgentReferences, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from './agent-reference.js'
 import { parseDemandDiscussionIntent, type DemandDiscussionIntent } from './discussion.js'
 import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
-import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
+import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatches, qualifiedDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId,
   type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
@@ -499,7 +499,7 @@ export class DemandStore {
   private applyProgress(goal: Demand, input: DemandProgressInput, authority: { author: DemandProgress['author']; reportingRunId: string | null; reviewForHuman?: boolean }, basis: DemandResponsibilityBasis): void {
     if (!demandExecutionReferences(goal).some(ref => sameDemandExecution(ref, input.execution))) this.rejectDelegation('Progress is not for an original execution in this Goal.')
     const managerVerified = authority.author.kind !== 'agent' || authority.author.id === goal.supervisorSessionId
-    if (!managerVerified && (authority.author.id !== input.execution.agentSessionId || authority.reportingRunId !== input.execution.runId))
+    if (!managerVerified && ('target' in input.execution || authority.author.id !== input.execution.agentSessionId || authority.reportingRunId !== input.execution.runId))
       this.rejectDelegation('Only the original worker Run or current management authority can record this progress.')
     if (input.phase === 'waiting-external' && (basis.stateEnteredAt === null || !input.evidence.length))
       this.rejectDelegation('External waiting needs an observed original state basis and evidence for its condition; existing Agent input remains available.')
@@ -610,7 +610,7 @@ export class DemandStore {
       }
       const applied = demandPatrolScope(goal, patrol.purpose) === patrol.expectedScope && goal.supervisorSessionId === author.agentSessionId && goal.grounding?.acceptedAt == null
       if (applied && report.nextOwner.kind === 'agent' && report.nextOwner.agentSessionId !== goal.supervisorSessionId &&
-        !demandExecutionReferences(goal).some(ref => ref.agentSessionId === report.nextOwner.agentSessionId)) this.rejectDelegation('The next responsible Agent must be bound to this original Goal.')
+        !demandExecutionReferences(goal).some(ref => !('target' in ref) && ref.agentSessionId === report.nextOwner.agentSessionId)) this.rejectDelegation('The next responsible Agent must be bound to this original Goal.')
       const now = Date.now()
       if (applied) {
         if (report.grounding) goal.grounding = { ...report.grounding, submissionId: mintObjectId(), acceptedAt: null }
@@ -674,8 +674,7 @@ export class DemandStore {
       if (!original) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start has not been prepared. Preserve the Agent and inspect its exact operation.')
       if (original.stage === 'confirmed') return { unchanged: demand }
       const { issue: _issue, ...frozen } = original
-      const next: DemandDispatch = { ...frozen, stage: phase.stage, submittedAt: original.submittedAt ?? Date.now(), ...(phase.stage === 'confirmed' ? { receipt: phase.receipt } : phase.issue ? { issue: phase.issue } : {}) }
-      parseDemandDispatches([next])
+      const next = parseDemandDispatch({ ...frozen, stage: phase.stage, submittedAt: original.submittedAt ?? Date.now(), ...(phase.stage === 'confirmed' ? { receipt: phase.receipt } : phase.issue ? { issue: phase.issue } : {}) })
       if (JSON.stringify(original) === JSON.stringify(next)) return { unchanged: demand }
       demand.dispatches = dispatches.map((dispatch, at) => at === index ? next : dispatch)
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
@@ -699,7 +698,7 @@ export class DemandStore {
         if (!sameDemandDelegationAttention(original.attention, attention)) this.rejectDelegation('The original Start notice is frozen. Inspect it without moving its target or changing its text.')
         return { unchanged: demand }
       }
-      if (original.execution !== 'finite' || original.hostId !== attention.hostId || demand.supervisorSessionId !== attention.supervisorAgentSessionId ||
+      if (qualifiedDemandDispatch(original) || original.execution !== 'finite' || original.hostId !== attention.hostId || demand.supervisorSessionId !== attention.supervisorAgentSessionId ||
         demand.status === 'done' || demand.status === 'cancelled') this.rejectDelegation('A Start notice needs its original Host and exact current Supervisor for an open Goal.')
       original.attention = { ...attention, preparedAt: Date.now() }
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)

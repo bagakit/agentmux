@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxError, routedAgentMuxRpc, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext, type AgentMuxRpcClient } from '@agentmux/core'
-import type { GoalRelationAccess, GoalRuntimeAccess } from '@agentmux/core/control'
+import type { AgentMuxSpaceMutationReport, GoalRelationAccess, GoalRuntimeAccess } from '@agentmux/core/control'
 import { demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { Demand } from '@agentmux/demand'
 import type { GoalExecutionClient } from './goal-runtime.js'
@@ -57,7 +57,8 @@ export async function goalSourceRpc(options: {
 }
 
 /** New references are qualified by a Source business cut, never Agent liveness or A input authority. */
-export async function assertGoalSourceRelation(rpc: Rpc, ref: DemandSpaceMemberReference, signal?: AbortSignal): Promise<void> {
+export type GoalSourceRelationFact = { kind: 'creation' } | { kind: 'association'; association: NonNullable<AgentMuxSpaceMutationReport['association']> }
+export async function assertGoalSourceRelation(rpc: Rpc, ref: DemandSpaceMemberReference, signal?: AbortSignal): Promise<GoalSourceRelationFact> {
   if (ref.source.admission.kind === 'creation') {
     // This is a business graph read, not creation inspection of D or a Native probe.
     const { catalog } = await rpc.call('space.inspect', { target: { spaceId: ref.source.spaceId, regionId: ref.source.regionId } }, signal ? { signal } : {})
@@ -66,7 +67,7 @@ export async function assertGoalSourceRelation(rpc: Rpc, ref: DemandSpaceMemberR
     if (!region || !tab?.zoneId || !catalog.bindings.some(item => item.zoneId === tab.zoneId && item.spaceId === ref.source.spaceId) ||
         region.creationOperationId !== ref.source.admission.operationId || region.agentSessionId !== ref.execution.agentSessionId || region.execution?.runtimeId !== ref.execution.runtimeId)
       unavailable('The Source creation names another original member, occurrence or admission. No relationship was saved.')
-    return
+    return { kind: 'creation' }
   }
   const inspected = await rpc.call('space.inspect', { target: { operationId: ref.source.admission.operationId } }, signal ? { signal } : {})
   const report = inspected.request?.report, association = report?.association
@@ -76,6 +77,7 @@ export async function assertGoalSourceRelation(rpc: Rpc, ref: DemandSpaceMemberR
       association?.operationId !== ref.source.admission.operationId || association.resource.runtimeId !== ref.source.runtimeId ||
       association.reference.runtimeId !== ref.execution.runtimeId || association.reference.binding.agentSessionId !== ref.execution.agentSessionId)
     unavailable('The original Source association, resource or reference is not confirmed. The Agent and selection were retained.')
+  return { kind: 'association', association }
 }
 
 export async function assertNewGoalSourceRelations(previous: Relations | undefined, next: Partial<Relations>, access: readonly GoalRelationAccess[] | undefined,

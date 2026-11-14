@@ -1,4 +1,9 @@
 import { awaitUntilCancelled } from './await-until-cancelled.js'
+import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
+import type { GoalQualifiedAccess } from '@agentmux/core/control'
+import type { DemandQualifiedDispatchIntent } from '@agentmux/demand'
+import type { AgentInputSubmissionReceipt, AgentInputWaitRef } from '@agentmux/core'
+
 import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { AgentMuxError, validateAgentPromptInputBinding, type AgentMuxClient,
@@ -15,6 +20,16 @@ import type { DemandDispatch } from '@agentmux/demand'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { CheckInObservation } from './agent-schedule-check-in.js'
 
+/** One explicit Goal operation borrows this exact original input carrier. */
+export type GoalFiniteInputPort = {
+  readCurrent(): Promise<{ runId: string }>
+  submit(input: DemandQualifiedDispatchIntent): Promise<AgentInputSubmissionReceipt>
+  inspectOriginal(input: DemandQualifiedDispatchIntent): Promise<AgentInputSubmissionReceipt | null>
+  rejoinOriginal(input: DemandQualifiedDispatchIntent, ref: AgentInputWaitRef): Promise<AgentInputSubmissionReceipt>
+  dispose(): Promise<void>
+}
+export type GoalFiniteAccessInput = { reference: DemandSpaceMemberReference; access: GoalQualifiedAccess; originalRunId?: string }
+
 export type GoalAgentControl = { kind: 'agent'; hostId: string; agentSessionId: string; run: AgentMuxRunRef }
 export type GoalDispatchReference = { goalId: string; operationId: string }
 export type GoalExecutionClient = AgentMuxClient | AgentMuxHostedClient
@@ -24,6 +39,7 @@ type Attention = { hostId: string; supervisorAgentSessionId: string; supervisorR
 
 /** The existing Goal mechanisms borrow typed Core operations, never an editor controller. */
 export interface GoalRuntimePort {
+  openFinite(input: GoalFiniteAccessInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInputPort>
   spatialCreationCandidates(tabId: string, regionId: string): Promise<AgentMuxAgentSession[]>
   agentCreation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
   observeGoalAgent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus>
@@ -48,6 +64,7 @@ export interface GoalRuntimePort {
 }
 
 export function createGoalRuntime(options: {
+  openFinite?(input: GoalFiniteAccessInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInputPort>
   clients(): readonly { hostId: string; client: GoalExecutionClient }[]
   subscribeClients?(listener: () => void): () => void
   inputOccupied?(control: GoalAgentControl, signal?: AbortSignal): Promise<boolean>
@@ -69,6 +86,10 @@ export function createGoalRuntime(options: {
     ? { kind: 'message', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, messageId: input.operationId }
     : { kind: 'prompt', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, submissionId: input.operationId })
   const runtime: GoalRuntimePort = {
+    openFinite: async (input, context) => {
+      if (!options.openFinite) throw new AgentMuxError('The current Source access for this finite Goal input is unavailable. Its original request and Agent remain retained.', 'CONTROL_UNAVAILABLE')
+      return await options.openFinite(input, context)
+    },
     spatialCreationCandidates: async (tabId, regionId) => {
       const clients = options.clients()
       if (!clients.length) throw new AgentMuxError('The original Core creation owners are unavailable. Keep the Launcher and request.', 'CONTROL_UNAVAILABLE')
@@ -173,7 +194,10 @@ export function createGoalRuntime(options: {
         operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: false })
     },
     inspectGoalAttention: inspect,
-    inspectGoalStart: async input => await inspect({ hostId: input.hostId, supervisorAgentSessionId: input.agentSessionId, supervisorRunId: input.runId, operationId: input.operationId }),
+    inspectGoalStart: async input => {
+      if ('target' in input) throw new AgentMuxError('Read this original qualified Goal input through its current Source access.', 'CONTROL_UNAVAILABLE')
+      return await inspect({ hostId: input.hostId, supervisorAgentSessionId: input.agentSessionId, supervisorRunId: input.runId, operationId: input.operationId })
+    },
     authorizeFutureIntent: async (target, context) => {
       context?.signal?.throwIfAborted(); await context?.assertCurrent?.()
       if (!context?.caller) return

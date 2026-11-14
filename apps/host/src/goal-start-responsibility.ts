@@ -55,7 +55,9 @@ export class GoalStartResponsibilityOwner {
     for (const [goalId, goal] of records) {
       const previous = this.indexed.get(goalId)
       previous?.remove(); this.indexed.delete(goalId)
-      const current = new Map((goal?.dispatches ?? []).filter(start => start.execution === 'finite').map(start => [start.operationId, start]))
+      // Immediate Host event indices cannot address a Source-qualified member.
+      // Those records remain visible below and use explicit current access.
+      const current = new Map((goal?.dispatches ?? []).filter((start): start is Extract<DemandDispatch, { hostId: string }> => start.execution === 'finite' && !('target' in start)).map(start => [start.operationId, start]))
       for (const operationId of previous?.operations ?? []) {
         const id = key(goalId, operationId), scope = this.scopes.get(id)
         if (scope && (!goal || !current.has(operationId) || closed(goal) || goal.supervisorSessionId !== scope.supervisor))
@@ -110,7 +112,7 @@ export class GoalStartResponsibilityOwner {
   private async run(ref: Reference): Promise<void> {
     this.controller.signal.throwIfAborted()
     const goal = await this.demands.get(ref.goalId), start = goal?.dispatches?.find(item => item.operationId === ref.operationId)
-    if (!goal || !start || start.execution !== 'finite' || closed(goal)) return
+    if (!goal || !start || 'target' in start || start.execution !== 'finite' || closed(goal)) return
     const observed = await this.observe(goal, start)
     if (observed.originalRun?.state !== 'exited' && observed.originalRun?.state !== 'interrupted') return
     if (goal.supervisorSessionId && typeof goal.supervisorSessionId !== 'string') throw new Error('This Source-qualified Supervisor has no approved automatic reminder contract. The original worker and request are retained.')
@@ -161,6 +163,10 @@ export class GoalStartResponsibilityOwner {
   }
   async observe(goal: Demand, start: DemandDispatch): Promise<GoalStartObservation> {
     const value: GoalStartObservation = { operationId: start.operationId, input: { state: 'unknown', ...(start.receipt ? { retainedReceipt: start.receipt } : {}) }, responsibility: 'observation-unknown' }
+    if ('target' in start) {
+      value.input.reason = 'Current Source access is required to read this original input. Its saved admission receipt and existing Agent remain retained.'
+      return value
+    }
     const issues: string[] = []
     const [input, run] = await Promise.allSettled([this.runtime.inspectGoalStart(start), this.runtime.observeOriginalRun(start.hostId, start.runId)])
     if (input.status === 'fulfilled') {

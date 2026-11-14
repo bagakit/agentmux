@@ -39,7 +39,7 @@ export function createGoalDelegationEvents(ports: {
         add(hosts, workerHostId)
       }
     }
-    for (const start of starts) if (start.execution === 'finite') {
+    for (const start of starts) if (start.execution === 'finite' && !('target' in start)) {
       add(runs, key(start.hostId, start.runId))
       add(hosts, start.hostId)
     }

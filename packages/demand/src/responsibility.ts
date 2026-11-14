@@ -1,14 +1,18 @@
 import type { Demand } from './demand-types.js'
 import { delegationWorkerHostId } from './delegations.js'
+import { demandAgentReferenceKey, parseDemandAgentReference, type DemandSpaceMemberReference } from './agent-reference.js'
+import { qualifiedDemandDispatch } from './dispatch.js'
 
 /** Business responsibility references original execution; it never owns Runtime state. */
-export type DemandExecutionReference = {
+export type DemandLegacyExecutionReference = {
   kind: 'start' | 'delegation'
   operationId: string
   hostId: string
   agentSessionId: string
   runId: string
 }
+export type DemandQualifiedExecutionReference = { kind: 'start'; operationId: string; target: DemandSpaceMemberReference; runId: string }
+export type DemandExecutionReference = DemandLegacyExecutionReference | DemandQualifiedExecutionReference
 export type DemandResponsibilityBasis = {
   stateEnteredAt: number | null
   activityRevision: number | null
@@ -51,6 +55,11 @@ function nullableTime(value: unknown): number | null {
   return value
 }
 export function parseDemandExecutionReference(value: unknown): DemandExecutionReference {
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'target')) {
+    const p = object(value, ['kind', 'operationId', 'target', 'runId']), target = parseDemandAgentReference(p.target)
+    if (p.kind !== 'start' || typeof target === 'string') throw new Error('Qualified responsibility requires its original finite Start member')
+    return { kind: 'start', operationId: text(p.operationId), target, runId: text(p.runId) }
+  }
   const p = object(value, ['kind', 'operationId', 'hostId', 'agentSessionId', 'runId'])
   if (p.kind !== 'start' && p.kind !== 'delegation') throw new Error('Responsibility requires its original execution kind')
   return { kind: p.kind, operationId: text(p.operationId), hostId: text(p.hostId), agentSessionId: text(p.agentSessionId), runId: text(p.runId) }
@@ -98,17 +107,22 @@ export function parseDemandProgressUpdates(value: unknown): DemandProgress[] {
 }
 export function demandExecutionReferences(goal: Pick<Demand, 'dispatches' | 'delegations'>): DemandExecutionReference[] {
   return [
-    ...(goal.dispatches ?? []).filter(item => item.execution === 'finite').map(item => ({ kind: 'start' as const,
-      operationId: item.operationId, hostId: item.hostId, agentSessionId: item.agentSessionId, runId: item.runId })),
+    ...(goal.dispatches ?? []).filter(item => item.execution === 'finite').map(item => qualifiedDemandDispatch(item)
+      ? { kind: 'start' as const, operationId: item.operationId, target: item.target, runId: item.runId }
+      : { kind: 'start' as const, operationId: item.operationId, hostId: item.hostId, agentSessionId: item.agentSessionId, runId: item.runId }),
     ...(goal.delegations ?? []).map(item => ({ kind: 'delegation' as const, operationId: item.operationId,
       hostId: delegationWorkerHostId(item), agentSessionId: item.workerAgentSessionId, runId: item.workerRunId }))
   ]
 }
 export function sameDemandExecution(left: DemandExecutionReference, right: DemandExecutionReference): boolean {
+  if ('target' in left || 'target' in right) return 'target' in left && 'target' in right && left.kind === right.kind && left.operationId === right.operationId &&
+    demandAgentReferenceKey(left.target) === demandAgentReferenceKey(right.target) && left.runId === right.runId
   return left.kind === right.kind && left.operationId === right.operationId && left.hostId === right.hostId &&
     left.agentSessionId === right.agentSessionId && left.runId === right.runId
 }
-export const demandExecutionKey = (reference: DemandExecutionReference) => JSON.stringify([reference.kind, reference.operationId, reference.hostId, reference.agentSessionId, reference.runId])
+export const demandExecutionKey = (reference: DemandExecutionReference) => 'target' in reference
+  ? JSON.stringify(['space-member', reference.kind, reference.operationId, demandAgentReferenceKey(reference.target), reference.runId])
+  : JSON.stringify([reference.kind, reference.operationId, reference.hostId, reference.agentSessionId, reference.runId])
 export function latestDemandProgress(goal: Pick<Demand, 'progressUpdates'>): Map<string, DemandProgress> {
   const latest = new Map<string, DemandProgress>()
   for (const update of goal.progressUpdates ?? []) latest.set(demandExecutionKey(update.execution), update)
@@ -145,7 +159,9 @@ export function demandHandoffDestinations(goal: Pick<Demand, 'dispatches' | 'del
 export function demandResponsibilityScope(goal: Pick<Demand, 'id' | 'status' | 'supervisorSessionId' | 'alignment' | 'grounding' | 'dispatches' | 'delegations' | 'progressUpdates'>): string {
   return JSON.stringify({ id: goal.id, status: goal.status, supervisor: goal.supervisorSessionId,
     alignment: goal.alignment?.revision ?? null, confirmedAt: goal.alignment?.confirmedAt ?? null, grounding: goal.grounding?.submissionId ?? null, acceptedAt: goal.grounding?.acceptedAt ?? null,
-    starts: (goal.dispatches ?? []).filter(item => item.execution === 'finite').map(item => [item.operationId, item.hostId, item.agentSessionId, item.runId, item.stage, item.receipt ?? null]),
+    starts: (goal.dispatches ?? []).filter(item => item.execution === 'finite').map(item => qualifiedDemandDispatch(item)
+      ? [item.operationId, item.target, item.runId, item.stage, item.receipt ?? null]
+      : [item.operationId, item.hostId, item.agentSessionId, item.runId, item.stage, item.receipt ?? null]),
     delegations: (goal.delegations ?? []).map(item => [item.operationId, item.hostId, delegationWorkerHostId(item), item.workerAgentSessionId, item.workerRunId, item.linkedAt ?? null, item.report?.operationId ?? null, item.collection?.operationId ?? null]),
     progress: (goal.progressUpdates ?? []).map(item => item.operationId) })
 }

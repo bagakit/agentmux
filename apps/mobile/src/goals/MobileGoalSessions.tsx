@@ -22,7 +22,7 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
   const rowsScope = useRef<MobileGoalDraftScope | null>(null)
   const sourceKey = JSON.stringify(mobileGoalDraftSource(client, getDeviceWorkface()))
   const references = mergeDemandAgentReferences(sessionIds, goal?.assigneeSessionIds ?? [], goal?.supervisorSessionId ? [goal.supervisorSessionId] : [],
-    (goal?.dispatches ?? []).map(value => value.agentSessionId), (goal?.participations ?? []).map(value => value.agentSessionId)).filter(value => typeof value === 'string')
+    (goal?.dispatches ?? []).map(value => 'target' in value ? value.target : value.agentSessionId), (goal?.participations ?? []).map(value => value.agentSessionId)).filter(value => typeof value === 'string')
   const ids = JSON.stringify(references)
   useEffect(() => {
     if (!visible || !references.length || !client?.forwardRpc) return
@@ -83,9 +83,9 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
     {!dispatches.length ? <p>尚无公开输入记录。工作状态、关联历史与 Agent 活跃不证明目标已开始推进。</p>
       : <><p>{dispatches.length} 条输入记录 · {dispatches.filter(value => value.stage === 'confirmed').length} 条已确认</p>
         <p>输入确认不代表工作完成或结果接受。多条记录分别保留，不推断唯一当前执行。</p>
-        {dispatches.filter(value => value.stage !== 'confirmed').map(value => <MobileNotice kind={value.stage === "unknown" || value.issue ? "warning" : "feedback"} dismissible={value.stage === "unknown" || Boolean(value.issue)} identity={[value.operationId,value.stage,value.issue]} key={value.operationId} role="status">{name(value.agentSessionId)} · {stages[value.stage]}{value.issue ? `：${value.issue}` : ''}</MobileNotice>)}
+        {dispatches.filter(value => value.stage !== 'confirmed').map(value => <MobileNotice kind={value.stage === "unknown" || value.issue ? "warning" : "feedback"} dismissible={value.stage === "unknown" || Boolean(value.issue)} identity={[value.operationId,value.stage,value.issue]} key={value.operationId} role="status">{name('target' in value ? value.target : value.agentSessionId)} · {stages[value.stage]}{value.issue ? `：${value.issue}` : ''}</MobileNotice>)}
         <details><summary>全部输入与确认依据</summary>{dispatches.map(value => <div key={value.operationId}>
-          <p>{name(value.agentSessionId)} · {stages[value.stage]} · {value.execution === 'continue' ? '续跑输入' : '单次输入'}</p>
+          <p>{name('target' in value ? value.target : value.agentSessionId)} · {stages[value.stage]} · {value.execution === 'continue' ? '续跑输入' : '单次输入'}</p>
           <p className="mobile-goals-body">{value.prompt}</p><pre>{JSON.stringify(value, null, 2)}</pre>
         </div>)}</details></>}
     <details><summary>负责人身份与参与来源</summary><dl><dt>负责人会话</dt><dd>{goal.assigneeSessionIds?.map(demandAgentReferenceLabel).join('、') || '未分配'}</dd>

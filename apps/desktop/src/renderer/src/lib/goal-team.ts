@@ -14,7 +14,8 @@ export function goalTeamIdentities(goal: DemandRecord) {
     const key = collaborationSubjectKey(subject), previous = identities.get(key)
     identities.set(key, { subject, roles: [...new Set([...previous?.roles ?? [], ...roles])] })
   }
-  for (const [key, relations] of projectDemandRelations([goal]).qualified) {
+  const projected = projectDemandRelations([goal])
+  for (const [key, relations] of projected.qualified) {
     const [hostId, agentSessionId] = JSON.parse(key) as [string, string]
     add({ hostId, agentSessionId }, relations.flatMap(relation => relation.roles.map(role => role.kind)))
   }
@@ -25,7 +26,7 @@ export function goalTeamIdentities(goal: DemandRecord) {
     add(subject, ['supervisor']); identities.set(key, { ...identities.get(key)!, currentSupervisor: true })
   }
   const agents = new Map<string, CollaborationAgent>([...identities].map(([key, { subject }]) => [key, { id: key, subject, sessionId: subject.agentSessionId }]))
-  return { identities, agents, wanted: new Set(identities.keys()) }
+  return { identities, agents, wanted: new Set(identities.keys()), sourceQualified: new Map([...projected.sourceQualified].filter(([, value]) => value.relations.some(relation => relation.roles.some(role => ['execution', 'execution-progress', 'execution-handoff'].includes(role.kind))))) }
 }
 
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
@@ -53,6 +54,7 @@ export function createGoalTeamSelector(goal: DemandRecord, references = goalTeam
       const legacySessionId = identity.subject.agentSessionId, id = demandAgentReferenceKey(legacySessionId), group = groups.get(id) ?? { id, legacySessionId, roles: [], identities: [] }
       group.identities.push(identity); groups.set(id, group)
     }
+    for (const [id, source] of references.sourceQualified) groups.set(id, { id, reference: source.reference, roles: [], identities: [] })
     for (const [key, { reference, roles: assigned }] of roles) {
       if (typeof reference !== 'string') { groups.set(key, { id: key, reference, roles: assigned, identities: [] }); continue }
       const originalId = reference

@@ -23,7 +23,8 @@ export function goalStartRows(goal: Pick<DemandRecord, 'dispatches' | 'startObse
       return { ...row, state: 'continuation', next: run.state === 'exited' ? 'Agent ended · Check Goal results or continue' : 'Interrupted · Continue the original Agent' }
     if (run?.state === 'running' && observation?.input.state === 'confirmed')
       return { ...row, state: 'working', next: 'Original Start received · Awaiting Goal results' }
-    return { ...row, state: 'unknown', next: 'Start observation unknown · Check original input' }
+    return { ...row, state: 'unknown', next: 'target' in start && start.receipt?.kind === 'core-input'
+      ? 'Original input receipt retained · Current execution unconfirmed' : 'Start observation unknown · Check original input' }
   })
 }
 

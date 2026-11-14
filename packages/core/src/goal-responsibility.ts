@@ -57,7 +57,7 @@ export function goalResponsibilityBasis(status: AgentMuxAgentRuntimeStatus | und
 export function observeGoalExecution(goal: Demand, facts: GoalExecutionFacts, now: number, ambiguous = false,
   indexed?: { progress: ReadonlyMap<string, DemandProgress>; handoffs: ReadonlyMap<string, DemandExecutionReference | null> }): GoalResponsibilityRow {
   const execution = facts.execution
-  const exact = facts.status?.session.agentSessionId === execution.agentSessionId && facts.status.session.run.runId === execution.runId && facts.status.run.runId === execution.runId
+  const exact = !('target' in execution) && facts.status?.session.agentSessionId === execution.agentSessionId && facts.status.session.run.runId === execution.runId && facts.status.run.runId === execution.runId
   const status = exact ? facts.status : undefined, basis = goalResponsibilityBasis(status)
   const progress = indexed?.progress ?? latestDemandProgress(goal)
   const update = progress.get(demandExecutionKey(execution))
@@ -70,7 +70,8 @@ export function observeGoalExecution(goal: Demand, facts: GoalExecutionFacts, no
   const set = (phase: GoalResponsibilityPhase, reason: string, alert: GoalResponsibilityRow['alert'],
     kind: GoalResponsibilityRow['nextOwner']['kind'] = 'manager', action = 'Inspect the original work and record its next responsibility.') => {
     row.phase = phase; row.reason = reason; row.alert = alert
-    row.nextOwner = { kind, agentSessionId: kind === 'worker' ? execution.agentSessionId : kind === 'manager' && typeof goal.supervisorSessionId === 'string' ? goal.supervisorSessionId : null, ...(kind === 'manager' && goal.supervisorSessionId && typeof goal.supervisorSessionId !== 'string' ? { agentReference: goal.supervisorSessionId } : {}), action }
+    row.nextOwner = { kind, agentSessionId: kind === 'worker' && !('target' in execution) ? execution.agentSessionId : kind === 'manager' && typeof goal.supervisorSessionId === 'string' ? goal.supervisorSessionId : null,
+      ...(kind === 'worker' && 'target' in execution ? { agentReference: execution.target } : kind === 'manager' && goal.supervisorSessionId && typeof goal.supervisorSessionId !== 'string' ? { agentReference: goal.supervisorSessionId } : {}), action }
     return row
   }
   if (goal.status === 'done' || goal.status === 'cancelled') return set('closed', 'This Goal is closed; original execution and evidence are retained.', null)
@@ -89,7 +90,8 @@ export function observeGoalExecution(goal: Demand, facts: GoalExecutionFacts, no
     const destination = (indexed?.handoffs ?? demandHandoffDestinations(goal)).get(demandExecutionKey(execution))
     if (!destination || sameDemandExecution(destination, execution)) return set('unknown', 'The accepted handoff has no confirmed responsible endpoint. Inspect the original Goal handoffs.', 'manager-review')
     const result = set('handed-off', current.summary, null, 'worker', current.nextAction)
-    result.nextOwner.agentSessionId = destination.agentSessionId
+    if ('target' in destination) { result.nextOwner.agentSessionId = null; result.nextOwner.agentReference = destination.target }
+    else { result.nextOwner.agentSessionId = destination.agentSessionId; delete result.nextOwner.agentReference }
     return result
   }
   const ended = facts.originalRun?.runId === execution.runId && facts.originalRun.state !== 'running'

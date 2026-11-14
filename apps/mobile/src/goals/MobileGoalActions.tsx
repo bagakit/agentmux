@@ -74,7 +74,7 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
         operation = beginGoalOperation(client, 'goal.start', params)
         original.current = { ...original.current, sessionId }
         const result = await client.forwardRpc('goal.start', params, undefined, operation.fence)
-        presentReceipt = () => { updated(result.goal, ['status', 'sessionIds', 'activityLog']); report(result.receipt.sessionId ? '开始请求已处理；请在关联会话查看实际执行。' : '开始请求已返回，执行会话尚未确认。') }
+        presentReceipt = () => { updated(result.goal, ['status', 'sessionIds', 'activityLog']); report('agentReference' in result.receipt ? '原来源 Agent 已确认输入；当前运行状态请在原执行入口查看。' : result.receipt.sessionId ? '开始请求已处理；请在关联会话查看实际执行。' : '开始请求已返回，执行会话尚未确认。') }
       }
     } catch (error) {
       if (operation) void finishGoalOperation(operation, false)

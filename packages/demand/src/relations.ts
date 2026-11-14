@@ -1,4 +1,5 @@
 import { demandAgentReferenceKey, type DemandAgentReference, type DemandSpaceMemberReference } from './agent-reference.js'
+import { qualifiedDemandDispatch } from './dispatch.js'
 export * from './agent-reference.js'
 import type { Demand, DemandStatus } from './demand-types.js'
 import { delegationWorkerHostId } from './delegations.js'
@@ -53,13 +54,19 @@ export function projectDemandRelations(goals: Iterable<GoalRelationSource>): Dem
     }
     const exact = (hostId: string, sid: string, kind: GoalRelationRoleKind, source: GoalRelationRole['source']) =>
       add(qualified, demandRelationKey(hostId, sid), goal, { kind, source })
+    const member = (reference: DemandSpaceMemberReference, kind: GoalRelationRoleKind, source: GoalRelationRole['source']) => {
+      const key = demandAgentReferenceKey(reference); sourceReferences.set(key, reference); add(sourceQualified, key, goal, { kind, source })
+    }
     for (const sid of goal.sessionIds ?? []) bare(sid, 'related', 'sessionIds')
     for (const sid of goal.assigneeSessionIds ?? []) bare(sid, 'assignee', 'assigneeSessionIds')
     if (goal.supervisorSessionId) bare(goal.supervisorSessionId, 'supervisor', 'supervisorSessionId')
     for (const item of goal.participations ?? []) exact(item.hostId, item.agentSessionId, item.kind, { kind: 'participation', id: item.id })
     for (const item of goal.dispatches ?? []) {
-      exact(item.hostId, item.agentSessionId, 'execution', { kind: 'dispatch', id: item.operationId })
-      if (item.execution === 'continue') exact(item.hostId, item.agentSessionId, 'continuation', { kind: 'dispatch', id: item.operationId })
+      if (qualifiedDemandDispatch(item)) member(item.target, 'execution', { kind: 'dispatch', id: item.operationId })
+      else {
+        exact(item.hostId, item.agentSessionId, 'execution', { kind: 'dispatch', id: item.operationId })
+        if (item.execution === 'continue') exact(item.hostId, item.agentSessionId, 'continuation', { kind: 'dispatch', id: item.operationId })
+      }
       if (item.attention) exact(item.attention.hostId, item.attention.supervisorAgentSessionId, 'supervisor', { kind: 'dispatch-attention', id: item.attention.operationId })
     }
     for (const item of goal.delegations ?? []) {
@@ -68,8 +75,12 @@ export function projectDemandRelations(goals: Iterable<GoalRelationSource>): Dem
       if (item.attention) exact(item.attention.hostId, item.attention.supervisorAgentSessionId, 'supervisor', { kind: 'delegation-attention', id: item.attention.operationId })
     }
     for (const item of goal.progressUpdates ?? []) {
-      exact(item.execution.hostId, item.execution.agentSessionId, 'execution-progress', { kind: 'progress', id: item.operationId })
-      if (item.handoffExecution) exact(item.handoffExecution.hostId, item.handoffExecution.agentSessionId, 'execution-handoff', { kind: 'progress', id: item.operationId })
+      if ('target' in item.execution) member(item.execution.target, 'execution-progress', { kind: 'progress', id: item.operationId })
+      else exact(item.execution.hostId, item.execution.agentSessionId, 'execution-progress', { kind: 'progress', id: item.operationId })
+      if (item.handoffExecution) {
+        if ('target' in item.handoffExecution) member(item.handoffExecution.target, 'execution-handoff', { kind: 'progress', id: item.operationId })
+        else exact(item.handoffExecution.hostId, item.handoffExecution.agentSessionId, 'execution-handoff', { kind: 'progress', id: item.operationId })
+      }
     }
   }
   const finish = (index: Map<string, Target>) => new Map([...index].map(([key, targets]) => [key,

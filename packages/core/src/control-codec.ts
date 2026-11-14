@@ -1,5 +1,5 @@
 import { formatGoalAddress } from './sharing.js'
-import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalRelationAccesses } from './goal-agent-reference.js'
+import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalQualifiedAccess, parseGoalRelationAccesses } from './goal-agent-reference.js'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { parseBrowserAgentWorkspaceParams, parseBrowserAgentWorkspaceResult } from './browser-agent-workspace.js'
 import { isSettingsPreferenceMethod, parseSettingsPreferenceParams, parseSettingsPreferenceResult } from './settings-preferences.js'
@@ -565,9 +565,11 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (!demandIds.length || new Set(demandIds).size !== demandIds.length) throw new AgentMuxError('Activity collection needs unique exact Goal IDs.', 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandIds }
   }
-  if (source.operation === 'demand.show' || source.operation === 'demand.decision-log' || source.operation === 'demand.activity.inspect' || source.operation === 'demand.activity.read') {
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
-      ...(source.operation === 'demand.show' && source.dispatchOperationId !== undefined ? { dispatchOperationId: id(source.dispatchOperationId, 'Original Goal dispatch operation is invalid.', 'INVALID_CONTROL_REQUEST') } : {}) }
+  if (source.operation === 'demand.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
+    ...(source.dispatchOperationId === undefined ? {} : { dispatchOperationId: id(source.dispatchOperationId, 'Original Goal dispatch operation is invalid.', 'INVALID_CONTROL_REQUEST') }),
+    ...(source.access === undefined ? {} : { access: parseGoalQualifiedAccess(source.access) }) }
+  if (source.operation === 'demand.decision-log' || source.operation === 'demand.activity.inspect' || source.operation === 'demand.activity.read') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST') }
   }
   if (source.operation === 'demand.activity.append') {
     if (typeof source.kind !== 'string' || !source.kind.trim() || source.kind === 'name-change' || typeof source.message !== 'string' || !source.message.trim())
@@ -667,6 +669,16 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { ...(source.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(source.relationAccess) }), schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.projectId === undefined ? {} : { projectId: source.projectId === null ? null : spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }), ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: parseGoalAgentReferences(source.assigneeSessionIds) }), ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : parseGoalAgentReference(source.supervisorSessionId) }), ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: finiteNumber(source.expectedUpdatedAt, 'Expected Goal version is invalid.') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), start: source.start }
   }
   if (source.operation === 'demand.start') {
+    if (source.agentReference !== undefined || source.access !== undefined || source.resumeOriginal !== undefined) {
+      const agentReference = parseGoalAgentReference(source.agentReference)
+      if (typeof agentReference === 'string' || source.sessionId !== undefined || source.continuation !== undefined || source.resumeOriginal !== undefined && source.resumeOriginal !== true)
+        throw new AgentMuxError('A qualified finite Start requires its exact Source reference and access, separately from a legacy Session or continuation.', 'INVALID_CONTROL_REQUEST')
+      if (source.expectedUpdatedAt !== undefined && (!Number.isSafeInteger(source.expectedUpdatedAt) || Number(source.expectedUpdatedAt) < 0)) throw new AgentMuxError('Expected Goal version is invalid.', 'INVALID_CONTROL_REQUEST')
+      const caller = optionalCaller(source.caller)
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
+        agentReference, access: parseGoalQualifiedAccess(source.access), ...(source.resumeOriginal === true ? { resumeOriginal: true } : {}),
+        ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: Number(source.expectedUpdatedAt) }), ...(caller ? { caller } : {}) }
+    }
     let continuation: { intervalMs: number; alignmentRevision: number } | undefined
     if (source.continuation !== undefined) {
       const c = object(source.continuation, 'Goal continuation is invalid.', 'INVALID_CONTROL_REQUEST')
@@ -1026,6 +1038,18 @@ function demandPhaseIndex(value: unknown, code: 'INVALID_CONTROL_REQUEST' | 'CON
   if (value === null) return null
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new AgentMuxError('Goal batch must be a non-negative integer or null.', code)
   return value as number
+}
+
+function parseGoalStartReceipt(value: unknown): import('./control.js').GoalStartReceipt {
+  const receipt = object(value, 'Goal Start receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const base = { demandId: id(receipt.demandId, 'Original Goal is invalid.', 'CONTROL_PROTOCOL_ERROR'), startedAt: finiteNumber(receipt.startedAt, 'Original Start timestamp is invalid.') }
+  if (receipt.agentReference !== undefined) {
+    if (Object.keys(receipt).some(key => !['demandId', 'startedAt', 'agentReference', 'run'].includes(key))) throw new AgentMuxError('Qualified Start receipt has mixed identities.', 'CONTROL_PROTOCOL_ERROR')
+    const agentReference = parseGoalAgentReference(receipt.agentReference, 'CONTROL_PROTOCOL_ERROR'), run = object(receipt.run, 'Original Goal Run is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (typeof agentReference === 'string' || Object.keys(run).some(key => key !== 'runId')) throw new AgentMuxError('Qualified Start receipt lacks its exact Source member.', 'CONTROL_PROTOCOL_ERROR')
+    return { ...base, agentReference, run: { runId: id(run.runId, 'Original Goal Run is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  }
+  return { ...base, sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') }
 }
 
 function parseDemand(value: unknown): AgentMuxDemand {
@@ -1652,7 +1676,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'demand.create' || operation === 'demand.update' || operation === 'demand.assign' || operation === 'demand.start' || operation === 'demand.handoff' || operation === 'demand.delete' || operation === 'demand.link-session' || operation === 'demand.link-project') {
     const demand = parseDemand(result.demand)
     const receipt = object(result.receipt, 'Control demand receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, ...(operation === 'demand.start' && result.continuation !== undefined ? { continuation: parseGoalContinuationLoop(result.continuation) } : {}), receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: spaceControlId(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR', true) } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.assign' ? { assignedAt: finiteNumber(receipt.assignedAt, 'Control demand receipt timestamp is invalid.'), startRequested: receipt.startRequested === true } : {}), ...(operation === 'demand.start' ? { startedAt: finiteNumber(receipt.startedAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.handoff' ? { handedOffAt: finiteNumber(receipt.handedOffAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.delete' ? { deletedAt: finiteNumber(receipt.deletedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, ...(operation === 'demand.start' && result.continuation !== undefined ? { continuation: parseGoalContinuationLoop(result.continuation) } : {}), receipt: { ...(operation === 'demand.start' ? parseGoalStartReceipt(receipt) : { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR') }), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: spaceControlId(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR', true) } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.assign' ? { assignedAt: finiteNumber(receipt.assignedAt, 'Control demand receipt timestamp is invalid.'), startRequested: receipt.startRequested === true } : {}), ...(operation === 'demand.handoff' ? { handedOffAt: finiteNumber(receipt.handedOffAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.delete' ? { deletedAt: finiteNumber(receipt.deletedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
   }
   if (operation === 'demand.patrol-all') {
     const receipt = parseSpaceControlSuccessReceipt({ ...source, operation: 'agent.open' })

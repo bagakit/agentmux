@@ -4,7 +4,7 @@ import { parseGoalPatrolObservations, type GoalPatrolObservation } from './goal-
 import { type GoalDelegationMethod } from './goal-delegation-methods.js'
 export { GOAL_DELEGATION_METHODS, isGoalDelegationMethod, type GoalDelegationMethod } from './goal-delegation-methods.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
-import { parseDemandDispatches, type DemandDispatch, type GoalStartObservation } from '@agentmux/demand'
+import { parseDemandDispatch, parseDemandDispatches, type DemandDispatch, type GoalStartObservation } from '@agentmux/demand'
 import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, validateDemandDelegationReport } from '@agentmux/demand/delegations'
 import { parseAlignment, parseGrounding } from '@agentmux/demand/goals'
@@ -230,11 +230,18 @@ export function parseGoalStartObservations(value: unknown, starts: readonly Dema
     const input = record(item.input, ['state', 'reason', 'retainedReceipt', 'proof'])
     if (!['confirmed', 'unknown'].includes(String(input.state))) throw new AgentMuxError('Start input state is invalid.', 'CONTROL_PROTOCOL_ERROR')
     if (input.retainedReceipt !== undefined) {
-      const receipt = record(input.retainedReceipt, ['kind', 'itemId', 'createdAt'])
-      if (!start.receipt || receipt.kind !== start.receipt.kind || receipt.itemId !== start.receipt.itemId || receipt.createdAt !== start.receipt.createdAt)
-        throw new AgentMuxError('The retained receipt does not belong to this original Start.', 'CONTROL_PROTOCOL_ERROR')
+      if ('target' in start) {
+        if (!start.receipt) throw new AgentMuxError('The original qualified Start has no retained input receipt.', 'CONTROL_PROTOCOL_ERROR')
+        const retained = parseDemandDispatch({ ...start, receipt: input.retainedReceipt }).receipt
+        if (JSON.stringify(retained) !== JSON.stringify(start.receipt)) throw new AgentMuxError('The retained receipt does not belong to this original qualified Start.', 'CONTROL_PROTOCOL_ERROR')
+      } else {
+        const receipt = record(input.retainedReceipt, ['kind', 'itemId', 'createdAt'])
+        if (!start.receipt || receipt.kind !== start.receipt.kind || receipt.itemId !== start.receipt.itemId || receipt.createdAt !== start.receipt.createdAt)
+          throw new AgentMuxError('The retained receipt does not belong to this original Start.', 'CONTROL_PROTOCOL_ERROR')
+      }
     }
     const proof = input.proof === undefined ? undefined : (() => {
+      if ('target' in start) throw new AgentMuxError('A legacy Core proof cannot stand for this Source-qualified original input.', 'CONTROL_PROTOCOL_ERROR')
       const value = record(input.proof, ['kind', 'agentSessionId', 'runId', 'operationId', 'acknowledged', 'prompt', 'inputKey'])
       const key = validateAgentPromptInputKey(value.inputKey)
       if (value.kind !== 'core-prompt' || value.agentSessionId !== start.agentSessionId || value.runId !== start.runId ||
@@ -266,7 +273,7 @@ export function parseGoalStartObservations(value: unknown, starts: readonly Dema
       throw new AgentMuxError('Start responsibility contradicts its original facts.', 'CONTROL_PROTOCOL_ERROR')
     const supervisor = item.supervisor === undefined ? undefined : (() => {
       const target = record(item.supervisor, ['agentSessionId', 'hostId', 'runId']), attention = start.attention
-      if (!attention || target.agentSessionId !== attention.supervisorAgentSessionId || target.hostId !== start.hostId || target.runId !== attention.supervisorRunId)
+      if ('target' in start || !attention || target.agentSessionId !== attention.supervisorAgentSessionId || target.hostId !== start.hostId || target.runId !== attention.supervisorRunId)
         throw new AgentMuxError('The Start notice belongs to another Supervisor input.', 'CONTROL_PROTOCOL_ERROR')
       return { agentSessionId: id(target.agentSessionId), hostId: id(target.hostId), runId: id(target.runId) }
     })()

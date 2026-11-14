@@ -66,6 +66,7 @@ export class GoalResponsibilityOwner {
       this.versions.set(goal.id, version)
       if (goal.status === 'done' || goal.status === 'cancelled' || !refs.length) { this.observations.delete(goal.id); deadlinesChanged = this.deadlines.delete(goal.id) || deadlinesChanged; continue }
       for (const ref of refs) {
+        if ('target' in ref) continue // Full qualified records remain in read(); no immediate Host/SID event alias exists.
         add(this.sessions, key(ref.hostId, ref.agentSessionId), goal.id); add(this.runs, key(ref.hostId, ref.runId), goal.id); add(this.hosts, ref.hostId, goal.id)
       }
       for (const delegation of goal.delegations ?? []) add(this.sources, key(delegation.hostId, delegation.sourceMessageId), goal.id)
@@ -175,14 +176,15 @@ export class GoalResponsibilityOwner {
         fact.report = Boolean(saved?.report || observed?.recoverableReport); fact.collected = Boolean(saved?.collection)
         if (observed?.unknown) fact.unknown = observed.unknown
       }
-      try { fact.status = await status(execution.hostId, execution.agentSessionId) }
+      if ('target' in execution) fact.unknown = 'Read this original execution using its current Source access. Its last input receipt and Agent remain retained.'
+      else try { fact.status = await status(execution.hostId, execution.agentSessionId) }
       catch (error) { fact.unknown = [fact.unknown, describe(error)].filter(Boolean).join(' ') }
       if (this.startupIssue) fact.unknown = [fact.unknown, this.startupIssue].filter(Boolean).join(' ')
       return fact
     }))
     await supervisorRead
     const unresolved = new Map<string, number>()
-    const runKey = (fact: GoalExecutionFacts) => JSON.stringify([fact.execution.hostId, fact.execution.agentSessionId, fact.execution.runId])
+    const runKey = (fact: GoalExecutionFacts) => 'target' in fact.execution ? JSON.stringify(['runtime', fact.execution.target.execution.runtimeId, fact.execution.target.execution.agentSessionId, fact.execution.runId]) : JSON.stringify([fact.execution.hostId, fact.execution.agentSessionId, fact.execution.runId])
     for (const fact of facts) if (fact.inputConfirmed && !fact.collected && !fact.report) unresolved.set(runKey(fact), (unresolved.get(runKey(fact)) ?? 0) + 1)
     const progress = latestDemandProgress(goal), indexed = { progress, handoffs: demandHandoffDestinations(goal, progress) }
     const executions = facts.map(fact => observeGoalExecution(goal, fact, now, (unresolved.get(runKey(fact)) ?? 0) > 1, indexed))
@@ -194,11 +196,13 @@ export class GoalResponsibilityOwner {
     const goal = await this.demands.get(goalId)
     if (!goal || !demandExecutionReferences(goal).some(ref => sameDemandExecution(ref, input.execution))) throw new AgentMuxError('Progress requires this original Goal execution.', 'CONTROL_REQUEST_CONFLICT')
     const manager = await isGoalSupervisor(goal, authority, this.runtime)
-    if (!manager && (authority.actor.id !== input.execution.agentSessionId || authority.hostId !== input.execution.hostId || authority.runId !== input.execution.runId))
+    if (!manager && ('target' in input.execution || authority.actor.id !== input.execution.agentSessionId || authority.hostId !== input.execution.hostId || authority.runId !== input.execution.runId))
       throw new AgentMuxError('Progress requires the authenticated original worker Run or current management authority. Native input remains available.', 'CONTROL_PERMISSION_DENIED')
     let observed: AgentMuxAgentRuntimeStatus | undefined
-    try { observed = await this.runtime.observeGoalAgent(input.execution.hostId, input.execution.agentSessionId) } catch { /* A blocked/progress declaration remains possible with unknown observation. */ }
-    if (observed && (observed.session.agentSessionId !== input.execution.agentSessionId || observed.session.run.runId !== input.execution.runId || observed.run.runId !== input.execution.runId)) observed = undefined
+    if (!('target' in input.execution)) {
+      try { observed = await this.runtime.observeGoalAgent(input.execution.hostId, input.execution.agentSessionId) } catch { /* A blocked/progress declaration remains possible with unknown observation. */ }
+      if (observed && (observed.session.agentSessionId !== input.execution.agentSessionId || observed.session.run.runId !== input.execution.runId || observed.run.runId !== input.execution.runId)) observed = undefined
+    }
     if (input.phase === 'handed-off' && input.handoffExecution) {
       const target = await this.read(goalId, { principal })
       if (!target.responsibility?.executions.some(row => sameDemandExecution(row.execution, input.handoffExecution!) && row.binding === 'confirmed'))

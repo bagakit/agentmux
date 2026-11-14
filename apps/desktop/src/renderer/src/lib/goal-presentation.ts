@@ -1,3 +1,4 @@
+import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from './global-demand-board'
@@ -20,7 +21,7 @@ export type GoalStage = (typeof GOAL_STAGES)[number]
 export type GoalNextStepSource =
   | { kind: 'definition'; revision: number | null }
   | { kind: 'results'; submissionId: string | null; revision: number | null }
-  | { kind: 'start'; operationId: string; hostId?: string; agentSessionId: string; runId?: string }
+  | ({ kind: 'start'; operationId: string; runId?: string } & ({ hostId?: string; agentSessionId: string; agentReference?: never } | { agentReference: DemandSpaceMemberReference; hostId?: never; agentSessionId?: never }))
   | { kind: 'delegation'; operationId: string; sourceMessageId: string; hostId: string; agentSessionId: string; runId: string; replyMessageId?: string }
   | { kind: 'patrol'; operationId: string }
   | { kind: 'goal' }
@@ -71,7 +72,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedStart?: Goal
     const delegated = goalDelegationNextRow(demand)
     if (delegated) return { stage: DELEGATION_STAGE[delegated.state], text: delegated.next, source: { kind: 'delegation', operationId: delegated.delegation.operationId, sourceMessageId: delegated.delegation.sourceMessageId, hostId: delegationWorkerHostId(delegated.delegation), agentSessionId: delegated.delegation.workerAgentSessionId, runId: delegated.delegation.workerRunId, ...(delegated.replyMessageId ? { replyMessageId: delegated.replyMessageId } : {}) } }
     const start = goalStartNextRow(demand)
-    if (start) return { stage: START_STAGE[start.state], text: start.next, source: { kind: 'start', operationId: start.start.operationId, hostId: start.start.hostId, agentSessionId: start.start.agentSessionId, runId: start.start.runId } }
+    if (start) return { stage: START_STAGE[start.state], text: start.next, source: { kind: 'start', operationId: start.start.operationId, ...('target' in start.start ? { agentReference: start.start.target } : { hostId: start.start.hostId, agentSessionId: start.start.agentSessionId }), runId: start.start.runId } }
   }
   if (!alignment) return { stage: 'define', text: 'Goal needs an outline', source: definitionSource }
   if (alignmentConfirmationIssue(alignment)) return { stage: 'define', text: alignment.openQuestions.length ? 'Decision needed' : 'Success criteria needed', source: definitionSource }

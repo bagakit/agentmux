@@ -22,7 +22,7 @@ export type CoordinatorAgentReferenceObservation = {
 /** Qualify A's own reference using that one original authenticated SDK carrier.
  * B still independently owns its Workspace/Space/Region association. No reverse
  * carrier, borrowed actor, general Host stream, creation or input is introduced. */
-export async function inspectCoordinatorAgentReference(rpc: AgentMuxRpcClient, rawReference: CoordinatorAgentReference,
+export async function inspectCoordinatorAgentReference(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, rawReference: CoordinatorAgentReference,
   rawResource: AgentAssociationResource, options: { signal?: AbortSignal } = {}): Promise<CoordinatorAgentReferenceObservation> {
   const reference = parseCoordinatorAgentReference(rawReference), resource = parseAgentAssociationResource(rawResource)
   const client = await connectHostedAgentMux({ rpc, expectedRuntimeId: reference.runtimeId, connectOnDemand: true, agentSessionIds: [reference.binding.agentSessionId] })

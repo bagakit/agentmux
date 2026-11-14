@@ -108,7 +108,7 @@ export class GoalPatrolOwner {
   async request(goalId: string, operationId: string, context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority, purpose?: 'plan'): Promise<DemandPatrol> {
     const goal = await this.demands.get(goalId)
     if (!goal) throw new AgentMuxError('The original Goal is unavailable.', 'CONTROL_UNAVAILABLE')
-    if (purpose !== 'plan' && authority.actor.kind === 'agent' && authority.actor.id !== goal.supervisorSessionId && !demandExecutionReferences(goal).some(ref => ref.agentSessionId === authority.actor.id))
+    if (purpose !== 'plan' && authority.actor.kind === 'agent' && authority.actor.id !== goal.supervisorSessionId && !demandExecutionReferences(goal).some(ref => !('target' in ref) && ref.agentSessionId === authority.actor.id))
       throw new AgentMuxError('Only this Goal’s original execution or management authority can request inspection.', 'CONTROL_PERMISSION_DENIED')
     const original = goal.patrols?.find(item => item.operationId === operationId || item.requestOperationIds?.includes(operationId))
     if (original) {
@@ -229,6 +229,7 @@ export class GoalPatrolOwner {
         throw new AgentMuxError('The original worker reply is not confirmed at its Core source. Keep its report and inspect it before collection.', 'CONTROL_UNAVAILABLE')
     }
     const bases = new Map(await Promise.all(report.progress.map(async update => {
+      if ('target' in update.execution) return [JSON.stringify(update.execution), null] as const
       try { const status = await this.runtime.observeGoalAgent(update.execution.hostId, update.execution.agentSessionId)
         return [JSON.stringify(update.execution), status.session.run.runId === update.execution.runId ? {
           stateEnteredAt: status.session.semanticStatus?.stateEnteredAt ?? null, activityRevision: status.session.semanticStatus?.currentActivityRevision ?? null,

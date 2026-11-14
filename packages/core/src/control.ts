@@ -1,6 +1,6 @@
 export type { GoalRelationAccess, GoalRuntimeAccess, GoalQualifiedAccess } from './goal-agent-reference.js'
-import type { DemandAgentReference } from '@agentmux/demand/relations'
-import type { GoalRelationAccess } from './goal-agent-reference.js'
+import type { DemandAgentReference, DemandSpaceMemberReference } from '@agentmux/demand/relations'
+import type { GoalQualifiedAccess, GoalRelationAccess } from './goal-agent-reference.js'
 import { SETTINGS_PREFERENCE_METHODS } from './settings-preferences.js'
 import type { AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import type { RendererAllocationsInput, RendererAllocationsResult } from './renderer-allocations.js'
@@ -501,7 +501,7 @@ export type AgentMuxDemandDecision = {
   sourceSessionId: string | null
 }
 export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'demand.list' }
-export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string; dispatchOperationId?: string }
+export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string; dispatchOperationId?: string; access?: GoalQualifiedAccess }
 export type AgentMuxControlDemandCreateRequest = RequestBase & {
   operation: 'demand.create'
   relationAccess?: GoalRelationAccess[]
@@ -549,14 +549,17 @@ export type AgentMuxControlDemandAssignRequest = RequestBase & {
   start: boolean
   expectedUpdatedAt?: number
 }
-export type AgentMuxControlDemandStartRequest = RequestBase & {
+type GoalStartRequestBase = RequestBase & {
   operation: 'demand.start'
   demandId: string
-  sessionId?: string
   expectedUpdatedAt?: number
-  continuation?: { intervalMs: number; alignmentRevision: number }
   caller?: AgentMuxControlCaller
 }
+export type AgentMuxControlDemandStartRequest = GoalStartRequestBase & (
+  { sessionId?: string; continuation?: { intervalMs: number; alignmentRevision: number }; agentReference?: never; access?: never; resumeOriginal?: never }
+  | { agentReference: DemandSpaceMemberReference; access: GoalQualifiedAccess; resumeOriginal?: true; sessionId?: never; continuation?: never })
+export type GoalStartReceipt = { demandId: string; startedAt: number } & (
+  { sessionId: string | null } | { agentReference: DemandSpaceMemberReference; run: { runId: string } })
 export type AgentMuxControlDemandContinuationActionRequest = RequestBase & {
   operation: 'demand.continuation-action'; demandId: string; loopId: string
   action: 'pause' | 'resume' | 'stop' | 'check'; expectedRevision: number; caller?: AgentMuxControlCaller
@@ -907,7 +910,7 @@ export type AgentMuxControlResult =
   | { operation: 'demand.confirm'; demand: AgentMuxDemand; receipt: { demandId: string; confirmedRevision: number; confirmedAt: number } }
   | { operation: 'demand.accept'; demand: AgentMuxDemand; receipt: { demandId: string; alignmentRevision: number; submissionId: string; acceptedAt: number; acceptedWithGaps: boolean } }
   | { operation: 'demand.assign'; demand: AgentMuxDemand; receipt: { demandId: string; assignedAt: number; startRequested: boolean } }
-  | { operation: 'demand.start'; demand: AgentMuxDemand; continuation?: ContinuousProgressLoop; receipt: { demandId: string; startedAt: number; sessionId: string | null } }
+  | { operation: 'demand.start'; demand: AgentMuxDemand; continuation?: ContinuousProgressLoop; receipt: GoalStartReceipt }
   | { operation: 'demand.continuation-action'; demandId: string; continuation: ContinuousProgressLoop; diskDurability: 'confirmed' }
   | { operation: 'demand.handoff'; demand: AgentMuxDemand; receipt: { demandId: string; handedOffAt: number; sessionId: string | null } }
   | { operation: 'demand.delete'; demand: AgentMuxDemand; receipt: { demandId: string; deletedAt: number } }

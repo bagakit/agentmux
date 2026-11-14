@@ -1,8 +1,9 @@
 import { parseAlignmentProposal, type DemandCriterion, type DemandGrounding } from './goals.js'
 import { parseDemandDelegationAttentionInput, type DemandDelegationAttention } from './delegations.js'
+import { demandAgentReferenceKey, parseDemandAgentReference, type DemandSpaceMemberReference } from './agent-reference.js'
 
 /** Business input provenance owned by explicit Goal Start, separate from Run lifecycle. */
-export type DemandDispatchIntent = {
+export type DemandLegacyDispatchIntent = {
   operationId: string
   agentSessionId: string
   hostId: string
@@ -12,18 +13,34 @@ export type DemandDispatchIntent = {
   loopId?: string
   alignmentRevision?: number
 }
-export type DemandDispatch = DemandDispatchIntent & {
+export type DemandQualifiedDispatchIntent = {
+  operationId: string
+  target: DemandSpaceMemberReference
+  runId: string
+  execution: 'finite'
+  prompt: string
+  agentMuxNote?: string
+}
+export type DemandDispatchIntent = DemandLegacyDispatchIntent | DemandQualifiedDispatchIntent
+export type DemandLegacyDispatchReceipt = { kind: 'core-prompt'; itemId: string; createdAt: number }
+export type DemandQualifiedDispatchReceipt = { kind: 'core-input'; inputKey: {
+  kind: 'prompt'; agentSessionId: string; expectedRun: { runId: string }; submissionId: string
+}; outcome: 'admitted' | 'terminal-confirmed'; observedAt: number }
+type DispatchState<Receipt> = {
   stage: 'prepared' | 'submitted' | 'confirmed' | 'unknown'
   preparedAt: number
   submittedAt?: number
   /** Reference to Core's durable original input fact; client success/activity is insufficient. */
-  receipt?: { kind: 'core-prompt'; itemId: string; createdAt: number }
+  receipt?: Receipt
   issue?: string
   /** Captured by the original business owner, never declared by a Start client. */
   resultBasis?: { alignmentRevision: number | null; criteria: DemandCriterion[]; groundingSubmissionId: string | null }
   /** Reference to an existing Core Supervisor input; not an A2A message or queue. */
   attention?: DemandDelegationAttention
 }
+export type DemandDispatch = (DemandLegacyDispatchIntent & DispatchState<DemandLegacyDispatchReceipt>) |
+  (DemandQualifiedDispatchIntent & DispatchState<DemandQualifiedDispatchReceipt>)
+export function qualifiedDemandDispatch(value: DemandDispatchIntent): value is DemandQualifiedDispatchIntent { return 'target' in value }
 
 export type GoalStartObservation = {
   operationId: string
@@ -51,8 +68,16 @@ function time(value: unknown, label: string): number {
   return value
 }
 const intentKeys = ['operationId', 'agentSessionId', 'hostId', 'runId', 'execution', 'prompt', 'loopId', 'alignmentRevision']
+const qualifiedIntentKeys = ['operationId', 'target', 'runId', 'execution', 'prompt', 'agentMuxNote']
 export function parseDemandDispatchIntent(value: unknown): DemandDispatchIntent {
   const input = record(value, 'dispatch')
+  if (Object.hasOwn(input, 'target')) {
+    if (Object.keys(input).some(key => !qualifiedIntentKeys.includes(key)) || input.execution !== 'finite') throw new Error('Source-qualified dispatch requires only its original finite target and input')
+    const target = parseDemandAgentReference(input.target)
+    if (typeof target === 'string') throw new Error('Source-qualified dispatch requires its complete original member')
+    return { operationId: text(input.operationId, 'dispatch.operationId'), target, runId: text(input.runId, 'dispatch.runId'), execution: 'finite',
+      prompt: text(input.prompt, 'dispatch.prompt'), ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: typeof input.agentMuxNote === 'string' ? input.agentMuxNote : (() => { throw new Error('dispatch.agentMuxNote must remain a string') })() }) }
+  }
   if (Object.keys(input).some(key => !intentKeys.includes(key))) throw new Error('dispatch has unknown fields')
   if (input.execution !== 'finite' && input.execution !== 'continue') throw new Error('dispatch execution is invalid')
   if (input.execution === 'continue' && (input.loopId === undefined || input.alignmentRevision === undefined) || input.execution === 'finite' && (input.loopId !== undefined || input.alignmentRevision !== undefined)) throw new Error('dispatch continuation reference is inconsistent')
@@ -64,15 +89,26 @@ export function parseDemandDispatchIntent(value: unknown): DemandDispatchIntent 
 }
 export function parseDemandDispatch(value: unknown): DemandDispatch {
   const input = record(value, 'dispatch')
-  if (Object.keys(input).some(key => ![...intentKeys, 'stage', 'preparedAt', 'submittedAt', 'receipt', 'issue', 'resultBasis', 'attention'].includes(key))) throw new Error('dispatch has unknown fields')
-  const intent = parseDemandDispatchIntent(Object.fromEntries(intentKeys.filter(key => input[key] !== undefined).map(key => [key, input[key]])))
+  const keys = Object.hasOwn(input, 'target') ? qualifiedIntentKeys : intentKeys
+  if (Object.keys(input).some(key => ![...keys, 'stage', 'preparedAt', 'submittedAt', 'receipt', 'issue', 'resultBasis', 'attention'].includes(key))) throw new Error('dispatch has unknown fields')
+  const intent = parseDemandDispatchIntent(Object.fromEntries(keys.filter(key => input[key] !== undefined).map(key => [key, input[key]])))
   if (!['prepared', 'submitted', 'confirmed', 'unknown'].includes(String(input.stage))) throw new Error('dispatch stage is invalid')
   if ((input.stage === 'confirmed') !== (input.receipt !== undefined) || (input.stage !== 'prepared' && input.submittedAt === undefined)) throw new Error('dispatch stage lacks its original evidence')
   let receipt: DemandDispatch['receipt']
   if (input.receipt !== undefined) {
     const native = record(input.receipt, 'dispatch.receipt')
-    if (Object.keys(native).some(key => !['kind', 'itemId', 'createdAt'].includes(key)) || native.kind !== 'core-prompt' || native.itemId !== `prompt:${intent.operationId}`) throw new Error('dispatch receipt belongs to another input')
-    receipt = { kind: 'core-prompt', itemId: native.itemId, createdAt: time(native.createdAt, 'dispatch.receipt.createdAt') }
+    if (qualifiedDemandDispatch(intent)) {
+      const key = record(native.inputKey, 'dispatch.receipt.inputKey'), run = record(key.expectedRun, 'dispatch.receipt.expectedRun')
+      if (Object.keys(native).some(key => !['kind', 'inputKey', 'outcome', 'observedAt'].includes(key)) || native.kind !== 'core-input' ||
+        Object.keys(key).some(key => !['kind', 'agentSessionId', 'expectedRun', 'submissionId'].includes(key)) || Object.keys(run).some(key => key !== 'runId') ||
+        key.kind !== 'prompt' || key.agentSessionId !== intent.target.execution.agentSessionId || run.runId !== intent.runId || key.submissionId !== intent.operationId ||
+        native.outcome !== 'admitted' && native.outcome !== 'terminal-confirmed') throw new Error('Source-qualified dispatch receipt belongs to another original input')
+      receipt = { kind: 'core-input', inputKey: { kind: 'prompt', agentSessionId: intent.target.execution.agentSessionId, expectedRun: { runId: intent.runId }, submissionId: intent.operationId },
+        outcome: native.outcome, observedAt: time(native.observedAt, 'dispatch.receipt.observedAt') }
+    } else {
+      if (Object.keys(native).some(key => !['kind', 'itemId', 'createdAt'].includes(key)) || native.kind !== 'core-prompt' || native.itemId !== `prompt:${intent.operationId}`) throw new Error('dispatch receipt belongs to another input')
+      receipt = { kind: 'core-prompt', itemId: native.itemId, createdAt: time(native.createdAt, 'dispatch.receipt.createdAt') }
+    }
   }
   let resultBasis: DemandDispatch['resultBasis'], attention: DemandDispatch['attention']
   if (input.resultBasis !== undefined) {
@@ -86,15 +122,22 @@ export function parseDemandDispatch(value: unknown): DemandDispatch {
       groundingSubmissionId: basis.groundingSubmissionId === null ? null : text(basis.groundingSubmissionId, 'dispatch.resultBasis.groundingSubmissionId') }
   }
   if (input.attention !== undefined) {
-    const notice = record(input.attention, 'dispatch.attention'), { preparedAt, attemptedAt, ...intent } = notice
-    attention = { ...parseDemandDelegationAttentionInput(intent), preparedAt: time(preparedAt, 'dispatch.attention.preparedAt'),
+    if (qualifiedDemandDispatch(intent)) throw new Error('Source-qualified finite input does not grant automatic Supervisor attention')
+    const notice = record(input.attention, 'dispatch.attention'), { preparedAt, attemptedAt, ...attentionIntent } = notice
+    attention = { ...parseDemandDelegationAttentionInput(attentionIntent), preparedAt: time(preparedAt, 'dispatch.attention.preparedAt'),
       ...(attemptedAt === undefined ? {} : { attemptedAt: time(attemptedAt, 'dispatch.attention.attemptedAt') }) }
     if (input.execution !== 'finite' || attention.hostId !== input.hostId) throw new Error('dispatch attention belongs to another Start or Host')
   }
-  return { ...intent, stage: input.stage as DemandDispatch['stage'], preparedAt: time(input.preparedAt, 'dispatch.preparedAt'),
+  const state = { stage: input.stage as DemandDispatch['stage'], preparedAt: time(input.preparedAt, 'dispatch.preparedAt'),
     ...(input.submittedAt === undefined ? {} : { submittedAt: time(input.submittedAt, 'dispatch.submittedAt') }),
-    ...(receipt === undefined ? {} : { receipt }), ...(input.issue === undefined ? {} : { issue: text(input.issue, 'dispatch.issue') }),
+    ...(input.issue === undefined ? {} : { issue: text(input.issue, 'dispatch.issue') }),
     ...(resultBasis === undefined ? {} : { resultBasis }), ...(attention === undefined ? {} : { attention }) }
+  if (qualifiedDemandDispatch(intent)) {
+    if (receipt && receipt.kind !== 'core-input') throw new Error('Source-qualified receipt kind changed')
+    return { ...intent, ...state, ...(receipt ? { receipt } : {}) }
+  }
+  if (receipt && receipt.kind !== 'core-prompt') throw new Error('Original legacy receipt kind changed')
+  return { ...intent, ...state, ...(receipt ? { receipt } : {}) }
 }
 export function parseDemandDispatches(value: unknown): DemandDispatch[] {
   if (!Array.isArray(value)) throw new Error('dispatches must be an array')
@@ -106,5 +149,8 @@ export function parseDemandDispatches(value: unknown): DemandDispatch[] {
   return dispatches
 }
 export function sameDemandDispatchIntent(left: DemandDispatchIntent, right: DemandDispatchIntent): boolean {
-  return intentKeys.every(key => left[key as keyof DemandDispatchIntent] === right[key as keyof DemandDispatchIntent])
+  if (qualifiedDemandDispatch(left) || qualifiedDemandDispatch(right)) return qualifiedDemandDispatch(left) && qualifiedDemandDispatch(right) &&
+    left.operationId === right.operationId && demandAgentReferenceKey(left.target) === demandAgentReferenceKey(right.target) && left.runId === right.runId &&
+    left.execution === right.execution && left.prompt === right.prompt && left.agentMuxNote === right.agentMuxNote
+  return intentKeys.every(key => left[key as keyof DemandLegacyDispatchIntent] === right[key as keyof DemandLegacyDispatchIntent])
 }

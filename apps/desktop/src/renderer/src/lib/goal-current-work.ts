@@ -1,3 +1,4 @@
+import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { DemandDispatch, DemandDelegation } from '@agentmux/demand'
 import type { DemandRecord } from './global-demand-board'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
@@ -18,6 +19,7 @@ let previousGoals: Readonly<Record<string, Goal>> | undefined
 const index = new Map<string, CurrentDemandFact>()
 const contributions = new Map<string, { goal: Goal; targets: Map<string, CurrentGoalFact> }>()
 const byTarget = new Map<string, Map<string, CurrentGoalFact>>()
+export const currentQualifiedDemandKey = (reference: DemandSpaceMemberReference) => demandAgentReferenceKey(reference)
 export const currentDemandKey = (hostId: string, agentSessionId: string) => JSON.stringify([hostId, agentSessionId])
 
 function project(goal: Goal): Map<string, CurrentGoalFact> {
@@ -36,8 +38,10 @@ function project(goal: Goal): Map<string, CurrentGoalFact> {
   for (const dispatch of goal.dispatches ?? []) {
     const confirmed = dispatch.stage === 'confirmed' && dispatch.receipt?.kind === 'core-prompt' &&
       dispatch.receipt.itemId === `prompt:${dispatch.operationId}` && Number.isSafeInteger(dispatch.receipt.createdAt) && dispatch.receipt.createdAt > 0
-    add(currentDemandKey(dispatch.hostId, dispatch.agentSessionId), dispatch.operationId, confirmed,
-      confirmed ? null : dispatch.stage === 'prepared' ? 'prepared' : dispatch.stage === 'submitted' ? 'submitted' : 'unknown', 'start')
+    const targetKey = 'target' in dispatch ? currentQualifiedDemandKey(dispatch.target) : currentDemandKey(dispatch.hostId, dispatch.agentSessionId)
+    const inputConfirmed = 'target' in dispatch ? dispatch.stage === 'confirmed' && dispatch.receipt?.kind === 'core-input' : confirmed
+    add(targetKey, dispatch.operationId, inputConfirmed,
+      inputConfirmed ? null : dispatch.stage === 'prepared' ? 'prepared' : dispatch.stage === 'submitted' ? 'submitted' : 'unknown', 'start')
   }
   for (const delegation of goal.delegations ?? []) {
     const row = rows.get(`delegation:${delegation.operationId}`), confirmed = Boolean(row && row.binding !== 'unconfirmed')

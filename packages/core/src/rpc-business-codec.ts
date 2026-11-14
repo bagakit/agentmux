@@ -1,3 +1,4 @@
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { isBrowserProfileCookieFileOperation } from './browser-profile-cookie-files.js'
 import { isBrowserProfileBookmarkOperation } from './browser-profile-bookmarks.js'
 import { isBrowserProfileExtensionOperation } from './browser-profile-extensions.js'
@@ -395,6 +396,17 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       }
       if (actual.goalContinuations && (actual.goalContinuations as import('./continuous-progress-scheduler.js').ContinuousProgressLoop[]).some(loop => loop.taskSource?.kind !== 'goal' || loop.taskSource.goalId !== request.demandId)) fail()
       if (request.operation === 'demand.start' && Boolean(request.continuation) !== Boolean(actual.continuation)) fail()
+      if (request.operation === 'demand.start') {
+        const receipt = actual.receipt as Record<string, unknown>
+        if (Boolean(request.agentReference) !== Boolean(receipt.agentReference)) fail()
+        if (request.agentReference) {
+          const goal = actual.demand as import('./control.js').AgentMuxDemand
+          const original = goal.dispatches?.find(item => item.operationId === request.requestId)
+          if (!original || !('target' in original) || demandAgentReferenceKey(original.target) !== demandAgentReferenceKey(request.agentReference) ||
+              JSON.stringify(receipt.agentReference) !== JSON.stringify(original.target) ||
+              (receipt.run as { runId: string }).runId !== original.runId || receipt.startedAt !== original.preparedAt) fail()
+        }
+      }
       if (actual.continuation) {
         const loop = actual.continuation as import('./continuous-progress-scheduler.js').ContinuousProgressLoop
         if (loop.taskSource?.kind !== 'goal' || loop.taskSource.goalId !== request.demandId) fail()

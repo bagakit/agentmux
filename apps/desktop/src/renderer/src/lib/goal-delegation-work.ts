@@ -1,3 +1,4 @@
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { useEffect } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { GoalDelegationResult } from '@agentmux/core/goal-delegation'
@@ -58,7 +59,7 @@ export function refreshGoalDelegations(goalId: string): Promise<void> {
 export function useGoalDelegationObservation(goal: DemandRecord, active = true): void {
   const references = JSON.stringify([(goal.delegations ?? []).map(item => [item.hostId, item.operationId,
     item.sourceMessageId, item.workerRunId, item.report?.replyMessageId, item.collection?.operationId]),
-    (goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => [start.hostId, start.operationId, start.runId])])
+    (goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => ['target' in start ? demandAgentReferenceKey(start.target) : start.hostId, start.operationId, start.runId])])
   useEffect(() => {
     if (!active || !goal.delegations?.length && !goal.dispatches?.some(start => start.execution === 'finite')) return
     const changed = () => { void refreshGoalDelegations(goal.id) }
