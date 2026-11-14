@@ -25,3 +25,7 @@
 .browser-profile-extensions__scope code { white-space: normal; overflow-wrap: anywhere; }
 .browser-profile-extensions__actions .browser-profile-extensions__primary { color: var(--accent); font-weight: 600; }
 .browser-profile-extensions__notice { color: var(--text-2); }
+
+.browser-profile-extensions__online { display: grid; gap: 8px; padding-block: 8px; border-block: 1px solid var(--line); }
+.browser-profile-extensions__online label { display: grid; gap: 4px; color: var(--text-3); font-size: 11px; }
+.browser-profile-extensions__online input, .browser-profile-extensions__online select { min-width: 0; width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-1); color: var(--text-1); font: inherit; }

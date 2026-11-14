@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { mintObjectId } from '@agentmux/core/object-id'
-import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionPending } from '@agentmux/core/control'
+import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionPending, BrowserProfileExtensionInputSource } from '@agentmux/core/control'
 import type { BrowserProfileSummary } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { browserProfiles } from '../../lib/browser-profiles'
@@ -13,6 +13,8 @@ const RefreshIcon = semanticIconComponent('action.refresh')
 /** A view of the original Profile extension owner; only the pending human-readable review is local. */
 export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileSummary }) {
   const [open, setOpen] = useState(false), [entries, setEntries] = useState<BrowserProfileExtension[]>([]), [review, setReview] = useState<BrowserProfileExtensionReview | null>(null)
+  const [online, setOnline] = useState(false), [onlineKind, setOnlineKind] = useState<'package-url' | 'update-manifest'>('package-url')
+  const [onlineUrl, setOnlineUrl] = useState(''), [addonId, setAddonId] = useState('')
   const [pending, setPending] = useState<BrowserProfileExtensionPending[]>([])
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null)
   const revision = useRef(profile.revision), mounted = useRef(true), latest = useRef(profile)
@@ -33,15 +35,20 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
     const path = kind === 'directory' ? await api.ui.chooseDirectory() : (await api.ui.chooseFiles())?.[0]
     if (!path || !mounted.current) return
     const operationId = mintObjectId()
-    const prepared = await api.browser.prepareProfileExtension(profile.id, revision.current, operationId, path, extensionId)
+    const prepared = await api.browser.prepareProfileExtension(profile.id, revision.current, operationId, { kind: 'local', path }, extensionId)
     if (mounted.current && latest.current.id === prepared.profileId) setReview(prepared)
+  }
+  const prepareOnline = async () => {
+    const source: BrowserProfileExtensionInputSource = onlineKind === 'package-url' ? { kind: onlineKind, url: onlineUrl.trim() } : { kind: onlineKind, url: onlineUrl.trim(), addonId: addonId.trim() }
+    const prepared = await api.browser.prepareProfileExtension(profile.id, revision.current, mintObjectId(), source)
+    if (mounted.current && latest.current.id === prepared.profileId) { setReview(prepared); setOnline(false) }
   }
   const apply = async () => {
     if (!review) return
     const result = await api.browser.applyProfileExtension(profile.id, review.expectedRevision, review.reviewId)
     if (!mounted.current) return
     if (result.outcome === 'cancelled') { setNotice('Nothing changed. The prepared package remains available for review.'); return }
-    setReview(null); setNotice('Extension saved. Native load is reported separately below.'); await refresh(); await browserProfiles.refresh()
+    setReview(null); setNotice('Extension saved. Load status is shown with the installed item.'); await refresh(); await browserProfiles.refresh()
   }
   return <section className="browser-profile-editor__section browser-profile-extensions" aria-label="Extensions">
     <button type="button" className="browser-profile-extensions__heading" aria-expanded={open} onClick={() => setOpen(value => !value)}>
@@ -51,14 +58,22 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
       <p className="browser-profile-editor__quiet">Approved packages run only in this Profile. Host support varies; loaded does not mean every Chrome API works.</p>
       <div className="browser-profile-extensions__actions">
         <button type="button" disabled={busy} onClick={() => void run(() => choose('package'))}><ExtensionIcon size={13} /> Add package…</button>
+        <button type="button" disabled={busy} onClick={() => setOnline(value => !value)} aria-expanded={online}>From URL…</button>
         <button type="button" disabled={busy} onClick={() => void run(() => choose('directory'))}>Unpacked directory…</button>
         <button type="button" disabled={busy} onClick={() => void run(refresh)} aria-label="Refresh extension load state"><RefreshIcon size={13} /></button>
       </div>
+      {online ? <form className="browser-profile-extensions__online" aria-label="Prepare online extension" onSubmit={event => { event.preventDefault(); void run(prepareOnline) }}>
+        <label>Source<select aria-label="Online extension source" disabled={busy} value={onlineKind} onChange={event => setOnlineKind(event.target.value as typeof onlineKind)}><option value="package-url">Package URL</option><option value="update-manifest">Update manifest</option></select></label>
+        <label>HTTPS address<input type="url" autoComplete="off" spellCheck={false} required disabled={busy} value={onlineUrl} onChange={event => setOnlineUrl(event.target.value)} placeholder="https://…" /></label>
+        {onlineKind === 'update-manifest' ? <label>Add-on ID<input required autoComplete="off" spellCheck={false} disabled={busy} value={addonId} onChange={event => setAddonId(event.target.value)} /></label> : null}
+        <p className="browser-profile-editor__quiet">Downloads use no website sign-in. Preparing a package does not install it.</p>
+        <div className="browser-profile-extensions__actions"><button type="button" disabled={busy} onClick={() => setOnline(false)}>Cancel</button><button type="submit" disabled={busy || !onlineUrl.trim() || onlineKind === 'update-manifest' && !addonId.trim()}>Prepare for review</button></div>
+      </form> : null}
       {pending.map(intent => <div key={intent.operationId} className="browser-profile-extensions__issue" role="status"><p>Extension {intent.kind} v{intent.version} remains unconfirmed. Original packages and Profile data are kept.</p><details><summary>Original operation</summary><code>{intent.operationId}</code><p>Inspect this operation before another action. It will not be replayed automatically.</p></details></div>)}
       {!entries.length && !review && !error ? <p className="browser-profile-editor__quiet">No managed extensions in this Profile.</p> : null}
       {entries.length ? <ul className="browser-profile-extensions__list">{entries.map(entry => <li key={entry.id}>
         <div className="browser-profile-extensions__identity"><strong>{entry.name}</strong><span>v{entry.version}</span><span data-state={entry.application.state}>{entry.application.state === 'loaded' ? 'Loaded' : entry.application.state === 'failed' ? 'Load failed' : 'Load unknown'}</span></div>
-        <p className="browser-profile-editor__quiet">{entry.source.label} · {entry.source.kind.toUpperCase()}</p>
+        <p className="browser-profile-editor__quiet">{entry.source.label}</p>
         {entry.application.reason ? <p className="browser-profile-extensions__issue">{entry.application.reason}</p> : null}
         <div className="browser-profile-extensions__actions">
           {entry.application.state !== 'loaded' ? <button type="button" disabled={busy} onClick={() => void run(async () => { await api.browser.loadProfileExtension(profile.id, entry.id); await refresh() })}>Load</button> : null}
@@ -90,7 +105,8 @@ function ExtensionScope({ item }: { item: Pick<BrowserProfileExtensionReview, 's
     ...item.permissions.api.map(value => ['API', value]), ...item.permissions.hosts.map(value => ['Host', value]),
     ...item.permissions.contentScripts.map(value => ['Content', value]), ...item.permissions.optional.map(value => ['Optional', value])]
   return <div className="browser-profile-extensions__scope">
-    <p>{item.source.signature === 'package-verified' ? 'Package signature verified. Publisher trust is not established.' : 'Local source · package signature not verified.'}</p>
+    <p>{item.source.signature === 'package-verified' ? 'Package signature verified. Publisher trust is not established.' : 'Package signature not verified.'}</p>
+    {item.source.retrieval ? <p>Downloaded from {item.source.retrieval.origin}{item.source.retrieval.format ? ` · ${item.source.retrieval.format === 'chromium-xml' ? 'Chromium update manifest' : 'WebExtensions update manifest'}` : ''}</p> : null}
     {item.source.homepage ? <p>Homepage: {item.source.homepage}</p> : null}{item.source.updateUrl ? <p>Declared update source: {item.source.updateUrl}</p> : null}
     {rows.length ? <dl>{rows.map(([label, value], index) => <div key={index}><dt>{label}</dt><dd>{value}</dd></div>)}</dl> : <p>No declared extension permissions.</p>}
     <details><summary>Package identity</summary><code>{item.sha256}</code></details>

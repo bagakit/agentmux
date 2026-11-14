@@ -89,7 +89,7 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
       return { operation: request.operation, ...await bookmarkOwner(ports).open(request.profileId, request.bookmarkId, request.browserId, request.expectedRevision, request.operationId, url => ports.openBookmark!(request, url)) }
     }
     case 'browser.profile.extension.ls': return { operation: request.operation, ...await extensionOwner(ports).list(request.profileId, request.operationId) }
-    case 'browser.profile.extension.prepare': return { operation: request.operation, review: await extensionOwner(ports).review(request.profileId, request.expectedRevision, request.operationId, request.sourcePath, request.extensionId) }
+    case 'browser.profile.extension.prepare': return { operation: request.operation, review: await extensionOwner(ports).review(request.profileId, request.expectedRevision, request.operationId, request.source, request.extensionId) }
     case 'browser.profile.extension.apply': return { operation: request.operation, ...await extensionOwner(ports).apply(request.profileId, request.expectedRevision, request.reviewId) }
     case 'browser.profile.extension.remove': return { operation: request.operation, ...await extensionOwner(ports).remove(request.profileId, request.expectedRevision, request.extensionId, request.operationId) }
     case 'browser.profile.extension.load': return { operation: request.operation, ...await extensionOwner(ports).load(request.profileId, request.extensionId) }

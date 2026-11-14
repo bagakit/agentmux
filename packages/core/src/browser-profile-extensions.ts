@@ -1,8 +1,13 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 
+export type BrowserProfileExtensionInputSource =
+  | { kind: 'local'; path: string }
+  | { kind: 'package-url'; url: string }
+  | { kind: 'update-manifest'; url: string; addonId: string }
+
 /** Native extension semantics stay with the Browser host. These are approved package facts only. */
-export type BrowserProfileExtensionSource = { kind: 'directory' | 'zip' | 'crx'; label: string; homepage?: string; updateUrl?: string; signature: 'not-verified' | 'package-verified' }
+export type BrowserProfileExtensionSource = { kind: 'directory' | 'zip' | 'crx'; label: string; homepage?: string; updateUrl?: string; signature: 'not-verified' | 'package-verified'; retrieval?: { kind: 'package-url' | 'update-manifest'; origin: string; packageSha256: string; manifestSha256?: string; format?: 'chromium-xml' | 'webextensions-json' } }
 export type BrowserProfileExtensionPermissions = { api: string[]; hosts: string[]; contentScripts: string[]; optional: string[]; fileAccess: false }
 export type BrowserProfileExtensionApplication = { state: 'loaded' | 'unknown' | 'failed'; reason?: string }
 export type BrowserProfileExtension = { id: string; nativeId: string; name: string; version: string; sha256: string; source: BrowserProfileExtensionSource;
@@ -17,7 +22,7 @@ export type BrowserProfileExtensionOperation = typeof BROWSER_PROFILE_EXTENSION_
 export function isBrowserProfileExtensionOperation(value: unknown): value is BrowserProfileExtensionOperation { return typeof value === 'string' && (BROWSER_PROFILE_EXTENSION_OPERATIONS as readonly string[]).includes(value) }
 export type BrowserProfileExtensionPayload =
   | { operation: 'browser.profile.extension.ls'; profileId: string; operationId?: string }
-  | { operation: 'browser.profile.extension.prepare'; profileId: string; expectedRevision: string; operationId: string; sourcePath: string; extensionId?: string }
+  | { operation: 'browser.profile.extension.prepare'; profileId: string; expectedRevision: string; operationId: string; source: BrowserProfileExtensionInputSource; extensionId?: string }
   | { operation: 'browser.profile.extension.apply'; profileId: string; expectedRevision: string; reviewId: string }
   | { operation: 'browser.profile.extension.remove'; profileId: string; expectedRevision: string; extensionId: string; operationId: string }
   | { operation: 'browser.profile.extension.load'; profileId: string; extensionId: string }
@@ -30,10 +35,30 @@ const fail = (): never => { throw new AgentMuxError('The exact extension request
 const text = (value: unknown): string => { if (typeof value !== 'string' || !value || /[\u0000-\u001f\u007f]/.test(value)) return fail(); return value }
 const strings = (value: unknown): string[] => { if (!Array.isArray(value)) return fail(); return value.map(text) }
 export function parseBrowserProfileExtensionSource(value: unknown): BrowserProfileExtensionSource {
-  const r = rpcRecord(value, ['kind', 'label', 'homepage', 'updateUrl', 'signature'])
+  const r = rpcRecord(value, ['kind', 'label', 'homepage', 'updateUrl', 'signature', 'retrieval'])
   if (!['directory', 'zip', 'crx'].includes(r.kind as string) || !['not-verified', 'package-verified'].includes(r.signature as string)) return fail()
   return { kind: r.kind as BrowserProfileExtensionSource['kind'], label: text(r.label), signature: r.signature as BrowserProfileExtensionSource['signature'],
+    ...(r.retrieval === undefined ? {} : { retrieval: retrieval(r.retrieval) }),
     ...(r.homepage === undefined ? {} : { homepage: text(r.homepage) }), ...(r.updateUrl === undefined ? {} : { updateUrl: text(r.updateUrl) }) }
+}
+export function parseBrowserProfileExtensionInputSource(value: unknown): BrowserProfileExtensionInputSource {
+  const r = rpcRecord(value)
+  if (r.kind === 'local') { rpcRecord(r, ['kind', 'path']); return { kind: 'local', path: text(r.path) } }
+  if (r.kind !== 'package-url' && r.kind !== 'update-manifest') return fail()
+  rpcRecord(r, r.kind === 'package-url' ? ['kind', 'url'] : ['kind', 'url', 'addonId'])
+  let url: URL
+  try { url = new URL(text(r.url)) } catch { return fail() }
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash) return fail()
+  return r.kind === 'package-url' ? { kind: r.kind, url: url.href } : { kind: r.kind, url: url.href, addonId: text(r.addonId) }
+}
+function retrieval(value: unknown): NonNullable<BrowserProfileExtensionSource['retrieval']> {
+  const r = rpcRecord(value, ['kind', 'origin', 'packageSha256', 'manifestSha256', 'format'])
+  if (!['package-url', 'update-manifest'].includes(r.kind as string)) return fail()
+  const origin = text(r.origin)
+  try { if (new URL(origin).origin !== origin || !origin.startsWith('https://')) return fail() } catch { return fail() }
+  if (r.format !== undefined && !['chromium-xml', 'webextensions-json'].includes(r.format as string)) return fail()
+  return { kind: r.kind as 'package-url' | 'update-manifest', origin, packageSha256: digest(r.packageSha256),
+    ...(r.manifestSha256 === undefined ? {} : { manifestSha256: digest(r.manifestSha256) }), ...(r.format === undefined ? {} : { format: r.format as 'chromium-xml' | 'webextensions-json' }) }
 }
 export function parseBrowserProfileExtensionPermissions(value: unknown): BrowserProfileExtensionPermissions {
   const r = rpcRecord(value, ['api', 'hosts', 'contentScripts', 'optional', 'fileAccess'])
@@ -52,11 +77,11 @@ function receipt(value: unknown): BrowserProfileExtensionReceipt {
 export function parseBrowserProfileExtensionPayload(value: unknown): BrowserProfileExtensionPayload {
   const r = rpcRecord(value), operation = r.operation as BrowserProfileExtensionOperation, profileId = text(r.profileId)
   const fields = operation === 'browser.profile.extension.ls' ? ['operationId'] : operation === 'browser.profile.extension.prepare'
-    ? ['expectedRevision', 'operationId', 'sourcePath', 'extensionId'] : operation === 'browser.profile.extension.apply'
+    ? ['expectedRevision', 'operationId', 'source', 'extensionId'] : operation === 'browser.profile.extension.apply'
       ? ['expectedRevision', 'reviewId'] : operation === 'browser.profile.extension.remove' ? ['expectedRevision', 'extensionId', 'operationId'] : operation === 'browser.profile.extension.load' ? ['extensionId'] : fail()
   rpcRecord(r, ['operation', 'profileId', 'requestId', 'schemaVersion', ...fields], 'INVALID_CONTROL_REQUEST')
   if (operation === 'browser.profile.extension.ls') return { operation, profileId, ...(r.operationId === undefined ? {} : { operationId: text(r.operationId) }) }
-  if (operation === 'browser.profile.extension.prepare') return { operation, profileId, expectedRevision: text(r.expectedRevision), operationId: text(r.operationId), sourcePath: text(r.sourcePath), ...(r.extensionId === undefined ? {} : { extensionId: text(r.extensionId) }) }
+  if (operation === 'browser.profile.extension.prepare') return { operation, profileId, expectedRevision: text(r.expectedRevision), operationId: text(r.operationId), source: parseBrowserProfileExtensionInputSource(r.source), ...(r.extensionId === undefined ? {} : { extensionId: text(r.extensionId) }) }
   if (operation === 'browser.profile.extension.apply') return { operation, profileId, expectedRevision: text(r.expectedRevision), reviewId: text(r.reviewId) }
   if (operation === 'browser.profile.extension.remove') return { operation, profileId, expectedRevision: text(r.expectedRevision), extensionId: text(r.extensionId), operationId: text(r.operationId) }
   return { operation: 'browser.profile.extension.load', profileId, extensionId: text(r.extensionId) }

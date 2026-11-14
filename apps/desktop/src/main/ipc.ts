@@ -526,7 +526,7 @@ export async function registerIpc(args: {
     return actual
   },revealLocal:path=>shell.showItemInFolder(path)}))
   browserProfiles.cookieFiles.setConfirmationHandler((request,signal)=>confirmProfileCookieFile(request,signal,args.window,browserProfiles.listProfiles().find(p=>p.id===request.profileId)))
-  browserProfiles.extensions.setConfirmationHandler(async ({ kind, review, localSourcePath }) => {
+  browserProfiles.extensions.setConfirmationHandler(async ({ kind, review, localSourcePath, onlineSource }) => {
     const profile = browserProfiles.listProfiles().find(profile => profile.id === review.profileId)
     if (!profile || profile.revision !== review.expectedRevision || args.window.isDestroyed()) return false
     const verb = kind === 'remove' ? 'Remove' : kind === 'update' ? 'Update' : 'Install'
@@ -534,7 +534,7 @@ export async function registerIpc(args: {
       ...review.permissions.contentScripts.map(value => 'Content: ' + value), ...review.permissions.optional.map(value => 'Optional: ' + value)]
     const answer = await dialog.showMessageBox(args.window, { type: 'warning', buttons: ['Cancel', verb + ' extension'], defaultId: 0, cancelId: 0,
       message: `${verb} “${review.name}” in “${profile.label}”?`,
-      detail: `Version ${review.version} · ${review.source.label}\n${localSourcePath ? 'Local source: ' + localSourcePath + '\n' : ''}${review.source.signature === 'package-verified' ? 'Package signature verified; publisher trust is not established.' : 'This local source has no verified package signature.'}\n\n${permissions.length ? permissions.join('\n') : 'No declared extension permissions.'}\n\n${kind === 'update' ? 'New permission scope:\n' + (review.addedPermissions.join('\n') || 'No added permissions.') + '\n\n' : ''}File access remains off. Extension support depends on the host; loading does not guarantee every Chrome API. Profile sign-ins and Browser input remain.` })
+      detail: `Version ${review.version} · ${review.source.label}\n${localSourcePath ? 'Local source: ' + localSourcePath + '\n' : ''}${onlineSource ? 'Online source: ' + onlineSource + '\n' : ''}${review.source.retrieval ? 'Package host: ' + review.source.retrieval.origin + '\n' : ''}${review.source.signature === 'package-verified' ? 'Package signature verified; publisher trust is not established.' : 'This package has no verified signature.'}\n\n${permissions.length ? permissions.join('\n') : 'No declared extension permissions.'}\n\n${kind === 'update' ? 'New permission scope:\n' + (review.addedPermissions.join('\n') || 'No added permissions.') + '\n\n' : ''}File access remains off. Extension support depends on the host; loading does not guarantee every Chrome API. Profile sign-ins and Browser input remain.` })
     return answer.response === 1
   })
   // Every page, child windows included, keeps WebRTC on its Profile's proxy; one hook instead of every creation site.
