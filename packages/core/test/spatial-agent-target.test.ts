@@ -23,7 +23,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-spatial-target-')); releases.push(() => rm(root, { recursive: true, force: true }))
   const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
   const folder = await spatial.registerFolder({ id: 'b-workspace', hostId: 'local', name: 'B project', path: '/b/project' })
-  let observed: AgentMuxAgentSession | undefined, runtimeId = 'runtime-d', pending = false, frozen: AgentExecutionOpenInput | undefined
+  let observed: AgentMuxAgentSession | undefined, runtimeId = 'runtime-d', pending = false, partialAfterStart = false, bindingConnected = false, frozen: AgentExecutionOpenInput | undefined
   const create = vi.fn(async (input: AgentExecutionOpenInput['agent']) => {
     observed = { kind: 'agent', agentSessionId: input.agentSessionId, hostId: 'local', providerId: 'codex', executorId: input.executorId,
       workspacePath: input.workspacePath, run: { runId: 'original-d-run' }, createdAt: 1, updatedAt: 1, retiredRuns: [],
@@ -32,18 +32,27 @@ async function fixture() {
         executorRevision: input.executorRevision, createdRun: { runId: 'original-d-run' }, initialPrompt: 'not-requested' } } as AgentMuxAgentSession
     return { session: observed, creation: observed.creation! }
   })
-  const client = { resolveAgentCreationSessionId: vi.fn(async () => 'original-d-session'),
+  const agentInput = vi.fn(async () => { throw Error('No Agent input belongs to this Host continuation fixture.') })
+  const client = { writeAgent: agentInput, pasteAgent: agentInput, submitAgentPrompt: agentInput, resolveAgentCreationSessionId: vi.fn(async () => 'original-d-session'),
     inspectAgentCreation: vi.fn(async () => { if (!observed) throw new AgentMuxError('No original creation is observed.', 'AGENT_CREATION_UNKNOWN'); return observed }),
     listHostExecutors: vi.fn(async () => ({ runtimeId, executors: [{ executorId: 'd-executor', configRevision: 'd-original-revision' }] })),
     hostEnvironment: vi.fn(async () => ({ homeDirectory: '/d/home' })), createHostAgentWithDelivery: create }
   const bindings = { create: vi.fn(async (input: AgentExecutionOpenInput) => {
       frozen = structuredClone(input)
       if (pending) throw new AgentMuxError('Original helper preparation remains unconfirmed.', 'EXECUTION_HELPER_UNAVAILABLE')
-      return { ...await create(input.agent), execution: {} }
+      const created = await create(input.agent)
+      bindingConnected = !partialAfterStart
+      if (partialAfterStart) throw new AgentMuxError('The Agent exists but its original binding is not connected.', 'EXECUTION_READER_UNAVAILABLE')
+      return { ...created, execution: {} }
     }), continueOriginal: vi.fn(async reference => {
       expect(reference).toEqual({ bindingId: frozen!.bindingId, agentSessionId: frozen!.agent.agentSessionId, createOperationId: frozen!.agent.createOperationId })
-      return { ...await create(frozen!.agent), execution: {} }
-    }) }
+      bindingConnected = true
+      return observed ? { session: observed, creation: observed.creation!, execution: {} } : { ...await create(frozen!.agent), execution: {} }
+    }), inspect: vi.fn(async (bindingId: string) => frozen && bindingId === frozen.bindingId ? { bindingId: frozen.bindingId, agentHostId: frozen.agentHostId,
+      resourceHostId: frozen.resourceHostId, agentSessionId: frozen.agent.agentSessionId, resourceWorkspacePath: frozen.resourceWorkspacePath,
+      continuation: { bindingId: frozen.bindingId, agentSessionId: frozen.agent.agentSessionId, createOperationId: frozen.agent.createOperationId },
+      state: bindingConnected ? 'connected' as const : 'unavailable' as const,
+      ...(!bindingConnected ? { diagnostic: { code: 'EXECUTION_READER_UNAVAILABLE', message: 'The original binding is not connected.' } } : {}) } : null) }
   const identity = { runtimeId: 'runtime-b', ownerInstanceId: 'instance-b', protocolVersion: 2, processId: process.pid, ctxmux: null, availability: 'connected' }
   const runtime = { client: { inspectAgentCreation: vi.fn(async () => { throw Error('A B-local SID lookup cannot locate a D Session.') }) }, ownerIdentity: () => identity,
     executionHost: vi.fn(async (hostId: string) => { expect(hostId).toBe('D-in-B'); return { runtimeId, client } }), executionBindings: bindings } as unknown as AgentMuxHeadlessRuntime
@@ -54,8 +63,8 @@ async function fixture() {
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); releases.push(() => rpc.dispose())
   const input = { operationId: 'source-create-operation', content: { kind: 'new-agent' as const, executorId: 'd-executor', agentTarget: { hostId: 'D-in-B', runtimeId } },
     destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true as const }, focus: false }
-  return { root, rpc, spatial, runtime, client, create, bindings, input, folder, control,
-    pending: () => { pending = true }, changeRuntime: () => { runtimeId = 'another-runtime' }, frozen: () => frozen }
+  return { root, rpc, spatial, runtime, client, create, bindings, input, folder, control, agentInput,
+    pending: () => { pending = true }, partialAfterStart: () => { partialAfterStart = true }, changeRuntime: () => { runtimeId = 'another-runtime' }, frozen: () => frozen }
 }
 
 it('the actual CLI retains a B-relative Agent route and Runtime and does not route it to a focused Desktop creator', async () => {
@@ -79,6 +88,7 @@ it('public source agent.open freezes B placement and D execution separately, and
   expect(snapshot.scope.regions).toMatchObject([{ execution: { hostId: 'D-in-B', runtimeId: 'runtime-d', cwd: '/d/home' }, runId: 'original-d-run' }])
   await f.rpc.call('agent.open', f.input)
   expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.client.listHostExecutors).toHaveBeenCalledTimes(1)
+  expect(f.bindings.continueOriginal).not.toHaveBeenCalled()
   expect(f.runtime.client.inspectAgentCreation).not.toHaveBeenCalled()
 })
 it('an explicit same-operation continuation uses only the original frozen binding while B placement stays independent of D home', async () => {
@@ -91,6 +101,48 @@ it('an explicit same-operation continuation uses only the original frozen bindin
   expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1)
   expect(f.client.listHostExecutors).toHaveBeenCalledTimes(1)
   expect(f.create).toHaveBeenCalledTimes(1)
+})
+it('a started Agent with an incomplete binding continues the same public Host operation without another Agent effect', async () => {
+  const f = await fixture(); f.partialAfterStart()
+  const first = await f.rpc.call('agent.open', f.input)
+  expect(first).toMatchObject({ outcome: 'partial', agent: { agentSessionId: 'original-d-session', runId: 'original-d-run' } })
+  const original = spatialAgentOpenRecord((await f.spatial.read())!.graph, f.input.operationId)!
+  expect(await f.bindings.inspect(original.executionBinding!.bindingId)).toMatchObject({ state: 'unavailable' })
+  expect(f.create).toHaveBeenCalledTimes(1)
+  const inspected = await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })
+  expect(inspected.request?.report).toMatchObject({ outcome: 'partial', agent: first.agent })
+  expect(f.bindings.continueOriginal).not.toHaveBeenCalled()
+  const result = await f.rpc.call('agent.open', structuredClone(f.input))
+  expect(f.bindings.continueOriginal).toHaveBeenCalledExactlyOnceWith(original.executionBinding, expect.anything())
+  expect(result).toMatchObject({ outcome: 'opened', operationId: f.input.operationId,
+    agent: { agentSessionId: first.agent!.agentSessionId, runId: first.agent!.runId }, to: first.to })
+  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1)
+  expect(f.client.listHostExecutors).toHaveBeenCalledTimes(1); expect(f.agentInput).not.toHaveBeenCalled()
+  expect(spatialAgentOpenRecord((await f.spatial.read())!.graph, f.input.operationId)).toEqual(original)
+})
+it('a binding observation failure keeps the started Agent and original partial request without repeating effects', async () => {
+  const f = await fixture(); f.partialAfterStart()
+  const first = await f.rpc.call('agent.open', f.input)
+  f.bindings.inspect.mockRejectedValueOnce(new Error('Original binding observation is temporarily unavailable.'))
+  const result = await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })
+  expect(result.request?.report).toMatchObject({ outcome: 'partial', agent: first.agent, to: first.to })
+  expect(result.request?.report?.issues).toContainEqual(expect.objectContaining({ message: 'Original binding observation is temporarily unavailable.' }))
+  expect(f.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.create).toHaveBeenCalledTimes(1)
+  expect(f.agentInput).not.toHaveBeenCalled()
+  expect((await f.spatial.read())!.graph.regions).toMatchObject([{ kind: 'agent', agentSessionId: first.agent!.agentSessionId, runId: first.agent!.runId }])
+})
+it('a same-SID binding receipt for another creation operation cannot complete the original partial request', async () => {
+  const f = await fixture(); f.partialAfterStart()
+  const first = await f.rpc.call('agent.open', f.input)
+  const binding = await f.bindings.inspect(f.frozen()!.bindingId)
+  if (!binding) throw Error('The fixture must retain its original binding.')
+  f.bindings.inspect.mockResolvedValueOnce({ ...binding, state: 'connected',
+    continuation: { ...binding.continuation, createOperationId: 'another-creation-operation' } })
+  const result = await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })
+  expect(result.request?.report).toMatchObject({ outcome: 'partial', agent: first.agent, to: first.to })
+  expect(result.request?.report?.issues).toContainEqual(expect.objectContaining({ code: 'EXECUTION_INTENT_UNCONFIRMED' }))
+  expect(f.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.create).toHaveBeenCalledTimes(1)
+  expect(f.agentInput).not.toHaveBeenCalled()
 })
 it('a changed original B Zone rejects only the replay and retains the admitted operation without dispatching a new binding', async () => {
   const f = await fixture(); f.pending(); await f.rpc.call('agent.open', f.input)
