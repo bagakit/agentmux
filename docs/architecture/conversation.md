@@ -102,7 +102,7 @@ captured 历史由 Session Store 持有，当前或近期窗口只是查询，�
 
 | Provider | 原生来源与身份 | 变化观察 | 原生 Resume |
 | --- | --- | --- | --- |
-| Grok | [`grok-native-history.ts`](../../packages/core/src/providers/grok-native-history.ts)：耐久对话 owner 为 `updates.jsonl`；`chat_history.jsonl` 可被 compaction 替换；身份与同目录 `summary.json` 及 Session 目录对齐 | 已核验的 JSONL（含首次落盘） | Session ID |
+| Grok | [`native-history.ts`](../../packages/providers/src/grok/native-history.ts)：耐久对话 owner 为 `updates.jsonl`；`chat_history.jsonl` 可被 compaction 替换；身份与同目录 `summary.json` 及 Session 目录对齐 | 已核验的 JSONL（含首次落盘） | Session ID |
 | Pi | [`pi.ts`](../../packages/core/src/providers/pi.ts)／[`pi-native-history.ts`](../../packages/core/src/providers/pi-native-history.ts)：`session_file` 的分支 JSONL；身份来自原生 session header 与受信 Hook binding | 同一份 JSONL | session file |
 | Antigravity | [`antigravity-native-session.ts`](../../packages/providers/src/antigravity/native-session.ts)：主 CLI 持有的 `presence/<UUID>.lock`；[`antigravity-native-history.ts`](../../packages/providers/src/antigravity/native-history.ts) 读 compact `transcript.jsonl` 与同目录 `transcript_full.jsonl` | 两份 transcript，一起清理 | Conversation UUID |
 | Cursor | [`cursor-native-history.ts`](../../packages/core/src/providers/cursor-native-history.ts)：当前 Run 打开的 `store.db` 与原生 metadata／conversation protobuf | DB／WAL／journal 原生提交的实际 revision（`observeNativeSqliteHistory`） | Conversation UUID |
@@ -116,7 +116,7 @@ Hook、Permission、Usage 与问题回答各自单独声明；history reader 可
 
 - [Claude](../../packages/core/src/providers/claude-native-history.ts) 对未中断的真实助手消息读取 `message.stop_reason`，把 `tool_use` 映射为 progress、`end_turn` 映射为 final；未知原因保留为未分类的正文。
 - [Codex](../../packages/core/src/providers/codex-saved-history.ts) 消费消息的 `commentary`／`final_answer`。
-- [Grok](../../packages/core/src/providers/grok-native-history.ts) 把同一 Session／prompt 的连续公开文本块组成一条消息：首块的字节位置持有稳定身份，之后的文字与成功终局更新这条消息；工具、思考与其他原生记录各保用途。 原 `user_message_chunk` 的 `_meta.syntheticPrompt === true` 明确标记原生合成输入，Provider 将其投影为 `activity` 并贡献既有 `recordPurpose: system-event`；`hideFromScrollback` 单独出现不改变分类，原正文标签不参与判定，`hostTurn` 的私有内容资格保持。组装只存在于本次 Provider 读取中：历史页保留快照切点，精确读取沿字节位置定位，旧的成功终局引用仍能读到完整回复。
+- [Grok](../../packages/providers/src/grok/native-history.ts) 把同一 Session／prompt 的连续公开文本块组成一条消息：首块的字节位置持有稳定身份，之后的文字与成功终局更新这条消息；工具、思考与其他原生记录各保用途。 原 `user_message_chunk` 的 `_meta.syntheticPrompt === true` 明确标记原生合成输入，Provider 将其投影为 `activity` 并贡献既有 `recordPurpose: system-event`；`hideFromScrollback` 单独出现不改变分类，原正文标签不参与判定，`hostTurn` 的私有内容资格保持。组装只存在于本次 Provider 读取中：历史页保留快照切点，精确读取沿字节位置定位，旧的成功终局引用仍能读到完整回复。
 
 Codex 保存的 rollout 由首条 `session_meta` 中的 `history_mode` 声明格式；之后被复制进 fork 的元数据不能改写它（[codex-saved-history.ts](../../packages/core/src/providers/codex-saved-history.ts) 的 `open`）：
 
