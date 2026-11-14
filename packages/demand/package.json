@@ -46,6 +46,14 @@
     "./relations": {
       "types": "./dist/src/relations.d.ts",
       "import": "./dist/src/relations.js"
+    },
+    "./goal-patrol": {
+      "types": "./dist/src/goal-patrol.d.ts",
+      "import": "./dist/src/goal-patrol.js"
+    },
+    "./responsibility": {
+      "types": "./dist/src/responsibility.d.ts",
+      "import": "./dist/src/responsibility.js"
     }
   },
   "bin": {
