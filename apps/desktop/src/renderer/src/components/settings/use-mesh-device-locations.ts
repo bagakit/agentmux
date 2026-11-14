@@ -10,7 +10,7 @@ import { SAVED_CLIENT_ID, savedHostId } from './MeshSavedConnections'
 
 type NodeRead = NodePublishingResults['node.location']
 
-function mapPoints(replies: ReadonlyMap<string, NodeRead>, networkId?: string): ReadonlyMap<string, MeshDeviceLocation> {
+function mapPoints(replies: ReadonlyMap<string, NodeRead>, networkId?: string | null): ReadonlyMap<string, MeshDeviceLocation> {
   const points = new Map<string, MeshDeviceLocation>()
   const origins = new Map<string, string | null>()
   for (const [hostId, reply] of replies) {
@@ -32,7 +32,7 @@ function mapPoints(replies: ReadonlyMap<string, NodeRead>, networkId?: string): 
 const empty = new Map<string, NodeRead>()
 
 /** The original Node is reached through its own saved carrier. Viewing the hidden graph starts no work. */
-export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boolean, refresh: number, networkId?: string) {
+export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boolean, refresh: number, networkId?: string | null) {
   const links = useAppStore(state => state.meshDeviceLinks.saved)
   const key = JSON.stringify([hosts.map(clusterHostKey), links])
   const [observed, setObserved] = useState<{ key: string; replies: ReadonlyMap<string, NodeRead> }>()
