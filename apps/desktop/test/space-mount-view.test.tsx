@@ -12,6 +12,7 @@ import { createWorkspaceLayout, setWorkbenchRegionSplitRatio, splitWorkbenchRegi
 import { dispatchWorkbenchCommand } from '../src/renderer/src/lib/workbench-shortcuts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { spaceMountKey, type SpaceMountRecord } from '../src/shared/space-mount'
+import { mountedAgentOpenInput, mountedAgentOpenKey, type MountedAgentOpenInput } from '../src/renderer/src/lib/space-mount-launch'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { spaceMountFixture } from './helpers/space-mount-fixture'
 
@@ -557,4 +558,60 @@ it.each(['source','slot'] as const)('a pending original open cannot swallow an e
  const check=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(x=>x.textContent==='Check original task')!
  await act(async()=>check.click());await vi.waitFor(()=>expect(inspected).toHaveLength(1))
  expect(inspected[0]).toEqual({hostId:f.target.hostId,reference:f.target.reference,requestId:first.request.operationId});expect(requests).toHaveLength(2)
+})
+
+it('the real Window Store keeps healthy members and private workface when a future association has no execution identity', async () => {
+  const f = await mountedFixture(), source = await f.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
+  // Controlled incoming DTOs exercise the existing Store entry. This does not
+  // claim this Main's Core produces the future association observation.
+  const snapshot = { ...source, scope: { ...source.scope, regions: source.scope.regions.map(region => ({ ...region,
+    kind: 'agent' as const, agentSessionId: 'original-healthy-SID', runId: 'original-healthy-Run',
+    execution: { hostId: 'local', cwd: '/original/project', runtimeId: f.target.reference.runtimeId } })) } }
+  const localTab = createWorkbenchTab('original-local-tab', { kind: 'launcher', regionId: 'original-local-region', workspaceId: 'workspace' })
+  const tabs = { [localTab.id]: localTab }, layouts = { workspace: createWorkspaceLayout('original-local-group', [localTab.id]) }
+  useAppStore.setState({ tabs, layouts, activeWorkspaceId: 'workspace' })
+  useAppStore.getState().mountSpace(f.target)
+  useAppStore.getState().observeSpaceMount(f.target, { snapshot, reading: false })
+  useAppStore.getState().editSpaceMountView(f.key, initialMountedSpaceView(snapshot))
+  useAppStore.getState().editSpaceMountDraft(f.key, f.tabId, f.regionId, 'Keep the original unsent draft')
+  const slot = { kind: 'region' as const, tabId: f.tabId, regionId: f.regionId }, requestKey = mountedAgentOpenKey(f.target, slot)
+  const pending: MountedAgentOpenInput = { kind: 'agent-open', target: f.target, slot, submitted: true, request: {
+    operationId: 'original-pending-OP', content: { kind: 'new-agent', executorId: 'codex' },
+    destination: { spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, newTab: true }, focus: false } }
+  useAppStore.getState().retainSpaceMountAgentOpen(requestKey, () => pending)
+  const opaque = { future: ['keep', 'original bytes'] }
+  useAppStore.setState(state => ({ mountedSpaceInputs: { ...state.mountedSpaceInputs as Record<string, unknown>, 'opaque-neighbor': opaque } }))
+  const opening = { reference: f.target.reference, source: snapshot.source, revision: snapshot.revision }
+  const healthy = JSON.parse(JSON.stringify({ ...opening, type: 'member',
+    member: { hostId: 'local', runtimeId: f.target.reference.runtimeId, agentSessionId: 'original-healthy-SID' },
+    state: { status: 'observed', authority: snapshot.source, session: { agentSessionId: 'original-healthy-SID', hostId: 'local',
+      providerId: 'codex', executorId: 'codex', workspacePath: '/original/project', run: { runId: 'original-healthy-Run' },
+      createdAt: 1, updatedAt: 1 } } }))
+  useAppStore.getState().observeSpaceMountSessions(f.target, { observation: healthy })
+  const before = useAppStore.getState(), metadata = before.mountedSpaceSessions[f.key]!
+  expect(Object.keys(metadata.members)).toHaveLength(1)
+  expect(Object.keys(metadata.lastConfirmed)).toHaveLength(1)
+  expect(Object.values(metadata.members)[0]?.state.status).toBe('observed')
+  for (const code of ['SPACE_SESSION_REFERENCE_UNAVAILABLE', 'SPACE_SESSION_REFERENCE_UNCONFIRMED']) {
+    // Same no-SID shape as the independent public watch in the Core association
+    // test: association locator and issue only, never a fabricated member.
+    const association = JSON.parse(JSON.stringify({ ...opening, type: 'association',
+      association: { regionId: 'original-associated-region', operationId: 'original-association-L' },
+      state: { status: 'unavailable', issue: { code, message: 'Original association observation unavailable; keep its L.' } } }))
+    expect(association).not.toHaveProperty('member')
+    expect(association).not.toHaveProperty('runtimeId')
+    expect(association).not.toHaveProperty('agentSessionId')
+    expect(() => useAppStore.getState().observeSpaceMountSessions(f.target, { observation: association })).not.toThrow()
+    const after = useAppStore.getState(), current = after.mountedSpaceSessions[f.key]!
+    expect(current.members).toBe(metadata.members); expect(current.lastConfirmed).toBe(metadata.lastConfirmed)
+    expect(after.mountedSpaceObservations).toBe(before.mountedSpaceObservations)
+    expect(after.mountedSpaceObservations[f.key]!.snapshot).toBe(snapshot)
+    expect(after.mountedSpaceInputs).toBe(before.mountedSpaceInputs)
+    expect(mountedAgentOpenInput(after.mountedSpaceInputs, requestKey)).toBe(pending)
+    expect((after.mountedSpaceInputs as Record<string, unknown>)['opaque-neighbor']).toBe(opaque)
+    expect(mountedSpaceInput(after.mountedSpaceInputs, f.key)!.view).toBe(mountedSpaceInput(before.mountedSpaceInputs, f.key)!.view)
+    expect(mountedSpaceInput(after.mountedSpaceInputs, f.key)!.drafts[mountedRegionKey(f.target.reference, f.tabId, f.regionId)]).toBe('Keep the original unsent draft')
+    expect(after.tabs).toBe(tabs); expect(after.layouts).toBe(layouts)
+    expect(after.sessions).toBe(before.sessions); expect(after.selectedSpaceMount).toBe(before.selectedSpaceMount)
+  }
 })
