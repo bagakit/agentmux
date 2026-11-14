@@ -202,7 +202,17 @@ it.runIf(business)('Source close plan reviews original editor input and retains 
 })
 
 it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind', 'lost-ack', 'region-x'])('actual Source %s reviews and closes one original position without borrowing observer drafts', async entry => {
+  await sourceViewCloseJourney(entry)
+})
+
+it.runIf(business)('actual Source Focus prepared close cancels without navigation or input while the original Native observation is unavailable', async () => {
+  await sourceViewCloseJourney('focus-cancel')
+})
+
+async function sourceViewCloseJourney(entry: string) {
   const f = await fixture({ originalSource: true })
+  const inputs = entry === 'focus-cancel' ? (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(f.host.client, method)) : []
+  if (entry === 'focus-cancel') vi.spyOn(f.host.client, 'runtimeSubject').mockRejectedValue(Error('The original Native observation is unavailable.'))
   const originalTab = entry === 'region-x' ? 'target-tab' : 'healthy-tab', originalRegion = entry === 'region-x' ? 'file-region' : 'healthy-region'
   if (entry !== 'region-x') f.store.setState(state => ({ layouts: { ...state.layouts, otherDisplay: createWorkspaceLayout('other-group', ['healthy-tab']) } }))
   const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
@@ -214,6 +224,7 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind',
   const { api } = await import('../src/renderer/src/lib/api.js')
   const { WorkspaceWorkbench } = await import('../src/renderer/src/components/WorkspaceWorkbench.js')
   const { GlobalFocusSurface } = await import('../src/renderer/src/components/GlobalFocusSurface.js')
+  const { WorkbenchCloseRequests } = await import('../src/renderer/src/hooks/useWorkbenchTabsClose.js')
   const { mainFocusPresentation } = await import('../src/renderer/src/lib/focus-tab-projection.js')
   const { workbenchSelectionCatalog } = await import('../src/renderer/src/lib/desktop-focus-navigation.js')
   const { originalSourceWorkspaceId, originalSourceTabProjectionId, originalSourceRegionProjectionId } = await import('../src/renderer/src/lib/original-space-navigation.js')
@@ -245,6 +256,7 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind',
     const state = observer(), select = (reference: any) => state.selectMainRegion(reference, state.workbenchSpaceSelection)
     const presentation = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, workbenchSelectionCatalog(state), select)
     return createElement(Fragment, null,
+      createElement(WorkbenchCloseRequests),
       createElement(GlobalFocusSurface, { workspaceOpen: false, onSelectContext: () => {}, onSelectLocation: select, presentation, viewTargets: {} }),
       createElement(WorkspaceWorkbench, { workspaceId, visible: state.mainSurface === 'workbench', viewTargets: {} }))
   }
@@ -252,6 +264,7 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind',
   const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
   cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
   await act(async () => root.render(createElement(Consumer)))
+  const held = observer.getState()
   if (entry === 'region-x') {
     const regionId = originalSourceRegionProjectionId(target, originalRegion)
     let region: HTMLElement | undefined
@@ -316,6 +329,27 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind',
   }
   await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Close"]:not([disabled])')).not.toBeNull())
   expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original position: otherDisplay · other-group')
+  if (entry === 'focus-cancel') {
+    const index = calls.mock.calls.findIndex(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.prepare')
+    expect(index).toBeGreaterThanOrEqual(0)
+    const prepared = (await calls.mock.results[index]!.value as { operation: Core.SpaceCloseReceipt }).operation
+    expect(prepared).toMatchObject({ phase: 'prepared', diskDurability: 'confirmed', plan: { target: { kind: 'tab-occurrence', displayWorkspaceId: 'otherDisplay', groupId: 'other-group', tabId: originalTab } } })
+    expect(observer.getState().mainSurface).toBe(held.mainSurface)
+    expect(observer.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+    await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click())
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).toBeNull())
+    expect(observer.getState().mainSurface).toBe(held.mainSurface)
+    expect(observer.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+    expect(observer.getState().agentComposerDrafts).toEqual(held.agentComposerDrafts)
+    expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).toContain('healthy-tab')
+    expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).toContain('healthy-tab')
+    expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
+    expect(calls.mock.calls.some(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toBe(false)
+    expect(localClose).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
+    for (const input of inputs) expect(input).not.toHaveBeenCalled()
+    expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+    return
+  }
   if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-review.html', document.body.innerHTML)
   await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Close"]:not([disabled])')!.click())
   if (entry === 'lost-ack') {
@@ -333,7 +367,7 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind',
   expect(localClose).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
   expect(calls.mock.calls.filter(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toHaveLength(1)
   expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
-})
+}
 
 async function sourceCloseFixture(split = false, file = false) {
   const f = await fixture()

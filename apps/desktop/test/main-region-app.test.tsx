@@ -425,7 +425,7 @@ it('actual File Markdown navigation consumes its exact foreign display occurrenc
   } finally { await f.close() }
 })
 
-async function focusIntentSourceFixture(kind: 'agent' | 'launcher' = 'agent') {
+async function focusIntentSourceFixture(kind: 'agent' | 'launcher' = 'agent', options: { nativeUnavailable?: boolean } = {}) {
   const f = await fixture(), cleanup: Array<() => unknown | Promise<unknown>> = []
   try {
   const { createSpaceSessionsFixture } = await import('../../../packages/core/test/helpers/space-session-fixture')
@@ -444,6 +444,7 @@ async function focusIntentSourceFixture(kind: 'agent' | 'launcher' = 'agent') {
   cleanup.push(async () => { await Promise.allSettled(physicalReads) })
   source.d.core.providers.register(new AgentProviderRegistry().get('codex'))
   const original = await source.d.put(sid)
+  if (options.nativeUnavailable) vi.spyOn(source.d.core, 'runtimeSubject').mockRejectedValue(Error('The original Native observation is unavailable.'))
   const stored = { ...original, creation: { createOperationId: creation, initialPrompt: 'unknown' as const } }
   const registry = Reflect.get(source.d.core, 'registry') as { put(value: typeof stored, expected: typeof stored.run): Promise<void> }
   await registry.put(stored, original.run)
@@ -635,4 +636,222 @@ it('an explicit complete original Source location reveals its accepted workface'
     expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).not.toBeNull()
     expect(useAppStore.getState().agentComposerDrafts[f.owner]).toBe(f.draft)
   } finally { await f.close() }
+})
+
+async function requestFocusCardClose(container: HTMLElement, id: string) {
+  let card: HTMLElement | undefined
+  await vi.waitFor(() => {
+    card = [...container.querySelectorAll<HTMLElement>('button[data-session-id]')].find(node => node.dataset.sessionId === id)
+    expect(card, 'The actual Focus card carries the requested original identity.').toBeDefined()
+  })
+  await act(async () => card!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
+  let close: HTMLElement | undefined
+  await vi.waitFor(() => {
+    close = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.includes('Close workface'))
+    expect(close, 'The common actual Agent menu exposes view close independently of Stop.').toBeDefined()
+  })
+  await act(async () => close!.click())
+}
+
+async function addFocusCloseTarget(f: Awaited<ReturnType<typeof fixture>>) {
+  const target = createWorkbenchTab('close-target-tab', { regionId: 'close-target-region', workspaceId: f.resource.id,
+    kind: 'agent', phase: 'attached', sessionId: f.other.id })
+  await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [target.id]: target }, layouts: { ...state.layouts,
+    [f.resource.id]: { ...state.layouts[f.resource.id]!, groups: state.layouts[f.resource.id]!.groups.map(group => group.id === 'resource-home-group' ? { ...group, tabOrder: [...group.tabOrder, target.id] } : group) } } })))
+  return target
+}
+
+it.each(['ordinary', 'source'] as const)('the actual %s Focus Close menu keeps the held workface through shared confirmation and cancel', async kind => {
+  const f = kind === 'source' ? await focusIntentSourceFixture('agent', { nativeUnavailable: true }) : await fixture()
+  const { connectWorkbenchCloseApiOwner } = await import('./helpers/workbench-close-api-owner')
+  const closeOwner = await connectWorkbenchCloseApiOwner()
+  try {
+    let id: string
+    if ('source' in f) {
+      const { focusSourceContextId } = await import('../src/renderer/src/lib/focus-source-model')
+      id = focusSourceContextId(f.source.d.owner.runtimeId, f.sid)
+    } else {
+      id = f.other.id
+      await addFocusCloseTarget(f)
+    }
+    await act(async () => { expect(useAppStore.getState().selectMainRegion(f.file)).toBe(true) })
+    const held = useAppStore.getState(), body = f.container.querySelector('.focused-tab-workspace')
+    const input = body?.querySelector<HTMLTextAreaElement>(`textarea[aria-label="Original draft ${f.exact.id}/exact-r2"]`)
+    expect(body).not.toBeNull(); expect(input).not.toBeNull()
+    input!.setSelectionRange(3, 11)
+    const selection = [input!.selectionStart, input!.selectionEnd]
+    const stop = vi.spyOn(api.sessions, 'stop'), write = vi.spyOn(api.sessions, 'write'), closeCall = vi.mocked(api.workbenchClose.call)
+    const originalEffects = 'source' in f ? [f.source.b, f.source.d].flatMap(owner =>
+      (['stopAgent', 'restartAgent', 'resumeAgent', 'reopenAgent', 'createAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(owner.core, method))) : []
+    await requestFocusCardClose(f.container, id)
+    expect(useAppStore.getState().mainSurface, 'A close request does not authorize View in Space.').toBe(held.mainSurface)
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+    let dialog: HTMLElement | null = null
+    await vi.waitFor(() => {
+      dialog = document.querySelector<HTMLElement>('.confirmation-dialog')
+      const state = useAppStore.getState()
+      expect(dialog, `The existing shared confirmation must be reachable without navigating. ${JSON.stringify({ tab: state.closeTabRequest, region: state.closeRegionRequest, error: state.error })}`).not.toBeNull()
+    })
+    let cancel: HTMLButtonElement | null = null
+    await vi.waitFor(() => { cancel = dialog!.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel'); expect(cancel).not.toBeNull(); expect(cancel!.disabled).toBe(false) })
+    await act(async () => cancel!.click())
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).toBeNull())
+    expect(useAppStore.getState().mainSurface).toBe(held.mainSurface)
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+    expect(useAppStore.getState().agentComposerDrafts).toEqual(held.agentComposerDrafts)
+    expect(f.container.querySelector('.focused-tab-workspace')).toBe(body)
+    expect(input!.isConnected).toBe(true)
+    expect(input!.value).toBe('Original unsent draft')
+    expect([input!.selectionStart, input!.selectionEnd]).toEqual(selection)
+    expect(stop).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
+    for (const effect of originalEffects) expect(effect).not.toHaveBeenCalled()
+    expect(closeCall.mock.calls.some(([method]) => method === 'space.close.apply')).toBe(false)
+    if ('source' in f) expect(vi.mocked(api.spaceMounts.call).mock.calls.find(([method]) => method === 'closeLocations')?.[1]).toMatchObject({
+      hostId: f.target.hostId, reference: f.target.reference,
+      member: { tabId: f.admitted.address.tabId, regionId: f.admitted.address.regionId, agentSessionId: f.sid, scope: 'tab' }
+    })
+  } finally { await closeOwner.dispose(); await f.close() }
+})
+
+it('confirming Keep from the actual Focus close dialog closes only its reviewed occurrence without stopping the Agent', async () => {
+  const f = await fixture(), target = await addFocusCloseTarget(f)
+  const { connectWorkbenchCloseApiOwner } = await import('./helpers/workbench-close-api-owner'), closeOwner = await connectWorkbenchCloseApiOwner()
+  try {
+    await act(async () => { expect(useAppStore.getState().selectMainRegion(f.file)).toBe(true) })
+    const held = useAppStore.getState(), stop = vi.spyOn(api.sessions, 'stop')
+    await requestFocusCardClose(f.container, f.other.id)
+    let keep: HTMLButtonElement | undefined
+    await vi.waitFor(() => { keep = [...document.querySelectorAll<HTMLButtonElement>('.confirmation-dialog button')].find(button => button.textContent?.includes('Keep')); expect(keep).toBeDefined() })
+    expect(useAppStore.getState().tabs[target.id]).toBeDefined()
+    expect(useAppStore.getState().mainSurface).toBe('agents')
+    await act(async () => { keep!.click(); await closeOwner.settle() })
+    await vi.waitFor(() => expect(useAppStore.getState().layouts[f.resource.id]!.groups[0]!.tabOrder).not.toContain(target.id))
+    expect(useAppStore.getState().tabs[f.exact.id]).toBe(held.tabs[f.exact.id])
+    expect(useAppStore.getState().sessions).toEqual(held.sessions)
+    expect(useAppStore.getState().mainSurface).toBe(held.mainSurface)
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+    expect(useAppStore.getState().agentComposerDrafts).toEqual(held.agentComposerDrafts)
+    expect(stop).not.toHaveBeenCalled()
+    const applies = vi.mocked(api.workbenchClose.call).mock.calls.filter(([method]) => method === 'space.close.apply')
+    expect(applies).toHaveLength(1)
+  } finally { await closeOwner.dispose(); await f.close() }
+})
+
+it('a later exact Region close intent remains pending until the current shared confirmation is cancelled', async () => {
+  const f = await fixture(); await addFocusCloseTarget(f)
+  const { connectWorkbenchCloseApiOwner } = await import('./helpers/workbench-close-api-owner'), closeOwner = await connectWorkbenchCloseApiOwner()
+  try {
+    const later = addWorkbenchRegion(createWorkbenchTab('later-close-tab', { regionId: 'later-close-region', workspaceId: f.resource.id,
+      kind: 'agent', phase: 'attached', sessionId: 'unobserved-later-session' }), 'later-close-region', 'right',
+    { kind: 'launcher', regionId: 'later-kept-region', workspaceId: f.resource.id })!
+    const reference = { displayWorkspaceId: f.resource.id, groupId: 'resource-home-group', tabId: later.id, regionId: 'later-close-region' }
+    await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [later.id]: later }, layouts: { ...state.layouts,
+      [f.resource.id]: { ...state.layouts[f.resource.id]!, groups: state.layouts[f.resource.id]!.groups.map(group => group.id === reference.groupId ? { ...group, tabOrder: [...group.tabOrder, later.id] } : group) } } })))
+    await requestFocusCardClose(f.container, f.other.id)
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).not.toBeNull())
+    const first = document.querySelector('.confirmation-dialog'), calls = vi.mocked(api.workbenchClose.call).mock.calls.length
+    await act(async () => useAppStore.getState().requestCloseRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, reference.groupId))
+    expect(useAppStore.getState().closeRegionRequest).toMatchObject({ groupId: reference.groupId, regionId: reference.regionId })
+    expect(vi.mocked(api.workbenchClose.call).mock.calls).toHaveLength(calls)
+    await act(async () => first!.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click())
+    await vi.waitFor(() => expect(vi.mocked(api.workbenchClose.call).mock.calls.some(([method, input]) => method === 'space.close.prepare' &&
+      'target' in input && input.target.kind === 'region' && input.target.groupId === reference.groupId && input.target.regionId === reference.regionId)).toBe(true))
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('unobserved-later-session'))
+    expect(useAppStore.getState().closeRegionRequest).toBeNull()
+    expect(useAppStore.getState().tabs[later.id]!.regions[reference.regionId]).toBeDefined()
+    await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click())
+    expect(vi.mocked(api.workbenchClose.call).mock.calls.some(([method]) => method === 'space.close.apply')).toBe(false)
+  } finally { await closeOwner.dispose(); await f.close() }
+})
+
+it('an ambiguous Region close intent never chooses the first display Group', async () => {
+  const f = await fixture(), { connectWorkbenchCloseApiOwner } = await import('./helpers/workbench-close-api-owner'), closeOwner = await connectWorkbenchCloseApiOwner()
+  try {
+    const held = useAppStore.getState()
+    await act(async () => useAppStore.getState().requestCloseRegion(f.display.id, f.exact.id, f.file.regionId))
+    await vi.waitFor(() => expect(useAppStore.getState().error ?? '').toContain('no single confirmed display occurrence'))
+    expect(vi.mocked(api.workbenchClose.call)).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs).toBe(held.tabs)
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+    expect(useAppStore.getState().mainSurface).toBe(held.mainSurface)
+  } finally { await closeOwner.dispose(); await f.close() }
+})
+
+it.each([false, true])('the actual child-document keyboard close keeps its confirmation and original input in the source document; split=%s', async split => {
+  const f = await fixture(), target = await addFocusCloseTarget(f)
+  const { connectWorkbenchCloseApiOwner } = await import('./helpers/workbench-close-api-owner'), closeOwner = await connectWorkbenchCloseApiOwner()
+  const { registerWorkbenchDocument, placeWorkbenchWindow, workbenchWindowPlacement } = await import('../src/renderer/src/lib/workbench-window-registry')
+  const { isMacPlatform } = await import('../src/renderer/src/lib/host-platform')
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const child = frame.contentDocument!, destination = child.createElement('div'); child.body.append(destination)
+  // happy-dom makes the first adoptNode ownerDocument property nonconfigurable,
+  // so the real return to Main throws. Only this native DOM primitive is adapted.
+  for (const owner of [document, child]) vi.spyOn(owner, 'adoptNode').mockImplementation(<T extends Node>(node: T): T => {
+    const adopted = node.parentNode ? node.parentNode.removeChild(node) : node
+    Object.defineProperty(adopted, 'ownerDocument', { value: owner, configurable: true })
+    return adopted as T
+  })
+  const identity = { windowId: 'original-close-child', documentGeneration: 'original-close-child-document' }
+  const release = registerWorkbenchDocument(child, identity)
+  const reference = { displayWorkspaceId: f.resource.id, groupId: 'resource-home-group', tabId: target.id, regionId: 'close-target-region' }
+  const windowTarget = { kind: 'tab' as const, displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }
+  try {
+    await act(async () => {
+      if (split) useAppStore.setState(state => ({ tabs: { ...state.tabs, [target.id]: addWorkbenchRegion(target, 'close-target-region', 'right',
+        { kind: 'file', workspaceId: f.resource.id, regionId: 'kept-child-region', path: 'kept-child.txt' })! } }))
+      useAppStore.getState().setAgentComposerDraft(f.other.id, 'Original child input remains unsent')
+      useAppStore.getState().activateTab(reference.displayWorkspaceId, reference.groupId, reference.tabId)
+      useAppStore.getState().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'pointer', reference.groupId)
+      expect(useAppStore.getState().selectMainRegion(reference)).toBe(true)
+      useAppStore.getState().setMainSurface('workbench')
+    })
+    await act(async () => { await placeWorkbenchWindow(windowTarget, { destination, window: identity }) })
+    let input: HTMLTextAreaElement | null = null
+    await vi.waitFor(() => { input = child.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Original draft"]'); expect(input).not.toBeNull() })
+    input!.setSelectionRange(4, 9)
+    const held = useAppStore.getState(), stop = vi.spyOn(api.sessions, 'stop')
+    await act(async () => child.body.dispatchEvent(new child.defaultView!.KeyboardEvent('keydown', { key: 'w', code: 'KeyW', bubbles: true, cancelable: true, metaKey: isMacPlatform(), ctrlKey: !isMacPlatform(), shiftKey: !isMacPlatform() })))
+    await vi.waitFor(() => expect(vi.mocked(api.workbenchClose.call).mock.calls.some(([method]) => method === 'space.close.prepare')).toBe(true))
+    let dialog: HTMLElement | null = null
+    await vi.waitFor(() => { dialog = child.querySelector<HTMLElement>('.confirmation-dialog'); expect(dialog, 'The stable window consumer must retain the exact keyboard source document.').not.toBeNull() })
+    expect(document.querySelector('.confirmation-dialog')).toBeNull()
+    await act(async () => dialog!.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click())
+    await vi.waitFor(() => expect(child.querySelector('.confirmation-dialog')).toBeNull())
+    expect(input!.isConnected).toBe(true)
+    expect(input!.value).toBe('Original child input remains unsent')
+    expect([input!.selectionStart, input!.selectionEnd]).toEqual([4, 9])
+    expect(useAppStore.getState().agentComposerDrafts[f.other.id]).toBe('Original child input remains unsent')
+    expect(useAppStore.getState().mainSurface).toBe(held.mainSurface)
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+    expect(stop).not.toHaveBeenCalled()
+  } finally {
+    if (workbenchWindowPlacement(windowTarget)) await act(async () => placeWorkbenchWindow(windowTarget, null))
+    release(); frame.remove(); await closeOwner.dispose(); await f.close()
+  }
+})
+
+it('an unconfirmed close document keeps its unsent exact intent and never falls back to Main', async () => {
+  const f = await fixture(), target = await addFocusCloseTarget(f)
+  const { connectWorkbenchCloseApiOwner } = await import('./helpers/workbench-close-api-owner'), closeOwner = await connectWorkbenchCloseApiOwner()
+  const { registerWorkbenchDocument } = await import('../src/renderer/src/lib/workbench-window-registry')
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const identity = { windowId: 'original-known-window', documentGeneration: 'current-document-generation' }
+  const release = registerWorkbenchDocument(frame.contentDocument!, identity)
+  try {
+    const held = useAppStore.getState(), originWindow = { ...identity, documentGeneration: 'unconfirmed-document-generation' }
+    await act(async () => useAppStore.getState().requestCloseTab(f.resource.id, 'resource-home-group', target.id, originWindow))
+    await vi.waitFor(() => expect(useAppStore.getState().error ?? '').toContain('original close window is unconfirmed'))
+    expect(useAppStore.getState().closeTabRequest).toMatchObject({ tabId: target.id, originWindow })
+    expect(vi.mocked(api.workbenchClose.call)).not.toHaveBeenCalled()
+    expect(document.querySelector('.confirmation-dialog')).toBeNull()
+    expect(useAppStore.getState().mainSurface).toBe(held.mainSurface)
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+    expect(useAppStore.getState().agentComposerDrafts).toEqual(held.agentComposerDrafts)
+    const saved = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
+    expect(saved).not.toHaveProperty('closeTabRequest'); expect(saved).not.toHaveProperty('closeRegionRequest')
+    await act(async () => useAppStore.getState().requestCloseTab(f.resource.id, 'resource-home-group', target.id))
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).not.toBeNull())
+    await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click())
+    expect(vi.mocked(api.workbenchClose.call).mock.calls.some(([method]) => method === 'space.close.apply')).toBe(false)
+  } finally { await closeOwner.dispose(); await f.close(); release(); frame.remove() }
 })

@@ -48,9 +48,12 @@ export default defineConfig({ ...source, cacheDir: resolve(root, '.tmp/renderer-
     const order = /const tabNavigation = <SortableContext items=\{([^}]+)\}/g
     assert.equal([...code.matchAll(order)].length, 1, 'Unique actual SortableContext order consumer')
     code = code.replace(order, (_match, items) => `const tabNavigation = <SortableContext items={((value) => { globalThis.__workbenchTabDemandProbe?.order(workspaceId, group.id, value); return value })(${items})}`)
-    const request = 'async function requestTabsClose(tabIds: readonly string[]): Promise<void> {'
-    assert.equal(code.split(request).length - 1, 1, 'Unique actual close request consumer')
-    code = code.replace(request, request + '\nglobalThis.__workbenchTabDemandProbe?.request(tabIds);')
+
+  }
+  if (file === 'apps/desktop/src/renderer/src/hooks/useWorkbenchTabsClose.tsx') {
+    const request = 'async function request(input: CloseRequest): Promise<void> {'
+    assert.equal(code.split(request).length - 1, 1, 'Unique actual close request owner')
+    code = code.replace(request, request + '\nglobalThis.__workbenchTabDemandProbe?.request(input.tabIds);')
   }
   if (file === 'apps/desktop/src/renderer/src/lib/workbench-tab-actions.ts') {
     const range = /export function tabIdsForCloseScope\([^]*?\): string\[\] \{/g

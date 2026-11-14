@@ -345,7 +345,7 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
     openLauncher: (target) => { calls.push(`openLauncher:${target.workspaceId}:${target.tabGroupId ?? ''}:${target.reveal}`); return 'new-tab' },
     closeRegion: (w, t, r) => { calls.push(`closeRegion:${w}:${t}:${r}`) },
     requestCloseTab: (w, g, t) => calls.push(`requestCloseTab:${w}:${g}:${t}`),
-    requestCloseRegion: (w, t, r) => calls.push(`requestCloseRegion:${w}:${t}:${r}`),
+    requestCloseRegion: (w, t, r, g) => calls.push(`requestCloseRegion:${w}:${t}:${r}:${g}`),
     splitRegion: (w, t, r, d) => calls.push(`splitRegion:${w}:${t}:${r}:${d}`),
     focusRegion: (w, t, r) => calls.push(`focusRegion:${w}:${t}:${r}`),
     swapRegions: (w, t, a, b) => calls.push(`swapRegions:${w}:${t}:${a}:${b}`),
@@ -487,7 +487,7 @@ describe('接线：命令转发到 store action', () => {
     }
     const store = spyStore({ tabs: { t2: splitTab } })
     expect(dispatchId('workbench.close-region', store)).toBe(true)
-    expect(store.calls).toEqual(['requestCloseRegion:ws:t2:r2R'])
+    expect(store.calls).toEqual(['requestCloseRegion:ws:t2:r2R:g'])
   })
 
   it('close-tab 在分屏 Tab 上仍关整张 Tab，这正是它与 close-region 的区别', () => {

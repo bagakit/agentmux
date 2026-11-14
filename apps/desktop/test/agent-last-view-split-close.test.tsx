@@ -25,6 +25,7 @@ import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { regionExecutionHost } from '../src/renderer/src/lib/region-execution-host'
 import { connectWorkbenchCloseApiOwner } from './helpers/workbench-close-api-owner'
+import { WorkbenchCloseRequests } from '../src/renderer/src/hooks/useWorkbenchTabsClose'
 
 const initial = useAppStore.getState()
 let root: Root, element: HTMLDivElement, overlay: HTMLDivElement
@@ -72,7 +73,7 @@ function FeedbackConsumers() {
   </aside>
 }
 async function mount(feedback = false) {
-  await act(async () => root.render(<><WorkspaceWorkbench workspaceId="workspace" />{feedback ? <FeedbackConsumers /> : null}</>))
+  await act(async () => root.render(<><WorkbenchCloseRequests /><WorkspaceWorkbench workspaceId="workspace" />{feedback ? <FeedbackConsumers /> : null}</>))
 }
 async function closeSplit(regionId: string) {
   const close = element.querySelector<HTMLElement>(`[data-workbench-region-id="${regionId}"] .workbench-region__close`)

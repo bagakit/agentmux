@@ -7,6 +7,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { PROMPT_REACTION_STARTERS } from '@agentmux/core/prompt-reaction'
 import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { WorkbenchCloseRequests } from '../src/renderer/src/hooks/useWorkbenchTabsClose'
 import { MoteWorkfaceContext } from '../src/renderer/src/lib/mote-workface'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { useAgentAttentionNotifications } from '../src/renderer/src/hooks/useAgentAttentionNotifications'
@@ -77,7 +78,7 @@ async function status(id: string, state: 'working' | 'waiting' | 'done', at = Da
 
 it.each([1, 32, 100])('bounds actual retained Workbench metadata and Pane reaction selector work at %i unrelated surfaces', async count => {
   const original = fixture(count)
-  await dom.render(<Profiler id="workbench" onRender={() => { commitCount++ }}><WorkspaceWorkbench workspaceId="workspace" /></Profiler>)
+  await dom.render(<><WorkbenchCloseRequests /><Profiler id="workbench" onRender={() => { commitCount++ }}><WorkspaceWorkbench workspaceId="workspace" /></Profiler></>)
   expect(document.querySelectorAll('.retained-workbench-view').length).toBeGreaterThanOrEqual(count)
   expect(document.querySelectorAll('[data-original-terminal]').length).toBeGreaterThan(0)
   const before = useAppStore.getState(), originalTerminal = document.querySelector('[data-original-terminal]')

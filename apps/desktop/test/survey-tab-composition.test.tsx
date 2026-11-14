@@ -919,11 +919,23 @@ it('[drag-composition] a later original split during intent saving survives the 
 
 // T7: original App / close owners, with the same typed Native and painted Agent/File leaves as this fixture.
 const horizontalPageClose = () => document.querySelector<HTMLButtonElement>('[data-survey-page-region-id="composition-page"] .survey-item-tab-close')!
+async function chooseHorizontalClosePosition() {
+  const choices = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')]
+  if (!choices.length) return
+  const original = choices.find(node => {
+    const reference = JSON.parse(node.dataset.surveyPanelReference!)
+    return reference.displayWorkspaceId === resource.id && reference.groupId === 'source-group'
+  })
+  expect(original, 'The existing picker confirms this fixture’s original display occurrence.').toBeDefined()
+  await click(original)
+}
 async function confirmHorizontalClose() {
+  await chooseHorizontalClosePosition()
   await vi.waitFor(() => expect(named('Close')).toBeDefined())
   await click(named('Close'))
 }
 async function horizontalPages(extra: { regionId: string; browserId: string }[] = []) {
+  headerCloseOwner = await connectWorkbenchCloseApiOwner()
   const page = { regionId: 'composition-page', browserId: 'composition-page' }
   useAppStore.setState({ surveyPageReferences: [page, ...extra] })
   await checkpointSpatialWorkbench()
@@ -963,6 +975,7 @@ it('[horizontal-close] a Native close failure keeps the original Browser, exact 
   expect(document.querySelector('[aria-label="Original file input"]')).toBe(file); expect(file.value).toBe('Original unsaved file text')
 })
 it('[horizontal-close] a sole Browser uses the original Tab owner and leaves other Tabs untouched', async () => {
+  headerCloseOwner = await connectWorkbenchCloseApiOwner()
   const native = await api.browser.create('horizontal-single', 'https://single.example.test/', resource.id)
   const tab = createWorkbenchTab('horizontal-single-tab', { ...native, kind: 'browser', browserId: native.id, regionId: 'horizontal-single-region', workspaceId: resource.id, title: 'Single page' })
   const state = useAppStore.getState(), page = { regionId: 'horizontal-single-region', browserId: native.id }
@@ -1006,6 +1019,7 @@ it('[horizontal-close] canceling the original unknown-Agent close preserves cont
   const page = await horizontalPages(), before = useAppStore.getState(), browser = source().regions[page.regionId]
   const close = vi.spyOn(api.browser, 'close')
   await click(horizontalPageClose())
+  await chooseHorizontalClosePosition()
   await vi.waitFor(() => expect(named('Cancel')).toBeDefined())
   expect(document.body.textContent).toContain('Close without confirming the Agent?')
   expect(close).not.toHaveBeenCalled(); await click(named('Cancel'))
@@ -1013,6 +1027,7 @@ it('[horizontal-close] canceling the original unknown-Agent close preserves cont
   expect(useAppStore.getState().surveyPageReferences).toEqual([page]); expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
 })
 it('[horizontal-close] a sole page with several real display Groups requires an exact choice and only detaches that binding', async () => {
+  headerCloseOwner = await connectWorkbenchCloseApiOwner()
   const native = await api.browser.create('horizontal-many', 'https://many.example.test/', resource.id)
   const tab = createWorkbenchTab('horizontal-many-tab', { ...native, kind: 'browser', browserId: native.id, regionId: 'horizontal-many-region', workspaceId: resource.id, title: 'Several positions' })
   const state = useAppStore.getState(), page = { regionId: 'horizontal-many-region', browserId: native.id }
@@ -1025,7 +1040,7 @@ it('[horizontal-close] a sole page with several real display Groups requires an 
   await vi.waitFor(() => expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(2))
   expect(close).not.toHaveBeenCalled()
   const chosen = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')].find(element => JSON.parse(element.dataset.surveyPanelReference!).displayWorkspaceId === display.id)!
-  await click(chosen); await confirmHorizontalClose()
+  await click(chosen)
   await vi.waitFor(() => expect(useAppStore.getState().layouts[display.id]!.groups.find(group => group.id === 'other-group')!.tabOrder).not.toContain(tab.id))
   expect(useAppStore.getState().layouts[resource.id]!.groups.find(group => group.id === 'source-group')!.tabOrder).toContain(tab.id)
   expect(useAppStore.getState().tabs[tab.id]!.regions[page.regionId]).toBeDefined()

@@ -18,6 +18,7 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 vi.mock('../src/renderer/src/components/AgentSessionComposer', () => ({ AgentSessionComposer: () => <textarea aria-label="Original composer" /> }))
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => <div>Original editor</div> }))
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { WorkbenchCloseRequests } from '../src/renderer/src/hooks/useWorkbenchTabsClose'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -43,7 +44,7 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); useAppStore.setState(initial, true); vi.unstubAllGlobals(); vi.restoreAllMocks() })
-async function mount() { await act(async () => root.render(<WorkspaceWorkbench workspaceId={workspaceId} />)) }
+async function mount() { await act(async () => root.render(<><WorkbenchCloseRequests /><WorkspaceWorkbench workspaceId={workspaceId} /></>)) }
 function closeTarget() {
   const button = container.querySelector<HTMLButtonElement>(`[data-workbench-region-id="${targetId}"] button[aria-label="Close split"]`)
   expect(button).not.toBeNull(); return button!
