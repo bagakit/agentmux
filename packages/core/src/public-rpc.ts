@@ -291,7 +291,7 @@ type NativeParams = AgentOpenParams & import('./space-close.js').SpaceCloseParam
   'agent.execution.inspect': import('./agent-execution-journal.js').AgentExecutionOperationKey & { hostId: string }
   'agent.execution.create': import('./agent-execution-coordinator.js').AgentExecutionOpenInput
   'agent.execution.continue': import('./agent-execution-contract.js').AgentExecutionReference
-  'agent.execution.binding': { bindingId: string }
+  'agent.execution.binding': { bindingId: string; view?: 'association' }
   'agent.execution.rejoin': { bindingId: string }
   'agent.posture.inspect': import('./agent-posture.js').PostureInspect
   'agent.posture.set': import('./agent-posture.js').PostureSet

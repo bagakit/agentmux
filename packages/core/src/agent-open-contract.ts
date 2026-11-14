@@ -1,4 +1,5 @@
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, parseAgentExecutionReference } from './errors.js'
+import type { AgentExecutionReference } from './agent-execution-contract.js'
 import { normalizeLaunchOptionSelection, type LaunchOptionSelection } from './agent-launch-option.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 
@@ -7,6 +8,19 @@ export type AgentOpenDescription = { source: { runtimeId: string; ownerInstanceI
 export const AGENT_OPEN_METHODS = { 'agent.open.describe': 'short' } as const
 export type AgentOpenParams = { 'agent.open.describe': { expectedRuntimeId: string } }
 export type AgentOpenResults = { 'agent.open.describe': AgentOpenDescription }
+/** A locator for A's original Coordinator/Agent, never a B-to-A route or grant. */
+export type CoordinatorAgentReference = { kind: 'coordinator-agent'; runtimeId: string; binding: AgentExecutionReference }
+export type AgentAssociationResource = { runtimeId: string; workspaceId: string; workspacePath: string }
+export function parseCoordinatorAgentReference(value: unknown): CoordinatorAgentReference {
+  const p = rpcRecord(value, ['kind','runtimeId','binding'])
+  if (p.kind !== 'coordinator-agent') throw new AgentMuxError('Keep the original external Coordinator reference.', 'INVALID_CONTROL_REQUEST')
+  return { kind: p.kind, runtimeId: rpcString(p.runtimeId, 'Original Coordinator Runtime'), binding: structuredClone(parseAgentExecutionReference(p.binding)) }
+}
+export function parseAgentAssociationResource(value: unknown): AgentAssociationResource {
+  const p = rpcRecord(value, ['runtimeId','workspaceId','workspacePath'])
+  return { runtimeId: rpcString(p.runtimeId, 'Original Source Runtime'), workspaceId: rpcString(p.workspaceId, 'Original Source Workspace'),
+    workspacePath: rpcString(p.workspacePath, 'Original Source directory') }
+}
 export function parseAgentOpenDescribe(value: unknown): AgentOpenParams['agent.open.describe'] {
   const p = rpcRecord(value, ['expectedRuntimeId'])
   return { expectedRuntimeId: rpcString(p.expectedRuntimeId, 'Original Source Runtime') }

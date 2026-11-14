@@ -30,7 +30,7 @@ import { parseMessageApplication } from './agent-message-envelope.js'
 import { parseConversationSnapshotInput, parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
 import { isImageMethod, parseImageParams, parseImageResult, type AgentMuxRpcImageOwner, type ImageMethod, type ImageActor, type ImageCallContext } from './public-rpc-image.js'
 import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
-import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
+import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecord, isSpatialAgentAssociation, spatialAgentAssociationRecord } from './spatial-agent-open-contract.js'
 import { agentTakeoverPrompt } from './agent-takeover-context.js'
 import { agentDerivedActionPrompt, isAgentBuiltInDerivedActionId, parseAgentDerivedActionFields } from './agent-derived-actions.js'
 import { reconcileMoteMainSetup } from './mote-main-setup.js'
@@ -228,7 +228,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   capsules?: { call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext,
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
   executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin' | 'continueOriginal'> & {
-    inspect(bindingId: string): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
+    inspect(bindingId: string, view?: 'association'): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
   }
   capsuleInput?: CapsuleInputPort
   capsuleRuntime?: CapsuleRuntimePort
@@ -437,7 +437,7 @@ const NATIVE_FIELDS = {
   'agent.execution.inspect': ['hostId', 'bindingId', 'streamGeneration', 'nativeRequestId'],
   'agent.execution.create': AGENT_EXECUTION_CREATE_FIELDS,
   'agent.execution.continue': ['bindingId', 'agentSessionId', 'createOperationId'],
-  'agent.execution.binding': ['bindingId'],
+  'agent.execution.binding': ['bindingId','view'],
   'agent.execution.rejoin': ['bindingId'],
   'terminal.input': ['target', 'operationId', 'ownerInstanceId', 'expectedByte', 'dataBase64'], 'terminal.interrupt': ['target', 'operationId', 'ownerInstanceId'], 'terminal.stop': ['target', 'operationId', 'ownerInstanceId'], 'terminal.operation.inspect': ['hostId', 'run', 'operationId', 'runtimeId'],
   'agent.posture.set': ['target', 'operationId', 'controlId', 'modeId', 'expectedControlDigest'], 'agent.posture.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
@@ -1789,6 +1789,9 @@ export class AgentMuxRpcService {
     if (method === 'agent.open') {
       params = await this.expandDerivedAction(params as AgentMuxRpcParams<'agent.open'>, context) as typeof params
       const request = rpcControlRequest('agent.open', params)
+      if (isSpatialAgentAssociation(request)) {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      }
       if (request.operation === 'agent.open' && request.moteMain) {
         // This correlation reserves a person's initial Main setup; ordinary Agent creation stays independent.
         if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
@@ -1821,13 +1824,13 @@ export class AgentMuxRpcService {
           typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
         throw new AgentMuxError('Execution binding operations require a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
       }
-      const input = method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : method === 'agent.execution.continue' ? parseAgentExecutionReference(params) : parseAgentExecutionBinding(params)
+      const input = method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : method === 'agent.execution.continue' ? parseAgentExecutionReference(params) : parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding' })
       const owner = this.ports.executionBindings
       if (!owner) throw new AgentMuxError('The original execution binding owner is unavailable. No helper or Agent was replaced.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
       const result = method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)
         : method === 'agent.execution.continue' ? await owner.continueOriginal(input as import('./agent-execution-contract.js').AgentExecutionReference, context)
-        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId, context) : await owner.inspect(input.bindingId)
+        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId, context) : await owner.inspect(input.bindingId, 'view' in input && input.view === 'association' ? 'association' : undefined)
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       return parseRpcNativeResult(method, result, input) as AgentMuxRpcResult<M>
     }
@@ -2461,13 +2464,17 @@ export class AgentMuxRpcService {
       const originalSpatialRequest = method === 'agent.open' || method === 'space.inspect' ? rpcControlRequest(method, params) : null
       const originalResumeRequest = method === 'agent.resume' ? rpcControlRequest(method, params, internalCaller) : null
       const independentResume = originalResumeRequest?.operation === 'resume' && !originalResumeRequest.text.trim()
-      let independentSpatial = originalSpatialRequest && (isHeadlessSpatialAgentOpen(originalSpatialRequest) ||
+      let independentSpatial = originalSpatialRequest && (isHeadlessSpatialAgentOpen(originalSpatialRequest) || isSpatialAgentAssociation(originalSpatialRequest) ||
         originalSpatialRequest.operation === 'space.inspect' && 'requestId' in originalSpatialRequest.target)
       const originalSpatialState = independentSpatial && originalSpatialRequest?.operation === 'agent.open' ? await this.spatial.readForLayout() : null
       if (independentSpatial && originalSpatialRequest?.operation === 'agent.open') independentSpatial =
-        isHeadlessSpatialAgentOpen(originalSpatialRequest, originalSpatialState?.graph)
+        isHeadlessSpatialAgentOpen(originalSpatialRequest, originalSpatialState?.graph) || isSpatialAgentAssociation(originalSpatialRequest)
       const retainedSpatialLaunch = originalSpatialRequest?.operation === 'agent.open' && originalSpatialState &&
         spatialAgentOpenRecord(originalSpatialState.graph, originalSpatialRequest.requestId)
+      if (originalSpatialRequest && isSpatialAgentAssociation(originalSpatialRequest) && !this.ports.callOriginalCore &&
+          !(originalSpatialState && spatialAgentAssociationRecord(originalSpatialState.graph, originalSpatialRequest.requestId)) &&
+          this.ports.spatialAgentControl?.describe?.().externalAssociation !== 1) throw new AgentMuxError(
+        'The selected Source owner has not confirmed external Coordinator association. Keep this original L and A reference; no creation or association was forwarded.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
       if (originalSpatialRequest?.operation === 'agent.open' && originalSpatialRequest.content.kind === 'new-agent' &&
           AGENT_OPEN_LAUNCH_FIELDS.some(field => Object.hasOwn(originalSpatialRequest.content, field)) &&
           (!independentSpatial || !this.ports.callOriginalCore && !retainedSpatialLaunch && this.ports.spatialAgentControl?.describe?.().ordinaryLaunch?.revision !== 1)) throw new AgentMuxError(

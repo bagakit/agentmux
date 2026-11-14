@@ -13,7 +13,7 @@ import { defaultAgentMuxStateDirectory } from './runtime-paths.js';
 import type { AgentMuxSpaceBindingTarget } from './space-control.js';
 import { addTabOccurrence, removeTab } from './spatial-layout.js';
 import { parseAgentMuxSpatialGraph, retainAdmittedAgentIdentity, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from './spatial-graph.js';
-import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, admitSpatialAgentOpen, spatialAgentOpenRecord, retainedMoteMainBindingReceipt, parseMoteMainBaseline, sameMoteMainBaseline, type MoteMainFollowUpInput, spatialAgentOpenDocument, matchesMoteMainBindingInput, validateMoteMainBindingObservation, type MoteMainBindingObservation } from './spatial-agent-open.js';
+import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, admitSpatialAgentOpen, admitSpatialAgentAssociation, spatialAgentAssociationRecord, spatialAgentOpenRecord, retainedMoteMainBindingReceipt, parseMoteMainBaseline, sameMoteMainBaseline, type MoteMainFollowUpInput, spatialAgentOpenDocument, matchesMoteMainBindingInput, validateMoteMainBindingObservation, type MoteMainBindingObservation } from './spatial-agent-open.js';
 export * from './spatial-agent-open.js';
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabelDocument, setDisplayLabelDocument, projectSpatialState, nameTargetKey, validateNameIntent,
   type AgentMuxNameTarget, type AgentMuxNameContext, type AgentMuxNameChangeIntent, type AgentMuxNameChangeRecord,
@@ -32,6 +32,7 @@ type AgentRegionAttachment = { tabId: string; regionId: string; agentSessionId: 
   execution: { hostId: string; cwd: string }; resource: SpatialJson };
 export type SpaceAgentRegion = {
   region: AgentMuxSpatialGraph['regions'][number]; zone: AgentMuxSpatialGraph['zones'][number];
+  association?: import('./spatial-agent-open-contract.js').AgentMuxSpatialAgentAssociationRecord;
   admission?: Pick<import('./spatial-agent-open-contract.js').AgentMuxSpatialAgentOpenRecord, 'requestId' | 'agentSessionId' | 'address' | 'execution' | 'placement'>
 };
 type SpaceAgentIndex = Map<string, { kind: AgentMuxSpatialGraph['spaces'][number]['kind']; agents: Set<string>; regions: Map<string, SpaceAgentRegion> }>;
@@ -196,20 +197,23 @@ export class AgentMuxSpatialStateStore {
     const zonesByTab = new Map(graph.tabs.map(tab => [tab.tabId, tab.zoneId]));
     const zones = new Map(graph.zones.map(zone => [zone.zoneId, zone]));
     for (const region of graph.regions) {
-      if (region.kind !== 'agent' || !region.agentSessionId || !region.execution) continue;
+      if (region.kind !== 'agent' || !region.association && (!region.agentSessionId || !region.execution)) continue;
       const zone = zonesByTab.get(region.tabId);
       if (zone === null || zone === undefined) continue;
-      const key = spatialAgentKey({ hostId: region.execution.hostId, agentSessionId: region.agentSessionId });
+      const key = region.execution && region.agentSessionId ? spatialAgentKey({ hostId: region.execution.hostId, agentSessionId: region.agentSessionId }) : null;
       const resource = zones.get(zone);
       if (!resource) continue;
       let original: ReturnType<typeof spatialAgentOpenRecord> = null;
       try { if (region.creationOperationId) original = spatialAgentOpenRecord(graph, region.creationOperationId); }
       catch { /* An unreadable admission leaves only this foreign control unconfirmed, not other membership. */ }
-      const member: SpaceAgentRegion = { region, zone: resource, ...(original ? { admission: { requestId: original.requestId,
+      let association: ReturnType<typeof spatialAgentAssociationRecord> = null;
+      try { if (region.association) association = spatialAgentAssociationRecord(graph, region.association.operationId); }
+      catch { /* Keep the Region; only its unresolved association control is unavailable. */ }
+      const member: SpaceAgentRegion = { region, zone: resource, ...(association ? { association } : {}), ...(original ? { admission: { requestId: original.requestId,
         agentSessionId: original.agentSessionId, address: original.address, execution: original.execution,
         ...(original.placement ? { placement: original.placement } : {}) } } : {}) };
       for (const spaceId of spacesByZone.get(zone) ?? []) {
-        const space = index.get(spaceId); space?.agents.add(key); space?.regions.set(region.regionId, member);
+        const space = index.get(spaceId); if (key) space?.agents.add(key); space?.regions.set(region.regionId, member);
       }
     }
     return { stamp: spatialFileStamp(await file.stat({ bigint: true })), index };
@@ -342,6 +346,15 @@ export class AgentMuxSpatialStateStore {
       return { ...admission, state: projectSpatialState(state) };
     });
   }
+  async associateAgentOpen(request: Parameters<typeof admitSpatialAgentAssociation>[1], sourceRuntimeId: string, assertCurrent: () => Promise<void>) {
+    return this.locked(async () => {
+      const current = await this.requiredState(), admission = admitSpatialAgentAssociation(current.graph, request, sourceRuntimeId);
+      await assertCurrent();
+      if (!admission.admitted) return { ...admission, state: projectSpatialState(current) };
+      const state = await this.writeLocked(current, parseAgentMuxSpatialGraph(admission.graph));
+      return { ...admission, state: projectSpatialState(state) };
+    });
+  }
   /** Claim only a follow-up on the original creation. Its outcomes remain at Files/dialogue owners. */
   async claimMoteMainFollowUp(input: MoteMainFollowUpInput) {
     return this.locked(async () => {
@@ -392,7 +405,7 @@ export class AgentMuxSpatialStateStore {
     return this.locked(async () => {
       const current = await this.read()
       if (!current) return false
-      const candidates = Object.keys(spatialAgentOpenDocument(current.graph).requests).map(id => spatialAgentOpenRecord(current.graph,id)!).filter(record => matchesMoteMainBindingInput(record,input))
+      const candidates = Object.keys(spatialAgentOpenDocument(current.graph).requests).flatMap(id => { const record = spatialAgentOpenRecord(current.graph,id); return record ? [record] : [] }).filter(record => matchesMoteMainBindingInput(record,input))
       if (candidates.length !== 1) return false
       const record = candidates[0]!
       if (record.moteMainFollowUps?.refusedBeforeBinding) return false

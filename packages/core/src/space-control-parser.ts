@@ -7,7 +7,7 @@ import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentSpawnCreator } from './agent-spawn.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { parseMoteMainCreationIntent } from './spatial-agent-open-contract.js'
-import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenLaunchFields } from './agent-open-contract.js'
+import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenLaunchFields, parseCoordinatorAgentReference, parseAgentAssociationResource } from './agent-open-contract.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
@@ -213,7 +213,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller', 'moteMain'], code)
-    const input = fields(source.content, ['kind', 'executorId', 'agentTarget', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source', 'actionId', ...AGENT_OPEN_LAUNCH_FIELDS], code)
+    const input = fields(source.content, ['kind', 'reference', 'expectedResource', 'executorId', 'agentTarget', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source', 'actionId', ...AGENT_OPEN_LAUNCH_FIELDS], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
     if (input.kind === 'new-agent') {
@@ -245,9 +245,16 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       content = { kind: 'derived-action', actionId: spaceControlId(input.actionId, 'Derived action', code), source: { agentSessionId: spaceControlId(origin.agentSessionId, 'Source Session', code) },
         ...(Object.hasOwn(input, 'executorId') ? { executorId: spaceControlId(input.executorId, 'Executor', code) } : {}) }
     } else if (input.kind === 'agent-session') {
-      fields(input, ['kind', 'agentSessionId'], code)
-      if (target.newZone) fail('Existing Session display cannot create a Zone.', code)
-      content = { kind: 'agent-session', agentSessionId: spaceControlId(input.agentSessionId, 'Agent Session', code) }
+      if (Object.hasOwn(input, 'reference')) {
+        fields(input, ['kind','reference','expectedResource'], code)
+        if (source.focus !== false || !target.spaceId || !target.zoneId || target.newZone || target.split || target.displayWorkspaceId || target.groupId ||
+            !(target.newTab === true && !target.tabId && !target.regionId || !target.newTab && target.tabId && target.regionId)) fail('External association requires an exact Source Zone and a background new Tab or empty Region.', code)
+        content = { kind: 'agent-session', reference: parseCoordinatorAgentReference(input.reference), expectedResource: parseAgentAssociationResource(input.expectedResource) }
+      } else {
+        fields(input, ['kind', 'agentSessionId'], code)
+        if (target.newZone) fail('Existing Session display cannot create a Zone.', code)
+        content = { kind: 'agent-session', agentSessionId: spaceControlId(input.agentSessionId, 'Agent Session', code) }
+      }
     } else fail('Agent content is invalid.', code)
     const caller = Object.hasOwn(source, 'caller') ? (() => {
       const owner = fields(source.caller, ['agentSessionId', 'capability'], code)
@@ -293,13 +300,14 @@ function address(value: unknown, code: Code): AgentMuxSpaceAddress {
     tabId: spaceControlId(source.tabId, 'Tab', code, true), regionId: spaceControlId(source.regionId, 'Region', code, true) }
 }
 function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
-    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'creationOperationId', 'runId', 'execution', 'browserId', 'file'], code)
+    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'creationOperationId', 'association', 'runId', 'execution', 'browserId', 'file'], code)
     const execution = item.execution === null ? null : (() => {
       const location = fields(item.execution, ['hostId', 'cwd', 'runtimeId'], code)
       return { hostId: spaceControlId(location.hostId, 'Execution Host', code), cwd: string(location.cwd, 'Execution cwd', code),
         ...(location.runtimeId === undefined ? {} : { runtimeId: spaceControlId(location.runtimeId, 'Execution Runtime', code) }) }
     })()
-    return { tabId: spaceControlId(item.tabId, 'Tab', code, true), regionId: spaceControlId(item.regionId, 'Region', code, true),
+    if (item.association !== undefined && (item.kind !== 'agent' || item.agentSessionId !== null || item.runId !== null || item.execution !== null || item.creationOperationId !== undefined)) fail('An external association cannot impersonate a local Agent or creation.', code)
+    return { ...(item.association === undefined ? {} : { association: (() => { const ref = fields(item.association, ['operationId'], code); return { operationId: spaceControlId(ref.operationId, 'Original association operation', code) } })() }), tabId: spaceControlId(item.tabId, 'Tab', code, true), regionId: spaceControlId(item.regionId, 'Region', code, true),
       kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git', 'git-diff', 'launcher'], 'Region kind', code),
       agentSessionId: nullableId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code), execution,
       ...(item.creationOperationId === undefined ? {} : { creationOperationId: spaceControlId(item.creationOperationId, 'Original creation operation', code) }),
@@ -487,7 +495,7 @@ function save(value: unknown, code: Code): AgentMuxSpatialSave {
     reason: nullableString(saved.reason, 'Save reason', code) }
 }
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
-  const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'save', 'issues'], code)
+  const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'association', 'save', 'issues'], code)
   const agent = source.agent === null ? null : (() => {
     const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId', 'retirement', 'toolExecution'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
@@ -525,7 +533,12 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
     return { projectId: nullableId(item.projectId, 'Resource Project', code, true), sourceWorkspaceId: nullableId(item.sourceWorkspaceId, 'Resource Workspace', code), hostId: spaceControlId(item.hostId, 'Resource Host', code), path: string(item.path, 'Resource directory', code),
       workspaceId: nullableId(item.workspaceId, 'Workspace', code), kind: member(item.kind, ['directory', 'worktree'], 'Resource kind', code), branch: nullableString(item.branch, 'Branch', code) }
   })()
-  return { requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown', 'retired'], 'Mutation outcome', code),
+  const association = source.association === undefined ? undefined : (() => {
+    const value = fields(source.association, ['operationId','reference','resource'], code)
+    if (value.operationId !== source.requestId || agent !== null || source.from !== null || source.resource !== null) fail('A Source association receipt cannot claim another creation or execution.', code)
+    return { operationId: spaceControlId(value.operationId, 'Association operation', code), reference: parseCoordinatorAgentReference(value.reference), resource: parseAgentAssociationResource(value.resource) }
+  })()
+  return { ...(association ? { association } : {}), requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown', 'retired'], 'Mutation outcome', code),
     from: source.from === null ? null : address(source.from, code), to: source.to === null ? null : address(source.to, code), agent, resource,
     save: save(source.save, code),
     issues: list(source.issues, value => {

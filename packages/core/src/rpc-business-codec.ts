@@ -294,6 +294,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
         const from = actual.from as Record<string, unknown> | null, agent = actual.agent as Record<string, unknown> | null
         if (from && from.regionId !== request.fromRegionId || agent && agent.agentSessionId !== request.expectedAgentSessionId) fail()
       }
+      if (request.operation === 'agent.open' && request.content.kind === 'agent-session' && request.content.reference) {
+        const association = actual.association as Record<string, unknown> | undefined
+        if (!association || actual.agent !== null || association.operationId !== request.requestId || !isDeepStrictEqual(association.reference, request.content.reference) || !isDeepStrictEqual(association.resource, request.content.expectedResource)) fail()
+      }
       if (request.operation === 'agent.open' && actual.agent) {
         const agent = actual.agent as Record<string, unknown>
         if (request.content.kind === 'agent-session' && agent.agentSessionId !== request.content.agentSessionId ||

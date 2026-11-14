@@ -1,6 +1,6 @@
 import { AgentMuxError, spatialCatalog, selectSpatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
   type AgentMuxRpcServiceOptions, type AgentMuxSpatialStateStore, type AgentMuxControlResult } from '@agentmux/core'
-import { isBackgroundLocalAgentOpen, isHeadlessSpatialAgentOpen, spatialAgentOpenRecord, spatialAgentOpenDigest, spatialAgentFact, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
+import { isBackgroundLocalAgentOpen, isHeadlessSpatialAgentOpen, isSpatialAgentAssociation, spatialAgentAssociationRecord, spatialAgentOpenRecord, spatialAgentOpenDigest, spatialAgentFact, type AgentMuxSpatialAgentAssociationRecord, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
 import { openSpatialAgentTarget } from './spatial-agent-target.js'
 import { parseAgentOpenLaunchFields } from '@agentmux/core/agent-open-contract'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
@@ -20,6 +20,17 @@ const regionDescriptor = (record: Pick<AgentMuxSpatialAgentOpenRecord, 'agentSes
 export function createHostSpatialAgentControl(options: { configurationPath: string; spatial: AgentMuxSpatialStateStore; runtime(): AgentMuxHeadlessRuntime;
   agentMuxContext?(request: AgentMuxSpatialAgentOpenRequest): Promise<string | undefined> }): NonNullable<AgentMuxRpcServiceOptions['spatialAgentControl']> {
   const topics = new ScratchTopics()
+  function associationReport(record: AgentMuxSpatialAgentAssociationRecord, graph: NonNullable<Awaited<ReturnType<AgentMuxSpatialStateStore['read']>>>['graph'], acknowledgedWrite = false): AgentMuxSpaceMutationReport {
+    const region = graph.regions.find(region => region.tabId === record.address.tabId && region.regionId === record.address.regionId)
+    const zone = graph.zones.find(zone => zone.zoneId === record.address.zoneId)
+    const attached = record.placement.runtimeId === options.runtime().ownerIdentity().runtimeId && region?.kind === 'agent' && region.association?.operationId === record.requestId && region.agentSessionId === null && region.execution === null &&
+      zone?.workspaceId === record.placement.workspaceId && zone.hostId === record.placement.hostId && zone.directoryPath === record.placement.workspacePath &&
+      graph.bindings.some(binding => binding.spaceId === record.address.spaceId && binding.zoneId === record.address.zoneId)
+    return { requestId: record.requestId, outcome: attached ? 'opened' : 'partial', from: null, to: attached ? record.address : null, agent: null, resource: null,
+      association: { operationId: record.requestId, reference: record.reference, resource: { runtimeId: record.placement.runtimeId, workspaceId: record.placement.workspaceId, workspacePath: record.placement.workspacePath } },
+      save: { layoutApplied: attached, clientStateWritten: false, storageFlushRequested: false, diskDurability: acknowledgedWrite ? 'confirmed' : 'unconfirmed', reason: acknowledgedWrite ? null : 'This current read confirms the retained association, not the original write acknowledgement.' },
+      issues: attached ? [] : [{ step: 'association', code: 'SPACE_PLACEMENT_UNKNOWN', message: 'The original association remains retained, but its original occurrence or resource is no longer attached.', recovery: 'Inspect the original L and A Coordinator independently; no creation or input was repeated.' }] }
+  }
   async function reconcile(record: AgentMuxSpatialAgentOpenRecord, context: AgentMuxRpcCallContext, initialIssue?: unknown,
     originalRequest?: AgentMuxSpatialAgentOpenRequest): Promise<AgentMuxSpaceMutationReport> {
     const report: AgentMuxSpaceMutationReport = { requestId: record.requestId, outcome: 'unknown', from: null, to: record.address,
@@ -81,9 +92,16 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
     const state = await options.spatial.read()
     if (request.operation === 'space.inspect') {
       if (!('requestId' in request.target)) return undefined
+      const association = state ? spatialAgentAssociationRecord(state.graph, request.target.requestId) : null
+      if (association && state) return { operation: 'space.inspect', catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }, request: { requestId: request.target.requestId, known: true, report: associationReport(association, state.graph) } }
       const record = state ? spatialAgentOpenRecord(state.graph, request.target.requestId) : null
       return { operation: 'space.inspect', catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
         request: { requestId: request.target.requestId, known: Boolean(record), report: record ? await reconcile(record, context) : null } }
+    }
+    if (isSpatialAgentAssociation(request)) {
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const result = await options.spatial.associateAgentOpen(request, options.runtime().ownerIdentity().runtimeId, async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() })
+      return { operation: 'agent.open', ...associationReport(result.record, result.state.graph, result.admitted) }
     }
     if (isHeadlessSpatialAgentOpen(request, state?.graph) && request.content.agentTarget) {
       if (!state) throw new AgentMuxError('The original spatial document is unavailable. Keep the chosen Space and original request.', 'SPATIAL_STATE_ABSENT')
@@ -151,5 +169,5 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       return { operation: 'agent.open', ...await reconcile(admission.record, context) }
     } catch (error) { return { operation: 'agent.open', ...await reconcile(admission.record, context, error) } }
-  }, { describe: () => ({ ordinaryLaunch: { revision: 1 as const, destination: 'source-zone-background' as const }, externalAssociation: null }) })
+  }, { describe: () => ({ ordinaryLaunch: { revision: 1 as const, destination: 'source-zone-background' as const }, externalAssociation: 1 as const }) })
 }

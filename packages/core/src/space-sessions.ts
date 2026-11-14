@@ -9,6 +9,7 @@ import type { AgentMuxClientEvent } from './types.js'
 export type SpaceSessionOccurrence = {
   regionId: string
   creationOperationId?: string
+  associationOperationId?: string
   projectRuntimeId: string | null
   agentRuntimeId: string | null
   executionRoute: { kind: 'same' } | { kind: 'adopted'; route: import('./host-route.js').AdoptedHostRoute } | { kind: 'unconfirmed' }
@@ -27,6 +28,8 @@ export type SpaceSessionsObservation = SpaceSessionsOpening & (
   | { type: 'member'; member: SpaceSessionMember; occurrences?: SpaceSessionOccurrence[]; state: SpaceSessionState }
   | { type: 'removed'; member: SpaceSessionMember }
   | { type: 'membership-complete' }
+  /** A business locator diagnostic without an invented Session/Runtime identity. */
+  | { type: 'association'; association: { regionId: string; operationId: string }; state: { status: 'unavailable'; issue: { code: string; message: string } } }
   | { type: 'runtime'; hostId: string; runtimeId: string; authority: SpaceAuthoritySource; event: AgentMuxClientEvent }
 )
 export const SPACE_SESSION_METHODS = { 'space.sessions.watch': 'long' } as const

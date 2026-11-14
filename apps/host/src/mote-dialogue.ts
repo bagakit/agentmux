@@ -119,7 +119,7 @@ export function createHostMoteDialogue(options: {
       try {afterCut=await cut(reference)}catch(error){issue=[issue,String(error)].filter(Boolean).join('\n')}
       const graph=(await options.spatial.read())?.graph
       const admissions = graph ? Object.keys(spatialAgentOpenDocument(graph).requests)
-        .map(id => spatialAgentOpenRecord(graph, id)!)
+        .flatMap(id => { const record = spatialAgentOpenRecord(graph, id); return record ? [record] : [] })
         .filter(record => {
           const intent = record.moteMain
           return intent?.bindOperationId === operationId && sameMotePreferencesTarget(intent.target, before.target) &&

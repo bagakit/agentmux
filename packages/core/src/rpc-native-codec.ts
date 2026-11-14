@@ -421,7 +421,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (Object.hasOwn(HOST_ROUTE_METHODS, method)) return parseHostRouteResult(method as keyof typeof HOST_ROUTE_METHODS, value) as Record<string, unknown>
     if (method === 'agent.creation.continue') return parseCreationContinueResult(value, parseCreationContinueParams(params)) as unknown as Record<string, unknown>
     if (method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
-      const input = parseAgentExecutionBinding(params)
+      const input = parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding' })
       if (method === 'agent.execution.binding' && value === null) return value as unknown as Record<string, unknown>
       return parseAgentExecutionInspection(value, input) as unknown as Record<string, unknown>
     }

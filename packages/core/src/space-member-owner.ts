@@ -10,6 +10,15 @@ export async function resolveSpaceMember(store: AgentMuxSpatialStateStore, targe
   const source = await store.readSpaceAgentRegion({ spaceId: target.reference.spaceId, regionId: target.regionId })
   if (!source) throw new AgentMuxError('The original Space document is unavailable. Its member and input are retained.', 'SPACE_MEMBER_UNAVAILABLE')
   const member = source.member
+  if (member?.region.association) {
+    const original = member.association
+    if (!original || original.requestId !== member.region.association.operationId || original.reference.runtimeId !== target.runtimeId ||
+        original.reference.binding.agentSessionId !== target.agentSessionId || original.address.regionId !== target.regionId || original.address.tabId !== member.region.tabId ||
+        original.address.spaceId !== target.reference.spaceId || original.address.zoneId !== member.zone.zoneId || original.placement.runtimeId !== target.reference.runtimeId ||
+        original.placement.workspaceId !== member.zone.workspaceId || original.placement.hostId !== member.zone.hostId || original.placement.workspacePath !== member.zone.directoryPath) throw new AgentMuxError(
+      'The original external association is unconfirmed. Keep its L and original Coordinator; a local same-SID Session was not substituted.', 'SPACE_MEMBER_ADMISSION_UNCONFIRMED')
+    throw new AgentMuxError('This member is controlled by its original independent Coordinator. Use that separately authenticated SDK; Source membership grants no reverse transport or input.', 'SPACE_MEMBER_EXTERNAL_COORDINATOR')
+  }
   if (!member || member.region.kind !== 'agent' || member.region.agentSessionId !== target.agentSessionId) throw new AgentMuxError(
     'This Region is no longer a member of the selected original Space and Session. No other Session was substituted.', 'SPACE_MEMBER_NOT_FOUND')
   const { region, zone, admission } = member, hostId = region.execution?.hostId

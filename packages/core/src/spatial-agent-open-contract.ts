@@ -7,6 +7,7 @@ import type { AgentMuxAgentSession } from './types.js'
 import type { AgentMuxSpaceAgentFact, AgentMuxSpaceAddress, AgentMuxSpaceControlRequest } from './space-control.js'
 import type { AgentMuxSpatialGraph } from './spatial-graph.js'
 import { parseMotePreferencesTarget, parseMoteDefaultConversation, parseMoteQuickBaseline, parseMotePreferencesSaveResult, sameMoteQuickDefaults, sameMotePreferencesTarget, effectiveMoteQuickSave, moteChangedMainRoleRevision, type MotePreferencesTarget, type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from './mote-preferences.js'
+import { parseCoordinatorAgentReference, type CoordinatorAgentReference } from './agent-open-contract.js'
 import { rpcRecord } from './rpc-data.js'
 import { AgentMuxError } from './errors.js'
 import type { FileReadResource } from './public-rpc-files.js'
@@ -96,6 +97,19 @@ export type AgentMuxSpatialAgentOpenRecord = {
   /** Dispatch markers only. Actual outcomes are read from the original source and Files owners. */
   moteMainFollowUps?: { sourceStarted?: true; bindStarted?: true; bindingReceipt?: MoteMainBindingReceipt; refusedBeforeBinding?: MoteMainBaseline; bindingObserved?: MoteMainBindingObservation; deferredInputObserved?:'admitted'|'terminal-confirmed'|'not-applied'; deferredInputKey?: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>; handoverInputKey?: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}> }
 }
+/** B's immutable membership association L. A retains its original Coordinator C. */
+export type AgentMuxSpatialAgentAssociationRecord = {
+  kind: 'association'; requestId: string; digest: string; address: AgentMuxSpaceAddress
+  reference: CoordinatorAgentReference
+  placement: { runtimeId: string; hostId: string; workspaceId: string; workspacePath: string }
+}
+export type AgentMuxSpatialAgentAssociationRequest = Omit<AgentMuxSpatialAgentOpenRequest, 'content'> & {
+  content: Extract<AgentMuxSpatialAgentOpenRequest['content'], { kind: 'agent-session'; reference: CoordinatorAgentReference }>
+}
+export function isSpatialAgentAssociation(request: { operation: string; content?: unknown }): request is AgentMuxSpatialAgentAssociationRequest {
+  return request.operation === 'agent.open' && !!request.content && typeof request.content === 'object' &&
+    'kind' in request.content && request.content.kind === 'agent-session' && 'reference' in request.content
+}
 /** Original creation reference, never current-role authority. */
 export function moteMainCreatedReference(record: AgentMuxSpatialAgentOpenRecord) {
   const { displayWorkspaceId, groupId, tabId, regionId } = record.address
@@ -132,7 +146,9 @@ export function validateMoteMainBindingReceipt(record: AgentMuxSpatialAgentOpenR
 /** Original unfinished first creation, independent of unrelated MOTE edits or client-local pointers. */
 export function pendingMoteMainCreation(graph: AgentMuxSpatialGraph, target: MotePreferencesTarget, expectedRoleRevision?:string|null): AgentMuxSpatialAgentOpenRecord | null {
   const matches = Object.keys(spatialAgentOpenDocument(graph).requests).flatMap(id => {
-    const record = spatialAgentOpenRecord(graph, id)!, intent = record.moteMain, receipt = record.moteMainFollowUps?.bindingReceipt
+    const record = spatialAgentOpenRecord(graph, id)
+    if (!record) return []
+    const intent = record.moteMain, receipt = record.moteMainFollowUps?.bindingReceipt
     if (!intent || expectedRoleRevision!==undefined&&intent.expectedRoleRevision!==expectedRoleRevision || record.moteMainFollowUps?.refusedBeforeBinding || receipt && receipt.status !== 'unconfirmed' || record.moteMainFollowUps?.bindingObserved) return []
     const original = intent.target
     return original.spaceId === target.spaceId && original.zoneId === target.zoneId &&
@@ -159,7 +175,7 @@ export function spatialAgentFact(session: Pick<AgentMuxAgentSession, 'agentSessi
     ...(session.forkedFrom ? { forkedFrom: session.forkedFrom } : {}) }
 }
 
-type Document = { schema: 'agentmux.spatial-agent-open.v1'; requests: Record<string, AgentMuxSpatialAgentOpenRecord> }
+type Document = { schema: 'agentmux.spatial-agent-open.v1'; requests: Record<string, AgentMuxSpatialAgentOpenRecord | AgentMuxSpatialAgentAssociationRecord> }
 export function spatialAgentOpenDocument(graph: AgentMuxSpatialGraph): Document {
   const stored = graph.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE]
   if (stored === undefined) return { schema: 'agentmux.spatial-agent-open.v1', requests: {} }
@@ -168,10 +184,25 @@ export function spatialAgentOpenDocument(graph: AgentMuxSpatialGraph): Document 
     'The original spatial creation associations are unreadable. Keep their graph and inspect the original operation.', 'SPATIAL_CREATION_UNCONFIRMED')
   return stored as unknown as Document
 }
+export function spatialAgentAssociationRecord(graph: AgentMuxSpatialGraph, requestId: string): AgentMuxSpatialAgentAssociationRecord | null {
+  const requests = spatialAgentOpenDocument(graph).requests
+  const raw = Object.hasOwn(requests, requestId) ? requests[requestId] : undefined
+  if (!raw || !('kind' in raw) || raw.kind !== 'association') return null
+  const fail = () => { throw new AgentMuxError('The original Source association is unreadable. Keep L and the original Coordinator reference.', 'SPATIAL_ASSOCIATION_UNCONFIRMED') }
+  try {
+    const p = rpcRecord(raw, ['kind','requestId','digest','address','reference','placement']), address = rpcRecord(p.address, ['spaceId','zoneId','workspaceId','displayWorkspaceId','groupId','tabId','regionId']), placement = rpcRecord(p.placement, ['runtimeId','hostId','workspaceId','workspacePath'])
+    if (p.requestId !== requestId || typeof p.digest !== 'string' || !p.digest || Object.values(address).length !== 7 ||
+        Object.values(address).some(value => typeof value !== 'string' || !value || /[\0\r\n]/u.test(value)) ||
+        Object.values(placement).length !== 4 || Object.values(placement).some(value => typeof value !== 'string' || !value || /[\0\r\n]/u.test(value)) || placement.workspaceId !== address.workspaceId) fail()
+    parseCoordinatorAgentReference(p.reference)
+  } catch { fail() }
+  return structuredClone(raw)
+}
 export function spatialAgentOpenRecord(graph: AgentMuxSpatialGraph, requestId: string): AgentMuxSpatialAgentOpenRecord | null {
   const requests = spatialAgentOpenDocument(graph).requests
   const original = Object.hasOwn(requests, requestId) ? requests[requestId] : undefined
   if (!original) return null
+  if ('kind' in original) { if (original.kind === 'association') { spatialAgentAssociationRecord(graph, requestId); return null } throw new AgentMuxError('The original admission kind is unconfirmed.', 'SPATIAL_CREATION_UNCONFIRMED') }
   if (original.requestId !== requestId || typeof original.digest !== 'string' || typeof original.agentSessionId !== 'string' ||
       !original.address || !original.execution || typeof original.execution.hostId !== 'string' || typeof original.execution.workspacePath !== 'string') throw new AgentMuxError(
     'The exact spatial creation association is unconfirmed. Keep its Session and original request.', 'SPATIAL_CREATION_UNCONFIRMED')
@@ -225,7 +256,7 @@ export function validateMoteMainBindingObservation(record: AgentMuxSpatialAgentO
 
 /** Original started first Query, including a bound role whose input is not yet inspected. */
 export function retainedMoteMainStarts(graph: AgentMuxSpatialGraph, target: MotePreferencesTarget): AgentMuxSpatialAgentOpenRecord[] {
-  const matches=Object.keys(spatialAgentOpenDocument(graph).requests).map(id=>spatialAgentOpenRecord(graph,id)!).filter(record=>record.moteMain?.deferredInput&&sameMotePreferencesTarget(record.moteMain.target,target))
+  const matches=Object.keys(spatialAgentOpenDocument(graph).requests).flatMap(id=>{const record=spatialAgentOpenRecord(graph,id);return record?[record]:[]}).filter(record=>record.moteMain?.deferredInput&&sameMotePreferencesTarget(record.moteMain.target,target))
   return matches
 }
 

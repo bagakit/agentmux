@@ -7,14 +7,16 @@ import type { AgentMuxHostedClient } from './hosted-client-contract.js'
 import type { AgentMuxClientEvent } from './types.js'
 import { hostedAgentSessionSummary } from './hosted-session-summary.js'
 
-export type SpaceSessionSource = { member: SpaceSessionMember; occurrences?: SpaceSessionOccurrence[]; adoptedRoute?: AdoptedHostRoute; issue?: { code: string; message: string } }
+export type SpaceSessionSource = { member: SpaceSessionMember; occurrences?: SpaceSessionOccurrence[]; adoptedRoute?: AdoptedHostRoute; issue?: { code: string; message: string }; unavailable?: true }
+export type SpaceSessionAssociationIssue = { association: { regionId: string; operationId: string }; issue: { code: string; message: string } }
+export type SpaceSessionReadSource = SpaceSessionSource | SpaceSessionAssociationIssue
 export type SpaceSessionReader = Pick<AgentMuxHostedClient<'summary'>, 'agentSessions' | 'runtimeOwnerIdentity' | 'sessionObservationScope' | 'dispose'>
 type Group = { key: string; hostId: string; runtimeId: string; cut: SpaceSessionsOpening; sources: SpaceSessionSource[]; adoptedRoute?: AdoptedHostRoute;
   controller: AbortController; stop?: (() => void | Promise<void>) | undefined }
 type Ports = {
   authority: SpaceAuthorityOwner
   /** Original source graph/admission lookup, once per related membership cut. */
-  sources(snapshot: SpaceSnapshot): Promise<SpaceSessionSource[]>
+  sources(snapshot: SpaceSnapshot): Promise<SpaceSessionReadSource[]>
   observe(group: { hostId: string; runtimeId: string; agentSessionIds: string[]; adoptedRoute?: AdoptedHostRoute },
     event: (authority: SpaceAuthoritySource, event: AgentMuxClientEvent) => void, signal: AbortSignal): Promise<SpaceSessionReader>
 }
@@ -102,7 +104,21 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
     const cut = snapshot, sources = await ports.sources(snapshot)
     if (closed || current !== cut) return
     const next = new Map<string, SpaceSessionSource>()
-    for (const source of sources) {
+    // Reuse only this reader's already confirmed selector for the same L/Region.
+    // This per-cut index is not a new authority and never opens an A carrier.
+    const previousAssociations = new Map<string, { source: SpaceSessionSource; occurrence: SpaceSessionOccurrence }>()
+    for (const source of members.values()) for (const occurrence of source.occurrences ?? []) if (occurrence.associationOperationId) previousAssociations.set(
+      JSON.stringify([occurrence.regionId, occurrence.associationOperationId]), { source, occurrence })
+    const issues: SpaceSessionAssociationIssue[] = []
+    for (const item of sources) {
+      let source: SpaceSessionSource
+      if ('association' in item) {
+        issues.push(item)
+        const previous = previousAssociations.get(JSON.stringify([item.association.regionId, item.association.operationId]))
+        if (!previous) continue
+        source = { ...previous.source, occurrences: [previous.occurrence], issue: item.issue, unavailable: true }
+      } else source = item
+
       const key = spaceSessionMemberKey(source.member), previous = next.get(key)
       let selected = previous ?? source
       if (previous?.issue && previous.issue.code !== 'SPACE_SESSION_ROUTE_AMBIGUOUS' && !source.issue) selected = source
@@ -130,9 +146,10 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
     }
     const removed = [...members].filter(([key]) => !next.has(key)).map(([, value]) => value.member)
     members.clear(); for (const [key, source] of next) members.set(key, source)
+    for (const item of issues) await send({ ...envelope(), type: 'association', association: item.association, state: { status: 'unavailable', issue: item.issue } })
     for (const member of removed) await send({ ...envelope(), type: 'removed', member })
     for (const source of next.values()) if (source.issue || source.member.hostId === null || source.member.runtimeId === null) await send({
-      ...envelope(), type: 'member', ...presentation(source), state: { status: 'unknown', issue: source.issue ?? { code: 'SPACE_SESSION_IDENTITY_UNCONFIRMED', message: 'The original Session Host or Runtime is unconfirmed. Its membership and Run reference are retained.' } } })
+      ...envelope(), type: 'member', ...presentation(source), state: { status: source.unavailable ? 'unavailable' : 'unknown', issue: source.issue ?? { code: 'SPACE_SESSION_IDENTITY_UNCONFIRMED', message: 'The original Session Host or Runtime is unconfirmed. Its membership and Run reference are retained.' } } })
     const opening: Group[] = []
     for (const plan of planned.values()) if (!groups.has(plan.key)) {
       const group: Group = { ...plan, cut: envelope(), controller: new AbortController() }; groups.set(plan.key, group); opening.push(group)

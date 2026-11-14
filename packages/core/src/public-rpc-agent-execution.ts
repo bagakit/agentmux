@@ -61,25 +61,39 @@ export function parseAgentExecutionCreate(value: unknown): AgentExecutionOpenInp
   return structuredClone(input) as unknown as AgentExecutionOpenInput
 }
 
-export function parseAgentExecutionBinding(value: unknown): { bindingId: string } {
-  const input = rpcRecord(value, ['bindingId'])
-  return { bindingId: identity(input.bindingId, 'INVALID_CONTROL_REQUEST') }
+export function parseAgentExecutionBinding(value: unknown, options: { associationView?: boolean } = {}): { bindingId: string; view?: 'association' } {
+  const input = rpcRecord(value, options.associationView ? ['bindingId','view'] : ['bindingId'])
+  if (input.view !== undefined && input.view !== 'association') invalid('Choose the original association witness view.', 'INVALID_CONTROL_REQUEST')
+  return { bindingId: identity(input.bindingId, 'INVALID_CONTROL_REQUEST'), ...(input.view === undefined ? {} : { view: 'association' }) }
 }
 
 /** Metadata only. A diagnostic's original operation key is usable without native payload bytes. */
 export function parseAgentExecutionInspection(value: unknown, expected: { bindingId: string } & Partial<Pick<AgentExecutionInspection,
-  'agentHostId' | 'resourceHostId' | 'agentSessionId' | 'resourceWorkspacePath' | 'agentRoute' | 'resourceRoute'>>): AgentExecutionInspection {
+  'agentHostId' | 'resourceHostId' | 'agentSessionId' | 'resourceWorkspacePath' | 'agentRoute' | 'resourceRoute'>> & { view?: 'association' }): AgentExecutionInspection {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'diagnostics', 'notices', 'continuation', 'helperStarts', 'agentRoute', 'resourceRoute'], code)
+  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'diagnostics', 'notices', 'continuation', 'helperStarts', 'agentRoute', 'resourceRoute', ...(expected.view === 'association' ? ['association'] : [])], code)
   for (const field of ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId']) identity(result[field], code)
   workspace(result.resourceWorkspacePath, code)
   for (const field of ['agentRoute', 'resourceRoute']) if (result[field] !== undefined) parseAdoptedHostRoute(result[field])
-  for (const [field, original] of Object.entries(expected)) if (!isDeepStrictEqual(result[field], original)) invalid('Execution observation belongs to another original binding.', code)
+  for (const [field, original] of Object.entries(expected)) if (field !== 'view' && !isDeepStrictEqual(result[field], original)) invalid('Execution observation belongs to another original binding.', code)
   if (result.state !== 'connected' && result.state !== 'unavailable' || (result.state === 'connected') === (result.diagnostic !== undefined)) invalid('Execution observation has inconsistent service state.', code)
   if (result.notices !== undefined) parseAgentExecutionNotices(result.notices, {}, code)
   if (result.continuation !== undefined) {
     const original = parseAgentExecutionReference(result.continuation)
     if (original.bindingId !== result.bindingId || original.agentSessionId !== result.agentSessionId) invalid('Continuation identifies another original execution.', code)
+  }
+  if (expected.view === 'association') {
+    const witness = rpcRecord(result.association, ['state','reference','agentRuntimeId','resourceRuntimeId','resourceWorkspacePath','issue'], code)
+    const original = parseAgentExecutionReference(witness.reference)
+    if (original.bindingId !== result.bindingId || original.agentSessionId !== result.agentSessionId || !isDeepStrictEqual(witness.reference, result.continuation)) invalid('Association witness belongs to another original creation.', code)
+    if (witness.state === 'confirmed') {
+      identity(witness.agentRuntimeId, code); identity(witness.resourceRuntimeId, code); workspace(witness.resourceWorkspacePath, code)
+      if (witness.resourceWorkspacePath !== result.resourceWorkspacePath || witness.issue !== undefined) invalid('Association witness has another resource or conflicting state.', code)
+    } else if (witness.state === 'unconfirmed') {
+      const issue = rpcRecord(witness.issue, ['code','message'], code)
+      if (issue.code !== 'EXECUTION_RUNTIME_WITNESS_UNCONFIRMED' || typeof issue.message !== 'string' ||
+          witness.agentRuntimeId !== undefined || witness.resourceRuntimeId !== undefined || witness.resourceWorkspacePath !== undefined) invalid('Unconfirmed original Runtime facts cannot be filled from current routes.', code)
+    } else invalid('Association witness has no explicit frozen fact state.', code)
   }
   if (result.helperStarts !== undefined) {
     const starts = rpcRecord(result.helperStarts, ['executor', 'frontend'], code)

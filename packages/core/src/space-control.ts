@@ -66,6 +66,8 @@ export type AgentMuxSpaceRegionFact = {
   agentSessionId: string | null
   /** Locator for this original source admission, never permission to recreate it. */
   creationOperationId?: string
+  /** External business association L, distinct from an Agent creation C. */
+  association?: { operationId: string }
   runId: string | null
   execution: { hostId: string; cwd: string; runtimeId?: string } | null
 }
@@ -230,6 +232,8 @@ export type AgentMuxSpaceMutationReport = {
   from: AgentMuxSpaceAddress | null
   to: AgentMuxSpaceAddress | null
   agent: AgentMuxSpaceAgentFact | null
+  /** A Source membership ACK, never an execution/Start or input receipt. */
+  association?: { operationId: string; reference: import('./agent-open-contract.js').CoordinatorAgentReference; resource: import('./agent-open-contract.js').AgentAssociationResource }
   resource: { projectId: string | null; sourceWorkspaceId: string | null; hostId: string; path: string; workspaceId: string | null; kind: 'directory' | 'worktree'; branch: string | null } | null
   save: AgentMuxSpatialSave
   issues: AgentMuxSpatialIssue[]
@@ -342,7 +346,8 @@ export type AgentMuxSpaceControlRequest = Base & (
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       /** A public request only: the Core service expands it into new-agent or fork-agent content before admission. */
       | { kind: 'derived-action'; actionId: string; source: { agentSessionId: string }; executorId?: string }
-      | { kind: 'agent-session'; agentSessionId: string };
+      | { kind: 'agent-session'; agentSessionId: string; reference?: never; expectedResource?: never }
+      | { kind: 'agent-session'; reference: import('./agent-open-contract.js').CoordinatorAgentReference; expectedResource: import('./agent-open-contract.js').AgentAssociationResource; agentSessionId?: never };
       destination: AgentMuxSpaceDestination; focus: boolean;
       moteMain?: import('./spatial-agent-open-contract.js').MoteMainCreationIntent;
       caller?: { agentSessionId: string; capability?: string } }

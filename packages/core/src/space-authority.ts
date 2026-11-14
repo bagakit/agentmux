@@ -125,7 +125,7 @@ const BUSINESS_FIELDS = {
     spaces: ['spaceId', 'kind', 'name', 'hostId', 'directoryPath', 'projectId', 'topicId', 'issue'],
     zones: ['zoneId', 'workspaceId', 'kind', 'hostId', 'directoryPath', 'branch', 'issue'],
     tabs: ['tabId', 'zoneId', 'workspaceId', 'name', 'nameRevision', 'regionIds', 'issue'],
-    regions: ['regionId', 'tabId', 'kind', 'browserId', 'file', 'agentSessionId', 'creationOperationId', 'runId', 'execution'],
+    regions: ['regionId', 'tabId', 'kind', 'browserId', 'file', 'agentSessionId', 'creationOperationId', 'association', 'runId', 'execution'],
     bindings: ['zoneId', 'spaceId']
 } as const;
 /** Opaque host JSON and window details cannot enter the shared business DTO. */

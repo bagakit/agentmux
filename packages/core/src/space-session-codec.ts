@@ -28,7 +28,7 @@ function member(value: unknown): SpaceSessionMember {
 function occurrences(value: unknown, runtimeId: string | null): SpaceSessionOccurrence[] {
   if (!Array.isArray(value)) return invalid()
   const result = value.map(item => {
-    const p = rpcRecord(item, ['regionId','creationOperationId','projectRuntimeId','agentRuntimeId','executionRoute'], 'CONTROL_PROTOCOL_ERROR')
+    const p = rpcRecord(item, ['regionId','creationOperationId','associationOperationId','projectRuntimeId','agentRuntimeId','executionRoute'], 'CONTROL_PROTOCOL_ERROR')
     const projectRuntimeId = p.projectRuntimeId === null ? null : id(p.projectRuntimeId), agentRuntimeId = p.agentRuntimeId === null ? null : id(p.agentRuntimeId)
     if (agentRuntimeId !== runtimeId) return invalid()
     const r = rpcRecord(p.executionRoute, ['kind','route'], 'CONTROL_PROTOCOL_ERROR')
@@ -42,17 +42,25 @@ function occurrences(value: unknown, runtimeId: string | null): SpaceSessionOccu
       if (r.kind !== 'same' && r.kind !== 'unconfirmed' || r.kind === 'same' && (!projectRuntimeId || projectRuntimeId !== agentRuntimeId)) return invalid()
       executionRoute = { kind: r.kind }
     }
-    return { regionId: id(p.regionId), ...(p.creationOperationId === undefined ? {} : { creationOperationId: id(p.creationOperationId) }), projectRuntimeId, agentRuntimeId, executionRoute }
+    if (p.associationOperationId !== undefined && (p.creationOperationId !== undefined || executionRoute.kind !== 'unconfirmed')) return invalid()
+    return { ...(p.associationOperationId === undefined ? {} : { associationOperationId: id(p.associationOperationId) }), regionId: id(p.regionId), ...(p.creationOperationId === undefined ? {} : { creationOperationId: id(p.creationOperationId) }), projectRuntimeId, agentRuntimeId, executionRoute }
   })
   if (new Set(result.map(item => item.regionId)).size !== result.length) return invalid()
   return result
 }
 export function parseSpaceSessionsObservation(value: unknown, opening: SpaceSessionsOpening): SpaceSessionsObservation {
-  const p = rpcRecord(value, ['reference', 'source', 'revision', 'type', 'member', 'occurrences', 'state', 'hostId', 'runtimeId', 'authority', 'event'], 'CONTROL_PROTOCOL_ERROR')
+  const p = rpcRecord(value, ['reference', 'source', 'revision', 'type', 'member', 'occurrences', 'state', 'association', 'hostId', 'runtimeId', 'authority', 'event'], 'CONTROL_PROTOCOL_ERROR')
   const actual = envelope(p, opening.reference)
   if (actual.source.ownerInstanceId !== opening.source.ownerInstanceId || actual.revision < opening.revision) return invalid()
   if (p.type === 'membership-complete') { rpcRecord(p, ['reference', 'source', 'revision', 'type'], 'CONTROL_PROTOCOL_ERROR'); return { ...actual, type: p.type } }
   if (p.type === 'removed') { rpcRecord(p, ['reference', 'source', 'revision', 'type', 'member'], 'CONTROL_PROTOCOL_ERROR'); return { ...actual, type: p.type, member: member(p.member) } }
+  if (p.type === 'association') {
+    rpcRecord(p, ['reference','source','revision','type','association','state'], 'CONTROL_PROTOCOL_ERROR')
+    const association = rpcRecord(p.association, ['regionId','operationId'], 'CONTROL_PROTOCOL_ERROR'), state = rpcRecord(p.state, ['status','issue'], 'CONTROL_PROTOCOL_ERROR')
+    const issue = rpcRecord(state.issue, ['code','message'], 'CONTROL_PROTOCOL_ERROR')
+    if (state.status !== 'unavailable') return invalid()
+    return { ...actual, type: p.type, association: { regionId: id(association.regionId), operationId: id(association.operationId) }, state: { status: state.status, issue: { code: id(issue.code), message: id(issue.message) } } }
+  }
   if (p.type === 'member') {
     rpcRecord(p, ['reference', 'source', 'revision', 'type', 'member', 'occurrences', 'state'], 'CONTROL_PROTOCOL_ERROR')
     const original = member(p.member), locations = p.occurrences === undefined ? {} : { occurrences: occurrences(p.occurrences, original.runtimeId) }, state = rpcRecord(p.state, ['status', 'authority', 'session', 'issue'], 'CONTROL_PROTOCOL_ERROR')

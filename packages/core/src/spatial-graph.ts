@@ -110,6 +110,10 @@ export function retainAdmittedAgentIdentity(graph: AgentMuxSpatialGraph, previou
   const original = new Map(previous.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]));
   graph.regions = graph.regions.map(region => {
     const old = original.get(JSON.stringify([region.tabId, region.regionId]));
+    if (region.kind === 'agent' && old?.kind === 'agent' && old.association && old.agentSessionId === null && region.agentSessionId === null) {
+      const { creationOperationId: _creation, ...retained } = region;
+      return { ...retained, association: { ...old.association }, agentSessionId: null, runId: null, execution: null };
+    }
     if (region.kind !== 'agent' || old?.kind !== 'agent' || !old.creationOperationId ||
         !old.agentSessionId || region.agentSessionId !== old.agentSessionId) return region;
     return { ...region, creationOperationId: old.creationOperationId, runId: old.runId,
@@ -154,6 +158,10 @@ export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph 
     id(r.tabId);
     nullableId(r.agentSessionId);
     if (r.creationOperationId !== undefined) id(r.creationOperationId);
+    if (r.association !== undefined) {
+      const association = record(r.association); id(association.operationId);
+      if (Object.keys(association).length !== 1 || r.kind !== 'agent' || r.agentSessionId !== null || r.runId !== null || r.execution !== null || r.creationOperationId !== undefined) invalid('An external association is not a local creation or execution.');
+    }
     nullableId(r.runId);
     if (!['agent', 'terminal', 'browser', 'file', 'git', 'git-diff', 'launcher'].includes(String(r.kind)))
       invalid('Invalid Region kind.');
