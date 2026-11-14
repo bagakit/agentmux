@@ -758,7 +758,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       }
       return { operation, ...reconciled, save }
     }
-    if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session' && request.content.kind !== 'derived-action') {
+    if (binding.createAgent && operation === 'agent.open' && (request.content.kind === 'new-agent' || request.content.kind === 'fork-agent')) {
       if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed after intent was saved. Its reserved identity is retained; creation was not dispatched.')
       const resourceWorkspace = ports.get().config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
       const topicId = !executionWorkspace && zone.kind === 'home' && resourceWorkspace ? topics.find(topic => topicContentZoneId(resourceWorkspace, topic) === zone.zoneId)?.id : undefined
