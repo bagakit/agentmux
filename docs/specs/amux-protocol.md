@@ -209,9 +209,9 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 
 ## 对象链接
 
-形式固定为 `amux://KIND/ID`。`KIND` 区分大小写，只取 `agent`、`region`、`tab`、`space`、`zone`、`capsule`；`ID` 是该类型的一个非空原身份，以 `encodeURIComponent` 编为单个 path segment。`capsule` 引用原持久页面，而非 Browser、端口或展示位置。没有 query、fragment、父对象路径或自动执行参数，不能从名字、Run 或当前位置替换原 ID。
+对象主链接为 `amux://KIND/ID`。`KIND` 区分大小写，只取 `agent`、`region`、`tab`、`space`、`zone`、`capsule`、`mote`；`ID` 是该类型的一个非空原身份，以 `encodeURIComponent` 编为单个 path segment。`capsule` 引用原持久页面；`mote` 的 ID 是准确 Mote 已有的稳定 `spaceId`，打开其逻辑主对话，不取当前 Agent SID 或裸 topicId。只有 Mote 允许 `amux://mote/ID/thread/EVENT` 的原工作事件引用；EVENT 是该 Mote 范围内的原 eventId，独立编为一个 segment，不能以执行 Agent SID 代替。所有链接均无 query、fragment 或自动执行参数；其他种类不接受额外路径，不能从名字、Run、当前物理目录或当前位置替换原 ID。Host 不另外编码为定位参数，身份和可达范围沿原服务及其已配置空间事实。
 
-解析必须将 segment 准确解码，并通过同一 formatter 编码为完全相同的原链接；非 canonical 转义、额外路径或尾斜杠不接受。不进行 URL 路径归一化；编码后的斜杠可以属于 ID，不能因此拆成对象层级。原 ID 的分配规则和耐久身份保全仍归[空间身份 owner](../design/behavior/spaces-and-layout.md#产品实体-id-分配)。
+解析必须将 segment 准确解码，并通过同一 formatter 编码为完全相同的原链接；非 canonical 转义、未定义的额外路径或尾斜杠不接受。不进行 URL 路径归一化；编码后的斜杠可以属于 ID，不能因此拆成对象层级。原 ID 的分配规则和耐久身份保全仍归[空间身份 owner](../design/behavior/spaces-and-layout.md#产品实体-id-分配)。
 
 [`formatAmuxObjectLink` / `parseAmuxObjectLink`](../../packages/core/src/sharing.ts) 持有公共生成与严格解析。格式有效只说明引用形式有效；对象存在、健康、可达、展示位置、输入资格和操作授权须从原对象核对。复制、打开、发送、导航与多候选消歧归[原行为合同](../design/behavior/public-control.md#对象地址分享与方向)。
 

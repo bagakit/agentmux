@@ -31,6 +31,10 @@ operation. app focus selects a surface; it does not accept a task or certify inp
 Use app focus --surface focus --view map to open the same collaboration map, or --view
 list for execution contexts. Omitting --view preserves the existing Focus view; other
 surfaces cannot use --view. The Space surface always presents the original workbench.
+Use app focus --mote SPACE to open the exact Mote's logical main conversation, or
+app focus --mote SPACE --thread EVENT to open its original work thread. SPACE is the Mote's
+stable spaceId from space ls; EVENT is the original scoped work eventId from dialogue read.
+Opening preserves original Sessions, inputs and drafts; no new Agent or task is created.
 Use app focus --surface focus --host HOST --session SID for one exact Agent in the list.
 Both identities are required; this cannot use map view or transfer input. Original filters
 remain, with one explained temporary reveal. Inspect focus.agent for actual card visibility,

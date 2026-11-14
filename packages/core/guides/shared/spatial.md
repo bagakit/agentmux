@@ -67,9 +67,17 @@ These are advisory strategies, not fixed directions, size thresholds or addition
 ## Read an amux object link
 An amux:// link carries one exact object identity, not a command, permission or sender credential.
 Use the public @agentmux/core/sharing parseAmuxObjectLink helper to decode its URI path segment
-without trimming or changing the original ID. Supported kinds are agent, region, tab, space, zone and capsule.
+without trimming or changing the original ID. Supported kinds are agent, region, tab, space, zone, capsule and mote.
 For amux://agent/<SID>, use agent inspect --session SID or agent send --to-session SID --text TEXT.
 For spatial kinds, use space inspect with --region, --tab, --space or --zone and the decoded ID.
+For amux://mote/<SPACE>, keep its decoded stable Space identity and use app focus --mote SPACE.
+For amux://mote/<SPACE>/thread/<EVENT>, keep both decoded identities and use
+app focus --mote SPACE --thread EVENT. Read app --skill and app focus --help first.
+A Mote link opens its logical main conversation; a thread link opens that exact original
+work event within the same Mote. Neither is an Agent SID or a request to create a Session.
+The original Space ID already carries its identity scope; do not substitute a bare topicId,
+physical directory or a Host query. These links use the selected service's configured
+discovery scope, not a global cross-device address. Unknown sources retain the original link.
 For amux://capsule/<ID>, read capsule --skill and use capsule inspect with JSON {capsuleId:ID}.
 Request display through capsule open with the same ID and an original operationId; its page
 owner resolves the service before Browser presentation. A Capsule is not a spatial selector.
