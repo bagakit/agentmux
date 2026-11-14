@@ -12,7 +12,7 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     win = new BrowserWindow({ width: 1180, height: 820, useContentSize: true, show: false, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) result.errors.push(String(message)) })
-    await win.loadFile(html, { query: { phase: 'initialization-' + phase } })
+    await win.loadFile(html, { query: { phase: 'initialization-' + phase, ...(process.env.MOTE_HEARTBEAT_SURFACE === '1' ? { 'heartbeat-surface': '1' } : {}) } })
     const read = expression => win.webContents.executeJavaScript(expression)
     const until = async expression => {
       const end = Date.now() + 15000
@@ -59,6 +59,86 @@ app.whenReady().then(async () => {
         await capture('legacy-checked-recovery-' + theme + '-' + (width > 600 ? 'wide' : 'narrow')); await escape()
       }
       win.setContentSize(1180, 820); await read('window.moteInit.theme("dark")')
+    }
+    if (process.env.MOTE_HEARTBEAT_SURFACE === '1') {
+      await until('window.moteHeartbeatSurface?.ready')
+      if (process.env.MOTE_HEARTBEAT_SURFACE_DETAIL_ONLY === '1') {
+        const dialog = 'document.querySelector(".mote-quick-mode-dialog")'
+        const reveal = async expression => {
+          await read(`(${expression}).scrollIntoView({block:'center',inline:'nearest'})`); await pause(120)
+          const target = await read(`(()=>{const e=${expression},r=e.getBoundingClientRect(),body=e.closest('.mote-quick-mode-dialog__body').getBoundingClientRect(),footer=document.querySelector('.mote-quick-mode-dialog__footer').getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return {text:e.textContent,rect:r.toJSON(),body:body.toJSON(),footer:footer.toJSON(),complete:r.top>=body.top&&r.bottom<=Math.min(body.bottom,footer.top)&&r.left>=0&&r.right<=innerWidth,hit:e.contains(document.elementFromPoint(x,y))}})()`)
+          assert.equal(target.complete,true,'Target is fully in the actual Dialog viewport');assert.equal(target.hit,true,'Target is not occluded');return target
+        }
+        await read('window.moteInit.theme("dark");window.moteHeartbeatSurface.variant("quiet")'); await profile(); await refresh()
+        await click(button('Configure heartbeat','document.querySelector(".mote-quick-mode")'))
+        await until('document.querySelector(".mote-quick-mode-dialog .mote-heartbeat__report")')
+        await click('document.querySelector(".mote-quick-mode-dialog .mote-heartbeat__report summary")')
+        result.ideaTarget=await reveal(button('Open Idea',dialog));await capture('report-idea-target-visible')
+        await click('document.querySelector(".mote-quick-mode-dialog .mote-heartbeat__details summary")')
+        await click(button('Use updated guidance',dialog));await until('window.moteHeartbeatSurface.pending()')
+        result.adoptionTargets=[]
+        for(const [width,height,name] of [[1180,820,'wide'],[420,740,'narrow']]){win.setContentSize(width,height);result.adoptionTargets.push(await reveal(button('Check original adoption',dialog)));await capture('original-adoption-target-visible-'+name)}
+        result.passed=true;return
+      }
+      if (phase === 'restore') {
+        const seed = JSON.parse(await fs.readFile(path.join(evidence, 'seed.json'), 'utf8'))
+        result.restored = await read('window.moteReliability.facts()')
+        assert.deepEqual(result.restored.inputAtEntry.drafts, seed.original.drafts, 'Original pending request and raw drafts hydrate before fixture input')
+        assert.deepEqual(result.restored.inputAtEntry.agentDrafts, seed.original.agentDrafts)
+        assert.deepEqual(result.restored.fixtureWrites, [])
+        for (const field of ['tabs', 'layouts', 'selection']) assert.deepEqual(result.restored[field], seed.original[field], 'Original workface: ' + field)
+        result.focusScope = { seed: seed.original.focus, restored: result.restored.focus, globalAgentFocus: 'not-qualified-by-this-draft-fixture' }
+        assert.deepEqual(result.restored.session.control, seed.original.session.control)
+        await profile(); await click(button('Configure heartbeat', 'document.querySelector(".mote-quick-mode")'))
+        await until('document.querySelector(".mote-quick-mode-dialog")?.textContent.includes("Check original adoption")')
+        const pending = await read('window.moteHeartbeatSurface.pending()')
+        assert.deepEqual(pending, seed.pending, 'Frozen complete input restored from original durable owner')
+        const prior = await read('window.moteHeartbeatSurface.saves.length')
+        assert.equal(prior, 0, 'Restore sends no adoption')
+        await click(button('Check original adoption', 'document.querySelector(".mote-quick-mode-dialog")'))
+        await until('window.moteHeartbeatSurface.saves.length===1')
+        assert.deepEqual(await read('window.moteHeartbeatSurface.saves[0]'), seed.pending[1].moteQuick.pending.input)
+        await capture('restored-original-adoption')
+        result.persistedInputs = await read('window.moteReliability.persistedInputs()')
+        result.draftRecovery = { originalNonempty: true, hydratedBeforeFixture: true, restoreFixtureWrites: 0, exactPendingRequest: true, explicitSameOperation: true, exactWorkface: true }
+        result.passed = true; return
+      }
+      for (const [theme, width, height] of [['dark',1180,820],['dark',420,740],['light',1180,820],['light',420,740]]) {
+        win.setContentSize(width,height); await read(`window.moteInit.theme(${JSON.stringify(theme)});window.moteHeartbeatSurface.variant('quiet')`)
+        await profile(); await refresh()
+        await until('document.querySelector(".mote-heartbeat__report-summary")')
+        await capture('care-report-' + theme + '-' + (width > 600 ? 'wide' : 'narrow'))
+        await click(button('Configure heartbeat', 'document.querySelector(".mote-quick-mode")'))
+        await until('document.querySelector(".mote-quick-mode-dialog")')
+        await capture('care-settings-' + theme + '-' + (width > 600 ? 'wide' : 'narrow')); await escape()
+      }
+      win.setContentSize(420,740); await input('Emulation.setEmulatedMedia', { features: [{ name:'prefers-reduced-motion',value:'reduce' }] })
+      await read('window.moteHeartbeatSurface.variant("failed")'); await refresh(); await capture('care-failed-reduced-motion')
+      win.setContentSize(1180,820); await read('window.moteInit.theme("dark");window.moteHeartbeatSurface.variant("quiet")'); await refresh()
+      await click(button('Configure heartbeat','document.querySelector(".mote-quick-mode")'))
+      const details = 'document.querySelector(".mote-quick-mode-dialog .mote-heartbeat__details summary")'
+      await click('document.querySelector(".mote-quick-mode-dialog .mote-heartbeat__report summary")'); await capture('care-report-idea-expanded')
+      await click(details)
+      await click(button('Use updated guidance','document.querySelector(".mote-quick-mode-dialog")'))
+      await until('window.moteHeartbeatSurface.pending()')
+      const interval = `document.querySelector('[aria-label="Heartbeat interval (minutes)"]')`
+      await click(interval)
+      await read('(' + interval + ').select()')
+      await input('Input.insertText', { text:'47' })
+      await until('window.moteHeartbeatSurface.pending()?.[1].moteQuick.minutes==="47"')
+      await read('document.querySelector(".mote-quick-mode-dialog__body").scrollTo(0,0)')
+      await capture('care-original-adoption-unconfirmed')
+      win.setContentSize(420,740); await capture('care-original-adoption-unconfirmed-narrow'); win.setContentSize(1180,820)
+      result.pending = await read('window.moteHeartbeatSurface.pending()')
+      await escape()
+      result.draftWitness = { agent: 'Original pending input draft ' + randomUUID(), launcher: 'Original Launcher draft ' + randomUUID() }
+      await read('window.moteReliability.editDrafts(' + JSON.stringify(result.draftWitness) + ')')
+      await until('JSON.stringify(window.moteHeartbeatSurface.pending())===' + JSON.stringify(JSON.stringify(result.pending)))
+      const end = Date.now()+15000
+      do { result.persistedInputs=await read('window.moteReliability.persistedInputs()'); result.original=await read('window.moteReliability.facts()'); if(JSON.stringify(result.persistedInputs)===JSON.stringify({drafts:result.original.drafts,agentDrafts:result.original.agentDrafts}))break; await pause(30) } while(Date.now()<end)
+      assert.deepEqual(result.persistedInputs,{drafts:result.original.drafts,agentDrafts:result.original.agentDrafts})
+      assert.ok(result.original.drafts[result.pending[0]].moteQuick.pending.input.operationId)
+      result.passed=true; return
     }
     if (process.env.MOTE_RECOVERY_VISUAL_ONLY === '1') { await checkedRecovery(); result.passed = true; return }
     if (phase === 'restore') {
