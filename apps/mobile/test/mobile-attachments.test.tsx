@@ -48,12 +48,18 @@ function boundFixture() {
     readAgentSessions: async () => [...f.sessions.values()], sessionHistorySources: async () => [] } as unknown as AgentMuxRpcCorePort
   const service = new AgentMuxRpcService({ fileUploads: owner, coreClients: () => [{ hostId: 'local', client: core }] })
   const calls: Array<{ method: string; params: any }> = []
+  const automaticPauses: any[] = []
   const forward = vi.fn(async (method: any, params: any) => {
+    if (method === 'agent.automation.pause') {
+      expect(params).toMatchObject({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, operationId: expect.any(String) })
+      automaticPauses.push(structuredClone(params))
+      return { receipt: { status: 'confirmed' } }
+    }
     calls.push({ method, params: structuredClone(params) })
     return await service.call(method, JSON.parse(JSON.stringify(params)), { principal: { kind: 'device', id: 'private-phone' }, assertCurrent: () => {} })
   })
   Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: 'connected' }), forwardRpc: forward })
-  return { ...f, owner, calls, forward }
+  return { ...f, owner, calls, automaticPauses, forward }
 }
 function identity(file: LocalAttachment) { return { hostId: 'local', agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, operationId: file.id,
   name: file.name, mimeType: file.mimeType, byteLength: file.size, revision: file.revision } }
@@ -386,7 +392,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const f = boundFixture(), originalForward = f.forward.getMockImplementation()!, selected: any[] = []
     let fail = true
     f.forward.mockImplementation(async (method, params) => {
-      selected.push({ method, params: structuredClone(params) })
+      if (method !== 'agent.automation.pause') selected.push({ method, params: structuredClone(params) })
       if (method === 'file.upload' && params.name === 'second.png' && fail) {
         const { dataBase64: _bytes, ...original } = params
         return { ...original, status: 'error', code: 'PRIVATE_DISK_FAILURE', message: 'private disk unavailable' } as any
