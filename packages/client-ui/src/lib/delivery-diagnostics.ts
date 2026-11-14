@@ -20,7 +20,8 @@ export type DeliveryAttemptSeed = { logId: string; startedAt: number; agentSessi
 
 /** Freeze one click before any await. Diagnostic identity never replaces Input identity. */
 export function startDeliveryAttempt(input: { agentSessionId: string | null; operationId: string | null;
-  hostId: string | null; condition?: AgentPromptCondition | null | undefined; execution?: 'default' | 'immediate'; prompt?: string }): DeliveryAttemptSeed {
+  hostId: string | null; condition?: AgentPromptCondition | null | undefined; expectedRun?: AgentPromptCondition['expectedRun'] | undefined;
+  execution?: 'default' | 'immediate'; prompt?: string }): DeliveryAttemptSeed {
   const bytes = input.prompt === undefined ? null : new TextEncoder().encode(input.prompt)
   let observedDigest: string | null = null
   try {
@@ -30,7 +31,7 @@ export function startDeliveryAttempt(input: { agentSessionId: string | null; ope
   const digest = () => observedDigest
   return Object.freeze({ logId: newDeliveryLogId(), startedAt: Date.now(),
     agentSessionId: input.agentSessionId, operationId: input.operationId, hostId: input.hostId,
-    expectedRunId: input.condition?.expectedRun.runId ?? null, afterSubmissionId: input.condition?.afterSubmissionId ?? null,
+    expectedRunId: input.expectedRun?.runId ?? input.condition?.expectedRun.runId ?? null, afterSubmissionId: input.condition?.afterSubmissionId ?? null,
     conditionAvailable: input.condition !== undefined && input.condition !== null, execution: input.execution ?? null, digest })
 }
 const PREFIX = 'agentmux.delivery-attempt.'

@@ -30,7 +30,7 @@ import {
   caretAtLastLine
 } from '../lib/composer-history'
 import { ComposerResubmitGuard } from '../lib/composer-resubmit-guard'
-import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
+import { useAppStore, agentSteerCanEdit, agentSteerExecution, staleManualSteerDraftKey, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer, type AgentComposerProps } from '@agentmux/client-ui/components/AgentComposer'
@@ -439,7 +439,8 @@ export function AgentSessionComposer({
     ...(entry.logId ? { logId: entry.logId } : {}),
     ...(entry.error ? { error: entry.error } : {}),
     ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
-  })), [queuedEntries, control, capabilities, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
+    ...(staleManualSteerDraftKey(entry, session) ? { staleRunDraft: true } : {}),
+  })), [queuedEntries, control, capabilities, session, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
   const sendImmediately = useMemo(() => queued.some(entry => entry.immediateSend), [queued])
 
   return (

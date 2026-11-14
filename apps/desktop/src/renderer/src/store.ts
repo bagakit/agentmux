@@ -914,6 +914,22 @@ export function agentSteerCanEdit(entry: AgentSteerQueueEntry, inFlightId?: stri
   return !entry.browserInput && !entry.archived && !entry.inputIntakeStarted && !entry.inputReceipt && entry.promptCondition === null && entry.operationId !== inFlightId
 }
 
+/** A retired terminal target may release the user's text to a draft, never its input authority. */
+export function staleManualSteerDraftKey(entry: AgentSteerQueueEntry, session: SessionSnapshot | undefined): Extract<import('@agentmux/core/prompt-condition').AgentPromptInputKey, { kind: 'prompt' }> | undefined {
+  const control = entry.directInputControl
+  const binding = entry.directInputBinding
+  if (entry.errorCode !== 'STALE_AGENT_SESSION' || entry.origin !== 'manual' || entry.inputReceipt ||
+      entry.originalMember || entry.recoveredSourceInput !== undefined || entry.browserInput || entry.browserRecipient ||
+      entry.goalContinuation || entry.goalPmo || entry.goalDispatch || entry.focusTask || entry.moteMain || entry.moteSource ||
+      entry.reaction || entry.resumeInputIntent || entry.resumeInputReceipt ||
+      binding?.admissionIntent.kind !== 'manual-actor' || control?.hostId !== 'local' ||
+      session?.kind !== 'agent' || session.hostId !== control.hostId || session.control.hostId !== control.hostId ||
+      session.control.agentSessionId !== control.agentSessionId || session.id !== control.agentSessionId ||
+      entry.runId !== control.run.runId || binding.expectedRun.runId !== control.run.runId ||
+      session.control.run.runId === control.run.runId) return
+  return { kind: 'prompt', agentSessionId: control.agentSessionId, expectedRun: binding.expectedRun, submissionId: entry.operationId }
+}
+
 function manualComposerBinding(sessionId: string, origin?: 'manual', options?: AgentSteerOptions): AgentSteerQueueEntry['directInputBinding'] {
   const session = options?.originalSession ?? useAppStore.getState().sessions.find(item => item.id === sessionId)
   // This is the direct user's new producer contract, not a recovered queue tag
@@ -12966,7 +12982,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const readOriginal = (state: ReturnType<typeof get>) => {
       const queue = state.agentSteerQueues[sessionId], entry = queue?.find(item => item.operationId === operationId)
       const session = state.sessions.find(item => item.id === sessionId)
-      if (!entry || entry.text !== expectedText || entry.errorCode !== 'AGENT_PROMPT_CONDITION_CHANGED') {
+      const staleKey = entry ? staleManualSteerDraftKey(entry, session) : undefined
+      if (!entry || entry.text !== expectedText ||
+          entry.errorCode !== 'AGENT_PROMPT_CONDITION_CHANGED' && !staleKey && !entry.movedToDraft) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The original message changed or is unavailable. Read its current record before moving it to the draft.')
       }
       // A repeated activation only retries the save; never append the authored body twice.
@@ -12976,16 +12994,26 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This message was archived without moving its text. Read the original archive before composing another message.')
       }
       if (session?.kind !== 'agent' || session.control.agentSessionId !== sessionId || session.hostId !== session.control.hostId ||
-          session.control.run.runId !== expectedRunId || entry.runId !== expectedRunId || entry.promptCondition?.expectedRun.runId !== expectedRunId) {
+          session.control.run.runId !== expectedRunId || !staleKey && (entry.runId !== expectedRunId || entry.promptCondition?.expectedRun.runId !== expectedRunId)) {
         throw controlFailure('STALE_AGENT_SESSION', 'The original Session or Run binding changed. Its message and current draft are kept.')
       }
       if (state.agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original call is still active. Its message and draft are kept.')
       if ((entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && confirmedSteerDelivery(state.timelines[sessionId], session.control, operationId)) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Read its History before composing another message.')
       }
-      return { entry, session }
+      return { entry, session, staleKey }
     }
     const first = readOriginal(get()), original = first.entry
+    if (!original.archived && first.staleKey) {
+      const receipt = await api.sessions.inspectInput(originalInputRoute(original), first.staleKey)
+      if (receipt) {
+        consumeInputReceipt(sessionId, receipt)
+        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core found the original input. Check its receipt before composing a new message.')
+      }
+      const latest = readOriginal(get())
+      if (latest.entry !== original && !latest.entry.movedToDraft) throw controlFailure(
+        'CONTROL_REQUEST_CONFLICT', 'The original message changed during confirmation. Its text and delivery history are kept.')
+    }
     if (moteDraftKey && !useLauncherState.getState().drafts[moteDraftKey]?.prompt?.trim() && original.text.trim() && first.session?.kind === 'agent') pause = first.session
     const move = { operationId, sessionId, runId: expectedRunId, text: expectedText, body: restoreComposerInput(original.text, original.inputImages) }
     if (moteDraftKey && !original.archived) {
@@ -13165,6 +13193,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const retainedControl = entry?.directInputBinding ? entry.directInputControl : undefined
     const seed = admission?.stage === 'queue-admission' ? admission.seed : startDeliveryAttempt({ agentSessionId: retainedControl?.agentSessionId ?? (session?.kind === 'agent' ? session.control.agentSessionId : sessionId),
       operationId, hostId: retainedControl?.hostId ?? session?.hostId ?? null, condition: entry?.promptCondition,
+      expectedRun: entry?.directInputBinding?.expectedRun,
       ...(entry?.execution ? { execution: entry.execution } : {}),
       ...(entry ? { prompt: composeAgentPrompt(entry.text, entry.agentMuxNote).text } : {}) })
     const attempt: SteerDeliveryAttempt = admission?.stage === 'queue-admission' ? admission : { seed, stage: 'queue-validation' }
@@ -13402,7 +13431,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           let attemptExecution = entry.execution
           const deliveryAttempt = manualSteerAttempts.get(JSON.stringify([sessionId, entry.operationId])) ?? {
             seed: startDeliveryAttempt({ agentSessionId: attemptSessionId, operationId: entry.operationId, hostId: attemptHostId,
-              condition: entry.promptCondition, ...(entry.execution ? { execution: entry.execution } : {}),
+              condition: entry.promptCondition, expectedRun: entry.directInputBinding?.expectedRun,
+              ...(entry.execution ? { execution: entry.execution } : {}),
               prompt: composeAgentPrompt(entry.text, entry.agentMuxNote).text }), stage: 'queue-preparation'
           } as SteerDeliveryAttempt
           const matchesAttempt = (item: AgentSteerQueueEntry) =>
@@ -13695,8 +13725,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   send(sessionId, text, onRejected, origin, agentMuxNote, options) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
     const operationId = mintObjectId(), session = options?.originalSession ?? get().sessions.find(item => item.id === sessionId)
+    const binding = manualComposerBinding(sessionId, origin, options)
     const seed = startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
-      operationId, hostId: session?.hostId ?? null, prompt: composeAgentPrompt(text, agentMuxNote).text })
+      operationId, hostId: session?.hostId ?? null, expectedRun: binding?.expectedRun, prompt: composeAgentPrompt(text, agentMuxNote).text })
     const reject = (error: unknown) => {
       const failure = describeError(error)
       void recordMessageDeliveryFailure(seed, error, 'queue-admission').then(diagnostic => {
@@ -13706,7 +13737,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ...(failure.code ? { code: failure.code } : {}), logId: diagnostic.logId }))
       })
     }
-    if (admitAgentSteer(sessionId, text, reject, operationId, origin, agentMuxNote, options, manualComposerBinding(sessionId, origin, options)) === false) return false
+    if (admitAgentSteer(sessionId, text, reject, operationId, origin, agentMuxNote, options, binding) === false) return false
     manualSteerAttempts.set(JSON.stringify([sessionId, operationId]), { seed, stage: 'queue-admission' })
     void get().sendQueuedAgentSteer(sessionId, operationId).catch(error => (onRejected ?? get().reportError)(error))
     return true

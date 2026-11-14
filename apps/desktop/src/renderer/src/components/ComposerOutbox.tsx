@@ -46,6 +46,7 @@ export type ComposerQueuedMessage = {
   preparing?: boolean
   sending?: boolean
   unconfirmed?: boolean
+  staleRunDraft?: boolean
   errorCode?: string
   error?: string
   logId?: string
@@ -90,6 +91,8 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
   }
   if (entry.archived) return { label: entry.confirmed ? '已归档 · 输入已确认' : '已归档', detail: entry.confirmed ? '原输入已由 Core 确认；归档不会撤回输入。可读取原记录，不能恢复为待发。' : `这条原消息已退出待发队列，不会自动发送。${entry.unconfirmed ? '\n此前是否已输入仍待核实；归档保留原操作，恢复也不会重建或重发。' : ''}${entry.error ? `\n此前记录：${entry.error}` : ''}`, busy: false }
   if (entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED' && !entry.preparing && !entry.sending) return { label: '发送条件已变化', detail: '本次尝试未写入输入；原消息此前的投递结果仍需核对。查看对话后，可移至草稿，作为新消息编辑。', busy: false }
+  if (entry.staleRunDraft && !entry.preparing && !entry.sending) return { label: '消息绑定的 Run 已变更',
+    detail: '可核对原输入并移至草稿。原投递历史会保留，移至草稿不会发送。', busy: false }
   if (entry.preparationWait) {
     const wait = entry.preparationWait, reason = wait.reason === 'context-compaction' ? '正在整理上下文' : 'Agent 正在准备输入'
     if (wait.state === 'waiting') return { label: `${reason} · 等待重试 ${wait.attempt}/${wait.maxAttempts}`, detail: `${reason}，原消息已保留。${wait.nextAttemptAt ? `${new Date(wait.nextAttemptAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} 自动重试（${wait.attempt}/${wait.maxAttempts}）；可停止本条等待。` : ''}`, busy: true }
@@ -194,10 +197,10 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
   const rows = queued.map((entry,index) => {
         if (query && !entry.text.includes(query)) return null
         const selected = selectedId === entry.id, state = queuedMessageState(entry,pendingInteraction)
-        const conditionChanged = entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
+        const moveToDraft = entry.staleRunDraft || entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
         const launchCarried = entry.inputReceipt?.status === 'launch-carried'
         const confirmed = entry.confirmed || launchCarried
-        const canSend = !conditionChanged && !launchCarried && !entry.archived && !state.busy && editingId !== entry.id
+        const canSend = !moveToDraft && !launchCarried && !entry.archived && !state.busy && editingId !== entry.id
         const ownFailure = failure?.id === entry.id && failure.text === entry.text ? failure.message : null
         return <li key={entry.id} data-state={entry.status} data-operation-id={entry.id} data-archived={Boolean(entry.archived)}
           data-queue-editing={editingId === entry.id || undefined}>
@@ -205,11 +208,11 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
             avatar={<ConversationSpeakerAvatar speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} name="Author unknown" size={18} />}
             text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />} source={entry.archived ? 'Archived original message' : 'Pending original message'}
             onOpen={(_key,event) => { if (!editingId) onSelect(entry.id,event) }} actions={<>
-            {!conditionChanged && !launchCarried && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool composer-outbox__send" disabled={!canSend}
+            {!moveToDraft && !launchCarried && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool composer-outbox__send" disabled={!canSend}
               aria-label={(entry.immediateSend ?? sendImmediately) ? 'Send queued message immediately' : 'Send queued message'} title={canSend ? '只发送这条原消息' : state.detail}
               onClick={() => onSend(entry.id)}><ThemeActionSubmitIcon size={14} /></button> : null}
             {onFill ? <MailboxDraftAction key={`fill:${entry.id}`} value={entry.text} onFill={() => onFill(entry.text)} /> : null}
-            {conditionChanged && !entry.archived && onMoveToDraft ? <button type="button" className="composer-tool" disabled={state.busy || Boolean(editingId)} aria-label="移至草稿" title="退出待发队列并追加正文到草稿；保留原投递记录，不会发送" onClick={async () => {
+            {moveToDraft && !entry.archived && onMoveToDraft ? <button type="button" className="composer-tool" disabled={state.busy || Boolean(editingId)} aria-label="移至草稿" title="退出待发队列并追加正文到草稿；保留原投递记录，不会发送" onClick={async () => {
               setFailure(null)
               try { await onMoveToDraft(entry.id, entry.text) } catch (error) { setFailure({ id: entry.id, text: entry.text, message: presentError(error) }) }
             }}><DraftIcon size={14} aria-hidden="true" /></button> : null}

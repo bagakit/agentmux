@@ -7182,7 +7182,10 @@ export class AgentMuxClient {
       const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
       const session = await this.currentStoredAgentSession(input.agentSessionId)
       const saved = await this.messageQueue.inspectInput({ key })
-      if (!saved && !sameRun(session.run, input.expectedRun)) throw new AgentMuxError('The original input Run changed before saving.', 'STALE_AGENT_SESSION')
+      if (!saved && !sameRun(session.run, input.expectedRun)) throw new AgentMuxError(
+        'The original input Run changed before saving.', 'STALE_AGENT_SESSION',
+        JSON.stringify({ stage: 'before-save', expectedRunId: input.expectedRun.runId, currentRunId: session.run.runId }),
+        { disposition: 'not_applied', confirmedInputBytes: 0 })
       // A legacy claim has no new gate. Preserve its original read/join contract;
       // absence of a journal row cannot prove that it was never dispatched.
       if (saved || !await this.inspectAgentPromptSubmission(key)) {
