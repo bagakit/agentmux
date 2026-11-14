@@ -8,6 +8,10 @@ export type PromptAttempt = {
   operationId: string
   runId: string | null
   draft: string
+  /** Original device text slot; the input attempt still belongs to its exact Session key. */
+  textSource?: { key: string; recordId: string | null }
+  /** Source declared by a new logical-Main producer, frozen before its first request. */
+  admissionIntent?: { kind: 'session-conversation' }
   /** Frozen at explicit input; absence on an old operation remains unknown on retry. */
   moteSource?: AgentInputMoteSource
   /** Platform discovery frozen before first intake; old absent values remain absent. */
@@ -74,9 +78,9 @@ class SessionIntents<T> extends Map<string, T> {
 
 /** Device-owned drafts and original intent guards only. No credentials, message log or send queue. */
 export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'setItem'>) {
-  const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new SessionIntents<ResponseAttempt>(), questions = new SessionIntents<MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
+  const drafts = new Map<string, string>(), moteTextSources = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new SessionIntents<ResponseAttempt>(), questions = new SessionIntents<MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
   const owner = getDeviceWorkface(storage)
-  const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, unstoredDraftEdits, recordChanged: false,
+  const state = { drafts, moteTextSources, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, unstoredDraftEdits, recordChanged: false,
     get saveIssue() { return owner.snapshot().issue },
     get hasUnconfirmedSave() { return saveRevision !== durableRevision } }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
@@ -99,6 +103,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       state.conflicts = value.conflicts ?? []
       const savedDrafts = value.drafts, savedAttempts = value.attempts, savedResponses = value.responses
       for (const [key, draft] of savedDrafts) drafts.set(key, draft as string)
+      for (const [scope, key] of value.moteTextSources ?? []) moteTextSources.set(scope, key)
       for (const [key, item] of savedAttempts) {
         const intent = item as PromptAttempt, status = intent.phase === 'sending' ? 'unknown' : intent.phase
         attempts.set(key, { ...intent, phase: status, message: restoredMessage(status) })
@@ -116,11 +121,14 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
   }
   function serialize(): DraftRecord {
       const record: DraftRecord = { version: 1, drafts: [...drafts],
+        ...(moteTextSources.size ? { moteTextSources: [...moteTextSources] } : {}),
         attempts: [...attempts].map(([key, intent]) => [key, {
           operationId: intent.operationId, runId: intent.runId,
           // Failed original bodies are retained for explicit retry. Confirmed bodies
           // remain in Core history and are removed from this device-owned intent.
           draft: intent.phase === 'confirmed' && !intent.manualInput ? '' : intent.draft, phase: intent.phase,
+          ...(intent.textSource ? { textSource: structuredClone(intent.textSource) } : {}),
+          ...(intent.admissionIntent ? { admissionIntent: structuredClone(intent.admissionIntent) } : {}),
           ...(intent.request ? { request: structuredClone(intent.request) } : {}), ...(intent.logId ? { logId: intent.logId } : {}),
           ...(intent.manualInput ? { manualInput: structuredClone(intent.manualInput) } : {}),
           ...(intent.moteSource ? { moteSource: structuredClone(intent.moteSource) } : {}),
@@ -148,7 +156,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
   function save(): Promise<boolean> {
     const captured = serialize(), revision = ++saveRevision, expectedRecordId = recordId
     const edits: ConversationEdit[] = []
-    for (const bucket of ['drafts', 'attempts', 'responses', 'questions', 'questionDrafts'] as ConversationBucket[]) {
+    for (const bucket of ['drafts', 'attempts', 'responses', 'questions', 'questionDrafts', 'moteTextSources'] as ConversationBucket[]) {
       const before = new Map<string, ConversationValue>(baseline[bucket] ?? []), after = new Map<string, ConversationValue>(captured[bucket] ?? [])
       for (const key of new Set([...before.keys(), ...after.keys()])) {
         if (JSON.stringify(before.get(key)) !== JSON.stringify(after.get(key))) edits.push({ bucket, key, expected: before.get(key), next: after.get(key) })
@@ -166,13 +174,14 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       // Do not erase edits made while saving. Replace a conflicted attempt object,
       // so its pending callback cannot mistake it for the canonical original.
       const current = serialize()
-      for (const bucket of ['drafts', 'attempts', 'responses', 'questions', 'questionDrafts'] as ConversationBucket[]) {
+      for (const bucket of ['drafts', 'attempts', 'responses', 'questions', 'questionDrafts', 'moteTextSources'] as ConversationBucket[]) {
         const before = new Map<string, ConversationValue>(captured[bucket] ?? []), now = new Map<string, ConversationValue>(current[bucket] ?? [])
         const disk = new Map<string, ConversationValue>(saved[bucket] ?? [])
         for (const key of new Set([...before.keys(), ...disk.keys()])) {
           if (JSON.stringify(now.get(key)) !== JSON.stringify(before.get(key))) continue
           const value = disk.get(key)
           if (bucket === 'drafts') { if (value === undefined) drafts.delete(key); else drafts.set(key, value as string) }
+          else if (bucket === 'moteTextSources') { if (value === undefined) moteTextSources.delete(key); else moteTextSources.set(key, value as string) }
           else if (bucket === 'attempts') {
             if (JSON.stringify(value) === JSON.stringify(now.get(key))) continue
             if (value === undefined) attempts.delete(key)

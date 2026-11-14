@@ -14,6 +14,7 @@ import type { createLocalDrafts, PromptAttempt } from './local-drafts'
 import type { MobileConnection } from './use-hosted-conversation'
 import { readMobileConversationSession, type MobileConversationMetadata } from './mobile-conversation-session'
 import type { ConfirmedAttachmentPrompt } from './attachments'
+import type { MobileTextDraft } from './mote-composer'
 import { useMobileWebDispatchedOperations, useMobileWebUpdatePendingAction } from '../mobile-web/update-safety'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { sameMotePreferencesTarget, sameMoteQuickDefaults } from '@agentmux/core/mote-preferences'
@@ -26,7 +27,7 @@ function dispatchedPromptIdentity(original: PromptAttempt): string {
   const input = original.manualInput
   return JSON.stringify([original.operationId, original.runId, original.draft, original.originalRuntimeId,
     original.originalHostId, original.explicit, original.request, original.moteSource, original.agentMuxNote, original.moteMain,
-    input && [input.agentSessionId, input.expectedRun, input.runtimeId]])
+    input && [input.agentSessionId, input.expectedRun, input.runtimeId], original.textSource, original.admissionIntent])
 }
 
 function originalPromptRequest(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
@@ -89,6 +90,8 @@ function promptAttemptsForSession(attempts: ReadonlyMap<string, PromptAttempt>, 
 
 type MobilePromptControllerOptions = {
   local: ReturnType<typeof createLocalDrafts>
+  textDraft?: MobileTextDraft | undefined
+  isTextTargetCurrent?: (() => boolean) | undefined
   client: AgentMuxHostedClient | null
   agentSessionId: string | null
   moteSource?: AgentInputMoteSource | undefined
@@ -115,9 +118,10 @@ export type MobilePromptPreparation = {
 type PendingInputAction = { cancelled: boolean; dispatched: boolean; saving: boolean; allowUpdate: () => void }
 
 /** Coordinates original device intents with Core; local-drafts remains the durable owner. */
-export function useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired, session, sessionState, timeline, connection,
+export function useMobilePromptController({ local, textDraft, isTextTargetCurrent, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired, session, sessionState, timeline, connection,
   disconnected, visible, refresh }: MobilePromptControllerOptions) {
   const draftKey = JSON.stringify(['draft', agentSessionId])
+  const textDraftKey = textDraft?.key ?? draftKey, textDrafts = textDraft?.local.drafts ?? local.drafts
   // Each asynchronous producer retains the maps of its original device record.
   const drafts = useMemo(() => ({ current: local.drafts }), [local])
   const attempts = useMemo(() => ({ current: local.attempts }), [local])
@@ -132,8 +136,8 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId, visible, onRolloverRequired })
   current.current = { client, agentSessionId, visible, onRolloverRequired }
-  const draftEdits = useRef(0), producers = useRef(new WeakMap<PromptAttempt, { key: string; revision: number }>())
-  const draft = drafts.current.get(draftKey) ?? ''
+  const ownDraftEdits = useRef(0), draftEdits = textDraft?.edits ?? ownDraftEdits, producers = useRef(new WeakMap<PromptAttempt, { key: string; revision: number }>())
+  const draft = textDrafts.get(textDraftKey) ?? ''
   const attempt = attempts.current.get(draftKey)
   const available = Boolean(client && agentSessionId && connection.state === 'connected' && !disconnected && sessionState !== 'retired' && sessionState !== 'deleted')
   async function readSession(source: AgentMuxHostedClient, id: string) {
@@ -163,13 +167,20 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       detail: `为避免和你的输入冲突，手机请求 Mac 暂停这个 Agent 的自动任务，但没有收到确认；不会自动重试。\n操作 ${target.operationId} · Mac 实例 ${target.ownerInstanceId || '未记录'}\n核对：agent automation inspect\n${errorMessage(error)}` }) })
   }
   const setDraft = (value: string, key = draftKey) => {
-    if (key === draftKey && value !== drafts.current.get(key)) draftEdits.current++
-    const occupied = Boolean(drafts.current.get(key)?.trim())
-    drafts.current.set(key, value)
+    const map = key === draftKey ? textDrafts : drafts.current, textKey = key === draftKey ? textDraftKey : key
+    if (key === draftKey && value !== map.get(textKey)) { textDraft?.bind(); draftEdits.current++ }
+    const occupied = Boolean(map.get(textKey)?.trim())
+    map.set(textKey, value); if (key === draftKey) textDraft?.notify()
     if (key === draftKey && value.trim() && !occupied) pauseForExplicitInput()
     if (key === draftKey && !value.trim()) automaticPause.current = null
     void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1)
   }
+  const observedEdits = useRef(draftEdits.current)
+  useEffect(() => {
+    if (!textDraft || !visible || observedEdits.current === draftEdits.current) return
+    observedEdits.current = draftEdits.current
+    if (draft.trim()) pauseForExplicitInput()
+  }, [textDraft, draft, draftEdits.current, visible])
   const cancelPreparation = (key = draftKey) => {
     const original = preparingKeys.current.get(key)
     if (!original) return
@@ -216,13 +227,21 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       return value.client === originalClient && value.recordId === recordId && value.key === originalKey && dispatchedPromptIdentity(value.original) === identity
     })
   }
+  const clearOriginalText = (key: string, original: PromptAttempt) => {
+    const producer = producers.current.get(original)
+    if (!producer || draftEdits.current !== producer.revision) return
+    const source = original.textSource, map = source && textDraft?.key === source.key ? textDraft.local.drafts : drafts.current
+    if (source && getDeviceWorkface().recordIdentity() !== source.recordId) return
+    const textKey = source?.key ?? key
+    if (map.get(textKey) === original.draft) { map.set(textKey, ''); textDraft?.notify() }
+  }
   const confirmPrompt = (key: string, original: PromptAttempt, message = 'Core 已确认输入。') => {
     if (!mounted.current || attempts.current.get(key) !== original) return
     original.phase = 'confirmed'
     original.message = message
     delete original.logId
     // A receipt belongs to its captured operation, including after navigating elsewhere.
-    if (drafts.current.get(key) === original.draft) drafts.current.set(key, '')
+    clearOriginalText(key, original)
     local.save()
     if (mounted.current) redraw(value => value + 1)
   }
@@ -271,8 +290,9 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       original.inputRequested = false
       await local.save()
       const producer = producers.current.get(original), decision = result.rollover.decision
-      if (producer && draftEdits.current === producer.revision && drafts.current.get(producer.key) === original.draft && mounted.current && current.current.visible && current.current.client === source && current.current.agentSessionId === input.agentSessionId) {
-        current.current.onRolloverRequired?.({ decision, prompt: input.prompt, draft: original.draft, confirm: async setup => {
+      if (producer && draftEdits.current === producer.revision && textDrafts.get(original.textSource?.key ?? producer.key) === original.draft && mounted.current && current.current.visible && current.current.client === source && current.current.agentSessionId === input.agentSessionId) {
+        current.current.onRolloverRequired?.({ decision, prompt: input.prompt, draft: original.draft,
+          ...(original.textSource ? { textSource: structuredClone(original.textSource) } : {}), confirm: async setup => {
           const linked = setup.record?.moteMain?.rollover, deferred = setup.record?.moteMain?.deferredInput, status = agentPromptSubmissionOutcome(setup.deferredInput?.record ?? null)
           if (!linked || !original.moteMain || setup.record?.requestId !== decision.creationOperationId || linked.creationOperationId !== decision.creationOperationId ||
             linked.queryOperationId !== original.operationId || deferred?.operationId !== original.operationId || deferred.prompt !== input.prompt ||
@@ -282,7 +302,9 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
             source.runtimeOwnerIdentity?.()?.runtimeId !== original.originalRuntimeId || attempts.current.get(producer.key) !== original) return
           attempts.current.set(retainedPromptKey(input.agentSessionId, original.operationId), { ...original, phase: 'confirmed', message: '这条消息已在新一轮对话送达，之前的 Agent 没有重复收到。' })
           attempts.current.delete(producer.key)
-          if (draftEdits.current === producer.revision && drafts.current.get(producer.key) === original.draft) drafts.current.set(producer.key, '')
+          // The welcome's original custody/receipt clears a shared Mote text slot.
+          // A separate ordinary Session slot remains this controller's responsibility.
+          if (!original.textSource && draftEdits.current === producer.revision) clearOriginalText(producer.key, original)
           await local.save(); if (mounted.current) redraw(value => value + 1)
         } })
       }
@@ -334,7 +356,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       if (!retained || attempts.current.get(key) !== original) return
       const pending = observed ? source.rejoinAgentInputWaiting({ ref: observed.ref })
         : sendOriginalPrompt(source, original, { agentSessionId: input.agentSessionId, operationId: original.operationId,
-          expectedRun: input.expectedRun, admissionIntent: { kind: 'manual-actor' }, prompt: expandSemanticReferences(original.draft),
+          expectedRun: input.expectedRun, admissionIntent: original.admissionIntent ?? { kind: 'manual-actor' }, prompt: expandSemanticReferences(original.draft),
           ...(original.moteSource ? { moteSource: structuredClone(original.moteSource) } : {}),
           ...(original.agentMuxNote === undefined ? {} : { agentMuxNote: original.agentMuxNote }),
           execution: 'immediate', authorHuman: true })
@@ -471,13 +493,15 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
     const frozenMoteSource = originalBody ? originalBody.moteSource : moteSource
     const originalMoteSource = frozenMoteSource ? structuredClone(frozenMoteSource) : undefined
     const existing = attempts.current.get(selectedKey)
-    const initialBody = originalBody?.draft ?? drafts.current.get(selectedKey) ?? ''
+    const initialBody = originalBody?.draft ?? (selectedKey === draftKey ? textDrafts.get(textDraftKey) : drafts.current.get(selectedKey)) ?? ''
     if (!originalBody && !moteDirectAgent && moteMainIssue && !(existing?.moteMain && existing.phase === 'unknown' && existing.draft === initialBody)) {
       setPreparationIssue({ client, sessionId: agentSessionId, message: moteMainIssue })
       return
     }
     const frozenMain = originalBody ? originalBody.moteMain : !moteDirectAgent && existing?.moteMain && existing.draft === initialBody ? existing.moteMain : moteMain
     const originalMain = frozenMain ? structuredClone(frozenMain) : undefined
+    const originalAdmission = originalBody ? originalBody.admissionIntent
+      : explicit && originalMain ? { kind: 'session-conversation' as const } : undefined
     const originalGuide = originalBody ? originalBody.agentMuxNote : originalMain ? undefined : originalMoteSource ? MOTE_INPUT_GUIDANCE : undefined
     let body = initialBody
     const priorPreparation = preparingKeys.current.get(selectedKey)
@@ -505,6 +529,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
     } : null
     const assertPreparedTarget = async () => {
       if (!mounted.current || preparing.cancelled) throw new Error('发送准备已取消。')
+      if (!originalBody && isTextTargetCurrent && !isTextTargetCurrent()) throw new Error('原编辑目标已改变；这条消息没有发送，原问题仍保留。')
       if (!preparation) return
       const selected = preparedTarget ? await readSession(preparedTarget.client, preparedTarget.sessionId) : null
       if (!mounted.current || preparing.cancelled) throw new Error('发送准备已取消。')
@@ -556,6 +581,8 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       const originalClient = client, originalId = agentSessionId
       const original: PromptAttempt = { operationId: randomClientRequestId(), runId: originalMain ? null : session?.run.runId ?? null,
         draft: body, phase: 'sending', message: '正在发送输入…', inputRequested: false,
+        ...(originalAdmission ? { admissionIntent: structuredClone(originalAdmission) } : {}),
+        ...((originalBody?.textSource ?? textDraft) ? { textSource: originalBody?.textSource ?? { key: textDraft!.key, recordId: textDraft!.recordId } } : {}),
         ...(originalMoteSource ? { moteSource: originalMoteSource } : {}),
         ...(originalGuide === undefined ? {} : { agentMuxNote: originalGuide }),
         ...(originalMain ? { moteMain: originalMain } : {}),
@@ -578,7 +605,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       let rpcRequested = false
       let removeDispatch: (() => void) | undefined
       try {
-        if (!available || !originalClient || !originalId) throw Object.assign(new Error(
+        if (!available || !originalClient || !originalId || textDraft && !originalBody && !textDraft.isCurrent()) throw Object.assign(new Error(
           `对话当前不能投递：${connection.issue ?? connection.message}${disconnected ? '，对话连接已断开' : ''}。可以再点发送重试。`), { code: 'CONTROL_UNAVAILABLE' })
         const originalSession = await readSession(originalClient, originalId)
         if (!mounted.current || preparing.cancelled || current.current.client !== originalClient || current.current.agentSessionId !== originalId ||
@@ -602,7 +629,8 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
         seed = Object.freeze({ ...seed, expectedRunId: original.runId,
           afterSubmissionId: original.request?.condition.afterSubmissionId ?? null,
           conditionAvailable: Boolean(original.request), execution: explicit ? 'immediate' : 'default' })
-        if (preparation && drafts.current.get(originalKey) === initialBody) drafts.current.set(originalKey, body)
+        const preparedTextKey = original.textSource?.key ?? originalKey
+        if (preparation && textDrafts.get(preparedTextKey) === initialBody) { textDrafts.set(preparedTextKey, body); textDraft?.notify() }
         if (!await local.save()) throw new Error('这台手机上的工作面已被替换，这次没有发送。')
         redraw(value => value + 1)
         if (attempts.current.get(originalKey) !== original) throw new Error('另一个页面已保存这条消息，这次没有发送。请核对两份正文。')
@@ -618,7 +646,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
           prompt: expandSemanticReferences(original.draft), authorHuman: true,
           ...(original.moteSource ? { moteSource: structuredClone(original.moteSource) } : {}),
           ...(original.agentMuxNote === undefined ? {} : { agentMuxNote: original.agentMuxNote }),
-          ...(original.manualInput ? { expectedRun: original.manualInput.expectedRun, admissionIntent: { kind: 'manual-actor' as const }, execution: 'immediate' as const }
+          ...(original.manualInput ? { expectedRun: original.manualInput.expectedRun, admissionIntent: original.admissionIntent ?? { kind: 'manual-actor' as const }, execution: 'immediate' as const }
             : { ...original.request!.condition, execution: original.request!.execution }) })
         removeDispatch = trackDispatchedPrompt(originalClient, originalKey, original)
         endPreparation()
@@ -787,7 +815,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
     const sessionId = attempt.manualInput?.agentSessionId ?? (Array.isArray(savedKey) && savedKey[0] === 'draft' && typeof savedKey[1] === 'string' ? savedKey[1] : null)
     if (runtimeId && hostId && runId && sessionId) confirmedAttachmentPrompt = { operationId: attempt.operationId, body: attempt.draft, source: { runtimeId, hostId, sessionId, runId } }
   }
-  return { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
+  return { draftKey, textDraftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
     confirmedAttachmentPrompt,
     sendBodyOnly: () => submit(true, undefined, draftKey, undefined, true),
     preparing: Boolean(preparingKeys.current.get(draftKey) && !preparingKeys.current.get(draftKey)!.cancelled),

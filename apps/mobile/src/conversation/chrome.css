@@ -81,8 +81,8 @@
 /* Composer dock: the measured composer geometry stays with conversation.css; the dock only adds a
  * hairline and lets the editor read as one rounded field on the group surface. */
 .mobile-app .mobile-conversation__composer { border-top: 1px solid var(--mobile-hairline); background: var(--mobile-page); }
-.mobile-app .mobile-conversation .composer[data-agent-composer] { border-radius: calc(var(--mobile-radius-group) + 2px); background-color: var(--mobile-group); }
-.mobile-app .mobile-conversation .composer[data-agent-composer]:focus-within { box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-line) 38%, transparent); }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer[data-agent-composer] { border-radius: calc(var(--mobile-radius-group) + 2px); background-color: var(--mobile-group); }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer[data-agent-composer]:focus-within { box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-line) 38%, transparent); }
 
 /* Reading chrome inside the conversation stays quiet: the coverage disclosure and the live work
  * line sit on the 16px gutter at the meta tier, so speech remains the first thing read. */
@@ -162,8 +162,8 @@
 .mobile-app .mobile-conversation .log-turn__actions { color: var(--text-3); }
 .mobile-app .mobile-conversation .log-turn__who { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
 /* Composer tools stay legible: secondary ink at rest, full ink when pressed. */
-.mobile-app .mobile-conversation .composer-tool { color: var(--text-2); }
-.mobile-app .mobile-conversation .composer-tool:active:not(:disabled) { color: var(--text); background: var(--mobile-group-press); }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer-tool { color: var(--text-2); }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer-tool:active:not(:disabled) { color: var(--text); background: var(--mobile-group-press); }
 /* The Mote source chip and the conversation view toggle follow the same quiet chrome. */
 .mobile-app .mobile-mote-source-status { margin: 4px var(--mobile-gutter) 0; }
 .mobile-app .mobile-mote-source-status > summary { min-height: 36px; padding: 0 10px; border-radius: 999px; background: var(--mobile-attention-wash); color: var(--text-2); font-size: var(--fs-micro); font-weight: 600; }

@@ -3,7 +3,7 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { moteQuickBaseline, parseMotePreferencesReadResult, sameMotePreferencesTarget, sameMoteQuickDefaults, type MotePreferencesTarget, type MoteQuickPreferencesReadResult } from '@agentmux/core/mote-preferences'
 import { moteMainBaseline, pendingMoteMainCreation, pendingMoteMainStarts, spatialAgentOpenRecord } from '@agentmux/core/spatial-graph'
-import { parseMoteDialogueResult, type MoteDialoguePage, type MoteMainSetupResult, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
+import { agentPromptSubmissionOutcome, parseMoteDialogueResult, type MoteDialoguePage, type MoteMainSetupResult, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import type { MobileAgentCreateIntent } from '../recovery/agent-create-intents'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
@@ -36,6 +36,7 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
   const result = outcome?.client === client && sameMotePreferencesTarget(outcome.target, target) ? outcome.value : null
   const [issue, setIssue] = useState(''), [busy, setBusy] = useState(false), [revision, refresh] = useState(0), [intentRevision, reloadIntents] = useState(0)
   const [checking, setChecking] = useState(false), inspection = useRef(false)
+  const queuedInspection = useRef<string | null>(null), inspectCurrent = useRef<(id: string) => Promise<void>>(async () => {})
   const source = useRef({ client, target, visible }); source.current = { client, target, visible }
   const flight = useRef(false), owner = getDeviceWorkface()
   useMobileWebUpdateSafetyOwner(() => flight.current ? '主 Agent 设置还在进行，请完成后再更新网页。' : null)
@@ -87,6 +88,26 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
     [owner, runtimeId, deviceHostId, target.spaceId, target.zoneId, target.expectedResource.hostId, target.expectedResource.workspaceId, target.expectedResource.workspacePath, revision, intentRevision, reading, result?.operationId])
   const pendingIds = [...new Set([...(reading?.pending ?? []), ...retained.filter(item => item.phase !== 'confirmed').map(item => item.input.operationId)])]
   const operationId = result?.operationId ?? (pendingIds.length === 1 ? pendingIds[0] : undefined)
+  const inputKeys = [result?.deferredInput, result?.handoverInput].flatMap(value => {
+    const key = value?.input?.key ?? value?.route?.key
+    return key && !['admitted', 'terminal-confirmed', 'not-applied'].includes(agentPromptSubmissionOutcome(value?.record ?? null)) ? [key] : []
+  })
+  const inputSelection = JSON.stringify(inputKeys)
+  useEffect(() => {
+    if (!visible || !client || !result?.operationId || !inputKeys.length) return
+    const id = result.operationId
+    // Setup may return its durable input before the original worker settles.
+    // Observe only those exact inputs; further reads never advance or resend.
+    const read = () => { void inspectCurrent.current(id) }
+    const unlisten = client.onEvent(event => {
+      if (event.type === 'agent-input' && inputKeys.some(key => key.kind === event.receipt.key.kind &&
+        key.agentSessionId === event.receipt.key.agentSessionId && key.expectedRun.runId === event.receipt.key.expectedRun.runId &&
+        key.kind === 'prompt' && event.receipt.key.kind === 'prompt' && key.submissionId === event.receipt.key.submissionId && key.attemptId === event.receipt.key.attemptId)) read()
+      else if (event.type === 'connection-state' && event.state === 'restored') read()
+    })
+    read()
+    return () => { unlisten(); if (queuedInspection.current === id) queuedInspection.current = null }
+  }, [client, visible, result?.operationId, inputSelection])
   const baseline = reading && moteQuickBaseline(reading.preferences)
   const executor = reading?.preferences.choices.executors.find(item => item.id === reading.preferences.defaults?.executorId)
   const readIssue = !reading ? null : reading.preferences.status !== 'ready' || !baseline || reading.preferences.issue
@@ -151,7 +172,8 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
     }
   }
   async function inspectOriginal(id: string) {
-    if (!client?.forwardRpc || !visible || inspection.current) return
+    if (!client?.forwardRpc || !visible) return
+    if (inspection.current) { queuedInspection.current = id; return }
     const original = source.current, recordId = owner.recordIdentity(), runtime = client.runtimeOwnerIdentity?.()
     const frozen = retained.find(item => item.input.operationId === id)?.input.moteMain?.target ?? target
     const current = () => source.current.client === original.client && source.current.visible && sameMotePreferencesTarget(source.current.target, original.target) &&
@@ -163,8 +185,13 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
       if (!current()) return
       setOutcome({ client, target: frozen, value }); setIssue(value.issue ?? ''); onResult?.(value)
     } catch (cause) { if (current()) setIssue(message(cause)) }
-    finally { inspection.current = false; setChecking(false) }
+    finally {
+      inspection.current = false; setChecking(false)
+      const queued = queuedInspection.current; queuedInspection.current = null
+      if (queued) void inspectCurrent.current(queued)
+    }
   }
+  inspectCurrent.current = inspectOriginal
   if (renderStart) return renderStart({ reading, result, issue: issue || readIssue, busy, checking, ready: Boolean(reading && !readIssue && !reading.creationPending.length), pending: pendingIds,
     submit: (query, retained) => run('create', query, undefined, retained), inspect: id => { void inspectOriginal(id) }, advance: id => { void run('advance', undefined, id) }, refresh: () => refresh(value => value + 1) })
   return <section className="mobile-mote-setup" aria-label="Main Agent">

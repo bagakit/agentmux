@@ -18,7 +18,7 @@ import type { AgentInputMoteSource, AgentSessionUserMessage } from '@agentmux/co
 import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
 import {
-  AgentComposer, AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationView,
+  AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationView,
   createSpeakerResolver,
   type ClientUiPlatform, type ConversationMessageProps
 } from '@agentmux/client-ui'
@@ -47,10 +47,12 @@ import type { AgentMuxSpaceAppearance } from '@agentmux/core/control'
 import type { DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import './conversation.css'
 import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileNotices } from '../notices/MobileNotice'
-import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
+import { useMobileWebAttachmentOwner, useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
+import type { AttachmentPageOwner } from './attachment-page-owner'
 import { mobileInteractionLabels } from '../presentation/interaction'
 import { readMobileConversationSession } from './mobile-conversation-session'
 import type { MobileConversationStatus } from './MobileConversationStatus'
+import { MobileComposerSource, mobileSessionComposerSource, useMobileMoteComposer } from './mote-composer'
 
 const inShellSlot = (target: HTMLElement | null | undefined, node: ReactNode) =>
   target === undefined ? node : target && node ? createPortal(node, target) : null
@@ -104,6 +106,7 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   moteMemberName?: ClientUiPlatform['moteMemberName'] | undefined
   moteTarget?: MotePreferencesTarget | undefined
   moteDialogue?: MobileMoteDialogue | undefined
+  /** Explicit Main/member intent; absent is an ordinary Session surface. */
   moteDirectAgent?: boolean | undefined
   moteAppearance?: AgentMuxSpaceAppearance | undefined
   moteName?: string | undefined
@@ -114,9 +117,10 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   onShowMoteThreads?(): void
   onMoteRolloverRequired?: ((query: MobileMoteRolloverQuery) => void) | undefined
   onReturnMoteMain?(reference?: MoteDefaultConversation): void
+  attachmentOwner?: AttachmentPageOwner | undefined
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onStatusChange, onAttach, onShowTerminal, onShowGoals, toolbarTarget, statusTarget, noticeTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain,
+export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onStatusChange, onAttach, onShowTerminal, onShowGoals, toolbarTarget, statusTarget, noticeTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain, attachmentOwner: providedAttachmentOwner,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationIoPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -139,8 +143,9 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     follow.current = change.state
     if (change.scrollToBottom && !reading.olderWindow) node.scrollTop = node.scrollHeight
   }, [reading.page, reading.timeline, reading.olderWindow, visible])
-  const local = useMobileLocalDrafts()
-  const drafts = useMemo(() => ({ current: local.drafts }), [local])
+  const local = useMobileLocalDrafts(), composer = useMobileMoteComposer(), composerSource = mobileSessionComposerSource(agentSessionId)
+  const drafts = useMemo(() => ({ current: composer?.text.local.drafts ?? local.drafts }), [local, composer?.text])
+  const currentComposer = useRef(composer); currentComposer.current = composer
   const [, redraw] = useState(0)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const notices = useMobileNotices()
@@ -178,9 +183,11 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     moteDialogue?.page?.main, moteTarget, agentSessionId)
   mainObservation.current = moteMain
   const moteMainIssue = moteDirectAgent ? undefined : mobileMoteMainInputIssue(moteDialogue?.page?.main, moteTarget, agentSessionId, Boolean(moteDialogue?.unavailable))
-    ?? (moteTarget && !moteMain ? '主对话角色还没核对。可以重新核对，或从 Threads 打开之前的 Agent。' : undefined)
-  const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
-    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired: onMoteRolloverRequired,
+    ?? ((moteTarget || moteDirectAgent === false) && !moteMain ? '主对话角色还没核对。可以重新核对，或从 Threads 打开之前的 Agent。' : undefined)
+  const { draftKey, textDraftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
+    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, textDraft: composer?.text,
+      isTextTargetCurrent: composer ? () => composer.sourceCurrent(composerSource) : undefined,
+      client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired: onMoteRolloverRequired,
       session: conversationStatus.session, sessionState: conversationStatus.metadata.state, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
     if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或操作尚未确认保存在设备上。请先恢复设备存储并保存，再更新网页。'
@@ -191,8 +198,11 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     return null
   })
   const attachmentControls = useRef<MobileAttachmentControls>(null)
+  const attachmentOwner = useMobileWebAttachmentOwner(providedAttachmentOwner)
   const [hasPendingAttachments, setHasPendingAttachments] = useState(false)
   const insertion = useRef<ComposerInsertionHandle>(null)
+  const originalEditorTarget = () => mounted.current && (composer ? currentComposer.current?.text.token === composer.text.token &&
+    currentComposer.current.sourceCurrent(composerSource) : currentComposer.current === null)
   const currentActivity = connection.state === 'connected' && reading.activity?.semantic === 'active'
   const retainedActivity = currentAgentSemanticStatus(reading.session?.semanticStatus)
   const workingObservedAt = currentActivity ? reading.activity?.observedAt
@@ -229,7 +239,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     try {
       const original = { client, agentSessionId, editor: insertion.current }
       await original.editor.insert(() => mounted.current && current.current.client === original.client &&
-        current.current.agentSessionId === original.agentSessionId && insertion.current === original.editor
+        current.current.agentSessionId === original.agentSessionId && insertion.current === original.editor && originalEditorTarget()
         ? item.insertText ?? item.text : null, { separate: true })
     } catch (error) {
       setCopyNotice(errorMessage(error))
@@ -310,11 +320,11 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   }
   async function fillHistoryMessage(message: AgentSessionUserMessage, signal: AbortSignal) {
     const originalScope = historyScope, originalEditor = insertion.current
-    const before = drafts.current.get(draftKey) ?? ''
+    const before = drafts.current.get(textDraftKey) ?? ''
     const content = await readHistoryMessage(message, signal)
     signal.throwIfAborted()
-    if (!currentHistoryTarget(originalScope) || insertion.current !== originalEditor) throw new Error('编辑器或 Agent 已切换，当前草稿没有改变。')
-    if ((drafts.current.get(draftKey) ?? '') !== before) throw new Error('读取期间草稿已更新，保留新稿；可重新选择这条记录。')
+    if (!currentHistoryTarget(originalScope) || insertion.current !== originalEditor || !originalEditorTarget()) throw new Error('编辑器或 Agent 已切换，当前草稿没有改变。')
+    if ((drafts.current.get(textDraftKey) ?? '') !== before) throw new Error('读取期间草稿已更新，保留新稿；可重新选择这条记录。')
     if (!originalEditor) throw new Error('编辑器已关闭。')
     originalEditor.replace(content.text)
     return content.attachments ? '已填入正文，还没发送。附件仍在那条记录里。' : undefined
@@ -362,7 +372,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   }, [client, session, agentSessionId, displayName, moteDialogue?.page?.main.current, reading.pageOwner, moteTarget, moteName, mainAvatar])
   // Source-history search is keyed by original records, independently of message entities.
   const mailboxMessages = useMemo(() => reading.projection?.originalRecords.flatMap(record => record.input ? [record.input] : []) ?? [], [reading.projection])
-  const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
+  const appendQuote = (quote: string) => setDraft(`${drafts.current.get(textDraftKey) ?? ''}${drafts.current.get(textDraftKey) ? '\n\n' : ''}${quote}`)
   const readHistoryResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
     if (!client || !agentSessionId) throw new Error('Mac 还没连接，暂时打不开这个资源。')
     return client.sessionHistoryResource(agentSessionId, input)
@@ -503,8 +513,8 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
             .then(copied => { if (copied) setCopyNotice('已复制本页备份，包含正文和操作记录。') })
         }}>复制本页保全备份</button> : null}
       </MobileNotice> : null}
-      {local.conflicts.filter(item => item.key === draftKey).length > 0 && <details className="mobile-conversation__notice"><summary>保全的冲突内容</summary>
-        {local.conflicts.filter(item => item.key === draftKey).map((item, index) => {
+      {local.conflicts.filter(item => item.key === draftKey || item.key === textDraftKey).length > 0 && <details className="mobile-conversation__notice"><summary>保全的冲突内容</summary>
+        {local.conflicts.filter(item => item.key === draftKey || item.key === textDraftKey).map((item, index) => {
           const body = typeof item.value === 'string' ? item.value : Array.isArray(item.value) ? item.value.map(answer => answer.answer).join('\n') : 'draft' in item.value ? item.value.draft : 'input' in item.value ? item.value.input.answers.map(answer => answer.answer).join('\n') : '这条答复还没确认送达。'
           return <div key={index}>{typeof item.value !== 'string' && <p>请求记录已保留，可以核对结果。</p>}<pre>{body}</pre><button type="button" onClick={() => { void platform.copyText(body, error => setCopyNotice(errorMessage(error))) }}>复制这份保全内容</button></div>
         })}
@@ -574,10 +584,11 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       </div> : null}
       {retainedResponses.map(([key, attempt]) => responseStatus(key, attempt))}
       {unidentifiedResponses.map(([key, attempt]) => <MobileNotice identity={[key,attempt.original?.input.operationId,attempt.phase,attempt.message]} key={key} role="status">{attempt.message}</MobileNotice>)}
-      <div onFocusCapture={event => { if ((event.target as HTMLElement).isContentEditable) setComposerFocused(true) }} onBlurCapture={event => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false)
-        }} className="mobile-conversation__composer">
-        <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null} agentSessionId={agentSessionId}
+      <div className="mobile-conversation__composer">
+        <MobileComposerSource sourceKey={composerSource} insertionRef={insertion}
+          onFocusCapture={event => { if ((event.target as HTMLElement).isContentEditable) setComposerFocused(true) }}
+          onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false) }}
+          aboveInput={<MobileAttachments owner={attachmentOwner} client={client} session={session ?? null} agentSessionId={agentSessionId}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}
           onPendingContentChange={setHasPendingAttachments}
           promptOperationId={attempt?.operationId ?? null} confirmedPrompt={confirmedAttachmentPrompt}
@@ -587,7 +598,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
           insert={async (resolve, original) => {
             const originalClient = current.current.client, selectedId = current.current.agentSessionId
             const selected = originalClient && selectedId ? (await readMobileConversationSession(originalClient, selectedId)).session : null
-            if (current.current.client !== originalClient || current.current.agentSessionId !== selectedId ||
+            if (!originalEditorTarget() || current.current.client !== originalClient || current.current.agentSessionId !== selectedId ||
               !fileUploadScopeMatches(original, { runtimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
               hostId: selected?.hostId ?? null, sessionId: selectedId, runId: selected?.run.runId ?? null }) || !insertion.current) {
               throw new Error('当前编辑器属于另一个对话或另一台 Mac，草稿没有改变。')
@@ -597,7 +608,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
               if (path === null) return null
               const selectedId = current.current.agentSessionId, client = current.current.client
               const selected = client && selectedId ? (await readMobileConversationSession(client, selectedId)).session : null
-              if (current.current.client !== originalClient || client !== originalClient || current.current.agentSessionId !== selectedId ||
+              if (!originalEditorTarget() || current.current.client !== originalClient || client !== originalClient || current.current.agentSessionId !== selectedId ||
                 !fileUploadScopeMatches(original, { runtimeId: client?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
                 hostId: selected?.hostId ?? null, sessionId: selectedId, runId: selected?.run.runId ?? null })) {
                 throw new Error('附件已上传，但编辑器已切换，草稿没有改变。')

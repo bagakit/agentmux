@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
-import { AgentComposer, ClientUiProvider, expandSemanticReferences } from '@agentmux/client-ui'
+import { ClientUiProvider, expandSemanticReferences } from '@agentmux/client-ui'
 import { MoteConversationStart, MoteConversationHistory, moteConversationHistoryRows, type MoteConversationHistorySource as Source } from '@agentmux/client-ui/components/MoteConversationStart'
 import { agentPromptSubmissionOutcome, type MoteMainSetupResult, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
-import { deriveObjectId } from '@agentmux/core/object-id'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { sameMotePreferencesTarget, type MoteDefaultConversation, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import { createLocalDrafts } from '../conversation/local-drafts'
+import { useMobileLocalDrafts } from '../conversation/local-drafts-owner'
+import { MobileComposerSource, mobileMoteStartDraftKey, mobileWelcomeComposerSource, useMobileMoteComposer } from '../conversation/mote-composer'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import type { MobileObjectIdentity } from './MobileIdentity'
 import { MobileMoteStartPortrait } from './MobileMoteStartPortrait'
@@ -29,14 +29,6 @@ function AutomaticStart({ state, query, begin }: { state: MobileMoteMainStartSta
   return null
 }
 
-/** Device draft address only. It never identifies a Session or grants a launch. */
-export function mobileMoteStartDraftKey(client: AgentMuxHostedClient | null, target: MotePreferencesTarget) {
-  const owner = getDeviceWorkface(), record = owner.snapshotIdentity()
-  return JSON.stringify(['mote-main-start', deriveObjectId('mobile-mote-main-draft', JSON.stringify([record.host?.origin || location.origin,
-    client?.runtimeOwnerIdentity?.()?.runtimeId ?? null, record.host?.hostId ?? null, target.spaceId, target.zoneId,
-    target.expectedResource.hostId, target.expectedResource.workspaceId, target.expectedResource.workspacePath]))])
-}
-
 /** The first message's stage from the original setup receipt alone; no result yet is still sending. */
 export function mobileMoteFirstMessageStage(result: MoteMainSetupResult | null, busy: boolean, operationId: string): MoteFirstMessageStage {
   const query = result?.record?.moteMain?.deferredInput
@@ -55,15 +47,17 @@ export function MobileMoteConversationStart({ client, target, identity, platform
   mode?: 'start' | 'new'; dialogue: MobileMoteDialogue; onConfigure(): void; onBound(): void
   onOpenMain(reference: MoteDefaultConversation): void; onOpenPeriod(source: Source): void
 }) {
-  const [local] = useState(createLocalDrafts), [, redraw] = useState(0), [notice, setNotice] = useState(''), [starting, setStarting] = useState(false), submitting = useRef(false)
+  const composer = useMobileMoteComposer(), pageLocal = useMobileLocalDrafts(), local = composer?.text.local ?? pageLocal
+  const [, redrawLocal] = useState(0), [notice, setNotice] = useState(''), [starting, setStarting] = useState(false), submitting = useRef(false)
+  const redraw = (change: (value: number) => number) => { redrawLocal(change); composer?.text.notify() }
   // The person's message as sent, shown in place while its Main is created; it is the frozen first message, not a second queue.
   const [sent, setSent] = useState<{ operationId: string; prompt: string; raw: string; key: string } | null>(null)
-  const key = mobileMoteStartDraftKey(client, target), draft = local.drafts.get(key) ?? '', edits = useRef(0)
-  const owner = getDeviceWorkface(), recordId = owner.recordIdentity(), source = useRef({ client, key, visible, recordId })
+  const key = composer?.text.key ?? mobileMoteStartDraftKey(client, target), draft = local.drafts.get(key) ?? '', ownEdits = useRef(0), edits = composer?.text.edits ?? ownEdits
+  const owner = getDeviceWorkface(), recordId = composer?.text.recordId ?? owner.recordIdentity(), source = useRef({ client, key, visible, recordId })
   source.current = { client, key, visible, recordId }
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  const submission = useRef<{ operationId: string; prompt: string; raw: string; confirm?: AutomaticQuery['confirm'] | undefined; ownsDraft: boolean; revision: number; source: typeof source.current; released?: boolean; landed?: boolean } | null>(null)
+  const submission = useRef<{ operationId: string; prompt: string; raw: string; creationOperationId?: string | undefined; confirm?: AutomaticQuery['confirm'] | undefined; ownsDraft: boolean; revision: number; source: typeof source.current; released?: boolean; landed?: boolean } | null>(null)
   useMobileWebUpdateSafetyOwner(() => local.hasUnconfirmedSave || local.saveIssue ? '本次主对话草稿尚未确认保存；请保全后再更新网页。' : null)
   const history = moteConversationHistoryRows(dialogue.page?.links ?? [], dialogue.page?.main.roleRevision, memberName)
   async function confirmed(result: MoteMainSetupResult, query: { operationId: string; prompt: string }) {
@@ -71,7 +65,9 @@ export function MobileMoteConversationStart({ client, target, identity, platform
     const outcome = agentPromptSubmissionOutcome(result.deferredInput?.record ?? null)
     if (!original || original.landed || original.operationId !== query.operationId || intent?.operationId !== original.operationId || intent.prompt !== original.prompt ||
       query.prompt !== original.prompt || (outcome !== 'admitted' && outcome !== 'terminal-confirmed') || !result.reference) return
-    if (source.current.client !== original.source.client || source.current.key !== original.source.key || owner.recordIdentity() !== original.source.recordId || mobileMoteStartDraftKey(original.source.client, target) !== original.source.key) return
+    if (original.creationOperationId && (result.record?.requestId !== original.creationOperationId ||
+        result.record.moteMain?.rollover?.creationOperationId !== original.creationOperationId)) return
+    if (source.current.client !== original.source.client || source.current.key !== original.source.key || owner.recordIdentity() !== original.source.recordId || (!composer && mobileMoteStartDraftKey(original.source.client, target) !== original.source.key)) return
     await original.confirm?.(result)
     if (!original.ownsDraft) return
     const current = () => mounted.current && source.current.client === original.source.client && source.current.key === original.source.key && source.current.visible &&
@@ -92,9 +88,11 @@ export function MobileMoteConversationStart({ client, target, identity, platform
     const raw = automaticQuery?.draft ?? draft, prompt = automaticQuery?.prompt ?? expandSemanticReferences(raw)
     if (!prompt.trim()) return
     const wasEmpty = !local.drafts.get(key)
+    const sameTextSource = automaticQuery?.textSource?.key === key && automaticQuery.textSource.recordId === recordId && local.drafts.get(key) === raw
     if (automaticQuery && wasEmpty) { local.drafts.set(key, raw); redraw(value => value + 1) }
     const original: NonNullable<typeof submission.current> = { operationId: automaticQuery?.decision.queryOperationId ?? randomClientRequestId(), prompt, raw,
-      confirm: automaticQuery?.confirm, ownsDraft: !automaticQuery || wasEmpty, revision: edits.current, source: { ...source.current } }
+      creationOperationId: automaticQuery?.decision.creationOperationId,
+      confirm: automaticQuery?.confirm, ownsDraft: !automaticQuery || wasEmpty || sameTextSource, revision: edits.current, source: { ...source.current } }
     const query: MobileMoteStartQuery = { operationId: original.operationId, prompt, ...(automaticQuery ? { rollover: automaticQuery.decision } : {}) }
     submission.current = original; submitting.current = true; setStarting(true)
     if (!automaticQuery) setSent({ operationId: original.operationId, prompt, raw, key })
@@ -134,7 +132,8 @@ export function MobileMoteConversationStart({ client, target, identity, platform
         showPrompt={draft !== pending.raw} stage={mobileMoteFirstMessageStage(state.result, state.busy || starting, pending.operationId)}
         action={state.pending.length ? { label: '核对', disabled: Boolean(state.checking), onClick: () => state.inspect(retained?.input.operationId ?? state.pending[0]!) } : { label: '核对', disabled: Boolean(state.checking), onClick: () => { state.refresh(); dialogue.refresh() } }} /> : undefined
       })()}
-      composer={<AgentComposer value={draft} disabled={false} active={visible} placeholder="写下你想聊的事…"
+      composer={<MobileComposerSource sourceKey={mobileWelcomeComposerSource(mode)}
+        value={draft} disabled={false} active={visible} placeholder="写下你想聊的事…"
         onChange={body => { edits.current++; local.drafts.set(key, body); redraw(value => value + 1); void local.save().then(() => redraw(value => value + 1)) }}
         {...(state.ready && !state.busy && !starting && visible && (mode === 'new' || !state.reading?.dialogue.main.current) ? { onSubmit: () => { void begin(state) } } : {})} />}
       notice={<>

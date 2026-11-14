@@ -26,10 +26,10 @@ export function useMobileWebUpdateSafety(): Pick<SafetyContext, 'apply'> {
 }
 
 /** One original attachment owner survives presentation remounts within this page. */
-export function useMobileWebAttachmentOwner(): AttachmentPageOwner {
+export function useMobileWebAttachmentOwner(provided?: AttachmentPageOwner): AttachmentPageOwner {
   const context = useContext(Safety), owner = useRef<AttachmentPageOwner | null>(null)
-  if (!owner.current) owner.current = context?.attachmentOwner() ?? createAttachmentPageOwner()
-  return owner.current
+  if (!provided && !owner.current) owner.current = context?.attachmentOwner() ?? createAttachmentPageOwner()
+  return provided ?? owner.current!
 }
 
 /** Keep an accepted operation protected even if its presenting component unmounts. */

@@ -11,7 +11,7 @@ import { errorMessage } from './delivery'
 import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-reference'
 import type { MobilePromptPreparation } from './use-mobile-prompt-controller'
 import { useMobileWebAttachmentOwner, useMobileWebUpdatePendingAction } from '../mobile-web/update-safety'
-import type { AttachmentFlight, SelectionOperation, SelectionTarget } from './attachment-page-owner'
+import type { AttachmentFlight, AttachmentPageOwner, SelectionOperation, SelectionTarget } from './attachment-page-owner'
 
 export type MobileAttachmentControls = {
   choose(): Promise<void>
@@ -22,6 +22,7 @@ export type MobileAttachmentControls = {
 type CopyDecision = { upload: MobileFileUpload; file: LocalAttachment; kind: 'discard' | 'saved'; intent: string;
   recordId: string | null; revision: string; dataBase64: string }
 type Props = {
+  owner?: AttachmentPageOwner | undefined
   client: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean;
   agentSessionId?: string | null;
   promptOperationId: string | null; confirmedPrompt: ConfirmedAttachmentPrompt | null;
@@ -32,8 +33,8 @@ type Props = {
   onPendingContentChange?: (pending: boolean) => void
 }
 /** A local selection and one original Host receipt, beside the maintained shared Composer. */
-export function MobileAttachments({ client, session, agentSessionId, connected, promptOperationId, confirmedPrompt, onSendBodyOnly, bodyOnlyDisabled, onCancelPreparation, preparing, controls, insert, pickFile = signal => pickLocalAttachment(undefined, undefined, signal), onPendingContentChange }: Props) {
-  const owner = useMobileWebAttachmentOwner(), ownerRevision = useSyncExternalStore(owner.subscribe, () => owner.revision, () => owner.revision)
+export function MobileAttachments({ owner: providedOwner, client, session, agentSessionId, connected, promptOperationId, confirmedPrompt, onSendBodyOnly, bodyOnlyDisabled, onCancelPreparation, preparing, controls, insert, pickFile = signal => pickLocalAttachment(undefined, undefined, signal), onPendingContentChange }: Props) {
+  const owner = useMobileWebAttachmentOwner(providedOwner), ownerRevision = useSyncExternalStore(owner.subscribe, () => owner.revision, () => owner.revision)
   const uploads = owner.uploads.current
   const [notice, setNotice] = useState<string | null>(null)
   const [copyDecision, setCopyDecision] = useState<CopyDecision | null>(null)

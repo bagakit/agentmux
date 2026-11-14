@@ -26,10 +26,12 @@ export { DEVICE_WORKFACE_KEY } from './device-storage-lock'
 export type MobilePanel = 'conversation' | 'sessions' | 'terminal'
 export type Navigation = { selectedSessionId: string | null; hostUrl: string; panel: MobilePanel }
 export type DraftRecord = { version: 1; drafts: Array<[string, string]>;
+  /** Exact Mote text addresses in this Device/Host record, independent of late Runtime discovery. */
+  moteTextSources?: Array<[string, string]>;
   attempts: Array<[string, Omit<PromptAttempt, 'message'>]>;
   responses: Array<[string, Omit<ResponseAttempt, 'message'>]>; questions?: Array<[string, MobileQuestionReplyAttempt]>;
   questionDrafts?: Array<[string, AgentSessionHistoryQuestionAnswer[]]>; conflicts?: ConversationConflict[] }
-export type ConversationBucket = 'drafts' | 'attempts' | 'responses' | 'questions' | 'questionDrafts'
+export type ConversationBucket = 'drafts' | 'attempts' | 'responses' | 'questions' | 'questionDrafts' | 'moteTextSources'
 export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Omit<ResponseAttempt, 'message'> | MobileQuestionReplyAttempt | AgentSessionHistoryQuestionAnswer[]
 export type ConversationEdit = { bucket: ConversationBucket; key: string; expected?: ConversationValue | undefined; next?: ConversationValue | undefined }
 /** Only unsaved draft text can follow an explicit device-record replacement. */
@@ -110,10 +112,16 @@ function origin(value: unknown): value is string {
     && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' } catch { return false }
 }
 export function parseDraftRecord(value: unknown): DraftRecord {
-  const v = record(value, ['version', 'drafts', 'attempts', 'responses', ...['conflicts', 'questions', 'questionDrafts'].filter(key => Object.hasOwn(value ?? {}, key))])
+  const v = record(value, ['version', 'drafts', 'attempts', 'responses', ...['conflicts', 'questions', 'questionDrafts', 'moteTextSources'].filter(key => Object.hasOwn(value ?? {}, key))])
   if (v.version !== 1) throw invalid()
   const drafts = entries(v.drafts), attempts = entries(v.attempts), responses = entries(v.responses)
   for (const [, draft] of drafts) if (!body(draft)) throw invalid()
+  if (v.moteTextSources !== undefined) for (const [, source] of entries(v.moteTextSources)) {
+    if (!id(source)) throw invalid()
+    let key: unknown
+    try { key = JSON.parse(source) } catch { throw invalid() }
+    if (!Array.isArray(key) || key.length !== 2 || key[0] !== 'mote-main-start' || !id(key[1])) throw invalid()
+  }
   for (const [, item] of attempts) {
     const keys = ['operationId', 'runId', 'draft', 'phase']
     if (item && typeof item === 'object' && Object.hasOwn(item, 'request')) keys.push('request')
@@ -126,10 +134,20 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (item && typeof item === 'object' && Object.hasOwn(item, 'moteSource')) keys.push('moteSource')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'agentMuxNote')) keys.push('agentMuxNote')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'moteMain')) keys.push('moteMain')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'textSource')) keys.push('textSource')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'admissionIntent')) keys.push('admissionIntent')
     const attempt = record(item, keys)
     if (!id(attempt.operationId) || !(attempt.runId === null || id(attempt.runId))
       || !body(attempt.draft) || !phase(attempt.phase)) throw invalid()
     if (attempt.logId !== undefined) validateDeliveryLogId(attempt.logId)
+    if (attempt.textSource !== undefined) {
+      const source = record(attempt.textSource, ['key', 'recordId'])
+      if (!id(source.key) || source.recordId !== null && !id(source.recordId)) throw invalid()
+    }
+    if (attempt.admissionIntent !== undefined) {
+      const intent = record(attempt.admissionIntent, ['kind'])
+      if (intent.kind !== 'session-conversation' || attempt.explicit !== true) throw invalid()
+    }
     if (attempt.moteSource !== undefined) parseAgentInputMoteSource(attempt.moteSource)
     if (attempt.agentMuxNote !== undefined && !body(attempt.agentMuxNote)) throw invalid()
     if (attempt.moteMain !== undefined) {
@@ -210,7 +228,7 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (!Array.isArray(v.conflicts)) throw invalid()
     for (const item of v.conflicts) {
       const c = record(item, ['bucket', 'key', 'value'])
-      if (!['drafts', 'attempts', 'responses', 'questions', 'questionDrafts'].includes(String(c.bucket)) || !id(c.key)) throw invalid()
+      if (!['drafts', 'attempts', 'responses', 'questions', 'questionDrafts', 'moteTextSources'].includes(String(c.bucket)) || !id(c.key)) throw invalid()
       parseDraftRecord({ version: 1, drafts: [], attempts: [], responses: [], [String(c.bucket)]: [[c.key, c.value]] })
     }
   }

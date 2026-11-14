@@ -60,24 +60,24 @@
 .mobile-conversation__input-state p { margin: 4px 0; }
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true'] { border: 0; box-shadow: none; font-size: var(--fs-body); border-radius: 10px; padding: 4px 8px; margin-block: 2px; }
 .mobile-app .mobile-conversation .agent-interaction__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.mobile-app .mobile-conversation .composer[data-agent-composer] { border: 0; background: var(--surface-2); background-image: none; margin: 0; padding: 2px 4px 0; box-shadow: none; border-radius: 12px; --composer-input-pad-top: 2px; --composer-input-pad-bottom: 2px; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: minmax(0,1fr) auto; min-height: 44px; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer-completion-editor { grid-column: 1 / -1; grid-row: 1; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 2; padding: 0; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child > .composer-tool { display: inline-flex; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child > .composer-tool .composer-tool__label { display: none; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 2; justify-self: end; }
-.mobile-app .mobile-conversation .composer__toolbar { padding: 0; gap: 2px; }
-.mobile-app .mobile-conversation .composer__toolbar > div:first-child { flex: 1 1 auto; min-width: 0; }
-.mobile-app .mobile-conversation .composer-tools { flex: none; gap: 2px; }
-.mobile-app .mobile-conversation .composer__editor .tiptap { padding-inline: 6px; }
-.mobile-app .mobile-conversation .composer-tool { min-width: 44px; min-height: 44px; justify-content: center; padding: 0; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer[data-agent-composer] { border: 0; background: var(--surface-2); background-image: none; margin: 0; padding: 2px 4px 0; box-shadow: none; border-radius: 12px; --composer-input-pad-top: 2px; --composer-input-pad-bottom: 2px; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: minmax(0,1fr) auto; min-height: 44px; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer:has(.composer-tools[data-mode='collapsed']) .composer-completion-editor { grid-column: 1 / -1; grid-row: 1; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 2; padding: 0; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child > .composer-tool { display: inline-flex; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child > .composer-tool .composer-tool__label { display: none; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 2; justify-self: end; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer__toolbar { padding: 0; gap: 2px; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer__toolbar > div:first-child { flex: 1 1 auto; min-width: 0; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer-tools { flex: none; gap: 2px; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer__editor .tiptap { padding-inline: 6px; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer-tool { min-width: 44px; min-height: 44px; justify-content: center; padding: 0; }
 .mobile-app .composer-tools[data-mode='collapsed'] .mobile-command-picker .composer-tool__label { display: none; }
 .mobile-app .mobile-conversation .md-conversation-image__retry { min-width: 44px; justify-content: center; }
-.mobile-app .mobile-conversation .composer__feedback { font-size: var(--fs-meta); }
-.mobile-app .mobile-conversation .composer-send { min-width: 44px; padding: 0 8px; }
-.mobile-app .mobile-conversation .composer-session-controls { box-shadow: none; background: transparent; }
-.mobile-app .mobile-conversation .composer__editor .tiptap { font-size: 16px; line-height: 1.4; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer__feedback { font-size: var(--fs-meta); }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer-send { min-width: 44px; padding: 0 8px; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer-session-controls { box-shadow: none; background: transparent; }
+.mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer__editor .tiptap { font-size: 16px; line-height: 1.4; }
 .mobile-posture-picker, .mobile-command-picker { position: relative; display: inline-flex; align-items: center; }
 .mobile-posture-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; min-width: 180px; max-width: min(86vw, 280px); display: grid; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--mobile-radius); background: var(--surface-1); box-shadow: var(--elev-2); }
 .mobile-posture-menu__item { display: grid; gap: 2px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-radius: var(--mobile-radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-meta); }

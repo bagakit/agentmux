@@ -508,6 +508,12 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-compact-notice__detail { margin: 0 0 var(--sp-4); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-3); user-select: text; }
 
 .mobile-conversation-slot[hidden], .mobile-session-tool-slot[hidden] { display: none; }
+.mobile-mote-composer { flex: none; padding: 0 6px max(4px, env(safe-area-inset-bottom)); }
+.mobile-mote-composer .composer { width: 100%; box-sizing: border-box; }
+.mobile-mote-composer[hidden] { display: none; }
+.mobile-mote-composer-notice { flex: none; margin: 0; padding: 4px 12px; color: var(--status-warning-text); font-size: var(--fs-meta); }
+.mobile-conversation-panel > .mote-start, .mobile-conversation-slot > .mobile-conversation { animation: mobile-mote-body-enter var(--dur-fast) var(--ease-enter); }
+@keyframes mobile-mote-body-enter { from { opacity: .7; transform: translateY(3px); } }
 /* Mobile chrome around the shared welcome and the original bounded period reader. */
 .mobile-mote-start-details { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .mobile-mote-start-details > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }

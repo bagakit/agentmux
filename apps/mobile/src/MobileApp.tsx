@@ -66,6 +66,8 @@ import type { MobileWebPageObservation } from './mobile-web/use-mobile-web-obser
 
 import { deferMobileSurface } from './navigation/defer-mobile-surface'
 import { MobileLocalDraftsOwner } from './conversation/local-drafts-owner'
+import { useMobileWebAttachmentOwner } from './mobile-web/update-safety'
+import { MobileMoteComposer, mobileSessionComposerSource, mobileWelcomeComposerSource } from './conversation/mote-composer'
 import { useEdgeBack } from './navigation/use-edge-back'
 import { MobileSheetHandle } from './navigation/MobileSheetHandle'
 import { useWideAgentWorkface } from './navigation/use-wide-agent-workface'
@@ -117,6 +119,7 @@ export function MobileApp(props: MobileAppProps) {
   return <MobileNoticeProvider><MobileAppContent {...props} /></MobileNoticeProvider>
 }
 function MobileAppContent({ client, connection, platform: basePlatform, native = false, focusComposer = () => false, connectionPanel, webObservation, restoreWorkface = false }: MobileAppProps) {
+  const attachmentOwner = useMobileWebAttachmentOwner()
   const composeAfterClose = useRef<{ client: MobileAppProps['client']; sessionId: string } | null>(null)
   const composeScope = useRef({ client, sessionId: null as string | null, visible: false, focusComposer })
   const connected = connection.state === 'connected'
@@ -708,6 +711,11 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
           onRefresh={() => { teamReading.refresh(); moteDialogue.refresh() }} />
       </section>
       <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal' || threadsVisible}>
+        <MobileMoteComposer client={client} target={moteTarget} platform={platform} enabled={Boolean(moteConversation && !moteDirectAgent && moteTarget)}
+          active={exposed && conversationVisible && !historyVisible}
+          sourceKey={welcomeVisible ? mobileWelcomeComposerSource(moteStart?.mode ?? 'start')
+            : (moteDialogue.page?.main.current ?? team?.main?.reference)?.sessionId === workface.selectedSessionId
+              ? mobileSessionComposerSource(workface.selectedSessionId) : 'unconfirmed-main'}>
         {!workface.selectedSessionId && !welcomeVisible && <div className="mobile-chat-start">
           <ThemeObjectConversationIcon size={24} /><h1>继续对话</h1>
           <p>{chatStartIssue ?? '正在找回对话…'}</p>
@@ -734,7 +742,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
           onConfigure={() => openProfile(objectIdentity)} onBound={() => { teamReading.refresh(); moteDialogue.refresh() }} onOpenMain={reference => openMainAgent(reference.sessionId, objectIdentity, reference.hostId)} />}
         <div hidden={welcomeVisible || historyVisible} className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
 
-          {workface.selectedSessionId && <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} onStatusChange={reportConversationStatus} moteMemberName={moteMemberName} moteTarget={moteTarget} moteDialogue={moteDialogue} moteDirectAgent={moteDirectAgent} moteName={moteTitle} moteAppearance={team?.appearance ?? objectIdentity?.mote?.appearance}
+          {workface.selectedSessionId && <MobileConversationSurface client={client} attachmentOwner={attachmentOwner} agentSessionId={workface.selectedSessionId} onStatusChange={reportConversationStatus} moteMemberName={moteMemberName} moteTarget={moteTarget} moteDialogue={moteDialogue} moteDirectAgent={moteConversation ? moteDirectAgent : undefined} moteName={moteTitle} moteAppearance={team?.appearance ?? objectIdentity?.mote?.appearance}
             moteWorkMemberName={source => workMember(source)?.name ?? source.origin.recipientSessionId} onOpenMoteWork={openMoteWork} onReturnMoteMain={returnToMoteMain}
             onMoteRolloverRequired={query => { if (teamSpaceId && moteTarget && !moteDirectAgent) { navigationRevision.current++; setMoteHistory(null); setMoteStart({ spaceId: teamSpaceId, mode: 'new', automatic: query }) } }}
             onShowMoteThreads={() => { if (teamSpaceId) { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId, section: 'threads', detail: false }) } }}
@@ -742,6 +750,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
             moteSource={mobileMoteInputSource(objectIdentity, workface.selectedSessionId, identityRecipient)} connection={connection} platform={platform} toolbarTarget={conversationToolsTarget} statusTarget={conversationStatusTarget} noticeTarget={moteNoticeTarget} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible && !welcomeVisible && !historyVisible} onShowTerminal={() => { navigationRevision.current++; setWorkface(value => ({ ...value, panel: 'terminal' })) }}
             onShowGoals={showConversationGoals} openHttpLink={openBrowserHttpLink} />}
         </div>
+        </MobileMoteComposer>
       </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>
         <MobileTerminalViewer loadWhen={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} onLoadReturn={returnToConversation} terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
       </section>
