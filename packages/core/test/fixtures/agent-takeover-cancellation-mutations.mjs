@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto'
 const variants = {
+  'count-spatial-as-execution-ack': {path:'apps/host/src/takeover-cancellation.ts',edits:[
+    ["initialInput: 'unknown', diskDurability: 'unconfirmed',", "initialInput: 'unknown', diskDurability: base.diskDurability,"]]},
+  'check-cancellation-on-observation': {path:'packages/core/src/client.ts',edits:[
+    ['    const input = current.initialInput\n    if (current.creation?.resolution?.initialInputContinuation', '    if (current.creation?.createOperationId && await this.store.readCreationCancellation(current.creation.createOperationId)) return current\n    const input = current.initialInput\n    if (current.creation?.resolution?.initialInputContinuation']]},
   'memory-confirms-cancellation-disk': {path:'packages/core/src/agent-session-store.ts',edits:[
     ["    this.creationCancellations.set(input.createOperationId, structuredClone(input))\n    return 'unconfirmed' as const", "    this.creationCancellations.set(input.createOperationId, structuredClone(input))\n    return 'confirmed' as const"]]},
   'skip-cancellation-pair': {path:'packages/core/src/client.ts',edits:[
@@ -12,7 +16,7 @@ const variants = {
   'skip-start-fence': { path:'packages/core/src/client.ts', edits:[['      await this.assertCreationNotCancelled(createOperationId)\n','']] },
   'skip-initial-input-hold': { path:'packages/core/src/client.ts', edits:[
     ['    if (original.creation?.createOperationId) await this.assertCreationNotCancelled(original.creation.createOperationId)\n',''],
-    ['    if (current.creation?.createOperationId && await this.store.readCreationCancellation(current.creation.createOperationId)) return current\n','']], also:{path:'packages/core/src/agent-session-store.ts',edits:[['  if (cancellation && newPromptClaim(previous, next)', '  if (false && cancellation && newPromptClaim(previous, next)']]} },
+    ['      if (current.creation?.createOperationId && await this.store.readCreationCancellation(current.creation.createOperationId)) return current\n','']], also:{path:'packages/core/src/agent-session-store.ts',edits:[['  if (cancellation && newPromptClaim(previous, next)', '  if (false && cancellation && newPromptClaim(previous, next)']]} },
   'skip-binding-fence': { path:'packages/core/src/agent-execution-coordinator.ts', edits:[[
     '    if (this.read(bindingId)?.cancellation) throw fail(', '    if (false && this.read(bindingId)?.cancellation) throw fail(']] },
   'forget-execution-control': { path:'packages/core/src/agent-session-store.ts', edits:[[

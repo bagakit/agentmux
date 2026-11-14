@@ -27,7 +27,7 @@ try {
   if(sid){
     await client.registry.load('local')
     const session=await store.readMetadata(sid)
-    await client.continueInitialInput(session,{runId:session.run.runId})
+    await client.continueInitialInput(session,{runId:session.run.runId,state:{type:'running'}})
     held=(await store.readCreationCancellation(input.request.operationId))?.operationId===input.operationId
   }
   console.log(JSON.stringify({pid:process.pid,written,checked,replay,controls,held,graphUnchanged:original===await readFile(join(root,'spatial.json'),'utf8')}))

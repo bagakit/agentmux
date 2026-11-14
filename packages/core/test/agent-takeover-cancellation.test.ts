@@ -94,6 +94,15 @@ it.each(['file', 'memory'] as const)('Hosted cancellation preserves its effect a
     const store = new AgentMuxMemoryAgentSessionStore()
     await store.compareAndSwapMetadata(null, (await f.store.readMetadata(agentSessionId))!)
     client = new AgentMuxClient({ store, providers: [f.provider], creationAuthority: f.inner.creationAuthority })
+    // Hosted's initial projection uses the same deterministic Native facts without starting a daemon.
+    const memory = client as typeof f.inner
+    memory.connected = true
+    Object.assign(memory.kernel, {
+      isConnected: f.inner.kernel.isConnected,
+      connect: f.inner.kernel.connect,
+      identity: f.inner.kernel.identity,
+      list: f.inner.kernel.list
+    })
     cleanup.push(() => client.dispose())
   }
   const remote = await hostedTestClient(client); cleanup.push(() => remote.dispose())
@@ -116,6 +125,43 @@ it('cancellation wins the real admission transaction after takeover preparation 
   expect(await f.rpc.call('agent.takeover.cancel', input)).toMatchObject({ outcome:'cancelled' })
   release.resolve()
   expect(await settled).toMatchObject({ code:'AGENT_TAKEOVER_CANCELLED' }); expect(f.started).toHaveLength(0)
+})
+it('a spatial save cannot acknowledge a missing execution cancellation write', async () => {
+  const f = await createTakeoverOwnerFixture(cleanup), request = originalRequest(f, 'execution-ack-gap')
+  const opened = await f.rpc.call('agent.open', request)
+  expect(opened.agent?.runId).toBeTruthy()
+  const input = { expectedRuntimeId: f.owner.runtimeId, operationId: 'execution-ack-gap-cancel', request }
+  const write = vi.spyOn(f.client, 'cancelAgentCreation').mockRejectedValueOnce(new Error('Original execution write is unavailable.'))
+  expect(await f.rpc.call('agent.takeover.cancel', input)).toMatchObject({
+    outcome: 'unconfirmed', diskDurability: 'unconfirmed', issue: 'Original execution write is unavailable.'
+  })
+  expect(await f.rpc.call('agent.takeover.cancel.inspect', input)).toMatchObject({
+    operationId: input.operationId, outcome: 'unconfirmed', diskDurability: 'unconfirmed'
+  })
+  expect(write).toHaveBeenCalledTimes(1)
+  expect(await f.rpc.call('agent.takeover.cancel', input)).toMatchObject({
+    operationId: input.operationId, outcome: 'created', diskDurability: 'confirmed',
+    agent: { agentSessionId: opened.agent!.agentSessionId, run: { runId: opened.agent!.runId } }
+  })
+  expect(f.started).toHaveLength(1)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+it('settling an existing first-input receipt never awaits the cancellation Store', async () => {
+  const f = await createTakeoverOwnerFixture(cleanup), request = originalRequest(f, 'existing-first-input')
+  const read = vi.spyOn(f.store, 'readCreationCancellation')
+  const resume = f.inner.continueInitialInput.bind(f.inner)
+  const observations: Array<{ state: string | undefined; reads: number }> = []
+  vi.spyOn(f.inner, 'continueInitialInput').mockImplementation(async (...args: unknown[]) => {
+    const before = read.mock.calls.length
+    const settled = await resume(...args)
+    observations.push({ state: settled.initialInput?.state, reads: read.mock.calls.length - before })
+    return settled
+  })
+  const opened = await f.rpc.call('agent.open', request)
+  expect(observations).toEqual([{ state: 'launch-carried', reads: 0 }])
+  expect(opened.agent?.runId).toBeTruthy()
+  expect(f.started).toHaveLength(1)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 it('holds a prepared live creator without stealing its lifecycle lease or starting after its barrier releases', async () => {
   const f = await createTakeoverOwnerFixture(cleanup), reached = deferred(), release = deferred(), request = originalRequest(f, 'prepared-race')
