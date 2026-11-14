@@ -37,6 +37,21 @@
 | 手机 Web client 的尺度、控件、文案、状态、动效与采图验收 | [手机客户端的呈现](presentation/mobile-client.md) |
 | 公共控制的原表面 | [公共控制与客户端的呈现](presentation/public-control.md) |
 
+## 按控件开始贡献
+
+先定位所属表面的行为与呈现专题，再沿下表复用现有入口。源码链接用于核对当前实现与真实调用，不证明整页已经符合规范；几何与手机差异仍由原专题持有。
+
+| 要做什么 | 规格 | 源码 Owner | 真实消费者示例 |
+| --- | --- | --- | --- |
+| 文字或图标动作 | [控件语言与逐态职责](presentation/shared-rules.md#控件语言) | [Button](../../packages/client-ui/src/components/Button.tsx)、[IconButton](../../packages/client-ui/src/components/IconButton.tsx)、[共享按钮样式](../../packages/client-ui/src/styles/buttons.css) | [SettingsSaveBar](../../apps/desktop/src/renderer/src/components/settings/SettingsSaveBar.tsx) |
+| 单字段或组合输入 | [输入与焦点规格](presentation/shared-rules.md#控件语言) | [TextInput](../../packages/client-ui/src/input/TextInput.tsx)、[InputGroup](../../packages/client-ui/src/input/InputGroup.tsx)、[输入样式](../../packages/client-ui/src/input/input.css) | [MoteRenameDialog](../../apps/desktop/src/renderer/src/components/MoteRenameDialog.tsx)、[MoteFirstCooperation](../../apps/desktop/src/renderer/src/components/MoteFirstCooperation.tsx) |
+| 标签、说明与原生设置项 | [控件语言](presentation/shared-rules.md#控件语言) · [Settings 呈现](presentation/settings-and-observation.md#settings-控制工作面) | [FormRow](../../packages/client-ui/src/components/FormRow.tsx)、[原生控件绘制](../../packages/client-ui/src/styles/native-controls.css) | [GeneralSettingsPane](../../apps/desktop/src/renderer/src/components/settings/GeneralSettingsPane.tsx)、[NotificationSettingsPane](../../apps/desktop/src/renderer/src/components/settings/NotificationSettingsPane.tsx) |
+| 单选字段或动作菜单 | [控件语言](presentation/shared-rules.md#控件语言) · [键盘与可访问性](presentation/shared-rules.md#响应式与可访问性) | [SelectionField](../../apps/desktop/src/renderer/src/components/SelectionField.tsx)、[HoverDropdownMenu](../../apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx)、[菜单样式](../../apps/desktop/src/renderer/src/styles/context-menu.css) | [AgentExecutorPicker](../../apps/desktop/src/renderer/src/components/AgentExecutorPicker.tsx)、[WorkbenchTabContextMenu](../../apps/desktop/src/renderer/src/components/WorkbenchTabContextMenu.tsx)（原 Radix ContextMenu） |
+| 模态或确认弹层 | [弹层作用域与层级](presentation/shared-rules.md#弹层作用域与层级) · [恢复确认的验收](../guides/agent-visual-e2e-review.md#各表面的场景要求) | [共享 Modal](../../packages/client-ui/src/components/Modal.tsx)、[窗口 Portal](../../apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx)、[ConfirmationDialog](../../apps/desktop/src/renderer/src/components/ConfirmationDialog.tsx) | [useWorkbenchTabsClose](../../apps/desktop/src/renderer/src/hooks/useWorkbenchTabsClose.tsx) |
+| 排版、主题或图标 | [排版角色](presentation/shared-rules.md#排版角色与来源) · [主题与样式](presentation/shared-rules.md#主题与样式-ssot-规范) | [主题目录与解析](../../packages/client-ui/src/theme/catalog.ts)、[语义 CSS 投影](../../packages/client-ui/src/theme/css-variables.ts)、[Desktop 尺度](../../apps/desktop/src/renderer/src/styles/tokens.css) | [AppearanceSettingsPane](../../apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPane.tsx)；手机沿[手机尺度与 token](presentation/mobile-client.md#尺度与-token) |
+
+组件负责原生控件、呈现与公共交互；值、校验、动作资格、保存及恢复仍由调用者和原业务 Owner 决定。改值从原来源与真实消费者核对，不在文档或局部样式再维护一份数值；检查方法沿[界面规则与真实行为](../testing/strategy.md#界面规则与真实行为)，实图验收沿[独立看图流程](../guides/agent-visual-e2e-review.md)。
+
 ## 更新与保全
 
 新约束原位合入所属专题，同一事实只定义一次，其他正文链接到 owner。入口只维护主题导航，不按日期、Task 或聊天轮次追加完整需求。修改步骤与检查见[完成一次文档修改](../guides/document-truth-and-maintenance.md#完成一次文档修改)，过程资料的留存边界见[过程目录](../process-directories.md)。
