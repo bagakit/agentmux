@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
@@ -12,6 +12,7 @@ import { hydratePersistedTab, reducePersistedTab, type PersistedWorkbenchTab } f
 import type { AppConfig, BrowserSnapshot } from '../src/shared/contracts'
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
 import type { BrowserRecoveryPreview, BrowserRecoveryPreviewReadResult } from '../src/shared/browser-recovery-preview'
+import { createClientUiRoot } from './helpers/client-ui-render'
 
 const original = useAppStore.getState()
 let root: Root, host: HTMLDivElement, dispose: (() => void) | undefined
@@ -35,7 +36,7 @@ beforeEach(() => {
   vi.spyOn(api.browser, 'setAnnotationMarkers').mockResolvedValue(undefined)
   vi.spyOn(api.browser, 'cancelElementSelection').mockResolvedValue(undefined)
   vi.spyOn(api.browser, 'getRecoveryPreview').mockResolvedValue({ status: 'missing' })
-  host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove(); dispose?.(); dispose = undefined
@@ -45,6 +46,28 @@ function address() { const value = host.querySelector<HTMLInputElement>('input[a
 async function fill(text: string) {
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(address(), text); address().dispatchEvent(new Event('input', { bubbles: true })) })
 }
+
+it('the Browser activity drawer asks the original owner for scoped history through the real Store', async () => {
+  const { layout, regions } = savedTab()
+  const surface = regions[layout.activeRegionId!] as BrowserWorkbenchSurface
+  const originalOperation = {
+    id: 'retained-operation', browserId: surface.browserId, summary: 'Original retained operation',
+    operator: { id: 'private-agent', name: 'Private Agent' }, url: surface.url, startedAt: 10, phase: 'completed' as const,
+    steps: [{ sequence: 1, method: 'snapshot', label: 'Original retained step', startedAt: 10, status: 'completed' as const }]
+  }
+  const list = vi.spyOn(api.browser, 'listOperationHistory').mockImplementation(async (...[browserId]: [string?]) =>
+    browserId === surface.browserId ? [originalOperation] : [{ ...originalOperation, id: 'recent-unrelated', browserId: 'busy-browser' }])
+  await act(async () => root.render(<BrowserPane tab={surface} visible />))
+  const trigger = host.querySelector('.browser-operation-status__trigger')!
+  expect(trigger).not.toBeNull()
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  const action = document.querySelector('[role="menu"] [aria-label="Open browser activity timeline"]')!
+  expect(action).not.toBeNull()
+  await act(async () => action.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  expect(list).toHaveBeenCalledExactlyOnceWith(surface.browserId)
+  expect(document.querySelector('[data-operation-id="retained-operation"]'), document.body.textContent ?? '').not.toBeNull()
+  expect(document.body.textContent).toContain('Original retained step')
+})
 
 it('restores thirty exact Browser descriptions and layout before creating any native page', async () => {
   const tabs = Object.fromEntries(Array.from({ length: 30 }, (_, i) => { const tab = savedTab('page-' + i); return [tab.id, reducePersistedTab(tab)] }))

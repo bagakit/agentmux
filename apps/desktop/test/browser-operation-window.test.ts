@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import ts from 'typescript'
-import { BrowserOperationFileStore, BrowserOperationJournal, browserOperationAlreadyExistsError } from '@agentmux/browser/browser-operation-journal'
+import { connectAgentMuxRpc } from '@agentmux/core'
+import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
+import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE, browserOperationAlreadyExistsError } from '@agentmux/browser/browser-operation-journal'
+import { serveStandaloneBrowser } from '@agentmux/browser/standalone'
 import type { BrowserOperationPhase } from '@agentmux/browser/model/browser-operation'
 import { runBrowserScript } from '@agentmux/browser/browser-script-runner'
 import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result'
@@ -178,11 +181,11 @@ function exactMethod(name: string, ports: Record<string, unknown>) {
   const owner = new Function(code + '; return owner')()
   return owner[name].bind(ports)
 }
-function actualRunHandler(ports: Record<string, unknown>) {
+function actualBrowserHandler(name: string, ports: Record<string, unknown>) {
   const source = readFileSync('apps/desktop/src/main/ipc.ts', 'utf8'), file = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true), nodes: ts.Node[] = []
-  const walk = (node: ts.Node) => { if (ts.isCallExpression(node) && node.expression.getText(file) === 'handleWithEvent' && ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === 'browser:runScript') nodes.push(node.arguments[1]!); ts.forEachChild(node, walk) }
+  const walk = (node: ts.Node) => { if (ts.isCallExpression(node) && node.expression.getText(file) === 'handleWithEvent' && ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === name) nodes.push(node.arguments[1]!); ts.forEachChild(node, walk) }
   walk(file); expect(nodes).toHaveLength(1)
-  bindSource('apps/desktop/src/main/ipc.ts', source, nodes[0]!.getText(file), 'browser:runScript')
+  bindSource('apps/desktop/src/main/ipc.ts', source, nodes[0]!.getText(file), name)
   const code = ts.transpile(`const execute = ${nodes[0]!.getText(file)}`, { target: ts.ScriptTarget.ES2022 })
   return new Function(...Object.keys(ports), code + ';return execute')(...Object.values(ports))
 }
@@ -207,7 +210,7 @@ it('original Main IPC and exact manager consumers read cold original IDs before 
     if (!result.completed) throw new Error('Private script runner did not complete')
     return { result: result.value, logs: result.logs, outcome: { kind: 'completed' as const }, runOperation: (await journal.finish(operationId, 'completed')) ?? operation }
   }), ensureBrowser = vi.fn()
-  const handle = actualRunHandler({ browsers: { getOperation, runScript }, ensureBrowser,
+  const handle = actualBrowserHandler('browser:runScript', { browsers: { getOperation, runScript }, ensureBrowser,
     browserAutomation: createBrowserAutomationGate({ automation: () => true, profileOf: async () => null, agentAccess: () => true }), config: { browser: { agentAutomation: true } }, browserRunResult, browserOperationAlreadyExistsError,
     externalBrowsers: { has: () => false, runScript: vi.fn() }, externalBridge: { require: vi.fn() }, workspace: vi.fn() })
   expect(await handle({}, input.browserId, 'return 1', input.operator, 'cold-1')).toMatchObject({ ok: false, error: { code: 'BROWSER_OPERATION_ALREADY_EXISTS' } })
@@ -220,6 +223,89 @@ it('original Main IPC and exact manager consumers read cold original IDs before 
   expect(ensureBrowser).toHaveBeenCalledExactlyOnceWith(input.browserId)
   expect(journal.getPersistenceWarning()).toContain('temporarily missing')
   facts.push({ actualMainManagerGetAndHistory: true, actualIPC: true, actualPermissionGate: true, coldDuplicatePageAcquisitions: 0, coldUnknownPageAcquisitions: 0, freshOriginalCarrierAndScriptRunnerWithAdvisory: true })
+})
+
+it('Desktop history applies the original Browser scope before the warm window', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'amux-window-scoped-warm-')); owned.push(directory)
+  const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, BROWSER_OPERATION_JOURNAL_FILE)), { maxOperations: 2 })
+  await journal.start({ ...input, id: 'original-protected' })
+  for (const [id, browserId] of [['original-outside', input.browserId], ['original-1', input.browserId], ['original-2', input.browserId], ['busy-1', 'busy'], ['busy-2', 'busy']] as const) {
+    await journal.start({ ...input, id, browserId })
+    await journal.startStep(id, { method: 'snapshot', label: 'Original step' })
+    await journal.finishStep(id, 1, { status: 'completed' })
+    await journal.finish(id, 'completed')
+  }
+  const listOperationHistory = exactMethod('listOperationHistory', { operationJournal: journal })
+  const history = actualBrowserHandler('browser:listOperationHistory', { browsers: { listOperationHistory } })
+  expect((await history({})).map((value: { id: string }) => value.id)).toEqual(['original-protected', 'busy-1', 'busy-2'])
+  const scoped = await history({}, input.browserId)
+  expect(scoped.map((value: { id: string }) => value.id)).toEqual(['original-protected', 'original-1', 'original-2'])
+  expect(scoped[1]).toMatchObject({ browserId: input.browserId, steps: [{ sequence: 1, method: 'snapshot', status: 'completed' }] })
+  expect(await history({}, 'absent')).toEqual([])
+})
+
+it('keeps scoped history unknown when original recovery never loaded the protected operations', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'amux-window-scoped-unconfirmed-')); owned.push(directory)
+  const path = join(directory, BROWSER_OPERATION_JOURNAL_FILE)
+  await new BrowserOperationJournal(new BrowserOperationFileStore(path)).start({ ...input, id: 'original-pending' })
+  const database = new DatabaseSync(path)
+  try { database.exec("UPDATE events SET body = 'unreadable'") } finally { database.close() }
+  const journal = new BrowserOperationJournal(new BrowserOperationFileStore(path))
+  await journal.ready()
+  expect(journal.getPersistenceWarning()).toContain('unavailable')
+  await expect(journal.list(input.browserId)).rejects.toThrow('Original Browser history could not be loaded')
+  await expect(journal.start({ ...input, id: 'healthy-live' })).resolves.toMatchObject({ id: 'healthy-live' })
+  await expect(journal.get('healthy-live')).resolves.toMatchObject({ id: 'healthy-live', phase: 'preparing' })
+  await expect(journal.list(input.browserId)).rejects.toThrow()
+})
+
+it('standalone CLI history restores the same scoped steps cold after unrelated writes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'amux-history-rpc-')); owned.push(directory)
+  const path = join(directory, BROWSER_OPERATION_JOURNAL_FILE)
+  const original = Array.from({ length: 66 }, (_, n) => ({
+    metadata: { ...input, id: 'original-' + n, startedAt: 10, finishedAt: 11, phase: 'completed' as const },
+    steps: [{ sequence: 1, method: 'snapshot', label: 'Original step', startedAt: 10, status: 'completed' as const }]
+  }))
+  const unrelated = Array.from({ length: 140 }, (_, n) => ({
+    metadata: { ...input, id: 'busy-' + n, browserId: 'busy', startedAt: 10, finishedAt: 11, phase: 'completed' as const }, steps: []
+  }))
+  const protectedOperation = { metadata: { ...input, id: 'original-interrupted', startedAt: 1, phase: 'running' as const }, steps: [] }
+  await new BrowserOperationFileStore(path).save({ writer: 'original', revision: 1, operations: [protectedOperation, ...original, ...unrelated], events: [], maxEvents: 512 })
+  const socketPath = join(directory, 'control.sock')
+  const host = await serveStandaloneBrowser({ directory, executablePath: join(directory, 'unused-executable'), socketPath })
+  try {
+    const args = await parseAgentMuxCliInvocation(['browser', 'history', '--browser', input.browserId])
+    expect(args.command.method).toBe('browser.history')
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
+    try {
+      const history = await client.call('browser.history', args.params as { browserId: string })
+      expect(history.operations.map(operation => operation.id)).toEqual(['original-interrupted', ...original.slice(-64).map(operation => operation.metadata.id)])
+      expect(history.operations[0]?.phase).toBe('indeterminate')
+      expect(history.operations[1]?.steps).toMatchObject([{ sequence: 1, method: 'snapshot', status: 'completed' }])
+      expect((await client.call('browser.history', {})).operations.map(operation => operation.id)).toEqual(['original-interrupted', ...unrelated.slice(-64).map(operation => operation.metadata.id)])
+      expect((await client.call('browser.inspect', { operationId: 'original-0' })).runOperation).toMatchObject({ id: 'original-0' })
+    } finally { await client.dispose() }
+  } finally { await host.stop() }
+
+  const store = new BrowserOperationFileStore(path)
+  const journal = new BrowserOperationJournal(store, { maxOperations: 2 })
+  await journal.ready()
+  await journal.setPhase('original-0', 'waiting')
+  await journal.start({ ...input, id: 'new-original' })
+  await journal.finish('new-original', 'completed')
+  const read = vi.spyOn(store, 'readOperations')
+  const expected = ['original-interrupted', 'original-0', 'original-65', 'new-original']
+  const scoped = await journal.list(input.browserId)
+  expect(scoped.map(operation => operation.id)).toEqual(expected)
+  expect(scoped[1]?.phase).toBe('waiting')
+  expect(read).toHaveBeenCalledExactlyOnceWith(['original-65'])
+  await rename(path, path + '.offline')
+  try {
+    await expect(journal.list(input.browserId)).rejects.toThrow()
+    await expect(journal.get('new-original')).resolves.toMatchObject({ id: 'new-original', phase: 'completed' })
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally { await rename(path + '.offline', path) }
+  expect((await journal.list(input.browserId)).map(operation => operation.id)).toEqual(expected)
 })
 
 })
