@@ -21,7 +21,7 @@ export type MoteChatConfiguration = {
   target: MoteChatTarget
   revision: number
   values: MoteChatValues
-  /** Original application-scoped creator, resolved by the Host rather than supplied by JSON. */
+  /** Host-resolved native creator proof; null permits only explicitly allocated finite guests. */
   creator: ConnectionActor | null
 }
 export type MoteChatConfigure = {
@@ -30,6 +30,8 @@ export type MoteChatConfigure = {
   expectedRevision: number | null
   expectedConnectionRevision: number | null
   values: MoteChatValues
+  /** Explicit online qualification of the native application creator in this original intent. */
+  refreshCreator?: true
 }
 export type MoteChatPerson = {
   actor: ConnectionActor

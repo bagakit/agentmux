@@ -96,18 +96,22 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     if (original) return parseMoteChatResult('space.mote.chat.configure', original, input)
     await this.options.assertTarget(input.target)
     const current = this.exact(input.target)
-    let creator = current?.creator ?? null
+    let creator = same(current?.values.connection?.application, input.values.connection?.application) ? current?.creator ?? null : null
     if (input.values.connection) {
       const ref = input.values.connection, connection = (await this.options.connections.inspect({ connectionId: ref.connectionId })).connection
       if (!connection || !same(connection.config.application, ref.application) || connection.revision !== input.expectedConnectionRevision) fail('MOTE_CHAT_CONNECTION_CHANGED', 'The selected original application changed. Read it again before saving this chat configuration.')
       const changed = !same(current?.values.connection, ref)
-      if (input.values.enabled && (!connection.config.enabled || changed && connection.initialSetup?.state === 'incomplete')) fail('MOTE_CHAT_CONNECTION_UNAVAILABLE', 'The selected application is disabled or its original setup has not completed. Continue that exact identity in Lark settings; existing conversations are retained.')
-      if (input.values.enabled && (changed || !creator)) {
+      if (input.values.enabled && (!connection.config.enabled || changed && connection.initialSetup?.state === 'incomplete')) fail('MOTE_CHAT_CONNECTION_UNAVAILABLE', 'The selected application is disabled or its original setup has not completed. Continue that exact identity in connection settings; existing conversations are retained.')
+      if (input.refreshCreator) {
         const observation = await this.options.connections.profile?.get({ connectionId: ref.connectionId, expectedConnectionRevision: connection.revision }, context)
-        if (!observation?.creator || !same(observation.application, ref.application) || observation.connectionRevision !== connection.revision) fail('MOTE_CHAT_CREATOR_UNCONFIRMED', 'The original application-scoped creator is not confirmed. Check this application profile and its read permission before enabling chat; no Agent was started.')
+        if (observation && (!same(observation.application, ref.application) || observation.connectionRevision !== connection.revision || observation.connectionId !== ref.connectionId)) fail('MOTE_CHAT_CONNECTION_CHANGED', 'The application profile belongs to another original connection or revision. No chat configuration was replaced.')
+        if (!observation?.creator) fail('MOTE_CHAT_CREATOR_UNCONFIRMED', 'This original native application creator is not confirmed. Existing proof, guest policy and conversations are retained; no identity update was saved.')
         creator = parseConnectionActor({ application: ref.application, ...observation.creator })
-      } else if (changed) creator = null
-    } else creator = null
+      }
+    } else {
+      if (input.refreshCreator) fail('MOTE_CHAT_CREATOR_UNCONFIRMED', 'Select an exact original application before explicitly qualifying its creator. Existing policy and conversations are retained.')
+      creator = null
+    }
     await context.assertCurrent?.()
     return this.store.transaction(() => {
       const original = this.originalOperation(input.operationId, intent)
@@ -225,10 +229,17 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     return parseMoteChatResult('space.mote.chat.diagnose', report, input)
   }
   async audience(value: MoteChatAudienceInput, context?: MoteChatCallContext) {
-    const input = parseMoteChatParams('space.mote.chat.audience', value); management(context); await context?.assertCurrent?.(); this.exact(input.target)
+    const input = parseMoteChatParams('space.mote.chat.audience', value); management(context); await context?.assertCurrent?.()
     const scope = ['audience', input.target], after = position(scope, input.cursor, '') as string
-    const rows = this.store.people(input.target.spaceId, after, (input.limit ?? 20) + 1), page = rows.slice(0, input.limit)
-    return parseMoteChatResult('space.mote.chat.audience', { people: page.map(row => row.person), next: rows.length > page.length ? cursor(scope, page.at(-1)!.key) : null }, input)
+    return this.store.transaction(() => {
+      const configuration = this.exact(input.target), rows = this.store.people(input.target.spaceId, after, (input.limit ?? 20) + 1), page = rows.slice(0, input.limit)
+      const people = page.map(row => {
+        const current = configuration ? this.person(configuration, row.person.actor, row) : row
+        if (current !== row) this.store.savePerson(current)
+        return current.person
+      })
+      return parseMoteChatResult('space.mote.chat.audience', { people, next: rows.length > page.length ? cursor(scope, page.at(-1)!.key) : null }, input)
+    })
   }
   async allocate(value: MoteChatAllocate, context: MoteChatCallContext) {
     const input = parseMoteChatParams('space.mote.chat.allocate', value); management(context); await context.assertCurrent?.(); await this.options.assertTarget(input.target)
@@ -239,8 +250,11 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
       if (original) return parseMoteChatResult('space.mote.chat.allocate', original, input)
       const configuration = this.exact(input.target), key = personKey(input.target.spaceId, input.actor), row = this.store.person(key)
       if (!configuration || configuration.revision !== input.expectedConfigurationRevision || !row || row.person.revision !== input.expectedPersonRevision) fail('MOTE_CHAT_REVISION_CONFLICT', 'This original person or Mote configuration changed. Read the current allocation before saving another intent.')
-      if (row.person.creator) fail('MOTE_CHAT_CREATOR_UNLIMITED', 'The confirmed application creator already has unlimited chat access. Allocate an allowance to an exact guest instead.')
-      const person = parseMoteChatPerson({ ...row.person, revision: row.person.revision + 1, total: input.total, remaining: Math.max(0, input.total - row.person.used) })
+      if (!same(configuration.values.connection?.application, input.actor.application)) fail('MOTE_CHAT_CONNECTION_CHANGED', 'This person belongs to another original application. Keep their history and select the matching application before allocating access.')
+      const qualified = this.person(configuration, input.actor, row)
+      if (qualified.person.creator) fail('MOTE_CHAT_CREATOR_UNLIMITED', 'The confirmed application creator already has unlimited chat access. Allocate an allowance to an exact guest instead.')
+      if (qualified.person.revision !== input.expectedPersonRevision) fail('MOTE_CHAT_REVISION_CONFLICT', 'This person’s current application role changed. Read their current allocation before explicitly saving another intent.')
+      const person = parseMoteChatPerson({ ...qualified.person, revision: qualified.person.revision + 1, total: input.total, remaining: Math.max(0, input.total - qualified.person.used) })
       const operation = parseMoteChatResult('space.mote.chat.allocate', { operationId: input.operationId, action: 'allocate', configuration, person }, input)
       this.store.savePerson({ ...row, person }); this.store.saveOperation(intent, operation); return operation
     })
@@ -334,11 +348,13 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     const connection = this.options.connections.readConfiguration(row.connectionId)
     return !!connection?.config.enabled && same(connection.config.application, row.generation.application)
   }
-  private person(configuration: MoteChatConfiguration, actor: ConnectionActor): MoteChatPersonRow {
-    const key = personKey(configuration.target.spaceId, actor), existing = this.store.person(key)
-    if (existing) return existing
-    const creator = same(configuration.creator, actor), total = creator ? null : configuration.values.strangerMessageLimit
-    return { key, spaceId: configuration.target.spaceId, person: parseMoteChatPerson({ actor, creator, revision: 1, total, used: 0, remaining: total }) }
+  private person(configuration: MoteChatConfiguration, actor: ConnectionActor, existing = this.store.person(personKey(configuration.target.spaceId, actor))): MoteChatPersonRow {
+    if (existing && !same(configuration.values.connection?.application, actor.application)) return existing
+    const key = personKey(configuration.target.spaceId, actor), creator = same(configuration.creator, actor)
+    if (existing?.person.creator === creator) return existing
+    const total = creator ? null : existing?.person.total ?? configuration.values.strangerMessageLimit, used = existing?.person.used ?? 0
+    return { key, spaceId: configuration.target.spaceId, person: parseMoteChatPerson({ ...(existing?.person ?? { actor }), creator,
+      revision: (existing?.person.revision ?? 0) + 1, total, used, remaining: total === null ? null : Math.max(0, total - used) }) }
   }
   private assertService(connectionId: string): void {
     const connection = this.options.connections.readConfiguration(connectionId)
@@ -462,7 +478,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   private mainActive(admission: MoteChatMainAdmission): boolean {
     const current = this.store.configuration(admission.target.spaceId), connection = this.options.connections.readConfiguration(admission.binding.connectionId)
     return !!current?.values.enabled && sameMotePreferencesTarget(current.target, admission.target) && same(current.values.connection?.application, admission.application) &&
-      current.values.connection?.connectionId === admission.binding.connectionId && same(current.creator, admission.actor) &&
+      same(current.creator, admission.actor) &&
       !!connection?.config.enabled && same(connection.config.application, admission.application)
   }
   private mainBinding(admission: MoteChatMainAdmission): RoomBinding {
@@ -581,8 +597,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     const a = this.store.admissionByIngress(ingressId)
     if (a?.kind === 'main') return a.binding.bindingId === bindingId && same(a.actor, actor) && this.mainActive(a)
     const row = a ? this.store.generation(a.generationId) : null
-    return !!row?.binding && row.binding.bindingId === bindingId && same(a!.actor, actor) && this.active(row) &&
-      this.store.configuration(row.generation.target.spaceId)?.values.connection?.connectionId === row.connectionId
+    return !!row?.binding && row.binding.bindingId === bindingId && same(a!.actor, actor) && this.active(row)
   }
 }
 

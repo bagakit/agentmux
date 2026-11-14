@@ -49,7 +49,7 @@ export function parseMoteChatValues(v: unknown, code: Code = 'INVALID_CONTROL_RE
 export function parseMoteChatConfiguration(v: unknown, code: Code = 'CONTROL_PROTOCOL_ERROR'): MoteChatConfiguration {
   const p = fields(v, ['target', 'revision', 'values', 'creator'], ['target', 'revision', 'values', 'creator'], code)
   const values = parseMoteChatValues(p.values, code), creator = p.creator === null ? null : actor(p.creator, code)
-  if (creator && (!values.connection || JSON.stringify(creator.application) !== JSON.stringify(values.connection.application)) || values.enabled && !creator) fail(code)
+  if (creator && (!values.connection || JSON.stringify(creator.application) !== JSON.stringify(values.connection.application))) fail(code)
   return { target: target(p.target, code), revision: count(p.revision, code, 1), values, creator }
 }
 export function parseMoteChatPerson(v: unknown, code: Code = 'CONTROL_PROTOCOL_ERROR'): MoteChatPerson {
@@ -138,10 +138,12 @@ export function parseMoteChatParams<M extends MoteChatMethod>(method: M, value: 
     return { target: target(p.target, code) } as MoteChatParamsMap[M]
   }
   if (method === 'space.mote.chat.configure') {
-    const p = fields(value, ['operationId', 'target', 'expectedRevision', 'expectedConnectionRevision', 'values'], ['operationId', 'target', 'expectedRevision', 'expectedConnectionRevision', 'values'], code)
+    const p = fields(value, ['operationId', 'target', 'expectedRevision', 'expectedConnectionRevision', 'values', 'refreshCreator'], ['operationId', 'target', 'expectedRevision', 'expectedConnectionRevision', 'values'], code)
     const values = parseMoteChatValues(p.values, code), connectionRevision = revision(p.expectedConnectionRevision, code)
     if (!!values.connection !== (connectionRevision !== null)) fail(code)
-    return { operationId: text(p.operationId, code), target: target(p.target, code), expectedRevision: revision(p.expectedRevision, code), expectedConnectionRevision: connectionRevision, values } as MoteChatParamsMap[M]
+    if (Object.hasOwn(p, 'refreshCreator') && p.refreshCreator !== true) fail(code)
+    return { operationId: text(p.operationId, code), target: target(p.target, code), expectedRevision: revision(p.expectedRevision, code), expectedConnectionRevision: connectionRevision, values,
+      ...(p.refreshCreator === true ? { refreshCreator: true as const } : {}) } as MoteChatParamsMap[M]
   }
   if (method === 'space.mote.chat.inspect') {
     const p = fields(value, ['target', 'operationId'], [], code)
@@ -180,6 +182,7 @@ export function parseMoteChatResult<M extends MoteChatMethod>(method: M, value: 
     if (o.action === 'reply') return fail(code)
     if (o.action !== (method === 'space.mote.chat.configure' ? 'configure' : 'allocate') || i && (o.operationId !== i.operationId || !sameMotePreferencesTarget(o.configuration.target, i.target))) fail(code)
     if (i && 'values' in i && JSON.stringify(o.configuration.values) !== JSON.stringify(i.values)) fail(code)
+    if (i && 'refreshCreator' in i && i.refreshCreator === true && o.configuration.creator === null) fail(code)
     if (i && 'total' in i && (o.action !== 'allocate' || JSON.stringify(o.person.actor) !== JSON.stringify(i.actor) || o.person.total !== i.total)) fail(code)
     return o as MoteChatResultMap[M]
   }
