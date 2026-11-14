@@ -1,4 +1,5 @@
 import { effectiveSurveyOrganization, surveyOrganizationZoneIds } from './survey-list'
+import { surveyPinnedReferences, type SurveyPinReadRecovery } from './survey-pins'
 import { surveyExplorationName } from './survey-exploration-name'
 import type { SurveyZoneSelection } from './survey-workface'
 import { isSurveyPage, surveyPageOwner, type SurveySelection } from './survey-page-references'
@@ -129,6 +130,8 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
 
 /** Preserve the original explicit research references, including temporarily missing topology. */
 export function readSurveyPresentation(state: {
+  pinnedItems?: Record<string, string[]>
+  surveyPinReadRecovery?: SurveyPinReadRecovery | null
   surveyCollectedZones: Record<string, true>
   surveyPageReferences: import('@agentmux/core/control').AgentMuxSurveyPageReference[]
   surveyProfileView?: import('@agentmux/core/control').AgentMuxSurveyProfileView
@@ -148,8 +151,9 @@ export function readSurveyPresentation(state: {
   const organization = effectiveSurveyOrganization(state.surveyOrganization, state.surveyCollectedZones)
   return {
     organization,
+    ...(state.pinnedItems ? { pinnedReferences: surveyPinnedReferences({ pinnedItems: state.pinnedItems, surveyPinReadRecovery: state.surveyPinReadRecovery ?? null }) } : {}),
     profileView: state.surveyProfileViewReadRecovery ? null : state.surveyProfileView ?? { kind: 'default' },
-    ...((state.surveyPageReadRecovery || state.surveyProfileViewReadRecovery) ? { issue: [state.surveyPageReadRecovery?.issue, state.surveyProfileViewReadRecovery?.issue].filter(Boolean).join(' ') } : {}),
+    ...((state.surveyPageReadRecovery || state.surveyProfileViewReadRecovery || state.surveyPinReadRecovery) ? { issue: [state.surveyPageReadRecovery?.issue, state.surveyProfileViewReadRecovery?.issue, state.surveyPinReadRecovery?.issue].filter(Boolean).join(' ') } : {}),
     pages: state.surveyPageReferences.map(page => {
       const owner = surveyPageOwner(state.tabs, page)
       const browser = owner?.surface.kind === 'browser' ? owner.surface : null

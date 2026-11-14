@@ -129,6 +129,9 @@ export type AgentMuxSurveyOrganization = {
 }
 /** Explicit client membership, independent of organization order and Core topology. */
 export type AgentMuxSurveyPageReference = { regionId: string; browserId: string }
+/** Explicit presentation preference; neither pinning nor unpinning changes membership or resources. */
+export type AgentMuxSurveyPinReference = { kind: 'zone'; zoneId: string } | ({ kind: 'page' } & AgentMuxSurveyPageReference)
+export type AgentMuxSurveyPinChange = { reference: AgentMuxSurveyPinReference; pinned: boolean; expectedPinned: boolean }
 export type AgentMuxSurveyPageAdmission = Pick<AgentMuxWorkfaceReport, 'save' | 'issues'> & {
   outcome: 'not-requested' | 'registered' | 'partial' | 'unknown'
   reference?: AgentMuxSurveyPageReference
@@ -138,6 +141,7 @@ export type AgentMuxSurveyListReport = AgentMuxWorkfaceReport & {
   scope: 'survey-list'
   collectedZoneIds: string[]
   pageReferences: AgentMuxSurveyPageReference[]
+  pinnedReferences?: AgentMuxSurveyPinReference[]
   storedOrganization: AgentMuxSurveyOrganization
   effectiveOrganization: AgentMuxSurveyOrganization
   outcome: 'read' | 'changed' | 'unchanged' | 'partial' | 'unknown' | 'refused'
@@ -148,6 +152,7 @@ export type AgentMuxSurveyProfileView = { kind: 'default' } | { kind: 'profile';
 export type AgentMuxSurveyPresentation = {
   profileView: AgentMuxSurveyProfileView | null
   organization?: AgentMuxSurveyOrganization
+  pinnedReferences?: AgentMuxSurveyPinReference[]
   items: { zoneId: string; name: string; issue?: string }[]
   pages: (AgentMuxSurveyPageReference & { name: string; profileId?: string; issue?: string })[]
   selection: {
@@ -306,7 +311,7 @@ export type AgentMuxWorkspaceAgentOrderReport = AgentMuxWorkfaceReport & {
 }
 type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
-  | { operation: 'space.survey-list'; organization?: AgentMuxSurveyOrganization; expected?: AgentMuxSurveyOrganization; collection?: AgentMuxSurveyCollectionChange }
+  | { operation: 'space.survey-list'; organization?: AgentMuxSurveyOrganization; expected?: AgentMuxSurveyOrganization; collection?: AgentMuxSurveyCollectionChange; pin?: AgentMuxSurveyPinChange }
   | { operation: 'space.agent-order'; displayWorkspaceId: string; order?: AgentMuxWorkspaceAgentOrderMember[]; expectedOrder?: AgentMuxWorkspaceAgentOrderMember[] }
   | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadInput)
   | ({ operation: 'space.mote.preferences.save' } & import('./mote-preferences.js').MotePreferencesSaveInput)

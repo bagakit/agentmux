@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
 import { desktopObservationSchema } from './desktop-focus-observation.ts'
-import { parseSurveyOrganization } from '@agentmux/core/control'
+import { parseSurveyOrganization, parseSurveyPinnedReferences } from '@agentmux/core/control'
 
 const id = z.string().min(1)
 const nullableId = id.nullable()
@@ -63,6 +63,12 @@ const surveyReference = z.object({ tabId: id, regionId: id }).strict()
 const survey = z.object({
   collectedZoneIds: z.array(id).refine(ids => new Set(ids).size === ids.length, 'Survey membership contains duplicate Zone IDs.'),
   pageReferences:z.array(z.object({regionId:id,browserId:id}).strict()),
+  pinIssue: z.string().optional(),
+  pinnedReferences: z.unknown().optional().transform((value, context) => {
+    if (value === undefined) return undefined
+    try { return parseSurveyPinnedReferences(value, 'CONTROL_PROTOCOL_ERROR') }
+    catch (error) { context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid Survey pins.' }); return z.NEVER }
+  }),
   organization: z.unknown().transform((value, context) => {
     try { return parseSurveyOrganization(value, 'CONTROL_PROTOCOL_ERROR') }
     catch (error) { context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid Survey organization.' }); return z.NEVER }

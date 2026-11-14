@@ -180,6 +180,7 @@ import { notificationDeliveryNotice } from './lib/notification-delivery-notice'
 import { persist } from 'zustand/middleware'
 import { learningReviewKey, restoredLearningReviewDrafts, type AgentLearningReviewDraft } from './lib/agent-learning-review-draft'
 import { isSurveyPage, surveyPageOwner, restoredSurveyPages, readSurveyPagePreferences, restoredSurveySelection, persistedSurveySelection, type SurveySelection } from './lib/survey-page-references'
+import { restoreSurveyPinPreferences, persistedSurveyPins, surveyPinnedReferences, type SurveyPinReadRecovery } from './lib/survey-pins'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, surveySelectReference, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import { configValuesEqual } from '../../shared/config-edit'
@@ -1200,6 +1201,7 @@ export type AppState = GitReadingActions & {
   switchBrowserProfileForSurvey(reference: import('@agentmux/core/control').AgentMuxSurveyPageReference, profileId: string): Promise<SurveyProfileBindingReceipt>
   repairSurveyProfileAdmission(receipt: SurveyProfileBindingReceipt): Promise<SurveyProfileBindingReceipt>
   surveyPageReadRecovery: import('./lib/survey-page-references').SurveyPageReadRecovery | null
+  surveyPinReadRecovery: SurveyPinReadRecovery | null
   retrySurveyPagesRead(): Promise<void>
   surveyPageReferences: import('@agentmux/core/control').AgentMuxSurveyPageReference[]
   setSurveyPageCollected(reference: import('@agentmux/core/control').AgentMuxSurveyPageReference, collected: boolean, onApplied?: (pages: AppState['surveyPageReferences']) => void): Promise<import('@agentmux/core/control').AgentMuxSurveyListReport>
@@ -4065,7 +4067,7 @@ type PersistedAppState = {
   projectRailOpen?: boolean
   collapsedProjectGroups?: Record<string, true>
   explorerCollapsed?: Record<string, boolean>
-  pinnedItems?: Record<string, string[]>
+  pinnedItems?: unknown
   spaceObjectIcons?: unknown
   toolkitPresentation?: unknown
   toolsOpen?: boolean
@@ -4098,6 +4100,7 @@ export type RestoredUiState = Pick<
   | 'surveyProfileView'
   | 'surveyProfileViewReadRecovery'
   | 'surveyPageReadRecovery'
+  | 'surveyPinReadRecovery'
   | 'surveyPageReferences'
   | 'surveyCollectedZones'
   | 'surveyOrganization'
@@ -4259,7 +4262,7 @@ export function restorePersistedUiState(
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
     explorerCollapsed: restoredExplorerCollapsed(persisted.explorerCollapsed),
-    pinnedItems: restoredPinnedItems(persisted.pinnedItems),
+    ...restoreSurveyPinPreferences(restoredPinnedItems(persisted.pinnedItems), persisted.pinnedItems),
     spaceObjectIcons: restoreSpaceIconOverrides(Object.hasOwn(config.appearance, 'spaceObjectIcons') ? config.appearance.spaceObjectIcons : retainedSpaceIconHandoff ?? persisted.spaceObjectIcons),
     toolkitPresentation: restoreToolkitPresentations(persisted.toolkitPresentation),
     toolsOpen: restoredBoolean(persisted.toolsOpen, true),
@@ -4375,7 +4378,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     explorerCollapsed: state.explorerCollapsed,
     // pin 住的 Topic/Branch 是用户意图，重开要还在。key 是派生的 scope（Scratch id 或 [hostId,repoPath]），
     // 与已逐字持久化的 file Region path、collapsedProjectGroups 的目录 key 同一档事实，没有新增敏感面。
-    pinnedItems: state.pinnedItems,
+    pinnedItems: persistedSurveyPins(state),
     ...(retainedSpaceIconHandoff === undefined ? {} : { spaceObjectIcons: retainedSpaceIconHandoff }),
     toolkitPresentation: state.toolkitPresentation,
     toolsOpen: state.toolsOpen,
@@ -5652,6 +5655,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   switchBrowserProfileForSurvey(reference, profileId) { return switchBrowserProfileForSurvey(get, reference, profileId) },
   repairSurveyProfileAdmission(receipt) { return repairSurveyProfileAdmission(get, receipt) },
   surveyPageReadRecovery: null,
+  surveyPinReadRecovery: null,
   async retrySurveyPagesRead() {
     const original = get().surveyPageReadRecovery
     if (!original) return
@@ -6952,7 +6956,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
         survey: { collectedZoneIds: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true),
-          organization: state.surveyOrganization, pageReferences: state.surveyPageReferences, selection: persistedSurveySelection(state.surveyZoneSelection) },
+          organization: state.surveyOrganization, pageReferences: state.surveyPageReferences, pinnedReferences: surveyPinnedReferences(state), ...(state.surveyPinReadRecovery ? { pinIssue: state.surveyPinReadRecovery.issue } : {}), selection: persistedSurveySelection(state.surveyZoneSelection) },
         persistence: { userStatePending: persistentWorkbenchStorage.pending() || desktopUserDocument.unreadFragments().length > 0 || auxiliaryUserDataPending(),
           userStateContentDigest: (() => {
             const encoded = desktopUserDocument.encodeProjection({ state: partializeAppState(state), version: 1 })
@@ -13619,7 +13623,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
     return { ...state, moteMainCreationReferences: restoredMoteMainCreationReferences(state.moteMainCreationReferences), agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), capsuleQuestionEditors: restoredCapsuleQuestionEditors(state.capsuleQuestionEditors), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
-      agentComposerHistoryNavigation: {}, surveyProfileView: readSurveyProfileView(state.surveyProfileView).view, surveyProfileViewReadRecovery: readSurveyProfileView(state.surveyProfileView).recovery, surveyPageReferences: readSurveyPagePreferences(state.surveyPageReferences).references, surveyPageReadRecovery: readSurveyPagePreferences(state.surveyPageReferences).recovery, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveySelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
+      agentComposerHistoryNavigation: {}, ...restoreSurveyPinPreferences(restoredPinnedItems(state.pinnedItems), state.pinnedItems), surveyProfileView: readSurveyProfileView(state.surveyProfileView).view, surveyProfileViewReadRecovery: readSurveyProfileView(state.surveyProfileView).recovery, surveyPageReferences: readSurveyPagePreferences(state.surveyPageReferences).references, surveyPageReadRecovery: readSurveyPagePreferences(state.surveyPageReferences).recovery, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveySelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
 }))

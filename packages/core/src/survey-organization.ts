@@ -1,6 +1,31 @@
 import { AgentMuxError } from './errors.js'
 import { settingsResourceBudget, settingsResourceEnvelope } from './settings-resource-json.js'
-import type { AgentMuxSurveyCollectionChange, AgentMuxSurveyOrganization, AgentMuxSurveyPageReference } from './space-control.js'
+import type { AgentMuxSurveyCollectionChange, AgentMuxSurveyOrganization, AgentMuxSurveyPageReference, AgentMuxSurveyPinReference, AgentMuxSurveyPinChange } from './space-control.js'
+
+/** Machine references only; a display title never identifies a pinned item. */
+export function parseSurveyPinReference(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AgentMuxSurveyPinReference {
+  const raw = settingsResourceEnvelope(value, ['kind', 'zoneId', 'regionId', 'browserId'], code)
+  if (raw.kind === 'zone') {
+    settingsResourceEnvelope(value, ['kind', 'zoneId'], code)
+    return { kind: 'zone', zoneId: parseSurveyZoneIds([raw.zoneId], code)[0]! }
+  }
+  if (raw.kind === 'page') {
+    settingsResourceEnvelope(value, ['kind', 'regionId', 'browserId'], code)
+    return { kind: 'page', ...parseSurveyPageReferences([{ regionId: raw.regionId, browserId: raw.browserId }], code)[0]! }
+  }
+  throw new AgentMuxError('Choose an exact Survey Zone or Browser page reference.', code)
+}
+export function parseSurveyPinChange(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AgentMuxSurveyPinChange {
+  const raw = settingsResourceEnvelope(value, ['reference', 'pinned', 'expectedPinned'], code)
+  if (typeof raw.pinned !== 'boolean' || typeof raw.expectedPinned !== 'boolean') throw new AgentMuxError('Pin changes require the exact original pin state.', code)
+  return { reference: parseSurveyPinReference(raw.reference, code), pinned: raw.pinned, expectedPinned: raw.expectedPinned }
+}
+export function parseSurveyPinnedReferences(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): AgentMuxSurveyPinReference[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || Reflect.ownKeys(value).length !== value.length + 1) throw new AgentMuxError('Pinned references require an ordinary dense array.', code)
+  const references = value.map(item => parseSurveyPinReference(item, code))
+  if (new Set(references.map(reference => JSON.stringify(reference))).size !== references.length) throw new AgentMuxError('Pinned references must name each original once.', code)
+  return references
+}
 
 /** Reuse the same exact-ID/dense-array codec for membership and organization. */
 export function parseSurveyZoneIds(value: unknown, code = 'INVALID_CONTROL_REQUEST'): string[] {

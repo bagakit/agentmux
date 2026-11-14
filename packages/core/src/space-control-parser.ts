@@ -1,5 +1,5 @@
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
-import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyProfileView } from './survey-organization.js'
+import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -130,17 +130,18 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection', 'moteMain'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection', 'pin', 'moteMain'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
   let request: AgentMuxSpaceControlRequest
   if (operation === 'space.survey-list') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'organization', 'expected', 'collection'], code)
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'organization', 'expected', 'collection', 'pin'], code)
     if (Object.hasOwn(source, 'organization') !== Object.hasOwn(source, 'expected')) fail('Survey list writes require organization and its exact expected original value.', code)
     request = { ...base, operation, ...(Object.hasOwn(source, 'organization') ? {
       organization: parseSurveyOrganization(source.organization, code), expected: parseSurveyOrganization(source.expected, code) } : {}),
-      ...(Object.hasOwn(source, 'collection') ? { collection: parseSurveyCollectionChange(source.collection, code) } : {}) }
+      ...(Object.hasOwn(source, 'collection') ? { collection: parseSurveyCollectionChange(source.collection, code) } : {}),
+      ...(Object.hasOwn(source, 'pin') ? { pin: parseSurveyPinChange(source.pin, code) } : {}) }
   } else if (operation === 'space.agent-order') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'displayWorkspaceId', 'order', 'expectedOrder'], code)
     if (Object.hasOwn(source, 'expectedOrder') && !Object.hasOwn(source, 'order')) fail('Expected order requires an explicit order change.', code)
@@ -421,7 +422,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       ...(avatar ? { avatar: { ...(Object.hasOwn(avatar, 'tint') ? { tint: string(avatar.tint, 'Avatar tint', code) } : {}), ...(Object.hasOwn(avatar, 'badge') ? { badge: string(avatar.badge, 'Avatar badge', code) } : {}) } } : {}) }
   }, 'Agent presentation', code), item => item.agentSessionId, 'Agent presentation', code) : undefined
   const survey = Object.hasOwn(source, 'survey') ? (() => {
-    const raw = fields(source.survey, ['items', 'pages', 'selection', 'issue', 'organization', 'profileView'], code)
+    const raw = fields(source.survey, ['items', 'pages', 'selection', 'issue', 'organization', 'profileView', 'pinnedReferences'], code)
     const reference = (value: unknown) => {
       const item = fields(value, ['tabId', 'regionId'], code)
       return { tabId: spaceControlId(item.tabId, 'Survey Tab', code, true), regionId: spaceControlId(item.regionId, 'Survey Region', code, true) }
@@ -449,6 +450,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     return {
       profileView: raw.profileView === null ? null : parseSurveyProfileView(raw.profileView, code),
       ...(Object.hasOwn(raw, 'organization') ? { organization: parseSurveyOrganization(raw.organization, code) } : {}),
+      ...(Object.hasOwn(raw, 'pinnedReferences') ? { pinnedReferences: parseSurveyPinnedReferences(raw.pinnedReferences, code) } : {}),
       items: unique(list(raw.items, value => {
         const item = fields(value, ['zoneId', 'name', 'issue'], code)
         return { zoneId: spaceControlId(item.zoneId, 'Survey Zone', code, true), name: string(item.name, 'Survey name', code),
@@ -596,10 +598,11 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   const requestId = spaceControlId(source.requestId, 'Receipt Request', code)
   let result: AgentMuxSpaceControlResult
   if (operation === 'space.survey-list') {
-    const body = fields(source.result, [...WORKFACE_FIELDS, 'scope', 'collectedZoneIds', 'pageReferences', 'storedOrganization', 'effectiveOrganization'], code)
+    const body = fields(source.result, [...WORKFACE_FIELDS, 'scope', 'collectedZoneIds', 'pageReferences', 'pinnedReferences', 'storedOrganization', 'effectiveOrganization'], code)
     result = { operation, scope: member(body.scope, ['survey-list'], 'Survey list scope', code),
       collectedZoneIds: parseSurveyZoneIds(body.collectedZoneIds, code),
       pageReferences:parseSurveyPageReferences(body.pageReferences,code),
+      ...(Object.hasOwn(body, 'pinnedReferences') ? { pinnedReferences: parseSurveyPinnedReferences(body.pinnedReferences, code) } : {}),
       storedOrganization: parseSurveyOrganization(body.storedOrganization, code), effectiveOrganization: parseSurveyOrganization(body.effectiveOrganization, code),
       outcome: member(body.outcome, VIEW_OUTCOMES, 'Survey list outcome', code), ...workfaceCommon(body, code) }
   } else if (operation === 'space.agent-order') {
