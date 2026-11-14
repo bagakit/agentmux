@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { setTimeout } from 'node:timers/promises'
 
-if (process.argv[2] !== 'acp' || !process.env.ACP_RUN_TRACE || !process.env.ACP_RUN_RELEASE) process.exit(2)
+if (process.argv.length !== 3 || process.argv[2] !== 'acp' || !process.env.ACP_RUN_TRACE || !process.env.ACP_RUN_RELEASE) process.exit(2)
 if (process.env.AGENTMUX_ACP_ACTOR_TOKEN || process.env.AGENTMUX_HOOK_TOKEN) process.exit(3)
 let pendingPrompt
 for await (const line of createInterface({ input: process.stdin })) {
@@ -18,7 +18,8 @@ for await (const line of createInterface({ input: process.stdin })) {
     while (!existsSync(process.env.ACP_RUN_RESUME_RELEASE)) await setTimeout(20)
     reply(readFileSync(process.env.ACP_RUN_RESUME_RELEASE, 'utf8') === 'mismatch' ? { sessionId: 'fixture-foreign-acp-session' } : {})
   } else if (method === 'session/prompt' && params.sessionId === 'fixture-original-acp-session' && typeof id === 'string' && !pendingPrompt) {
-    pendingPrompt = id
+    if (params.prompt?.[0]?.text.endsWith('Original creation draft') || params.prompt?.[0]?.text.endsWith('Original resumed draft')) reply({ stopReason: 'end_turn' })
+    else pendingPrompt = id
   } else if (method === 'session/cancel' && params.sessionId === 'fixture-original-acp-session' && id === undefined && pendingPrompt) {
     while (!existsSync(process.env.ACP_RUN_CANCEL_RELEASE)) await setTimeout(20)
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: pendingPrompt, result: { stopReason: 'cancelled' } }) + '\n')

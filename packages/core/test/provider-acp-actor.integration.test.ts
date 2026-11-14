@@ -34,10 +34,16 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     const launchOptions = join(scope.root, 'launch-options.json')
     await writeFile(launchOptions, JSON.stringify({ interaction: 'acp' }))
     const cli = [entry('../bin/amux'), '--endpoint', `unix:${scope.socketPath}`]
+    const inputEpoch = await core.readAgentInputEpoch()
     const opened = await exec(process.execPath, [...cli, 'agent', 'open', '--space', spaceId, '--zone', zoneId, '--new-tab', '--executor', executorId,
-      '--launch-options', launchOptions, '--operation-id', createOperationId], { env: scope.env })
+      '--launch-options', launchOptions, '--prompt', 'Original creation draft', '--operation-id', createOperationId,
+      ...(inputEpoch ? ['--input-epoch', inputEpoch] : [])], { env: scope.env }).catch(error => {
+      const report = JSON.parse(error.stdout || error.stderr || '{}')
+      if (report.ok !== true || report.result?.outcome !== 'partial') throw error
+      return { stdout: JSON.stringify(report) }
+    })
     const result = JSON.parse(opened.stdout).result
-    expect(result.agent, JSON.stringify(result)).not.toBeNull()
+    expect(result).toMatchObject({ outcome: 'partial', agent: { initialPrompt: 'unconfirmed' } })
     const session = (await core.readAgentSession(result.agent.agentSessionId))!
     started = session
     expect(session.run).toEqual({ runId: result.agent.runId })
@@ -53,7 +59,11 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     const nativePid = initial[0]!.pid
     const original = (await core.listRuns()).find(run => run.runId === session.run.runId)!
     expect(original.state).toBe('running')
-    expect((await core.readAgentSession(session.agentSessionId))?.nativeHandle).toBeUndefined()
+    expect(session.nativeHandle).toBeUndefined()
+    const initialKey = session.creation?.initialInputKey
+    expect(initialKey).toMatchObject({ agentSessionId: session.agentSessionId, expectedRun: session.run })
+    expect(await core.inspectAgentPromptSubmission(initialKey!)).toBeNull()
+    expect(await calls()).toEqual(initial)
     const owner = scope.owner
     await core.dispose()
     const restarted = await scope.restart()
@@ -64,24 +74,32 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(current).toMatchObject({ runId: original.runId, pid: original.pid, state: 'running' })
     expect(() => process.kill(nativePid, 0)).not.toThrow()
     await writeFile(release, 'complete the original request')
-    const saved = await until(() => core.readAgentSession(session.agentSessionId), value => value?.nativeHandle !== undefined, 'original ACP identity from the restarted Core')
+    const saved = await until(() => core.readAgentSession(session.agentSessionId), value => value?.creation?.initialPrompt === 'confirmed', 'original ACP identity and deferred input from the restarted Core')
     expect(saved).toMatchObject({ agentSessionId: session.agentSessionId, run: session.run,
       nativeHandle: { kind: 'provider', providerId: 'antigravity', sessionId: 'fixture-original-acp-session' } })
+    const initialInput = await until(calls, value => value.length >= 3, 'the original launch draft on the restarted Core')
+    expect(initialInput.map(call => call.method)).toEqual(['initialize', 'session/new', 'session/prompt'])
+    expect(initialInput[2]).toMatchObject({ pid: nativePid, params: { sessionId: 'fixture-original-acp-session',
+      prompt: [{ type: 'text', text: expect.stringMatching(/Original creation draft$/u) }] } })
+    expect(saved?.creation?.initialInputKey).toEqual(initialKey)
+    expect((await core.inspectAgentPromptSubmission(initialKey!))?.admission).toMatchObject({
+      inputKey: initialKey, intent: { message: { userContent: 'Original creation draft' }, prompt: (initialInput[2]!.params as { prompt: { text: string }[] }).prompt[0]!.text }, native: { outcome: 'admitted', requestId: initialInput[2]!.id }
+    })
     const inspected = await exec(process.execPath, [entry('../bin/amux'), '--endpoint', `unix:${scope.socketPath}`, 'agent', 'inspect',
       '--provider-native', 'fixture-original-acp-session', '--provider', 'antigravity'], { env: scope.env })
     expect(JSON.parse(inspected.stdout).result.session).toMatchObject({ agentSessionId: session.agentSessionId, run: session.run })
     await expect(core.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: session.run, data: 'ordinary terminal input', source: 'user' }))
       .rejects.toMatchObject({ code: 'AGENT_ACP_TERMINAL_INPUT_UNAVAILABLE', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
-    expect(await calls()).toEqual(initial)
+    expect(await calls()).toEqual(initialInput)
     expect(() => process.kill(nativePid, 0)).not.toThrow()
 
     const promptFile = join(scope.root, 'prompt.json')
-    await writeFile(promptFile, JSON.stringify({ prompt: 'Original structured request', expectedRun: session.run, afterSubmissionId: null }))
+    await writeFile(promptFile, JSON.stringify({ prompt: 'Original structured request', expectedRun: session.run, afterSubmissionId: initialKey!.submissionId }))
     const submit = () => exec(process.execPath, [...cli, 'agent', 'input', 'submit', '--session', session.agentSessionId,
       '--operation-id', 'original-structured-prompt', '--input', promptFile], { env: scope.env })
     const promptResult = JSON.parse((await submit()).stdout).result
-    const promptCalls = await until(calls, value => value.length >= 3, 'the original native session/prompt')
-    const promptRequest = promptCalls[2]!
+    const promptCalls = await until(calls, value => value.length >= 4, 'the original native session/prompt')
+    const promptRequest = promptCalls[3]!
     expect(promptRequest).toMatchObject({ pid: nativePid, method: 'session/prompt',
       params: { sessionId: 'fixture-original-acp-session', prompt: [{ type: 'text', text: 'Original structured request' }] } })
     expect(promptResult.record?.admission?.native).toMatchObject({ outcome: 'admitted', requestId: promptRequest.id })
@@ -97,8 +115,8 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(await calls()).toEqual(promptCalls)
     const cancelling = cancel('original-structured-prompt')
     void cancelling.catch(() => {})
-    const cancelCalls = await until(calls, value => value.length >= 4, 'the original native session/cancel notification')
-    expect(cancelCalls[3]).toEqual({ pid: nativePid, method: 'session/cancel', params: { sessionId: 'fixture-original-acp-session' } })
+    const cancelCalls = await until(calls, value => value.length >= 5, 'the original native session/cancel notification')
+    expect(cancelCalls[4]).toEqual({ pid: nativePid, method: 'session/cancel', params: { sessionId: 'fixture-original-acp-session' } })
     expect(await Promise.race([cancelling.then(() => 'returned'), wait(175, 'pending')])).toBe('pending')
     expect((await core.listRuns()).find(run => run.runId === session.run.runId)).toMatchObject({ pid: original.pid, state: 'running' })
     await writeFile(cancelRelease, 'complete the original cancelled prompt')
@@ -112,10 +130,10 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     const restarting = exec(process.execPath, [...cli, 'agent', 'restart', '--session', restartRequest.agentSessionId,
       '--run', restartRequest.expectedRun.runId, '--operation-id', restartRequest.operationId], { env: scope.env })
     void restarting.catch(() => {})
-    const resumedCalls = await until(calls, value => value.length >= 6, 'replacement child already requesting the original ACP session')
-    expect(resumedCalls.map(call => call.method)).toEqual(['initialize', 'session/new', 'session/prompt', 'session/cancel', 'initialize', 'session/resume'])
-    expect(resumedCalls[4]!.pid).not.toBe(nativePid)
-    expect(resumedCalls[5]).toMatchObject({ pid: resumedCalls[4]!.pid,
+    const resumedCalls = await until(calls, value => value.length >= 7, 'replacement child already requesting the original ACP session')
+    expect(resumedCalls.map(call => call.method)).toEqual(['initialize', 'session/new', 'session/prompt', 'session/prompt', 'session/cancel', 'initialize', 'session/resume'])
+    expect(resumedCalls[5]!.pid).not.toBe(nativePid)
+    expect(resumedCalls[6]).toMatchObject({ pid: resumedCalls[5]!.pid,
       params: { sessionId: 'fixture-original-acp-session', cwd: scope.root, mcpServers: [] } })
     const beforeAck = await core.inspectAgentRestart(restartRequest)
     expect(beforeAck.phase).not.toBe('restarted')
@@ -128,14 +146,29 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(resumed.nativeHandle).toEqual(saved?.nativeHandle)
     expect(await calls()).toEqual(resumedCalls)
 
+    process.kill(resumedCalls[5]!.pid, 'SIGTERM')
+    await until(async () => (await core.listRuns()).find(run => run.runId === resumed.run.runId),
+      run => run !== undefined && run.state !== 'running', 'confirmed terminal state on the exact ACP Run')
+    const resumeInput = { agentSessionId: session.agentSessionId, operationId: 'resume-with-original-draft', prompt: 'Original resumed draft',
+      ...(inputEpoch ? { inputEpoch } : {}) }
+    const withDraft = await core.resumeAgent(resumeInput)
+    started = withDraft
+    expect(withDraft.nativeHandle).toEqual(saved?.nativeHandle)
+    const withDraftCalls = await until(calls, value => value.length >= 10, 'typed SDK resume with the original deferred draft')
+    expect(withDraftCalls.slice(7).map(call => call.method)).toEqual(['initialize', 'session/resume', 'session/prompt'])
+    expect(withDraftCalls[9]).toMatchObject({ pid: withDraftCalls[8]!.pid, params: { sessionId: 'fixture-original-acp-session',
+      prompt: [{ type: 'text', text: expect.stringMatching(/Original resumed draft$/u) }] } })
+    expect((await core.resumeAgent(resumeInput)).run).toEqual(withDraft.run)
+    expect(await calls()).toEqual(withDraftCalls)
+
     await writeFile(resumeRelease, 'mismatch')
-    const wrongReply = { agentSessionId: session.agentSessionId, expectedRun: resumed.run, operationId: 'original-acp-with-foreign-ack' }
+    const wrongReply = { agentSessionId: session.agentSessionId, expectedRun: withDraft.run, operationId: 'original-acp-with-foreign-ack' }
     await expect(core.restartAgent(wrongReply)).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
     expect((await core.inspectAgentRestart(wrongReply)).phase).not.toBe('restarted')
     const retained = await core.readAgentSession(session.agentSessionId)
     expect(retained?.nativeHandle).toEqual(saved?.nativeHandle)
-    expect(retained?.run).toEqual(resumed.run)
-    expect((await calls()).map(call => call.method)).toEqual(['initialize', 'session/new', 'session/prompt', 'session/cancel', 'initialize', 'session/resume', 'initialize', 'session/resume'])
+    expect(retained?.run).toEqual(withDraft.run)
+    expect((await calls()).slice(10).map(call => call.method)).toEqual(['initialize', 'session/resume'])
     await core.stopAgent(started.agentSessionId, started.run, { operationId: 'stop-original-structured-acp' })
     started = undefined
   } finally {
