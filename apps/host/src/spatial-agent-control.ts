@@ -68,6 +68,15 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         'The original creation operation resolves to another Session. Keep both references; no current SID was substituted.', 'SPATIAL_CREATION_UNCONFIRMED')
       const session = await (host?.client ?? options.runtime().client).inspectAgentCreation(record.agentSessionId)
       if (session.kind === 'retired-agent') {
+        const history = session.history
+        if (session.agentSessionId !== record.agentSessionId || !history || history.creation?.createOperationId !== record.requestId ||
+            history.executorId !== record.executorId || history.workspacePath !== record.execution.workspacePath ||
+            record.execution.executorRevision && history.creation.executorRevision !== record.execution.executorRevision ||
+            record.executionBinding && (history.toolExecution?.bindingId !== record.executionBinding.bindingId ||
+              history.toolExecution.resourceRuntimeId !== record.placement?.runtimeId || history.toolExecution.workspacePath !== record.placement?.workspacePath))
+          throw new AgentMuxError('The retired Session has no confirmed history for this original creation. Its identity and request are retained.', 'AGENT_CREATION_UNCONFIRMED')
+        report.agent = { ...spatialAgentFact({ ...history, agentSessionId: session.agentSessionId, run: session.run }, record.execution.hostId),
+          retirement: { source: session.source, observedAt: session.observedAt } }
         report.outcome = 'retired'; report.to = null
         report.issues.push(issue(new AgentMuxError('The original Agent was explicitly retired. Its exact Session and creation history remain available.', 'AGENT_SESSION_RETIRED')))
         return report
