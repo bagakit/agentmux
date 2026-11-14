@@ -3,7 +3,7 @@ import '../styles/media-player.css'
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { classifyStream, createSeekQueue, describeMediaFailure, formatClock, liveEdgeState, nextPlaybackRate, resolveMediaKey, seekableWindow, spokenDuration,
-  type MediaFailureView, type MediaPlayerAction, type SeekableWindow, type SeekQueue } from '../engines/media-player'
+  timelinePreviewAvailable, type MediaFailureView, type MediaPlayerAction, type SeekableWindow, type SeekQueue } from '../engines/media-player'
 import { formatFileBytes } from '../format-file-bytes'
 import { MediaTimeline } from './MediaTimeline'
 
@@ -61,6 +61,7 @@ function readFacts(element: HTMLMediaElement, previous: Facts): Facts {
 export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { lease: MediaLease; name: string; onRetry: () => void; resume?: MediaResume; readStatus(id: string): Promise<{ state: import('../engines/media-player').MediaStreamFactState }> }) {
   const root = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
+  const stage = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ width: number; height: number } | null>(null)
   const media = useRef<HTMLMediaElement | null>(null)
   const [facts, setFacts] = useState<Facts>(INITIAL)
@@ -300,9 +301,13 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
     aria-valuetext={`${Math.round((facts.muted ? 0 : facts.volume) * 100)}%`} value={Math.round((facts.muted ? 0 : facts.volume) * 100)}
     style={{ '--media-fill': `${(facts.muted ? 0 : facts.volume) * 100}%` } as CSSProperties}
     onChange={event => { const element = media.current; if (!element) return; element.muted = false; element.volume = Number(event.currentTarget.value) / 100 }} />
+  // A frame preview needs a decoded picture, which failed main playback no longer has, so the preview goes with it.
+  const previewable = timelinePreviewAvailable(lease.kind, stream, decode === 'ready' && facts.width > 0 && facts.height > 0)
   const timeline = sliderVisible ? <MediaTimeline key={lease.id} bounds={sliderBounds} fraction={fraction} buffered={bufferedFraction}
     label={live ? 'Live position' : 'Seek'} valueText={valueText}
-    clock={time => live && facts.window ? `-${formatClock(facts.window.end - time)}` : formatClock(time)} onHold={onHold} onScrub={onScrub} onLand={release} /> : null
+    clock={time => live && facts.window ? `-${formatClock(facts.window.end - time)}` : formatClock(time)}
+    preview={previewable ? { url: lease.url, ratio: facts.width / facts.height } : null} within={stage} controlsShown={audioOnly || controlsVisible}
+    onHold={onHold} onScrub={onScrub} onLand={release} /> : null
   const liveBadge = live ? <button type="button" className="media-player__live" data-live-edge={edge}
     aria-disabled={edge !== 'behind'} aria-label={edge === 'unknown' ? 'Live position unknown' : edge === 'behind' ? 'Go to live' : 'Playing live'}
     title={edge === 'unknown' ? 'Live position unknown' : edge === 'behind' ? 'Go to live (End)' : 'Live'}
@@ -386,7 +391,7 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
     data-decode-state={decode} data-stream={stream} data-controls={audioOnly || controlsVisible ? 'visible' : 'hidden'} data-fullscreen={fullscreen || undefined}
     onKeyDown={onKeyDown} onPointerMove={audioOnly ? undefined : wake} onPointerLeave={() => { if (!audioOnly && playing) markActive(false) }} onFocus={audioOnly ? undefined : wake}>
     <div ref={frame} className="media-player__frame" hidden={audioOnly}>
-      <div className="media-player__stage" data-fitted={fitted ? '' : undefined}
+      <div ref={stage} className="media-player__stage" data-fitted={fitted ? '' : undefined}
         style={fitted ? { '--media-fit-width': `${fitted.width}px`, '--media-fit-height': `${fitted.height}px` } as CSSProperties : undefined}>
         {element}
         {audioOnly ? null : videoChrome}

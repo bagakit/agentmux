@@ -91,9 +91,22 @@
 .media-player__slider:focus-visible::-webkit-slider-thumb, .media-player__volume:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in oklab, var(--media-accent) 35%, transparent); }
 /* Timeline in the bar: flex-1 so it fills the space between the time readout and the right-side buttons. */
 .media-player__timeline { position: relative; padding-inline: var(--sp-2); flex: 1; min-width: 80px; }
-/* The pointed time, as one unit centred on the pointer. */
+/* The pointed time, and over a single video file the frame there: one unit centred on the pointer. With a frame it
+   stops at the player's sides instead of leaving them, and the frame keeps to the room above the timeline. The frame
+   takes the picture's own shape and shows only once decoded; until then it stays out of the layout, unseen. */
 .media-player__preview { position: absolute; bottom: calc(100% + var(--sp-2)); left: var(--media-preview-x, 0); translate: -50% 0;
-  display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); pointer-events: none; }
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); pointer-events: none;
+  --media-preview-tall: 112px; --media-preview-wide: 176px;
+  --media-preview-height: min(var(--media-preview-tall), max(0px, calc(var(--media-preview-room, 999px) - 48px)));
+  --media-preview-width: min(var(--media-preview-wide), calc(var(--media-preview-height) * var(--media-preview-ratio))); }
+.media-player__preview[data-idle] { visibility: hidden; }
+.media-player__preview[data-frame] { left: clamp(calc(var(--media-preview-lo) + var(--media-preview-width) / 2 + var(--sp-2)), var(--media-preview-x),
+  calc(var(--media-preview-hi) - var(--media-preview-width) / 2 - var(--sp-2))); }
+.media-player__preview-frame { width: var(--media-preview-width); aspect-ratio: var(--media-preview-ratio); overflow: hidden; border-radius: var(--radius-md);
+  background: #000000; box-shadow: var(--elev-2), 0 0 0 1px color-mix(in oklab, #ffffff 18%, transparent); transition: opacity var(--dur-fast) ease; }
+.media-player__preview:not([data-frame]) > .media-player__preview-frame { position: absolute; bottom: 0; visibility: hidden; opacity: 0; }
+.media-player__preview-frame > video { width: 100%; height: 100%; display: block; object-fit: cover; }
+.media-player[data-fullscreen] .media-player__preview { --media-preview-tall: 160px; --media-preview-wide: 256px; }
 .media-player__bubble { padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-sm);
   color: var(--media-ink); background: color-mix(in oklab, #000000 55%, transparent); backdrop-filter: blur(16px);
   font-size: var(--fs-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -175,6 +188,7 @@
 
 /* Narrow Regions keep play, mute, the whole elapsed / total time and full screen; the volume slider and speed step aside. */
 @container (max-width: 511px) {
+  .media-player__preview { --media-preview-tall: 88px; --media-preview-wide: 144px; }
   .media-player--video .media-player__controls { inset: auto 0 0; gap: 0; }
   .media-player--video .media-player__bar { border-radius: 0; background: transparent; backdrop-filter: none; box-shadow: none; padding-inline: var(--sp-4); }
 }
@@ -184,7 +198,8 @@
   .media-player--audio .media-player__volume { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .media-player__controls, .media-player__scrim, .media-player__start, .media-player__button, .media-player--video .media-player__volume { transition: none; }
+  .media-player__controls, .media-player__scrim, .media-player__start, .media-player__button, .media-player--video .media-player__volume,
+  .media-player__preview-frame { transition: none; }
   .media-player--video[data-controls="hidden"] .media-player__controls { transform: none; }
   .media-player__indicator { animation: media-player-indicator-still 0s var(--dur-indicator) forwards; }
   .media-player__start:hover { transform: none; }
