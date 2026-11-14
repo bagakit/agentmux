@@ -9,6 +9,7 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { spaceMountKey } from '../../../src/shared/space-mount'
 import '../../../src/renderer/src/styles/index.css'
 import { prepareTakeoverFeedback } from './feedback.mjs'
+import { prepareSourceConnection } from './connection.mjs'
 
 // Original authority/Native process IO are controlled preview leaves. The App,
 // source adapter, normal Context/lane/card/Reader/filter/menu remain production.
@@ -62,6 +63,7 @@ api.spaceMounts.member=async(input,_listener)=>{
 }
 useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces:[workspace],hosts:[{id:'local',kind:'local',label:'Original local device'}]},sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
  tabs:window.__feedbackRestoreSerialized?{}:{[tab.id]:tab},layouts:window.__feedbackRestoreSerialized?{}:{[workspace.id]:createWorkspaceLayout('ordinary-group',[tab.id])},activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:[]},pmo:{sessionId:null}},agentComposerDrafts:window.__feedbackRestoreSerialized?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
+if(window.__sourceConnectionScene)prepareSourceConnection({api,snapshot,opening})
 if(window.__takeoverFeedbackScene)await prepareTakeoverFeedback({api,useAppStore,workspace,sessions,tab})
 createRoot(document.getElementById('root')).render(createElement(App))
 window.unifiedFocusProof={ready:true,holdNextCheck(){memberReadMode='pending'},failCheck(){for(const emit of sessionObservers)emit({type:'error',error:{code:'ORIGINAL_METADATA_READER_UNAVAILABLE',message:'The original metadata stream became unavailable while checking. Your saved work is kept.'}})},finishCheck(){memberReadMode='observed';for(const emit of sessionObservers)for(const observation of originalEvents())emit({type:'observation',observation})},sourceChecks(){return sourceChecks},memberCalls,foreignRuntime:'original-other-runtime',localName:sessions[0].label,foreignName:name,localReply,foreignReply:window.__originalForeignBody,foreignInput:window.__originalForeignInput,theme(appAppearance){updateThemeSelection({themeId:'graphite',appAppearance})},facts(){const state=useAppStore.getState();return{selected:state.selectedSpaceMount,source:state.mountedSpaceInputs[key],runs:state.sessions.map(s=>s.control.run),drafts:state.agentComposerDrafts,sourceRegions:snapshot.scope.regions.length}}}

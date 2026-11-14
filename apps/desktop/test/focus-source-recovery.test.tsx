@@ -241,3 +241,32 @@ it('a pinned original reading survives an actual later Run while preserving sele
   expect(panel.textContent).toMatch(/earlier Run|source.*changed|Run.*changed/i)
   await f.assertPreserved(replacement.run)
 })
+
+it('the actual Focus source notice identifies the retained source, keeps raw connection details secondary and refreshes only that source', async () => {
+  const f = await fixture(), key = spaceMountKey(f.target.reference)
+  await vi.waitFor(() => expect(f.card().textContent).toContain(originalName))
+  const known = useAppStore.getState().mountedSpaceObservations[key]!.snapshot!
+  const watch = vi.mocked(api.spaceMounts.watch), sessionReads = vi.mocked(api.spaceMounts.sessions)
+  const originalWatch = watch.mock.calls.find(call => call[0].hostId === f.target.hostId)!
+  await act(async () => {
+    originalWatch[1]({ type: 'snapshot', snapshot: { ...known, scope: { ...known.scope, space: null } } })
+    originalWatch[1]({ type: 'error', error: { code: 'HOST_SERVICE_UNCONFIRMED', message: 'The original endpoint is not yet confirmed. Keep its namespace.' } })
+  })
+  const notice = () => [...dom.container.querySelectorAll<HTMLElement>('section[aria-label^="Source status"]')].find(node => node.textContent?.includes('Project updates unavailable'))
+  await vi.waitFor(() => expect(notice()).toBeDefined())
+  expect(notice()!.getAttribute('aria-label')).toContain(known.scope.space!.name)
+  expect(notice()!.getAttribute('aria-label')).toContain('Original source route')
+  expect(notice()!.querySelector('.service-window-notice')?.textContent ?? notice()!.textContent).toContain('Some updates from this project are unavailable')
+  expect(notice()!.querySelector('details')?.open).toBe(false)
+  expect(notice()!.querySelector('details')?.textContent).toContain('The original endpoint is not yet confirmed')
+  expect(notice()!.querySelector('details')?.textContent).toContain(f.target.reference.runtimeId)
+  expect(notice()!.querySelector('details')?.textContent).toContain(f.target.reference.spaceId)
+  const before = sessionReads.mock.calls.length
+  await act(async () => notice()!.querySelector<HTMLButtonElement>('button')!.click())
+  await vi.waitFor(() => {
+    expect(sessionReads.mock.calls.length).toBeGreaterThan(before)
+    expect(notice()).toBeUndefined()
+  })
+  expect(sessionReads.mock.calls.at(-1)![0]).toMatchObject({ hostId: f.target.hostId, reference: f.target.reference })
+  await f.assertPreserved()
+})
