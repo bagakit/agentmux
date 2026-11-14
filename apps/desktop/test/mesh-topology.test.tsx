@@ -6,6 +6,7 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import { ReactFlowProvider, useReactFlow, useStoreApi, type ReactFlowInstance, type ReactFlowProps } from '@xyflow/react'
 import { MeshNetworkMap } from '../src/renderer/src/components/settings/MeshNetworkMap'
 import { meshTopologyModel } from '../src/renderer/src/components/settings/mesh-topology'
+import type { MeshDeviceLocation } from '../src/shared/mesh-map-locations'
 const flowTrace = vi.hoisted(() => ({ instances: [] as ReactFlowInstance[] }))
 // Keep the installed production graph and its actual onInit instance; observe, never replace fitView.
 vi.mock('@xyflow/react', async original => {
@@ -77,6 +78,35 @@ it('actual map consumer draws only reciprocal generation-matched links, retainin
   await click('[data-mesh-object="route"]')
   expect(container.querySelector('[aria-label="Selected endpoint network path"]')?.textContent).toContain('peer-destination')
   expect(container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain('Available route RTT')
+})
+
+it('a newly observed geographic location preserves the adjusted viewport until an explicit Fit', async () => {
+  let flow: ReturnType<typeof useReactFlow> | undefined
+  function ReadOriginalFlow() { flow = useReactFlow(); return null }
+  const snapshot = observation()
+  const bounds = HTMLElement.prototype.getBoundingClientRect
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('mesh-explorer__canvas') ? new DOMRect(0, 0, 980, 540) : bounds.call(this)
+  })
+  const frames = async () => {
+    await act(async () => { await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))) })
+  }
+  const show = async (observedLocations?: Map<string, MeshDeviceLocation>) => {
+    await act(async () => root.render(<ReactFlowProvider><ReadOriginalFlow /><MeshNetworkMap snapshot={snapshot} localClient observedLocations={observedLocations} /></ReactFlowProvider>))
+    await frames()
+  }
+  await show()
+  await vi.waitFor(() => expect(flowTrace.instances).toHaveLength(1))
+  await frames()
+  const adjusted = { x: 81, y: 42, zoom: .75 }
+  await act(async () => { await flow!.setViewport(adjusted) })
+  expect(flow!.getViewport()).toEqual(adjusted)
+  await show(new Map([['relay:peer-destination', { latitude: 80, longitude: 179, source: 'node', label: 'Edge device' }]]))
+  expect(container.querySelector('[data-geographic-point="relay:peer-destination"]')).not.toBeNull()
+  expect(flow!.getViewport(), 'viewport after the new point has been rendered').toEqual(adjusted)
+  await click('[aria-label="Fit observed topology"]')
+  await frames()
+  expect(flow!.getViewport()).not.toEqual(adjusted)
 })
 
 it('available routes and adopted circuits keep distinct exact paths through the production graph and list', async () => {

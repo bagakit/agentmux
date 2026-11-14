@@ -131,6 +131,27 @@ app.whenReady().then(async()=>{try{
   await wait('.mesh-explorer__canvas .mesh-geography__atlas')
   assert.equal(await evaluate("document.querySelectorAll('[data-geographic-point], .mesh-explorer-edge').length"),0)
   await frame('geography-unknown-dark')
+  receipt.unlocatedAlignment = await evaluate(`(() => {
+   const bounds = selector => document.querySelector(selector).getBoundingClientRect()
+   const canvas = bounds('.mesh-explorer__canvas'), atlas = bounds('.mesh-geography__atlas'), tray = bounds('.mesh-geography__tray')
+   const cards = [...document.querySelectorAll('.mesh-unlocated-node')].map(node => {
+    const card = node.querySelector('.mesh-explorer-node, .mesh-saved-client').getBoundingClientRect()
+    return { left: Math.round(card.left), top: Math.round(card.top), width: card.width, height: card.height }
+   })
+   const longStatus = document.querySelector('[data-host-node="build-secondary"] .mesh-explorer-node__state')
+   const title = longStatus.closest('button').querySelector('strong')
+   return { cards, topInset: atlas.top - canvas.top, bottomInset: canvas.bottom - Math.max(atlas.bottom, tray.bottom),
+    topDifference: Math.abs(atlas.top - tray.top), titleHeight: title.getBoundingClientRect().height, statusFits: longStatus.clientHeight >= parseFloat(getComputedStyle(longStatus).lineHeight) - .5,
+    statusText: longStatus.textContent, statusTruncated: longStatus.scrollWidth > longStatus.clientWidth }
+  })()`)
+  const {cards,topInset,bottomInset,topDifference,titleHeight,statusFits,statusText,statusTruncated}=receipt.unlocatedAlignment
+  assert.equal(cards.length,9)
+  assert.equal(new Set(cards.map(({left})=>left)).size,2)
+  assert.equal(new Set(cards.map(({top})=>top)).size,5)
+  assert.ok(cards.every(card=>card.width>0 && Math.abs(card.width-cards[0].width)<.1 && Math.abs(card.height-cards[0].height)<.1))
+  assert.ok(topDifference<1 && topInset<=28 && bottomInset<=75,'atlas and device grid share a compact canvas')
+  assert.match(statusText,/Selection not confirmed/)
+  assert.ok(titleHeight>=12 && statusFits && statusTruncated,'long device status fits on one line below the device name')
   await button('Connections');await frame('connections-unknown-dark')
   await button('List');await frame('devices-list-dark')
  }
@@ -142,6 +163,7 @@ app.whenReady().then(async()=>{try{
   const atlas = document.querySelector('.mesh-geography__atlas').getBoundingClientRect()
   const canvas = document.querySelector('.mesh-explorer__canvas').getBoundingClientRect()
   const tray = document.querySelector('.mesh-geography__tray').getBoundingClientRect()
+  const trayCardWidths = [...document.querySelectorAll('.mesh-unlocated-node :is(.mesh-explorer-node, .mesh-saved-client)')].map(card => card.getBoundingClientRect().width)
   const pins = Object.fromEntries([...document.querySelectorAll('[data-geographic-point]')].map(mark => {
     const pin = mark.querySelector('circle').getBoundingClientRect()
     return [mark.dataset.geographicPoint, {x: (pin.left + pin.width / 2 - atlas.left) / atlas.width, y: (pin.top + pin.height / 2 - atlas.top) / atlas.height}]
@@ -152,7 +174,9 @@ app.whenReady().then(async()=>{try{
   const loop = document.querySelector('[data-testid="rf__edge-saved:host:private"] .react-flow__edge-path').getAttribute('d')
   return { pins, atlasWidth: atlas.width, canvasWidth: canvas.width, atlasLeft: atlas.left, atlasTop: atlas.top,
     trayFits: tray.bottom <= canvas.bottom + 1 && tray.left >= canvas.left - 1 && tray.right <= canvas.right + 1,
-    trayBeside: tray.left >= atlas.right, trayBelow: tray.top >= atlas.bottom, panStart: [atlas.left + atlas.width * .23, atlas.top + atlas.height * .68],
+    trayBeside: tray.left >= atlas.right, trayBelow: tray.top >= atlas.bottom, minimumTrayCardFraction: Math.min(...trayCardWidths) / tray.width,
+    equalTrayCardWidths: trayCardWidths.length > 0 && Math.max(...trayCardWidths) - Math.min(...trayCardWidths) < .1,
+    panStart: [atlas.left + atlas.width * .23, atlas.top + atlas.height * .68],
     bothLabels: sameSite.bottom <= local.top || sameSite.top >= local.bottom,
     savedAtEquator: saved.endsWith('500,250'), sameSiteLink: loop.includes(' C '), tray: document.querySelector('.mesh-geography__tray').textContent }
  })()`)
@@ -163,6 +187,7 @@ app.whenReady().then(async()=>{try{
  assert.ok(receipt.geography.savedAtEquator)
  assert.ok(receipt.geography.sameSiteLink)
  assert.ok(receipt.geography.trayBeside && receipt.geography.atlasWidth / receipt.geography.canvasWidth > .68)
+ assert.ok(receipt.geography.equalTrayCardWidths)
  assert.ok(receipt.geography.tray.includes('Location unknown5'))
  const closeTo = (actual, expected) => Math.abs(actual - expected) < .001
  assert.ok(closeTo(receipt.geography.pins['saved:client'].x, (121.4737 + 180) / 360))
@@ -197,7 +222,8 @@ app.whenReady().then(async()=>{try{
  await click('[aria-label="Fit observed topology"]')
  await evaluate('meshFixture.theme("light")');await frame('geographic-overview-light')
  window.setContentSize(560,950);await frame('geographic-narrow-light')
- assert.ok((await geography()).trayBelow && (await geography()).trayFits)
+ const narrowGeography = await geography()
+ assert.ok(narrowGeography.trayBelow && narrowGeography.trayFits && narrowGeography.equalTrayCardWidths && narrowGeography.minimumTrayCardFraction > .25)
  await evaluate('meshFixture.theme("dark")');await frame('geographic-narrow-dark')
  window.setContentSize(1440,1050)
  await click('.mesh-explorer__canvas [data-host-node="studio"]')
@@ -214,6 +240,10 @@ app.whenReady().then(async()=>{try{
  await button('Save locations')
  assert.equal(await evaluate("document.querySelector('[data-geographic-point=\"saved:host:studio\"]')"),null)
  await frame('geographic-location-cleared')
+ await click('[aria-label="Fit observed topology"]')
+ await frame('geographic-location-cleared-fit')
+ const refitted = await geography()
+ assert.ok(refitted.trayFits && refitted.tray.includes('Location unknown6'))
  receipt.geography.clearedExactHost = true
  await window.loadURL(url+'?scenario=device')
  await wait('[data-mesh-device="office-workstation"]')

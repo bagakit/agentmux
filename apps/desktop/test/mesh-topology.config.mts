@@ -13,6 +13,7 @@ const mutations: Record<string, [string, string, string]> = {
   'poll-relayout': ['MeshNetworkMap.tsx', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions, geographic]', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions, geographic, snapshot]'],
   'lost-selection-fit': ['MeshNetworkMap.tsx', 'setFocusRequest(value => value + 1)', 'setFocusRequest(value => value)'],
   'poll-focus': ['MeshNetworkMap.tsx', 'focusRequest === focusedRequest.current', 'false'],
+  'refit-on-location': ['MeshNetworkMap.tsx', '[active, view, hasMap]', '[active, view, hasMap, fit]'],
   'separate-list-inspector': ['MeshNetworkMap.tsx', "!onGateway || view === 'list' ? inspector : null", "!onGateway ? inspector : null"],
   'below-list-directory': ['MeshNetworkMap.tsx', "{view === 'list' ? directory : null}", '{null}'],
 }
@@ -32,9 +33,9 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
       output = output.replace(guard, 'if (false) return')
     }
     if (mutant === 'poll-focus') {
-      const dependencies = '[focusRequest, active, view, fit]'
+      const dependencies = '[focusRequest, active, view]'
       if (output.split(dependencies).length !== 2) throw Error('Poll focus mutation dependencies must bind once')
-      output = output.replace(dependencies, '[focusRequest, active, view, fit, snapshot]')
+      output = output.replace(dependencies, '[focusRequest, active, view, snapshot]')
     }
     if (mutant === 'below-list-directory') {
       const placement = "{!onGateway && view === 'topology' && hasRelayPeers ? directory : null}"

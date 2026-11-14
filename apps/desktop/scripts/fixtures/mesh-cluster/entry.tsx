@@ -66,6 +66,7 @@ useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local
   studio: {state:'connected', transport:'ssh', fallback:false, observedAt:Date.now(), establishedAt:Date.now()-180000},
   'farm-cn1': {state:'disconnected', transport:'ssh', fallback:false, observedAt:Date.now(), establishedAt:Date.now()-180000},
   'studio-tailcat': {state:'connected', transport:'tailcat', fallback:true, observedAt:Date.now(), establishedAt:Date.now()-180000},
+  ...(state === 'initial' ? { 'build-secondary': { state: 'connecting', transport: null, fallback: false, observedAt: Date.now(), establishedAt: null } } : {}),
  } })
 createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual fixture · production Settings · controlled topology/resource observations; not live host telemetry</footer></div></DesktopClientUiProvider>)
 Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, relayOff: () => { state = 'initial' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
