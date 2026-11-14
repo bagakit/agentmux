@@ -148,7 +148,7 @@ it('actual headless Host and CLI save original preferences, share one schedule, 
   expect(await readFile(join(topic.physicalDirectoryPath!,'MOTE.md'),'utf8')).toContain('recovery: on-open')
 }, 120_000)
 
-async function managedFixture(initialSaveBusy=false, retainedPrompt?: string) {
+async function managedFixture(initialSaveBusy=false, retainedPrompt?: string, retainedNote?: string) {
   const f=await rpcOwnerFixture(['main','other'],core);cleanup.push(f.close)
   const configurationPath=join(f.root,'config.json');await writeFile(configurationPath,JSON.stringify({workspaces:[{id:SCRATCH_WORKSPACE_ID,hostId:'local',path:f.root}]}))
   const target={spaceId:'private-mote-space',zoneId:homeZoneId('private-mote-space'),expectedResource:{hostId:'local',workspaceId:SCRATCH_WORKSPACE_ID,workspacePath:f.root}}
@@ -162,7 +162,7 @@ async function managedFixture(initialSaveBusy=false, retainedPrompt?: string) {
   const files:any={read:async()=>{if(!available)throw new Error('Original private MOTE source unavailable');return {resource,result:{status:'read',document:{path:'MOTE.md',revision:'sha256:'+'0'.repeat(64),content:'---\nversion: 1\ndefaults:\n  presence:\n    enabled: '+enabled+'\n    intervalMs: 60000\n---\n'}}}}}
   let clock=100000,busy=false,outcome:'sent'|'unknown'='sent';const sent:any[]=[]
   const store=new ContinuousProgressLoopStore(join(f.root,'loops.json'))
-  const make=()=>new ContinuousProgressLoopManager(store,async(loop,operationId)=>{sent.push({loop:structuredClone(loop),operationId});return outcome},()=>clock,async(loop,tickId)=>({session:{...f.client.agentSession(loop.agentSessionId),semanticStatus:{state:busy?'working':'done',source:'native-hook',observedAt:clock,stateEnteredAt:clock},futurePromptIntents:{[loop.futureIntentId!]:await f.client.readAgentFuturePromptIntent(loop.agentSessionId,loop.futureIntentId!)}},observation:{process:'running',semantic:busy?'active':'idle',readiness:'ready',stale:false},inputByte:0,tickId,now:clock}) as any,{saveFutureIntent:async(loop,active)=>{if(initialSaveBusy&&active)throw new core.AgentMuxError('The original Future Intent owner is busy with a person input.','AGENT_PROMPT_SUBMISSION_BUSY');await f.client.saveAgentFuturePromptIntent({agentSessionId:loop.agentSessionId,expectedRun:f.client.agentSession(loop.agentSessionId).run,intentId:loop.futureIntentId!,operationId:loop.creationOperationId!,prompt:loop.prompt,active,continuitySource:loop.managedSource})}})
+  const make=()=>new ContinuousProgressLoopManager(store,async(loop,operationId)=>{sent.push({loop:structuredClone(loop),operationId});return outcome},()=>clock,async(loop,tickId)=>({session:{...f.client.agentSession(loop.agentSessionId),semanticStatus:{state:busy?'working':'done',source:'native-hook',observedAt:clock,stateEnteredAt:clock},futurePromptIntents:{[loop.futureIntentId!]:await f.client.readAgentFuturePromptIntent(loop.agentSessionId,loop.futureIntentId!)}},observation:{process:'running',semantic:busy?'active':'idle',readiness:'ready',stale:false},inputByte:0,tickId,now:clock}) as any,{saveFutureIntent:async(loop,active)=>{if(initialSaveBusy&&active)throw new core.AgentMuxError('The original Future Intent owner is busy with a person input.','AGENT_PROMPT_SUBMISSION_BUSY');await f.client.saveAgentFuturePromptIntent({agentSessionId:loop.agentSessionId,expectedRun:f.client.agentSession(loop.agentSessionId).run,intentId:loop.futureIntentId!,operationId:loop.creationOperationId!,prompt:loop.prompt,...(retainedNote?{agentMuxNote:retainedNote}:{}),active,continuitySource:loop.managedSource})}})
   let manager=make()
   await manager.start()
   if(retainedPrompt) await manager.call('schedule.create',{target:{hostId:'local',agentSessionId:'main',providerId:f.client.agentSession('main').providerId,workspacePath:f.root},everyMs:60000,prompt:retainedPrompt,managedSource:{sourceId:motePresenceSourceId(snapshot.identity),revision:snapshot.roleRevision},operationId:'retained-original-maintenance'})
@@ -182,11 +182,13 @@ it('a supervision heartbeat freezes the exact original Mote input and shares the
   expect(f.sent[0].loop).toMatchObject({agentSessionId:'main',prompt:loop.prompt,managedSource:loop.managedSource})
 })
 it('a retained supervision heartbeat body and an unknown claim survive owner restart without adopting new guidance',async()=>{
-  const retained='Original previously arranged maintenance body.', f=await managedFixture(false,retained)
+  const retained='Original previously arranged maintenance body.', retainedNote='Original previously arranged platform context.', f=await managedFixture(false,retained,retainedNote)
   f.outcome('unknown');await f.manager.check(f.advance())
   const frozen=structuredClone(f.loop()), intent=await f.f.client.readAgentFuturePromptIntent('main',frozen.futureIntentId!)
   expect(frozen).toMatchObject({prompt:retained,status:'paused',lastOutcome:'unknown'})
   expect(frozen.pendingCompletion?.operationId).toBe(f.sent[0].operationId)
+  expect(intent?.message.systemContext).toContain(retainedNote);expect(intent?.message.systemContext).not.toContain(MOTE_SUPERVISION_GUIDANCE)
+  expect(frozen.pendingCompletion?.agentMuxNote).toBe(intent!.message.systemContext)
   await f.restart()
   expect(f.loop()).toMatchObject({loopId:frozen.loopId,prompt:retained,pendingCompletion:frozen.pendingCompletion})
   expect(await f.f.client.readAgentFuturePromptIntent('main',frozen.futureIntentId!)).toEqual(intent)

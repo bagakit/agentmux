@@ -14,14 +14,14 @@ import type { AgentMuxClient } from '../../src/client.js'
 import { createHostMoteDialogue, createHostMoteMainReader } from '../../../../apps/host/src/mote-dialogue.js'
 import { createHostContent } from '../../../../apps/host/src/content-owner.js'
 import { createHostSpatialAgentControl } from '../../../../apps/host/src/spatial-agent-control.js'
-import { createMoteInputFixture, moteInputTestSource } from './mote-input-owner.js'
+import { createMoteInputFixture } from './mote-input-owner.js'
 import { runSourceObjectCli } from './source-object-cli.js'
 import { objectCliEnvironment } from './object-cli-rpc.js'
 import { fixtureHostExecutorOptions } from '../../../../apps/host/test/helpers/configured-executor-owner.js'
 
 /** Synthetic Runtime/native I/O only; creation, authorization, messages, Dispatch, Host and RPC are real owners. */
-export async function createMoteWorkThreadFixture() {
-  const f = await createMoteInputFixture({ clientOptions: root => fixtureHostExecutorOptions(() => join(root, 'configuration.json'))(root) }), cleanup: Array<() => Promise<unknown>> = [f.close]
+export async function createMoteWorkThreadFixture(options: {directoryAddress?:boolean;topicId?:string} = {}) {
+  const f = await createMoteInputFixture({ ...options, clientOptions: root => fixtureHostExecutorOptions(() => join(root, 'configuration.json'))(root) }), cleanup: Array<() => Promise<unknown>> = [f.close]
   try {
     const configurationPath = join(f.root, 'configuration.json'), configuration = JSON.parse(await readFile(configurationPath, 'utf8'))
     await writeFile(join(dirname(f.motePath), 'SOUL.md'), '# SOUL\nSynthetic persistent Mote identity.\n')
@@ -50,7 +50,8 @@ export async function createMoteWorkThreadFixture() {
     vi.spyOn(core.screenEvidence, 'wait').mockResolvedValue(1)
     const provider = f.client.providers.get('codex')
     f.client.providers.replace({ ...provider, prepareManagedLaunch: async plan => ({ plan }) })
-    const target = { spaceId: moteInputTestSource.spaceId, zoneId: moteInputTestSource.zoneId,
+    const graph=(await f.spatial.read())!.graph
+    const target = { spaceId: graph.spaces[0]!.spaceId, zoneId: graph.bindings[0]!.zoneId,
       expectedResource: { hostId: 'local', workspaceId: '__scratch__', workspacePath: join(f.root, 'scratch') } }
     const content = createHostContent({ configurationPath, spatial: f.spatial })
     const main = createHostMoteMainReader({ configurationPath, spatial: f.spatial, files: content.files! })
@@ -69,7 +70,7 @@ export async function createMoteWorkThreadFixture() {
       }
     })
     const server = new AgentMuxControlServer({ socketPath: join(f.root, 'work-dialogue.sock'), coreClients: f.coreClients,
-      spatialState: f.spatial, moteDialogue: dialogue, goalDelegations,
+      spatialState: f.spatial, ...content, moteDialogue: dialogue, goalDelegations,
       spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: f.spatial, runtime: () => ({ client: f.client }) as any }) })
     await server.start(); cleanup.push(() => server.stop())
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
@@ -80,7 +81,7 @@ export async function createMoteWorkThreadFixture() {
       if (result.code !== 0) throw Error(result.stdout + result.stderr)
       return JSON.parse(result.stdout).result
     }
-    return { root: f.root, client: f.client as AgentMuxClient, inner: f.inner, writes: f.writes,
+    return { root: f.root, configurationPath, files:content.files!, capability:f.capability, client: f.client as AgentMuxClient, inner: f.inner, writes: f.writes,
       target, main, dialogue, rpc, cli, launches, demands, motePath: f.motePath, spatial: f.spatial,
       close: async () => { for (const close of cleanup.reverse()) await close() } }
   } catch (error) { for (const close of cleanup.reverse()) await close(); throw error }

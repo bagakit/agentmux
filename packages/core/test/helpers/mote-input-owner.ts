@@ -43,6 +43,7 @@ const jsonl = (rows: unknown[]) => rows.map((value) => JSON.stringify(value)).jo
 
 export async function createMoteInputFixture(options: {
   directoryAddress?: boolean
+  topicId?: string
   clientOptions?: (root: string) => Omit<AgentMuxClientOptions, 'store'>
 } = {}) {
   const cleanup: Array<() => Promise<unknown>> = []
@@ -53,7 +54,7 @@ export async function createMoteInputFixture(options: {
     if (event.type === 'agent-error') errors.push(event)
   })
   const scratch = join(f.root, 'scratch'),
-    directory = join(scratch, scratchTopicDirectoryName('AbCdEfGh1234'))
+    directory = join(scratch, scratchTopicDirectoryName(options.topicId ?? 'AbCdEfGh1234'))
   await mkdir(directory, { recursive: true })
   const source = options.directoryAddress ? { ...moteInputTestSource, spaceId: directoryIdentity('local', directory), zoneId: homeZoneId(directoryIdentity('local', directory)) } : moteInputTestSource
   const configurationPath = join(f.root, 'configuration.json')
@@ -79,7 +80,7 @@ export async function createMoteInputFixture(options: {
       {
         spaceId: source.spaceId,
         kind: 'mote',
-        topicId: 'AbCdEfGh1234',
+        topicId: options.topicId ?? 'AbCdEfGh1234',
         name: 'Original',
         hostId: 'local',
         directoryPath: directory,
