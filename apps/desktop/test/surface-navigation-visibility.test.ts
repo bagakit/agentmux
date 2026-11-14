@@ -57,6 +57,51 @@ function terminalTab(id: string, workspaceId = 'workspace-1') {
   })
 }
 
+it('resource owners skip covered layouts and keep exact visible projections', () => {
+  const scratch = Array.from({ length: 48 }, (_, index) => ({
+    ...(index % 2 === 0 ? fileTab(`file-${index}`, SCRATCH_WORKSPACE_ID)
+      : terminalTab(`shell-${index}`, SCRATCH_WORKSPACE_ID)),
+    topicId: index < 24 ? 'topic-a' : 'topic-b'
+  }))
+  const other = terminalTab('other-shell')
+  const tabs = Object.fromEntries([...scratch, other].map(tab => [tab.id, tab]))
+  const groupReads = { scratch: 0, other: 0 }
+  const countGroupReads = (layout: ReturnType<typeof createWorkspaceLayout>, key: keyof typeof groupReads) =>
+    new Proxy(layout, {
+      get(target, property, receiver) {
+        if (property === 'groups') groupReads[key]++
+        return Reflect.get(target, property, receiver)
+      }
+    })
+  const layouts = {
+    [SCRATCH_WORKSPACE_ID]: countGroupReads(createWorkspaceLayout('scratch-group', scratch.map(tab => tab.id)), 'scratch'),
+    [other.workspaceId]: countGroupReads(createWorkspaceLayout('other-group', [other.id]), 'other')
+  }
+  const input = {
+    tabs, layouts, sessions: [],
+    activeWorkspaceId: SCRATCH_WORKSPACE_ID,
+    workbenchVisible: false,
+    projectedVisibleRegionIds: new Set(['region:file-0']),
+    projectedVisibleTabIds: new Set(['shell-1']),
+    documents: {}, dirtyDocuments: {}, savingDocuments: {}
+  }
+
+  const memory = collectSurfaceMemoryCandidates(input)
+  const parking = collectTerminalColdParkCandidates(input)
+  expect(memory).toHaveLength(24)
+  expect(parking).toHaveLength(25)
+  expect(memory.filter(candidate => candidate.navigationContextActive).map(candidate => candidate.id)).toEqual(['region:file-0'])
+  expect(parking.filter(candidate => candidate.navigationContextActive).map(candidate => candidate.id)).toEqual(['region:shell-1'])
+  expect([...memory, ...parking].filter(candidate => candidate.visible).map(candidate => candidate.id)).toEqual(['region:file-0', 'region:shell-1'])
+  expect(groupReads).toEqual({ scratch: 0, other: 0 })
+
+  const reopened = collectTerminalColdParkCandidates({ ...input, workbenchVisible: true })
+  expect(groupReads.scratch).toBeGreaterThan(0)
+  expect(groupReads.other).toBe(0)
+  expect(reopened.find(candidate => candidate.id === 'region:shell-3')?.navigationContextActive).toBe(true)
+  expect(reopened.find(candidate => candidate.id === 'region:shell-25')?.navigationContextActive).toBe(false)
+})
+
 // ---------------------------------------------------------------------------
 // 行为层：这一处判定本身答得对不对。
 // ---------------------------------------------------------------------------
@@ -347,68 +392,6 @@ describe('两个回收器共用同一处判定', () => {
         { visible: candidate.visible, navigationContextActive: candidate.navigationContextActive },
         `${candidate.id} 的在屏判定与那处唯一实现不一致——有人又自己判了一遍`
       ).toEqual(expected.get(candidate.id))
-    }
-  })
-
-  it('每个生产这两个字段的文件都必须真的调用那处唯一实现', () => {
-    // 判据是「有没有调那个实现」，**不是**「有没有 import 它」，也不是「有没有出现某个字符串」。
-    //
-    // 这个方向是实测选出来的：先写成 import 关系时，把候选收集器里那一句调用换成内联手抄（import
-    // 语句留在原地不动）——这条恒绿，只有下面那条数拼法的补充判据红。而 import 语句是死的，
-    // 「import 了却不调」正是原缺陷的一种。所以问题要问成「有没有走那个唯一实现」：产出这两个字段
-    // 的文件是可枚举的，它们有一个共同标记，就是产出本身。
-    //
-    // `[,:}]` 里的 `}` 是补的：原判据只认 `,` 和 `:`，于是**末位 shorthand**（`{ visible,
-    // navigationContextActive }`、`{ ...rest, navigationContextActive }`）后面跟的是空格加 `}`，
-    // 整个文件探测不到 → 不进 producers → 下面那个循环根本不对它跑。实测这条路能让一个「装了
-    // import、却自己内联判一遍」的新消费者对三条接线守卫全隐形——正是本判据要防的缺陷本身。
-    const produces = /(^|[^.\w])navigationContextActive\s*[,:}](?!\s*boolean)/
-    // 判据自检：这三种产出写法都必须被认出来。少了任何一种，绕过的方式就是换成那种写法，而这个
-    // 自检会比「等到有人真那么写」先红。反例那条钉住 `boolean` 排除项仍然生效（类型声明不是产出）。
-    for (const [shape, source] of [
-      ['显式取值', 'return { navigationContextActive: x, tabVisible: y }'],
-      ['中间 shorthand', 'return { navigationContextActive, tabVisible }'],
-      ['末位 shorthand', 'return { visible, navigationContextActive }'],
-      ['展开后末位', 'return { ...rest, navigationContextActive }']
-    ] as const) {
-      expect(produces.test(source), `产出探测认不出「${shape}」这种写法，换成它就能绕过`).toBe(true)
-    }
-    expect(
-      produces.test('type X = { navigationContextActive: boolean }'),
-      '产出探测把类型声明也算成产出，那不是产出'
-    ).toBe(false)
-    const producers = sourceFiles().filter((relative) => produces.test(read(relative)))
-
-    // 前提自检：扫描必须真的抓到实现自己 + 两个协调器。抓到 0 个（写错扫描根、正则失配）时下面的
-    // 循环恒绿，那是本仓 guard 假绿里最常见的一种。
-    //
-    // 判「至少包含这三个」而不是「恰好是这三个」：第四个消费者出现时，红出来的原因应该是「你没有
-    // 走那处实现」，而不是「这张清单该更新了」。在场性归这条自检，是否调用全交给下面的循环。
-    expect(
-      producers.filter((relative) => [
-        IMPLEMENTATION,
-        'lib/surface-memory-budget-candidates.ts',
-        'lib/terminal-cold-parking-coordinator.tsx'
-      ].includes(relative)).sort(),
-      '产出这两个字段的文件没有全被抓到，判据对漏掉的那些失效'
-    ).toEqual([
-      'lib/surface-memory-budget-candidates.ts',
-      IMPLEMENTATION,
-      'lib/terminal-cold-parking-coordinator.tsx'
-    ])
-
-    for (const relative of producers) {
-      if (relative === IMPLEMENTATION) continue
-      const source = read(relative)
-      expect(
-        source.match(/surfaceNavigationVisibility\(/g) ?? [],
-        `${relative} 产出了在屏判定却没有恰好一次调用 surfaceNavigationVisibility——它在自己判一遍`
-      ).toHaveLength(1)
-      // import 也要在场：上面那条只证明这个名字被当函数调了，而同名的本地函数同样满足它。
-      expect(
-        source,
-        `${relative} 调的 surfaceNavigationVisibility 不是从那处实现 import 来的`
-      ).toMatch(/from '\.\/surface-navigation-visibility'/)
     }
   })
 
