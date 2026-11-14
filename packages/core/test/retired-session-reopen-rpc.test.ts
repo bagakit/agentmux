@@ -15,7 +15,7 @@ afterEach(async () => { for (const cleanup of close.splice(0).reverse()) await c
 async function endpoint(transport: 'unix' | 'http', provider: 'claude' | 'codex' = 'claude') {
   const f = await retiredReopenFixture(provider); close.push(f.close)
   const identity: AgentMuxRuntimeOwnerIdentity = { runtimeId: 'private-reopen-runtime', ownerInstanceId: 'private-reopen-owner',
-    protocolVersion: 1, processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' }
+    protocolVersion: 2, processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' }
   const hosted = new AgentMuxHostedRuntimeService(f.client, f.storePath, () => identity); close.push(() => hosted.dispose())
   const owner = new AgentMuxControlServer({ socketPath: join(f.root, 'public.sock'),
     coreClients: () => [{ hostId: 'local', client: f.client }], hostedRuntime: () => hosted,

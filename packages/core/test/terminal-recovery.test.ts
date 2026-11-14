@@ -27,6 +27,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amxtr-')); roots.push(root)
   let retained: AgentMuxRun | null = null, started = 0, retired = false
   const port = {
+    inspectCreation: vi.fn(async () => null), notice: vi.fn(), assertNoAgentKey: vi.fn(async()=>{}), retireKey: vi.fn(), observeRetirementKey: vi.fn(),
     runtime: () => runtime, original: vi.fn(async () => run('old-run', 'interrupted')),
     prepare: vi.fn(async (op: string, cwd: string) => ({ createOperationId: op, workspacePath: cwd,
       launch: JSON.stringify({ createOperationId: op, request: { program: '/bin/cat', args: [], cwd, env: { AGENTMUX_LIFECYCLE_OPERATION_ID: op, PRIVATE_SENTINEL: 'frozen-secret' }, initial_size: { cols: 80, rows: 24 }, declared_inputs: [] } }) })),
