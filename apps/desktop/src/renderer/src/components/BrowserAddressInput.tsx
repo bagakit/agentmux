@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
-import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ComponentPropsWithoutRef, type Ref } from 'react'
+import { useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type Ref } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserInputHistorySnapshot, BrowserInputHistoryTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -45,21 +45,22 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   const [open, setOpen] = useState(false)
   const [filtering, setFiltering] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [selected, setSelected] = useState(-1)
+  const [selectedText, setSelectedText] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [completion, setCompletion] = useState<{ key: string; prefix: string; text: string } | null>(null)
   const preview = open && completion?.key === currentTarget && completion.prefix === value ? completion : null
   const id = useId()
   useEffect(() => onHistoryNotice(notice), [notice, onHistoryNotice])
   // A current URL is context, not a query. Filter only once the person edits it.
-  const entries = browserAddressSuggestions(history, value, filtering)
+  const entries = useMemo(() => browserAddressSuggestions(history, value, filtering), [history, value, filtering])
+  const selected = entries.findIndex(entry => entry.text === selectedText)
   const live = (key: string, token: number) => targetKey.current === key && request.current === token
   useLayoutEffect(() => {
     const node = input.current
-    if (preview && node && node === document.activeElement) node.setSelectionRange(preview.prefix.length, preview.text.length)
+    if (preview && node && node === node.ownerDocument.activeElement) node.setSelectionRange(preview.prefix.length, preview.text.length)
     const selection = withdrawnSelection.current
     withdrawnSelection.current = null
-    if (!preview && selection?.key === currentTarget && selection.value === value && node && node === document.activeElement) node.setSelectionRange(selection.start, selection.end)
+    if (!preview && selection?.key === currentTarget && selection.value === value && node && node === node.ownerDocument.activeElement) node.setSelectionRange(selection.start, selection.end)
   }, [preview, value, currentTarget])
 
   async function reload(): Promise<void> {
@@ -67,9 +68,16 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
     if (!target) { setNotice('Input history is unavailable until its Workspace and Profile are confirmed. Browsing remains available.'); return }
     setLoading(true)
     try {
+      if (!history) {
+        const saved = await api.browser.listInputHistory(target, 'saved')
+        if (!live(key, token)) return
+        setLoadedHistory({ key, snapshot: saved })
+        setLoading(false)
+        if (!saved.entries.length) return
+      }
       const result = await api.browser.listInputHistory(target)
       if (!live(key, token)) return
-      setLoadedHistory({ key, snapshot: result }); setSelected(-1); setCompletion(null); setNotice(result.warning ?? null)
+      setLoadedHistory({ key, snapshot: result }); setNotice(result.warning ?? null)
     } catch (error) {
       if (live(key, token)) setNotice(`Input history could not be read: ${presentError(error)}. Your input and browsing remain available; retry history here.`)
     } finally { if (live(key, token)) setLoading(false) }
@@ -79,7 +87,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
     if (props.disabled || submitDisabled || composing.current) return
     if (!text.trim()) { setOpen(false); onSubmit(text); return }
     if (text !== value) onValueChange(text)
-    setOpen(false); setFiltering(false); setSelected(-1); setCompletion(null)
+    setOpen(false); setFiltering(false); setSelectedText(null); setCompletion(null)
     const key = currentTarget, target = historyTarget, token = ++request.current
     if (target) {
       // Capture this human submission before navigation/creation; never read a later draft.
@@ -99,11 +107,11 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   useImperativeHandle(ref, () => ({ submit, focus() { input.current?.focus(); input.current?.select() } }))
 
   useEffect(() => {
-    ++request.current; setLoadedHistory(null); setOpen(false); setFiltering(false); setSelected(-1); setLoading(false); setNotice(null); setCompletion(null)
+    ++request.current; setLoadedHistory(null); setOpen(false); setFiltering(false); setSelectedText(null); setLoading(false); setNotice(null); setCompletion(null)
     return () => { ++request.current }
   }, [currentTarget])
 
-  function dismiss(): void { ++request.current; setOpen(false); setLoading(false); setSelected(-1); setCompletion(null) }
+  function dismiss(): void { ++request.current; setOpen(false); setLoading(false); setSelectedText(null); setCompletion(null) }
 
   function showSuggestions(): void {
     if (composing.current) return
@@ -123,6 +131,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
     }
     const stop = autoUpdate(anchor, floating, () => { void position() })
     const outside = (event: Event) => { if (!anchor.contains(event.target as Node) && !floating.contains(event.target as Node)) dismiss() }
+    const document = anchor.ownerDocument
     document.addEventListener('pointerdown', outside, true)
     document.addEventListener('focusin', outside, true)
     return () => { disposed = true; stop(); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('focusin', outside, true) }
@@ -131,11 +140,11 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   async function remove(text?: string): Promise<void> {
     const target = historyTarget, snapshot = history, key = currentTarget, token = ++request.current
     if (!target || !snapshot) return
-    setCompletion(null); setSelected(-1)
+    setCompletion(null); setSelectedText(null)
     try {
       const result = text === undefined ? await api.browser.clearInputHistory(target, snapshot.scope) : await api.browser.removeInputHistory(target, snapshot.scope, text)
       if (targetKey.current === key) onHistoryChange?.()
-      if (live(key, token)) { setLoadedHistory({ key, snapshot: result }); setSelected(-1); setCompletion(null); setNotice(null) }
+      if (live(key, token)) { setLoadedHistory({ key, snapshot: result }); setNotice(null) }
     } catch (error) {
       if (live(key, token)) setNotice(`Input history could not be deleted: ${presentError(error)}. Your input and saved history are kept; retry here.`)
     }
@@ -146,12 +155,15 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
       value={composerRenderValue(preview?.text ?? value, composition)} autoComplete="off"
       onChange={event => {
         const next = event.currentTarget.value, native = event.nativeEvent as InputEvent
-        setCompletion(null); setSelected(-1); setFiltering(true); ime.change(next)
+        setCompletion(null); setSelectedText(null); setFiltering(true); ime.change(next)
         const candidates = native.inputType === 'insertText' && !composing.current && !native.isComposing && next.length > value.length && next.startsWith(value) &&
           event.currentTarget.selectionStart === next.length && event.currentTarget.selectionEnd === next.length
           ? browserAddressSuggestions(history, next, true) : []
         const index = candidates.findIndex(row => row.source === 'history' && row.text.length > next.length && row.text.toLocaleLowerCase().startsWith(next.toLocaleLowerCase()))
-        if (index >= 0) { setCompletion({ key: currentTarget, prefix: next, text: candidates[index]!.text }); setSelected(index) }
+        if (index >= 0) {
+          const text = candidates[index]!.text
+          setCompletion({ key: currentTarget, prefix: next, text }); setSelectedText(text)
+        }
         if (!open) showSuggestions()
       }}
       onCompositionStart={event => { composing.current = true; dismiss(); ime.compositionStart(preview ? value : event.currentTarget.value) }}
@@ -165,6 +177,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
         if (preview && (event.currentTarget.selectionStart !== preview.prefix.length || event.currentTarget.selectionEnd !== preview.text.length)) {
           withdrawnSelection.current = { key: currentTarget, value, start: Math.min(event.currentTarget.selectionStart ?? 0, value.length), end: Math.min(event.currentTarget.selectionEnd ?? 0, value.length) }
           setCompletion(null)
+          setSelectedText(null)
         }
       }}
       onContextMenu={event => { event.stopPropagation(); dismiss(); onContextMenu?.(event) }}
@@ -178,25 +191,25 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
           event.preventDefault(); void remove(entries[selected]!.text); return
         }
         if (preview && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === 'ArrowRight' || event.key === 'End')) {
-          event.preventDefault(); onValueChange(preview.text); setCompletion(null); setSelected(-1)
+          event.preventDefault(); onValueChange(preview.text); setCompletion(null); setSelectedText(null)
           input.current?.setSelectionRange(preview.text.length, preview.text.length); return
         }
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
           event.preventDefault()
           setCompletion(null)
           if (!entries.length) { showSuggestions(); return }
-          setOpen(true); setSelected(previous => previous < 0 ? event.key === 'ArrowDown' ? 0 : entries.length - 1 : (previous + (event.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length); return
+          const step = event.key === 'ArrowDown' ? 1 : -1
+          const index = selected < 0 ? step === 1 ? 0 : entries.length - 1 : (selected + step + entries.length) % entries.length
+          setOpen(true); setSelectedText(entries[index]!.text); return
         }
         if (event.key === 'Enter') {
           event.preventDefault()
-          const text = open && selected >= 0 ? entries[selected]?.text ?? value : value
-          submit(text)
+          submit()
         }
       }} />
     {open ? <WindowOverlayPortal><div ref={panel} className="browser-address-history" role="dialog" aria-label="Browser input history" style={{ visibility: 'hidden' }}>
       <header><span>Addresses &amp; searches</span><button type="button" disabled={!history?.entries.length} onPointerDown={event => event.preventDefault()} onClick={() => void remove()}>Clear history</button></header>
       {notice ? <p role="status">{notice}<button type="button" onPointerDown={event => event.preventDefault()} onClick={() => { input.current?.focus(); void reload() }}>Retry history</button></p> : null}
-      {loading ? <p>Reading input history…</p> : null}
       <ul id={id} role="listbox" aria-label="Recent addresses and searches">{entries.map((entry, index) => <li id={`${id}-${index}`} role="option" aria-selected={selected === index} key={entry.text}>
         <button type="button" className="browser-address-history__choose" aria-label={`${entry.source === 'history' ? 'Open recent input' : entry.kind === 'search' ? 'Search' : 'Open'} ${entry.text}`} title={entry.text}
           onPointerDown={event => event.preventDefault()} onClick={() => submit(entry.text)}>
@@ -205,6 +218,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
         </button>
         {entry.source === 'history' ? <button type="button" className="browser-address-history__delete" aria-label={`Remove input ${entry.text}`} onPointerDown={event => event.preventDefault()} onClick={() => void remove(entry.text)}><ThemeActionRemoveIcon size={12} /></button> : <span className="browser-address-history__action-space" />}
       </li>)}</ul>
+      {loading && !entries.length ? <p>Reading input history…</p> : null}
       {!loading && !notice && (!history || !history.entries.length || !entries.length) ? <p>{!history ? 'Input history is not loaded.' : history.entries.length ? 'No matching recent input.' : 'No saved input yet.'}</p> : null}
     </div></WindowOverlayPortal> : null}
   </>

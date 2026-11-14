@@ -2505,8 +2505,9 @@ export async function registerIpc(args: {
   handleWithEvent('browser:detectProfileImportSources', (event) => ipcResult(() => browserProfiles.detectImportSources()))
   handleWithEvent('browser:importProfile', (event, sourceToken: string, label: string) =>
     ipcResult(() => browserProfiles.importProfile(sourceToken, label)))
-  handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget) => {
+  handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget, detail?: 'saved') => {
     const scope = resolveInputHistoryScope(target)
+    if (detail === 'saved') return scope.profileId === null ? { scope, entries: [] } : browserInputHistory.list(scope)
     return listBrowserInputHistoryWithAppearance(scope, {
       history: browserInputHistory, graph: async () => (await spatialState.read())?.graph ?? null,
       knownScopes: () => browsers.knownRecoveryPreviewScopes(), readPage: actual => browserRecoveryPreviews.readPage(actual)

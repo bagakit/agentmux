@@ -2288,7 +2288,7 @@ export type AgentMuxDesktopApi = {
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>
     importProfile(sourceToken: string, label: string): Promise<BrowserProfileSummary>
     /** Explicit human address/search submissions only; page navigation never records here. */
-    listInputHistory(target: BrowserInputHistoryTarget): Promise<BrowserInputHistorySnapshot>
+    listInputHistory(target: BrowserInputHistoryTarget, detail?: 'saved'): Promise<BrowserInputHistorySnapshot>
     recordInputHistory(target: BrowserInputHistoryTarget, text: string): Promise<BrowserInputHistoryRecord>
     removeInputHistory(target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string): Promise<BrowserInputHistorySnapshot>
     clearInputHistory(target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope): Promise<BrowserInputHistorySnapshot>

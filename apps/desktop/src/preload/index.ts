@@ -926,7 +926,7 @@ const api: AgentMuxPreloadApi = {
     detectProfileImportSources: () => ipcRenderer.invoke('browser:detectProfileImportSources'),
     importProfile: (sourceToken: string, label: string) =>
       ipcRenderer.invoke('browser:importProfile', sourceToken, label),
-    listInputHistory: (target: BrowserInputHistoryTarget) => ipcRenderer.invoke('browser:listInputHistory', target),
+    listInputHistory: (target: BrowserInputHistoryTarget, detail?: 'saved') => ipcRenderer.invoke('browser:listInputHistory', target, detail),
     recordInputHistory: (target: BrowserInputHistoryTarget, text: string) => ipcRenderer.invoke('browser:recordInputHistory', target, text),
     removeInputHistory: (target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string) => ipcRenderer.invoke('browser:removeInputHistory', target, scope, text),
     clearInputHistory: (target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope) => ipcRenderer.invoke('browser:clearInputHistory', target, scope),

@@ -11,20 +11,31 @@ export function browserAddressSuggestions(history: BrowserInputHistorySnapshot |
     catch { return { kind: 'input' as const, url: '' } } // Decoration cannot change a malformed explicit address's submission.
   }
   const query = value.trim().toLocaleLowerCase()
-  const rows: BrowserAddressSuggestion[] = (history?.entries ?? []).map(entry => {
+  const folded = (text: string) => text.toLocaleLowerCase()
+  const rows = (history?.entries ?? []).map(entry => {
     const resolved = classify(entry.text)
     const appearance = resolved.kind === 'address' ? entry.appearance : undefined
-    return { text: entry.text, source: 'history' as const, kind: resolved.kind,
+    const row: BrowserAddressSuggestion = { text: entry.text, source: 'history', kind: resolved.kind,
       title: appearance?.title || entry.text,
       detail: appearance?.url ?? (resolved.kind === 'search' ? 'Recent search' : resolved.kind === 'address' ? 'Recent address' : 'Recent input'),
       ...(appearance?.faviconDataUrl ? { faviconDataUrl: appearance.faviconDataUrl } : {}) }
-  }).filter(row => !filtering || !query || `${row.text}\n${row.title}`.toLocaleLowerCase().includes(query))
-  if (!filtering || !query) return rows.slice(0, 8)
-  rows.sort((a, b) => Number(b.text.toLocaleLowerCase().startsWith(query)) - Number(a.text.toLocaleLowerCase().startsWith(query)))
-  if (rows.some(row => row.text === value)) return rows.slice(0, 8)
-  const resolved = classify(value), current: BrowserAddressSuggestion = { text: value, source: 'input', kind: resolved.kind,
-    title: value, detail: resolved.kind === 'search' ? 'Search the web' : 'Open address' }
-  // A prefix completion and the unchanged query remain adjacent, distinct choices.
-  rows.splice(rows[0]?.text.toLocaleLowerCase().startsWith(query) ? 1 : 0, 0, current)
-  return rows.slice(0, 8)
+    return { row, url: resolved.url }
+  })
+  if (!filtering || !query) return rows.slice(0, 8).map(({ row }) => row)
+  const matches = rows.filter(({ row }) => [row.text, row.title, row.kind === 'address' ? row.detail : ''].some(text => folded(text).includes(query)))
+  if (!matches.some(({ row }) => row.text === value)) {
+    const { kind, url } = classify(value)
+    matches.push({ url, row: { text: value, source: 'input', kind, title: value, detail: kind === 'search' ? 'Search the web' : 'Open address' } })
+  }
+  const rank = ({ row, url }: (typeof rows)[number]) => {
+    if (row.kind === 'address') {
+      const host = URL.parse(url)?.hostname.replace(/^www\./u, '') ?? ''
+      if (folded(row.title) === query || folded(host) === query) return 0
+      if ([row.title, host, row.text].some(text => folded(text).startsWith(query))) return 1
+    }
+    if (folded(row.text) === query) return 2
+    return folded(row.text).startsWith(query) ? 3 : 4
+  }
+  const prioritized = matches.map(candidate => ({ row: candidate.row, rank: rank(candidate) })).sort((a, b) => a.rank - b.rank)
+  return prioritized.slice(0, 8).map(({ row }) => row)
 }
