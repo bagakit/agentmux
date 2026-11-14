@@ -33,15 +33,15 @@ it('keeps native default and submit actions distinct, forwards the ref and respe
   expect(button.type).toBe('button'); expect(ordinary.current).toBe(button)
   expect(button.getAttribute('aria-busy')).toBe('true'); expect(button.disabled).toBe(false)
   button.focus(); expect(document.activeElement).toBe(button)
-  expect(button.className).toBe('small-button own-surface')
+  expect(button.matches('.agent-button.small-button.own-surface')).toBe(true)
   await act(async () => button.click())
   expect(action).toHaveBeenCalledTimes(1); expect(submit).not.toHaveBeenCalled()
   const disabled = container.querySelector<HTMLButtonElement>('#disabled')!
-  expect(disabled.className).toBe('danger-button'); expect(disabled.disabled).toBe(true)
+  expect(disabled.matches('.agent-button.danger-button')).toBe(true); expect(disabled.disabled).toBe(true)
   await act(async () => disabled.click())
   expect(action).toHaveBeenCalledTimes(1)
   const save = container.querySelector<HTMLButtonElement>('#submit')!
-  expect(save.className).toBe('primary-button'); expect(save.type).toBe('submit')
+  expect(save.matches('.agent-button.primary-button')).toBe(true); expect(save.type).toBe('submit')
   await act(async () => save.click())
   expect(submit).toHaveBeenCalledTimes(1)
 })
@@ -59,7 +59,7 @@ it('keeps a named busy icon action usable and retains explicit native title and 
   await act(async () => icon.click()); expect(action).toHaveBeenCalledTimes(1)
   const danger = container.querySelector<HTMLButtonElement>('#danger-icon')!
   expect(danger.title).toBe('Inspect the exact target before deletion')
-  expect(danger.className).toBe('icon-button icon-button--danger'); expect(danger.disabled).toBe(true)
+  expect(danger.matches('.agent-icon-button.icon-button.icon-button--danger')).toBe(true); expect(danger.disabled).toBe(true)
   await act(async () => danger.click()); expect(action).toHaveBeenCalledTimes(1)
 })
 
@@ -78,7 +78,7 @@ it('saves the real Settings draft through its original module and durable owner,
   f.publish.mockImplementation(config => { publish(config); useAppStore.getState().setConfig(config) })
   const save = vi.spyOn(api.config, 'save').mockImplementation((next, expected) => f.owner.edit(expected, next))
   await render(<ActualAppearance />)
-  const button = saveButton(); expect(button).not.toBeNull(); expect(button.className).toBe('primary-button')
+  const button = saveButton(); expect(button).not.toBeNull(); expect(button.matches('.agent-button.primary-button')).toBe(true)
   expect(button.disabled).toBe(true)
   await act(async () => light().click())
   expect(button.disabled).toBe(false); expect(light().checked).toBe(true)

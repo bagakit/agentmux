@@ -119,6 +119,13 @@ app.whenReady().then(async () => {
     await wait(`!${menu}`, 'Touch selection closes only the menu')
     assert.deepEqual(await original('dropdownProof.requests'), ['save-original', 'open-original'])
     result.cases.push('touch-selects-the-exact-file-action-once')
+
+    await cdp.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false })
+    const primaryOutput = query('.image-annotation-editor button.agent-button.primary-button')
+    await click(primaryOutput)
+    assert.deepEqual(await original('dropdownProof.requests'), ['save-original', 'open-original', 'copy-processed'],
+      'The shared primary button invokes its original output once')
+    result.cases.push('primary-button-preserves-original-output')
     result.passed = true
   } catch (error) {
     result.failure = error.message

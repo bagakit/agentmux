@@ -53,8 +53,14 @@ async function run(mutation) {
             source = source.replace(before, '<SharedPortal container={globalThis.document.body} {...props} />')
             mutations++
           }
+          if (file === editor && mutation === 'missing-primary-action') {
+            const before = 'variant="primary" type="button" disabled={busy || !loaded} onClick={() => complete()}'
+            assert.equal(source.split(before).length, 2, 'Mutate the real migrated Copy PNG control exactly once')
+            source = source.replace(before, 'variant="primary" type="button" disabled={busy || !loaded}')
+            mutations++
+          }
           loaded[file] = digest(source)
-          if (file === adapter && mutation === 'wrong-document') return source
+          if ((file === adapter && mutation === 'wrong-document') || (file === editor && mutation === 'missing-primary-action')) return source
         },
         async generateBundle() {
           const files = this.getWatchFiles()
@@ -77,13 +83,14 @@ async function run(mutation) {
     const result = JSON.parse(await readFile(join(output, 'renderer.json'), 'utf8'))
     if (mutation) {
       assert.equal(execution.exitCode, 1, result.failure)
-      assert.equal(result.failure, mutation === 'wrong-document'
+      assert.equal(result.failure.split('\n', 1)[0], mutation === 'wrong-document'
         ? 'The file menu opens in the original second document and modal slot'
-        : 'ArrowDown activates the click menu and focuses the first original action')
+        : mutation === 'global-keyboard' ? 'ArrowDown activates the click menu and focuses the first original action'
+          : 'The shared primary button invokes its original output once')
     } else {
       assert.equal(execution.exitCode, 0, result.failure)
       assert.equal(result.passed, true)
-      assert.equal(result.cases.length, 3)
+      assert.equal(result.cases.length, 4)
     }
     const frames = Object.fromEntries(await Promise.all(result.frames.map(async frame => [frame, digest(await readFile(join(output, frame)))])))
     return { loaded, primitive, frames, result }
@@ -95,10 +102,14 @@ async function run(mutation) {
 const original = await run()
 const wrongDocument = await run('wrong-document')
 const globalKeyboard = await run('global-keyboard')
+const missingPrimaryAction = await run('missing-primary-action')
 assert.notEqual(wrongDocument.loaded[adapter], original.loaded[adapter])
 assert.equal(wrongDocument.primitive, original.primitive)
 assert.notEqual(globalKeyboard.primitive, original.primitive)
 assert.deepEqual(globalKeyboard.loaded, original.loaded)
+assert.equal(missingPrimaryAction.primitive, original.primitive)
+assert.notEqual(missingPrimaryAction.loaded[editor], original.loaded[editor])
+for (const file of [adapter, product, shared, styles]) assert.equal(missingPrimaryAction.loaded[file], original.loaded[file])
 for (const file of [editor, product, shared, styles]) assert.equal(wrongDocument.loaded[file], original.loaded[file])
 const goal = 'apps/desktop/src/renderer/src/components/GoalDetail.tsx'
 const test = 'apps/desktop/test/ui-button-consumers.test.tsx'
@@ -115,6 +126,6 @@ assert.ok(loadedGoalRecords.some(record => record.path === goal && record.sha256
 const goalLog = join(evidence, 'goal-actions.log')
 await writeFile(goalLog, goalResult)
 const receipt = join(evidence, 'receipt.json')
-await writeFile(receipt, JSON.stringify({ passed: true, original, wrongDocument, globalKeyboard,
+await writeFile(receipt, JSON.stringify({ passed: true, original, wrongDocument, globalKeyboard, missingPrimaryAction,
   goalActions: { inputs: Object.fromEntries(goalInputs), log: relative(root, goalLog) } }, null, 2) + '\n')
 console.log(relative(root, receipt))
