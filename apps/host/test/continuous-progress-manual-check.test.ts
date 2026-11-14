@@ -74,6 +74,33 @@ it('skips copying an in-flight due schedule and still checks another target', as
   }
 })
 
+it('keeps an active target ordered after cancelling a queued check', async () => {
+  const target = { agentSessionId: 'original-shared' }
+  const f = await fixture([
+    record('first', { ...target, nextCheckAt: 100 }),
+    record('middle', { ...target, nextCheckAt: 110 }),
+    record('last', { ...target, nextCheckAt: 120 }),
+    record('unrelated', { nextCheckAt: 120 }),
+  ])
+  const hold = f.hold('first')
+  const first = f.manager.check(100, 'first')
+  await hold.entered.promise
+  const middle = f.manager.check(110, 'middle')
+  let last: Promise<void> | undefined
+  try {
+    expect((await f.manager.stopLoop('middle')).status).toBe('stopped')
+    await middle
+    last = f.manager.check(120, 'last')
+    await f.manager.check(120, 'unrelated')
+    expect(f.observed.map(entry => entry.loopId)).toEqual(['first', 'unrelated'])
+  } finally {
+    hold.release.resolve()
+    await Promise.all([first, middle, last])
+  }
+  expect(f.observed.map(entry => entry.loopId)).toEqual(['first', 'unrelated', 'last'])
+  expect(f.submitted.every(entry => entry.loop.loopId !== 'middle')).toBe(true)
+})
+
 it.each([1, 100, 1000])('public list copies only the exact target with %i unrelated saved prompts', async count => {
   const original = record('selected'), target = { hostId: original.hostId, agentSessionId: original.agentSessionId,
     providerId: original.providerId, workspacePath: original.workspacePath }
