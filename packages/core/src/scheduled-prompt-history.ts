@@ -5,7 +5,7 @@ import { matchesScheduledInputSource, projectContinuousProgressInputFacts } from
 import { agentPromptInputId } from './agent-prompt-condition.js'
 import { AgentMuxError } from './errors.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
-import { parseScheduleRpcParams, scheduleHistoryPageSize, type ScheduleHistoryPage, type ScheduleHistoryQuery } from './public-rpc-schedules.js'
+import { parseScheduleRpcParams, scheduleEventRecapLimit, scheduleHistoryPageSize, type ScheduleHistoryPage, type ScheduleHistoryQuery } from './public-rpc-schedules.js'
 import { rpcRecord } from './rpc-data.js'
 import type { AgentFuturePromptIntent, AgentPromptSubmissionRecord } from './types.js'
 
@@ -44,11 +44,10 @@ export function parseScheduledPromptHistoryRequest(value: unknown): ScheduledPro
 const compareText = (a: string, b: string) => Buffer.compare(Buffer.from(a), Buffer.from(b))
 const comparePosition = (a: Position, b: Position) => a[0] - b[0] || compareText(a[1], b[1]) || compareText(a[2], b[2])
 
-/** Scope survives pause or a later Run. A changed definition, window or owner requires a new read. */
+/** Read position belongs to the schedule and exact owner, independent of later rule revisions. */
 function readCursor(request: ScheduledPromptHistoryRequest, owner: string) {
-  const { query, target, managedSource, definitions } = request
-  const scope = createHash('sha256').update(JSON.stringify([owner, target, managedSource, [...definitions].sort((a,b) => compareText(a.intentId,b.intentId)),
-    query.scheduleId, query.from, query.to])).digest('base64url')
+  const { query, target, managedSource } = request
+  const scope = createHash('sha256').update(JSON.stringify([owner, target, managedSource, query.scheduleId, query.from, query.to])).digest('base64url')
   let before: Position | undefined
   if (query.cursor) {
     try {
@@ -88,7 +87,12 @@ function page(request: ScheduledPromptHistoryRequest, owner: string, session: Ta
       continue
     }
     const { delivery, nativeResult } = projectContinuousProgressInputFacts(original, claim, key)
-    result.entries.push({ operationId: agentPromptInputId(key), occurrenceAt: futureIntent.occurrenceAt, delivery, nativeResult })
+    // Only the original user-facing input belongs in this authorized projection.
+    // The current definition, system context and native command are not recap data.
+    const input = claim.intent?.message?.userContent
+    const excerpt = input?.slice(0, scheduleEventRecapLimit).replace(/[\uD800-\uDBFF]$/u, '')
+    result.entries.push({ operationId: agentPromptInputId(key), occurrenceAt: futureIntent.occurrenceAt, runId: original.run.runId, delivery, nativeResult,
+      recap: input && excerpt ? { text: excerpt, truncated: input.length > excerpt.length } : null })
   }
   return result
 }

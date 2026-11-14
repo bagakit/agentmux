@@ -12,7 +12,13 @@ import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 export type ScheduleMutation = { scheduleId: string; expectedRevision: number; operationId: string }
 export type ScheduleScope = Pick<ContinuousProgressTarget, 'hostId' | 'workspacePath'>
 export type ScheduleHistoryQuery = { scheduleId: string; from: number; to: number; limit?: number; cursor?: string }
-export type ScheduleHistoryEntry = Pick<ContinuousProgressInputFacts, 'delivery' | 'nativeResult'> & { operationId: string; occurrenceAt: number }
+export const scheduleEventRecapLimit = 800
+export type ScheduleHistoryEntry = Pick<ContinuousProgressInputFacts, 'delivery' | 'nativeResult'> & {
+  operationId: string
+  occurrenceAt: number
+  runId: string
+  recap: Readonly<{ text: string; truncated: boolean }> | null
+}
 export type ScheduleHistoryPage = Pick<ScheduleHistoryQuery, 'scheduleId' | 'from' | 'to'> & {
   executionScope: 'connected-host'
   coverage: 'recorded-inputs' | 'unconfirmed'
@@ -238,13 +244,24 @@ function parseScheduleHistoryPage(value: unknown, request?: ScheduleHistoryQuery
   }
   let before = window.to
   const entries = (p.entries as unknown[]).map(entry => {
-    const original = rpcRecord(entry, ['operationId', 'occurrenceAt', 'delivery', 'nativeResult'], code)
+    const original = rpcRecord(entry, ['operationId', 'occurrenceAt', 'runId', 'recap', 'delivery', 'nativeResult'], code)
     string(original.operationId, code)
     integer(original.occurrenceAt, code)
     if (original.occurrenceAt < window.from || original.occurrenceAt >= window.to || original.occurrenceAt > before)
       invalid('A schedule history entry is outside its original time window or order.', code)
     before = original.occurrenceAt
-    return { operationId: original.operationId, occurrenceAt: original.occurrenceAt, ...parseContinuousProgressDelivery(original.delivery, original.nativeResult) }
+    const runId = original.runId
+    string(runId, code)
+    let recap: ScheduleHistoryEntry['recap'] = null
+    if (original.recap !== null) {
+      const value = rpcRecord(original.recap, ['text', 'truncated'], code)
+      const { text, truncated } = value
+      if (typeof text !== 'string' || !text.length || text.length > scheduleEventRecapLimit || typeof truncated !== 'boolean')
+        invalid('The original schedule event recap is invalid.', code)
+      recap = { text, truncated }
+    }
+    return { operationId: original.operationId, occurrenceAt: original.occurrenceAt, runId, recap,
+      ...parseContinuousProgressDelivery(original.delivery, original.nativeResult) }
   })
   return { ...window, executionScope: 'connected-host', coverage: p.coverage, entries, nextCursor: p.nextCursor }
 }
