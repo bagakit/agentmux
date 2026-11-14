@@ -146,7 +146,7 @@ the original device's listener settings; another Node never shows this Mac's edi
 
 ## Tailcat transport
 
-Settings → Cluster → Hosts → Connection holds the original Host's transport selection:
+Settings → Cluster → Mesh → Connections → selected Host → Connection holds the original Host's transport selection:
 SSH (the default), SSH with Tailcat backup, or Tailcat only. A remote Host keeps its existing
 id, kind=ssh record, SSH fields and Runtime binding. transport selects the carrier;
 tailcat holds {address, keyFile}. Turning Tailcat off leaves the original SSH route intact.
@@ -163,11 +163,12 @@ existing one. The result's created flag distinguishes new from reused; only the 
 returns a public key as its connection code. Private keys stay in their original files.
 Saved server keys include a PSK and fixed relay. Never publish the listener's private address.
 The Desktop part is the person's: ask them to complete it at these locations. On the
-receiving machine, Settings → Cluster → Node → Incoming connections takes
+receiving machine, Settings → Cluster → Mesh → Connections → This device → Connection takes
 the saved server key, the client public key under Allowed clients and the Allow Tailcat
 connections switch. Save incoming connections applies that original local Host config; its refreshed status reads
-the original listener. Node publication has its own separate Save publication and Core
-policy receipt; neither save claims to commit the other domain. On the sending machine, that Host's Tailcat field takes the
+the original listener. Save hosts independently saves the Host collection and never submits the
+listener draft. Node publication has its own separate Save publication and Core
+policy receipt; neither save claims to commit the other domain. On the sending machine, that remote Host's Connection Tailcat field takes the
 listener's private address and the saved client key; then that exact Host is saved and tested.
 Missing CLI, invalid saved key or listener failure is visible; a listening receipt does not
 prove a client connected. Disabling only stops this listener and retains existing work.
@@ -211,7 +212,7 @@ Private Tailcat addresses, key paths and raw process errors are never connection
 
 ## Review a remote Core update
 
-The Core maintenance section in Desktop Settings → Cluster → Hosts → Connection compares
+The Core maintenance section in Desktop Settings → Cluster → Mesh → Connections → selected Host → Connection compares
 the current deployment with the candidate bundled in this App. It is not an online
 latest-version check. Package versions, source commits,
 deployment digests, Core owner API protocol and required Native Runtime protocol

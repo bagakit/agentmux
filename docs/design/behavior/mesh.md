@@ -102,6 +102,8 @@ Mesh 在 Settings 中有可发现的独立网络入口，搜索、Overview、Hos
 
 Tailcat 通过官方 CLI 的双向 stdio 复用现有 JSON-RPC 和 Runtime 绑定。接收端必须已经安装并运行 AgentMux；本机接入开关只监听并将连接桥接到原 `amux system endpoint --stdio`，不安装远程核心。开关使用已保存的 server key（含 PSK 和固定 DERP region）及明确的非空 client public key allowlist；关闭只停止监听。发送端使用保存的 client key 和对方 `tc…` 地址。地址属于凭据，不进入日志、拓扑标签或公开示例。
 
+本机 listener 唯一位于 **Mesh > Connections > This device > Connection** 的 `incoming` 字段；远端 client 仍在各自 Host 的 Connection。canonical `{section:'hosts',field:'incoming'}` 省略 Host 时只解析已配置的唯一 `kind=local` Host；legacy `{section:'network-node',field:'incoming'}` 仅在目标确为该 local Host 或省略目标时规范到同一路由。App 路由入口与 SettingsPanel 初始化、搜索及 focus 共用一个纯 normalizer，先揭示 Connections、准确 Host 与 Connection，再聚焦唯一可见字段。显式 missing／remote target 不得替换为 `config.hosts[0]` 或本机；没有唯一 local Host 时也不得猜测。普通 `network-node` 导航仍管理原 Node 发布与监控，`hosts` 的 `resources` 仍进入 Overview，稳定模块、view、Host、Runtime、field 与 draft 身份不变。
+
 CLI 缺失、启动失败和监听观察未知必须可见并可重新检查；进程启动不代签已连接。Tailcat 失败不能撤销健康 SSH、Agent 或 Run。现有 Linux x64 headless Core 升级范围保持不变，Tailcat 接入不授予 Mac 远程安装、主动扫描或绕过安全策略的权限。
 
 ### 在 App 中准备 Tailcat 接入
@@ -118,7 +120,7 @@ CLI 缺失、启动失败和监听观察未知必须可见并可重新检查；�
 
 Tailcat 依赖缺失、密钥准备或入站监听失败时，就地说明下一步并保留手动安装入口；用户可选择某个 Mote，交代依赖安装、环境诊断和配置填写准备。任务携带准确的本机执行目标、被配置 Host、接收／发起角色及非敏感字段是否已填写，不把私有地址、私钥或未经筛选的原始错误复制进任务。未保存草稿不能冒充已生效配置。
 
-原失败步骤、已知机器码和所处设置入口以白名单字段加入同一任务上下文，供 Mote 直接消费已确认事实；缺失观察明确未知，不要求重新安装已确认可用的依赖，也不把窗口定位当成业务步骤。帮助入口可在诊断未知时继续使用，不新增求助状态库或借求助取得密钥、允许列表及保存权限。
+原失败步骤、已知机器码和所处设置入口以白名单字段加入同一任务上下文，供 Mote 直接消费已确认事实；接收端 help 的 `settingsTarget` 是 `{section:'hosts',hostId:<原 local Host ID>,item:'incoming'}`，client 仍是各远端 Host 的 `connection`。缺失观察明确未知，不要求重新安装已确认可用的依赖，也不把窗口定位当成业务步骤。帮助入口可在诊断未知时继续使用，不新增求助状态库或借求助取得密钥、允许列表及保存权限。
 
 求助复用原 Mote 目录、逻辑主对话和持久输入队列，沿原角色修订与准确操作回执投递，不按当前活动成员、显示名称或首个 Executor 猜执行者，也不新增专用修复 Agent 或任务状态库。主对话未确认时保原引用和设置草稿，让用户沿所选 Mote 的原开始／恢复入口继续。入队、输入确认、处理完成和连接成功分别表达；未知投递不自动重发。原客户端接入授权、密钥准备和保存权限继续由各自 owner 确认，求助本身不能代批允许列表。
 

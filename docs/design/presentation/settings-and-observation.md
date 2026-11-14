@@ -435,7 +435,7 @@ Cluster 分组下以 Mesh 进入网络工作面并保留原 Host 工作台，页
 
 选中态同时使用稳定边界／表面与焦点或文字信号，沿 Mint 语言，与状态色分开；hover、键盘焦点和 selected 各有区别。未知节点有可读文字与克制样式，不呈正常绿色，也不借用死亡或危险删除的强红。
 
-连接配置在原 Host 编辑面内呈现 SSH、SSH 优先且 Tailcat 备选、仅 Tailcat 三种选择；字段标签、字号与原控件保持同一密度，SSH 高级参数仍按需展开。本机连接页以一个明确的 Tailcat 入站开关承接 server key 与允许的 client public key，保存草稿提示邻近原 Save hosts。监听观察及刷新保持紧凑的一行，完整失败原因就地可读；私有地址使用密码字段与显式复制动作，拓扑、连线和列表仅显示 Tailcat 传输名称。行为与凭据边界唯一见[Remote 管理合同](../behavior/mesh.md#tailcat-传输与本机接入)。
+连接配置在原 Host 编辑面内呈现 SSH、SSH 优先且 Tailcat 备选、仅 Tailcat 三种选择；字段标签、字号与原控件保持同一密度，SSH 高级参数仍按需展开。本机 listener 只在 **Mesh > Connections > This device > Connection** 呈现，以一个明确的 Tailcat 入站开关承接 server key 与允许的 client public key。独立的 **Save incoming connections** 只保存 listener 草稿；同页 **Save hosts** 只保存 Host 集合，两者的 dirty、回执与观察不得互相冒充。监听观察及刷新保持紧凑的一行，完整失败原因就地可读；私有地址使用密码字段与显式复制动作，拓扑、连线和列表仅显示 Tailcat 传输名称。行为、精确导航与凭据边界唯一见[Remote 管理合同](../behavior/mesh.md#tailcat-传输与本机接入)。
 
 接入准备沿两台机器的实际步骤排列，每侧只有一个主动作。接收端的入站区在开关上方给出“准备接收另一台 Mac”：完成后填好 server key 名、打开草稿开关并把焦点交给允许列表，旁注说明还需粘贴对方连接码并明确保存。发起端在所选 Host 的 Tailcat 字段旁给出取得本机连接码的动作：完成后填好 client key 名，并在只读等宽字段中显示本机连接码及显式复制动作。动作进行中有短加载态，回执说明新生成或沿用已有密钥，并引用所在编辑器真实的保存动作；失败原因和下一步邻近动作成组阅读，不弹窗、不清空草稿。字段中已有的密钥名保持原值并被动作沿用，只有空字段才填入默认名。合同见[在 App 中准备 Tailcat 接入](../behavior/mesh.md#在-app-中准备-tailcat-接入)。
 
