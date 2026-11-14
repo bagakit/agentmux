@@ -27,8 +27,8 @@ export class RunControlOperations {
   private readonly acknowledgedImages = new Map<string, string>()
   constructor(private readonly directory: string) {}
   private path(id: string): string { return join(this.directory, digest(id) + '.json') }
-  private async readRecord(id: string, newAdmission = false): Promise<Record | null> {
-    if (this.observed.has(id)) return structuredClone(this.observed.get(id)!)
+  private async readRecord(id: string, newAdmission = false, diskOnly = false): Promise<Record | null> {
+    if (!diskOnly && this.observed.has(id)) return structuredClone(this.observed.get(id)!)
     let raw: string
     try { raw = await readFile(this.path(id), 'utf8') }
     catch (error) {
@@ -107,16 +107,23 @@ export class RunControlOperations {
       await this.save(record); return { receipt: record.receipt as ReceiptFor<R>, dispatched: true }
     })
   }
-  async settle<R extends ControlRequest>(request: R, actor: RunControlActor, update: Pick<ReceiptFor<R>, 'outcome' | 'acknowledgement'> & { issue?: string }): Promise<ReceiptFor<R>> {
-    const record = await this.readRecord(request.operationId)
-    if (!record) throw new AgentMuxError('The original dispatched native operation is unavailable.', 'RUN_CONTROL_RECORD_UNCONFIRMED')
-    this.same(record, request, actor)
+  async settle<R extends ControlRequest>(request: R, actor: RunControlActor, dispatched: ReceiptFor<R>, update: Pick<ReceiptFor<R>, 'outcome' | 'acknowledgement'> & { issue?: string }): Promise<ReceiptFor<R>> {
+    // The caller already holds this acknowledged dispatch claim. Reading its
+    // file again must not be a prerequisite for retaining a later native ACK.
+    const receipt = 'action' in request ? parseTerminalControlResult(dispatched, request) : parsePostureSetResult(dispatched, request)
+    if (receipt.phase !== 'dispatching' || digest(receipt.actor) !== digest(actor)) throw conflict()
+    const record: Record = { schemaVersion: 1, request, requestDigest: digest({ request, actor }), receipt }
     record.receipt = { ...record.receipt, ...update, phase: 'settled', diskDurability: 'unconfirmed' } as ControlReceipt
     // Retain the observed ACK even if admission to the receipt writer fails.
     // The durable dispatch claim already prevents any later reinput.
     this.observed.set(request.operationId, structuredClone(record))
     try {
       await this.locked(request.operationId, async () => {
+        // A missing or replaced disk member is not permission to reconstruct or
+        // overwrite it. Keep only the obtained ACK in this original live owner.
+        const prior = await this.readRecord(request.operationId, false, true)
+        if (!prior || prior.requestDigest !== record.requestDigest || prior.receipt.phase !== 'dispatching' ||
+          prior.receipt.nativeOperationId !== dispatched.nativeOperationId || digest(prior.receipt.runtime) !== digest(dispatched.runtime)) throw conflict()
         const durable = { ...record, receipt: { ...record.receipt, diskDurability: 'confirmed' as const } }
         await this.save(durable); record.receipt = durable.receipt; this.observed.delete(request.operationId)
       })

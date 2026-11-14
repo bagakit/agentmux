@@ -4834,10 +4834,10 @@ export class AgentMuxClient {
         if (stopped.kind === 'absent') { outcome = 'no-op'; acknowledgement = { kind: 'stop-absent', runId: stopped.runId } }
         else acknowledgement = { kind: 'stop', runId: stopped.runId, disposition: stopped.disposition, state: stopped.state }
       }
-      return parseTerminalControlResult(await operations.settle(input, actor, { outcome, acknowledgement }), input)
+      return parseTerminalControlResult(await operations.settle(input, actor, claim.receipt, { outcome, acknowledgement }), input)
     } catch (error) {
       const notApplied = error instanceof AgentMuxError && (error.detail === 'not_applied' || error.controlFailure?.disposition === 'not_applied')
-      return await operations.settle(input, actor, { outcome: notApplied ? 'not-applied' : 'unknown', acknowledgement: null,
+      return await operations.settle(input, actor, claim.receipt, { outcome: notApplied ? 'not-applied' : 'unknown', acknowledgement: null,
         issue: 'Original raw Terminal operation ' + input.operationId + ': ' + String(error) + '. Inspect this original operation; do not replay it.' })
     }
   }
@@ -8341,10 +8341,10 @@ export class AgentMuxClient {
       if (ack.runId !== input.target.expectedRun.runId || !ack.appliedByteRange ||
         ack.appliedByteRange.endByte - ack.appliedByteRange.startByte !== Buffer.byteLength(plan.data))
         throw new AgentMuxError('The original posture byte receipt does not match its input.', 'CONTROL_PROTOCOL_ERROR')
-      return await operations.settle(input, actor, { outcome: 'applied', acknowledgement: ack })
+      return await operations.settle(input, actor, claim.receipt, { outcome: 'applied', acknowledgement: ack })
     } catch (error) {
       const notApplied = error instanceof AgentMuxError && (error.detail === 'not_applied' || error.controlFailure?.disposition === 'not_applied')
-      return await operations.settle(input, actor, { outcome: notApplied ? 'not-applied' : 'unknown', acknowledgement: null,
+      return await operations.settle(input, actor, claim.receipt, { outcome: notApplied ? 'not-applied' : 'unknown', acknowledgement: null,
         issue: 'Original posture operation ' + input.operationId + ': ' + String(error) + '. Inspect the same operation; do not reinput.' })
     }
   }
