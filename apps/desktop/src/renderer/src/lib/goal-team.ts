@@ -5,7 +5,7 @@ import { goalAgentPresentation, type GoalAgentRole } from './goal-agent-selectio
 import { goalSupervisorHostWitnesses, projectDemandRelations, type GoalRelationRoleKind } from '@agentmux/demand/relations'
 import { collaborationSubjectKey, type CollaborationAgent } from './agent-collaboration'
 
-export type GoalTeamIdentity = { subject: { hostId: string; agentSessionId: string }; roles: readonly (GoalRelationRoleKind | 'planned-executor')[] }
+export type GoalTeamIdentity = { subject: { hostId: string; agentSessionId: string }; roles: readonly (GoalRelationRoleKind | 'planned-executor')[]; currentSupervisor?: true }
 /** Accurate recorded sources are not inferred from bare assignments or live namesakes. */
 export function goalTeamIdentities(goal: DemandRecord) {
   const identities = new Map<string, GoalTeamIdentity>()
@@ -18,84 +18,70 @@ export function goalTeamIdentities(goal: DemandRecord) {
     add({ hostId, agentSessionId }, relations.flatMap(relation => relation.roles.map(role => role.kind)))
   }
   for (const node of goal.plan?.nodes ?? []) if (node.executor) add(node.executor, ['planned-executor'])
-  const supervisorHosts = goalSupervisorHostWitnesses({ ...goal, supervisorSessionId: goal.supervisorSessionId ?? null })
-  if (goal.supervisorSessionId && supervisorHosts.length === 1) add({ hostId: supervisorHosts[0]!, agentSessionId: goal.supervisorSessionId }, ['supervisor'])
+  const supervisorHosts = goalSupervisorHostWitnesses(goal)
+  if (goal.supervisorSessionId && supervisorHosts.length === 1) {
+    const subject = { hostId: supervisorHosts[0]!, agentSessionId: goal.supervisorSessionId }, key = collaborationSubjectKey(subject)
+    add(subject, ['supervisor']); identities.set(key, { ...identities.get(key)!, currentSupervisor: true })
+  }
   const agents = new Map<string, CollaborationAgent>([...identities].map(([key, { subject }]) => [key, { id: key, subject, sessionId: subject.agentSessionId }]))
   return { identities, agents, wanted: new Set(identities.keys()) }
 }
 
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
-export type GoalTeamActor = { key: string; session: Agent; roles: GoalAgentRole[]; recommended: boolean }
-export type GoalTeamReference = { id: string; roles: GoalAgentRole[]; reason: string }
-type Team = { actors: GoalTeamActor[]; references: GoalTeamReference[] }
-type Membership = Pick<DemandRecord, 'supervisorSessionId' | 'assigneeSessionIds' | 'sessionIds' | 'participations'>
+export type GoalTeamActor = { key: string; session: Agent; identity: GoalTeamIdentity; roles: readonly GoalAgentRole[]; recommended: boolean }
+export type GoalTeamGroup = { id: string; roles: readonly GoalAgentRole[]; identities: readonly GoalTeamIdentity[]; actors: readonly GoalTeamActor[]; unconfirmedRoles: readonly GoalAgentRole[] }
+type Team = { groups: readonly GoalTeamGroup[]; actors: readonly GoalTeamActor[] }
 const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((item, i) => item === b[i])
-const actorKey = (session: Agent) => JSON.stringify([session.control.hostId, session.control.agentSessionId])
 
 /** Read only this Goal's original references through the shared inventory index.
  * A bare reference never selects the first Host or synthesizes an Actor. */
-export function createGoalTeamSelector(goal: Membership) {
+export function createGoalTeamSelector(goal: DemandRecord, references = goalTeamIdentities(goal)) {
   const roles = new Map<string, GoalAgentRole[]>()
   for (const [role, ids] of [['supervisor', goal.supervisorSessionId ? [goal.supervisorSessionId] : []],
     ['assignees', goal.assigneeSessionIds ?? []], ['related', goal.sessionIds]] as const) {
     for (const id of ids) roles.set(id, [...new Set([...roles.get(id) ?? [], role])])
   }
-  let held: Team = { actors: [], references: [] }
+  let held: Team = { groups: [], actors: [] }
   let sessions: readonly SessionSnapshot[] | undefined
   return (state: { sessions: readonly SessionSnapshot[] }): Team => {
     if (sessions === state.sessions) return held
     sessions = state.sessions
     const index = agentSessionPresentationIndex(state.sessions)
-    const actors = new Map<string, GoalTeamActor>(), references: GoalTeamReference[] = []
-    const matches = (id: string) => (index.get(id) ?? []).filter(session => session.control.agentSessionId === id || session.id === id)
-    for (const [id, assigned] of roles) {
-      const candidates = matches(id)
-      const session = goalAgentPresentation(candidates, id)
-      if (!session) {
-        const hosts = [...new Set(candidates.map(session => session.control.hostId))]
-        const reason = candidates.some(session => session.hostId !== session.control.hostId)
-          ? 'The presentation Host does not match its original Agent owner. Review the retained relationship.'
-          : candidates.length ? `More than one original Host or Run matches${hosts.length ? ` · Hosts ${hosts.join(', ')}` : ''}. Review this relationship without choosing a first Host.`
-            : 'The original Agent identity is not currently confirmed. Its reference and work are retained.'
-        references.push({ id, roles: assigned, reason })
-        continue
-      }
-      const key = actorKey(session), previous = actors.get(key)
-      actors.set(key, { key, session, roles: [...new Set([...previous?.roles ?? [], ...assigned])], recommended: false })
+    const groups = new Map<string, { id: string; roles: GoalAgentRole[]; identities: GoalTeamIdentity[] }>()
+    for (const identity of references.identities.values()) {
+      const id = identity.subject.agentSessionId, group = groups.get(id) ?? { id, roles: [], identities: [] }
+      group.identities.push(identity); groups.set(id, group)
     }
-    if (!goal.supervisorSessionId) {
-      // Keep the existing bounded recommendations, using exact original participation
-      // and only an unambiguous canonical identity the original role picker can save.
-      const candidates = [...actors.values()].filter(actor => actor.roles.includes('related')).map(actor => actor.key)
-      for (const source of goal.participations ?? []) {
-        const found = matches(source.agentSessionId)
-        const session = goalAgentPresentation(found, source.agentSessionId)
-        if (!session || session.control.hostId !== source.hostId) continue
-        const key = actorKey(session)
-        if (!actors.has(key)) actors.set(key, { key, session, roles: [], recommended: false })
-        if (!candidates.includes(key)) candidates.push(key)
-      }
-      const recommended = new Set(candidates.slice(0, 3))
-      for (const [key, actor] of actors) {
-        if (!actor.roles.length && !recommended.has(key)) actors.delete(key)
-        else actor.recommended = recommended.has(key)
-      }
+    for (const [originalId, assigned] of roles) {
+      // A retained presentation alias may join an already qualified original
+      // subject; the alias itself supplies no new Host or write authority.
+      const presentation = goalAgentPresentation(index.get(originalId) ?? [], originalId)
+      const canonical = presentation && references.identities.has(collaborationSubjectKey(presentation.control)) ? presentation.control.agentSessionId : originalId
+      const group = groups.get(canonical) ?? { id: canonical, roles: [], identities: [] }
+      group.roles = [...new Set([...group.roles, ...assigned])]; groups.set(canonical, group)
     }
-    const oldActors = new Map(held.actors.map(actor => [actor.key, actor]))
-    const oldReferences = new Map(held.references.map(reference => [reference.id, reference]))
-    const nextActors = [...actors.values()].map(actor => {
-      const subject = actor.session.control
-      const presentations = (index.get(subject.agentSessionId) ?? []).filter(session => session.control.hostId === subject.hostId &&
-        session.control.agentSessionId === subject.agentSessionId && session.control.run.runId === subject.run.runId)
-      actor.session = goalAgentPresentation(presentations, subject.agentSessionId) ?? actor.session
-      const old = oldActors.get(actor.key)
-      return old?.session === actor.session && old.recommended === actor.recommended && same(old.roles, actor.roles) ? old : actor
+    const oldActors = new Map(held.actors.map(actor => [actor.key, actor])), oldGroups = new Map(held.groups.map(group => [group.id, group]))
+    let recommendations = 0
+    const rank = (group: { roles: readonly GoalAgentRole[] }) => group.roles.includes('supervisor') ? 0 : group.roles.includes('assignees') ? 1 : 2
+    const nextGroups = [...groups.values()].sort((a, b) => rank(a) - rank(b)).map(group => {
+      const unconfirmedRoles = group.roles.filter(role => role !== 'supervisor' || !group.identities.some(identity => identity.currentSupervisor))
+      const actors = group.identities.flatMap(identity => {
+        const { subject } = identity, candidates = (index.get(subject.agentSessionId) ?? []).filter(session => session.control.hostId === subject.hostId)
+        const session = goalAgentPresentation(candidates, subject.agentSessionId)
+        if (!session) return []
+        const key = collaborationSubjectKey(subject), assigned: GoalAgentRole[] = identity.currentSupervisor && group.roles.includes('supervisor') ? ['supervisor'] : []
+        const recommended = !goal.supervisorSessionId && recommendations < 3 &&
+          Boolean(goalAgentPresentation(index.get(subject.agentSessionId) ?? [], subject.agentSessionId))
+        if (recommended) recommendations++
+        const old = oldActors.get(key)
+        return [old?.session === session && old.identity === identity && old.recommended === recommended && same(old.roles, assigned)
+          ? old : { key, session, identity, roles: assigned, recommended }]
+      })
+      const old = oldGroups.get(group.id)
+      return old && same(old.unconfirmedRoles, unconfirmedRoles) && same(old.roles, group.roles) && same(old.identities, group.identities) && same(old.actors, actors)
+        ? old : { ...group, actors, unconfirmedRoles }
     })
-    const nextReferences = references.map(reference => {
-      const old = oldReferences.get(reference.id)
-      return old?.reason === reference.reason && same(old.roles, reference.roles) ? old : reference
-    })
-    if (!same(held.actors, nextActors) || !same(held.references, nextReferences)) held = { actors: nextActors, references: nextReferences }
+    if (!same(held.groups, nextGroups)) held = { groups: nextGroups, actors: nextGroups.flatMap(group => group.actors) }
     return held
   }
 }

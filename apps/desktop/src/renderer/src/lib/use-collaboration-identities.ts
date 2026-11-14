@@ -4,7 +4,7 @@ import type { SessionHistorySourceObservation, SessionHistorySourceReference } f
 import { api } from './api'
 import { collaborationHistoryMember, collaborationSubjectKey, type CollaborationAgent, type CollaborationRelation } from './agent-collaboration'
 
-type IdentityRead = { reference: SessionHistorySourceReference; source: AgentSessionHistoryDescriptor | null; issue: string | null; loading: boolean }
+export type IdentityRead = { reference: SessionHistorySourceReference; source: AgentSessionHistoryDescriptor | null; issue: string | null; loading: boolean }
 const referenceKey = (reference: SessionHistorySourceReference) => 'hostId' in reference
   ? collaborationSubjectKey(reference) : JSON.stringify(['runtime-reference', reference.runtimeId, reference.agentSessionId])
 

@@ -52,9 +52,9 @@ export function retainedFocusContext(source: SessionHistoryDescriptor, name?: st
   return { id: source.agentSessionId, hostId: source.hostId, resourceUnobserved: !source.history, ...(source.workPlacement ? { workPlacement: source.workPlacement } : {}), ...(source.history?.toolExecution ? { toolExecution: source.history.toolExecution } : {}), name: name ?? source.agentSessionId,
     kind: 'agent', providerId: source.history?.providerId ?? null, ...(source.history?.executorId ? { executorId: source.history.executorId } : {}),
     workspacePath: source.history?.workspacePath ?? '', workspace: undefined, workspaceId: '', workspaceName: 'Retained Session', topicId: null,
-    runId: '', runUnobserved: true, processState: 'interrupted', state: 'disconnected', stateLabel: source.state === 'retired' ? 'Retired' : 'Unobserved', bucket: 'idle',
+    runId: '', runUnobserved: true, processState: 'interrupted', state: 'disconnected', stateLabel: source.state === 'deleted' ? 'Record deleted' : source.state === 'retired' ? 'Retired' : 'Unobserved', bucket: 'idle',
     liveAgent: false, actionable: false, lastActivityAt: null, workingEnteredAt: null,
-    detail: `${source.state === 'retired' ? 'Retired' : 'Retained'} Session · Current Run is unconfirmed`, detailIsRecap: false, detailKind: 'service', recap: null }
+    detail: source.state === 'deleted' ? 'The AgentMux record was deleted. Its original relationship is retained.' : `${source.state === 'retired' ? 'Retired' : 'Retained'} Session · Current Run is unconfirmed`, detailIsRecap: false, detailKind: 'service', recap: null }
 }
 
 export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusBucket, FocusContext[]> {
