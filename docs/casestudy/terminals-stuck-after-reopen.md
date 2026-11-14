@@ -2,7 +2,7 @@
 
 ## 定性
 
-P0：原 Run 仍在运行，客户端却因无关恢复观察无法交付原终端，触犯健康能力与工作面恢复红线。本案例复盘 Hosted 附着阻断、`fd437cbb11` 的限定修复，以及随后在新建 Agent 消费者证实的同类准入遗漏与 `3f7ef43c0a` 修复；资源占用与其它启动故障仍分别归因。
+P0：原 Run 仍在运行，客户端却因无关恢复观察无法交付原终端，触犯健康能力与工作面恢复红线。本案例复盘 Hosted 附着阻断、`f9b0e4ee98` 的限定修复，以及随后在新建 Agent 消费者证实的同类准入遗漏与 `88b24a1b0b` 修复；同一类“观察失败阻断准确能力”的两次复发见文末两个复发小节。资源占用与其它启动故障分别归因。
 
 ## 用户可见症状
 
@@ -30,24 +30,24 @@ P0：原 Run 仍在运行，客户端却因无关恢复观察无法交付原终�
 
 ## 引入沿革
 
-以下按提交顺序记录，来源是 Git；为避免暴露事件元数据，仅保留 SHA 与 message。可从仓库根核对：
+以下按提交顺序记录，来源是 Git；为避免暴露事件元数据，仅保留 SHA 与 message。分类常量 `AGENTMUX_HOSTED_RUNTIME_METHODS` 后来改成了按方法映射的分类表，所以命令在附着修复的父提交 `f9b0e4ee98^` 上执行：
 
 ```sh
-git log --format='%h %s' -S runtimeSubject -- packages/core/src/hosted-client-contract.ts
-git log --format='%h %s' -L '/^export const AGENTMUX_HOSTED_RUNTIME_METHODS/,+8:packages/core/src/hosted-client-contract.ts'
-git log --follow --format='%h %s' -- packages/core/src/hosted-client-contract.ts
+git log --format='%h %s' -S runtimeSubject f9b0e4ee98^ -- packages/core/src/hosted-client-contract.ts
+git log --format='%h %s' -L '/^export const AGENTMUX_HOSTED_RUNTIME_METHODS/,+8:packages/core/src/hosted-client-contract.ts' f9b0e4ee98^
+git log --follow --format='%h %s' f9b0e4ee98^ -- packages/core/src/hosted-client-contract.ts
 ```
 
 | 提交 | message 与该段变化 | 为什么没有覆盖本缺口 |
 | --- | --- | --- |
-| `a1c94fec4a` | `feat(core): share hosted RPC and browser HTTP transport`：shared Hosted 方法表已有 `runtimeSubject` | 说明该方法先于独立 Runtime 分类存在，遗漏不能归给后来的 membership 修复 |
-| `15bc64a45f` | `fix(core): keep exact control independent of observation leases`：引入 `AGENTMUX_HOSTED_RUNTIME_METHODS`，包含 attach 等物理方法，遗漏 `runtimeSubject` | 准入已区分物理操作与观察，但附着后回执投影仍落到完整 `connect()`；缺口从该分类引入时存在 |
-| `0046c02b11` | `feat(remote): expose passive Host runtime observations in Settings and CLI`：将两个被动 Runtime 诊断移入 offline 分类 | 改善诊断观察的前提，没有覆盖附着后的 Session 投影 |
-| `4cae4223c5` | `fix(runtime): restore cold Host membership independently of recovery`：加入 `runtimeProjection`，让冷 Host 的原绑定可先投影 | 解决全量 membership 的前一步，回归没有消费 `attachSession` 的最终回执，因此仍留下 `sessionByTarget` 的等待 |
-| `fd437cbb11` | `fix(core): attach original terminals without waiting for unrelated recovery`：将 `runtimeSubject` 加入同一 shared Runtime 分类 | 把原 Agent／raw Terminal 的真实 Main 附着回执和后续输出接入同一回归 |
-| `3f7ef43c0a` | `fix(core): create agents without waiting for unrelated recovery`：补齐准确创建、原回执读取与来源授权的既有准入 | 独立验证新建链，并补足冷 fork 准确来源采用；不是附着成功即可代签创建 |
+| `4d44394137` | `feat(core): share hosted RPC and browser HTTP transport`：shared Hosted 方法表已有 `runtimeSubject` | 说明该方法先于独立 Runtime 分类存在，遗漏不能归给后来的 membership 修复 |
+| `f5b4af3ede` | `fix(core): keep exact control independent of observation leases`：引入 `AGENTMUX_HOSTED_RUNTIME_METHODS`，包含 attach 等物理方法，遗漏 `runtimeSubject` | 准入已区分物理操作与观察，但附着后回执投影仍落到完整 `connect()`；缺口从该分类引入时存在 |
+| `c3220c60d9` | `feat(remote): expose passive Host runtime observations in Settings and CLI`：将两个被动 Runtime 诊断移入 offline 分类 | 改善诊断观察的前提，没有覆盖附着后的 Session 投影 |
+| `583e65278b` | `fix(runtime): restore cold Host membership independently of recovery`：加入 `runtimeProjection`，让冷 Host 的原绑定可先投影 | 解决全量 membership 的前一步，回归没有消费 `attachSession` 的最终回执，因此仍留下 `sessionByTarget` 的等待 |
+| `f9b0e4ee98` | `fix(core): attach original terminals without waiting for unrelated recovery`：将 `runtimeSubject` 加入同一 shared Runtime 分类，只改 `hosted-client-contract.ts` 一行 | 修复本身；原 Agent／raw Terminal 的真实 Main 附着回执与后续输出的回归在 `e88e5bfc08` |
+| `88b24a1b0b` | `fix(core): create agents without waiting for unrelated recovery`：补齐准确创建、原回执读取与来源授权的既有准入 | 修复本身；新建链与冷 fork 准确来源采用的回归在 `a90851dd51`，不是附着成功即可代签创建 |
 
-指定分类段的 Git 沿革显示，从 Runtime 分类引入到 `fd437cbb11` 附着修复之前，改过该段的是上述被动诊断分类与冷 Host membership 两项；文件其它方法的改动不等于检查过这一段附着依赖。
+指定分类段的 Git 沿革显示，从 Runtime 分类引入到 `f9b0e4ee98` 附着修复之前，改过该段的是上述被动诊断分类与冷 Host membership 两项（`-L` 输出中更早的 `cfb0ee363b` 发生在分类引入之前）；文件其它方法的改动不等于检查过这一段附着依赖。
 
 ## 根因分析
 
@@ -78,7 +78,7 @@ git log --follow --format='%h %s' -- packages/core/src/hosted-client-contract.ts
 
 ## 验证
 
-本修复的历史证据绑定 `fd437cbb11`。正式夹具的两项测试通过；仅从实际加载的生产 shared Runtime 分类移除 `runtimeSubject` 后，两项中附着测试明确失败，另一项通过；恢复原候选后两项重新通过。失败是 `unrelatedRecovery` 事件先于 attach 回执到达，断言为“原 Main 附着不得等待无关 Session 恢复”，不是模块加载错误、空集合或机器负载超时。
+本修复的历史证据绑定 `f9b0e4ee98`；该提交只改分类，夹具的扩展在测试提交 `e88e5bfc08`（`test(runtime): cover original attachments before Session recovery`）。正式夹具的两项测试通过；仅从实际加载的生产 shared Runtime 分类移除 `runtimeSubject` 后，两项中附着测试明确失败，另一项通过；恢复原候选后两项重新通过。失败是 `unrelatedRecovery` 事件先于 attach 回执到达，断言为“原 Main 附着不得等待无关 Session 恢复”，不是模块加载错误、空集合或机器负载超时。
 
 从仓库根可复核现有私有夹具；夹具还会清除其余 `AGENTMUX_`／`CTXMUX_` 环境继承，自建 Native、存储和私有子进程：
 
@@ -94,11 +94,13 @@ env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_RUNTIME_DIRECTORY -u AGENTMUX_ST
 
 实际 clean App 安装后，公开 `space.inspect` 确认原 Agent 与 raw Terminal 的准确 Region／Run，二者可见、liveReady、acceptsInput；独立看图确认同屏真实内容可读。原 Native、Run／PID、持久 Session、Tab／Region 和 Core 布局保留。GUI 观察与原身份核对分别成立，不把截图当作新输入已被消费或完整旧焦点相等的证明。原始 receipt 与截图保留本机，本文不复制身份、机器信息或终端正文。
 
-创建修复 `3f7ef43c0a` 的同一真实 Main 夹具共三项通过：新增创建项在 pending／failed 两阶段分别创建一个 Agent 和一个 raw Terminal，核准确 Native／Run／PID、非空初始内容与后续有序字节；重复原 operation 不新增启动或输入，原首次投递未知保持未知。六项 Hosted 定点测试通过。撤销三项创建分类、inspect／attest 分类、prepared 重连与冷 fork 来源采用，共七项实际加载生产变异，均在对应消费者产生语义失败，恢复后通过。生产构建与类型检查通过，测试类型无新增诊断。
+创建修复 `88b24a1b0b` 不含测试，对应测试在 `a90851dd51`（`test(core): cover Hosted creation without unrelated recovery`）。同一真实 Main 夹具共三项通过：新增创建项在 pending／failed 两阶段分别创建一个 Agent 和一个 raw Terminal，核准确 Native／Run／PID、非空初始内容与后续有序字节；重复原 operation 不新增启动或输入，原首次投递未知保持未知。六项 Hosted 定点测试通过。撤销三项创建分类、inspect／attest 分类、prepared 重连与冷 fork 来源采用，共七项实际加载生产变异，均在对应消费者产生语义失败，恢复后通过。生产构建与类型检查通过，测试类型无新增诊断。
 
-相关 Core 套件合计五十一项通过、五项失败；五项失败已用精确基线 `ceddee1ef6` 的原源码和测试实际对照，分别是四项旧 Provider fork 夹具与一项旧消息展示断言。新增冷 fork 用明确 Provider collaborator 保留真实原来源 witness 校验，不代签当前全部 Provider 原生 fork 集成；不能把这批结果描述为 Core 全量测试通过。
+相关 Core 套件合计 51 项通过、5 项失败；5 项失败已用精确基线 `76ee3a3c1e` 的原源码和测试实际对照，分别是四项旧 Provider fork 夹具与一项旧消息展示断言。新增冷 fork 用明确 Provider collaborator 保留真实原来源 witness 校验，不代签当前全部 Provider 原生 fork 集成；不能把这批结果描述为 Core 全量测试通过。
 
-## 后续恢复：过期辅助握手扩大为全局失败
+## 复发：过期辅助握手扩大为全局失败
+
+同一类缺陷（无关观察失败阻断准确目标的能力）的第二种形态。等级 P0：准确 Native Run 仍在运行，原 Session 却因另一笔辅助握手事务的失败无法恢复，并波及其他 Session 的恢复观察。
 
 用户继续反馈原 Session 无法恢复，提示当前输入游标已前进，而原操作期望从零开始。准确 Native Run 仍为 running，输入开放，已接收字节均已完成；原 Provider-native conversation 身份与来源文件也仍可读。现场没有该新 Run 已观察到原上下文的确认回执，语义恢复完成状态须保持未知。
 
@@ -106,31 +108,35 @@ env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_RUNTIME_DIRECTORY -u AGENTMUX_ST
 
 **失败扩散发生在 Core。** 旧 `ensureTerminalHandshake` 复用未确认 claim 自动重投；非 timeout 错误被完整 `open` 收集并抛为全局连接失败。后续的原生状态与上下文恢复观察尚未完成，另一个 Session 的消费者又等待同一完整 `connect()`。这形成了“观察失败阻断后续恢复观察”的闭环。
 
-`e10cd3cad4` 在原 owner 修正这条边界：过期 claim 不自动重投，原 operation、range 与未确认状态保留；准确失败沿既有 capability 服务窗呈现。新人工输入取得当前 Native 游标，继续经过原授权和输入 fence。新握手的 claim/write 进入已有 Session 输入串行边界，查询观察留在队列之外；辅助 marker 保存失败保留健康 Run 的既有能力及持久性未知。
+`5db9648550` 在原 owner 修正这条边界：过期 claim 不自动重投，原 operation、range 与未确认状态保留；准确失败沿既有 capability 服务窗呈现。新人工输入取得当前 Native 游标，继续经过原授权和输入 fence。新握手的 claim/write 进入已有 Session 输入串行边界，查询观察留在队列之外；辅助 marker 保存失败保留健康 Run 的既有能力及持久性未知。
 
 语义恢复的结果是：同一 durable Session 沿准确 Provider-native conversation 继续原上下文。原进程仍在时，接回同 Run／PTY 可以先完成；原 Run 确认结束或丢失后，请求 Level B 则仍须核对原 native target、Provider、Executor、权限、原操作与持久 prepare/commit。全局依赖判据唯一见[按操作判断强弱依赖](../design/behavior/shared-rules.md#按操作判断强弱依赖)，恢复结果边界归[Durable Runtime 健康](../design/behavior/session-recovery.md#durable-runtime-健康)。
 
-这项修复的证据包括：同 Native／Run／PID 跨真实语义进程重启保留；原输出及新有序输出可读；新输入取得准确 ACK；原 claim 未改写、旧输入未重放；实际输入竞争及目录 sync 返回 ENOSPC 时仍保留健康能力。五条实际编译 Core 变异和三条实际 Renderer 消费变异产生对应业务失败，恢复候选后相关 Core/Main 六十项、UI 三十三项通过。这里的 ENOSPC 是 FileStore 同步调用边界的受控 syscall 错误，真实满卷、OOM 或物理掉电仍需各自的隔离证据；测试 Provider 的 native target 保全也不代签真实 Provider 上下文恢复。
+这项修复的证据包括：同 Native／Run／PID 跨真实语义进程重启保留；原输出及新有序输出可读；新输入取得准确 ACK；原 claim 未改写、旧输入未重放；实际输入竞争及目录 sync 返回 ENOSPC 时仍保留健康能力。5 条实际编译 Core 变异和 3 条实际 Renderer 消费变异产生对应业务失败，恢复候选后相关 Core／Main 60 项、UI 33 项通过。这里的 ENOSPC 是 FileStore 同步调用边界的受控 syscall 错误，真实满卷、OOM 或物理掉电仍需各自的隔离证据；测试 Provider 的 native target 保全也不代签真实 Provider 上下文恢复。
 
 P00 可靠性原则已原位写入[低资源原则](../design/behavior/shared-rules.md#低资源下的正确性与可恢复性)、恢复合同、[拦截判定](../../RED-LINES.md)和[故障验证策略](../testing/strategy.md#隔离资源故障与恢复验证)。已确认持久的原身份、请求和进度是跨极端事件的恢复起点；未知副作用不自动重放。SIGKILL 验证进程崩溃，受控断电验证存储耐久性，两项分别留证。
 
-`415fdbb503` 随后闭合准确恢复的完整消费者：Core 的 continuity／resume／status 只采用本次准确 Session 与严格退休事实，全组辅助观察失败逐 Session 保留。实际 Main 链又暴露两处前置等待，以及一处后置拒绝：Core 已返回可接回的原 Run，Main 却因事件缓存缺少 Session 再次抛错。修正复用原 Runtime 准入及准确回执投影，并核对返回 Run，保留原 operation、expectedRun、Provider、权限和 Level B 条件。机制见[Terminal Runtime 架构](../architecture/terminal-runtime.md#11-原终端附着与-hosted-准入)。
+`86db07d460` 随后闭合准确恢复的完整消费者：Core 的 continuity／resume／status 只采用本次准确 Session 与严格退休事实，全组辅助观察失败逐 Session 保留。实际 Main 链又暴露两处前置等待，以及一处后置拒绝：Core 已返回可接回的原 Run，Main 却因事件缓存缺少 Session 再次抛错。修正复用原 Runtime 准入及准确回执投影，并核对返回 Run，保留原 operation、expectedRun、Provider、权限和 Level B 条件。机制见[Terminal Runtime 架构](../architecture/terminal-runtime.md#11-原终端附着与-hosted-准入)。
 
-该恢复切片的十三条实际编译 Core 变异与四条实际加载 Main 变异分别产生业务失败，恢复后八十三项相关 Core 测试、八项真实 Main 消费者与拒绝对照通过。真实隔离 Native 和新语义进程使用同一原文件、Run 与 PID；准确 ended Session 的合成 Provider 恢复保原 native target 和操作，但不代签真实 Provider 上下文。宽回归仍有经准确基线复现的旧失败，不宣称全量通过。managed Hook 配置 helper 原有的无 Session 事件诊断尚未补成准确 late-subscriber 回执，本轮没有借用另一类 Hook 观察替它签字。
+该恢复切片的 13 条实际编译 Core 变异与 4 条实际加载 Main 变异分别产生业务失败，恢复后 83 项相关 Core 测试、8 项真实 Main 消费者与拒绝对照通过。真实隔离 Native 和新语义进程使用同一原文件、Run 与 PID；准确 ended Session 的合成 Provider 恢复保原 native target 和操作，但不代签真实 Provider 上下文。宽回归仍有经准确基线复现的旧失败，不宣称全量通过。managed Hook 配置 helper 原有的无 Session 事件诊断当时尚未补成准确 late-subscriber 回执，这次修复没有借用另一类 Hook 观察替它签字。
 
-## 新增观察口误套原活 Run
+## 复发：新增观察口误套原活 Run
+
+同一类缺陷的第三种形态。等级 P0：触犯[健康能力底线](../../AGENTS.md#健康能力与未知状态)——前台观察只是未知，界面却把健康终端呈现为已断开。证据在修复的父提交 `5f364c9387^`：`session-recovery-banner.ts` 对 unknown 给出 “Terminal connection unconfirmed” 并提示 Resume；`SessionPane.tsx` 把 unknown 与确认 detached 一样计入 `disconnected`，渲染 `terminal-recovery--disconnected` 浮层；`terminal.css` 中该浮层绝对定位（`z-index: 35`，贴终端底部、左右各留 12px），覆盖原终端底部。若能证明该版本中 unknown 不进入这个浮层，或浮层不遮挡终端的阅读与输入，这个等级就不成立。
 
 另一次现场出现终端已有输出，页面仍持续显示“连接未确认／Resume”。准确 Runtime 观察确认原 Run 仍在运行、输出服务可用、输入开放；Core 的受管前台观察则报告原控制通道不存在。两种观察属于不同对象，不能以终端画面代签前台 attached，也不能以辅助通道缺失推断原 Agent 已退出。
 
 原因有两层。Core 只要看到原 `nativeActor` 和当前 Provider 的观察方法，就要求原活进程提供后来新增的前台控制通道；原 `protocolId` 实际只承诺原生输入能力，没有承诺该通道。Renderer 又把前台 unknown 与确认 detached 共用 Resume 横幅，使观察缺口遮住仍可工作的终端。终端 attach 成功只更新自己的连接状态，不能解除另一 owner 持有的 unknown；单纯隐藏横幅也会掩盖真实前台断开。
 
-修正在原启动与呈现 owner 分别收敛：[Provider 启动计划](../../packages/core/src/providers/codex-native-input.ts) 只为实际具备通道的新启动冻结私有 `frontendControl` 声明，[Session Store](../../packages/core/src/agent-session-store.ts) 原样保留准确声明，[Core](../../packages/core/src/client.ts) 的观察和手动重连只消费该原声明，不追认或回填原活 Run。缺声明不猜附着状态；声明存在但通道失败继续保留准确 unknown。[SessionPane](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 将 unknown 放入不遮挡终端的服务窗，提供只读原对象重查，确认 detached 才保留原显式 Resume。行为边界归[Session 恢复](../design/behavior/session-recovery.md)。
+修正在原启动与呈现 owner 分别收敛：[Provider 启动计划](../../packages/core/src/providers/codex-native-input.ts) 只为实际具备通道的新启动冻结私有 `frontendControl` 声明，[Session Store](../../packages/core/src/agent-session-store.ts) 原样保留准确声明，[Core](../../packages/core/src/client.ts) 的观察和手动重连只消费该原声明，不追认或回填原活 Run。缺声明不猜附着状态；声明存在但通道失败继续保留准确 unknown。[SessionPane](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 将 unknown 放入不遮挡终端的服务窗，提供只读原对象重查，确认 detached 才保留原显式 Resume。Core 侧的声明绑定由 `3f2326ecad`（`fix(core): bind frontend control to the original launch capability`）落地；呈现修正是 `5f364c9387`（`fix(desktop): keep unknown frontend observations off live terminals`），unknown 改用不遮挡终端的服务窗和只读 “Refresh observation”，只有确认 detached 才保留 Resume。行为边界归[Session 恢复](../design/behavior/session-recovery.md)。
 
 回归分别覆盖原声明缺席、声明存在但通道丢失，以及确认前台断开的真实恢复。公共 Hosted／CLI 消费者核对语义 owner 重启后的原 Session、Run、PID、原生身份、输入计数与子进程数；呈现消费者核对刷新不执行恢复、准确 attached 后撤下告示以及原终端节点和草稿保留。隔离夹具的通过不代签用户现场已安装新候选，也不证明全部资源或极端事件问题已关闭。
 
 ## 遗留
 
-- **性能归因仍未完成。** Host 高 CPU、Renderer 高内存与交互成本仍需分开归因，已有观察尚不能完成全部因果归因。终端恢复可读不代签整体资源优化、长期稳定性或活跃长历史连续阅读。
+以下按本复盘时（`e2539f6779`）的状态记录；锚点之后的变化逐条注明提交。
+
+- **性能归因未完成。** Host 高 CPU、Renderer 高内存与交互成本需要分开归因，当时的观察不足以完成全部因果归因。终端恢复可读不代签整体资源优化、长期稳定性或活跃长历史连续阅读。
 - **旧 GUI 的完整即时恢复未确认。** 缺少退出前完整观察，原持久拓扑相等不证明所有焦点、阅读位置或未持久界面状态都相等；安装事务的 unknown 保留。
-- **原待创建请求仍须对账。** 普通 shell 与私有 Main 新建分别有证据；原用户请求尚无确认 Run，不能用新的测试目标替代。待创建请求和错误通知仅在 Renderer 内存，完整旧提交参数未持久保全的缺口仍在；先保全可确认正文与身份，缺少原结果、prepared 关联或完整旧 intent 时保持未知，不补造参数或重放首句。
+- **原待创建请求须对账。** 普通 shell 与私有 Main 新建分别有证据；原用户请求当时没有确认的 Run，不能用新的测试目标替代。待创建请求和错误通知只在 Renderer 内存中，完整旧提交参数没有持久保全；先保全可确认正文与身份，缺少原结果、prepared 关联或完整旧 intent 时保持未知，不补造参数或重放首句。
 - **覆盖范围有限。** 已验证原 Agent 与 raw Terminal 两类实际消费者，没有逐个遍历所有终端，也没有证明未知 Level B 上下文恢复。Timeline／名称元数据的全体等待仅是独立静态风险，没有本次现场因果证明，不夹入此修复。

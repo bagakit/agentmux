@@ -25,7 +25,7 @@ Error invoking remote method 'sessions:creation': AgentMuxError: The original cr
 
 - **共享持久化恢复故障**：SQLite 报 `database or disk is full`，在操作系统仍有磁盘空间时，应用自己的数据库页配额也可以触发 FULL。失败发生在共享 Runtime 的恢复路径，所以多个 Session 和依赖这个 Runtime 的 Executor 检查同时受阻。它不证明每个 Provider 的 CLI 都坏了。
 - **首次错误被后续检查盖住**：首次启动失败后，检查同一创建操作只看到了“没有 Session 或 prepared start”。这是创建诊断保全的问题；后续检查结果不能取代首次失败，也不能授权重放启动或 Prompt。它与存储故障可以叠加，但不构成 SQLite 根因。
-- **恢复后仍有旧检查提示**：原 Session 已 ready/running，GUI 仍显示 Startup Snapshot 的 114 条部分完成提示。对恢复后的 owner 重读实际得到 67 个 subject、23 条完整成功的 timeline；这些计数不是同一个集合，不能把 114 全部解释成 Session 丢失。首次空快照和 Provider RPC notice 的自动收口属于另外的观察恢复路径，本案记录时尚未完成行为验收。
+- **恢复后仍有旧检查提示**：原 Session 已 ready/running，GUI 仍显示 Startup Snapshot 的 114 条部分完成提示。对恢复后的 owner 重读实际得到 67 个 subject、23 条完整成功的 timeline；这些计数不是同一个集合，不能把 114 全部解释成 Session 丢失。首次空快照和 Provider RPC notice 的自动收口属于另外的观察恢复路径，首次记录时尚未完成行为验收，后续由改进措施 7 补齐。
 
 ## 影响面
 
@@ -61,7 +61,7 @@ ctxmux --socket "$incident_socket" storage "$incident_run"
 
 ## 引入时间线
 
-以下提交及其先后关系来自 ctxmux 的 main 祖先历史，不代表本案的安装顺序。核对使用了 pickaxe、逐段历史和文件完整历史：
+以下提交及其先后关系来自 ctxmux 仓库的 main 祖先历史，不代表本案的安装顺序。ctxmux 是独立仓库，这些 SHA 与 `crates/` 路径在 ctxmux 仓库根核对；`f1345ff` 是本案的修复版本，当前随包的 ctxmux 源码身份以 [Darwin manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json) 为准。核对使用了 pickaxe、逐段历史和文件完整历史：
 
 ```bash
 git log -S '384 * 1024 * 1024' --oneline -- crates/ctxmux-daemon/src/resources.rs
@@ -92,7 +92,7 @@ git log --follow --pretty='%h %s' -- crates/ctxmux-daemon/src/persistence.rs
 
 `-L` 证明：从各自引入到 `d2bc03c`，两个回滚 helper 的无条件 ROLLBACK 函数体没有其它修改；并非所有期间提交都重写了该错误分支。默认 policy 块的后续修改则是上表的 `2525eff`、`b061b8d`、`325876b`，维护证明块的后续修改是 `9044f62`。更大的文件改动史还有其它优化，不能据“改过同一文件”声称它们改过这些缺陷行。
 
-AgentMux 同批相关修复是 `7e14b3947`（`fix(desktop): retain the original spatial creation failure`）、`cfbd210d7`（`fix(desktop): show output resource pressure in Session service windows`）和 `54d881cf0`（`fix(core): integrate durable storage pressure recovery`）。它们分别保留首次错误、消费 Native 压力事实、接入已验 Native；不能反过来补齐最初失败操作缺失的历史。
+AgentMux 同批相关修复是 `25ece3ba93`（`fix(desktop): retain the original spatial creation failure`）、`43393f23b0`（`fix(desktop): show output resource pressure in Session service windows`）和 `63aa40a5f3`（`fix(core): integrate durable storage pressure recovery`）。它们分别保留首次错误、消费 Native 压力事实、接入已验 Native；不能反过来补齐最初失败操作缺失的历史。
 
 ## 根因分析
 
@@ -145,7 +145,7 @@ AgentMux 同批相关修复是 `7e14b3947`（`fix(desktop): retain the original 
 
 ## 验证
 
-源码事实绑定 `ctxmux@f1345ff428fadb581f8271e2a3456fec390d5d87`；本仓库压力呈现绑定 `cfbd210d7`，首次错误绑定 `7e14b3947`。下面命令分别在各自仓库根运行，使用 fixture 自有状态；`env -i` 去除 ambient Runtime 路由、资源 policy 和 Provider 环境，只保留运行构建工具需要的 PATH/HOME。每组要求列出的 anchor 实际被发现并执行，零测试不是通过。
+源码事实绑定 `ctxmux@f1345ff428fadb581f8271e2a3456fec390d5d87`；本仓库压力呈现绑定 `43393f23b0`，首次错误绑定 `25ece3ba93`。下面命令分别在各自仓库根运行，使用 fixture 自有状态；`env -i` 去除 ambient Runtime 路由、资源 policy 和 Provider 环境，只保留运行构建工具需要的 PATH/HOME。每组要求列出的 anchor 实际被发现并执行，零测试不是通过。
 
 ```bash
 # ctxmux 仓库根：实际 SQLite FULL、固定额度公共链路及原状态冷恢复。
@@ -188,6 +188,8 @@ controlled fixture 的界限必须保留：ballast 提供真实页压力，但�
 本案不保存用户 Prompt、终端正文、Session/Run/native UUID、环境值或机器绝对路径。来源范围是用户症状、上述提交的源代码/历史、绑定候选的 fixture/mutant receipts，以及原现场的聚合恢复和 GUI 证据；最初 resume/takeover 的完整日志不在这个来源集合中。
 
 ## 遗留
+
+以下按本复盘时（`3f864001d5`）的状态记录；锚点之后的变化逐条注明提交。
 
 - **PARTIAL：首次 resume/takeover 的完整因果链。** 已有后续报错和共享 Native 故障证据，缺首次操作的完整启动、RPC 与提交历史；不补猜测，也不把后来的恢复成功当成当时错误原因的证明。
 - **unknown 不能自动猜成恢复完成。** 第 7 项只结算原 producer 的已确认事实；没有原执行 Host、不可用远端或未确认身份的引用仍留在原工作面。首次空快照和 Provider RPC 结束的全部历史时序没有完整日志，当前恢复和新反例不能补造它们。

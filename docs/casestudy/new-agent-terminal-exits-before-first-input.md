@@ -2,7 +2,7 @@
 
 ## 定性
 
-P0。Core 把辅助历史来源未知当成原初始化输入不可发送，撤销了准确 Native 对象已经具备的输入能力；用户的真实首条输入留在准备态，前台恢复又依赖这条输入尚未产生的历史。本案例记录该次故障、源码修复及同日安装后原会话恢复，区分每个阶段当时的证据。行为要求沿 [Session 恢复](../design/behavior/session-recovery.md)。
+P0。本案范围是 Codex 受管启动的新 Agent：Core 把辅助历史来源未知当成原初始化输入不可发送，撤销了准确 Native 对象已经具备的输入能力；用户的真实首条输入留在准备态，前台恢复又依赖这条输入尚未产生的历史。本案例记录该次故障、源码修复及修复当天安装后原会话的恢复，区分每个阶段当时的证据。行为要求沿 [Session 恢复](../design/behavior/session-recovery.md)。
 
 ## 用户可见症状
 
@@ -10,7 +10,7 @@ P0。Core 把辅助历史来源未知当成原初始化输入不可发送，撤�
 
 > `thread/resume failed: no rollout found for thread id <原 threadId> (code -32600)`
 
-此处省略用户路径和准确身份。后台存活、初始化 ready、可输入、历史持久化和前台接回是五个不同事实。用户担心元数据损坏，但调查没有取得损坏证据；进程存活也不能证明任务已经执行。这个机制与同批调查中的连接容量自限、通知放大分别处理。
+此处省略用户路径和准确身份。后台存活、初始化 ready、可输入、历史持久化和前台接回是五个不同事实。用户担心元数据损坏，但调查没有取得损坏证据；进程存活也不能证明任务已经执行。这个机制与同批调查中的[连接容量自限](rpc-disconnects-during-normal-bursts.md)、通知放大分别处理。
 
 ## 影响面
 
@@ -30,27 +30,27 @@ P0。Core 把辅助历史来源未知当成原初始化输入不可发送，撤�
 
 调查初期，故障版本没有已证明有效的带内恢复办法：反复 Resume 只会遇到同一个缺 rollout 对象。当时先保留原后台、SID、Native ID、Run、工作面和输入 key，不 Stop、不另建空 Agent、不重发未知输入，也不写占位 prompt、标题或元数据来制造历史。
 
-源码修复后，原 Core 恢复 owner 核对未 claim 的原输入及授权，沿原 key 继续真实内容，让 Native 自行生成来源，再用原公共 Resume 接回前台。该路径先由私有真实链路证明；同日实际加载包含修复的 `5923cebb7e` 后，原用户会话取得原首输入的 Native admission，并在原 Run 上接回前台。这个后续事实不覆盖调查初期的未知，也不把另一批尚未安装的传输修复算作此次恢复原因。
+源码修复后，原 Core 恢复 owner 核对未 claim 的原输入及授权，沿原 key 继续真实内容，让 Native 自行生成来源，再用原公共 Resume 接回前台。该路径先由私有真实链路证明；修复当天实际加载包含修复的包（源码 `11a6596425`）后，原用户会话取得原首输入的 Native admission，并在原 Run 上接回前台。这个后续事实不覆盖调查初期的未知，也不把另一批尚未安装的传输修复算作此次恢复原因。
 
 ## 引入时间线
 
-历史沿 `git log -S 'nativeSourceObservation.state'`、`git log -S 'requiredNativeSource'`、`git log -L 693,707:packages/core/src/prompt-submission.ts` 和该文件的 `git log --follow` 核对。区分旧判定的引入与后来使新启动进入该判定的组合变化：
+历史沿 `git log -S 'nativeSourceObservation.state'`、`git log -S 'requiredNativeSource'`、`git log -L 693,707:packages/core/src/prompt-submission.ts 57da6f8d81`（行号属于故障包源码中的 `defaultNativeSource`）和该文件的 `git log --follow` 核对。区分旧判定的引入与后来使新启动进入该判定的组合变化：
 
-| 原提交 | 变化及遗漏 |
+| 提交 | 变化及遗漏 |
 | --- | --- |
-| `12c904600d`，`fix(core): correlate default semantic messages with native input` | 引入共享默认 Native 来源判定；把当前 Run 存在来源观察一并排除，没有区分历史定位 unknown 与准确对象输入资格 |
-| `4007b52cac`，`feat(core): send exact question replies through the native input owner` | 扩展 `requiredNativeSource` 消费，仍保留上述判定 |
-| `0ea7e890f9`，`feat(core): admit A2A reference inputs through native idle queue` | 扩展 idle-only 路径，没有验证零 turn 首输入 |
-| `651cd0e8d5`，`fix(core): deliver idle references through the original native queue` | 移除对 nativeActor 存在的旧限制；历史未知的否决仍在 |
-| `2ec3020309`，`feat(core): encapsulate durable agent session recovery` | 新建改成 Native `thread/start` 确认对象后启动 TUI，并由 Core post-launch owner 发送原输入；与旧来源否决组合形成这条互锁 |
-| `066b64bde5`，`fix(core): retain original managed initialization beyond observation deadlines` | 保留超时后的原初始化，未验证真实零 turn 对象能否被 TUI resume |
-| `5d66549daf`，`feat(core): retain explicit native targets through input and recovery` | 保护显式目标并重组同一默认来源分支，原初始化的 unknown 仍被挡住 |
-| `7f4ac9d06d` | 调查所绑定的故障包源码，不是缺陷引入提交 |
-| `7e46c11d08`，`fix(core): retain original input through native source initialization` | 修正原首输入误拒，Provider 前台恢复先取得同对象真实 join 回执；兼容测试 30 条通过 |
-| `fa35d8ff3d` / `12df295a46` | 分别区分 Native 用户输入与模型请求计数，并把失败进度、取消绑定到准确 Native 事实；补齐最终真实验证口径 |
-| `5923cebb7e` | 同日实际安装且 Main / Renderer 真正加载的源码，包含 `12df295a46`；原用户会话随后取得同身份前台与输入恢复证据 |
+| `dcf9e782ae`，`fix(core): correlate default semantic messages with native input` | 引入共享默认 Native 来源判定；把当前 Run 存在来源观察一并排除，没有区分历史定位 unknown 与准确对象输入资格 |
+| `bdd1d04e6f`，`feat(core): send exact question replies through the native input owner` | 扩展 `requiredNativeSource` 消费，仍保留上述判定 |
+| `e5f097af83`，`feat(core): admit A2A reference inputs through native idle queue` | 扩展 idle-only 路径，没有验证零 turn 首输入 |
+| `c7b467f2cc`，`fix(core): deliver idle references through the original native queue` | 移除对 nativeActor 存在的旧限制；历史未知的否决仍在 |
+| `bd11bb5f73`，`feat(core): encapsulate durable agent session recovery` | 新建改成 Native `thread/start` 确认对象后启动 TUI，并由 Core post-launch owner 发送原输入；与旧来源否决组合形成这条互锁 |
+| `cb6a247e9f`，`fix(core): retain original managed initialization beyond observation deadlines` | 保留超时后的原初始化，未验证真实零 turn 对象能否被 TUI resume |
+| `ee5fd2b951`，`feat(core): retain explicit native targets through input and recovery` | 保护显式目标并重组同一默认来源分支，原初始化的 unknown 仍被挡住 |
+| `57da6f8d81` | 调查所绑定的故障包源码，不是缺陷引入提交 |
+| `92830c55ba`，`fix(core): retain original input through native source initialization` | 修正原首输入误拒，Provider 前台恢复先取得同对象真实 join 回执；兼容测试 30 条通过 |
+| `ce26002136` / `f802ad94f8` | 分别区分 Native 用户输入与模型请求计数，并把失败进度、取消绑定到准确 Native 事实；补齐最终真实验证口径 |
+| `11a6596425` | 修复当天实际安装且 Main／Renderer 真正加载的源码，祖先包含 `f802ad94f8`；原用户会话随后取得同身份前台与输入恢复证据 |
 
-`git log -L` 在默认来源判定内部还显示上述四次扩展/重组；相邻的 `f7905c6dff`（初始 idle 通知）及 `5bc10e8866`（发送前重核恢复授权）处理了其他正确性问题，也没有覆盖本次“对象已加载、首输入未 claim、来源未知”的顺序。
+`git log -L` 在默认来源判定内部还显示上述四次扩展／重组；相邻的 `98dae702ae`（初始 idle 通知）及 `e76cee19e6`（发送前重核恢复授权）处理了其他正确性问题，也没有覆盖本次“对象已加载、首输入未 claim、来源未知”的顺序。
 
 ## 根因分析
 
@@ -86,12 +86,14 @@ flowchart LR
 
 最终候选 9 条通过；六个独立源码变异分别恢复旧 unknown 否决、跳过前台 join、跳过最终授权、忽略准确来源、借用已有 claim、把例外授予普通问题，均使对应业务判据变红。变异只作用于各自加载产物，原源码前后 hash 保持相同；没有另记一轮恢复测试。源码与调用链可从 [真实集成测试](../../packages/core/test/native-initial-input.integration.test.ts)、[验证入口](../../packages/core/scripts/verify-native-initial-input.mjs)、[恢复 reconciler](../../packages/core/src/agent-session-recovery/reconciliation.ts) 和 [Provider 前台 owner](../../packages/core/src/providers/codex-managed-frontend.ts) 核对。
 
-随后另核了真实交付与原会话，而没有从私有绿色推断现场成功。Main / Renderer 实际加载 `5923cebb7ec35c17594137939088973f06104a0d`，其提交祖先包含 `12df295a46`。原用户 SID、Native ID、Run 均与故障记录相同，后台 PID 保持不变；新前台 attached、初始化 ready，原 Native rollout 已存在且持久确认。原初始化输入 key 的独立 `agent.input.inspect` 返回 `transport=native`、`acknowledged=true`、`native.outcome=admitted`。后续实际用户输入的 payload / submit 均有 ACK，原会话的 `native-transcript` 状态为 done。这些证据支持原工作入口已恢复，不把后续轮次 done 或输入 ACK 代签原任务业务目标完成。
+随后另核了真实交付与原会话，而没有从私有绿色推断现场成功。Main／Renderer 实际加载的源码对应 main 上的 `11a6596425`，其祖先包含 `f802ad94f8`。原用户 SID、Native ID、Run 均与故障记录相同，后台 PID 保持不变；新前台 attached、初始化 ready，原 Native rollout 已存在且持久确认。原初始化输入 key 的独立 `agent.input.inspect` 返回 `transport=native`、`acknowledged=true`、`native.outcome=admitted`。后续实际用户输入的 payload / submit 均有 ACK，原会话的 `native-transcript` 状态为 done。这些证据支持原工作入口已恢复，不把后续轮次 done 或输入 ACK 代签原任务业务目标完成。
 
 本机保留私有验证回执，以及安装后原 App、原 Agent 与原输入的现场回执；过程资料不是长期文档的运行依赖。源码验证、正式包加载、原输入 admission 和业务结果分别结算。
 
 ## 遗留
 
-- 原首输入已由 Native 接收，原会话已接回并处理后续用户输入；原任务业务目标是否完成仍需业务结果，不能由 admission、字节 ACK 或后续 done 状态替代。
+以下按本复盘时（`2a0360d26d`）的状态记录；锚点之后的变化逐条注明提交。
+
+- 原首输入已由 Native 接收，原会话已接回并处理后续用户输入；原任务业务目标是否完成需要业务结果判断，不能由 admission、字节 ACK 或后续 done 状态替代。
 - 没有原真实输入的空白零 turn 对象不借本修复生成占位内容；其原生前台连接需要独立证明。
 - 其他 Provider、所有 Codex 版本及所有断线原因均不在本次实测范围。输入已 claim 但施效未知时，继续原 key 对账，不因本例绕过防重。

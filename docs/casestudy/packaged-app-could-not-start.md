@@ -2,7 +2,7 @@
 
 ## 定性
 
-P0。用户无法进入安装包的工作面，原 Renderer 内没有可用恢复入口；启动检查又没有留下真正的 preload 首错。这个结论限于 Desktop 启动，不能据此判定所有 Agent 或持久 Session 已死亡。
+P0。本案范围是一个新打的 macOS 安装包的 Desktop 启动：用户无法进入安装包的工作面，原 Renderer 内没有可用恢复入口；启动检查又没有留下真正的 preload 首错。这个结论限于 Desktop 启动，不能据此判定所有 Agent 或持久 Session 已死亡。
 
 ## 用户可见症状
 
@@ -12,50 +12,50 @@ P0。用户无法进入安装包的工作面，原 Renderer 内没有可用恢�
 >
 > “还是 could not start”
 
-原安装包后来记录 `Interface did not load or respond`，属于 preload 失败后的界面就绪未确认。用户转来的 `ERR_ABORTED (-3)` 和配置路径 `${ISOLATED_FIXTURE_ROOT}/u/agentmux.config.json` 则来自本轮隔离实验的页面重载；该实验错误不能代替原包根因，原路径留在本机证据。
+原安装包后来记录 `Interface did not load or respond`，属于 preload 失败后的界面就绪未确认。用户转来的 `ERR_ABORTED (-3)` 和配置路径 `${ISOLATED_FIXTURE_ROOT}/u/agentmux.config.json` 则来自调查期间隔离实验的页面重载；该实验错误不能代替原包根因，原路径留在本机证据。
 
 交付修复候选时还出现了独立的签名资格误判。用户完成既有证书的 codeSign 信任认证后，`security find-identity -v -p codesigning` 已列出原 SHA 的身份，并报告 `1 valid identities found`；该行附带 `(CSSMERR_TP_NOT_TRUSTED)`，旧预检正则因此漏选。原证书实际签名及严格 trusted-leaf 校验通过，不能继续把这次交付阻断解释为“用户尚未完成信任”。
 
 ## 影响面
 
-STOPS：受影响包的 sandbox preload、Desktop API bridge、Renderer 挂载和通过这个界面操作 Agent。原包身份是 `07d5fc81df0787af1d7d0e3874dc3dc9950e01f1` / tree `54a069512e86b0ca8bb4ec174ebcca354239c6fd`。
+STOPS：受影响包的 sandbox preload、Desktop API bridge、Renderer 挂载和通过这个界面操作 Agent。原包源码对应当前 main 上的 `957fced4a3`；包内记录的 tree 是 `54a069512e86b0ca8bb4ec174ebcca354239c6fd`（历史清理前的 tree 哈希，与 main 上该提交现在的 tree 不同）。
 
-以下不受影响：修复保留原 `sandbox: true`、`contextIsolation: true`、`nodeIntegration: false`，不替换或停止 Native，不修改 Session Store，不派发创建、恢复或输入。实际反例使用独立 userData，不连接用户 Runtime；Core 与 Native 的运行事实仍须单独读取。依据是 [安全设置](../../apps/desktop/src/main/window-security.ts)、[隔离验证脚本](../../apps/desktop/scripts/verify-sandboxed-preload.mjs) 和修复提交的五文件范围。仅有后台 PID 不足以证明全部原 Session 可恢复。
+以下不受影响：修复保留原 `sandbox: true`、`contextIsolation: true`、`nodeIntegration: false`，不替换或停止 Native，不修改 Session Store，不派发创建、恢复或输入。实际反例使用独立 userData，不连接用户 Runtime；Core 与 Native 的运行事实仍须单独读取。依据是 [安全设置](../../apps/desktop/src/main/window-security.ts)、[隔离验证脚本](../../apps/desktop/scripts/verify-sandboxed-preload.mjs)，以及修复提交 `e52380ee16` 的改动范围：它只改了 `apps/desktop/electron.vite.config.ts` 与 `apps/desktop/src/main/index.ts` 两个文件。仅有后台 PID 不足以证明全部原 Session 可恢复。
 
 ## 止血措施
 
-旧包内无带内恢复。可执行的止血是从已合入 main 的启动修复构建并按原安装 owner 安全替换 App；不删除配置或 Session、不关闭健康 Native。既有证书认证已完成，后续交付须消费修正后的有效身份解析及真实 staged-App 签名校验，保留原证书身份，不再重复要求用户认证。
+旧包内无带内恢复。可执行的止血是从包含启动修复 `e52380ee16` 的 main 构建，并按原安装 owner 安全替换 App；不删除配置或 Session、不关闭健康 Native。既有证书认证已完成，后续交付须消费修正后的有效身份解析及真实 staged-App 签名校验，保留原证书身份，不再重复要求用户认证。
 
-后续现场安装副本 `9587a54` 包含启动修复 `369a4cc`，实际 preload 只保留 Electron 的裸 require，已显示原工作面；原 Native 的进程出生身份未变。这是启动修复已被当前安装实例消费的证据。该副本实际为 `Signature=adhoc`，不能计作本轮证书签名交付，也不能推出全部 Session 已恢复；正常证书签名更新仍待完成。
+后续现场安装副本的源码对应 main 上的 `45d86b4208`，其祖先包含启动修复 `e52380ee16`；该副本实际 preload 只保留 Electron 的裸 require，已显示原工作面，原 Native 的进程出生身份未变。这证明启动修复已被那个安装实例消费。该副本实际为 `Signature=adhoc`，不能计作证书签名交付，也不能推出全部 Session 已恢复；本复盘时正常证书签名更新尚未完成。
 
 ## 引入时间线
 
-追溯命令：
+追溯命令（在启动修复的父提交 `e52380ee16^` 上执行）：
 
 ```sh
-git log -S '@agentmux/core/object-id' --format='%H %s' -- apps/desktop/src/shared/scratch-topic-identity.mjs
-git log -L 1,2:apps/desktop/src/shared/scratch-topic-identity.mjs --format='%H %s'
-git log --follow --format='%H %s' -- apps/desktop/src/shared/scratch-topic-identity.mjs
-git log -L 19,26:apps/desktop/electron.vite.config.ts --format='%H %s'
+git log -S '@agentmux/core/object-id' --format='%H %s' e52380ee16^ -- apps/desktop/src/shared/scratch-topic-identity.mjs
+git log -L 1,2:apps/desktop/src/shared/scratch-topic-identity.mjs --format='%H %s' e52380ee16^
+git log --follow --format='%H %s' e52380ee16^ -- apps/desktop/src/shared/scratch-topic-identity.mjs
+git log -L 19,26:apps/desktop/electron.vite.config.ts --format='%H %s' e52380ee16^
 ```
 
-- `99c8d4ba318654b4a36ed2985bf2725271f284fd`，`feat(agentmux): deliver tmux runtime and desktop workbench`：建立 preload 的依赖外置配置。这是早已存在的构建选择，不是后续新增共享导入的引入提交。配置该段的 `git log -L` 在修复前只有这次引入。
-- `4183c0139c8745323be0730ab35c77c933afc1c1`，`fix: use bundled renderer for packaged smoke checks`：为避免隔离 smoke 等不到热更新 token，跳过正常 Renderer 更新就绪流程。后来的 ready-file 分支只等 `loadFile` 及可选 Core 连接，形成了另一套“启动成功”判据；它不能确认 preload bridge 或 React 工作面存在。
-- **引入提交** `c4a4e31e28edd29a413d8f694ebde4698bc748f0`，`refactor: unify product IDs with fixed-width Base58`：为统一身份校验，新增 `scratch-topic-identity.mjs` 对 `@agentmux/core/object-id` 的运行时导入，并经 scratch-topics 与 contracts 进入 preload。共享类型文件里有运行时值，导入不止发生在 Renderer。直到本次修复，该新模块的 pickaxe、逐行历史及 follow 历史均只显示 c4a4e31e；没有后续改过这两行却漏检的提交。
-- `369a4cc43150f53fc19e6669ea175df9c5ba09b1`，`fix(desktop): bundle sandbox preload and confirm renderer startup`：显式关闭 preload 自动外置，并使普通启动与 ready-file 分支消费同一个真实 Renderer-ready loader。
+- `490085acfb`，`feat(agentmux): deliver tmux runtime and desktop workbench`：建立 preload 的依赖外置配置。这是早已存在的构建选择，不是后续新增共享导入的引入提交。配置该段的 `git log -L` 在修复前只有这次引入。
+- `9e062af1ed`，`fix: use bundled renderer for packaged smoke checks`：为避免隔离 smoke 等不到热更新 token，跳过正常 Renderer 更新就绪流程。后来的 ready-file 分支只等 `loadFile` 及可选 Core 连接，形成了另一套“启动成功”判据；它不能确认 preload bridge 或 React 工作面存在。
+- **引入提交** `28b26fd06f`，`refactor: unify product IDs with fixed-width Base58`：为统一身份校验，新增 `scratch-topic-identity.mjs` 对 `@agentmux/core/object-id` 的运行时导入，并经 scratch-topics 与 contracts 进入 preload。共享类型文件里有运行时值，导入不止发生在 Renderer。直到修复，该新模块的 pickaxe、逐行历史及 follow 历史均只显示 `28b26fd06f`；没有后续改过这两行却漏检的提交。
+- `e52380ee16`，`fix(desktop): bundle sandbox preload and confirm renderer startup`：显式关闭 preload 自动外置，并使普通启动与 ready-file 分支消费同一个真实 Renderer-ready loader。
 
 签名次因另沿 `apps/desktop/scripts/macos-signing.mjs` 追溯：
 
 ```sh
 git log -S 'configured signing identity is not uniquely available' --format='%H %s' -- apps/desktop/scripts/macos-signing.mjs
-git log -L 35,43:apps/desktop/scripts/macos-signing.mjs 4eba4a25f1ff0f1b8127dc31b3e265103064f184 --format='%H %s'
-git log -L 66,73:apps/desktop/scripts/macos-signing.mjs 4eba4a25f1ff0f1b8127dc31b3e265103064f184 --format='%H %s'
+git log -L 35,43:apps/desktop/scripts/macos-signing.mjs 8365225042 --format='%H %s'
+git log -L 66,73:apps/desktop/scripts/macos-signing.mjs 8365225042 --format='%H %s'
 git log --follow --format='%H %s' -- apps/desktop/scripts/macos-signing.mjs
 ```
 
-`d2aa325003335b9aa1a2fe9ec5de9405e86b13cb`，`fix(packaging): preserve certificate-backed macos signing identity` 建立了 Developer ID 身份解析。`4eba4a25f1ff0f1b8127dc31b3e265103064f184`，`fix(desktop): preserve local macOS signing identity across updates` 将解析扩展到本地证书，沿用了要求名称后立即结束的正则，并新增只接受 `anchor H` 的默认 requirement 判断；这次为了保留本地签名身份的改动，反而没有验证 Apple 对该身份的真实输出。修复前两段逐行历史均只显示这两次提交，没有后续修改这两段却漏检的提交；文件 follow 历史中的 `2bd068b130c13dd5c7aee4854ca5032ce032b4fc`（`fix(packaging): preserve pinned runtime and signed helper identities`）修改的是签名 helper 与 Runtime 保全，未改这两段。
+`c7f52079b3`，`fix(packaging): preserve certificate-backed macos signing identity` 建立了 Developer ID 身份解析。`8365225042`，`fix(desktop): preserve local macOS signing identity across updates` 将解析扩展到本地证书，沿用了要求名称后立即结束的正则，并新增只接受 `anchor H` 的默认 requirement 判断；这次为了保留本地签名身份的改动，没有验证 Apple 对该身份的真实输出。修复前两段逐行历史均只显示这两次提交，没有后续修改这两段却漏检的提交；文件 follow 历史中的 `acb4f96293`（`fix(packaging): preserve pinned runtime and signed helper identities`）修改的是签名 helper 与 Runtime 保全，未改这两段。
 
-`e428233c051b40a1897b96745be5ccdc725f531f`，`fix(desktop): qualify the original local signing identity`：修正本地有效身份解析及原证书默认 requirement 判断，在既有严格签名验证中确认 trusted leaf。该提交已合入 main；这份源码资格不提升为当前安装副本已使用原证书。
+`71a5548677`，`fix(desktop): qualify the original local signing identity`：修正本地有效身份解析及原证书默认 requirement 判断，在既有严格签名验证中确认 trusted leaf。它在当前 main 历史中；这份源码资格不代表某个安装副本已使用原证书签名。
 
 ## 根因分析
 
@@ -69,7 +69,7 @@ git log --follow --format='%H %s' -- apps/desktop/scripts/macos-signing.mjs
 
 这部分的根因是交付资格把证书链诊断、代码签名信任及工具输出形状当成同一个判据。[Apple 的有效身份枚举实现](https://github.com/apple-oss-distributions/SecurityTool/blob/main/identity_find.c)可以同时打印证书链警告；证书单独执行 X.509 校验所得的 `AnchorTrusted=0`，也不等于真实签名的 [`certificate leaf trusted`](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_codesigning/lib/reqinterp.cpp) 不成立。先前用简化身份行和单一 requirement 文本作反例，没有经过原证书、真实 Mach-O 签名及实际 strict 校验，因而没发现这两处误拒。原证书本机反例才将这些事实分开；证书链诊断的具体原因仍未确定。
 
-正常证书签名候选 `11684542` 随后两次在 Electron Framework 上收到 `internal error in Code Signing subsystem`，均停在安装前，当前可用副本没有被替换。真实 Framework 的窄签名在约 960 MB 可用空间时通过；另一份保持 Electron 实际布局的样本在签名前可用空间约 238 MB 时失败。该失败文件原地保留，磁盘资源恢复后，使用同一文件、原证书和原生产签名流程再次签名，开始时可用空间约 2.19 GB、全过程最低约 1.91 GB，签名及严格原身份／trusted-leaf 校验均通过。
+正常证书签名候选（源码对应 main 上的 `f300ac4ea3`）随后两次在 Electron Framework 上收到 `internal error in Code Signing subsystem`，均停在安装前，当时可用的安装副本没有被替换。真实 Framework 的窄签名在约 960 MB 可用空间时通过；另一份保持 Electron 实际布局的样本在签名前可用空间约 238 MB 时失败。该失败文件原地保留，磁盘资源恢复后，使用同一文件、原证书和原生产签名流程再次签名，开始时可用空间约 2.19 GB、全过程最低约 1.91 GB，签名及严格原身份／trusted-leaf 校验均通过。
 
 这一组同对象前后证据使签名失败与资源压力高度关联，但工具只返回通用内部错误，没有暴露底层 errno，不能把历史错误精确写成 ENOSPC。真实文件写入及测试另已直接报 ENOSPC；macOS Data 与 VM 共享 APFS 容器，交换文件的变化也会影响可用空间。较早采样、清理后的余量、小 Mach-O 签名成功和源码资格不能代替真实大产物签名时的资源条件，也不能据此重新认定原证书不受信任。
 
@@ -114,7 +114,9 @@ PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false node apps/desktop/scripts/verify-macos-
 
 ## 遗留
 
-- 原启动修复、首因观测和签名资格是不同切片；实际交付须核包含这些修复的 main、编译内容及正在运行的安装实例，不能用一次 source 或签名请求代签。
-- 现场 ad hoc 副本的工作面可见，但正常证书签名更新及真实用户配置下的原工作面、Session 恢复仍须各自确认；本轮隔离 GREEN 不替用户安装实例取得资格。
-- 后续 `app.inspect` 的 Recall 嵌套枚举遗漏，以及远程 Host 检查旧 endpoint 时的 `Invalid control endpoint publication observation`，是独立观测缺口。`bbc905ed` 增加 publication 字段后，SSH 旧接口诊断未同步其严格解码；Recall 已有生产投影却漏更新嵌套枚举。`95ce66c2` 修复两处消费者，11 项实际 SSH stdio 与 7 项原 Store／IPC／Main 检查通过；3 个生产编译变异触发对应语义断言，当前协议、错误目标拒绝及原工作面保留。安装实例是否已消费这些修复仍须核对，不能据观察失败判定健康 Agent 已死亡。
-- 先前共享容量故障后的部分原 Run／Provider 恢复身份仍未确认，归[原容量事故](all-sessions-unrecoverable-with-disk-space.md)，不靠本次启动修复批量重启或替换 Session。
+以下按本复盘时（`d85bb52cf6`）的状态记录；锚点之后的变化逐条注明提交。
+
+- 启动修复、首因观测和签名资格是不同切片；交付时分别核对包含这些修复的 main、编译内容及正在运行的安装实例，不能用一次源码验证或签名请求代签。
+- 现场 ad hoc 副本的工作面可见，但正常证书签名更新、真实用户配置下的原工作面与 Session 恢复当时尚未各自确认；隔离环境的 GREEN 不替用户安装实例取得资格。
+- 同期另发现两个独立观测缺口，不属于本事故：`app.inspect` 的 Recall 嵌套枚举遗漏，以及远程 Host 检查旧 endpoint 时的 `Invalid control endpoint publication observation`。`812ba3997f` 增加 publication 字段后，SSH 旧接口诊断没有同步其严格解码；Recall 已有生产投影，却漏更新了嵌套枚举。`2f42492a45` 修复这两处消费者，11 项实际 SSH stdio 与 7 项原 Store／IPC／Main 检查通过，3 个生产编译变异触发对应语义断言，当前协议、错误目标拒绝及原工作面保留。本复盘时，安装实例是否已消费 `2f42492a45` 尚未核对。观察失败不能用来判定健康 Agent 已死亡。
+- 先前共享容量故障后的部分原 Run／Provider 恢复身份当时仍未确认，归[原容量事故](all-sessions-unrecoverable-with-disk-space.md)，不靠本次启动修复批量重启或替换 Session。

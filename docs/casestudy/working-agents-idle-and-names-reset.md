@@ -2,7 +2,7 @@
 
 ## 定性
 
-P1。状态投影误导用户对当前工作的判断，名称覆盖破坏对象辨识与协作追踪。现场健康 Run 仍可输入、输出；没有证据证明这些观察缺口已经使用户失去终端能力。Native 定位符错误另有恢复错目标的 P0 风险，必须在具体恢复操作上拒绝失配，不能因此停止健康 Run。
+P1。本案范围是 Agent 当前活动的状态投影，以及 Agent／Tab 等对象的显示名写入：状态投影误导用户对当前工作的判断，名称覆盖破坏对象辨识与协作追踪。现场健康 Run 仍可输入、输出；没有证据证明这些观察缺口已经使用户失去终端能力。Native 定位符错误另有恢复错目标的 P0 风险，必须在具体恢复操作上拒绝失配，不能因此停止健康 Run。
 
 本案的现场读取、源码因果与修复验证分别成立；历史上某次名称覆盖的操作者、入口及具体触发尚无完整记录，不能从源码提交作者推断。
 
@@ -41,41 +41,41 @@ Grok 三例只有陈旧 session_start，属于活动观察不足的另一种情�
 
 ## 引入时间线
 
-以下来自 Git，不是对用户那次覆盖时刻的猜测。复现历史时固定调查基线 `b8e44e7c2ab057cc588dd64bfd64629fe4f0f920`；行号属于该基线，当前行号会移动。
+以下来自 Git，不是对用户那次覆盖时刻的猜测。复现历史时固定调查基线 `beb361c3c5`；行号属于该基线，当前行号会移动。
 
 ```sh
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 -S stateEnteredAt --oneline -- packages/core/src/agent-semantic-state.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 -L :invalidateAgentIdleEvidence:packages/core/src/agent-semantic-state.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 --follow --pretty='%h %s' -- packages/core/src/agent-semantic-state.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 -S subagentId --oneline -- packages/core/src/hook-normalizer.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 --follow --pretty='%h %s' -- packages/core/src/hook-normalizer.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 -L 5096,5112:packages/core/src/client.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 -L 4960,4980:apps/desktop/src/renderer/src/store.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 -S usesCaller --oneline -- packages/core/src/rpc-business-codec.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 -L 81,90:packages/core/src/rpc-business-codec.ts
-git log b8e44e7c2ab057cc588dd64bfd64629fe4f0f920 --follow --pretty='%h %s' -- packages/core/src/rpc-business-codec.ts
+git log beb361c3c5 -S stateEnteredAt --oneline -- packages/core/src/agent-semantic-state.ts
+git log beb361c3c5 -L :invalidateAgentIdleEvidence:packages/core/src/agent-semantic-state.ts
+git log beb361c3c5 --follow --pretty='%h %s' -- packages/core/src/agent-semantic-state.ts
+git log beb361c3c5 -S subagentId --oneline -- packages/core/src/hook-normalizer.ts
+git log beb361c3c5 --follow --pretty='%h %s' -- packages/core/src/hook-normalizer.ts
+git log beb361c3c5 -L 5096,5112:packages/core/src/client.ts
+git log beb361c3c5 -L 4960,4980:apps/desktop/src/renderer/src/store.ts
+git log beb361c3c5 -S usesCaller --oneline -- packages/core/src/rpc-business-codec.ts
+git log beb361c3c5 -L 81,90:packages/core/src/rpc-business-codec.ts
+git log beb361c3c5 --follow --pretty='%h %s' -- packages/core/src/rpc-business-codec.ts
 ```
 
 | 提交、日期、原 message | 当时优化与留下的缺口 |
 | --- | --- |
-| `e9500b55e`，07-26，`feat(desktop): give Agents and Tabs real names, and stop the Tab impersonating one Agent` | 名称读取优先级成立，但 manual 与 launch 共用写入槽；这是迟到覆盖这一类缺陷的引入点 |
-| `232da098f`，09-29，`Merge branch 'main' into feat/goals-entry-closeoutf-2fw8f678a` | rename setter 的行历史合入其他目标工作；仍无来源/版本的写入合同 |
-| `f64679846`，09-16，`feat(core): persist proven semantic state entry without guessing idle activity` | 输入消费只删 done.stateEnteredAt，正确避免猜 working；却未同时撤销公共 idle 投影。该函数到调查基线没有后续 Git 改动 |
-| `354a7e4f5`，09-16，`fix(core): preserve main native handle across child hook events` | 给 native locator 加 child 保护；保护目标正确，但没有当前 Run 主线程的正向归属见证 |
-| `ba453616c`，09-16，`fix: settle exact unclaimed native questions` | 将子主体判据复用到问题/定位隔离，仍未定义合法 child 对整体工作的新鲜度贡献 |
-| `4d7871d3e`，09-18，`feat(core): accept provider-declared native hook semantics` | 泛化 Hook 规则，没有独立区分主体权限和整体活动 |
-| `d0f4fc955`，09-20，`fix(core): preserve native subjects and truthful turn boundaries` | 把 locator 的隔离判据扩到 semantic/lifecycle；防止子任务冒充主完成，但也让真实下属工作不刷新整体状态 |
-| `0cc472f28`，09-24，`fix(core): isolate native Hook facts by trusted Session membership` | 增强 foreign 隔离；不能去掉这道正确边界，需要补 Run 与原生主体归属 |
-| `c2fd2b216`，09-25，`fix(core): scope tool traces to verified native sessions` | trace 隔离继续增强，未让 aggregate activity 成为独立事实 |
-| `ebc5495f2`，09-30，`feat(cli): control exact display names and read current aliases` | 加入公共改名入口，仍继承 Renderer 名称槽和缺审计的设计 |
-| `da4dfe439`，10-05，`feat(core): expose shared JSON-RPC service and object-first CLI` | `usesCaller` 是路由转换名单，rename 不在名单；没有独立的所有 mutation 可信 attribution 通道 |
-| `c665cdc25`，10-05，`feat(core): share hosted RPC and browser HTTP transport` | 同一 caller 转换块增加 transport，仍继承来源缺口，并非删除了原有改名记录 |
-| `490f898f8`，10-06，`fix(launcher): preserve unsent inputs and isolate draft updates` | 捕获 launch 名、保护输入草稿，尾部仍调用 manual setter；没有检查后来的手动 name revision |
-| `f938400cd`，10-06，`feat(desktop): persist workbench positions through Core` | 将 spatial durable ACK 借给 Chromium-only 名称，准确引入了错误保存确认；不是证明现场名称已经落盘后丢失 |
-| `52bae9f70`，10-06，`fix(survey): load zones directly and preserve browser recovery` | 显式 hydrate merge 继承 Zustand 默认合并顺序；正常启动 fence 已存在，不能称该提交让所有正常冷启动必然覆盖 |
-| `984b66d91`，10-06，`feat(core): retain accepted session work history`；`6d1e2cd00`，10-06，`feat(core): resume original retained conversations explicitly` | nativeHandle 相邻行历史增加保存/继续语义，仅显式 reopen 目标有专门保护；未知来源的旧定位和实测当前定位仍没有分开的诊断事实 |
+| `316066edb5`，2026-07-26，`feat(desktop): give Agents and Tabs real names, and stop the Tab impersonating one Agent` | 名称读取优先级成立，但 manual 与 launch 共用写入槽；这是迟到覆盖这一类缺陷的引入点 |
+| `2e37221c30`，2026-09-29，`Merge branch 'main' into feat/goals-entry-closeoutf-2fw8f678a` | rename setter 的行历史合入其他目标工作；仍无来源／版本的写入合同 |
+| `104b388b76`，2026-09-16，`feat(core): persist proven semantic state entry without guessing idle activity` | 输入消费只删 done.stateEnteredAt，正确避免猜 working；却未同时撤销公共 idle 投影。该函数到调查基线没有后续 Git 改动 |
+| `ab56c18c46`，2026-09-16，`fix(core): preserve main native handle across child hook events` | 给 native locator 加 child 保护；保护目标正确，但没有当前 Run 主线程的正向归属见证 |
+| `f2f1b48d76`，2026-09-16，`fix: settle exact unclaimed native questions` | 将子主体判据复用到问题／定位隔离，仍未定义合法 child 对整体工作的新鲜度贡献 |
+| `a80e72f4f8`，2026-09-18，`feat(core): accept provider-declared native hook semantics` | 泛化 Hook 规则，没有独立区分主体权限和整体活动 |
+| `c602c35ea6`，2026-09-20，`fix(core): preserve native subjects and truthful turn boundaries` | 把 locator 的隔离判据扩到 semantic／lifecycle；防止子任务冒充主完成，但也让真实下属工作不刷新整体状态 |
+| `5a03373d68`，2026-09-24，`fix(core): isolate native Hook facts by trusted Session membership` | 增强 foreign 隔离；不能去掉这道正确边界，需要补 Run 与原生主体归属 |
+| `cf8a09af9b`，2026-09-25，`fix(core): scope tool traces to verified native sessions` | trace 隔离继续增强，未让 aggregate activity 成为独立事实 |
+| `c510a88616`，2026-09-30，`feat(cli): control exact display names and read current aliases` | 加入公共改名入口，仍继承 Renderer 名称槽和缺审计的设计 |
+| `0843053815`，2026-10-01，`feat(core): expose shared JSON-RPC service and object-first CLI` | `usesCaller` 是路由转换名单，rename 不在名单；没有独立的所有 mutation 可信 attribution 通道 |
+| `4d44394137`，2026-10-01，`feat(core): share hosted RPC and browser HTTP transport` | 同一 caller 转换块增加 transport，仍继承来源缺口，并非删除了原有改名记录 |
+| `ba3e799e81`，2026-10-02，`fix(launcher): preserve unsent inputs and isolate draft updates` | 捕获 launch 名、保护输入草稿，尾部仍调用 manual setter；没有检查后来的手动 name revision |
+| `fd61891680`，2026-10-02，`feat(desktop): persist workbench positions through Core` | 将 spatial durable ACK 借给 Chromium-only 名称，准确引入了错误保存确认；不是证明现场名称已经落盘后丢失 |
+| `288030519a`，2026-10-02，`fix(survey): load zones directly and preserve browser recovery` | 显式 hydrate merge 继承 Zustand 默认合并顺序；正常启动 fence 已存在，不能称该提交让所有正常冷启动必然覆盖 |
+| `b43eff7573`，2026-10-02，`feat(core): retain accepted session work history`；`bff1750e56`，2026-10-02，`feat(core): resume original retained conversations explicitly` | nativeHandle 相邻行历史增加保存／继续语义，仅显式 reopen 目标有专门保护；未知来源的旧定位和实测当前定位仍没有分开的诊断事实 |
 
-nativeHandle 写入行的更早历史还经过 `41f348c79`、`fefe174c7`、`27938b91d`、`8b96e183e`、`6a40dba49`（均 07-25）、`14e970c20`（08-01），分别建立语义 Session、Session/Run 分层、ctxmux 接入与 Provider 适配。该行历史只能证明这条写入链的演化，不能把工作区文件能力提交的作者直接认作此次污染者。根因是这条链一直缺少同 Run 的原生主体权威，而非最近一次依赖升级。
+nativeHandle 写入行的更早历史还经过 `f90ee88988`、`e680b65d19`、`5e432c1458`、`1106cffb76`、`f577f839de`（均 2026-07-25）、`3a4f7f2e2f`（2026-08-01），分别建立语义 Session、Session／Run 分层、ctxmux 接入与 Provider 适配。该行历史只能证明这条写入链的演化，不能把工作区文件能力提交的作者直接认作此次污染者。根因是这条链一直缺少同 Run 的原生主体权威，而非最近一次依赖升级。
 
 ## 根因分析
 
@@ -90,6 +90,8 @@ nativeHandle 写入行的更早历史还经过 `41f348c79`、`fefe174c7`、`2793
 已有分层、未知状态和不假确认规则存在，但没有绑定住所有 owner 的写入入口与返回值。再抄一遍规则不能防复发，必须让实际 owner 的版本/事务/公开回执约束这些入口。
 
 ## 改进措施
+
+现行约束只在 owner 定义：显示名的优先级链、手动意图与写入留痕见[显示名与身份](../design/behavior/spaces-and-layout.md#显示名与身份)；当前活动与原生轮结果的区分见[模型请求失败与工作结果](../design/behavior/agent-capabilities-and-messaging.md#模型请求失败与工作结果)。下面记录当时的修复。
 
 1. **Core 分开完成、当前活动与输入消费。** 保留主完成身份、readiness 和审批栅栏；新输入只能撤销旧当前结论到 unknown，不能猜 working。真实 child 活动在 Provider 证明归属后可贡献 aggregate activity。
    - 是否足够 root：覆盖主输入后旧 idle、真实 child 工作、组合后的再次输入这 3 类当前投影，而非只修一个文案；Core/public status/Main/Renderer 同时消费。同 Run 的 `currentActivityRevision` 排序当前事实；旧 done、冷快照和重复 ACK 不能重放已消费的 working/idle，主 completion identity 与原生时刻不改写。
@@ -147,6 +149,8 @@ PY_ENV
 记录历史不在每次终端输出传播：普通 spatial layout/subscribe 返回 `history: query-only` 和当前 labels，历史只经显式分页查询。相关 Native witness 同身份短缓存；未相关 Session 不执行 OS discovery。查询和存储成本仍随真实名称文档增长，不宣称无限历史为常数成本。
 
 ## 遗留
+
+以下按本复盘时（`f64cd94bcb`）的状态记录；锚点之后的变化逐条注明提交。
 
 - 原有覆盖没有完整审计，不能给出当时具体谁、在哪里做的历史事实；已有值保留为 unknown/retained。
 - Grok 三例仍需它们的原生 loaded/error 观察才能解释漏掉最近 Hook 的原因。支持协议和当前配置不代替实际 loaded 证据；保留健康输入及非阻塞观察缺口。

@@ -2,7 +2,7 @@
 
 ## 定性
 
-P0。连接入口把没有资源依据的 64 项业务 ACK 账本当成容量上限，主动销毁合法新连接；保护措施本身撤销了健康服务原可提供的能力。本文记录对故障包 `7f4ac9d06d` 的调查及后续源码修复，不把私有复现提升成每次现场断开的唯一原因。同日实际加载的 `5923cebb7e` 包含另一篇案例的首输入修复，却不含本篇传输修正；源码验收与补包安装分别结算。能力与真实资源边界沿 [RED-LINES](../../RED-LINES.md)。
+P0。本案范围是本地 Unix 控制连接的准入：连接入口把没有资源依据的 64 项业务 ACK 账本当成容量上限，主动销毁合法新连接；保护措施本身撤销了健康服务原可提供的能力。本文记录对故障包（源码 `57da6f8d81`）的调查及后续源码修复，不把私有复现提升成每次现场断开的唯一原因。同一天实际加载的包（源码 `11a6596425`）包含[新 Agent 首输入案例](new-agent-terminal-exits-before-first-input.md)的修复，却不含本篇传输修正；源码验收与补包安装分别结算。能力与真实资源边界沿 [RED-LINES](../../RED-LINES.md)。
 
 ## 用户可见症状
 
@@ -38,17 +38,17 @@ P0。连接入口把没有资源依据的 64 项业务 ACK 账本当成容量上
 
 ## 引入时间线
 
-历史用 `git log -S 'pending.size === 64'`、`git log -L 9,42:packages/core/src/control-endpoint-listener-worker.ts` 与该文件的 `git log --follow` 核对；SSH 同类问题另用 `git log -S 'writableLength'` 和对应 `git log -L` 定位。
+历史用 `git log -S 'pending.size === 64'`、`git log -L 9,42:packages/core/src/control-endpoint-listener-worker.ts 57da6f8d81`（行号属于故障包源码）与该文件的 `git log --follow` 核对；SSH 同类问题另用 `git log -S 'writableLength'` 和对应 `git log -L` 定位。
 
 | 原提交 | 变化及遗漏 |
 | --- | --- |
-| `cb713ba31c`，`feat(remote): integrate federated Runtime and durable recovery` | SSH writer 引入 `writableLength + encodedBytes > AGENTMUX_RPC_MAX_MESSAGE_BYTES` 的聚合拒绝，把单帧限制当队列总预算；属于同类资源单位混淆，不是本地 64 连接的直接成因 |
-| `3e7ee4f4ce`，`fix(core): recover original control endpoint publication` | 建立私有 listener worker，当时还没有 64 项账本 |
-| `9e574fe2d0`，`fix(core): transfer sockets without duplicating listener ownership` | 修复 Unix Server 句柄重复所有权，改为移交 Socket；同时引入 `pending.size === 64` 拒绝、业务 admitted ACK 与 publication 容量状态 |
-| `7f4ac9d06d` | 原运行包与私有突发复现绑定的源码；不是阈值引入时间 |
-| `285f38fffc`，`fix(core): deliver RPC bursts through actual transport backpressure` | main 删除人工准入账本，复用原连接与实际 writer 背压；对应独立候选提交 `8144e6bf5a` |
-| `f19b7ee7ab`，`fix(core): preserve exact cancellation facts before shared dispatch` | main 补回共享 writer 确切未派发取消的 not_applied 事实；对应候选 `a1a659c7dc`，与已派发 unknown 分开 |
-| `5923cebb7e` | 同日另核的实际加载包，尚不包含上述传输修正或本轮通知身份修正；不能用该包已启动证明本缺陷已交付 |
+| `2f4b872d1d`，`feat(remote): integrate federated Runtime and durable recovery` | SSH writer 引入 `writableLength + encodedBytes > AGENTMUX_RPC_MAX_MESSAGE_BYTES` 的聚合拒绝，把单帧限制当队列总预算；属于同类资源单位混淆，不是本地 64 连接的直接成因 |
+| `812ba3997f`，`fix(core): recover original control endpoint publication` | 建立私有 listener worker，当时还没有 64 项账本 |
+| `40ae1b5d7c`，`fix(core): transfer sockets without duplicating listener ownership` | 修复 Unix Server 句柄重复所有权，改为移交 Socket；同时引入 `pending.size === 64` 拒绝、业务 admitted ACK 与 publication 容量状态 |
+| `57da6f8d81` | 原运行包与私有突发复现绑定的源码；不是阈值引入时间 |
+| `73802bc7a2`，`fix(core): deliver RPC bursts through actual transport backpressure` | 删除人工准入账本，复用原连接与实际 writer 背压 |
+| `7445c2a7df`，`fix(core): preserve exact cancellation facts before shared dispatch` | 补回共享 writer 确切未派发取消的 not_applied 事实，与已派发的 unknown 分开 |
+| `11a6596425` | 同一天另核的实际加载包源码，不包含上述两项传输修正，也不含同期的通知身份修正；不能用该包已启动证明本缺陷已交付 |
 
 引入提交自述为 “Explicit admission ACKs bound pending handoffs at 64”，并在 RED-LINES 说明中把这 64 项称为真实 pending descriptors。原验证证明了封顶、已有连接保留和句柄释放，却没有证明这份账本准确计量资源，或 65 个合法连接为何不能继续交付。`git log -L` 确认，直到本故障包，这段 worker 容量代码自引入后没有再被修改；不能把后续文件存在当成有人重新审过必要性。SSH writer 的该阈值行也保留到了故障包，后续 endpoint 诊断、身份分配改动没有验证合法多帧的聚合背压。
 
@@ -72,19 +72,21 @@ P0。连接入口把没有资源依据的 64 项业务 ACK 账本当成容量上
 
 ## 验证
 
-原只读复现从已安装 `7f4ac9d06d` 导入真实 ControlServer / RpcClient，在私有临时 Socket 启动服务，同一 client 顺序执行 16、64、193、193 的并发 cohort，全部请求是 `system.endpoint`。前两组全部成功，后两组各失败 129 次；publication 同时给出 pending=64 的准确诊断。没有访问用户 Runtime、发送 Agent 输入或重启用户 App。它证明真实实现存在可重复缺陷，不证明所有 原用户会话现场断开都由此触发。
+原只读复现从已安装的故障包（源码 `57da6f8d81`）导入真实 ControlServer / RpcClient，在私有临时 Socket 启动服务，同一 client 顺序执行 16、64、193、193 的并发 cohort，全部请求是 `system.endpoint`。前两组全部成功，后两组各失败 129 次；publication 同时给出 pending=64 的准确诊断。没有访问用户 Runtime、发送 Agent 输入或重启用户 App。它证明真实实现存在可重复缺陷，不证明原用户会话的每一次现场断开都由此触发。
 
 该反例的突发复现脚本与原始回执保留在本机过程资料中。新实现的 `node packages/core/scripts/verify-control-admission-burst.mjs --mutations` 最终取得 **35 条通过、六个源码变异各一条业务失败、恢复两条通过**。真实消费包含 193 个独立 client 全部合法准入，同 client 的 16 / 64 / 193 重复突发维持一个物理 Socket、193 个 stream lease 独立取消与通知分发、真实 CLI / Native / SSH 消费以及断线后原 mutation 不重放。六个变异分别恢复 64 drop、撤掉 Unix 共享接线、取消时关闭同伴、错配 subscription、重放未知业务和丢失排队取消事实。
 
 共享 writer 的 `node packages/core/scripts/verify-rpc-stream-writer.mjs --mutations` 另有四条 baseline / 四条恢复通过；恢复聚合阈值、忽略 drain、保留已取消 queued entry、不结算物理关闭等待者四个变异，分别造成 1 / 4 / 1 / 2 个行为失败。夹具使用真实 Node Writable 的 false / drain / close / error，控制慢读行为，不声称实际分配了 64MiB 或测得系统无限容量。实现见 [共享 stream transport](../../packages/core/src/rpc-stream-transport.ts)。
 
-实测的是私有源码候选；403 个输入保持稳定，其中五个产品文件的 hash 逐字节绑定到 main `f19b7ee7abe485beddabf4d7bdb2256b991db7f1`。这不把外层执行树的 HEAD 或后续文档提交冒称实测候选。上述是源码与真实调用链证据，已加载包仍为当次观察到的 `5923cebb7e`，尚无包含这批传输修正的补包安装回执。
+实测的是私有源码候选；403 个输入保持稳定，其中五个产品文件的 hash 逐字节绑定到 main 上的 `7445c2a7df`。这不把外层执行树的 HEAD 或后续文档提交冒称实测候选。上述是源码与真实调用链证据；本复盘时已加载包仍是当次观察到的 `11a6596425`，尚无包含这批传输修正的补包安装回执。
 
 通知 producer 丢 ID 与辅助 unknown 触发全局观察，另由准确 Core 生命周期 / Session owner 修复，不把它们的测试绿色算作 Socket 准入证据。纯文档本次仅核原始来源、Git 时间线、直接链接及语义保全，不重跑真实 Runtime 或打包。
 
 ## 遗留
 
-- 原用户会话 某次 socket close 的具体底层原因仍未确定；应保准确 method、endpoint / owner、request ID、transport cause 和原 reader，而不是从错误标题猜死亡。
-- 新传输源码和共享 writer 背压已获各自真实反例与变异证明；补包安装和 原用户会话现场的对应传输恢复仍需独立回执，不由源码绿色代签。
-- `public-rpc-wire.ts` 的订阅累计 pendingBytes 也使用单帧上限，但尚未取得本次真实反例；这里只登记待核，不把静态相似性当已证根因。
+以下按本复盘时（`dd7af96a7f`）的状态记录；锚点之后的变化逐条注明提交。
+
+- 原用户会话某次 socket close 的具体底层原因未确定。诊断应保留准确 method、endpoint／owner、request ID、transport cause 和原 reader，而不是从错误标题猜测死亡。
+- 新传输源码和共享 writer 背压已获各自真实反例与变异证明；补包安装和原用户会话现场的对应传输恢复当时尚无独立回执，不由源码绿色代签。
+- `public-rpc-wire.ts` 的订阅累计 pendingBytes 也使用单帧上限，当时没有取得真实反例，只登记为待核，不把静态相似性当成已证根因。（`c8f0f7ba1574` 复核：锚点之后该文件没有改动，`public-rpc-wire.ts:94` 仍以 `AGENTMUX_RPC_MAX_MESSAGE_BYTES` 比较订阅累计的 `pendingBytes`。）
 - 删除人工阈值不等于承诺无限容量。真实单帧协议、权限、准确目标和资源耗尽边界仍须保留；不能为减少报错静默重放业务或关闭健康 Agent。
