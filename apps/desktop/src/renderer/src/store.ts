@@ -1,3 +1,5 @@
+import { refreshGoalDelegations } from './lib/goal-delegation-work'
+import { requestAgentConversationFloatingOpen } from './lib/pmo-teams-topic-floating'
 import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordDelete } from './lib/session-record-delete'
 import type { AgentSessionRecordDeleteInput } from '@agentmux/core/agent-session-record'
 import { readingProjection, sameReadingPosition, type FileViewReadingBinding, type FileViewReadingProjection, type FileViewReadings } from './lib/file-view-reading'
@@ -1209,7 +1211,7 @@ export type AppState = GitReadingActions & {
   setSelectedDemand(id: string | null): void
   setDemandArrangement(arrangement: DemandArrangement): void
   openDemandPmo(demandId: string, onReceipt?: (receipt: GoalPmoReceipt) => void): Promise<string>
-  requestDemandPmoTask(demandId: string, mode: GoalDiscussionTaskMode, options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string>
+  requestDemandPmoTask(demandId: string, mode: GoalDiscussionTaskMode, options?: { newRequest?: boolean; creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string | null>
   refreshDemand(demandId: string): Promise<void>
   confirmDemandGoal(demandId: string, expectedRevision: number): Promise<void>
   acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean): Promise<void>
@@ -5290,26 +5292,34 @@ function gitNavigationTarget(state: AppState) {
     surface.file ? [surface.file.path, surface.file.origPath] : null]) : null
 }
 
-async function openGoalPmo(demandId: string, mode: 'open' | GoalDiscussionTaskMode, options?: { onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
+export async function retainGoalPlanRequest(goalId: string): Promise<void> {
+  const key = goalDiscussionRequestKey(goalId, 'plan')
+  if (!useAppStore.getState().goalDiscussionRequests[key]) useAppStore.setState(state => ({ goalDiscussionRequests: { ...state.goalDiscussionRequests, [key]: { goalId, mode: 'plan', requestId: mintObjectId() } } }))
+  await requestWorkbenchStorageFlush(false)
+}
+
+async function openGoalPmo(demandId: string, mode: 'open' | GoalDiscussionTaskMode, options?: { newRequest?: boolean; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string | null> {
   const state = useAppStore.getState()
-  await handoffOriginalGoalDiscussions(demandId)
-  const choice = primaryMoteExecutorChoice(state)
+  if (mode !== 'plan') await handoffOriginalGoalDiscussions(demandId)
+  const choice = mode === 'plan' ? {} : primaryMoteExecutorChoice(state)
   const key = mode === 'open' ? null : goalDiscussionRequestKey(demandId, mode)
   const held = key === null ? undefined : useAppStore.getState().goalDiscussionRequests[key]
-  const request = held === undefined
+  const request = held === undefined || options?.newRequest
     ? { goalId: demandId, mode, requestId: mintObjectId(), ...(choice.executorId ? { executorId: choice.executorId } : {}) }
     : originalGoalDiscussionRequest(held, demandId, mode as GoalDiscussionTaskMode)
   if (key !== null) {
-    useAppStore.setState(current => ({ goalDiscussionRequests: { ...current.goalDiscussionRequests, [key]: request as GoalDiscussionRequest } }))
+    useAppStore.setState(current => ({ goalDiscussionRequests: { ...current.goalDiscussionRequests, ...(options?.newRequest && held ? { [JSON.stringify([demandId, mode, held.requestId])]: held } : {}), [key]: request as GoalDiscussionRequest } }))
     // The original local persistence owner confirms this action reference before any input.
     // This does not require a spatial save or certify the eventual recipient delivery.
     await requestWorkbenchStorageFlush(false)
   }
+  const target = mode === 'plan' ? state.demands[demandId]?.supervisorSessionId : null
+  if (target) requestAgentConversationFloatingOpen(target, undefined, 'Planning request saved; preparing input for this Goal’s Supervisor.')
   const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.discuss', requestId: request.requestId, demandId, mode, ...(request.executorId ? { executorId: request.executorId } : {}) })
   if (result.operation !== 'demand.discuss') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original discussion returned another operation.')
   const goal = hostGoalRecord(result.demand)
   useAppStore.setState(current => ({ demands: { ...current.demands, [goal.id]: demandRecordFromFilesystem(goal, current.demands[goal.id]) } }))
-  if (key !== null) {
+  if (key !== null && mode !== 'plan') {
     useAppStore.setState(current => {
       if (current.goalDiscussionRequests[key]?.requestId !== request.requestId) return current
       const goalDiscussionRequests = { ...current.goalDiscussionRequests }; delete goalDiscussionRequests[key]
@@ -5324,7 +5334,13 @@ async function openGoalPmo(demandId: string, mode: 'open' | GoalDiscussionTaskMo
       })
     }
   }
-  const receipt = { tabId: result.receipt.tabId, agentSessionId: result.receipt.agentSessionId }
+  if (result.receipt.route === 'supervisor') {
+    const receipt: GoalPmoReceipt = { route: 'supervisor', agentSessionId: result.receipt.agentSessionId, hostId: result.receipt.hostId, requestOperationId: result.receipt.requestOperationId }
+    options?.onReceipt?.(receipt)
+    await refreshGoalDelegations(demandId)
+    return null
+  }
+  const receipt: GoalPmoReceipt = { route: 'discussion', tabId: result.receipt.tabId, agentSessionId: result.receipt.agentSessionId }
   options?.onReceipt?.(receipt)
   // The Goals caller presents this original discussion Tab without replacing its background workface.
   return receipt.tabId
@@ -8289,7 +8305,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ demandArrangement: arrangement })
   },
   async openDemandPmo(demandId, onReceipt) {
-    return openGoalPmo(demandId, 'open', onReceipt === undefined ? undefined : { onReceipt })
+    const tabId = await openGoalPmo(demandId, 'open', onReceipt === undefined ? undefined : { onReceipt })
+    if (tabId === null) throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original discussion returned no workface.')
+    return tabId
   },
   async requestDemandPmoTask(demandId, mode, options) {
     return openGoalPmo(demandId, mode, options)

@@ -1,11 +1,12 @@
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { createHash } from 'node:crypto'
 import { AgentMuxError, agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentMuxRpcCallContext } from '@agentmux/core'
-import { demandExecutionReferences, demandResponsibilityScope, type Demand, type DemandPatrol, type DemandPatrolAttempt,
+import { demandExecutionReferences, demandPatrolScope, completedGoalPlanRequest, type Demand, type DemandPatrol, type DemandPatrolAttempt,
   type DemandPatrolReportInput, type DemandPatrolTarget, type DemandStore, type DemandStoreChanges, type DemandStoreSnapshot } from '@agentmux/demand'
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import type { GoalPatrolObservation } from '@agentmux/core/goal-patrol'
 import type { DemandEvidence } from '@agentmux/demand/goals'
+import { goalSupervisorHost } from './goal-supervisor-identity.js'
 import type { GoalRuntimePort } from './goal-runtime.js'
 
 type Runtime = Pick<GoalRuntimePort, 'resolveGoalAgent' | 'observeCoreEvents' | 'observeInputOccupation' | 'saveGoalAttention' |
@@ -57,8 +58,8 @@ export class GoalPatrolOwner {
       }
       if (goal) for (const patrol of goal.patrols ?? []) {
         const id = key(goal.id, patrol.operationId), attempt = patrol.attempts.at(-1)
-        if (patrol.report || !attempt || attempt.supersededAt || goal.status === 'done' || goal.status === 'cancelled' ||
-          goal.supervisorSessionId !== attempt.target.agentSessionId || demandResponsibilityScope(goal) !== patrol.expectedScope) {
+        if (patrol.report || completedGoalPlanRequest(goal, patrol) || !attempt || attempt.supersededAt || goal.status === 'done' || goal.status === 'cancelled' ||
+          goal.supervisorSessionId !== attempt.target.agentSessionId || demandPatrolScope(goal, patrol.purpose) !== patrol.expectedScope) {
           this.scopes.get(id)?.abort(new Error('The frozen inspection scope changed; the request is retained.')); continue
         }
         active.add(id); add(this.sessions, key(attempt.target.hostId, attempt.target.agentSessionId), id); add(this.runs, key(attempt.target.hostId, attempt.target.runId), id); add(this.hosts, attempt.target.hostId, id)
@@ -78,12 +79,18 @@ export class GoalPatrolOwner {
     for (const ref of refs ?? []) { const [goalId, patrolId] = JSON.parse(ref) as [string, string]; void this.check(goalId, patrolId) }
   }
   private async exact(goalId: string, operationId: string) {
-    const goal = await this.demands.get(goalId), patrol = goal?.patrols?.find(item => item.operationId === operationId)
+    const goal = await this.demands.get(goalId), patrol = goal?.patrols?.find(item => (item.operationId === operationId || item.requestOperationIds?.includes(operationId)))
     if (!goal || !patrol) throw new AgentMuxError('The original Goal inspection is unavailable. Preserve its operation and original work.', 'CONTROL_UNAVAILABLE')
     return { goal, patrol }
   }
-  private attempt(goalId: string, patrolId: string, target: DemandPatrolTarget, context: string, suffix: string): Omit<DemandPatrolAttempt, 'preparedAt'> {
+  private attempt(goalId: string, patrolId: string, target: DemandPatrolTarget, context: string, suffix: string, purpose?: 'plan'): Omit<DemandPatrolAttempt, 'preparedAt'> {
     const operationId = 'goal-patrol-' + createHash('sha256').update(JSON.stringify([goalId, patrolId, suffix])).digest('hex')
+    if (purpose === 'plan') {
+      const guidance = goalRoleGuidance({ role: 'manager', goalId, agentSessionId: target.agentSessionId, runId: target.runId, source: { kind: 'goal-plan-request', operationId: patrolId } })
+      return { operationId, actionOperationId: suffix, intentId: operationId, target, agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-plan-request.v1',
+        goalId, requestOperationId: patrolId, inputOperationId: operationId, target, context: JSON.parse(context),
+        next: 'Make and save a dependency plan inside this existing Goal. Read the current Goal and goal plan. As its current Supervisor use goal plan revise with the current proposal revision, real nodes, dependencies, covered criteria and repeatable checks. If the proposal is missing, clarify the same original intent and propose meaningful criteria first. Read back the saved plan revision; delivery is not plan completion. This request does not authorize execution, delegation, continuous progress or human confirmation/acceptance.' }) + '\n\n' + guidance }
+    }
     const frozen = JSON.parse(context) as { alignmentRevision: number | null; executions: unknown[]; alerts: unknown[]; reports: unknown[]; evidence: DemandEvidence[] }
     // The original Goal holds full tasks/results. Carry exact references and an explicit bounded excerpt.
     const excerpt = { alignmentRevision: frozen.alignmentRevision, executionCount: frozen.executions.length,
@@ -98,33 +105,48 @@ export class GoalPatrolOwner {
       next: 'Read amux goal --skill and the retained original Goal/patrol/execution/input/evidence before inspection. Actually inspect progress, evidence, gaps and unknowns; use goal patrol report --input FILE to write back this patrol, current business status and next responsible party/action. Explicit review of an original stored worker report collects its exact authenticated reply atomically; do not collect separately before frozen-scope reporting. Delivery, acknowledgement and reminders are not inspection or acceptance. Retain original Goal/Session/Run and unknown inputs; never blindly resend. Human confirmation and acceptance remain human actions.' }) + '\n\n' + guidance }
 
   }
-  async request(goalId: string, operationId: string, context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<void> {
+  async request(goalId: string, operationId: string, context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority, purpose?: 'plan'): Promise<DemandPatrol> {
     const goal = await this.demands.get(goalId)
     if (!goal) throw new AgentMuxError('The original Goal is unavailable.', 'CONTROL_UNAVAILABLE')
-    if (authority.actor.kind === 'agent' && authority.actor.id !== goal.supervisorSessionId && !demandExecutionReferences(goal).some(ref => ref.agentSessionId === authority.actor.id))
+    if (purpose !== 'plan' && authority.actor.kind === 'agent' && authority.actor.id !== goal.supervisorSessionId && !demandExecutionReferences(goal).some(ref => ref.agentSessionId === authority.actor.id))
       throw new AgentMuxError('Only this Goal’s original execution or management authority can request inspection.', 'CONTROL_PERMISSION_DENIED')
     const original = goal.patrols?.find(item => item.operationId === operationId)
-    if (original) { await this.check(goalId, original.operationId); return }
-    const expectedScope = demandResponsibilityScope(goal)
-    const retained = [...goal.patrols ?? []].reverse().find(item => !item.report && item.expectedScope === expectedScope)
-    if (retained) { await this.check(goalId, retained.operationId); return }
+    if (original) {
+      if (original.purpose !== purpose) throw new AgentMuxError('This original operation belongs to another Goal request purpose. Its original input is retained.', 'CONTROL_REQUEST_CONFLICT')
+      await this.check(goalId, original.operationId); return original
+    }
+    if (purpose === 'plan' && !goal.supervisorSessionId) throw new AgentMuxError('This Goal has no Supervisor. Keep this planning request and choose a Supervisor in the original Goal relationships, then explicitly send it.', 'GOAL_PLAN_SUPERVISOR_REQUIRED')
+    let planningHost: string | undefined
+    if (purpose === 'plan') { try { planningHost = await goalSupervisorHost(goal, this.runtime) } catch (error) { this.issues.set(key(goalId, operationId), describe(error)) } }
+    if (purpose === 'plan' && authority.actor.kind === 'agent' && authority.actor.id === goal.supervisorSessionId && planningHost !== undefined && authority.hostId === planningHost) throw new AgentMuxError('You are this Goal’s Supervisor. Read goal plan and save through goal plan revise instead of requesting a plan from yourself.', 'GOAL_PLAN_REQUEST_SELF')
+    const expectedScope = demandPatrolScope(goal, purpose)
+    const retained = [...goal.patrols ?? []].reverse().find(item => !item.report && item.purpose === purpose && !completedGoalPlanRequest(goal, item) && item.expectedScope === expectedScope)
+    if (retained && purpose !== 'plan') { await this.check(goalId, retained.operationId); return retained }
+    if (retained) {
+      await this.demands.preparePatrol(goalId, { operationId, expectedScope, purpose: 'plan', planRevision: retained.planRevision!,
+        supervisorAgentSessionId: retained.supervisorAgentSessionId, executions: [], context: retained.context, requestedBy: authority.actor })
+      await this.check(goalId, retained.operationId); return retained
+    }
     // Reading exact original work is the request basis, not an inference from its title/UI.
-    const work = await this.read(goalId, context)
+    const work = purpose === 'plan' ? undefined : await this.read(goalId, context)
     let target: DemandPatrolTarget | undefined
-    if (goal.supervisorSessionId) { try {
-      const resolved = await this.runtime.resolveGoalAgent(goal.supervisorSessionId), session = resolved.status.session
+    if (goal.supervisorSessionId && (purpose !== 'plan' || planningHost !== undefined)) { try {
+      const resolved = await this.runtime.resolveGoalAgent(goal.supervisorSessionId, planningHost), session = resolved.status.session
       target = { hostId: resolved.hostId, agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId, workspacePath: session.workspacePath }
     } catch (e) { this.issues.set(key(goalId, operationId), describe(e)) } }
-    const frozen = JSON.stringify({ goalId, expectedScope, alignmentRevision: goal.alignment?.revision ?? null, executions: demandExecutionReferences(goal),
-      alerts: work.responsibility?.executions.filter(row => row.alert).map(row => ({ execution: row.execution, phase: row.phase, alert: row.alert, basis: row.basis })) ?? [],
+    const frozen = purpose === 'plan' ? JSON.stringify({ goalId, expectedScope, title: goal.title, description: goal.description,
+      requestedBy: authority.actor, requester: authority, requestOperationId: operationId, supervisorAgentSessionId: goal.supervisorSessionId,
+      alignment: goal.alignment ?? null, planRevision: goal.plan?.revision ?? 0 }) : JSON.stringify({ goalId, expectedScope, alignmentRevision: goal.alignment?.revision ?? null, executions: demandExecutionReferences(goal),
+      alerts: work?.responsibility?.executions.filter(row => row.alert).map(row => ({ execution: row.execution, phase: row.phase, alert: row.alert, basis: row.basis })) ?? [],
       reports: (goal.delegations ?? []).filter(d => d.report).map(d => ({ delegationOperationId: d.operationId, sourceMessageId: d.sourceMessageId, reportOperationId: d.report!.operationId, replyMessageId: d.report!.replyMessageId })),
       progressOperations: (goal.progressUpdates ?? []).map(update => update.operationId), groundingSubmissionId: goal.grounding?.submissionId ?? null,
       evidence: [...new Map([...(goal.grounding?.checks ?? []).flatMap(c => c.evidence), ...(goal.progressUpdates ?? []).flatMap(p => p.evidence)].map(evidence => [JSON.stringify(evidence), evidence])).values()] })
-    const receipt = await this.demands.preparePatrol(goalId, { operationId, expectedScope, supervisorAgentSessionId: goal.supervisorSessionId,
-      executions: demandExecutionReferences(goal), context: frozen, requestedBy: authority.actor,
-      ...(target ? { attempt: this.attempt(goalId, operationId, target, frozen, operationId) } : {}) })
-    const saved = [...receipt.demand.patrols!].reverse().find(item => item.expectedScope === expectedScope && !item.report)!
+    const receipt = await this.demands.preparePatrol(goalId, { operationId, expectedScope, ...(purpose === 'plan' ? { purpose, planRevision: goal.plan?.revision ?? 0 } : {}), supervisorAgentSessionId: goal.supervisorSessionId,
+      executions: purpose === 'plan' ? [] : demandExecutionReferences(goal), context: frozen, requestedBy: authority.actor,
+      ...(target ? { attempt: this.attempt(goalId, operationId, target, frozen, operationId, purpose) } : {}) })
+    const saved = [...receipt.demand.patrols!].reverse().find(item => item.purpose === purpose && item.expectedScope === expectedScope && !item.report)!
     await this.check(goalId, saved.operationId)
+    return saved
   }
   private check(goalId: string, patrolId: string): Promise<void> {
     const id = key(goalId, patrolId), previous = this.flights.get(id)
@@ -140,13 +162,20 @@ export class GoalPatrolOwner {
   private async admit(goalId: string, patrolId: string, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
     const { goal, patrol } = await this.exact(goalId, patrolId), attempt = patrol.attempts.at(-1)
-    if (!attempt || attempt.attemptedAt || attempt.supersededAt || patrol.report || demandResponsibilityScope(goal) !== patrol.expectedScope) return
+    if (!attempt || attempt.attemptedAt || attempt.supersededAt || patrol.report || completedGoalPlanRequest(goal, patrol) || demandPatrolScope(goal, patrol.purpose) !== patrol.expectedScope) return
     const target = attempt.target
     signal.throwIfAborted(); await this.runtime.saveGoalAttention(input(attempt)); signal.throwIfAborted()
     const observation = await this.runtime.observeContinuousProgress({ ...target, futureIntentId: attempt.intentId }, attempt.operationId, Date.now(), signal)
     if (observation.session.run.runId !== target.runId) throw new AgentMuxError('The saved PMO Run changed. Recover the same Session and explicitly continue this never-attempted request.', 'STALE_AGENT_SESSION')
     const occurrence = { intentId: attempt.intentId, occurrenceAt: attempt.preparedAt }, decision = decideFutureProgress(observation, occurrence)
-    if (decision.kind !== 'send') { this.issues.set(key(goalId, patrolId), decision.reason); this.changed([goalId]); return }
+    if (decision.kind !== 'send') {
+      const planningReason = decision.reason === 'working' || decision.reason === 'stale-working'
+        ? 'The Supervisor is working. This saved planning request waits for an eligible input window.'
+        : decision.reason === 'user-input-changed' ? 'The Supervisor has unsent input. Its draft is retained while this saved planning request waits.'
+        : decision.reason === 'interaction-pending' ? 'The Supervisor has a native question or permission waiting. Open its original conversation; this planning request is retained.'
+        : 'The Supervisor’s input readiness is not confirmed. Read its original status; the saved planning request and healthy capabilities are retained.'
+      this.issues.set(key(goalId, patrolId), patrol.purpose === 'plan' ? planningReason : decision.reason); this.changed([goalId]); return
+    }
     signal.throwIfAborted()
     const admission = await this.demands.markPatrolAttempt(goalId, patrolId, attempt.operationId)
     if (admission.replayed) return // Another original owner already attempted; this read grants no submit.
@@ -165,14 +194,15 @@ export class GoalPatrolOwner {
       if (originalAction.target.runId !== expectedRunId) throw new AgentMuxError('This original continuation action names another Run. Read the saved action without changing its input.', 'CONTROL_REQUEST_CONFLICT')
       await this.check(goalId, patrolId); return
     }
-    if (patrol.report || goal.supervisorSessionId !== patrol.supervisorAgentSessionId || demandResponsibilityScope(goal) !== patrol.expectedScope)
+    if (patrol.report || completedGoalPlanRequest(goal, patrol) || goal.supervisorSessionId !== patrol.supervisorAgentSessionId || demandPatrolScope(goal, patrol.purpose) !== patrol.expectedScope)
       throw new AgentMuxError('The original inspection scope changed. Preserve this request and explicitly inspect the current Goal.', 'CONTROL_REQUEST_CONFLICT')
     const id = key(goalId, patrolId)
     this.scopes.get(id)?.abort(new Error('Explicit continuation fences the original pending admission.'))
     await this.flights.get(id)
     const refreshed = await this.exact(goalId, patrolId), previous = refreshed.patrol.attempts.at(-1)
     if (refreshed.patrol.attempts.some(item => item.attemptedAt)) throw new AgentMuxError('The original input may have been attempted. Inspect it or report the real inspection; no input was resent.', 'CONTROL_REQUEST_CONFLICT')
-    const resolved = await this.runtime.resolveGoalAgent(patrol.supervisorAgentSessionId), session = resolved.status.session
+    const originalHost = previous?.target.hostId ?? (patrol.purpose === 'plan' ? await goalSupervisorHost(goal, this.runtime) : undefined)
+    const resolved = await this.runtime.resolveGoalAgent(patrol.supervisorAgentSessionId, originalHost), session = resolved.status.session
     if (session.run.runId !== expectedRunId || previous && (expectedRunId === previous.target.runId || resolved.hostId !== previous.target.hostId))
       throw new AgentMuxError('Continue requires the explicitly recovered same Session at its exact new Run, or the first confirmed route of its retained request.', 'STALE_AGENT_SESSION')
     if (previous) {
@@ -180,11 +210,12 @@ export class GoalPatrolOwner {
       await this.runtime.disableGoalAttention(input(previous))
     }
     const target = { agentSessionId: session.agentSessionId, hostId: resolved.hostId, runId: expectedRunId, providerId: session.providerId, workspacePath: session.workspacePath }
-    await this.demands.continuePatrol(goalId, patrolId, previous?.operationId ?? null, this.attempt(goalId, patrolId, target, patrol.context, operationId))
+    await this.demands.continuePatrol(goalId, patrolId, previous?.operationId ?? null, this.attempt(goalId, patrolId, target, patrol.context, operationId, patrol.purpose))
     await this.check(goalId, patrolId)
   }
   async report(goalId: string, patrolId: string, report: DemandPatrolReportInput, authority: GoalDelegationAuthority): Promise<void> {
     const { patrol } = await this.exact(goalId, patrolId)
+    if (patrol.purpose === 'plan') throw new AgentMuxError('A planning request is completed by saving the plan, not an inspection report. Read goal plan and goal plan revise.', 'CONTROL_REQUEST_CONFLICT')
     if (authority.actor.kind !== 'agent' || !authority.runId || authority.actor.id !== patrol.supervisorAgentSessionId)
       throw new AgentMuxError('Only the authenticated original PMO can report an actual inspection, including from its recovered Run.', 'CONTROL_PERMISSION_DENIED')
     const resolved = await this.runtime.resolveGoalAgent(authority.actor.id)
@@ -209,16 +240,23 @@ export class GoalPatrolOwner {
   async observe(goal: Demand): Promise<GoalPatrolObservation[]> {
     return await Promise.all((goal.patrols ?? []).map(async patrol => {
       const attempt = patrol.attempts.at(-1), reason = this.issues.get(key(goal.id, patrol.operationId)) ?? this.issues.get('startup')
+      const planRevision = completedGoalPlanRequest(goal, patrol)
+      if (planRevision !== null) return { operationId: patrol.operationId, state: 'planned' as const, planRevision, reason: `Plan revision ${planRevision} is saved in this original Goal.` }
       if (patrol.report) return { operationId: patrol.operationId, state: patrol.report.applied ? 'reported' as const : 'stale' as const, reason: patrol.report.reason }
-      if (demandResponsibilityScope(goal) !== patrol.expectedScope) return { operationId: patrol.operationId, state: 'stale' as const, reason: 'Original inspection scope changed. Read the current Goal and request a new inspection explicitly.' }
-      if (!attempt) return { operationId: patrol.operationId, state: 'missing' as const, reason: reason ?? 'Choose the original Goal Supervisor, then request inspection. No replacement Agent was created.' }
-      if (!attempt.attemptedAt) return { operationId: patrol.operationId, state: 'prepared' as const, reason: reason ?? 'Saved request waits for eligible original PMO input; its draft and native capabilities are retained.' }
+      if (demandPatrolScope(goal, patrol.purpose) !== patrol.expectedScope) return { operationId: patrol.operationId, state: 'stale' as const, reason: patrol.purpose === 'plan' ? 'The original Supervisor or proposal changed. Keep this request; explicitly ask the current Supervisor with a new operation.' : 'Original inspection scope changed. Read the current Goal and request a new inspection explicitly.' }
+      if (!attempt) return { operationId: patrol.operationId, state: 'missing' as const, reason: reason ?? (patrol.purpose === 'plan' ? 'The original Supervisor route is unavailable. Reconnect its Host, then explicitly continue this saved planning request. No replacement Agent was created.' : 'Choose the original Goal Supervisor, then request inspection. No replacement Agent was created.') }
+      if (!attempt.attemptedAt) {
+        try { const current = await this.runtime.observeGoalAgent(attempt.target.hostId, attempt.target.agentSessionId)
+          if (current.session.run.runId !== attempt.target.runId) return { operationId: patrol.operationId, state: 'stale' as const, reason: 'The original Supervisor Run changed. Explicitly continue this never-attempted request on its recovered same Session.' }
+        } catch (e) { return { operationId: patrol.operationId, state: 'unknown' as const, reason: describe(e) } }
+        return { operationId: patrol.operationId, state: 'prepared' as const, reason: reason ?? (patrol.purpose === 'plan' ? 'Saved planning request waits for eligible Supervisor input; its draft and native capabilities are retained.' : 'Saved request waits for eligible original PMO input; its draft and native capabilities are retained.') }
+      }
       try { const receipt = await this.runtime.inspectGoalAttention(input(attempt)), admission = receipt?.admission
         const confirmed = receipt?.agentSessionId === attempt.target.agentSessionId && receipt.run.runId === attempt.target.runId &&
           admission?.submissionId === attempt.operationId && admission.acknowledged && admission.intent?.message?.systemContext === attempt.agentMuxNote &&
           admission.inputKey?.kind === 'prompt' && admission.inputKey.submissionId === attempt.operationId && admission.inputKey.expectedRun.runId === attempt.target.runId
         return { operationId: patrol.operationId, state: confirmed ? 'delivered' as const : 'unknown' as const,
-          reason: confirmed ? 'Original PMO input is confirmed. Inspection and Goal writeback are still pending.' : reason ?? 'Original input receipt is unknown. Inspect this operation; it is never automatically resent.' }
+          reason: confirmed ? patrol.purpose === 'plan' ? 'Planning input is confirmed. The Supervisor has not yet saved a newer plan.' : 'Original PMO input is confirmed. Inspection and Goal writeback are still pending.' : reason ?? 'Original input receipt is unknown. Inspect this operation; it is never automatically resent.' }
       } catch (e) { return { operationId: patrol.operationId, state: 'unknown' as const, reason: describe(e) } }
     }))
   }

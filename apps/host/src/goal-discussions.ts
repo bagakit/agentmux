@@ -14,27 +14,17 @@ import { globalGoalPatrolPrompt } from '@agentmux/core/goal-patrol'
 import { readOriginalMoteConfiguration, ScratchTopics, configuredExecutor } from './mote-resources.js'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { projectHostGoal } from './goal-projection.js'
+import type { GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
+import type { DemandPatrol } from '@agentmux/demand'
 import type { GoalRuntimePort } from './goal-runtime.js'
 
 type Request = Extract<AgentMuxControlRequest, { operation: 'demand.discuss' }>
-type TaskMode = Exclude<Request['mode'], 'open'>
-const discussionPrompt = (goal: Demand, mode: TaskMode) => mode === 'plan' ? `Make a plan for this existing Goal: ${goal.id}.`
-  : mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.'
+type TaskMode = 'grill' | 'grounding'
+type DiscussionRequest = Omit<Request, 'mode'> & { mode: 'open' | TaskMode }
+const discussionPrompt = (_goal: Demand, mode: TaskMode) => mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.'
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 /** Original Goal request text, shared by every client through the domain owner. */
 function discussionTask(goal: Demand, mode: TaskMode): string {
-  if (mode === 'plan') return [
-    `Make and save a dependency plan inside the existing Goal ${goal.id}.`,
-    'This is an explicit planning request only. Preserve this same Goal and its original intent. Do not start work, send execution tasks, enable continuous progress, confirm the Goal or accept results for the person.',
-    'Read the current Goal, its actual Supervisor, current alignment and plan first. A dedicated discussion Agent or a manager guidance label does not grant Supervisor authority. Only the exact current Supervisor or an authenticated person can revise the plan. If you are not that Supervisor, explain the existing management relationship and the explicit selection or coordination needed; do not assign yourself or impersonate a person.',
-    'A current proposal allows planning before human confirmation. If the proposal or meaningful success criteria are missing, clarify the real outcome in this original discussion and update this same Goal with a real alignment proposal first. Do not invent intent, standards, human approval or a placeholder plan merely to fill the graph.',
-    'Describe real work nodes with stable IDs, outcomes, covered current criterion IDs and checks another party can repeat. Record dependencies only where one node needs another result; preserve real parallel work. Use an exact known executor Host and AgentSession, or executor:null when unknown. Do not guess identities.',
-    'Read goal plan, then save through goal plan revise with the revision you read (expectedRevision:0 for the first plan) and the current alignmentRevision. Supply {goalId,revision:{operationId,expectedRevision,alignmentRevision,nodes:[{id,title,outcome,dependsOn,criterionIds,check,executor}]}}. If the plan changed, read it again; keep nodes with recorded work and their original history.',
-    'Read back the original Goal plan after saving. A received request or a textual breakdown is not a saved plan. Report the original saved revision or the exact unconfirmed step; never claim that input acknowledgement means the DAG exists.',
-    `"$AGENTMUX_CLI" goal inspect --goal ${JSON.stringify(goal.id)}`,
-    `"$AGENTMUX_CLI" goal plan --goal ${JSON.stringify(goal.id)}`,
-    '"$AGENTMUX_CLI" goal plan revise --input FILE'
-  ].join('\n\n')
   return [
     `Coordinate the existing Goal ${goal.id}. Current request: ${mode === 'grill' ? 'align the goal' : 'align the results'}.`,
     ...(!goal.alignment && !goal.description.trim() ? ['This is an existing undefined Goal draft. Its placeholder title is not the user intent. Ask what the person wants to achieve; do not invent an outcome, criteria or human approval.'] : []),
@@ -50,6 +40,7 @@ export function createHostGoalDiscussions(options: {
   demands: DemandStore
   spatial?: AgentMuxSpatialStateStore
   runtime: GoalRuntimePort
+  requestPlan?(goalId: string, operationId: string, context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<DemandPatrol>
   confirmParticipation(input: import('@agentmux/core').GoalParticipationConfirm, context: AgentMuxRpcCallContext): Promise<unknown>
   call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext, hostId?: string): Promise<AgentMuxRpcResult<M>>
 }) {
@@ -111,7 +102,7 @@ export function createHostGoalDiscussions(options: {
     const original = goalProjectContext({ workspaces, hosts }, goal.projectId)
     return goalProjectContextText(original, goal.projectId)
   }
-  const intent = async (goal: Demand, request: Request, context: AgentMuxRpcCallContext): Promise<DemandDiscussionIntent> => {
+  const intent = async (goal: Demand, request: DiscussionRequest, context: AgentMuxRpcCallContext): Promise<DemandDiscussionIntent> => {
     if (goal.discussionIntent) {
       if (goal.discussionIntent.requestOperationId === request.requestId && (goal.discussionIntent.mode !== request.mode || request.executorId !== undefined && goal.discussionIntent.executorId !== request.executorId))
         throw new AgentMuxError('The original Goal discussion request belongs to another mode. Keep its same operation and original input.', 'CONTROL_REQUEST_CONFLICT')
@@ -175,14 +166,54 @@ export function createHostGoalDiscussions(options: {
         throw new AgentMuxError('The original Goal discussion creation changed its frozen request.', 'CONTROL_REQUEST_CONFLICT')
       return original.agentMuxNote
     },
-    async execute(request: Request, context: AgentMuxRpcCallContext): Promise<Extract<AgentMuxControlResult, { operation: 'demand.discuss' }>> {
+    async execute(request: Request, context: AgentMuxRpcCallContext, authority?: GoalDelegationAuthority): Promise<Extract<AgentMuxControlResult, { operation: 'demand.discuss' }>> {
       await current(context)
       let goal = await saved(request.demandId)
+      if (request.mode === 'plan') {
+        const retained = goal.patrols?.find(item => (item.operationId === request.requestId || item.requestOperationIds?.includes(request.requestId)))
+        if (retained && retained.purpose !== 'plan') throw new AgentMuxError('This operation already belongs to an inspection. Keep its original request.', 'CONTROL_REQUEST_CONFLICT')
+        // An old frozen discussion input stays at its exact original recipient. Read
+        // both public input producers across every retained Run; absence is not inferred
+        // from the current screen or current Run alone.
+        const frozen = goal.discussionIntent?.requestOperationId === request.requestId
+        if (frozen && goal.discussionIntent!.mode !== 'plan') throw new AgentMuxError('The original discussion operation has another purpose.', 'CONTROL_REQUEST_CONFLICT')
+        let originalBinding: ReturnType<typeof readGoalDiscussionBinding> = null
+        let claimed = false
+        if (!retained && options.spatial) {
+          const state = await options.spatial.read()
+          if (!state) return unavailable('The original discussion bindings could not be observed while reconciling this planning operation.')
+          originalBinding = readGoalDiscussionBinding(state.graph, goal.id)
+          if (originalBinding?.recipient.kind === 'agent') {
+            const recipient = originalBinding.recipient, original = await options.runtime.agentCreation(recipient.hostId, recipient.agentSessionId)
+            if (frozen && original.kind === 'agent' && original.creation && original.creation.createOperationId === goal.discussionOperationId) {
+              if (original.creation.initialPrompt !== 'confirmed') return unavailable('The frozen original discussion creation input is unconfirmed; it was not replayed or redirected.')
+              claimed = true
+            }
+            const runs = original.kind === 'agent' ? [original.run, ...original.retiredRuns] : []
+            for (const run of runs) for (const producer of ['prompt', 'message'] as const) {
+              const prior = await options.runtime.inspectGoalAttention({ hostId: recipient.hostId, supervisorAgentSessionId: recipient.agentSessionId,
+                supervisorRunId: run.runId, operationId: producer === 'prompt' ? request.requestId : deriveObjectId('goal-discussion-message', request.requestId),
+                ...(producer === 'message' ? { producer } : {}) })
+              if (prior) { claimed = true; if (!prior.admission?.acknowledged) return unavailable('The original planning input in the dedicated discussion is unconfirmed; it is retained without resending or redirecting.') }
+            }
+            resolveGoalDiscussionBinding(state.graph, originalBinding)
+          }
+        }
+        if (!retained && (frozen || claimed)) {
+          if (!originalBinding || originalBinding.recipient.kind !== 'agent' || !claimed) return unavailable('The original frozen planning discussion is retained. Inspect its original creation and input; no new planning body was sent.')
+          return { operation: request.operation, demand: projectHostGoal(goal), receipt: { demandId: goal.id, requestId: request.requestId, mode: 'plan', route: 'discussion',
+            tabId: originalBinding.tabId, regionId: originalBinding.regionId, hostId: originalBinding.recipient.hostId, agentSessionId: originalBinding.recipient.agentSessionId } }
+        }
+        if (!options.requestPlan || !authority) throw new AgentMuxError('The original Supervisor planning request owner or authenticated requester is unavailable. Keep this request and original work.', 'CONTROL_UNAVAILABLE')
+        const planned = await options.requestPlan(goal.id, request.requestId, context, authority), target = planned.attempts.at(-1)?.target
+        return { operation: request.operation, demand: projectHostGoal(await saved(goal.id)), receipt: { demandId: goal.id, requestId: request.requestId, mode: 'plan', route: 'supervisor',
+          requestOperationId: planned.operationId, agentSessionId: planned.supervisorAgentSessionId!, hostId: target?.hostId ?? null, runId: target?.runId ?? null } }
+      }
       if (!options.spatial) return unavailable('The original Core spatial owner is unavailable.')
       let state = await options.spatial.read()
       if (!state) return unavailable('The original Core spatial document is unavailable.')
       let binding = readGoalDiscussionBinding(state.graph, goal.id)
-      const original = goal.discussionIntent || !binding ? await intent(goal, request, context) : undefined
+      const original = goal.discussionIntent || !binding ? await intent(goal, { ...request, mode: request.mode }, context) : undefined
       goal = await saved(goal.id)
       if (!binding) {
         // Another caller/profile can contribute a retained binding while the
@@ -215,7 +246,7 @@ export function createHostGoalDiscussions(options: {
         if (confirmed) { state = confirmed.state; binding = readGoalDiscussionBinding(state.graph, goal.id)! }
       }
       resolveGoalDiscussionBinding(state.graph, binding)
-      const receipt = () => ({ demandId: goal.id, requestId: request.requestId, mode: request.mode, tabId: binding.tabId, regionId: binding.regionId,
+      const receipt = () => ({ demandId: goal.id, requestId: request.requestId, mode: request.mode, route: 'discussion' as const, tabId: binding.tabId, regionId: binding.regionId,
         hostId: binding.recipient.kind === 'agent' ? binding.recipient.hostId : null, agentSessionId: binding.recipient.kind === 'agent' ? binding.recipient.agentSessionId : null })
       if (binding.recipient.kind === 'launcher') {
         if (request.mode !== 'open') return unavailable('Open the original discussion launcher and explicitly choose its Agent before sending this request.')
@@ -263,14 +294,7 @@ export function createHostGoalDiscussions(options: {
         if (!prior?.admission?.acknowledged) return unavailable('The original discussion input remains unconfirmed. Its operation and recipient are retained; it was not repeated.')
         if (context.caller) {
           const { message } = await options.call('message.read', { hostId: recipient.hostId, operationId: request.requestId }, context)
-          // A reference notification's input body is not the original message body.
-          // Reconcile the retained journal envelope with its exact admitted input;
-          // a later project/Goal edit must not manufacture a new planning body.
-          const originalPlan = request.mode === 'plan' && message?.envelope.operationId === request.requestId &&
-            message.envelope.senderSessionId === context.caller.agentSessionId && message.envelope.recipientSessionId === prior.agentSessionId &&
-            message.envelope.recipientRunId === prior.run.runId
-          if (message?.envelope.messageId !== messageId || message.envelope.correlationId !== deriveObjectId('goal-discussion-' + request.mode, goal.id) ||
-              (request.mode === 'plan' ? !originalPlan : message.envelope.body !== await taskContext(goal, request.mode)))
+          if (message?.envelope.messageId !== messageId || message.envelope.correlationId !== deriveObjectId('goal-discussion-' + request.mode, goal.id) || message.envelope.body !== await taskContext(goal, request.mode))
             throw new AgentMuxError('The original discussion message belongs to another business request. Its actual sender, recipient and input remain retained.', 'CONTROL_REQUEST_CONFLICT')
         }
         await options.confirmParticipation({ goalId: goal.id, hostId: recipient.hostId, agentSessionId: recipient.agentSessionId, expectedRun: prior.run, evidence: context.caller ? 'message-input' : 'prompt-input', operationId: request.requestId }, context)

@@ -1,5 +1,5 @@
 import { parseDemandDiscussionIntent, type DemandDiscussionIntent } from './discussion.js'
-import { assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
+import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
 import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId,
@@ -524,16 +524,21 @@ export class DemandStore {
   async preparePatrol(id: string, input: DemandPatrolPreparation): Promise<DemandReceipt> {
     return this.mutate('patrol.prepare', snapshot => {
       const goal = findDemand(snapshot, id, this.storePath)
-      const priorGoal = snapshot.demands.find(item => item.patrols?.some(p => p.operationId === input.operationId))
+      const priorGoal = snapshot.demands.find(item => item.patrols?.some(p => (p.operationId === input.operationId || p.requestOperationIds?.includes(input.operationId))))
       if (priorGoal) {
-        if (priorGoal.id !== id) this.rejectDelegation('This patrol operation belongs to another original Goal.')
+        if (priorGoal.id !== id || priorGoal.patrols!.find(p => (p.operationId === input.operationId || p.requestOperationIds?.includes(input.operationId)))!.purpose !== input.purpose) this.rejectDelegation('This patrol operation belongs to another original Goal.')
         return { unchanged: goal }
       }
-      if (demandResponsibilityScope(goal) !== input.expectedScope || goal.supervisorSessionId !== input.supervisorAgentSessionId)
+      if (demandPatrolScope(goal, input.purpose) !== input.expectedScope || goal.supervisorSessionId !== input.supervisorAgentSessionId)
         this.rejectDelegation('The frozen Goal responsibility changed before inspection preparation.')
-      const retained = [...goal.patrols ?? []].reverse().find(p => !p.report && p.expectedScope === input.expectedScope)
-      if (retained) return { unchanged: goal }
-      assertPatrolExecutions(goal, input)
+      const retained = [...goal.patrols ?? []].reverse().find(p => !p.report && p.purpose === input.purpose && !completedGoalPlanRequest(goal, p) && p.expectedScope === input.expectedScope)
+      if (retained) {
+        if (input.purpose !== 'plan') return { unchanged: goal }
+        retained.requestOperationIds = [...retained.requestOperationIds ?? [], input.operationId]
+        goal.updatedAt = Math.max(Date.now(), goal.updatedAt + 1)
+        return goal
+      }
+      if (input.purpose !== 'plan') assertPatrolExecutions(goal, input)
       if (input.attempt && input.attempt.target.agentSessionId !== goal.supervisorSessionId) this.rejectDelegation('The original patrol target is not this Goal Supervisor.')
       const now = Date.now(), { attempt, ...request } = input
       const patrol = parseDemandPatrols([{ ...request, ...(goal.alignment ? { alignment: goal.alignment } : {}), requestedAt: now, attempts: attempt ? [{ ...attempt, preparedAt: now }] : [] }])[0]!
@@ -546,7 +551,7 @@ export class DemandStore {
     return this.mutate('patrol.attempt', snapshot => {
       const goal = findDemand(snapshot, id, this.storePath), patrol = goal.patrols?.find(p => p.operationId === patrolId), attempt = patrol?.attempts.at(-1)
       if (!patrol || !attempt || attempt.operationId !== inputOperationId || attempt.supersededAt || patrol.report ||
-        demandResponsibilityScope(goal) !== patrol.expectedScope || goal.supervisorSessionId !== attempt.target.agentSessionId)
+        demandPatrolScope(goal, patrol.purpose) !== patrol.expectedScope || goal.supervisorSessionId !== attempt.target.agentSessionId)
         this.rejectDelegation('The original patrol admission was superseded; its native input was not replaced.')
       if (attempt.attemptedAt) return { unchanged: goal }
       attempt.attemptedAt = Date.now(); goal.updatedAt = Math.max(attempt.attemptedAt, goal.updatedAt + 1)
@@ -569,7 +574,7 @@ export class DemandStore {
       }
       const old = patrol.attempts.at(-1)
       if (patrol.report || patrol.attempts.some(a => a.attemptedAt) || (old?.operationId ?? null) !== oldInputOperationId || old?.supersededAt ||
-        patrol.supervisorAgentSessionId !== next.target.agentSessionId || goal.supervisorSessionId !== next.target.agentSessionId || demandResponsibilityScope(goal) !== patrol.expectedScope)
+        patrol.supervisorAgentSessionId !== next.target.agentSessionId || goal.supervisorSessionId !== next.target.agentSessionId || demandPatrolScope(goal, patrol.purpose) !== patrol.expectedScope)
         this.rejectDelegation('The old request changed or may have attempted input. Keep its exact receipt; no new attempt is admitted.')
       if (old) old.supersededAt = next.preparedAt
       patrol.attempts.push(next); goal.updatedAt = Math.max(next.preparedAt, goal.updatedAt + 1)
@@ -583,6 +588,7 @@ export class DemandStore {
     const report = parseDemandPatrolReportInput(raw)
     return this.mutate('patrol.report', snapshot => {
       const goal = findDemand(snapshot, id, this.storePath), patrol = goal.patrols?.find(p => p.operationId === patrolId)
+      if (patrol?.purpose === 'plan') this.rejectDelegation('A planning request is completed by saving a Goal plan, not by an inspection report. Read goal plan and goal plan revise.')
       if (!patrol || patrol.supervisorAgentSessionId !== author.agentSessionId) this.rejectDelegation('Only the original PMO can return this retained inspection.')
       const duplicate = snapshot.demands.flatMap(g => g.patrols ?? []).find(p => p.report?.operationId === report.operationId)
       if (duplicate && duplicate !== patrol) this.rejectDelegation('This report operation belongs to another original patrol.')
@@ -599,7 +605,7 @@ export class DemandStore {
         if (update.expectedScope !== patrol.expectedScope || !patrol.executions.some(ref => sameDemandExecution(ref, update.execution))) this.rejectDelegation('Inspection progress must name this patrol’s exact original execution scope.')
         if (snapshot.demands.some(g => g.progressUpdates?.some(u => u.operationId === update.operationId))) this.rejectDelegation('This inspection progress operation was already used. Keep the original declaration.')
       }
-      const applied = demandResponsibilityScope(goal) === patrol.expectedScope && goal.supervisorSessionId === author.agentSessionId && goal.grounding?.acceptedAt == null
+      const applied = demandPatrolScope(goal, patrol.purpose) === patrol.expectedScope && goal.supervisorSessionId === author.agentSessionId && goal.grounding?.acceptedAt == null
       if (applied && report.nextOwner.kind === 'agent' && report.nextOwner.agentSessionId !== goal.supervisorSessionId &&
         !demandExecutionReferences(goal).some(ref => ref.agentSessionId === report.nextOwner.agentSessionId)) this.rejectDelegation('The next responsible Agent must be bound to this original Goal.')
       const now = Date.now()

@@ -48,7 +48,7 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
     try {
       assertGoalIntentScope(client, owner, intent(value))
       const result = await client!.forwardRpc!('goal.discuss', input)
-      if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.operationId !== input.operationId || result.receipt.mode !== 'grill') throw new Error('返回的讨论与这次请求不一致')
+      if (result.receipt.route !== 'discussion' || result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.operationId !== input.operationId || result.receipt.mode !== 'grill') throw new Error('返回的讨论与这次请求不一致')
       setRequest({ ...value, phase: 'ready', issue: result.receipt.agentSessionId ? '目标已保存，已打开主 Mote 讨论。' : '目标已保存，还没有 Agent 接上；请在 Mac 上为主 Mote 选择 Agent 并启动。' })
       await owner.settleGoalIntent(intent(value), 'confirmed', value.recordId, original)
       if (value.present()) openDiscussion(result.receipt)

@@ -1,7 +1,7 @@
 import type { Demand, DemandStatus } from './demand-types.js'
 import { parseAlignment, parseGroundingProposal, type DemandAlignment, type DemandGroundingProposal } from './goals.js'
 import { demandExecutionReferences, parseDemandExecutionReference, parseDemandProgressInput, sameDemandExecution,
-  type DemandExecutionReference, type DemandProgressInput } from './responsibility.js'
+  demandResponsibilityScope, type DemandExecutionReference, type DemandProgressInput } from './responsibility.js'
 
 export type DemandPatrolTarget = { agentSessionId: string; hostId: string; runId: string; providerId: string; workspacePath: string }
 export type DemandPatrolAttempt = { operationId: string; actionOperationId: string; intentId: string; target: DemandPatrolTarget; agentMuxNote: string;
@@ -11,7 +11,7 @@ export type DemandPatrolReportInput = { operationId: string; summary: string; gr
   nextOwner: { kind: 'agent' | 'human' | 'external' | 'unassigned'; agentSessionId: string | null; action: string } }
 export type DemandPatrolReport = DemandPatrolReportInput & { authorAgentSessionId: string; reportingRunId: string;
   reportedAt: number; applied: boolean; reason: string }
-export type DemandPatrol = { operationId: string; expectedScope: string; executions: DemandExecutionReference[]; alignment?: DemandAlignment;
+export type DemandPatrol = { purpose?: 'plan'; planRevision?: number; requestOperationIds?: string[]; operationId: string; expectedScope: string; executions: DemandExecutionReference[]; alignment?: DemandAlignment;
   supervisorAgentSessionId: string | null; context: string; requestedBy: { kind: 'agent' | 'user' | 'device'; id: string };
   requestedAt: number; attempts: DemandPatrolAttempt[]; report?: DemandPatrolReport }
 export type DemandPatrolPreparation = Omit<DemandPatrol, 'requestedAt' | 'attempts' | 'report' | 'alignment'> & { attempt?: Omit<DemandPatrolAttempt, 'preparedAt' | 'attemptedAt' | 'supersededAt'> }
@@ -47,8 +47,16 @@ export function parseDemandPatrols(value: unknown): DemandPatrol[] {
   if (!Array.isArray(value)) throw new Error('Goal patrols must be an array')
   const seen = new Set<string>()
   return value.map(value => {
-    const p = obj(value, ['operationId', 'expectedScope', 'executions', 'alignment', 'supervisorAgentSessionId', 'context', 'requestedBy', 'requestedAt', 'attempts', 'report'])
+    const p = obj(value, ['purpose', 'planRevision', 'requestOperationIds', 'operationId', 'expectedScope', 'executions', 'alignment', 'supervisorAgentSessionId', 'context', 'requestedBy', 'requestedAt', 'attempts', 'report'])
     if (!Array.isArray(p.executions) || !Array.isArray(p.attempts)) throw new Error('Patrol requires its frozen executions and input attempts')
+    if (p.purpose !== undefined && p.purpose !== 'plan' || p.planRevision !== undefined && (!Number.isSafeInteger(p.planRevision) || Number(p.planRevision) < 0 || p.purpose !== 'plan')) throw new Error('Goal request purpose or plan revision is invalid')
+    if (p.purpose === 'plan' && (p.planRevision === undefined || p.report !== undefined || p.executions.length)) throw new Error('Planning retains its original plan revision and has no inspection executions or report')
+    const requestOperationIds = p.requestOperationIds === undefined ? undefined : (() => {
+      if (!Array.isArray(p.requestOperationIds) || p.purpose !== 'plan') throw new Error('Planning request aliases must be original operation IDs')
+      const ids = p.requestOperationIds.map(text)
+      if (new Set(ids).size !== ids.length) throw new Error('Duplicate planning operation alias')
+      return ids
+    })()
     const requested = obj(p.requestedBy, ['kind', 'id'])
     if (!['agent', 'user', 'device'].includes(String(requested.kind))) throw new Error('Patrol requester is invalid')
     const operationId = text(p.operationId)
@@ -61,7 +69,7 @@ export function parseDemandPatrols(value: unknown): DemandPatrol[] {
     })()
     const attempts = p.attempts.map(parseDemandPatrolAttempt)
     if (new Set(attempts.map(a => a.operationId)).size !== attempts.length || attempts.slice(0, -1).some(a => !a.supersededAt || a.attemptedAt)) throw new Error('Patrol input history is invalid')
-    return { operationId, expectedScope: text(p.expectedScope), executions: p.executions.map(parseDemandExecutionReference), ...(p.alignment === undefined ? {} : { alignment: parseAlignment(p.alignment) }),
+    return { ...(p.purpose === 'plan' ? { purpose: 'plan' as const, planRevision: p.planRevision as number, ...(requestOperationIds ? { requestOperationIds } : {}) } : {}), operationId, expectedScope: text(p.expectedScope), executions: p.executions.map(parseDemandExecutionReference), ...(p.alignment === undefined ? {} : { alignment: parseAlignment(p.alignment) }),
       supervisorAgentSessionId: p.supervisorAgentSessionId === null ? null : text(p.supervisorAgentSessionId), context: text(p.context),
       requestedBy: { kind: requested.kind as DemandPatrol['requestedBy']['kind'], id: text(requested.id) }, requestedAt: time(p.requestedAt), attempts, ...(report ? { report } : {}) }
   })
@@ -70,4 +78,13 @@ export function assertPatrolExecutions(goal: Pick<Demand, 'dispatches' | 'delega
   const refs = demandExecutionReferences(goal)
   if (!patrol.executions.length || patrol.executions.some(ref => !refs.some(original => sameDemandExecution(original, ref))) ||
     new Set(patrol.executions.map(ref => JSON.stringify([ref.kind, ref.operationId]))).size !== patrol.executions.length) throw new Error('Patrol must retain original executions from this Goal')
+}
+
+/** Planning depends on its original proposal/manager, never unrelated execution history. */
+export function demandPatrolScope(goal: Demand, purpose?: 'plan'): string {
+  return purpose === 'plan' ? JSON.stringify({ purpose: 'plan', goalId: goal.id, supervisor: goal.supervisorSessionId,
+    alignmentRevision: goal.alignment?.revision ?? null, planRevision: goal.plan?.revision ?? 0 }) : demandResponsibilityScope(goal)
+}
+export function completedGoalPlanRequest(goal: Demand, request: DemandPatrol): number | null {
+  return request.purpose === 'plan' && goal.plan && goal.plan.revision > request.planRevision! ? goal.plan.revision : null
 }

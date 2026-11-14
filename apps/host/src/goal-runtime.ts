@@ -25,7 +25,7 @@ export interface GoalRuntimePort {
   spatialCreationCandidates(tabId: string, regionId: string): Promise<AgentMuxAgentSession[]>
   agentCreation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
   observeGoalAgent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus>
-  resolveGoalAgent(agentSessionId: string): Promise<{ hostId: string; status: AgentMuxAgentRuntimeStatus }>
+  resolveGoalAgent(agentSessionId: string, expectedHostId?: string): Promise<{ hostId: string; status: AgentMuxAgentRuntimeStatus }>
   observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>>
   observeCoreEvents(types: readonly AgentMuxClientEvent['type'][], listener: (hostId: string, event: AgentMuxClientEvent) => void): () => void
   observeInputOccupation(listener: (control: GoalAgentControl) => void): () => void
@@ -87,8 +87,8 @@ export function createGoalRuntime(options: {
       return { ...value, hostId }
     },
     observeGoalAgent: status,
-    resolveGoalAgent: async sessionId => {
-      const matches = options.clients().filter(entry => { try { return entry.client.agentSession(sessionId).agentSessionId === sessionId } catch { return false } })
+    resolveGoalAgent: async (sessionId, expectedHostId) => {
+      const matches = options.clients().filter(entry => { if (expectedHostId !== undefined && entry.hostId !== expectedHostId) return false; try { return entry.client.agentSession(sessionId).agentSessionId === sessionId } catch { return false } })
       if (matches.length !== 1) throw new AgentMuxError('The exact Goal Agent has no unique retained Host binding. Reconnect its original owner; no unrelated Host was probed.', 'CONTROL_UNAVAILABLE')
       return { hostId: matches[0]!.hostId, status: await status(matches[0]!.hostId, sessionId) }
     },

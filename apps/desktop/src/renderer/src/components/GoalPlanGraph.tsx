@@ -8,7 +8,7 @@ import type { DemandProjection } from '../lib/global-demand-board'
 import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { GoalPlanThread } from './GoalPlanThread'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
-import { goalDiscussionRequestKey } from '../lib/goal-discussion-request'
+import { GoalPlanRequest } from './GoalPlanRequest'
 
 /** One distinct glyph per node state, so a node still reads without its color. */
 const STATE_ICON_NAMES = {
@@ -168,12 +168,11 @@ function NodeDetail({ item, dependencyNames, onIssue }: { item: GoalPlanNodeView
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * Goal owner's derivation; this view never decides it.
  */
-export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, requestLabel = 'Create execution plan', pending = false, busy = false }: {
-  demand: Pick<DemandProjection, 'id' | 'plan' | 'planState' | 'delegations' | 'alignment'>; onOpenDiscussion?: () => void
-  onRequestPlan?: () => void; requestLabel?: string; pending?: boolean; busy?: boolean
+export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending = false, busy = false }: {
+  demand: DemandProjection; onOpenDiscussion?: () => void
+  onRequestPlan?: () => void; pending?: boolean; busy?: boolean
 }) {
   const projection = useMemo(() => goalPlanProjection(demand), [demand.plan, demand.planState, demand.delegations])
-  const retainedRequest = useAppStore(state => Boolean(state.goalDiscussionRequests?.[goalDiscussionRequestKey(demand.id, 'plan')]))
   const [open, setOpen] = useState<string | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
   const canvas = useRef<HTMLDivElement>(null)
@@ -181,14 +180,12 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, request
   const empty: GoalPlanView = { revision: 0, nodes: [], next: [], progress: null }
   const { edges, width, height } = useEdges(canvas, projection ?? empty, open ?? '')
   useLayoutEffect(() => { if (open) reading.current?.scrollIntoView?.({ block: 'nearest' }) }, [open])
-  const requestAction = onRequestPlan ? <button type="button" className="small-button" data-goal-plan-request disabled={pending || busy} onClick={onRequestPlan}>
-    {pending ? 'Preparing planning request…' : retainedRequest ? 'Check planning request' : projection ? 'Discuss plan' : requestLabel}
-  </button> : null
+  const requestAction = onRequestPlan ? <GoalPlanRequest demand={demand} onRequest={onRequestPlan} pending={pending} busy={busy} /> : null
   if (!projection) return <section className="goal-plan goal-plan--empty" aria-label="Goal plan" data-goal-plan-empty>
     <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Tasks and dependencies</span></div>
     <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No execution plan yet</p>
       <p className="goals-muted">{demand.alignment ? 'Turn this goal into tasks, dependencies and checks. The saved plan appears here as a dependency graph.' : 'Clarify the outcome and success criteria in the goal discussion, then plan the tasks and dependencies here.'}</p>
-      <div className="goals-inline-actions">{requestAction ?? (onOpenDiscussion ? <button type="button" className="small-button" onClick={onOpenDiscussion}>Open goal discussion</button> : null)}
+      <div className="goals-inline-actions">{requestAction}{onOpenDiscussion ? <button type="button" className="small-button" onClick={onOpenDiscussion}>Open goal discussion</button> : null}
         {onRequestPlan ? <span className="goals-caption">Planning does not start execution.</span> : null}</div>
     </div>
   </section>

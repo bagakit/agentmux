@@ -71,7 +71,7 @@ function runDirectGoal(current: DirectGoalRequest, intent: PresentationIntent, c
       }
       useAppStore.getState().setSelectedDemand(current.id)
       const tabId = await useAppStore.getState().requestDemandPmoTask(current.id, 'grill', { creationOperationId: request?.creationOperationId ?? current.creationOperationId })
-      if (mayPresent(intent, current.id, tabId)) requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
+      if (tabId && mayPresent(intent, current.id, tabId)) requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
       publish(null)
     } catch (cause) {
       publish({ ...(request ?? current), pending: false, error: cause instanceof Error ? cause.message : String(cause),

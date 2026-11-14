@@ -140,6 +140,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     if (selectedRef.current === id) select(null)
   }
   const openDiscussion = (receipt: GoalDiscussionReceipt) => {
+    if (receipt.route !== 'discussion') return
     if (!navigation.current.visible || selectedRef.current !== receipt.goalId) return
     setContext(value => ({ ...value, discussion: { goalId: receipt.goalId, tabId: receipt.tabId, regionId: receipt.regionId, hostId: receipt.hostId, agentSessionId: receipt.agentSessionId } }))
     if (receipt.agentSessionId && receipt.hostId === 'local' && openSession) openSession(receipt.agentSessionId, { name: '目标 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })

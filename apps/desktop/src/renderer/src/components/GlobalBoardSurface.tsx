@@ -113,7 +113,7 @@ export function GlobalBoardSurface() {
     moteRequests.current.add(demandId); setMotePending(current => ({ ...current, [demandId]: mode ?? 'open' }))
     try {
       const tabId = mode ? await requestDemandPmoTask(demandId, mode) : await openDemandPmo(demandId)
-      requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
+      if (tabId) requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
       setMoteErrors(current => { const next = { ...current }; delete next[demandId]; return next })
     } catch (error) { setMoteErrors(current => ({ ...current, [demandId]: { mode: mode ?? 'open', message: error instanceof Error ? error.message : String(error) } })) }
     finally { moteRequests.current.delete(demandId); setMotePending(current => { const next = { ...current }; delete next[demandId]; return next }) }

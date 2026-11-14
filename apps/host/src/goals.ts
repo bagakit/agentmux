@@ -113,6 +113,7 @@ export function createHostGoals(options: {
     if (failures.length) throw new AggregateError(failures, 'Some original Goal observers could not start; healthy domains and Agents remain available.')
   })()
   const discussions = createHostGoalDiscussions({ configurationPath: options.configurationPath, demands, ...(options.spatial ? { spatial: options.spatial } : {}), runtime,
+    requestPlan: (id, op, context, authority) => patrol.request(id, op, context, authority, 'plan'),
     confirmParticipation: (input, context) => participation.confirm(input, context),
     call: (method, params, context, hostId = 'local') => options.coreCall(hostId, method, params, context) })
   const participation = createGoalParticipationOwner({ demands, client: exact,
@@ -185,7 +186,8 @@ export function createHostGoals(options: {
       return { operation: req.operation, demandId: original.demandId, requestId: original.operationId, activity: original.activity, diskDurability: original.diskDurability }
     }
     if (req.operation === 'demand.activity.read') return { operation: req.operation, ...await demands.readActivities(req.demandId) }
-    if (req.operation === 'demand.discuss') return await discussions.execute(req, context)
+    if (req.operation === 'demand.discuss') return await discussions.execute(req, context, name?.actor.verified && name.actor.id && ['agent', 'user', 'device'].includes(name.actor.kind)
+      ? { actor: { kind: name.actor.kind as 'agent' | 'user' | 'device', id: name.actor.id }, ...(name.location.hostId ? { hostId: name.location.hostId } : {}), ...(name.location.callerRunId ? { runId: name.location.callerRunId } : {}) } : undefined)
     if (req.operation === 'demand.patrol-all') return await discussions.patrol(req, context)
     const goal = await get(req.demandId)
     if (req.operation === 'demand.decision-log') return { operation: req.operation, demandId: goal.id, decisions: goal.decisions }

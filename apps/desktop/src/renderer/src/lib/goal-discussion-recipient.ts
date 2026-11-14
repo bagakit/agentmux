@@ -33,7 +33,7 @@ export function useGoalDiscussionRecipient(goalId: string) {
   const recipient = data.name ?? 'the goal discussion'
   return { kind: data.kind, name: data.name,
     openLabel: data.kind === 'new' ? 'Start goal discussion' : data.name ? `Open discussion with ${data.name}` : 'Open original discussion',
-    requestLabel: (mode: GoalDiscussionTaskMode) => mode === 'plan' ? data.name ? `Plan with ${data.name}` : 'Create execution plan' : mode === 'grounding' ? `Ask ${recipient} to check results` : data.name ? `${data.outlined ? 'Discuss changes' : 'Clarify goal'} with ${data.name}` : data.outlined ? 'Discuss changes in goal discussion' : 'Clarify goal in discussion',
+    requestLabel: (mode: Exclude<GoalDiscussionTaskMode, 'plan'>) => mode === 'grounding' ? `Ask ${recipient} to check results` : data.name ? `${data.outlined ? 'Discuss changes' : 'Clarify goal'} with ${data.name}` : data.outlined ? 'Discuss changes in goal discussion' : 'Clarify goal in discussion',
     description: data.kind === 'new' ? 'Starts a dedicated discussion in your primary Mote.' : data.name ? 'Sends to this goal’s dedicated discussion.' : data.launcher ? 'The original discussion launcher is kept. Open it to choose an Agent; a request prepares this discussion.' : 'The original discussion Agent is not yet confirmed. Its identity and request are kept.' }
 }
 

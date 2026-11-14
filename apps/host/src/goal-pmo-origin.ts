@@ -1,6 +1,7 @@
 /** A finite PMO request; creation source is separate from execution or dispatch. */
 export type GoalPmoIntent = { goalId: string; creationOperationId?: string }
-export type GoalPmoReceipt = { tabId: string; agentSessionId: string | null }
+export type GoalPmoReceipt = { route: 'discussion'; tabId: string; agentSessionId: string | null }
+  | { route: 'supervisor'; agentSessionId: string; hostId: string | null; requestOperationId: string }
 
 export async function goalPmoOperation(intent: GoalPmoIntent, kind: 'create' | 'discussion' | 'discussion-create'): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([kind, intent.goalId, intent.creationOperationId])))
