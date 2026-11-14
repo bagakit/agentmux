@@ -289,6 +289,48 @@ it('fills only the local Mac map draft after an explicit OS location read and sa
   } finally { delete api.ui.requestMacMapLocation }
 })
 
+it('automatically plots the local public egress estimate and lets a manual pin take precedence', async () => {
+  const estimate = vi.fn(async () => ({ source: 'public-egress' as const, label: 'Example region', latitude: 31, longitude: 121, accuracyKm: 120 }))
+  const locate = vi.fn()
+  api.ui.estimateLocalMapLocation = estimate
+  api.ui.requestMacMapLocation = locate
+  vi.spyOn(api.config, 'save').mockImplementation(async next => next)
+  try {
+    await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+    const localPin = () => dom.container.querySelector('[data-geographic-point="saved:client"]')
+    await vi.waitFor(() => expect(localPin()?.hasAttribute('data-approximate')).toBe(true))
+    expect(dom.container.querySelector('[data-id="saved:client"]')?.textContent).toContain('IP · ±120 km')
+    expect(dom.container.querySelectorAll('[data-geographic-point]')).toHaveLength(1)
+    expect(estimate).toHaveBeenCalledTimes(1)
+    expect(locate).not.toHaveBeenCalled()
+    expect(useAppStore.getState().config?.meshMapLocations).toBeUndefined()
+    await dom.click('.mesh-explorer__header > button:first-of-type')
+    await input(dom.container.querySelector<HTMLInputElement>('[aria-label="Latitude, longitude"]')!, '45, -90')
+    await dom.click('.mesh-locations-panel [data-settings-save-bar] button')
+    await vi.waitFor(() => expect(localPin()?.querySelector('circle')?.getAttribute('cx')).toBe('250'))
+    expect(localPin()?.hasAttribute('data-approximate')).toBe(false)
+    expect(estimate).toHaveBeenCalledTimes(1)
+  } finally {
+    delete api.ui.estimateLocalMapLocation
+    delete api.ui.requestMacMapLocation
+  }
+})
+
+it('uses a published local location without asking for an IP estimate', async () => {
+  const estimate = vi.fn(async () => null)
+  api.ui.estimateLocalMapLocation = estimate
+  const node = { runtimeId: 'local-original', ownerInstanceId: 'local-owner', alias: 'desktop' }
+  const publishing = vi.spyOn(api.nodePublishing, 'call').mockResolvedValue({ node, location: { source: 'node', label: 'Office', latitude: 0, longitude: 45 } } as never)
+  try {
+    await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-geographic-point="saved:client"] circle')?.getAttribute('cx')).toBe('625'))
+    expect(estimate).not.toHaveBeenCalled()
+  } finally {
+    publishing.mockRestore()
+    delete api.ui.estimateLocalMapLocation
+  }
+})
+
 it('a Mac location result after switching devices leaves the original and remote drafts untouched', async () => {
   let complete!: (result: MacMapLocationResult) => void
   const locate = vi.fn(() => new Promise<MacMapLocationResult>(resolve => { complete = resolve }))

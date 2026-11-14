@@ -16,6 +16,20 @@ app.whenReady().then(async()=>{try{
  const pathVisibility=async name=>{const value=await evaluate("(()=>{const c=document.querySelector('.mesh-explorer__canvas').getBoundingClientRect();return Array.from(document.querySelectorAll('.react-flow__node')).filter(e=>e.querySelector('[data-on-path]')).map(e=>{const r=e.getBoundingClientRect();return {id:e.dataset.id,inside:r.left>=c.left-1&&r.right<=c.right+1&&r.top>=c.top-1&&r.bottom<=c.bottom+1}})})()");assert.ok(value.length>=3&&value.every(e=>e.inside),'the selected '+name+' must be fully visible beside the inspector');receipt.pathVisibility??={};receipt.pathVisibility[name]=value}
  const top=()=>evaluate("document.querySelector('[data-mesh-view]:not([hidden])').scrollTop=0")
  await fs.mkdir(output,{recursive:true})
+ if (scope === 'ip-location') {
+  await window.loadURL(url+'?scenario=ip-location')
+  await wait('[data-geographic-point="saved:client"][data-approximate]')
+  assert.equal(await evaluate("document.querySelectorAll('[data-geographic-point]').length"),1)
+  assert.ok(await evaluate("document.querySelector('[data-id=\"saved:client\"]').textContent.includes('IP · ±120 km')"))
+  await frame('ip-location-wide-dark')
+  await evaluate('meshFixture.theme("light")')
+  window.setContentSize(560,950)
+  await wait('.mesh-explorer__canvas[data-narrow]')
+  await frame('ip-location-narrow-light')
+  assert.equal(Object.values(receipt.frameOverflow).some(Boolean),false)
+  receipt.passed=true
+  return
+ }
  if (scope === 'mac-location') {
   await window.loadURL(url+'?scenario=mac-location')
   await wait('.mesh-explorer__canvas .mesh-geography__atlas')

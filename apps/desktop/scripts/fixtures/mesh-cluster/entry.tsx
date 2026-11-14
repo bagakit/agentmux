@@ -16,7 +16,7 @@ let settings: MeshNetworkSettings = { owner: { runtimeId: 'core-original-review'
  configuration: { role: 'gateway', networkId: 'work-machines', endpointAccess: { allowedClientKeys: [] }, members: [], peers: [{ peerId: 'saved-gateway-original', endpoints: [{ endpoint: 'regional-gateway.internal:8444', useTls: true }] }], publishers: [], listen: { host: '127.0.0.1', port: 8444 }, advertisedIngress: [{ endpoint: 'cn1.example.com', useTls: true }] } }
 const originalOffer = { v: 2 as const, serverId: target, daemonPublicKeyB64: 'Hx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8=', relay: { endpoint: 'original-edge.local:7443', useTls: true } }
 const scenario = new URLSearchParams(location.search).get('scenario') ?? 'active'
-let state = scenario === 'mac-location' ? 'initial' : scenario
+let state = scenario === 'mac-location' || scenario === 'ip-location' ? 'initial' : scenario
 if (state === 'initial') settings = { ...settings, configuration: { ...settings.configuration, role: 'disabled', networkId: 'my-devices', listen: undefined, advertisedIngress: [] } }
 function observation(): MeshNetworkInspection {
  const record = (originPeerId: string, neighbors: number[], index: number) => ({ version: 1 as const, networkId: 'work-machines', originPeerId, epoch: 3, revision: 8, signature: 'fixture', publishers: index === 2 ? [{ serverId: target, generation: 'generation-original' }] : [], advertisedIngress: [{endpoint:['this-device.internal:8444','farm-gateway.internal:443','studio.internal:443','build-agent.internal:443','gateway-secondary.internal:443'][index]!,useTls:true}], neighbors: neighbors.map(n => ({ peerId: ids[n]!, peerEpoch: 3, connectionId: `link-${Math.min(index,n)}-${Math.max(index,n)}`, rttMs: 23 })) })
@@ -79,6 +79,9 @@ if (scenario === 'mac-location') {
  }
  Object.assign(window, { denyFixtureLocation: () => { denied = true } })
 }
+if (scenario === 'ip-location') api.ui.estimateLocalMapLocation = async () => ({
+ source: 'public-egress', label: 'Vancouver region', latitude: 49, longitude: -123, accuracyKm: 120,
+})
 if (state === 'device') {
  const offer = { ...originalOffer, serverId: 'office-workstation', relay: { endpoint: 'gateway.example', useTls: true } }
  useAppStore.setState({ meshDeviceLinks: { draft: '', saved: [connectionLinkUrl('https://gateway.example', offer)] } })

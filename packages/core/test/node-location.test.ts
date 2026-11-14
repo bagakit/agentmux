@@ -36,6 +36,7 @@ it('keeps unrelated or ambiguous sites unknown and rounds only an enabled origin
   expect(lookup).not.toHaveBeenCalled()
   const result = { source: 'public-egress', latitude: 31, longitude: 121, label: 'Example city', accuracyKm: 200 }
   expect(await source.read('original', publicPolicy)).toEqual(result)
+  expect(await source.readPublicEgress()).toEqual(result)
   expect(await source.read('original', publicPolicy)).toEqual(result)
   expect(lookup).toHaveBeenCalledTimes(1)
   expect(await source.read('original')).toBeNull()

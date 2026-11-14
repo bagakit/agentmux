@@ -11,3 +11,5 @@ Use the capture script's fourth argument, `geography`, for the physical map scen
 The geography capture starts with nine devices whose locations are unknown. Check that the map and device tray share a compact top edge, the local and remote cards align in one grid, and the long unconfirmed connection status leaves the device title readable. With known coordinates, check the aligned tray beside the map at wide sizes and below it after resizing to a narrow window.
 
 Use the fourth argument `mac-location` to capture the local Settings editor before, during, and after a location request. Verify that the draft marker precedes Save, the main map marker follows Save, denied access retains the existing coordinates, and a remote device exposes its manual editor. This fixture supplies a controlled OS result and exercises the original Mesh editor and save path.
+
+Use `ip-location` to verify that Geography automatically places this device on opening when its only source is a controlled public egress estimate. Check the uncertainty mark and the nearby device label in both window sizes.
