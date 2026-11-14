@@ -1269,10 +1269,21 @@ describe('One Activity reading surface over public original-sequence windows', (
   viewport.getBoundingClientRect = () => rect(100, 200); row.getBoundingClientRect = () => rect(110)
   const trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
   trace.open = true; const text = [...body.querySelectorAll('p')].find(node => node.textContent === 'Reply 353')!.firstChild!
+  const focused = body.closest('.log-turn')?.querySelector<HTMLButtonElement>('button[aria-label="Copy message"]')
+  expect(focused).toBeDefined(); await act(async () => focused!.focus())
+  expect(document.activeElement).toBe(focused)
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
+  const before = ids(), cursor = acceptedWindow().navigation.older
+  expect(cursor).not.toBeNull()
+  const calls = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   await wheel()
-  expect(ids()).toHaveLength(360); expect(body.isConnected).toBe(true); expect(trace.open).toBe(true)
+  const after = ids()
+  expect(after.indexOf(before[0]!)).toBeGreaterThan(0)
+  expect(after.slice(-before.length)).toEqual(before)
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(calls).some(([input]) => input.cursor === cursor)).toBe(true)
+  expect(body.isConnected).toBe(true); expect(trace.open).toBe(true)
   expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe('Reply')
+  expect(document.activeElement).toBe(focused)
   expect(conversationReadingAnchor(viewport)).toEqual({ kind: 'record', id: 'record-353', offset: 10 })
   expect(viewport.scrollTop).toBe(0)
  })
