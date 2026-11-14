@@ -4,13 +4,17 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { connectionLinkUrl, CONNECTION_METADATA_PATH, type ConnectionOffer } from '@agentmux/relay/offer'
 import { fixture, deferred } from './conversation-fixture'
 
-const ports = vi.hoisted(() => ({ connect: vi.fn(), pair: { publicKey: new Uint8Array(32).fill(7), secretKey: new Uint8Array(32).fill(9) }, roots: [] as Root[] }))
+const ports = vi.hoisted(() => ({ connect: vi.fn(), pair: { publicKey: new Uint8Array(32).fill(7), secretKey: new Uint8Array(32).fill(9) }, roots: [] as Root[], beforeRender: null as null | (() => void) }))
 vi.mock('@agentmux/core/relay-hosted', async original => ({ ...await original<object>(), connectRelayHostedClient: ports.connect }))
 vi.mock('../src/connection/relay-identity', () => ({ deviceRelayIdentity: async () => ports.pair, existingDeviceRelayIdentity: async () => ports.pair }))
 vi.mock('@capacitor/core', async original => ({ ...await original<object>(), Capacitor: { isNativePlatform: () => false } }))
 vi.mock('react-dom/client', async original => {
   const module = await original<typeof import('react-dom/client')>()
-  return { ...module, createRoot: (...args: Parameters<typeof module.createRoot>) => { const root = module.createRoot(...args); ports.roots.push(root); return root } }
+  return { ...module, createRoot: (...args: Parameters<typeof module.createRoot>) => {
+    const root = module.createRoot(...args), render = root.render.bind(root)
+    root.render = element => { ports.beforeRender?.(); ports.beforeRender = null; render(element) }
+    ports.roots.push(root); return root
+  } }
 })
 const OFFER = 'agentmux.connection-offer.v2'
 const offer = (): ConnectionOffer => ({ v: 2, serverId: 'host-original', daemonPublicKeyB64: Buffer.alloc(32, 7).toString('base64'), relay: { endpoint: location.host, useTls: location.protocol === 'https:' } })
@@ -20,6 +24,7 @@ const moduleStarted = vi.fn()
 beforeEach(async () => {
   vi.resetModules(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/')
   moduleGate = deferred<void>(); moduleFailure = null; moduleStarted.mockClear(); ports.connect.mockReset()
+  ports.beforeRender = null
   vi.doUnmock('../src/recovery/device-storage-lock')
   vi.doMock('../src/MobileApp', async original => { moduleStarted(); await moduleGate.promise; if (moduleFailure) throw moduleFailure; return original() })
   const { getDeviceWorkface, emptyDeviceWorkface } = await import('../src/recovery/device-workface')
@@ -133,4 +138,37 @@ it('a rejected product module retains its healthy original connection and expose
   await action('返回')
   expect(f.client.dispose).not.toHaveBeenCalled(); expect(localStorage.getItem(OFFER)).toBe(JSON.stringify(original))
   expect(f.submit).not.toHaveBeenCalled(); expect(f.signalAgent).not.toHaveBeenCalled()
+})
+
+it('actual main clears an old update metadata observation when explicit retry setup fails before another read', async () => {
+  const { getDeviceWorkface } = await import('../src/recovery/device-workface')
+  const owner = getDeviceWorkface(), original = offer(), pending = deferred<Response>()
+  await owner.updateNavigation({ selectedSessionId: 'session-original', panel: 'conversation', hostUrl: '' })
+  await owner.retainGoalRequest({ runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', deviceHostId: original.serverId, origin: location.origin,
+    method: 'goal.delete', request: { goalId: 'original-goal', operationId: 'original-unknown-retry', confirmation: 'delete' } }, owner.recordIdentity())
+  const record = owner.snapshot().record, saved = JSON.stringify(original)
+  localStorage.setItem(OFFER, saved)
+  let signal: AbortSignal | undefined
+  const read = vi.fn((_url: unknown, input: RequestInit) => { signal = input.signal!; return pending.promise })
+  vi.stubGlobal('fetch', read)
+  // Main decodes the real pin, then the public update fragment is installed
+  // before React's first render. The original connection props/owner are real.
+  ports.beforeRender = () => history.replaceState(null, '', '/#amux-update')
+  await entry(connectionLinkUrl(location.origin + '/', original))
+  await wait(() => expect(document.querySelector('.mobile-update-recovery')).not.toBeNull())
+  await wait(() => expect(read).toHaveBeenCalledOnce())
+  expect(document.body.textContent).toContain('正在读取连接')
+  expect([...document.querySelectorAll('button')].some(node => node.textContent === '取消本次读取')).toBe(true)
+  localStorage.setItem(OFFER, 'damaged original offer')
+  await action('重新检查连接')
+  await wait(() => expect(document.body.textContent).toContain('Mac 连接记录无法完整读取'))
+  expect(signal!.aborted).toBe(true)
+  expect(document.body.textContent).not.toContain('正在读取连接')
+  expect([...document.querySelectorAll('button')].some(node => node.textContent === '取消本次读取')).toBe(false)
+  expect(read).toHaveBeenCalledOnce(); expect(ports.connect).not.toHaveBeenCalled()
+  await act(async () => pending.resolve(metadata(original)))
+  expect(document.body.textContent).toContain('Mac 连接记录无法完整读取')
+  expect(localStorage.getItem(OFFER)).toBe('damaged original offer')
+  expect(owner.snapshot().record).toEqual(record)
+  expect(document.querySelector('.mobile-app')).toBeNull()
 })

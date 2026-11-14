@@ -10,6 +10,7 @@ const variants: Record<string, { before: string; after: string; target: string }
   'update-before-module-ready': { before: 'const module = await prepareMobileApp().catch(() => null)', after: 'const module = true', target: '^actual main waits for the real product module' },
   'metadata-cancel-does-not-abort': { before: '      metadata.abort()', after: '      void 0', target: '^actual main cancels only pending metadata and rereads its original pin while old success' },
   'late-metadata-clears-new-observation': { before: 'if (!controller.signal.aborted && cancelMetadata.current === cancelObservation)', after: 'if (true)', target: '^actual main cancels only pending metadata and rereads its original pin while old success' },
+  'setup-retains-stale-metadata-pending': { before: '    setMetadataPending(false)\n    const controller', after: '    const controller', target: '^actual main clears an old update metadata observation' },
 }
 if (mutant && !variants[mutant]) throw Error('Unknown startup mutation: ' + mutant)
 const mutation = mutant ? variants[mutant] : null
