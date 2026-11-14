@@ -1405,6 +1405,8 @@ export type AppState = GitReadingActions & {
     /** Claim an empty Group's original input in its new real Region, without navigating another surface. */
     initialInputs?: { prompt: string; names: LauncherNames; optionsByProvider: LauncherProviderOptions; sourceLauncherId?: string }
   }): string | undefined
+  /** Human close admission, repeated by closeTab when a confirmation is committed. */
+  checkTabClose(workspaceId: string, tabGroupId: string, tabId: string): boolean
   closeTab(
     workspaceId: string,
     tabGroupId: string,
@@ -7800,8 +7802,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       initialInputs.sourceLauncherId ?? warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }), initialInputs)
     return tab.id
   },
+  checkTabClose(workspaceId, tabGroupId, tabId) {
+    const state = get(), tab = state.tabs[tabId]
+    if (!tab) return true // An already closed original Tab needs no further cleanup.
+    const layout = state.layouts[workspaceId]
+    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !layout.groups.some(group => group.id === tabGroupId && group.tabOrder.includes(tabId))) {
+      state.reportError(new Error('The original Tab display location is no longer confirmed. Its content and other views are kept; choose its current location and retry.'), { kind: 'indeterminate' })
+      return false
+    }
+    const pinned = (state.config?.workspaces ?? []).some(owner => {
+      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner) ?? []
+      return topics.some(topic => {
+        const original = topic.quickMode?.status === 'saved' ? topic.quickMode.defaults.conversation : undefined
+        if (!original || original.displayWorkspaceId !== workspaceId || original.groupId !== tabGroupId || original.tabId !== tabId || scratchTopicKind(topic.id, topics) !== 'mote') return false
+        // The preference owner can differ from the Tab's resource; its resolver checks Region, Session and Host.
+        return Boolean(moteDefaultConversation(state, topic, owner.id).conversation)
+      })
+    })
+    if (!pinned) return true
+    state.reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode to close it; its Agent is unchanged.'), { kind: 'indeterminate' })
+    return false
+  },
   closeTab(workspaceId, tabGroupId, tabId, options) {
     const state = get()
+    if (!state.checkTabClose(workspaceId, tabGroupId, tabId)) return Promise.resolve(false)
     const errorBeforeClose = state.error
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) {
       return Promise.resolve(false)

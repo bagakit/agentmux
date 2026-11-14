@@ -30,10 +30,10 @@ export function moteConversationChoices(state: State, topic: ScratchTopicSnapsho
   if (!workspace) return []
   const spaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, topic))
   return catalog.locations.flatMap(location => {
-    const region = state.tabs[location.tabId]?.regions[location.regionId]
+    const tab = state.tabs[location.tabId], region = tab?.regions[location.regionId]
     const agent = catalog.regions.find(item => item.tabId === location.tabId && item.regionId === location.regionId)
     const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
-    if (session?.control.kind !== 'agent' || !agent?.execution?.hostId || agent.agentSessionId !== session.control.agentSessionId || location.spaceId !== spaceId || location.workspaceId !== workspaceId || region?.kind !== 'agent') return []
+    if (session?.control.kind !== 'agent' || !agent?.execution?.hostId || agent.agentSessionId !== session.control.agentSessionId || location.spaceId !== spaceId || location.workspaceId !== tab?.workspaceId || region?.kind !== 'agent') return []
     const choice = { hostId: session.control.hostId, sessionId: session.control.agentSessionId, displayWorkspaceId: location.displayWorkspaceId,
       groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }
     return resolveMoteDefaultConversation(state, { ...topic, quickMode: { status: 'saved', defaults: { conversation: choice }, version: '' } }, workspaceId, catalog).conversation ? [choice] : []

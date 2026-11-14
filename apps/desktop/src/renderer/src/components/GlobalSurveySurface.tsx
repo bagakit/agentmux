@@ -28,7 +28,7 @@ import { BrowserStartPage } from './BrowserStartPage'
 import { resolveBrowserStartPage } from '../../../shared/browser-start-page'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
 import { groupIds, regionIds } from '@agentmux/layout'
-import { resolveWorkbenchZone } from '../lib/workbench-projection'
+import { resolveWorkbenchZone, sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 import { SurveyItemOptions, SurveyItemContextMenu, type SurveyItemOptionsProps } from './SurveyItemOptions'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
@@ -394,13 +394,18 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   function closeItemTab(zoneId: string, tabId: string, subject: string, chosen?: WorkbenchProjectionSelection) {
     const state = useAppStore.getState(), tab = state.tabs[tabId]
-    const choices = itemReferences(zoneId).filter(reference => reference.tabId === tabId && reference.regionId === tab?.layout.activeRegionId)
+    // Zone composition can contain a synthetic unplaced Group. Only original placements authorize a close.
+    const choices = (catalog?.locations ?? []).filter(location => location.zoneId === zoneId && location.tabId === tabId &&
+      location.regionId === tab?.layout.activeRegionId && location.workspaceId === tab?.workspaceId &&
+      state.layouts[location.displayWorkspaceId]?.groups.some(group => group.id === location.groupId && group.tabOrder.includes(tabId)) &&
+      groupIds(state.layouts[location.displayWorkspaceId]!.root).includes(location.groupId))
+      .filter((location, index, all) => all.findIndex(other => sameWorkbenchProjectionSelection(other, location)) === index)
     const active = state.surveyZoneSelection?.zoneId === zoneId ? state.surveyZoneSelection.active : null
     const shown = active?.tabId === tabId ? projection?.selection.filter(reference => reference.tabId === tabId && reference.regionId === active.regionId) ?? [] : []
-    const reference = chosen ?? (shown.length === 1 ? choices.find(choice => choice.displayWorkspaceId === shown[0]!.displayWorkspaceId && choice.groupId === shown[0]!.groupId) : undefined)
-      ?? (choices.length === 1 ? choices[0] : undefined)
-    if (!reference && choices.length > 1) { setLocationChoice({ kind: 'close', zoneId, subject, choices }); return }
-    const group = reference && itemProjection(zoneId)?.composition?.groups.find(group => group.id === reference.groupId && group.tabOrder.includes(tabId))
+    const reference = chosen ? choices.find(choice => sameWorkbenchProjectionSelection(choice, chosen))
+      : (shown.length === 1 ? choices.find(choice => sameWorkbenchProjectionSelection(choice, shown[0]!)) : undefined) ?? (choices.length === 1 ? choices[0] : undefined)
+    if (!reference && !chosen && choices.length > 1) { setLocationChoice({ kind: 'close', zoneId, subject, choices }); return }
+    const group = reference && state.layouts[reference.displayWorkspaceId]?.groups.find(group => group.id === reference.groupId && group.tabOrder.includes(tabId))
     if (!reference || !group) { setError('This original Tab is still restoring. Its content and reference are kept.'); return }
     setLocationChoice(null)
     intent.current += 1

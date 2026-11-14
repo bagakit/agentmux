@@ -26,8 +26,8 @@ export function resolveMoteDefaultConversation(state: State, topic: ScratchTopic
   const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
   const actualSessionId = session?.control.kind === 'agent' ? session.control.agentSessionId : region?.kind === 'agent' ? region.sessionId : undefined
   if (!workspace || region?.kind !== 'agent' || actualSessionId !== conversation.sessionId || agent?.agentSessionId !== actualSessionId ||
-      agent.execution && agent.execution.hostId !== conversation.hostId || session?.control.hostId && session.control.hostId !== conversation.hostId || tab?.workspaceId !== workspaceId ||
-      !group?.tabOrder.includes(conversation.tabId) || !catalog.locations.some(location => location.spaceId === spaceId && location.workspaceId === workspaceId && sameWorkbenchProjectionSelection(location, conversation)))
+      agent.execution && agent.execution.hostId !== conversation.hostId || session?.control.hostId && session.control.hostId !== conversation.hostId ||
+      !group?.tabOrder.includes(conversation.tabId) || !catalog.locations.some(location => location.spaceId === spaceId && location.workspaceId === tab?.workspaceId && sameWorkbenchProjectionSelection(location, conversation)))
     return { issue: 'The saved main Agent conversation is not confirmed at its original location. Its reference and existing work are kept; choose its exact conversation in Profile or inspect MOTE.md.' }
   return { conversation, ...(!agent?.execution ? { issue: 'The main Agent conversation’s execution Host is unconfirmed. Its original location and saved Host are kept; retry its Agent observation.' } : {}) }
 }

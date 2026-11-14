@@ -276,11 +276,7 @@ function SortableWorkbenchTab({
   useLayoutEffect(() => {
     if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget, 'layout-effect')
   }, [visible, group.activeTabId, tab.id, switchTarget])
-  const tabClose = useWorkbenchTabsClose((request, tabId) => {
-    if (!motePinnedTab(mote?.defaultConversation, request.workspaceId, request.group.id, tabId)) return true
-    useAppStore.getState().reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode to close it; its Agent is unchanged.'), { kind: 'indeterminate' })
-    return false
-  })
+  const tabClose = useWorkbenchTabsClose()
   const { closing } = tabClose
   const [displayTargets, setDisplayTargets] = useState<{
     displayWorkspaceId: string; groupId: string; label: string; linked: boolean

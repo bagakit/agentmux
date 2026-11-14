@@ -14,7 +14,7 @@ export type WorkbenchTabsCloseRequest = {
 }
 
 /** Shared human confirmation; the Store still owns the original close transaction. */
-export function useWorkbenchTabsClose(canClose?: (request: WorkbenchTabsCloseRequest, tabId: string) => boolean) {
+export function useWorkbenchTabsClose() {
   const [pending, setPending] = useState<(WorkbenchTabsCloseRequest & { confirmation: LastViewCloseConfirmation }) | null>(null)
   const [closing, setClosing] = useState(false)
 
@@ -27,7 +27,7 @@ export function useWorkbenchTabsClose(canClose?: (request: WorkbenchTabsCloseReq
 
   async function request(request: WorkbenchTabsCloseRequest): Promise<void> {
     const state = useAppStore.getState()
-    const tabIds = request.tabIds.filter(id => request.group.tabOrder.includes(id) && (canClose?.(request, id) ?? true))
+    const tabIds = request.tabIds.filter(id => request.group.tabOrder.includes(id) && state.checkTabClose(request.workspaceId, request.group.id, id))
     if (!tabIds.length || closing) return
     const dirtyCount = new Set(tabIds.flatMap(id => {
       const tab = state.tabs[id]
