@@ -26,6 +26,10 @@ import { DEFAULT_THEME_ID, GRAPHITE_THEME, themeValue, updateObservedTheme, type
 import '@agentmux/client-ui/styles.css'
 
 type Call = { sequence: number; observedAt: number; method: string; params: unknown }
+const questionReceiptFixture = new URLSearchParams(location.search).get('question-receipts') === '1'
+let permissionReceiptStage: 'saved' | 'unknown' | 'completed' = 'saved'
+let permissionInput: Parameters<AgentMuxHostedClient['respondAgentInteraction']>[0] | undefined
+let questionReplyRequests = 0
 const responsiveFixture = new URLSearchParams(location.search).get('responsive-primary-workfaces') === '1'
 const focusAvailabilityFixture = new URLSearchParams(location.search).get('focus-availability') === '1'
 const exactFirstReadFixture = new URLSearchParams(location.search).get('exact-first-read') === '1'
@@ -48,7 +52,13 @@ waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-origi
   title: '请确认本次资料读取', evidence: { source: 'native-hook', observedAt: 1, run: waiting.run },
   permissionHook: { receiptId: 'request-original' },
   options: [{ id: 'allow-original', label: '允许本次读取', kind: 'allow-once' }, { id: 'deny-original', label: '拒绝本次读取', kind: 'reject-once' }] } }
+if (questionReceiptFixture) waiting.nativeHandle = { kind: 'provider', providerId: 'codex', sessionId: `native-${waiting.agentSessionId}` }
 const waitingRequest = structuredClone(waiting.pendingInteraction)
+function permissionReceipt(input: NonNullable<typeof permissionInput>) {
+  return { agentSessionId: input.agentSessionId, operationId: input.operationId, run: input.expectedRun,
+    expectedRequest: input.expectedRequest, response: input.response, nativeAdoption: 'unknown' as const,
+    delivery: permissionReceiptStage === 'completed' ? 'hook-written' as const : permissionReceiptStage, nativeCompleted: input.expectedRequest.evidence }
+}
 const sessions = [main, waiting, result]
 const joinedNotice = new URLSearchParams(location.search).get('mote-notice-join') === '1' ? moteNoticeCaptureFixture({
   recipient: main.agentSessionId, member: waiting.agentSessionId,
@@ -269,7 +279,15 @@ const client = {
     record('sdk.ensureAgentContinuity', input)
     return { kind: 'reattachable', agentSessionId: input.agentSessionId, previousRun: input.expectedRun }
   },
-  sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); if (auxiliaryDensityScene && id === main.agentSessionId) return { agentSessionId: id, source: { providerId: main.providerId, nativeSessionId: 'native-' + id }, nextCursor: 'auxiliary-earlier-records', items: [] }; return { agentSessionId: id, source: { providerId: densityScene ? main.providerId : 'codex', nativeSessionId: `native-${id}${agentMenuScene ? '-original-source-reference'.repeat(6) : ''}` }, nextCursor: null,
+  sessionHistoryPage: async (id: string) => {
+    record('sdk.sessionHistoryPage', { id })
+    if (questionReceiptFixture && id === waiting.agentSessionId) return { agentSessionId: id,
+      source: { providerId: 'codex', nativeSessionId: `native-${id}` }, nextCursor: null, items: [
+        { id: 'original-question', turnId: 'original-turn', kind: 'assistant-message', contentParts: [{ kind: 'text', text: '原问题保留在这个工作面。' }],
+          questionRequest: { delivery: 'async', questions: [{ id: 'original-question-part', prompt: '这次核对沿用哪份资料？',
+            options: [{ id: 'keep', label: '沿用原资料' }], acceptsText: true }] } }
+      ] } satisfies import('@agentmux/core').AgentSessionHistoryPage
+    if (auxiliaryDensityScene && id === main.agentSessionId) return { agentSessionId: id, source: { providerId: main.providerId, nativeSessionId: 'native-' + id }, nextCursor: 'auxiliary-earlier-records', items: [] }; return { agentSessionId: id, source: { providerId: densityScene ? main.providerId : 'codex', nativeSessionId: `native-${id}${agentMenuScene ? '-original-source-reference'.repeat(6) : ''}` }, nextCursor: null,
     items: [...(moteDialogueCapture ? [{ id: `${id}-user-original`, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: id === main.agentSessionId ? '先比较两个方向，今天从哪一步开始？' : '沿着原目标，继续之前的讨论。' }] }, { id: `${id}-answer-original`, kind: 'assistant-message' as const, contentParts: [{ kind: 'text' as const, text: id === main.agentSessionId ? '先保留两份依据。我请资料整理核对样本，再一起决定第一步。' : '我接着原目标继续：方案 A 可以先做小实验，原依据与未完成的问题都保留。' }] }] : [...(agentMenuScene && id === main.agentSessionId ? [
       { id: `${id}-user-short`, kind: 'user-message' as const, startedAt: _tailRefreshFixtureEpoch(0, 1), contentParts: [{ kind: 'text' as const, text: '可以，继续。' }] }
     ] : []), { id: `${id}-user-original`, kind: 'user-message', ...(agentMenuScene ? { startedAt: _tailRefreshFixtureEpoch(0, 2) } : {}), contentParts: [{ kind: 'text', text: agentMenuScene
@@ -379,8 +397,24 @@ const client = {
   },
   respondAgentInteraction: async (params: Parameters<AgentMuxHostedClient['respondAgentInteraction']>[0]) => {
     record('sdk.respondAgentInteraction', params)
+    if (questionReceiptFixture) {
+      permissionInput = structuredClone(params)
+      return permissionReceipt(params)
+    }
     return { agentSessionId: params.agentSessionId, operationId: params.operationId, run: params.expectedRun,
       expectedRequest: params.expectedRequest, response: params.response, delivery: 'connection-written' as const }
+  },
+  inspectAgentInteractionOperation: async (input: Parameters<AgentMuxHostedClient['inspectAgentInteractionOperation']>[0]) => {
+    record('sdk.inspectAgentInteractionOperation', input)
+    if (!permissionInput || input.agentSessionId !== permissionInput.agentSessionId || input.operationId !== permissionInput.operationId) return null
+    return permissionReceipt(permissionInput)
+  },
+  replySessionQuestion: async (input: Parameters<AgentMuxHostedClient['replySessionQuestion']>[0]) => {
+    record('sdk.replySessionQuestion', input)
+    if (!questionReceiptFixture) throw new Error('Original reply observation is unavailable for this fixture.')
+    const operationId = questionReplyRequests++ === 0 ? 'foreign-operation' : input.operationId
+    return { agentSessionId: input.agentSessionId, operationId, source: input.source, recordId: input.recordId,
+      questionIds: input.answers.map(answer => answer.questionId), outcome: 'submitted' as const }
   },
   forwardRpc: async (method: string, params: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     record(method, params)
@@ -495,6 +529,11 @@ if (!localStorage.getItem('mobile-product-fixture-initialized')) {
   } else getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
   localStorage.setItem('mobile-product-fixture-initialized', 'true')
 }
+if (questionReceiptFixture) await getDeviceWorkface().updatePresentation({ selectedSessionId: waiting.agentSessionId, hostUrl: '', panel: 'conversation' },
+  { primary: 'mote', showSession: true, showGoalWork: false, profile: null,
+    identity: { name: '资料整理', project: '我的 Mote', mote: { spaceId: 'mote-original' }, context: { spaceId: 'mote-original',
+      zoneId: 'zone-mote', tabId: 'tab-mote', regionId: 'region-waiting', workspaceId: 'workspace-mote', displayWorkspaceId: 'workspace-mote',
+      groupId: 'group-mote' } } })
 if (exactFirstReadFresh) await getDeviceWorkface().updatePresentation({ selectedSessionId: result.agentSessionId, hostUrl: '', panel: 'conversation' },
   { primary: 'focus', showSession: true, showGoalWork: false, identity: { name: '实验建议', project: '并行项目' }, profile: null })
 if (composerFresh) {
@@ -672,6 +711,7 @@ function Scene() {
       catalog.regions.push({ ...catalog.regions.find(value => value.regionId === 'region-result')!, tabId: tab.tabId, regionId: 'region-result-mote' })
       catalog.locations.push({ ...catalog.locations.find(value => value.regionId === 'region-mote')!, regionId: 'region-result-mote' })
     },
+    setPermissionReceiptStage: (stage: typeof permissionReceiptStage) => { permissionReceiptStage = stage },
     /** Core settles the answered request: the pending interaction closes and the row leaves attention. */
     settleWaitingAnswer: () => {
       waiting.pendingInteraction = undefined
