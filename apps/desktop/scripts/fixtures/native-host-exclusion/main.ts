@@ -55,6 +55,12 @@ function hostRegion(frame: any, content: { x: number; y: number; width: number; 
   return { x: (left - frame.frame.x) * scaleX, y: (top - frame.frame.y) * scaleY,
     width: (right - left) * scaleX, height: (bottom - top) * scaleY }
 }
+function finderWindowBounds(): Array<{ x: number; y: number; width: number; height: number }> {
+  const output = execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e',
+    'const finder = Application("Finder"); JSON.stringify(finder.windows().map(window => window.bounds()))'],
+  { encoding: 'utf8' })
+  return JSON.parse(output)
+}
 async function run() {
   await app.whenReady()
   const primary = screen.getPrimaryDisplay()
@@ -108,9 +114,16 @@ async function run() {
   check('included isolated-region unique color is present', includedPixels.area > 100 && includedPixels.matches > includedPixels.area * 0.9)
 
   // The host stays fully visible. Exclusion is native filtering, not opacity or hiding.
-  execFileSync('open', ['-a', 'Finder'])
+  execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e',
+    'const finder = Application("Finder"); finder.activate(); for (const window of finder.windows()) window.close()'])
   for (const deadline = Date.now() + 5000; Date.now() < deadline && app.isActive();) await wait(50)
+  host.moveTop()
   check('the host remains visible while another app is frontmost', host.isVisible() && host.getOpacity() === 1 && !app.isActive() && !host.isFocused())
+  const finderWindows = finderWindowBounds()
+  const obscuringFinderWindows = finderWindows.filter(window => window.x < content.x + content.width && window.x + window.width > content.x
+    && window.y < content.y + content.height && window.y + window.height > content.y)
+  receipt.frontmost = { finderWindowCount: finderWindows.length, obscuringFinderWindowCount: obscuringFinderWindows.length }
+  check('no Finder window obscures the visible host', host.isVisible() && obscuringFinderWindows.length === 0)
   const excluded = await native.captureDisplays({ includeHostWindows: false })
   const excludedFrame = frameFor(excluded, display.id), excludedRegion = hostRegion(excludedFrame, content)
   const excludedPixels = colorPixels(excludedFrame.png, excludedRegion)
