@@ -6,7 +6,7 @@ import type { AgentProviderPromptExecutionContext, AgentProviderPromptPayloadCon
 import { AgentMuxError } from '../errors.js'
 import { nativeProcessBirth } from '../agent-native-process.js'
 import { discoverCursorNativeSession } from './cursor-native-session.js'
-import { resolveCursorStorePath } from './cursor-native-history.js'
+import { resolveCursorStorePath } from './cursor-history.js'
 import { qualifyCursorPayloadProtocol } from './cursor-payload-protocol.js'
 
 function unavailable(): never {

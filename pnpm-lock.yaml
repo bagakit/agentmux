@@ -712,9 +712,6 @@ importers:
       '@agentmux/relay':
         specifier: workspace:*
         version: link:../relay
-      '@bufbuild/protobuf':
-        specifier: 1.10.1
-        version: 1.10.1
       '@noble/hashes':
         specifier: 2.4.0
         version: 2.4.0
@@ -767,6 +764,9 @@ importers:
         specifier: 2.9.0
         version: 2.9.0
     devDependencies:
+      '@bufbuild/protobuf':
+        specifier: 1.10.1
+        version: 1.10.1
       '@ctxmux/sdk':
         specifier: file:vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
         version: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
@@ -960,6 +960,9 @@ importers:
 
   packages/providers:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 1.10.1
+        version: 1.10.1
       '@noble/hashes':
         specifier: 2.4.0
         version: 2.4.0

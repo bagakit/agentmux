@@ -3,7 +3,8 @@ import { link, mkdir, open, realpath, stat, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { AgentWorkspaceTrustContext, AgentWorkspaceTrustReceipt } from '../agent-provider.js'
 import type { ProviderExecutionEnvironment } from './execution-environment.js'
-import { cursorDataRoot, cursorWorkspaceSlug } from './cursor-native-history.js'
+import { cursorWorkspaceSlug } from '@agentmux/providers/cursor/native-history'
+import { cursorDataRoot } from './cursor-history.js'
 
 /** Cursor's native marker lookup, scoped to its actual physical cwd and execution environment. */
 export function cursorTrustMarkerPath(workspacePath: string, env?: ProviderExecutionEnvironment): string {

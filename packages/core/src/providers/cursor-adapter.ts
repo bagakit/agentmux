@@ -3,7 +3,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import { normalizeNativeHook } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
-import { cursorDataRoot, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
+import { cursorDataRoot, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-history.js'
 import { discoverCursorNativeSession } from './cursor-native-session.js'
 import { cursorPromptPayloadConsumption } from './cursor-payload-consumption.js'
 import { buildPromptInputPayload, sanitizeBracketedPasteText } from '../bracketed-paste.js'

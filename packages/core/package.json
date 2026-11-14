@@ -582,7 +582,6 @@
     "@agentmux/identity": "workspace:*",
     "@agentmux/providers": "workspace:*",
     "@agentmux/relay": "workspace:*",
-    "@bufbuild/protobuf": "1.10.1",
     "@noble/hashes": "2.4.0",
     "@scure/base": "2.2.0",
     "@xmldom/xmldom": "0.9.12",
@@ -619,6 +618,7 @@
     "postinstall": "node bin/install-ctxmux.mjs"
   },
   "devDependencies": {
+    "@bufbuild/protobuf": "1.10.1",
     "@ctxmux/sdk": "file:vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz",
     "@types/node": "^24.0.0",
     "@types/mdast": "^4.0.4",

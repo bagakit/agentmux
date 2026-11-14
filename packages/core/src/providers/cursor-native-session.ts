@@ -3,7 +3,7 @@ import { realpath } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
 import { nativeProcessFiles, nativeProcessBirth, type NativeProcessFile } from '../agent-native-process.js'
 import { NativeSqliteHistoryReader } from '../native-sqlite-history-reader.js'
-import { readCursorStoreMetadata, resolveCursorStorePath } from './cursor-native-history.js'
+import { readCursorStoreMetadata, resolveCursorStorePath } from './cursor-history.js'
 import type { AgentProviderNativeSessionDiscovery, AgentProviderNativeSessionDiscoveryContext } from '../types.js'
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i

@@ -219,6 +219,10 @@
     "./claude/native-session": {
       "types": "./dist/claude/native-session.d.ts",
       "import": "./dist/claude/native-session.js"
+    },
+    "./cursor/native-history": {
+      "types": "./dist/cursor/native-history.d.ts",
+      "import": "./dist/cursor/native-history.js"
     }
   },
   "files": [
@@ -235,6 +239,7 @@
     "typescript": "^5.9.0"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "1.10.1",
     "@noble/hashes": "2.4.0",
     "json-rpc-2.0": "1.8.1",
     "smol-toml": "1.9.1",
