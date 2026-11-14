@@ -332,6 +332,8 @@ Codex 的受管 actor 写通道由 [`codex-native-input`](../../packages/core/sr
 
 PTY 字节回执与 `inputRef` 本身不构成原生采用。Provider 的 saved-history owner 保留 canonical 用户条目的 client correlation、语义 item ID 与来源；[`native-input-adoption`](../../packages/core/src/native-input-adoption.ts) 沿历史页、changes 与精确记录读取核对持久 claim，不派发输入、不改写回执。共同 timeline 与严格 codec 复用同一条采用边规则，临时 Reader 只保留有界的引用反证；晚到的歧义撤销归并，溢出时明确未知。客户端与 connector 直接消费原生主消息与完整的提交贡献，不解码 token、不匹配正文。受管 actor 写通道不授予历史 reader 控制权，公开内容与投递授权仍逐 part 判断。
 
+共享回执的只读呈现策略归 [`conversation-send-receipts`](../../packages/client-ui/src/lib/conversation-send-receipts.ts)：由原记录、Core 已接受的原生对应和客户端偏好纯投影接收确认、必要提示、等待资格及默认开合／隐藏。`ConversationSubmissionMetadata` 和 `CapturedConversationMessage` 消费同一结果，前者组合原回执、正文及动作，不在 JSX 另算披露规则；[`ConversationMessageDisclosure`](../../packages/client-ui/src/components/ConversationMessageDisclosure.tsx) 保留显式开合、定位、焦点和选区的优先级，实际可见性由原 `useVisibleWork` 限制动效。该策略不调用 Runtime、读取来源、保存配置或创建关联。
+
 ### Mailbox 与 A2A journal
 
 外部入站的 `DurableIngressHost.deliver` 调用 `submitAgentMessage`，与本地输入复用 `DurableAgentMuxMessageQueue`、input journal 与准入 owner。[`readAgentInputMailbox`](../../packages/core/src/client.ts) 沿 journal 的 recipient／intent-sequence 索引有界读取受控输入与只读的 submission 引用，SDK、`agent.input.ls` RPC／CLI 与 Hosted 消费同一份严格结果合同，字节分片复用 `JsonReadEntry`。新的 claim CAS 与 typed launch commit 记录首次的 key，旧 claim 或 unknown launch 不回填；每条 admission 仍从其 owner 读取，失败时保留该条内容与缺口。
