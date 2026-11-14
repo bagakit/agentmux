@@ -30,16 +30,18 @@ useAppStore.setState({ config, sessions: [session], tabs: { [tab.id]: tab }, lay
   loading: false, error: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, topicCategories: [],
   detectExecutors: async () => {}, checkHost: async () => {}, refreshSpatialState: async () => {}, refreshScratchTopics: async () => [] })
 api.config.save = async (requested, expected) => { const saved = applyConfigEdit(useAppStore.getState().config!, expected!, requested); useAppStore.setState({ config: saved }); return saved }
-let receipt: AgentPromotionReceipt | null = null, resolveApply: ((value: { promotion: AgentPromotionReceipt }) => void) | null = null
+let receipt: AgentPromotionReceipt | null = null, resolveApply: ((value: { promotion: AgentPromotionReceipt }) => void) | null = null, rejectApply: ((reason: Error) => void) | null = null
+let emptyClubs = false
+const clubs = [{ title: 'Research Club · product and architecture', directoryPath: '/private/promotion/motes/research', target: { spaceId: 'research-club', zoneId: 'research-home', expectedResource: { hostId: 'local', workspaceId: 'mote-workspace', workspacePath: '/private/promotion' } } }, { title: 'Writing Club', directoryPath: '/private/promotion/motes/writing', target: { spaceId: 'writing-club', zoneId: 'writing-home', expectedResource: { hostId: 'local', workspaceId: 'mote-workspace', workspacePath: '/private/promotion' } } }]
 const calls: Array<{ method: string; params: unknown }> = []
 api.agentPromotions.call = async (method, params) => {
   calls.push({ method, params })
-  if (method === 'agent.promote.inspect') return { promotion: receipt }
+  if (method === 'agent.promote.inspect') return 'operationId' in params ? { promotion: receipt, discovery: null } : { promotion: null, discovery: { clubs: emptyClubs ? [] : clubs, memberships: [], pending: receipt?.state === 'partial' ? [receipt] : [], nextCursor: null, issue: null } }
   const input = params as AgentPromotionApply
   receipt = { ...input, topicId: 'launcher:trusted-mote', moteSpaceId: 'trusted-mote', zoneId: 'trusted-home', directoryPath: '/private/promotion/motes/trusted',
     conversation: { ...source, displayWorkspaceId: 'trusted-mote', groupId: 'trusted-group', tabId: 'trusted-tab', regionId: 'trusted-region' },
-    state: 'partial', stage: 'main', diskDurability: 'confirmed', unavailable: [{ code: 'MOTE_MAIN_UNCONFIRMED', message: 'The original Main save is not yet confirmed.', recovery: 'Inspect and explicitly continue this original promotion.' }] }
-  return await new Promise(resolve => { resolveApply = resolve })
+    state: 'partial', stage: 'spatial', diskDurability: 'unconfirmed', unavailable: [{ code: 'SPATIAL_UNCONFIRMED', message: 'The original member association is not yet confirmed.', recovery: 'Inspect and explicitly continue this original promotion.' }] }
+  return await new Promise((resolve, reject) => { resolveApply = resolve; rejectApply = reject })
 }
 mountThemeRuntime(window, config.appearance)
 function Scene() {
@@ -63,10 +65,12 @@ function Scene() {
 createClientUiRoot(document.getElementById('root')!).render(<Scene />)
 Object.assign(window, { agentPromotionProbe: {
   calls, source,
+  empty(value: boolean) { emptyClubs = value },
+  unknown() { if (!rejectApply) throw Error('No original submitted promotion'); rejectApply(new Error('The original save reply was lost. Inspect before continuing.')); rejectApply = null; resolveApply = null },
   closeSettings() { const close = document.querySelector<HTMLButtonElement>('[aria-label="Close settings"]'); if (!close) throw Error('Actual Settings close control unavailable'); close.click() },
   policy(enabled: boolean) { useAppStore.setState({ config: { ...useAppStore.getState().config!, promotion: { enabled } } }) },
   partial() { if (!receipt || !resolveApply) throw Error('No original submitted promotion'); resolveApply({ promotion: receipt }); resolveApply = null },
-  complete() { if (!receipt || !resolveApply) throw Error('No original submitted promotion'); receipt = { ...receipt, state: 'complete', stage: 'complete', unavailable: [] }; resolveApply({ promotion: receipt }); resolveApply = null },
+  complete() { if (!receipt || !resolveApply) throw Error('No original submitted promotion'); receipt = { ...receipt, state: 'complete', stage: 'complete', diskDurability: 'confirmed', unavailable: [] }; resolveApply({ promotion: receipt }); resolveApply = null },
   theme(light: boolean) { const appearance = { ...config.appearance, appAppearance: light ? 'light' as const : 'dark' as const }; useAppStore.setState(state => ({ config: { ...state.config!, appearance } })); updateThemeSelection(appearance, window) },
   facts() { const s = useAppStore.getState(); return { sessions: s.sessions, tabs: s.tabs, layouts: s.layouts, drafts: s.agentComposerDrafts, activeWorkspaceId: s.activeWorkspaceId, calls } }
 } })

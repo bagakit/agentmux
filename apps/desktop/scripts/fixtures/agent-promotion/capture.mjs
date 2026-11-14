@@ -71,7 +71,7 @@ try {
     plugins: [sourceResolver], build: { target: 'esnext', outDir: compiled, emptyOutDir: true } })
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled,'index.html'), temporary,evidence],
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled,'index.html'), temporary,evidence,...(process.argv.includes('--agent-only')?['--agent-only']:[])],
     { temporaryRoot: temporary, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await writeFile(join(evidence,'process.log'),logs.join('\n'))
   receipt.actual = JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'))
