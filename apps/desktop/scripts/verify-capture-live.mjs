@@ -12,6 +12,14 @@ const require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const args = process.argv.slice(2)
+if (args.length === 1 && args[0] === '--integrated') {
+  const result = await new Promise((done, reject) => {
+    const child = spawn(process.execPath, [join(root, 'apps/desktop/scripts/verify-capture-integrated.mjs')], { cwd: root, stdio: 'inherit', env: process.env })
+    child.once('error', reject)
+    child.once('exit', (code, signal) => done({ code, signal }))
+  })
+  if (result.signal || result.code !== 0) process.exitCode = 1
+} else {
 assert.deepEqual(args, ['--scenario', 'lifecycle'], 'Usage: verify-capture-live.mjs --scenario lifecycle')
 assert.equal(process.platform, 'darwin', 'The real ScreenCaptureKit lifecycle proof requires macOS')
 const out = resolve(root, '.local/capture-live', 'run-' + new Date().toISOString().replaceAll(':', '').replaceAll('.', '') + '-' + process.pid)
@@ -144,3 +152,4 @@ if (lockedSession()) {
   }
 }
 process.stdout.write(JSON.stringify({ passed: receipt.passed, pending: receipt.pending, failure: receipt.failure, receipt: join(out, 'receipt.json') }) + '\n')
+}
