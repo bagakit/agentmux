@@ -25,6 +25,19 @@ const dispatch = async (source: typeof first) => ({ hostId: source.origin.hostId
   source: { envelope: { ...source.origin, body: '原任务 ' + source.origin.recipientSessionId } },
   dispatch: { sourceMessageId: source.origin.messageId, ownerAgentSessionId: current.sessionId, workerAgentSessionId: source.origin.recipientSessionId, threadId: source.origin.threadId, openedAt: 2, originAwaits: true, events: [] },
   replies: [{ envelope: { messageId: source.origin.hostId + '-reply', threadId: source.origin.threadId, senderSessionId: source.origin.recipientSessionId, recipientSessionId: current.sessionId, body: source.origin.hostId + ' 的原回复', createdAt: 3 } }], identityDiagnostics: [] }) as any
+it('keeps private reading through a late work-source read and honors a later explicit original work link', async () => {
+  const read = vi.fn(dispatch), privateChats = (visible: boolean) => <p data-private-reader={String(visible)}>原私聊</p>
+  const render = (source: MoteDialoguePage | null, requestedEvent?: { eventId: string; token: string }) => <MoteWorkThreads page={source} issue="原工作未确认" loading={false} visible readWork={read} onRefresh={() => {}} onOpenWork={() => {}} privateChats={privateChats} requestedEvent={requestedEvent} />
+  await act(async () => root.render(render(null)))
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === '私聊')!.click())
+  await act(async () => root.render(render(page)))
+  expect(container.querySelector('[data-private-reader]')?.getAttribute('data-private-reader')).toBe('true')
+  expect(container.querySelector('[role="tabpanel"][aria-label="私聊"]')?.hasAttribute('hidden')).toBe(false)
+  expect(container.querySelector('.mote-conversation__issue')).toBeNull()
+  await act(async () => root.render(render(page, { eventId: first.eventId, token: 'later-explicit-work' })))
+  expect(container.querySelector('[data-private-reader]')?.getAttribute('data-private-reader')).toBe('false')
+  expect(container.querySelector('[data-mote-work-thread]')?.getAttribute('data-mote-work-thread')).toBe(first.eventId)
+})
 it('Discussion renders the original Main body without worker events or a second view switch', async () => {
   const read = vi.fn(dispatch), render = vi.fn(() => <div data-original-main>主对话原正文</div>)
   await act(async () => root.render(<MoteConversationThreads page={page} issue={null} actor={{ hostId: current.hostId, agentSessionId: current.sessionId }} name="Mote" visible conversationClient={null} renderCurrent={render} />))
