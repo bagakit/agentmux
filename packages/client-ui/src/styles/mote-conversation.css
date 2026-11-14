@@ -33,7 +33,7 @@
 .mote-work-event__summary > .mote-work-event__time { font-size: var(--fs-meta, 12px); font-weight: 400; color: var(--text-3); flex-shrink: 0; }
 
 /* Threads: one toolbar row, a dense list and a reading pane. Container queries decide the layout. */
-.mote-threads { container: mote-threads / inline-size; }
+.mote-threads { container: mote-threads / inline-size; display: flex; flex-direction: column; min-height: 100%; }
 .mote-threads__toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-block-end: 8px; padding-block: 8px; background: color-mix(in srgb, var(--mote-threads-surface, var(--surface-0)) 92%, transparent); backdrop-filter: saturate(1.2) blur(10px); border-block-end: 1px solid var(--line-soft); }
 .mote-threads__toolbar > .mote-conversation__navigation { position: static; flex: none; margin: 0 0 0 auto; padding: 0; background: transparent; flex-wrap: nowrap; }
 .mote-threads__search { display: flex; align-items: center; gap: 6px; flex: 1 1 140px; max-width: 260px; min-width: 96px; min-height: var(--mote-thread-control-height, 30px); padding-inline: 9px; border-radius: 999px; background: var(--surface-2); color: var(--text-3); transition: background var(--dur-fast, 120ms) ease; }
@@ -54,16 +54,16 @@
 .mote-threads__members, .mote-threads__private { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* The tab already names and counts the members; the host's own panel heading would repeat it. */
 .mote-threads__members .mote-cooperation__team-heading { display: none; }
-.mote-threads__filters { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--surface-2); overflow-x: auto; scrollbar-width: none; }
-.mote-threads__filters button { appearance: none; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: var(--mote-thread-control-height, 28px); border: 0; border-radius: 999px; padding: 0 11px; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; transition: color var(--dur-fast, 120ms) ease, background var(--dur-fast, 120ms) ease; }
+.mote-threads__filters { display: inline-flex; flex-wrap: wrap; min-width: 0; gap: 2px; padding: 2px; border-radius: var(--radius, 8px); background: var(--surface-2); }
+.mote-threads__filters button { appearance: none; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: var(--mote-thread-control-height, 28px); border: 0; border-radius: 999px; padding: 0 11px; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; transition: color var(--dur-fast, 120ms) ease, background var(--dur-fast, 120ms) ease; }
 .mote-threads__filters button:hover { color: var(--text); }
 .mote-threads__filters button[aria-pressed="true"] { background: var(--surface-0); color: var(--text); box-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent), inset 0 0 0 1px var(--line-soft); }
-.mote-threads__filters button::after { content: attr(data-count); min-width: 1.2em; color: var(--text-3); font-size: var(--fs-micro, 11px); font-variant-numeric: tabular-nums; text-align: center; }
-.mote-threads__filters button[data-count="0"]:not([aria-pressed="true"])::after { opacity: .5; }
-.mote-threads__filters button:focus-visible, .mote-conversation__related > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mote-threads__filters button > span { min-width: 1.2em; color: var(--text-3); font-size: var(--fs-micro, 11px); font-variant-numeric: tabular-nums; text-align: center; }
+.mote-threads__filters button[data-count="0"]:not([aria-pressed="true"]) > span { opacity: .5; }
+.mote-conversation__related > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .mote-threads__scope { margin: 0 0 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.5; }
 .mote-threads__back { display: none; }
-/* Narrow: row one is the view tabs and actions, row two the status pills and search. Nothing scrolls out of sight. */
+/* As the toolbar narrows, give each filter a whole labeled control. */
 @container mote-threads (max-width: 639.98px) {
   .mote-threads__views { order: 1; }
   .mote-threads__toolbar > .mote-conversation__navigation { order: 2; }
@@ -71,6 +71,15 @@
   .mote-threads__filters { order: 4; }
   .mote-threads__search { order: 5; flex: 1 1 80px; min-width: 80px; max-width: none; }
 }
+@container mote-threads (max-width: 430px) {
+  .mote-threads__views { gap: var(--sp-3); margin-inline-end: 0; }
+  .mote-threads__views button::after { bottom: 0; }
+  .mote-threads__views button:focus-visible { outline-offset: -3px; }
+  .mote-threads__toolbar > .mote-conversation__navigation button { padding-inline: var(--sp-2); }
+  .mote-threads__filters { flex-basis: 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .mote-threads__filters button { flex-direction: column; justify-content: center; min-width: 0; gap: 0; padding-inline: var(--sp-1); line-height: 1.25; }
+}
+.mote-threads__filters button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -3px; }
 .mote-threads__list { margin: 0; padding: 0; list-style: none; }
 .mote-threads__list > li[hidden] { display: none; }
 .mote-threads__list--history > li { padding-inline-start: 10px; border-inline-start: 1px solid var(--line-soft); }
@@ -81,9 +90,6 @@
 .mote-threads .mote-work-event__summary:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
 .mote-threads .mote-work-event__disclosure { display: none; }
 .mote-threads .mote-work-event[data-expanded="true"] { background: transparent; border-radius: 0; }
-.mote-threads[data-layout="stack"] .mote-work-event[data-expanded="true"] > .mote-work-event__summary { padding-inline: 2px; border-radius: 0; border-block-end: 1px solid var(--line-soft); }
-.mote-threads[data-layout="stack"] .mote-work-event[data-expanded="true"] > .mote-work-event__summary:hover { background: transparent; }
-.mote-threads[data-layout="stack"] .mote-work-event[data-expanded="true"] > .mote-work-event__thread { padding: 12px 2px 16px; }
 /* Reading pane: the thread as a flat document, never a card inside a card. */
 .mote-work-event__thread { padding: 4px 4px 14px; border-top: 0; font-size: var(--fs-body, 14px); line-height: 1.65; }
 .mote-work-event__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 4px 12px; }
@@ -98,21 +104,26 @@
 .mote-work-event__sender { color: var(--text-2); font-weight: 550; }
 .mote-work-event__issue { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
 .mote-work-event__provenance { margin: 12px 0 0; color: var(--text-3); font-size: var(--fs-micro, 11px); line-height: 1.5; overflow-wrap: anywhere; }
-/* Split (measured >= 640px): list on the left, the selected thread in its own scrolling pane on the right. */
-.mote-threads[data-layout="split"] { display: flex; flex-direction: column; min-height: 100%; }
-.mote-threads[data-layout="split"] > .mote-threads__work:not([hidden]) { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.mote-threads[data-layout="split"] .mote-threads__body { flex: 1; display: grid; grid-template-columns: minmax(220px, 36%) minmax(0, 1fr); column-gap: 0; align-items: stretch; }
-.mote-threads[data-layout="split"] .mote-threads__list { padding-inline-end: 12px; }
-.mote-threads__pane { min-height: 240px; padding: 4px 4px 20px 20px; border-inline-start: 1px solid var(--line-soft); }
-.mote-threads__pane > .mote-work-event__thread { position: sticky; top: 60px; padding: 0; animation: mote-conversation-reveal var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
+/* One detail pane with the original thread, positioned by available space. */
+.mote-threads__pane { min-width: 0; }
+.mote-threads__pane > .mote-work-event__thread { animation: mote-conversation-reveal var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
 .mote-threads__pane-empty { margin: 40px 12px; color: var(--text-3); font-size: var(--fs-meta, 12px); text-align: center; }
-.mote-threads[data-layout="split"] .mote-threads__list > li[data-selected] > .mote-work-event > .mote-work-event__summary { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--green); }
-/* Narrow: the selected thread takes the full width with a back control; other rows step aside. */
-@container mote-threads (min-width: 0px) {
-  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__back { display: inline-flex; align-items: center; gap: 4px; min-height: var(--mote-thread-control-height, 32px); margin-block-end: 6px; padding: 0 8px 0 4px; border: 0; border-radius: var(--radius-sm, 6px); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; }
-  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__back > svg { transform: rotate(180deg); }
-  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__list > li:not([data-selected]) { display: none; }
-  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__list > li[data-selected] .mote-work-event__thread { animation: mote-conversation-reveal var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
+@container mote-threads (min-width: 640px) {
+  .mote-threads__work:not([hidden]) { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .mote-threads__body { flex: 1; display: grid; grid-template-columns: minmax(220px, 36%) minmax(0, 1fr); align-items: stretch; }
+  .mote-threads__list { padding-inline-end: 12px; }
+  .mote-threads__pane { min-height: 240px; padding: 4px 4px 20px 20px; border-inline-start: 1px solid var(--line-soft); }
+  .mote-threads__pane > .mote-work-event__thread { position: sticky; top: 60px; padding: 0; }
+  .mote-threads__list > li[data-selected] > .mote-work-event > .mote-work-event__summary { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--green); }
+}
+@container mote-threads (max-width: 639.98px) {
+  .mote-threads__back { display: inline-flex; align-items: center; gap: 4px; min-height: var(--mote-thread-control-height, 32px); margin-block-end: 6px; padding: 0 8px 0 4px; border: 0; border-radius: var(--radius-sm, 6px); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; }
+  .mote-threads__back > svg { transform: rotate(180deg); }
+  .mote-threads[data-detail="open"] .mote-threads__list > li:not([data-selected]) { display: none; }
+  .mote-threads .mote-work-event[data-expanded="true"] > .mote-work-event__summary { padding-inline: 2px; border-radius: 0; border-block-end: 1px solid var(--line-soft); }
+  .mote-threads .mote-work-event[data-expanded="true"] > .mote-work-event__summary:hover { background: transparent; }
+  .mote-threads__pane-empty { display: none; }
+  .mote-threads__pane > .mote-work-event__thread { padding: 12px 2px 16px; }
 }
 .mote-conversation__navigation button, .mote-work-event button, .mote-conversation__link, .mote-work-event summary { min-width: var(--mote-thread-control-height, 30px); min-height: var(--mote-thread-control-height, 30px); }
 .mote-work-event summary { display: flex; align-items: center; cursor: pointer; width: fit-content; }
@@ -144,7 +155,6 @@
   .mote-conversation__related-chevron, .mote-conversation__source-chevron, .mote-conversation__source-title { transition: none; }
   .mote-threads__views button, .mote-threads__views button::after { transition: none; }
   .mote-conversation__related[open] > .mote-conversation__related-body:not([hidden]), .mote-conversation__source[open] > summary ~ * { animation: none; }
-  .mote-threads__pane > .mote-work-event__thread,
-  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__list > li[data-selected] .mote-work-event__thread { animation: none; }
+  .mote-threads__pane > .mote-work-event__thread { animation: none; }
 }
 .mote-conversation__source > .mote-conversation__muted { margin-top: 0; }

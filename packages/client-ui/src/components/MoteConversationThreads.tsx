@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { DispatchObservation } from '@agentmux/core'
 import type { MoteDialogueLink, MoteDialoguePage } from '@agentmux/core/mote-dialogue'
@@ -6,6 +6,7 @@ import type { ConversationRef } from '@agentmux/core/conversation'
 import { useConversationView, type ConversationViewClient } from '../lib/use-conversation-view.js'
 import { describeConversationWindow, type ConversationRecord } from '../lib/conversation-records.js'
 import { useVisibleWork } from '../lib/use-visible-work.js'
+import { useMoteThreadReadingAnchor } from '../lib/use-mote-thread-reading-anchor.js'
 import { ConversationView } from './ConversationView.js'
 import type { ConversationRecordInsertion } from './ConversationRecordSequence.js'
 import type { ConversationReadingGeometry } from '../lib/conversation-body-work.js'
@@ -13,6 +14,7 @@ import { createSpeakerResolver, type DescribeSpeaker } from '../lib/conversation
 import { semanticIconComponent } from '../theme/icons.js'
 import { TextInput } from '../input/index.js'
 import { AgentMarkdown } from './AgentMarkdown.js'
+import { Tabs, type TabOption } from './Tabs.js'
 import '../styles/mote-conversation.css'
 import { MotePeriodConversation } from './MotePeriodConversation.js'
 export { MotePeriodConversation } from './MotePeriodConversation.js'
@@ -68,12 +70,13 @@ function EarlierConversation({ source, client, visible, name, geometry, describe
   </section>
 }
 export { EarlierConversation as MoteOriginalConversation }
-function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onExpand, refreshSource, discovering = false, onSummary, detailHost, renderEventActions }: {
+function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onExpand, refreshSource, discovering = false, onSummary, detailHost, detailHidden = false, renderEventActions }: {
   event: MoteWorkEvent; read: MoteWorkReader; visible: boolean; memberName?: ((source: Work) => string) | undefined; onOpen?: ((source: Work) => void) | undefined
   expanded: boolean; onExpand(): void; refreshSource: MoteDialoguePage | null; discovering?: boolean
   onSummary?: ((id: string, summary: ThreadSummary) => void) | undefined
-  /** When present, the opened thread renders in this pane instead of below its row. The same element and reads are kept. */
+  /** A selected thread uses the same pane at every width. Omit for inline readers. */
   detailHost?: HTMLElement | null | undefined
+  detailHidden?: boolean
   renderEventActions?: ((event: MoteWorkEvent) => ReactNode) | undefined
 }) {
   const visibility = useVisibleWork<HTMLElement>(visible)
@@ -105,15 +108,7 @@ function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onE
   const search = [summary ?? '', ...event.sources.map(source => memberName?.(source) ?? '')].join(' ').toLocaleLowerCase()
   useEffect(() => { onSummary?.(event.id, { key, search, read: selected.values.length === event.sources.length && !selected.issue, reported, question: hasQuestion, replies }) },
     [event.id, key, search, selected.values.length, selected.issue, event.sources.length, reported, hasQuestion, replies, onSummary])
-  return <article ref={visibility.ref} className="mote-work-event" data-mote-work-event={event.id} data-expanded={expanded}>
-    <button type="button" className="mote-work-event__summary" aria-expanded={expanded} onClick={onExpand}>
-      <ThreadIcon className="mote-work-event__mark" size={16} aria-hidden="true" /><span><strong>{summary || '工作 Thread'}</strong>
-        <small>{memberName?.(event.sources[0]!) ?? '执行者未确认'}{workerCount > 1 ? ` · ${workerCount} 位执行者` : ''}
-          <span> · {reported ? '已回报' : hasQuestion ? '含问题记录' : first ? '已派出' : '待核对'}{replies ? ` · ${replies} 条回复` : ''}</span></small></span>
-      {recordedTime(event.at)}<span className="mote-work-event__disclosure" aria-hidden="true">{expanded ? '−' : '+'}</span>
-    </button>
-    {expanded ? renderEventActions?.(event) : null}
-    {expanded ? (thread => detailHost ? createPortal(thread, detailHost) : thread)(<div className="mote-work-event__thread" data-mote-work-thread={event.id}>
+  const thread = expanded ? <div className="mote-work-event__thread" data-mote-work-thread={event.id} hidden={detailHidden}>
       {onOpen ? <div className="mote-work-event__actions">{event.sources.map(source => <button type="button" key={source.sequence} onClick={() => onOpen(source)}>继续原工作{event.sources.length > 1 ? ` · ${memberName?.(source) ?? '执行者未确认'}` : ''}</button>)}</div> : null}
       {selected.issue ? <p role="status" className="mote-work-event__issue">{selected.issue}<button type="button" onClick={() => setRetry(value => value + 1)}>重读原来源</button></p> : null}
       {selected.values.map(({ source, value }) => {
@@ -130,7 +125,16 @@ function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onE
       </section> })}
       {!selected.values.length && !selected.issue ? <p className="mote-conversation__muted">读取原工作 thread…</p> : null}
       <p className="mote-work-event__provenance">{reported ? '执行者已回报；任务验收另见原工作记录 · ' : ''}来源 {event.sources.map(source => `${source.origin.hostId} / ${source.origin.messageId} / ${source.origin.threadId}`).join('，')}</p>
-    </div>) : null}
+    </div> : null
+  return <article ref={visibility.ref} className="mote-work-event" data-mote-work-event={event.id} data-expanded={expanded}>
+    <button type="button" className="mote-work-event__summary" aria-expanded={expanded} onClick={onExpand}>
+      <ThreadIcon className="mote-work-event__mark" size={16} aria-hidden="true" /><span><strong>{summary || '工作 Thread'}</strong>
+        <small>{memberName?.(event.sources[0]!) ?? '执行者未确认'}{workerCount > 1 ? ` · ${workerCount} 位执行者` : ''}
+          <span> · {reported ? '已回报' : hasQuestion ? '含问题记录' : first ? '已派出' : '待核对'}{replies ? ` · ${replies} 条回复` : ''}</span></small></span>
+      {recordedTime(event.at)}<span className="mote-work-event__disclosure" aria-hidden="true">{expanded ? '−' : '+'}</span>
+    </button>
+    {expanded ? renderEventActions?.(event) : null}
+    {detailHost === undefined ? thread : detailHost && thread ? createPortal(thread, detailHost) : null}
   </article>
 }
 /** Original dispatch threads, independent of the Main Agent's native reader.
@@ -150,6 +154,7 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
   view?: MoteThreadView | undefined; onViewChange?: ((view: MoteThreadView) => void) | undefined; showViews?: boolean
 }) {
   const viewport = useVisibleWork<HTMLElement>(visible)
+  const tabsId = useId()
   const [history, setHistory] = useState(false), [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [localView, setLocalView] = useState<MoteThreadView>('work')
   const view = controlledView ?? localView
@@ -192,30 +197,37 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
     return () => { node?.removeEventListener('pointerdown', cancel, true); node?.removeEventListener('keydown', cancel, true) }
   }, [visible, requestedEvent?.token, events])
 
-  // Wide containers read the selected thread in a right pane; narrow ones read it in place. The pane is chosen by measured width, not by a device guess.
-  const [pane, setPane] = useState<HTMLElement | null>(null), [wide, setWide] = useState(false)
-  useEffect(() => {
-    const node = viewport.ref.current, View = node?.ownerDocument.defaultView?.ResizeObserver
-    if (!node || !View) return
-    const observer = new View(([entry]) => { const next = (entry?.contentRect.width ?? 0) >= 640; setWide(previous => previous === next ? previous : next) })
-    observer.observe(node); return () => observer.disconnect()
-  }, [viewport.ref])
+  // The active detail stays mounted in one pane. CSS lays it out beside or after the original row.
+  const [pane, setPane] = useState<HTMLElement | null>(null)
   const open = selected && expanded.has(selected) ? selected : null
+  const shownOpen = open !== null && events.some(event => event.id === open && matches(event))
+  useMoteThreadReadingAnchor(pane, viewport.visible && view === 'work' && shownOpen ? open : null)
+  const localTabs = showViews && Boolean(members || privateChats)
+  const panelId = (value: MoteThreadView) => `${tabsId}-${value}`
+  const tabId = (value: MoteThreadView) => `${panelId(value)}-tab`
+  const panelProps = (value: MoteThreadView, label: string) => localTabs
+    ? { role: 'tabpanel', id: panelId(value), 'aria-labelledby': tabId(value) }
+    : { role: 'tabpanel', 'aria-label': label }
+  const tabs: TabOption<MoteThreadView>[] = [
+    { value: 'work', panelId: panelId('work'), button: { id: tabId('work') }, label: <>工作<span>{events.length}</span></> },
+  ]
+  if (privateChats) tabs.push({ value: 'private', panelId: panelId('private'), button: { id: tabId('private') }, label: '私聊' })
+  if (members) tabs.push({ value: 'members', panelId: panelId('members'), button: { id: tabId('members'), 'data-attention': members.attention || undefined },
+    label: <>成员{members.count === null ? null : <span>{members.count}</span>}</> })
   const toggle = (id: string) => {
     setExpanded(previous => { const next = new Set(previous); if (next.has(id)) { next.delete(id); if (selected === id) setSelected(null) } else { next.add(id); setSelected(id) } return next })
   }
   let previousDay = ''
-  return <section ref={viewport.ref} className="mote-conversation mote-threads" data-mote-threads={identity || undefined} data-view={view} data-detail={open ? 'open' : undefined} data-layout={wide ? 'split' : 'stack'}>
+  return <section ref={viewport.ref} className="mote-conversation mote-threads" data-mote-threads={identity || undefined} data-view={view} data-detail={shownOpen ? 'open' : undefined}>
     <header className="mote-threads__toolbar">
-      {showViews && (members || privateChats) ? <div className="mote-threads__views" role="tablist" aria-label="Threads 内容">
-        <button type="button" role="tab" aria-selected={view === 'work'} onClick={() => setView('work')}>工作<span>{events.length}</span></button>
-        {privateChats ? <button type="button" role="tab" aria-selected={view === 'private'} onClick={() => setView('private')}>私聊</button> : null}
-        {members ? <button type="button" role="tab" aria-selected={view === 'members'} data-attention={members.attention || undefined} onClick={() => setView('members')}>成员{members.count === null ? null : <span>{members.count}</span>}</button> : null}
-      </div> : null}
+      {localTabs ? <Tabs className="mote-threads__views" aria-label="Threads 内容" options={tabs} value={view} onValueChange={setView} /> : null}
       <div className="mote-threads__filters" role="group" aria-label="按回报记录筛选" hidden={view !== 'work'}>{([
         ['all', '全部'], ['question', '含问题'], ['reported', '已回报'], ['unconfirmed', '待核对']
-      ] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={filter === value} data-count={value === 'all' && members && !search ? undefined : count(value)}
-        aria-description={`${count(value)} 项`} onClick={() => setFilter(value)}>{label}</button>)}</div>
+      ] as const).map(([value, label]) => {
+        const total = count(value)
+        return <button type="button" key={value} aria-pressed={filter === value} aria-label={label} data-count={total}
+          aria-description={`${total} 项`} onClick={() => setFilter(value)}>{label}<span aria-hidden="true">{total}</span></button>
+      })}</div>
       <label className="mote-threads__search" hidden={view !== 'work'}><SearchIcon size={14} aria-hidden="true" /><TextInput aria-label="查找工作标题或执行者" placeholder="查找" value={query} onChange={event => setQuery(event.target.value)} /></label>
       <nav className="mote-conversation__navigation" aria-label="Threads 浏览方式">
         {view === 'work' ? <><button type="button" aria-pressed={!history} onClick={() => setHistory(false)}>工作列表</button>
@@ -224,11 +236,11 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
       </nav>
     </header>
     {issue && view === 'work' ? <p role="status" className="mote-conversation__issue">{issue} 原工作与输入仍保留。</p> : null}
-    {privateChats ? <div className="mote-threads__private" role="tabpanel" aria-label="私聊" hidden={view !== 'private'}>{privateChats(visible && view === 'private')}</div> : null}
-    {members ? <div className="mote-threads__members" role="tabpanel" aria-label="成员" hidden={view !== 'members'}>{members.content(visible && view === 'members')}</div> : null}
-    <div className="mote-threads__work" role={members ? 'tabpanel' : undefined} aria-label={members ? '工作' : undefined} hidden={view !== 'work'}>
+    {privateChats ? <div className="mote-threads__private" {...panelProps('private', '私聊')} hidden={view !== 'private'}>{privateChats(visible && view === 'private')}</div> : null}
+    {members ? <div className="mote-threads__members" {...panelProps('members', '成员')} hidden={view !== 'members'}>{members.content(visible && view === 'members')}</div> : null}
+    <div className="mote-threads__work" {...(localTabs || members ? panelProps('work', '工作') : {})} hidden={view !== 'work'}>
     {discovering ? <p className="mote-threads__scope" role="status">在已载入的 {events.length} 项工作中查找{pending ? ` · ${pending} 项资料待核对` : ''}{page?.next ? ' · 可继续读取更早工作' : ''}</p> : null}
-    {open && !wide ? <button type="button" className="mote-threads__back" onClick={() => toggle(open)}>
+    {open && shownOpen ? <button type="button" className="mote-threads__back" onClick={() => toggle(open)}>
       <DisclosureIcon size={12} aria-hidden="true" />返回工作列表</button> : null}
     <div className="mote-threads__body">
     <ol className={`mote-threads__list${history ? ' mote-threads__list--history' : ''}`}>{[...events].reverse().map(event => {
@@ -238,10 +250,12 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
       if (shown) previousDay = day
       return <li key={event.id} hidden={!shown} data-selected={open === event.id || undefined}>{heading ? <h3 className="mote-threads__day">{day}</h3> : null}
         <WorkEventCard key={event.id} event={event} read={readWork} visible={visible && view === 'work'} discovering={discovering && viewport.visible} memberName={memberName} onOpen={onOpenWork} refreshSource={page} onSummary={onSummary} renderEventActions={renderEventActions}
-          expanded={expanded.has(event.id)} onExpand={() => toggle(event.id)} detailHost={wide ? (open === event.id ? pane : null) : undefined} />
+          expanded={expanded.has(event.id)} onExpand={() => toggle(event.id)} detailHost={open === event.id ? pane : undefined} detailHidden={!shown} />
       </li>
     })}</ol>
-    {wide ? <div ref={setPane} className="mote-threads__pane" aria-live="polite">{open ? null : <p className="mote-threads__pane-empty">{events.length ? '选择左侧一项工作，在这里阅读原任务与回复。' : ''}</p>}</div> : null}
+    <div ref={setPane} className="mote-threads__pane" aria-live="polite">
+      {shownOpen ? null : <p className="mote-threads__pane-empty">{events.length ? '选择左侧一项工作，在这里阅读原任务与回复。' : ''}</p>}
+    </div>
     </div>
     {events.length > 0 && !matched ? <p className="mote-conversation__muted">没有匹配的已载入工作。{pending ? '部分原资料尚未确认，可重新读取。' : page?.next ? '可继续读取更早的工作。' : '试试其他标题或执行者。'}</p> : null}
     {!events.length ? <p className="mote-conversation__muted">{loading ? '读取工作 threads…' : members ? '还没有已关联的工作。成员的原对话在「成员」中。' : '还没有已关联的工作事件。'}</p> : null}
