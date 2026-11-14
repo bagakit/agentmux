@@ -14,9 +14,13 @@ export function collaborationAgentPresentation(session: Extract<SessionSnapshot,
       : session.processState === 'running' && observeAgentSession(session, Date.now()).semantic === 'idle' ? 'idle' : 'unknown'
   return { name: name ?? session.label, tier, lastActivityAt: focusActivityEntryTime(session) ?? null, providerId: session.providerId, executorId: session.executorId }
 }
-export function collaborationNodeSize(tier: CollaborationAgent['tier']) {
-  return tier === 'closed' ? { width: 24, height: 24 } : tier === 'idle' || tier === 'unknown' ? { width: 154, height: 38 } : { width: 250, height: 94 }
+/** Read only when admitting an occurrence or explicitly arranging. Live facts
+ * keep their existing slot, including a compact member becoming active. */
+export function collaborationNodeSize(tier: CollaborationAgent['tier'], step?: CollaborationRecencyStep) {
+  return tier === 'closed' || tier === 'idle' && step === 'older' ? { width: 24, height: 24 }
+    : tier === 'idle' || tier === 'unknown' ? { width: 154, height: 38 } : { width: 250, height: 94 }
 }
+export const collaborationCardSlot = (box: { width: number; height: number }) => box.width >= 250 && box.height >= 94
 
 /** Three steps the eye can actually rank. A continuous curve flattens after a day. */
 export type CollaborationRecencyStep = 'recent' | 'today' | 'older'

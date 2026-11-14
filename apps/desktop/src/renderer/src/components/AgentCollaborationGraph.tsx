@@ -11,7 +11,7 @@ import { useCollaborationLayout } from '../lib/use-collaboration-layout'
 import { collaborationEnvelope, collaborationVisibleRoute } from '../lib/collaboration-map-geometry'
 import { collaborationDistantFaceInk, collaborationMapReadsSummary, COLLABORATION_OVERVIEW_MARK_SIZE, collaborationCameraDuration, collaborationIdentityInk, collaborationMapContentInk, collaborationMapLod, collaborationMapTextBudget, collaborationOverviewScale, collaborationVisibleHull } from '../lib/collaboration-map-lod'
 import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, type CollaborationLocate } from '../lib/collaboration-map-camera'
-import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecencyLabel, collaborationRecencyStep, collaborationAgentName, collaborationAgentGlyph, useCollaborationRecencyClock, type CollaborationRecencyStep } from '../lib/collaboration-map-presentation'
+import { COLLABORATION_ACTIVITY_MS, collaborationCardSlot, collaborationNodeSize, collaborationRecencyLabel, collaborationRecencyStep, collaborationAgentName, collaborationAgentGlyph, useCollaborationRecencyClock, type CollaborationRecencyStep } from '../lib/collaboration-map-presentation'
 import { useAgentInformationPreview } from './AgentInformationPreview'
 import { FocusContextCardBody } from './FocusContextCardBody'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
@@ -51,7 +51,7 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
   const { agent } = data, zoom = useStore(state => state.transform[2])
   const registerReadingProxy = useContext(MapReadingProxyContext), gate = useContext(PointerRestGateContext)
   const preferences = useContext(CollaborationMapPreferences)
-  const lod = collaborationMapLod(zoom, preferences), overview = lod.identity === 0
+  const lod = collaborationMapLod(zoom, preferences), overview = lod.identity === 0 || data.box.width <= 28 && data.box.height <= 28
   const root = useRef<HTMLDivElement>(null)
   const [focusedLayer, setFocusedLayer] = useState<'identity' | 'detail' | null>(null)
   const readingLayer = useSyncExternalStore(agentInformationPreview.subscribe, () => {
@@ -60,7 +60,7 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
   })
   const label = collaborationAgentName(agent)
   const tier = agent.tier ?? (agent.context ? 'active' : 'unknown')
-  const detail = agent.context && tier === 'active' ? lod.detail : 0
+  const detail = agent.context && collaborationCardSlot(data.box) ? lod.detail : 0
   const contentInk = collaborationMapContentInk(detail)
   const projectedLayer = contentInk.detail > 0 ? 'detail' : 'identity', heldLayer = readingLayer ?? focusedLayer, owner = heldLayer ?? projectedLayer
   const identityOpacity = heldLayer ? Number(owner === 'identity') : contentInk.identity
@@ -78,7 +78,7 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
       <div className="collaboration-agent__identity-layer" data-map-layer="identity" inert={owner !== 'identity'} aria-hidden={owner !== 'identity'} style={{ opacity: identityOpacity, '--collaboration-mark-scale': markScale } as CSSProperties}>
         <AgentMark data={data} label={label} tier={tier} glyph={glyph} overview={overview} identityProgress={lod.identity} markScale={markScale} identityInk={identityInk} status={lod.status} />
       </div>
-      {agent.context && (tier === 'active' && detail > 0 || owner === 'detail') ? <div className="collaboration-agent__detail-layer" data-map-layer="detail" data-focus-proxy={focusProxy || undefined} inert={owner !== 'detail'} aria-hidden={owner !== 'detail'} style={{ opacity: detailOpacity }}>
+      {agent.context && (detail > 0 || owner === 'detail') ? <div className="collaboration-agent__detail-layer" data-map-layer="detail" data-focus-proxy={focusProxy || undefined} inert={owner !== 'detail'} aria-hidden={owner !== 'detail'} style={{ opacity: detailOpacity }}>
         <FocusContextCardBody context={agent.context} identity={data.identity} goalLinks={data.goals} disclosure={{ status: lod.status, summary: lod.summary }} selected={data.selected} onSelect={data.onSelect} onOpenWorkface={data.onOpen} />
       </div> : null}
     </div>
@@ -197,11 +197,26 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   const graphAreas = useMemo(() => collaborationVisibleAreas(worldAreas, folded), [worldAreas, folded])
   const presentation = useMemo(() => collaborationConnections(worldAreas, relations, folded), [worldAreas, relations, folded])
   const allConnections = presentation.connections
+  // Occurrence geometry is a reading choice, not live Agent state. Re-admit
+  // sizes only for new occurrences or the user's explicit Arrange action.
+  const slotSizes = useRef(new Map<string, { width: number; height: number }>())
+  const [slotRevision, setSlotRevision] = useState(0)
   const input = useMemo<CollaborationLayoutInput>(() => ({
     areas: worldAreas.map(area => ({ id: collaborationAreaNode(area.id), name: area.name, parentId: area.parentId ? collaborationAreaNode(area.parentId) : null, members: area.members.map(id => collaborationAgentNode(area.id, id)), folded: folded.has(area.id) })),
-    nodes: worldAreas.flatMap(area => area.members.flatMap(id => { const agent = agents.get(id); return agent ? [{ id: collaborationAgentNode(area.id, id), areaId: collaborationAreaNode(area.id), ...collaborationNodeSize(agent.tier ?? (agent.context ? 'active' : 'unknown')) }] : [] })),
+    nodes: worldAreas.flatMap(area => area.members.flatMap(id => {
+      const agent = agents.get(id); if (!agent) return []
+      const nodeId = collaborationAgentNode(area.id, id)
+      const knownTime = agent.lastActivityAt != null && Number.isFinite(agent.lastActivityAt) && agent.lastActivityAt > 0
+      const size = slotSizes.current.get(nodeId) ?? collaborationNodeSize(agent.tier ?? (agent.context ? 'active' : 'unknown'), knownTime ? steps.get(id) : undefined)
+      slotSizes.current.set(nodeId, size)
+      return [{ id: nodeId, areaId: collaborationAreaNode(area.id), ...size }]
+    })),
     connections: allConnections.map(connection => ({ id: connection.id, source: connection.source, target: connection.target, kind: connection.relations[0]!.kind, strength: collaborationConnectionStrength(connection) }))
-  }), [worldAreas, agents, allConnections, folded])
+  }), [worldAreas, agents, allConnections, folded, slotRevision, steps])
+  useEffect(() => {
+    const retained = new Set(input.nodes.map(node => node.id))
+    for (const id of slotSizes.current.keys()) if (!retained.has(id)) slotSizes.current.delete(id)
+  }, [input.nodes])
   const layout = useCollaborationLayout(input, active, readingAnchor, motion.enabled), geometry = layout.boxes
   useEffect(() => { if (locate) layout.settle() }, [locate?.token, layout.settle])
   const activity = useMemo(() => {
@@ -232,14 +247,30 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     if (!pending) return
     if (!active || pending.gesture !== gestures.current || pending.source !== locate) { foldAnchor.current = null; return }
     const box = geometry.get(pending.id)
-    if (box?.kind !== 'area' || box.folded !== pending.folded || !flow.current) return
-    foldAnchor.current = null
+    if (box?.kind !== 'area' || box.folded !== pending.folded || !flow.current || layout.busy) return
     // A clamped screen label is the user's reading occurrence. Keep that
     // occurrence when its original world heading was outside the viewport.
-    const { zoom } = flow.current.getViewport()
-    void flow.current.setViewport({ zoom, x: pending.x - (box.x + box.heading.x) * zoom,
-      y: pending.y - (box.y + box.heading.y + box.heading.height) * zoom })
-  }, [geometry, locate, active])
+    const window = canvas.current?.ownerDocument.defaultView ?? globalThis.window
+    // Let the original label's ResizeObserver finish measuring a newly shown
+    // internal-connection row before aligning its stable identity/action row.
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        if (foldAnchor.current !== pending || pending.gesture !== gestures.current || pending.source !== locate || !flow.current) return
+        foldAnchor.current = null
+        const viewport = flow.current.getViewport(), { zoom } = viewport
+        const label = [...canvas.current?.querySelectorAll<HTMLElement>('.collaboration-area__overview-label') ?? []].find(label => label.dataset.areaId === pending.id)
+        const bounds = label?.getBoundingClientRect(), summary = label?.querySelector('.collaboration-area__summary')?.getBoundingClientRect(), surface = canvas.current?.getBoundingClientRect()
+        // Screen labels can have a collision-avoidance offset from their world
+        // heading. Adding that offset again would walk the label sideways.
+        void flow.current.setViewport(bounds?.width && summary?.height && surface?.width && surface.height
+          ? { zoom,
+            x: Math.abs(pending.x - (bounds.left - surface.left)) <= .75 ? viewport.x : pending.x - (box.x + box.heading.x) * zoom,
+            y: Math.abs(pending.y - (summary.bottom - surface.top)) <= .75 ? viewport.y : pending.y - (box.y + box.heading.y + box.heading.height) * zoom }
+          : { zoom, x: pending.x - (box.x + box.heading.x) * zoom, y: pending.y - (box.y + box.heading.y + box.heading.height) * zoom })
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [geometry, locate, active, layout.busy])
 
   const nodeCache = useRef(new Map<string, GraphNode>()), heldNodes = useRef<GraphNode[]>([])
   const nodes = useMemo(() => {
@@ -381,7 +412,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       <span className="collaboration-canvas__divider" aria-hidden="true" />
       <button type="button" className="icon-button" aria-label="Zoom out" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.zoomOut({ duration })) }}><SemanticIcon name="action.zoom-out" size={14} /></button>
       <button type="button" className="icon-button" aria-label="Zoom in" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.zoomIn({ duration })) }}><SemanticIcon name="action.zoom-in" size={14} /></button>
-      <button type="button" className="icon-button collaboration-canvas__arrange" aria-label="Arrange map" title="Arrange using observed relationships" onClick={layout.arrange}><SemanticIcon name="object.topology" size={14} /><span>Arrange</span></button>
+      <button type="button" className="icon-button collaboration-canvas__arrange" aria-label="Arrange map" title="Reorganize using current activity and observed relationships. Positions stay fixed between structural changes and explicit arrangement." onClick={() => { slotSizes.current.clear(); setSlotRevision(value => value + 1); layout.arrange() }}><SemanticIcon name="object.topology" size={14} /><span>Arrange</span></button>
       <button type="button" className="icon-button" aria-label="Overview" title="Show the whole map" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.fitView({ padding: .1, maxZoom: 1, includeHiddenNodes: true, duration })) }}><SemanticIcon name="layout.expand" size={14} /></button>
     </div>
     {motion.issue ? <p className="collaboration-canvas__motion-issue" role="status">{motion.issue}</p> : null}
@@ -481,7 +512,7 @@ function CollaborationViewport({ canvas, ready, geometry, areas, agents, locate,
   const index = useMemo(() => new CollaborationBoundsIndex(areas.flatMap(area => area.members.flatMap(id => {
     const box = geometry.get(collaborationAgentNode(area.id, id)), agent = agents.get(id)
     const tier = agent?.tier ?? (agent?.context ? 'active' : 'unknown')
-    return agent && tier === 'active' && box ? [{ ...box, agentId: id }] : []
+    return agent && tier === 'active' && box && collaborationCardSlot(box) ? [{ ...box, agentId: id }] : []
   }))), [geometry, areas, agents])
   const visible = useStore(useCallback((state: { transform: [number, number, number]; width: number; height: number }) => {
     if (!ready || !collaborationMapReadsSummary(state.transform[2], preferences)) return [] as string[]

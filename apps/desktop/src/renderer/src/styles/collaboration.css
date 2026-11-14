@@ -82,6 +82,11 @@
 /* The active ring is a shape cue (2px, not hue alone) that hands over to the card border. */
 .collaboration-agent--active:has(.agent-avatar) { --collaboration-body-line: color-mix(in srgb, var(--green) calc((1 - var(--collaboration-identity, 1)) * 60%), var(--collaboration-disc-line)); --collaboration-ring-width: calc(1px + (1 - var(--collaboration-identity, 1)) * 1px); }
 .collaboration-agent__body { position: absolute; pointer-events: none; background: var(--collaboration-disc); box-shadow: inset 0 0 0 calc(var(--collaboration-ring-width, 1px) * var(--collaboration-mark-scale, 1)) var(--collaboration-body-line, var(--collaboration-disc-line)); }
+/* Recency changes background ink inside the retained slot, never its content contrast. */
+.collaboration-agent[data-recency=recent] { --collaboration-warmth: 6%; }
+.collaboration-agent[data-recency=today] { --collaboration-warmth: 3%; }
+.collaboration-agent[data-recency=older] { --collaboration-warmth: 0%; }
+.collaboration-agent[data-recency] .collaboration-agent__body { background: color-mix(in srgb, var(--text) var(--collaboration-warmth), var(--collaboration-disc)); }
 .collaboration-agent__identity-layer, .collaboration-agent__detail-layer { position: absolute; inset: 0; border-radius: inherit; pointer-events: auto; }
 .collaboration-agent__identity-layer { display: flex; align-items: center; justify-content: center; }
 .collaboration-agent [inert] { pointer-events: none; }
@@ -92,6 +97,7 @@
 .collaboration-agent__focus-proxy strong { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
 .collaboration-agent__focus-proxy kbd { flex: 0 0 auto; color: var(--text-2); font: inherit; font-size: 10px; }
 .collaboration-agent .focus-context-card { height: 100%; box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 4%, transparent); background: var(--surface-1); }
+.collaboration-agent[data-recency] .focus-context-card { background: color-mix(in srgb, var(--text) var(--collaboration-warmth), var(--surface-1)); }
 .collaboration-agent .focus-context { height: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; }
 .collaboration-agent .focus-context__identity strong, .focus-map-preview__detail .focus-context__identity strong { font-size: max(var(--fs-meta), var(--collaboration-name-size)); }
 .collaboration-agent .focus-context__detail, .focus-map-preview__detail .focus-context__detail { font-size: max(var(--fs-micro), var(--collaboration-summary-size)); }
@@ -176,7 +182,7 @@
 .collaboration-agent--unknown .collaboration-agent__point { background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--text-2); }
 /* A confirmed-closed member has no disc: shape, not only tone, says it cannot work now.
  * Its face recedes to monochrome and returns to its own colours while it is read. */
-.collaboration-agent--closed .collaboration-agent__body { background: transparent; }
+.collaboration-agent--closed[data-recency] .collaboration-agent__body { background: transparent; }
 .collaboration-agent--closed .collaboration-agent__body:not([data-selected=true]) { box-shadow: none; }
 .collaboration-agent--closed .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); }
 /* Hover emphasis on map content waits for the camera to rest: content sliding under a still
