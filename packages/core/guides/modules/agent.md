@@ -58,8 +58,15 @@ one-way connection and unknown receipt recovery.
 For ordinary continuous progress, `agent progress --help` exposes exact-target list,
 create, action and update. A person or device may update only the original loop's interval
 and prompt. The next check and an already claimed or unconfirmed input keep their original
-identity and content; Goal-bound progress stays with its Goal owner. Use the original
-expectedLoop and operationId. A list is a current observation, not a disk receipt. If a
+identity and content; Goal-bound progress stays with its Goal owner. The exact target is `{hostId,agentSessionId,providerId,workspacePath}`. List takes `{target}`;
+create takes `{target,intervalMs,prompt,operationId,taskSource?}`. Intervals are safe integer
+milliseconds, at least 60000. Optional `taskSource:{kind:"feature",root,ownerId,readerPath}`
+uses the original Feature. Action takes `{target,loopId,action,expectedLoop,operationId}`
+where action is pause/resume/stop/check; update takes
+`{target,loopId,expectedLoop,intervalMs,prompt,operationId}`. Copy the full current loop from
+list into expectedLoop, keeping original fields; do not synthesize it from this guide.
+Each leaf's `--help` contains a complete parser-checked illustrative input.
+Use the original expectedLoop and operationId. A list is a current observation, not a disk receipt. If a
 save response is unknown, retain the exact request and explicitly retry that same operation
 to confirm its save; a changed or superseded operation is not automatically replayed.
 Resume restores ordinary progress and immediately checks that Agent; check requires an

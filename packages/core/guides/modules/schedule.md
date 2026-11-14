@@ -29,6 +29,15 @@ workspacePath}, original prompt and operationId. Choose exactly one timing form:
   An occupied or unready Agent retains its due occurrence; an unknown receipt keeps the original operation.
   It cannot enable checkIn.
 
+Calendar common fields are `{kind,timezone,time,policies:{gap:"skip",fold:"earlier"|"later",monthEnd:"clamp",overdue:"latest"}}`.
+Use an IANA timezone and HH:mm clock. `once` requires `date` (YYYY-MM-DD), `daily` has no extra
+field, `weekly` requires `weekday` (1 Monday through 7 Sunday), `monthly` requires `day` (1–31),
+and `yearly` requires `month` (1–12) and `day` (1–31). Each action's `--help` includes its own
+complete input and parser-checked example. `schedule inspect` takes exactly one `{scheduleId}`
+or `{operationId}`. Pause/resume/cancel take `{scheduleId,expectedRevision,operationId}`.
+Read list/inspect for the current positive revision. The returned `schedule.loopId` is the
+`scheduleId` selector, not the original `creationOperationId` or mutation `operationId`.
+
 Read amux schedule create --help for the complete current schema. The first creation of the original
 operation fixes nextCheckAt as its absolute deadline. Repeating the same operationId, restarting the owner
 or pausing and resuming keeps that deadline. Pause suspends delivery, not time; resuming an overdue
