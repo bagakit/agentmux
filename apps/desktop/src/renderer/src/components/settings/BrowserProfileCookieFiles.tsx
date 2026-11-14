@@ -46,7 +46,7 @@ export function BrowserProfileCookieFiles({ profile, active = true }: { profile:
       }
       setOperations(value => {
         const known = new Map(value.map(item => [item.operationId, item]))
-        for (const receipt of [...result.recent, ...result.pending]) known.set(receipt.operationId, { ...known.get(receipt.operationId), operationId: receipt.operationId, kind: receipt.kind, scope: receipt.scope, receipt, unknown: false })
+        for (const receipt of [...result.recent, ...result.pending]) known.set(receipt.operationId, { ...known.get(receipt.operationId), operationId: receipt.operationId, kind: receipt.kind, scope: receipt.scope, receipt, unknown: false, refused: false })
         if (operationId) {
           const old = known.get(operationId)
           if (result.receipt) known.set(operationId, { operationId, kind: result.receipt.kind, scope: result.receipt.scope, receipt: result.receipt, items: offset ? [...(old?.items ?? []), ...result.items] : result.items, nextOffset: result.nextOffset })
