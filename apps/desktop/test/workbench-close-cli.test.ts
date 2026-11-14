@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
+import type * as Core from '@agentmux/core'
+let core: typeof import('@agentmux/core')
 import { act, createElement, createRef, Fragment } from 'react'
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -7,22 +9,12 @@ import { resolve, join } from 'node:path'
 import { webcrypto, createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { build } from '../../../packages/core/node_modules/esbuild/lib/main.js'
-import * as core from '@agentmux/core'
-import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { activateRuntime } from '../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js'
 import { ObjectCliProbe, objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
-import { startAgentMuxHost } from '../../host/src/host.js'
-import { RuntimeController } from '../src/main/runtime-controller.js'
-import { connectDesktopAgentMuxHost, callOriginalDesktopHost } from '../src/main/desktop-host.js'
-import { desktopRpcMethods } from '../src/main/desktop-rpc-exposure.js'
-import { WorkbenchUserStateStore } from '../src/main/workbench-user-state.js'
-import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge.js'
-import { createDesktopWorkbenchCloseOwner } from '../src/main/workbench-close-owner.js'
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture.js'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { monacoKeybindingConstants } from './helpers/editor-pane-store.js'
-import { createClientUiRoot } from './helpers/client-ui-render.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => '/private-unused' } }))
 const sourceEditor = vi.hoisted(() => ({ mount: null as ((editor: any, monaco: any) => void) | null }))
@@ -58,6 +50,16 @@ async function fixture() {
   if (!restartMode) cleanup.push(() => rm(root, { recursive: true, force: true }))
   const env = objectCliEnvironment(root)
   for (const [key, value] of Object.entries(env)) if (key.startsWith('AGENTMUX_')) vi.stubEnv(key, value!)
+  // The outer restart driver loads neither a second Core nor a second Renderer
+  // graph. Real product owners load only inside their Native consumer process.
+  core = await import('@agentmux/core')
+  const [{ AgentMuxSpatialStateStore }, { startAgentMuxHost }, { RuntimeController },
+    { connectDesktopAgentMuxHost, callOriginalDesktopHost }, { desktopRpcMethods },
+    { WorkbenchUserStateStore }, { DesktopControlIpcBridge }, { createDesktopWorkbenchCloseOwner }] = await Promise.all([
+    import('@agentmux/core/spatial-state'), import('../../host/src/host.js'), import('../src/main/runtime-controller.js'),
+    import('../src/main/desktop-host.js'), import('../src/main/desktop-rpc-exposure.js'), import('../src/main/workbench-user-state.js'),
+    import('../src/main/control-ipc-bridge.js'), import('../src/main/workbench-close-owner.js')
+  ])
   await mkdir(join(root, 'state/ctxmux'), { recursive: true, mode: 0o700 })
   const native = await activateRuntime({ executable: resolve('packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
     socketPath: join(root, 'ctxmux.sock'), stateDir: join(root, 'state/ctxmux'), childDisposition: { mode: 'detached', stderr: 'pipe' } })
@@ -69,7 +71,7 @@ async function fixture() {
   const saved = restartMode === 'reader' ? JSON.parse(await readFile(join(root, 'original-process-facts.json'), 'utf8')) : null
   const run = saved?.run ?? await host.client.createTerminal({ command: process.execPath, args: ['-e', program], workspacePath: root, createOperationId: 'close-raw' })
   const other = saved?.other ?? await host.client.createTerminal({ command: process.execPath, args: ['-e', program], workspacePath: root, createOperationId: 'healthy-agent' })
-  const capability = saved?.capability ?? core.issueAgentCapability(), agent: core.AgentMuxStoredAgentSession = saved?.agent ?? { kind: 'agent', agentSessionId: 'healthy-agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: root,
+  const capability = saved?.capability ?? core.issueAgentCapability(), agent: Core.AgentMuxStoredAgentSession = saved?.agent ?? { kind: 'agent', agentSessionId: 'healthy-agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: root,
     run: { runId: other.runId }, retiredRuns: [], hookBindingId: 'private-hook', hookToken: 'private-token', capabilityHash: core.hashAgentCapability(capability), createdAt: 1, updatedAt: 1 }
   if (!saved) await agentStore.compareAndSwap(null, agent)
   if (restartMode === 'writer') await writeFile(join(root, 'original-process-facts.json'), JSON.stringify({ run, other, capability, agent, pid: process.pid }))
@@ -117,7 +119,7 @@ async function fixture() {
   vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => spatial.retainDisplayLabels(values))
   const arranged = store.getState(), dispose = await store.getState().initialize(); cleanup.push(async () => dispose())
   if (!saved) { store.setState(arranged, true); await prepareRendererUpdate('quit') }
-  let bridge: DesktopControlIpcBridge
+  let bridge: InstanceType<typeof DesktopControlIpcBridge>
   bridge = new DesktopControlIpcBridge({ isAvailable: () => true, sendCancellation: () => {}, sendRequest(request) {
     if (!request.operation.startsWith('workbench.close.')) throw Error('Unexpected private Renderer request')
     void store.getState().executeWorkbenchClose(request as import('../src/shared/workbench-close-control.js').WorkbenchCloseRendererRequest).then(result => {
@@ -140,8 +142,8 @@ async function fixture() {
   const stops = vi.spyOn(inner.kernel, 'stop')
   return { root, host, native, run, agent, other, store, api, user, spatial, runtime, key, cli, prepare, rpc, managed, stops, browserClose, authority,
     reopenOwner: () => { owner = createDesktopWorkbenchCloseOwner({ store: user, bridge, authority: () => authority, runtime, closeBrowser: browserClose }) },
-    prepared: (value: { code: number | null; stdout: string; stderr: string }) => { expect(value.code, value.stderr || value.stdout).toBe(0); return JSON.parse(value.stdout).result.operation as core.SpaceCloseReceipt },
-    apply: (record: core.SpaceCloseReceipt) => cli('apply', { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) }) }
+    prepared: (value: { code: number | null; stdout: string; stderr: string }) => { expect(value.code, value.stderr || value.stdout).toBe(0); return JSON.parse(value.stdout).result.operation as Core.SpaceCloseReceipt },
+    apply: (record: Core.SpaceCloseReceipt) => cli('apply', { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) }) }
 }
 
 it.runIf(business)('compiled CLI closes the exact frozen raw Run and reviewed dirty file through the original Main and Renderer owners', async () => {
@@ -414,6 +416,7 @@ it.runIf(business)('a late old Monaco dispose cannot clear a new editor composit
   const { hasNoteComposition } = await import('../src/renderer/src/lib/note-live-merge.js')
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const node = document.createElement('div'); document.body.append(node)
+  const { createClientUiRoot } = await import('./helpers/client-ui-render.js')
   const root = createClientUiRoot(node)
   cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
   await act(async () => root.render(createElement(FileSourceEditor, { tabId: 'target-tab', surface: { kind: 'file', regionId: 'file-region', workspaceId: 'W', path: 'draft.txt' }, viewState: createRef() })))
@@ -452,6 +455,7 @@ it.runIf(business).each(['Keep Session & Close', 'Stop & Close'])('actual GUI %s
   const restorePopover = installNativePopover(); cleanup.push(async () => restorePopover())
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const calls = vi.spyOn(f.api.workbenchClose, 'call').mockImplementation((method, input) => f.rpc.call(method, input))
+  const { createClientUiRoot } = await import('./helpers/client-ui-render.js')
   const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
   cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
   function Consumer() {
@@ -464,7 +468,7 @@ it.runIf(business).each(['Keep Session & Close', 'Stop & Close'])('actual GUI %s
   const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === choice)!
   await act(async () => button.click())
   await vi.waitFor(async () => {
-    const applied = calls.mock.calls.find(([method]) => method === 'space.close.apply')?.[1] as core.SpaceCloseParams['space.close.apply'] | undefined
+    const applied = calls.mock.calls.find(([method]) => method === 'space.close.apply')?.[1] as Core.SpaceCloseParams['space.close.apply'] | undefined
     const result = applied ? await f.rpc.call('space.close.inspect', { operationId: applied.operationId }) : null
     expect(f.store.getState().tabs['healthy-tab'], JSON.stringify({ error: f.store.getState().error, result })).toBeUndefined()
   }, { timeout: 5000 })
@@ -479,7 +483,7 @@ it.runIf(business).each(['Keep Session & Close', 'Stop & Close'])('actual GUI %s
   } else {
     expect(f.stops).toHaveBeenCalledTimes(1)
     expect((await f.native.client.status(f.other.runId)).state.type).toBe('exited')
-    const apply = calls.mock.calls.find(([method]) => method === 'space.close.apply')![1] as core.SpaceCloseParams['space.close.apply']
+    const apply = calls.mock.calls.find(([method]) => method === 'space.close.apply')![1] as Core.SpaceCloseParams['space.close.apply']
     expect((await f.rpc.call('space.close.inspect', { operationId: apply.operationId })).operation).toMatchObject({ outcome: 'applied', resources: [{ receipt: { agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run } }] })
   }
 })
