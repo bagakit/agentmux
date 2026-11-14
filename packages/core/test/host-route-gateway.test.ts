@@ -160,6 +160,51 @@ test('actual routed stream keeps unrelated policy edits and revokes only its ori
   await reader.dispose()
 })
 
+test.each(['cancelled', 'rejected'] as const)('a %s route receiver closes only its original reader without a detached rejection', async failure => {
+  const f = await fixture(), route = { source: f.b.identity, hops: [{ edgeId: 'D', target: f.d.identity }] }
+  const grant = f.grant('reader-lifetime', f.b.identity); grant.scopes.push('runtime.events')
+  await f.configure(f.d, [], [grant])
+  const signed = async (id: string) => {
+    const call = { method: 'runtime.events', params: { consumerId: id, fence: f.call.params.fence } }
+    const envelope = await f.b.authority.endorseHostRoute(await f.b.authority.attestHostRoute({ schema: 'agentmux.host-route.v1', purpose: 'host-route',
+      route, actor: { source: f.b.identity, ...principal }, requestId: id, method: call.method, paramsDigest: agentCreationIntentDigest(call.params) }))
+    return { envelope, call }
+  }
+  const neighbourEvents: unknown[] = [], neighbourSignal = new AbortController()
+  const neighbour = await hostRouteTransport(f.d.rpc).watch(await signed('healthy-neighbour'), event => { neighbourEvents.push(event) }, neighbourSignal.signal)
+  await neighbour.start?.()
+  await vi.waitFor(() => expect(neighbourEvents).toHaveLength(1))
+  const neighbourProducer = f.producers.get('D')!
+  const controller = new AbortController(), attempts: string[] = []
+  let release!: () => void, entered = false
+  const held = new Promise<void>(resolve => { release = resolve })
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const reader = await hostRouteTransport(f.d.rpc).watch(await signed('closing-original'), async event => {
+    attempts.push((event as { type: string }).type)
+    entered = true
+    await held
+    if (failure === 'cancelled') controller.signal.throwIfAborted()
+    throw Error('This original receiver no longer accepts delivery')
+  }, controller.signal)
+  const producer = f.producers.get('D')!
+  try {
+    await reader.start?.()
+    await vi.waitFor(() => expect(entered).toBe(true))
+    if (failure === 'cancelled') controller.abort(Error('The original reader closed'))
+    release()
+    await vi.waitFor(() => expect(producer.disposed).toBeGreaterThan(0))
+    await new Promise(resolve => setImmediate(resolve))
+    expect(attempts).toHaveLength(failure === 'cancelled' ? 1 : 2)
+    expect(warning).toHaveBeenCalledTimes(failure === 'cancelled' ? 0 : 1)
+    await neighbourProducer.emit({ type: 'snapshot', data: { originalNeighbour: 'still-readable' } })
+    await vi.waitFor(() => expect(neighbourEvents).toHaveLength(2))
+    expect(neighbourProducer.disposed).toBe(0)
+    expect(await f.d.rpc.call('route.identity', {})).toEqual(f.d.identity)
+  } finally {
+    release(); await reader.dispose(); await neighbour.dispose(); warning.mockRestore()
+  }
+})
+
 
 test('A original parent admits one B child, keeps A actor through C/D and refuses changed target/SID or renewed actor', async () => {
   const f = await fixture(), a = f.e, actor = { source: a.identity, ...principal }
