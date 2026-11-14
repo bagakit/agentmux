@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -21,28 +21,33 @@ for (let index = 0; index < args.length; index++) {
   if (flag === '--summary') options.summary = true
   else if (flag === '--prepare-only') options.prepareOnly = true
   else if (flag === '--capture-only') options.captureOnly = true
-  else if (['--source', '--electron', '--evidence', '--capture-receipt', '--prepared-build'].includes(flag)) {
+  else if (['--source', '--electron', '--evidence', '--capture-receipt', '--prepared-build', '--native-receipt', '--workface-receipt', '--cost-receipt'].includes(flag)) {
     assert.ok(args[index + 1] && !args[index + 1].startsWith('--'), flag + ' requires one exact path.')
     options[flag.slice(2)] = args[++index]
   } else if (flag === '--help') {
-    console.log('Usage: node apps/desktop/scripts/verify-goal-responsibility-journey.mjs [--summary] [--source FILE] [--prepared-build RECEIPT] [--electron EXISTING_BINARY] [--evidence DIR] [--prepare-only | --capture-only | --capture-receipt FILE]\n'
+    console.log('Usage: node apps/desktop/scripts/verify-goal-responsibility-journey.mjs [--summary] --evidence DIR [--source FILE] [--prepared-build RECEIPT] [--electron EXISTING_BINARY] [--native-receipt FILE --workface-receipt FILE --cost-receipt FILE] [--prepare-only | --capture-only | --capture-receipt FILE]\n'
       + 'Environment equivalents: AGENTMUX_GOAL_RESPONSIBILITY_JOURNEY, AGENTMUX_GOAL_RESPONSIBILITY_ELECTRON (or AGENTMUX_PROOF_ELECTRON_PATH), AGENTMUX_GOAL_RESPONSIBILITY_EVIDENCE.\n'
-      + 'Default source: .tmp/goal-responsibility/t005/source/journey.json. --capture-only preserves strict source/build/candidate checks and produces recorded-transport images only.\n'
+      + 'Supply an exact --source FILE unless combining an exact --capture-receipt FILE. --capture-only preserves strict source/build/candidate checks and produces recorded-transport images only.\n'
       + '--capture-receipt (or AGENTMUX_GOAL_RESPONSIBILITY_CAPTURE_RECEIPT) reads an exact original capture and combines current Native/workface/cost evidence without rebuilding or recapturing. Its output directory must be separate.\n'
       + '--summary captures eight original Goals summary scenes only, without the unrelated full workspace/restart journey. Requires --capture-only.\n'
       + '--prepared-build reuses an exact already-prepared Renderer artifact in capture-only mode; only this runner and the Electron navigation harness may change.\n'
-      + 'The default gate consumes original Native, workface and cost receipts; it never reruns Native input or downloads Electron. Independent aesthetic review remains required.')
+      + 'The combined gate requires explicit original Native, workface and cost receipt paths; it never reruns Native input or downloads Electron. Independent aesthetic review remains required.')
     process.exit(0)
   } else throw new Error('Unknown responsibility capture option: ' + flag)
 }
-const sourcePath = options.source ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_JOURNEY ?? join(repository, '.tmp/goal-responsibility/t005/source/journey.json')
+const sourcePath = options.source ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_JOURNEY
 assert.ok(!options.summary || options.captureOnly && !options['capture-receipt'], 'Summary capture is one bounded capture-only process.')
 assert.ok(!options['prepared-build'] || options.captureOnly, 'Prepared build reuse is limited to a new capture-only invocation.')
 const captureReceipt = options['capture-receipt'] ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_CAPTURE_RECEIPT
+assert.ok(sourcePath || captureReceipt, 'Supply --source FILE or --capture-receipt FILE; this runner has no implicit input.')
 assert.ok([options.prepareOnly, options.captureOnly, Boolean(captureReceipt)].filter(Boolean).length <= 1, 'Preparation, capture-only and original capture combination are mutually exclusive.')
 const electron = options.electron ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_ELECTRON ?? process.env.AGENTMUX_PROOF_ELECTRON_PATH
 if (!options.prepareOnly && !captureReceipt) assert.ok(electron && isAbsolute(electron), 'Supply an existing absolute Electron binary path; this runner never installs or downloads one.')
-const evidence = resolve(options.evidence ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_EVIDENCE ?? join(repository, '.tmp/goal-responsibility/t005', 'visual-' + randomUUID()))
+const evidencePath = options.evidence ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_EVIDENCE
+assert.ok(evidencePath, 'Supply --evidence DIR for this proof output.')
+const evidence = resolve(evidencePath)
+const qualifications = Object.fromEntries(['native', 'workface', 'cost'].map(kind => [kind, options[kind + '-receipt'] ?? process.env['AGENTMUX_GOAL_RESPONSIBILITY_' + kind.toUpperCase() + '_RECEIPT']]))
+if (!options.prepareOnly && !options.captureOnly) for (const kind of Object.keys(qualifications)) assert.ok(qualifications[kind], 'Supply --' + kind + '-receipt FILE for original ' + kind + ' evidence.')
 assert.equal(await stat(join(evidence, 'receipt.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error }), null, 'A new proof must not overwrite an existing receipt; choose a new evidence directory.')
 const originalCapture = captureReceipt ? await readOriginalEvidence(resolve(captureReceipt), 'agentmux.goal-responsibility-visual-capture.v1', repository) : null
 const captureEvidence = originalCapture ? dirname(originalCapture.reference.path) : evidence
@@ -138,11 +143,11 @@ try {
     assert.equal(await currentHash(result.electron.path), result.electron.sha256)
     if (!options.captureOnly) {
       result.qualifications = {
-      native: await qualifyNativeEvidence(resolve(process.env.AGENTMUX_GOAL_RESPONSIBILITY_NATIVE_RECEIPT ?? join(repository, '.tmp/goal-responsibility/t005/native/receipt.json')),
+      native: await qualifyNativeEvidence(resolve(qualifications.native),
         'responsibility', repository, currentHash),
-      workface: await qualifyNativeEvidence(resolve(process.env.AGENTMUX_GOAL_RESPONSIBILITY_WORKFACE_RECEIPT ?? join(repository, '.tmp/typed-native-restart/last/receipt.json')),
+      workface: await qualifyNativeEvidence(resolve(qualifications.workface),
         'workface', repository, currentHash),
-      cost: await qualifyCostEvidence(resolve(process.env.AGENTMUX_GOAL_RESPONSIBILITY_COST_RECEIPT ?? join(repository, '.tmp/goal-responsibility/t005/cost-receipt.json')),
+      cost: await qualifyCostEvidence(resolve(qualifications.cost),
         repository, currentHash)
     }
     result.scope = 'combined-original-public-native-workface-cost-and-renderer'

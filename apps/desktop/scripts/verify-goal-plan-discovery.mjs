@@ -1,123 +1,113 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { createRequire } from 'node:module'
+import { parseArgs } from 'node:util'
+import { goalPlanRequestMutations } from '../test/goal-plan-request-mutations.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..')
+const { values } = parseArgs({ options: { evidence: { type: 'string' } } })
+assert.ok(values.evidence, 'Supply --evidence DIR for this proof output.')
+const evidence = resolve(values.evidence)
+const config = 'apps/desktop/test/vitest.goal-plan-request.config.mts'
 const require = createRequire(import.meta.url), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
-// Original six- and eight-case proofs remain immutable. The bounded increment
-// adds one pending-origin consumer while retaining their exact scope and hashes.
-const pendingOnly = process.argv[2] === 'pending-origin'
-const evidence = resolve(repository, '.bagakit/feature-tracker/goal-plan-discovery-artifacts/', pendingOnly ? 'consumer-pending-origin-proof' : 'consumer-legacy-complete-proof')
-const legacyProof = resolve(repository, '.bagakit/feature-tracker/goal-plan-discovery-artifacts/consumer-legacy-proof')
-const config = 'apps/desktop/test/vitest.goal-plan-discovery.config.mts'
-assert.ok(process.argv.length === 2 || process.argv.length === 3 && pendingOnly, 'Select the complete gate or its finite pending-origin increment; no test selectors')
-mkdirSync(evidence, { recursive: true })
 const hash = value => createHash('sha256').update(value).digest('hex')
+const read = path => readFileSync(resolve(repository, path))
+mkdirSync(evidence, { recursive: true })
 const workerSource = 'packages/core/src/control-endpoint-listener-worker.ts', worker = join(evidence, 'control-endpoint-listener-worker.mjs')
-const originalProof = resolve(repository, '.bagakit/feature-tracker/goal-plan-discovery-artifacts/consumer-proof')
-const originalWorker = join(originalProof, 'control-endpoint-listener-worker.mjs')
-if (existsSync(join(originalProof, 'receipt.json')) && existsSync(originalWorker)) {
-  const original = JSON.parse(readFileSync(join(originalProof, 'receipt.json'), 'utf8')).listenerAsset
-  assert.equal(hash(readFileSync(resolve(repository, workerSource))), original.sourceSHA256, 'Reuse only the unchanged original listener owner')
-  const bytes = readFileSync(originalWorker); assert.equal(hash(bytes), original.compiledSHA256)
-  writeFileSync(worker, bytes)
-} else {
-  assert.equal(pendingOnly, false, 'The bounded increment must reuse the original listener asset')
-  await build({ entryPoints: [resolve(repository, workerSource)], outfile: worker, platform: 'node', target: 'node24', format: 'esm', bundle: true, packages: 'external', logLevel: 'silent' })
-}
-const listenerAsset = { source: workerSource, sourceSHA256: hash(readFileSync(resolve(repository, workerSource))), compiledSHA256: hash(readFileSync(worker)) }
+// Compile this candidate, including dependencies, so output may live outside the checkout.
+await build({ entryPoints: [resolve(repository, workerSource)], outfile: worker, platform: 'node', target: 'node24', format: 'esm', bundle: true, logLevel: 'silent' })
+const listenerAsset = { source: workerSource, sourceSHA256: hash(read(workerSource)), compiledSHA256: hash(readFileSync(worker)) }
 const mutations = [
+  ...goalPlanRequestMutations.map(({ name, ...mutation }) => ({ ...mutation, id: name, port: 'request' })),
   { id: 'planning-callback-opens-only', path: 'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx',
     anchor: 'const tabId = mode ? await requestDemandPmoTask(demandId, mode) : await openDemandPmo(demandId)',
-    replacement: 'const tabId = await openDemandPmo(demandId)' },
-  { id: 'planning-input-is-an-open-request', path: 'apps/host/src/goal-discussions.ts',
-    anchor: 'Make a plan for this existing Goal: ${goal.id}.', replacement: 'Open this existing Goal only: ${goal.id}.' },
+    replacement: 'const tabId = await openDemandPmo(demandId)', port: 'discovery',
+    oracle: 'a planning input reaches the Supervisor and only its saved public plan replaces the real empty Goal with the owner DAG' },
   { id: 'saved-plan-dropped-before-renderer', path: 'apps/host/src/goal-projection.ts',
-    anchor: '...hostGoalPlan(goal),', replacement: '...{},' },
+    anchor: '...hostGoalPlan(goal),', replacement: '...{},', port: 'discovery',
+    oracle: 'the original Goal record reaches the store and mounted graph before a delegation observer can repair it' },
   { id: 'unknown-planning-reference-is-replaced', path: 'apps/desktop/src/renderer/src/store.ts',
-    anchor: 'const held = key === null ? undefined : useAppStore.getState().goalDiscussionRequests[key]', replacement: 'const held = undefined' }
+    anchor: 'const held = key === null ? undefined : useAppStore.getState().goalDiscussionRequests[key]', replacement: 'const held = undefined', port: 'discovery',
+    oracle: 'lost planning receipt retains the original request through Renderer rehydrate without repeating input' }
 ]
-function run(id, mutant) {
+assert.ok(goalPlanRequestMutations.length > 0 && mutations.length > goalPlanRequestMutations.length, 'Current routing and original consumer counterexamples are nonempty.')
+assert.equal(new Set(mutations.map(item => item.id)).size, mutations.length)
+const harness = [config, 'apps/desktop/test/vitest.goal-plan-discovery.config.mts', 'apps/desktop/test/goal-plan-request-mutations.mjs',
+  'apps/desktop/test/goal-plan-discovery-product.test.tsx', 'apps/desktop/test/helpers/host-goal-discussion-fixture.ts',
+  'apps/desktop/test/helpers/injected-context-core.ts', 'apps/desktop/test/helpers/isolate-core-environment.ts',
+  'apps/desktop/scripts/fixtures/demand-current-work/vitest.config.mts', 'apps/desktop/scripts/verify-goal-plan-discovery.mjs', workerSource]
+const sources = Object.fromEntries([...new Set([...harness, ...mutations.map(item => item.path)])].sort().map(path => [path, hash(read(path))]))
+const unchanged = () => { for (const [path, digest] of Object.entries(sources)) assert.equal(hash(read(path)), digest, 'Proof candidate changed: ' + path) }
+const exact = value => '^' + value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'
+const rows = path => readFileSync(path, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+function run(id, { mutant, oracle } = {}) {
+  unchanged()
   const directory = join(evidence, id); mkdirSync(directory, { recursive: true })
-  const loadedPath = join(directory, 'loaded.jsonl'), cliPath = join(directory, 'cli-loaded.jsonl'), resultPath = join(directory, 'result.json')
-  writeFileSync(loadedPath, ''); writeFileSync(cliPath, '')
-  const result = spawnSync('pnpm', ['exec', 'vitest', 'run', '--config', config, '--reporter=json', '--outputFile', resultPath,
-    ...(pendingOnly ? ['-t', '^legacy pending creation origin remains pending through real planning input and the saved graph$'] : [])], {
-    cwd: repository, encoding: 'utf8', timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, GOAL_PLAN_DISCOVERY_LOADED: loadedPath, GOAL_PLAN_DISCOVERY_CLI_LOADED: cliPath,
-      GOAL_PLAN_DISCOVERY_EVIDENCE: directory, AGENTMUX_PRIVATE_LISTENER_ASSET: worker, ...(mutant ? { GOAL_PLAN_DISCOVERY_MUTANT: JSON.stringify(mutant) } : {}) }
+  const loadedPath = join(directory, 'loaded.jsonl'), requestPath = join(directory, 'request-loaded.jsonl')
+  const cliPath = join(directory, 'cli-loaded.jsonl'), resultPath = join(directory, 'result.json')
+  for (const path of [loadedPath, requestPath, cliPath]) writeFileSync(path, '')
+  const env = { ...process.env, GOAL_PLAN_DISCOVERY_LOADED: loadedPath, GOAL_PLAN_REQUEST_LOADED: requestPath,
+    GOAL_PLAN_DISCOVERY_CLI_LOADED: cliPath, GOAL_PLAN_DISCOVERY_EVIDENCE: directory, AGENTMUX_PRIVATE_LISTENER_ASSET: worker }
+  delete env.GOAL_PLAN_DISCOVERY_MUTANT; delete env.GOAL_PLAN_REQUEST_MUTANT
+  if (mutant) env[mutant.port === 'request' ? 'GOAL_PLAN_REQUEST_MUTANT' : 'GOAL_PLAN_DISCOVERY_MUTANT'] = JSON.stringify(mutant)
+  const result = spawnSync(process.execPath, [join(repository, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config,
+    '--reporter=json', '--outputFile', resultPath, ...(oracle ? ['--testNamePattern', exact(oracle)] : [])], {
+    cwd: repository, encoding: 'utf8', timeout: 180_000, maxBuffer: 16 * 1024 * 1024, env
   })
   writeFileSync(join(directory, 'console.log'), (result.stdout ?? '') + (result.stderr ?? ''))
-  assert.equal(result.error, undefined, 'The actual test process must complete')
+  assert.equal(result.error, undefined, 'The actual test process must complete: ' + id)
   const json = JSON.parse(readFileSync(resultPath, 'utf8'))
-  assert.equal(json.numTotalTests, 9, 'The complete finite consumer must be discovered; empty selections cannot pass')
-  const loaded = readFileSync(loadedPath, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
-  for (const path of ['apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx', 'apps/desktop/src/renderer/src/components/GoalPlanGraph.tsx',
-    'apps/host/src/goal-discussions.ts', 'apps/host/src/goal-projection.ts', 'packages/demand/src/demand-store.ts'])
-    assert.ok(loaded.some(row => row.path === path), 'The real owner must be evaluated: ' + path)
+  assert.equal(json.numRuntimeErrorTestSuites ?? 0, 0, 'Collection/load failures are not semantic proof: ' + id)
+  const executed = json.testResults.flatMap(file => file.assertionResults).filter(test => !['pending', 'skipped', 'todo'].includes(test.status))
+  assert.ok(executed.length > 0, 'The current suite must execute nonempty tests: ' + id)
+  if (oracle) { assert.equal(executed.length, 1); assert.equal(executed[0].fullName, oracle) }
+  const loaded = rows(loadedPath), requestLoaded = rows(requestPath)
   if (mutant) {
-    assert.ok(result.status !== 0 && result.status !== null && json.numFailedTests > 0, 'The loaded mutation must fail a real consumer')
-    assert.ok(json.testResults.flatMap(file => file.assertionResults).some(test => test.status === 'failed' && test.failureMessages.some(message => /AssertionError/u.test(message))), 'A collection or process failure cannot prove a mutation')
-    assert.ok(loaded.some(row => row.path === mutant.path && row.mutant === mutant.id && row.loadedSHA256 !== row.originalSHA256), 'The mutated source must actually evaluate')
+    assert.ok(Number.isInteger(result.status) && result.status !== 0, 'The mutation must fail a real consumer: ' + id)
+    assert.equal(executed[0].status, 'failed')
+    assert.ok(executed[0].failureMessages.some(message => /AssertionError|expected|instead of rejecting/u.test(message)), 'Infrastructure failure is not semantic RED: ' + id)
+    const ownerRows = mutant.port === 'request' ? requestLoaded : loaded
+    assert.ok(ownerRows.some(row => row.path === mutant.path && row.mutant === mutant.id && row.loadedSHA256 !== row.originalSHA256), 'The mutated owner must evaluate: ' + id)
   } else {
-    assert.equal(result.status, 0); assert.equal(json.numPassedTests, pendingOnly ? 1 : 9); assert.equal(json.numFailedTests, 0)
-    const cli = readFileSync(cliPath, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
-    assert.ok(cli.some(row => row.path === 'packages/core/src/agentmux.ts' && row.consumer === 'public-cli'), 'The actual amux CLI must evaluate its original source')
-    assert.equal(json.numPendingTests, pendingOnly ? 8 : 0)
-  }
-  return { id, status: result.status, total: json.numTotalTests, passed: json.numPassedTests, failed: json.numFailedTests,
-    resultSHA256: hash(readFileSync(resultPath)), loaded, ...(mutant ? { mutation: mutant } : {}) }
-}
-const mutate = mutant => {
-  assert.equal(readFileSync(resolve(repository, mutant.path), 'utf8').split(mutant.anchor).length, 2, 'One original mutation anchor is required: ' + mutant.id)
-  return run(mutant.id, mutant)
-}
-if (pendingOnly) {
-  const originalBytes = readFileSync(join(legacyProof, 'receipt.json')), original = JSON.parse(originalBytes)
-  assert.equal(original.success, true); assert.equal(original.baseline.passed, 8); assert.equal(original.restored.passed, 8); assert.equal(original.mutants.length, 4)
-  const reviewPath = join(evidence, 'source-reuse-review.json'), reviewedTransitions = []
-  const review = existsSync(reviewPath) ? JSON.parse(readFileSync(reviewPath, 'utf8')) : undefined
-  for (const [path, sha256] of Object.entries(original.sources)) if (!path.startsWith('apps/desktop/test/')) {
-    const currentSHA256 = hash(readFileSync(resolve(repository, path)))
-    if (currentSHA256 === sha256) continue
-    assert.equal(review?.schema, 'agentmux.goal-plan-reviewed-peer-source-transition.v1', 'Changed product source invalidates bounded reuse: ' + path)
-    assert.equal(review.transitions.length, 2, 'The bounded increment allows only its explicitly reviewed paired peer transition')
-    const transition = review.transitions.find(item => item.path === path && item.oldSHA256 === sha256 && item.newSHA256 === currentSHA256)
-    assert.ok(transition, 'Unreviewed product drift invalidates bounded reuse: ' + path)
-    assert.equal(hash(readFileSync(resolve(repository, transition.diffPath))), transition.diffSHA256)
-    for (const [commit, expected] of [[review.baseCommit, sha256], [review.peerCommit, currentSHA256]]) {
-      const blob = spawnSync('git', ['show', commit + ':' + path], { cwd: repository })
-      assert.equal(blob.status, 0); assert.equal(hash(blob.stdout), expected, 'The reviewed original Git blob must match exactly')
+    assert.equal(result.status, 0, 'The current candidate must pass: ' + id)
+    assert.ok(executed.every(test => test.status === 'passed'))
+    if (!oracle) {
+      assert.equal(json.numPendingTests, 0); assert.equal(json.numPassedTests, json.numTotalTests)
+      for (const path of ['apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx', 'apps/desktop/src/renderer/src/components/GoalPlanGraph.tsx',
+        'apps/host/src/goal-discussions.ts', 'apps/host/src/goal-projection.ts', 'packages/demand/src/demand-store.ts'])
+        assert.ok(loaded.some(row => row.path === path), 'The real owner must evaluate: ' + path)
+      assert.ok(rows(cliPath).some(row => row.path === 'packages/core/src/agentmux.ts' && row.consumer === 'public-cli'), 'The actual public CLI must evaluate its source.')
+      for (const row of loaded) {
+        assert.equal(row.originalSHA256, hash(read(row.path)), 'The source-loaded owner changed: ' + row.path)
+        sources[row.path] = row.originalSHA256
+      }
     }
-    reviewedTransitions.push(transition)
   }
-  if (review) assert.equal(reviewedTransitions.length, review.transitions.length, 'The exact reviewed peer pair must be observed together')
-  const path = 'apps/desktop/test/goal-plan-discovery-product.test.tsx'
-  const originalTest = readFileSync(join(legacyProof, 'original-harness/goal-plan-discovery-product.test.tsx'), 'utf8'), currentTest = readFileSync(resolve(repository, path), 'utf8')
-  assert.equal(hash(originalTest), original.harness[path]); assert.ok(currentTest.startsWith(originalTest), 'The original eight consumer bodies must remain byte-for-byte unchanged')
-  const increment = run('pending-origin')
-  for (const path of ['apps/host/src/goal-pmo-origin.ts', 'apps/host/src/goal-participation-owner.ts']) assert.ok(increment.loaded.some(row => row.path === path), 'The current source-purpose and participation owners must evaluate')
-  const sources = Object.fromEntries([...new Set(increment.loaded.map(row => row.path))].map(path => [path, hash(readFileSync(resolve(repository, path)))]))
-  for (const row of increment.loaded) assert.equal(row.originalSHA256, sources[row.path], 'The evaluated pending-origin candidate changed: ' + row.path)
-  const receipt = { schema: 'agentmux.goal-plan-legacy-origin-increment-proof.v1', success: true,
-    scope: 'One actual Core/Host pending-origin consumer adds to the unchanged eight-case legacy proof. No repeated baseline or mutations; no model, Native daemon, or App-restart claim.',
-    base: { path: '.bagakit/feature-tracker/goal-plan-discovery-artifacts/consumer-legacy-proof/receipt.json', sha256: hash(originalBytes), baseline: original.baseline, mutants: original.mutants, restored: original.restored },
-    increment, sources, listenerAsset, existingTestBytesPreserved: true, reviewedPeerSourceTransitions: reviewedTransitions,
-    harness: Object.fromEntries([path, config, 'apps/desktop/scripts/verify-goal-plan-discovery.mjs'].map(path => [path, hash(readFileSync(resolve(repository, path)))])) }
-  writeFileSync(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-  console.log(JSON.stringify({ schema: receipt.schema, success: true, base: 8, mutations: 4, restored: 8, added: 1, evidence }))
-} else {
-const baseline = run('baseline'), mutants = mutations.map(mutate)
-const restored = run('restored')
-const sources = Object.fromEntries([...new Set(baseline.loaded.map(row => row.path))].map(path => [path, hash(readFileSync(resolve(repository, path)))]))
-for (const run of [baseline, restored]) for (const row of run.loaded)
-  assert.equal(row.originalSHA256, sources[row.path], 'The evaluated candidate changed during proof: ' + row.path)
-const receipt = { schema: 'agentmux.goal-plan-discovery-consumer-proof.v1', success: true, scope: 'Mounted production UI to original Unix Host, Core input and Domain file. Public amux CLI plan producer; controlled Native I/O, no model or Native daemon. No live Goals touched.',
-  sources, listenerAsset, baseline, mutants, restored, harness: Object.fromEntries(['apps/desktop/test/goal-plan-discovery-product.test.tsx', config,
-    'apps/desktop/scripts/verify-goal-plan-discovery.mjs'].map(path => [path, hash(readFileSync(resolve(repository, path)))])) }
-writeFileSync(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-console.log(JSON.stringify({ schema: receipt.schema, success: true, baseline: baseline.passed, mutations: mutants.length, restored: restored.passed, evidence }))
+  unchanged()
+  const proof = { id, status: result.status, total: json.numTotalTests, executed: executed.length, passed: json.numPassedTests, failed: json.numFailedTests,
+    resultSHA256: hash(readFileSync(resultPath)), loaded, requestLoaded, ...(oracle ? { oracle } : {}), ...(mutant ? { mutation: mutant } : {}) }
+  console.log(JSON.stringify({ id, executed: proof.executed, passed: proof.passed, failed: proof.failed }))
+  return proof
 }
+const baseline = run('baseline'), mutants = []
+for (const mutant of mutations) {
+  let source = read(mutant.path).toString()
+  for (const edit of mutant.edits ?? [mutant]) {
+    assert.equal(source.split(edit.anchor).length, 2, 'One exact current mutation anchor is required: ' + mutant.id)
+    source = source.replace(edit.anchor, () => edit.replacement)
+  }
+  assert.notEqual(hash(source), sources[mutant.path])
+  const red = run(mutant.id + '-red', { mutant, oracle: mutant.oracle })
+  const restored = run(mutant.id + '-restored', { oracle: mutant.oracle })
+  mutants.push({ ...mutant, red, restored })
+}
+unchanged()
+assert.equal(hash(read(workerSource)), listenerAsset.sourceSHA256); assert.equal(hash(readFileSync(worker)), listenerAsset.compiledSHA256)
+const receipt = { schema: 'agentmux.goal-plan-discovery-consumer-proof.v2', success: true,
+  scope: 'Current mounted production UI, original Unix Host/Core/Demand, actual source public CLI. Controlled Native I/O; no live user Goal or installed Native/restart claim.',
+  sources, listenerAsset, baseline, mutants, restored: mutants.map(item => item.restored), sharedTreeMutations: 0 }
+writeFileSync(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
+console.log(JSON.stringify({ schema: receipt.schema, success: true, baseline: baseline.passed, mutations: mutants.length, evidence }))

@@ -21,7 +21,9 @@ export async function openHostGoalDiscussionFixture(config: AppConfig) {
     runtime: () => ({ client: core.core }) as AgentMuxHeadlessRuntime })
   const coreRoot = join(host.directory, 'core'), scratchRoot = join(host.directory, 'scratch')
   await mkdir(coreRoot); await mkdir(scratchRoot)
+  const listenerAsset = process.env.AGENTMUX_PRIVATE_LISTENER_ASSET
   core = await injectedContextCore(coreRoot)
+  if (listenerAsset) vi.stubEnv('AGENTMUX_PRIVATE_LISTENER_ASSET', listenerAsset)
   // Rendering readiness is controlled Native evidence; all input admission and receipts remain Core-owned.
   vi.spyOn((core.core as unknown as { screenEvidence: { wait(): Promise<number> } }).screenEvidence, 'wait').mockResolvedValue(0)
   const scratch = { ...config.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)!, path: scratchRoot }

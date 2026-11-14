@@ -1,3 +1,4 @@
+import { parseArgs } from 'node:util'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises'
@@ -8,7 +9,9 @@ import { build, loadConfigFromFile } from 'vite'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..'), fixture = join(import.meta.dirname, 'fixtures/goal-cross-host')
-const evidence = join(repository, '.tmp/goal-cross-host-surface', crypto.randomUUID()), privateRoot = await mkdtemp(join(tmpdir(), 'amx-goal-message-visual-'))
+const { values } = parseArgs({ options: { evidence: { type: 'string' } } })
+assert.ok(values.evidence, 'Supply --evidence DIR for this capture output.')
+const evidence = resolve(values.evidence), privateRoot = await mkdtemp(join(tmpdir(), 'amx-goal-message-visual-'))
 await mkdir(evidence, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const files = ['apps/desktop/src/renderer/src/components/settings/HostMessageTrustPanel.tsx', 'apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx',

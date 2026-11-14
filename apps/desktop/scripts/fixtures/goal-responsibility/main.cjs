@@ -36,6 +36,15 @@ async function waitFor(expression) {
   }
   throw new Error('Timed out while observing the original private Renderer: ' + expression)
 }
+async function openOriginalWorkface() {
+  await evaluate('goalResponsibilityVisual.surface("workbench")')
+  const original = 'document.querySelector("[data-mote-workface] .mote-workface__original:not([hidden])")'
+  if (!await evaluate(visible(original))) {
+    await click(button('切换对话', 'document.querySelector("[data-mote-conversation-switcher]")'), 'choose-original-workface')
+    await click(button('原工作区'), 'open-original-workface')
+  }
+  await waitFor(visible(original))
+}
 async function paint() {
   await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   await delay(90)
@@ -201,7 +210,7 @@ app.whenReady().then(async () => {
         await openDetail()
         await evaluate('document.querySelector("[data-goal-detail-id] [data-goal-responsibility]").scrollIntoView({block:"start"})')
         await capture(`detail-${width}-${mode}`, width, mode)
-        await evaluate('goalResponsibilityVisual.surface("workbench")')
+        await openOriginalWorkface()
         await waitFor('Boolean(document.querySelector(".region-current-demand"))')
         await capture(`region-${width}-${mode}`, width, mode)
         await evaluate('goalResponsibilityVisual.surface("mote")')
@@ -212,7 +221,7 @@ app.whenReady().then(async () => {
         await capture(`mote-${width}-${mode}`, width, mode)
       }
       await dimensions(1280, 'light')
-      await evaluate('goalResponsibilityVisual.surface("workbench")')
+      await openOriginalWorkface()
       const editor = 'document.querySelector("[data-workbench-region-id=\\"goal-responsibility-worker-region\\"] [aria-label=\\"Message Agent\\"]")'
       await waitFor(visible(editor))
       await click(editor, 'keep-unsent-original-worker-draft')

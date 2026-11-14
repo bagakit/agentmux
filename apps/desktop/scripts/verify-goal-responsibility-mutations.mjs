@@ -3,15 +3,17 @@ import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
-import { promisify } from 'node:util'
+import { parseArgs, promisify } from 'node:util'
 
 const run = promisify(execFile), repository = resolve(import.meta.dirname, '../../..')
-const args = process.argv.slice(2)
-assert.ok(args[0] === '--slice' && ['responsibility', 'patrol', 'cost', 'delegation'].includes(args[1]), 'Choose one bounded --slice responsibility|patrol|cost|delegation.')
-assert.ok(args.length === 2 || args.length === 4 && ['--resume', '--check-qualified'].includes(args[2]), 'Optional continuation is --resume ORIGINAL_RECEIPT; read-only proof checking is --check-qualified POINTER.')
-const slice = args[1], schemaName = slice === 'delegation' ? 'role-delegation' : slice
+const { values } = parseArgs({ options: Object.fromEntries(['slice', 'evidence', 'resume', 'check-qualified'].map(name => [name, { type: 'string' }])) })
+const slice = values.slice
+assert.ok(['responsibility', 'patrol', 'cost', 'delegation'].includes(slice), 'Choose one bounded --slice responsibility|patrol|cost|delegation.')
+assert.ok(!values.resume || !values['check-qualified'], 'Continuation and read-only proof checking are mutually exclusive.')
+assert.ok(values.evidence || values['check-qualified'], 'Supply --evidence DIR; read-only checking may use the exact --check-qualified POINTER directory.')
+const schemaName = slice === 'delegation' ? 'role-delegation' : slice
 const schema = `agentmux.goal-${schemaName}-mutations.v1`, pointerSchema = `agentmux.goal-${schemaName}-qualified-receipt.v1`
-const resumePath = args[2] === '--resume' ? resolve(repository, args[3]) : undefined
+const resumePath = values.resume ? resolve(values.resume) : undefined
 const previousBytes = resumePath ? await readFile(resumePath) : undefined
 const previous = previousBytes ? JSON.parse(previousBytes) : undefined
 if (previous) assert.ok(previous.schema === schema && previous.slice === slice && previous.passed === false,
@@ -21,7 +23,8 @@ const product = `apps/desktop/test/goal-${schemaName}-product.test.tsx`, unit = 
 const costTest = 'packages/demand/test/demand-read-cost.test.ts'
 const tests = slice === 'cost' ? [costTest] : slice === 'delegation' ? [product] : [`packages/demand/test/${slice === 'patrol' ? 'goal-patrol' : 'responsibility'}.test.ts`, unit, product,
   ...(slice === 'patrol' ? [costTest] : [])]
-const oracleFiles = [...tests, ...(slice === 'cost' ? [] : ['apps/desktop/test/helpers/goal-responsibility-product.tsx'])]
+const costConfig = 'apps/desktop/test/vitest.goal-responsibility-cost.config.mts'
+const oracleFiles = [...tests, ...(slice === 'cost' ? [costConfig, 'apps/desktop/test/vitest.goal-plan-revision.config.mts', 'apps/host/test/goal-cross-host-source.mjs'] : ['apps/desktop/test/helpers/goal-responsibility-product.tsx'])]
 const productSuite = 'responsibility production owners, compiled public CLI and mounted consumers '
 const fullOracle = {
   'delays a short native idle but exposes persistent unreported responsibility': 'delays a short native idle but exposes persistent unreported responsibility from its original state start',
@@ -73,11 +76,11 @@ const patrolCases = [
   { name: 'gui-click-only-reads-instead-of-requesting-original-patrol', file: 'apps/desktop/src/renderer/src/components/GoalPatrolControl.tsx',
     changes: [["api.demands.delegation('goal.patrol', { goalId, operationId })", "api.demands.delegation('goal.delegations', { goalId })"]], test: product, oracle: patrolNames.click },
   { name: 'unknown-original-attempt-replayed-after-owner-restart', file: 'apps/host/src/goal-patrol-owner.ts',
-    changes: [['if (!attempt || attempt.attemptedAt || attempt.supersededAt || patrol.report || demandResponsibilityScope(goal) !== patrol.expectedScope) return',
-      'if (!attempt || attempt.supersededAt || patrol.report || demandResponsibilityScope(goal) !== patrol.expectedScope) return'],
+    changes: [['if (!attempt || attempt.attemptedAt || attempt.supersededAt || patrol.report || completedGoalPlanRequest(goal, patrol) || demandPatrolScope(goal, patrol.purpose) !== patrol.expectedScope) return',
+      'if (!attempt || attempt.supersededAt || patrol.report || completedGoalPlanRequest(goal, patrol) || demandPatrolScope(goal, patrol.purpose) !== patrol.expectedScope) return'],
       ['if (admission.replayed) return // Another original owner already attempted; this read grants no submit.', 'void admission.replayed // Mutation: a persisted original attempt incorrectly grants submit again.']], test: product, oracle: patrolNames.replay },
   { name: 'stale-report-overwrites-new-original-business-scope', file: 'packages/demand/src/demand-store.ts', build: 'demand',
-    changes: [['const applied = demandResponsibilityScope(goal) === patrol.expectedScope && goal.supervisorSessionId === author.agentSessionId && goal.grounding?.acceptedAt == null', 'const applied = true']], test: product, oracle: patrolNames.stale },
+    changes: [['const applied = demandPatrolScope(goal, patrol.purpose) === patrol.expectedScope && goal.supervisorSessionId === author.agentSessionId && goal.grounding?.acceptedAt == null', 'const applied = true']], test: product, oracle: patrolNames.stale },
   { name: 'associated-review-hides-management-unknown-and-blocked-responsibility', file: shared, build: 'core',
     changes: [["if (current.reviewForHuman === true && goal.status !== 'blocked' && goal.alignment && goal.alignment.criteria.length > 0 &&\n      grounding.checks.length === goal.alignment.criteria.length && goal.alignment.criteria.every(c => grounding.checks.some(check => check.criterionId === c.id)) &&\n      grounding.checks.every(check => check.outcome !== 'unknown' && check.evidence.length > 0 && check.evidence.every(isDemandEvidenceReference) && (check.outcome !== 'gap' || Boolean(check.note.trim()))))",
       'if (current.reviewForHuman !== undefined)']], test: product, oracle: patrolNames.review },
@@ -102,7 +105,7 @@ const delegationCases = [{ name: 'original-delegation-producer-discards-canonica
 const cases = slice === 'delegation' ? delegationCases : slice === 'cost' ? costCases : slice === 'patrol' ? patrolCases : responsibilityCases
 assert.ok(cases.length > 0, 'A nonempty production mutation set is required')
 const id = new Date().toISOString().replaceAll(':', '-') + '-' + randomUUID().slice(0, 8)
-const proofDirectory = join(repository, '.tmp/goal-responsibility', slice === 'delegation' ? 't004/delegation' : slice === 'cost' ? 't003/cost' : slice === 'patrol' ? 't003' : 't001')
+const proofDirectory = values.evidence ? resolve(values.evidence) : dirname(resolve(values['check-qualified']))
 const evidence = join(proofDirectory, 'mutations-' + id)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const qualifiedPointer = join(proofDirectory, 'qualified-receipt.json')
@@ -187,7 +190,7 @@ async function build(label, kind = 'core') {
 }
 async function check(label, { red = false, test, oracle } = {}) {
   const json = join(evidence, label + '.vitest.json')
-  const parameters = [join(repository, 'node_modules/vitest/vitest.mjs'), 'run', ...(test ? [test] : tests),
+  const parameters = [join(repository, 'node_modules/vitest/vitest.mjs'), 'run', ...(slice === 'cost' ? ['--config', costConfig] : []), ...(test ? [test] : tests),
     ...(oracle ? ['--testNamePattern', oracle] : []), '--maxWorkers=1', '--reporter=default', '--reporter=json', '--outputFile=' + json]
   const productReceiptDirectory = join(evidence, 'product-' + label)
   const result = await command(label, process.execPath, parameters, { ...env,
@@ -228,8 +231,8 @@ async function restore() {
   active = undefined
 }
 try {
-  if (args[2] === '--check-qualified') {
-    try { const qualified = await verifiedCompletedReceipt(resolve(repository, args[3])); assert.ok(qualified, 'No completed qualified receipt'); console.log(JSON.stringify(qualified)); process.exit(0) }
+  if (values['check-qualified']) {
+    try { const qualified = await verifiedCompletedReceipt(resolve(values['check-qualified'])); assert.ok(qualified, 'No completed qualified receipt'); console.log(JSON.stringify(qualified)); process.exit(0) }
     catch (error) { console.log(JSON.stringify({ passed: false, qualified: false, error: error.message })); process.exit(1) }
   }
   if (!previous) {
@@ -308,7 +311,7 @@ try {
   if (receipt.passed) await writeFile(qualifiedPointer, JSON.stringify({ schema: pointerSchema,
     receipt: relative(repository, join(evidence, 'receipt.json')), receiptSha256: hash(await readFile(join(evidence, 'receipt.json'))) }, null, 2) + '\n')
   if (receipt.passed && slice === 'cost') {
-    const pointer = join(repository, '.tmp/goal-responsibility/t005/cost-receipt.json'); await mkdir(dirname(pointer), { recursive: true })
+    const pointer = join(proofDirectory, 'cost-receipt.json'); await mkdir(dirname(pointer), { recursive: true })
     await writeFile(pointer, JSON.stringify({ path: relative(repository, join(evidence, 'receipt.json')), sha256: hash(await readFile(join(evidence, 'receipt.json'))) }, null, 2) + '\n')
   }
 }

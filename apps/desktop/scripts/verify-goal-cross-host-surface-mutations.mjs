@@ -1,3 +1,4 @@
+import { parseArgs } from 'node:util'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
@@ -5,7 +6,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 
 const repository = resolve(import.meta.dirname, '../../..')
-const evidence = resolve(repository, process.env.AGENTMUX_GOAL_SURFACE_MUTATION_EVIDENCE ?? '.tmp/goal-cross-host-surface-mutations')
+const { values } = parseArgs({ options: { evidence: { type: 'string' } } })
+assert.ok(values.evidence, 'Supply --evidence DIR for this proof output.')
+const evidence = resolve(values.evidence)
 mkdirSync(evidence, { recursive: true })
 const mutations = [
   { id: 'reviewed-identities', file: 'apps/desktop/src/main/settings-host-message-trust.ts',
@@ -31,7 +34,7 @@ for (const mutant of mutations) {
   assert.equal(source.split(mutant.before).length, 2, `One exact mutation anchor: ${mutant.id}`)
   const proof = join(evidence, `${mutant.id}-loaded.jsonl`)
   writeFileSync(proof, '')
-  const run = spawnSync('pnpm', ['exec', 'vitest', 'run', '--config', 'apps/desktop/test/vitest.goal-cross-host-surface.config.mts', `apps/desktop/test/${mutant.test}.test.tsx`], {
+  const run = spawnSync(process.execPath, [join(repository, 'node_modules/vitest/vitest.mjs'), 'run', '--config', 'apps/desktop/test/vitest.goal-cross-host-surface.config.mts', `apps/desktop/test/${mutant.test}.test.tsx`], {
     cwd: repository, encoding: 'utf8', env: { ...process.env, AGENTMUX_DAILY_GOAL_MUTANT: JSON.stringify(mutant), AGENTMUX_DAILY_GOAL_PROOF: proof }, maxBuffer: 5 * 1024 * 1024
   })
   const log = (run.stdout ?? '') + (run.stderr ?? '')

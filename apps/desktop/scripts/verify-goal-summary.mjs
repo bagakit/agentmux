@@ -1,3 +1,4 @@
+import { parseArgs } from 'node:util'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -10,7 +11,9 @@ const patrol = 'apps/desktop/src/renderer/src/components/GoalPatrolControl.tsx'
 const css = 'apps/desktop/src/renderer/src/styles/goal-responsibility.css'
 const product = 'apps/desktop/test/goal-summary-product.test.tsx'
 const helper = 'apps/desktop/test/helpers/goal-responsibility-product.tsx'
-const evidence = join(root, '.tmp/goal-summary'), name = 'mutations-' + randomUUID()
+const { values } = parseArgs({ options: { evidence: { type: 'string' } } })
+assert.ok(values.evidence, 'Supply --evidence DIR for this proof output.')
+const evidence = resolve(values.evidence), name = 'mutations-' + randomUUID()
 const mutations = [
   { label: 'compact-next-responsibility-disappears', file: summary,
     before: '<span className="goal-responsibility__next-action">{row.nextOwner.action}</span>',
