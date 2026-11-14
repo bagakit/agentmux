@@ -158,8 +158,8 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
   return <section className="note-version-history" aria-label="Saved versions">
     <div className="note-version-history__body">
       {document?.readSource ? <div className="note-version-history__tools" aria-label="History owner">
-        <button className="note-text-button" aria-pressed={!originalMain} onClick={() => { ++epoch.current; setOrigin('source') }}>Source history</button>
-        {legacy ? <button className="note-text-button" aria-pressed={originalMain} onClick={() => { ++epoch.current; setOrigin('main') }}>Original Main history</button> : null}
+        <button className={`small-button${!originalMain ? ' small-button--active' : ''}`} aria-pressed={!originalMain} onClick={() => { ++epoch.current; setOrigin('source') }}>Source history</button>
+        {legacy ? <button className={`small-button${originalMain ? ' small-button--active' : ''}`} aria-pressed={originalMain} onClick={() => { ++epoch.current; setOrigin('main') }}>Original Main history</button> : null}
       </div> : null}
       {legacy && document?.readSource ? <details className="note-version-history__scope"><summary>Original Main reference</summary>
         <p>The original Main metadata is kept at its recorded resource. This history is read-only in the Source workface.</p>
