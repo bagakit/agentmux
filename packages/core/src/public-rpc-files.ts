@@ -1,6 +1,7 @@
 import { parseNoteTitleProjection } from './note-title.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from './public-rpc-frame.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProvenanceSnapshot } from './note-provenance.js'
 import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
@@ -30,10 +31,15 @@ export type FileDocumentReadResult =
 export type FileReadUnknown = { status: 'unknown'; code: string; message: string }
 export type FileReadParams = { zoneId: string; spaceId?: string; path: string; expectedResource: FileResource; maxBytes?: number }
 export type FileReadResult = { resource: FileReadResource | null; result: FileDocumentReadResult | FileReadUnknown }
-export type FileListParams = Omit<FileReadParams, 'maxBytes'> & { limit?: number }
+export type FileListParams = Omit<FileReadParams, 'maxBytes'> & { limit?: number; mode?: 'directory' }
+/** Reserve the other half of the original packet for routing/framing and diagnostics. */
+export const FILE_LIST_MAX_RESULT_BYTES = AGENTMUX_RPC_MAX_MESSAGE_BYTES / 2
 /** Names only. A bounded observation does not claim to be a complete filesystem index. */
 export type FileNameListing = { status: 'listed'; files: string[]; complete: boolean; omitted: 'git-ignored' | 'none'; partialReason: 'limit' | 'budget' | 'unreadable' | null }
-export type FileListResult = { resource: FileReadResource | null; result: FileNameListing | FileReadUnknown }
+export type FileDirectoryEntry = { name: string; path: string; isDirectory: boolean; isSymlink: boolean;
+  mtimeMs?: number; ignored?: boolean; linkTarget?: string; linkIssue?: 'unavailable' }
+export type FileDirectoryListing = { status: 'directory-listed'; entries: FileDirectoryEntry[]; complete: boolean; partialReason: 'limit' | null }
+export type FileListResult = { resource: FileReadResource | null; result: FileNameListing | FileDirectoryListing | FileReadUnknown }
 /** Save an existing original text file; null revisions/new-file creation are outside this method. */
 export type FileWriteParams = Omit<FileReadParams, 'maxBytes' | 'expectedResource'> & { expectedResource: FileReadResource; content: string; expectedRevision: string;
   /** Both fields are present for an original, durable Note edit; otherwise this remains ordinary CAS. */
@@ -156,9 +162,10 @@ export function parseFileReadParams(value: unknown): FileReadParams {
   return p as FileReadParams
 }
 export function parseFileListParams(value: unknown): FileListParams {
-  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'limit'], code)
-  const { limit, ...read } = p
+  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'limit', 'mode'], code)
+  const { limit, mode, ...read } = p
   parseFileReadParams(read)
+  if (mode !== undefined && mode !== 'directory') invalid('File discovery mode must be directory when supplied.', code)
   if (limit !== undefined && (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 20000)) invalid('File discovery limit must be between 1 and 20000.', code)
   return p as FileListParams
 }
@@ -168,6 +175,25 @@ export function parseFileListResult(value: unknown, params: FileListParams): Fil
   // Reuse the exact Zone/root mapping validation, independently of the discovered child names.
   parseFileReadResult({ resource: p.resource, result: r.status === 'unknown' ? r : { status: 'directory' } }, params)
   if (r.status === 'unknown') return p as FileListResult
+  if (params.mode === 'directory') {
+    if (Buffer.byteLength(JSON.stringify(value)) > FILE_LIST_MAX_RESULT_BYTES) invalid('The directory projection exceeds its original packet budget.', code)
+    rpcRecord(r, ['status', 'entries', 'complete', 'partialReason'], code)
+    if (r.status !== 'directory-listed' || !Array.isArray(r.entries) || r.entries.length > (params.limit ?? 20000) ||
+        typeof r.complete !== 'boolean' || ![null, 'limit'].includes(r.partialReason as null) || r.complete !== (r.partialReason === null)) invalid('The original one-level directory listing is invalid.', code)
+    const parent = (p.resource as FileReadResource).path, prefix = parent === '.' ? '' : parent + '/', names = new Set<string>()
+    for (const value of r.entries) {
+      const entry = rpcRecord(value, ['name', 'path', 'isDirectory', 'isSymlink', 'mtimeMs', 'ignored', 'linkTarget', 'linkIssue'], code)
+      pathString(entry.name, code); pathString(entry.path, code)
+      if (entry.name === '.' || entry.name === '..' || entry.name.includes('/') || entry.path !== prefix + entry.name || names.has(entry.name) ||
+          typeof entry.isDirectory !== 'boolean' || typeof entry.isSymlink !== 'boolean' ||
+          entry.mtimeMs !== undefined && (typeof entry.mtimeMs !== 'number' || !Number.isFinite(entry.mtimeMs)) ||
+          entry.ignored !== undefined && typeof entry.ignored !== 'boolean' ||
+          entry.linkTarget !== undefined && (typeof entry.linkTarget !== 'string' || /\0/u.test(entry.linkTarget)) ||
+          entry.linkIssue !== undefined && entry.linkIssue !== 'unavailable') invalid('The directory listing must contain exact distinct direct children.', code)
+      names.add(entry.name)
+    }
+    return p as FileListResult
+  }
   rpcRecord(r, ['status', 'files', 'complete', 'omitted', 'partialReason'], code)
   if (r.status !== 'listed' || !Array.isArray(r.files) || r.files.length > (params.limit ?? 20000) ||
       typeof r.complete !== 'boolean' || !['git-ignored', 'none'].includes(r.omitted as string) ||

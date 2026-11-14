@@ -28,7 +28,7 @@ export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends 
     retiredZone?(zoneId: string): Promise<unknown>
     topicForDirectory?(workspace: W, directory: string): Promise<ScratchDirectoryFact | null>
     workspace(id: string): W | undefined
-    files: Pick<WorkspaceFiles<W>, 'read' | 'listFiles'> & {
+    files: Pick<WorkspaceFiles<W>, 'read' | 'listFiles'> & Partial<Pick<WorkspaceFiles<W>, 'readDirectory'>> & {
       writeBytes?(workspace: W, input: Parameters<WorkspaceFiles<W>['writeBytes']>[1]): ReturnType<WorkspaceFiles<W>['writeBytes']>
       write(workspace: W, input: Parameters<WorkspaceFiles<W>['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles<W>['write']>
       writeSharedUndo?(workspace: W, input: Parameters<WorkspaceFiles<W>['write']>[1], context: FileWriteContext | undefined, action: import('./note-history-actions.js').NoteHistoryWriteAction, transferred?: Record<string, import('@agentmux/core/note-provenance').NoteBlockProvenance>): Promise<WorkspaceFileWriteResult>

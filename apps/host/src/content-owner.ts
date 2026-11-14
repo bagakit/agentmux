@@ -119,7 +119,7 @@ export function createHostContent(options: {
       topicForDirectory: (owner, directory) => scratch.readForDirectory(owner, directory),
       share: { share: (input, context) => shared.share(input, context), undoShare: (input, context) => shared.undoShare(input, context), inspectShare: (input, context) => shared.inspectShare(input, context) },
       files: {
-        read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer),
+        read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), readDirectory: files.readDirectory.bind(files), history: writer.history.bind(writer),
         write: (owner, input, context) => guarded(owner, input, actual => writer.write(actual, input, context)),
         writeBytes: (owner, input) => guarded(owner, input, actual => files.writeBytes(actual, input)),
         restore: (owner, input, context) => guarded(owner, input, actual => writer.restore(actual, input, context)),

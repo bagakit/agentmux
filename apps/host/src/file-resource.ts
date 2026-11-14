@@ -9,6 +9,7 @@ import type { AgentMuxSpaceCatalog, AgentMuxZoneFact } from '@agentmux/core/cont
 import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from './mote-topic-model.js'
 import type { WorkspaceFileReadBudget } from './workspace-file-bytes.js'
 import type { FileMutationObservations } from './file-mutation-observations.js'
+import { FILE_LIST_MAX_RESULT_BYTES } from '@agentmux/core/files'
 
 export type FileResourcePorts<W extends FileWorkspace> = {
   effects?: FileMutationObservations
@@ -19,6 +20,7 @@ export type FileResourcePorts<W extends FileWorkspace> = {
   files: {
     read(workspace: W, path: string, budget?: WorkspaceFileReadBudget): Promise<FileDocumentReadResult>
     listFiles(workspace: W, path: string, limit?: number, options?: { signal?: AbortSignal }): Promise<FileNameListing>
+    readDirectory?(workspace: W, path: string): Promise<import('@agentmux/core/files').FileDirectoryEntry[]>
     write(workspace: W, input: { path: string; content: string; expectedRevision: string | null; baseContent?: string; operationId?: string },
       context?: FileWriteContext): Promise<FileWriteReceipt & { fileWitness?: unknown }>
   }
@@ -48,7 +50,21 @@ export class FileResourceOwner<W extends FileWorkspace> {
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_LIST_UNCONFIRMED', message: resolved.message } }
     const { resource, workspace } = resolved
     try {
-      const result = await this.ports.files.listFiles(workspace, resource.path, params.limit, options)
+      let result: FileListResult['result']
+      if (params.mode === 'directory') {
+        if (!this.ports.files.readDirectory) throw new Error('The original one-level directory reader is unavailable.')
+        const original = await this.ports.files.readDirectory(workspace, resource.path), entries: import('@agentmux/core/files').FileDirectoryEntry[] = []
+        // The original owner still enumerates this one directory. These bounds limit
+        // the public projection, not the Native enumeration cost or filesystem scope.
+        let bytes = Buffer.byteLength(JSON.stringify(resource)) + 512
+        for (const entry of original) {
+          const size = Buffer.byteLength(JSON.stringify(entry)) + 1
+          if (entries.length >= (params.limit ?? 20000) || bytes + size > FILE_LIST_MAX_RESULT_BYTES) break
+          entries.push(entry); bytes += size
+        }
+        const complete = entries.length === original.length
+        result = { status: 'directory-listed', entries, complete, partialReason: complete ? null : 'limit' }
+      } else result = await this.ports.files.listFiles(workspace, resource.path, params.limit, options)
       const current = await this.ports.workspace(workspace.id)
       if (!current || current.hostId !== workspace.hostId || current.path !== workspace.path) throw new Error('The original File resource changed during discovery. Inspect it before retrying.')
       return { resource, result }

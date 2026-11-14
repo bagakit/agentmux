@@ -287,7 +287,7 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
     const workspace = this.scope(), expectedResource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path }
     const request = { zoneId: original.zoneId, path: '.', expectedResource, limit: SEARCH_MAX_CANDIDATES - budget.candidates }
     const listing = parseFileListResult(await this.originalFiles.list(request, { signal: budget.signal }), request)
-    if (listing.result.status !== 'listed') throw new AgentMuxError(listing.result.message, listing.result.code)
+    if (listing.result.status !== 'listed') throw new AgentMuxError(listing.result.status === 'unknown' ? listing.result.message : 'The original filename listing returned another mode.', listing.result.status === 'unknown' ? listing.result.code : 'CONTROL_PROTOCOL_ERROR')
     if (!listing.result.complete || listing.result.omitted !== 'none') unavailable.push(issue(new AgentMuxError(
       `Original document discovery is bounded or omits Git-ignored files (${listing.result.partialReason ?? listing.result.omitted}). Open the exact original file or narrow discovery to continue.`, 'TOPIC_KNOWLEDGE_PARTIAL'), topic.id))
     if (listing.result.omitted === 'git-ignored') unavailable.push(issue(new AgentMuxError('Git-ignored document candidates were omitted by the original Files owner.', 'TOPIC_DOCUMENTS_GIT_IGNORED'), topic.id))

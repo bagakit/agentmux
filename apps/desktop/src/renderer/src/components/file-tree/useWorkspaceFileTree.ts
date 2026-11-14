@@ -2,7 +2,8 @@
 // Local or system-SSH reads cannot cross a Workspace identity boundary.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { api } from '../../lib/api'
+import { readWorkspaceDirectory } from '../../lib/source-files-discovery'
+import { useAppStore } from '../../store'
 import {
   createFileExplorerDirLoadScope,
   createFileExplorerDirLoadTracker
@@ -40,11 +41,13 @@ export function flattenFileTree(
 
 export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '', active = true) {
   const resource = useWorkspaceResource(workspaceId)
+  const source = useAppStore(state => state.sourceFilesInputs.selections[workspaceId])
+  const readSources = useAppStore(state => state.sourceFilesInputs.readSources)
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
   const cacheRef = useRef(dirCache)
   const loadTrackerRef = useRef(createFileExplorerDirLoadTracker())
   const staleDirsRef = useRef(new Set<string>())
-  const loadScope = useMemo(() => createFileExplorerDirLoadScope(workspaceId), [workspaceId, rootPath, resource?.hostId, resource?.path])
+  const loadScope = useMemo(() => createFileExplorerDirLoadScope(workspaceId), [workspaceId, rootPath, resource?.hostId, resource?.path, source, readSources])
   cacheRef.current = dirCache
 
   const loadDir = useCallback(
@@ -67,7 +70,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         [path]: { children: previous[path]?.children ?? [], loading: true, error: null }
       }))
       try {
-        const entries = await api.files.readDirectory(workspaceId, path)
+        const { entries, complete } = await readWorkspaceDirectory(workspaceId, path, useAppStore.getState)
         if (!loadTrackerRef.current.isCurrent(token)) return false
         const children = entries.filter(entry => fileExplorerContains(rootPath, entry.path)).map((entry) => ({
           ...entry,
@@ -77,7 +80,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         staleDirsRef.current.delete(path)
         setDirCache((previous) => ({
           ...previous,
-          [path]: { children, loading: false, error: null }
+          [path]: { children, loading: false, error: complete ? null : 'This original directory listing is partial. Refresh to observe its current entries.' }
         }))
         return true
       } catch (error) {
