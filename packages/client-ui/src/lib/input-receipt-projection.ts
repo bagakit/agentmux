@@ -44,7 +44,8 @@ function receiptIdentity(record: NonNullable<AgentInputSubmissionReceipt['admiss
 /** A client can request continuation only for the exact recorded input. Core rechecks its authority. */
 export function originalInputCanRejoin(receipt: AgentInputSubmissionReceipt): boolean {
   return receipt.persistence === 'confirmed' && (receipt.continuation !== undefined ||
-    receipt.status === 'waiting' && (receipt.observation === 'rejoin-needed' || receipt.control.waiting?.wake === 'explicit-rejoin'))
+    receipt.status === 'waiting' && receipt.observation !== 'closed' &&
+      (receipt.observation === 'rejoin-needed' || receipt.control.waiting?.wake === 'explicit-rejoin'))
 }
 
 export function originalInputDeliveryConfirmed(receipt: AgentInputSubmissionReceipt | undefined): boolean {
