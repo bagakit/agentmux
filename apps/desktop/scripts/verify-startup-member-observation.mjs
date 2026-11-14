@@ -12,6 +12,7 @@ const evidence = resolve(process.env.AGENTMUX_STARTUP_MEMBER_EVIDENCE ?? join(ro
 await mkdir(evidence, { recursive: true })
 const temporary = await mkdtemp(join(tmpdir(), 'amux-startup-member-')), hash = value => createHash('sha256').update(value).digest('hex')
 const loaded = [], aliases = new Map(), receipt = { passed: false, evidence, cases: [], cleanup: null }
+const expectedChecks = ['read', 'conversation-read', 'conversation-watch', 'pre-cancel', 'independent-call-cancel', 'late-success-not-adopted', 'opening-dispose-preserves-sibling', 'sibling-dispose']
 for (const name of ['core', 'identity', 'layout', 'demand', 'client-ui', 'relay', 'git', 'diagnostic-evidence']) {
   const directory = join(root, 'packages', name), manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
   for (const [key, value] of Object.entries(manifest.exports ?? {})) {
@@ -71,21 +72,25 @@ try {
     await build({ ...shared, stdin: { contents: `import {createRendererSpaceMount} from './apps/desktop/src/renderer/src/lib/space-mount-api.ts';window.memberBridge={createRendererSpaceMount}`, resolveDir: root },
       outfile: join(directory, 'renderer.js'), platform: 'browser', format: 'iife' })
     const execution = await runProbeProcess(electron, [join(directory, 'main.mjs'), directory, caseEvidence], {
-      cwd: root, env, temporaryRoot: temporary, timeoutMs: 30000, onLine: line => logs.push(line)
+      cwd: root, env, temporaryRoot: temporary, timeoutMs: 45000, onLine: line => logs.push(line)
     })
     await writeFile(join(caseEvidence, 'process.log'), logs.splice(0).join('\n'))
     if (mutation === 'baseline') {
       assert.equal(execution.exitCode, 0, 'Actual sandboxed member bridge must pass')
       const result = JSON.parse(await readFile(join(caseEvidence, 'bridge.json'), 'utf8'))
-      assert.equal(result.passed, 4); receipt.cases.push({ mutation, execution, result })
+      assert.deepEqual(result.checks, expectedChecks)
+      assert.equal(result.preferences.contextIsolation, true); assert.equal(result.preferences.sandbox, true); assert.equal(result.preferences.nodeIntegration, false)
+      assert.deepEqual(result.errors, [])
+      receipt.cases.push({ mutation, execution, result })
     } else {
       assert.notEqual(execution.exitCode, 0, 'Restoring raw AbortSignal across contextBridge must fail')
       const failure = JSON.parse(await readFile(join(caseEvidence, 'bridge-failure.json'), 'utf8'))
       assert.equal(failure.passed, 0); assert.match(failure.message, /Original member read.*throwIfAborted.*not a function/s)
-      assert.ok(loaded.filter(value => value.mutation === mutation && value.originalSHA256 !== value.consumedSHA256).length >= 2)
+      const changed = new Set(loaded.filter(value => value.mutation === mutation && value.originalSHA256 !== value.consumedSHA256).map(value => value.path))
+      assert.deepEqual([...changed].sort(), ['apps/desktop/src/preload/space-mount.ts', 'apps/desktop/src/renderer/src/lib/space-mount-api.ts'])
       receipt.cases.push({ mutation, execution, failure })
     }
-    console.log(mutation + ': ' + (mutation === 'baseline' ? '4 actual isolated bridge cases passed' : 'exact screenshot TypeError reproduced'))
+    console.log(mutation + ': ' + (mutation === 'baseline' ? expectedChecks.length + ' actual isolated bridge cases passed' : 'exact throwIfAborted TypeError reproduced'))
   }
   for (const file of loaded) assert.equal(hash(await readFile(join(root, file.path))), file.originalSHA256, 'Loaded production source stayed unchanged')
   receipt.passed = true
