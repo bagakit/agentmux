@@ -1,6 +1,6 @@
 import type { FileDocument } from '@agentmux/core'
 import type { FileReadResult } from '@agentmux/core/files'
-import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, sameMoteDefaultConversation, type MoteQuickBaseline, type MoteQuickChoices, type MoteQuickPreferencesSaveParams, type MotePresenceReading, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, sameMoteDefaultConversation, type MoteQuickBaseline, type MoteQuickChoices, type MoteQuickPreferencesReadInput, type MoteQuickPreferencesSaveParams, type MotePresenceReading, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { scratchTopicLogicalPath, type MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from './mote-workface'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
@@ -13,14 +13,14 @@ import { moteMainRoleRevision } from '@agentmux/core/mote-dialogue'
 import type { MoteHeartbeatReports } from './mote-heartbeat-report'
 
 export type SavedMoteQuickMode = { document: FileDocument | null; defaults: MoteQuickDefaults; choices?: MoteQuickChoices; issue?: string; source?: FileReadResult; pending?: MoteQuickPreferencesSaveParams; maintenance?: MotePresenceReading; reports?: MoteHeartbeatReports }
-export async function readMoteQuickDefaults(scope: MoteWorkfaceScope): Promise<SavedMoteQuickMode> {
+export async function readMoteQuickDefaults(scope: MoteWorkfaceScope, includeChoices: MoteQuickPreferencesReadInput['includeChoices'] = true): Promise<SavedMoteQuickMode> {
   const target = moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings)
   if (!target) return { document: null, defaults: {}, issue: 'The original Mote resource is unconfirmed. Its settings and conversations remain available.' }
-  return readMoteQuickTarget(target)
+  return readMoteQuickTarget(target, includeChoices)
 }
-export async function readMoteQuickTarget(target: MotePreferencesTarget): Promise<SavedMoteQuickMode> {
-  const input = { kind: 'quick' as const, target }, result = parseMotePreferencesReadResult(await api.motePreferences.read(input), input)
-  return { document: result.source?.result.status === 'read' ? result.source.result.document : null, defaults: result.defaults ?? {}, choices: result.choices, ...(result.source ? { source: result.source } : {}), ...(result.issue ? { issue: result.issue } : {}), ...(result.maintenance ? { maintenance: result.maintenance } : {}) }
+export async function readMoteQuickTarget(target: MotePreferencesTarget, includeChoices: MoteQuickPreferencesReadInput['includeChoices'] = true): Promise<SavedMoteQuickMode> {
+  const input = { kind: 'quick' as const, target, includeChoices }, result = parseMotePreferencesReadResult(await api.motePreferences.read(input), input)
+  return { document: result.source?.result.status === 'read' ? result.source.result.document : null, defaults: result.defaults ?? {}, ...(result.choices ? { choices: result.choices } : {}), ...(result.source ? { source: result.source } : {}), ...(result.issue ? { issue: result.issue } : {}), ...(result.maintenance ? { maintenance: result.maintenance } : {}) }
 }
 export type MoteQuickWrite = { status: 'saved' | 'unchanged'; source: MoteQuickBaseline }
 export class MoteQuickSaveError extends Error {
@@ -73,7 +73,7 @@ export async function adoptMoteHeartbeatGuidance(scope: MoteWorkfaceScope, saved
   let input = saved.pending
   if (input && input.action?.kind !== 'adopt-current-guidance') throw new Error('Inspect the retained original settings save before adopting guidance.')
   if (!input) {
-    const current = await readMoteQuickDefaults(scope), schedule = current.maintenance?.schedule, guidance = current.maintenance?.guidance
+    const current = await readMoteQuickDefaults(scope, false), schedule = current.maintenance?.schedule, guidance = current.maintenance?.guidance
     const main = current.defaults.conversation, resource = current.source?.resource
     if (current.issue || !schedule?.revision || !guidance?.currentDefinition || !main || !resource ||
       schedule.hostId !== main.hostId || schedule.agentSessionId !== main.sessionId ||

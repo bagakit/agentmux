@@ -72,7 +72,7 @@ function createReader(key: string, target: MotePreferencesTarget, initialScope: 
     let sourceChanged = false
     publish({ ...state, loading: true })
     pending = Promise.resolve().then(async () => {
-      const selected = full ? await readMoteQuickTarget(target) : original!
+      const selected = full ? await readMoteQuickTarget(target, false) : original!
       const selectedSchedule = selected.maintenance?.schedule
       if (!selectedSchedule) return selected
       const input = { scheduleId: selectedSchedule.loopId }

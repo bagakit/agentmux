@@ -3,7 +3,7 @@ import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { moteQuickBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
-  sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickPreferencesReadResult, type MoteQuickDefaults, type MotePreferencesDestination } from '@agentmux/core/mote-preferences'
+  mergeMoteQuickChoices, sameMotePreferencesTarget, sameMoteDefaultConversation, type MotePreferencesTarget, type MoteQuickChoices, type MoteQuickPreferencesReadResult, type MoteQuickDefaults, type MotePreferencesDestination } from '@agentmux/core/mote-preferences'
 import { getDeviceWorkface, DeviceWorkfaceRecordChangedError, type DeviceWorkfaceStore } from '../recovery/device-workface'
 import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickScope, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError,
   type MoteQuickDraft, type MoteRolloverEditor, type MoteQuickScope, type MoteQuickAttempt, type MoteMaintenanceAttempt } from '../recovery/mote-quick-drafts'
@@ -46,6 +46,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   const [destination, setDestination] = useState<MotePreferencesDestination | null>(null)
   const latest = useRef({ client, visible, onSaved }); latest.current = { client, visible, onSaved }
   const readEpoch = useRef(0)
+  const readController = useRef<AbortController | null>(null)
   const maintenanceOwner = useRef<{ client: AgentMuxHostedClient; scope: string; ownerInstanceId: string } | null>(null)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; readEpoch.current++ } }, [])
   const display = (next: Editable) => { current.current = next; if (mounted.current) setDraft(next) }
@@ -79,24 +80,42 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   }
   async function inspect() {
     const source = connection(latest.current.client, owner, target), epoch = ++readEpoch.current, original = latest.current.client
+    readController.current?.abort()
+    const controller = new AbortController(); readController.current = controller
     if (!source || !original?.forwardRpc || !latest.current.visible) { setNotice('暂时无法核对 Mac 上的配置。'); return }
-    try {
-      const result = parseMotePreferencesReadResult(await original.forwardRpc('space.mote.preferences.read', { kind: 'quick', target }), { kind: 'quick', target })
+    const sameReader = () => {
       const now = connection(original, owner, target)
-      if (!mounted.current || epoch !== readEpoch.current || latest.current.client !== original || !now || now.ownerInstanceId !== source.ownerInstanceId ||
-        moteQuickDraftKey(now.scope) !== moteQuickDraftKey(source.scope) || owner.recordIdentity() !== recordId) return
+      return !controller.signal.aborted && mounted.current && latest.current.visible && epoch === readEpoch.current && latest.current.client === original &&
+        now?.ownerInstanceId === source.ownerInstanceId && moteQuickDraftKey(now.scope) === moteQuickDraftKey(source.scope) && owner.recordIdentity() === recordId
+    }
+    try {
+      const input = { kind: 'quick' as const, target, includeChoices: false }
+      const result = parseMotePreferencesReadResult(await original.forwardRpc('space.mote.preferences.read', input, { signal: controller.signal }), input)
+      if (!sameReader()) return
       setRead(result)
       maintenanceOwner.current = { client: original, scope: moteQuickDraftKey(source.scope), ownerInstanceId: source.ownerInstanceId }
-      setDestination(existing => existing && result.choices.destinations.some(c => JSON.stringify(c.reference) === JSON.stringify(existing)) ? existing :
-        result.choices.destinations.length === 1 ? result.choices.destinations[0]!.reference : null)
       const baseline = moteQuickBaseline(result)
       if (baseline && !current.current.baseline && !current.current.blockedAttemptId) {
         void retain({ ...current.current, scope: source.scope, baseline, values: changed.current ? current.current.values : baseline.defaults })
       }
       setNotice(result.status === 'ready' ? '已核对当前配置；读取不确认旧保存。' : result.issue ?? '配置还没确认。')
+      if (result.status === 'ready') for (const selected of ['executors', 'locations'] as const) void original.forwardRpc('space.mote.preferences.read', { kind: 'quick', target, includeChoices: selected }, { signal: controller.signal }).then(value => {
+        const discovery = parseMotePreferencesReadResult(value, { kind: 'quick', target, includeChoices: selected })
+        if (!sameReader()) return
+        if (discovery.status !== 'ready' || !discovery.choices) throw new Error(discovery.issue ?? '候选尚未确认，原设置保留。')
+        const choices = discovery.choices
+        setRead(previous => previous ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, choices) } : previous)
+        const destinations = choices.destinations
+        if (destinations !== null) setDestination(existing => existing && destinations.some(c => JSON.stringify(c.reference) === JSON.stringify(existing)) ? existing :
+          destinations.length === 1 ? destinations[0]!.reference : null)
+      }).catch(error => {
+        const failure: MoteQuickChoices = { executors: selected === 'executors' ? [] : null, conversations: selected === 'locations' ? [] : null,
+          destinations: selected === 'locations' ? [] : null, issues: { [selected]: message(error) } }
+        if (sameReader()) setRead(previous => previous ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, failure) } : previous)
+      })
     } catch (error) { if (mounted.current && epoch === readEpoch.current) setNotice(message(error)) }
   }
-  useEffect(() => { if (visible) void inspect(); return () => { readEpoch.current++ } }, [client, visible])
+  useEffect(() => { if (visible) void inspect(); return () => { readEpoch.current++; readController.current?.abort() } }, [client, visible])
   async function resumeMaintenance(pending?: MoteMaintenanceAttempt) {
     if (flight.current || adopting.current) return
     const original = latest.current.client, source = connection(original, owner, target), selected = current.current
@@ -161,11 +180,14 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   async function save() {
     if (flight.current || adopting.current) return
     const original = latest.current.client, source = connection(original, owner, target), submitted = current.current
-    if (!latest.current.visible || !original?.forwardRpc || !source || !submitted.scope || !submitted.baseline || submitted.blockedAttemptId || conflicted.current || !destination ||
+    if (!latest.current.visible || !original?.forwardRpc || !source || !submitted.scope || !submitted.baseline || submitted.blockedAttemptId || conflicted.current ||
       moteQuickDraftKey(source.scope) !== moteQuickDraftKey(submitted.scope) || owner.recordIdentity() !== recordId) {
-      setNotice('配置、保存位置或上次保存还没确认，请先核对并采用当前版本。'); return
+      setNotice('配置或上次保存还没确认，请先核对并采用当前版本。'); return
     }
-    const input = parseMotePreferencesSaveParams({ kind: 'quick', target, baseline: submitted.baseline, values: submitted.values, destination,
+    const changesMain = !sameMoteDefaultConversation(submitted.baseline.defaults.conversation, submitted.values.conversation)
+    if (changesMain && !destination) { setNotice('更换主对话需要确认它的展示位置；你的选择已保留，可以重新核对。'); return }
+    const input = parseMotePreferencesSaveParams({ kind: 'quick', target, baseline: submitted.baseline, values: submitted.values,
+      ...(changesMain && destination ? { destination } : {}),
       operationId: randomClientRequestId() }), attempt: MoteQuickAttempt = { input, ownerInstanceId: source.ownerInstanceId, phase: 'sending', result: null, issue: null }
     flight.current = true; setBusy(true)
     try {

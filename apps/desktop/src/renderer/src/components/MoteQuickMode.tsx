@@ -5,7 +5,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useShallow } from 'zustand/react/shallow'
-import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, type MotePresenceReading } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, mergeMoteQuickChoices, moteMinutesToMs, type MoteQuickChoices, type MotePresenceReading } from '@agentmux/core/mote-preferences'
 import { MOTE_QUICK_MODE_PATH, type MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -157,7 +157,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
         .finally(() => { unsubscribe(); if (lifetime.current === epoch) setLoading(false) })
       return () => { lifetime.current = {}; unsubscribe() }
     }
-    void readMoteQuickDefaults(scope).then(source => {
+    void readMoteQuickDefaults(scope, false).then(source => {
       if (lifetime.current !== epoch) return
       setSaved(previous => { const pending = previous?.pending ?? restored.current?.pending?.input; return pending ? { ...source, pending } : source })
       if (moved) throw new Error('Your selection changed during the read. Your choices are kept; reread the settings.')
@@ -167,6 +167,17 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
         setRolloverKind(source.defaults.conversationRollover?.kind ?? 'keep-current')
         setRolloverMinutes(source.defaults.conversationRollover?.kind === 'idle' ? String(source.defaults.conversationRollover.idleMs / 60000) : '')
       }
+      if (!source.issue) for (const selected of ['executors', 'locations'] as const) void readMoteQuickDefaults(scope, selected).then(discovery => {
+        if (lifetime.current !== epoch) return
+        if (discovery.issue || !discovery.choices) throw new Error(discovery.issue ?? 'The original choices are unconfirmed. Reread this Mote’s settings.')
+        setSaved(previous => previous && previous.source?.resource && source.source?.resource &&
+          JSON.stringify(previous.source.resource) === JSON.stringify(source.source.resource)
+          ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, discovery.choices!) } : previous)
+      }).catch(cause => {
+        const failure: MoteQuickChoices = { executors: selected === 'executors' ? [] : null, conversations: selected === 'locations' ? [] : null,
+          destinations: selected === 'locations' ? [] : null, issues: { [selected]: presentError(cause) } }
+        if (lifetime.current === epoch) setSaved(previous => previous ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, failure) } : previous)
+      })
     }).catch(cause => { if (lifetime.current === epoch) { setSaved(previous => previous?.pending ? previous : null); setIssue(presentError(cause)) } })
       .finally(() => { unsubscribe(); if (lifetime.current === epoch) setLoading(false) })
     return () => { lifetime.current = {}; unsubscribe() }
@@ -189,7 +200,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       record.managedSource?.sourceId !== original.managedSource?.sourceId || record.managedSource?.revision !== original.managedSource?.revision || !sameMoteHeartbeatReference(record.lastInputRef, original.lastInputRef)
   }
   async function confirmCurrentHeartbeat(schedule: ContinuousProgressLoop, ownerHostId: string) {
-    const current = await readMoteQuickDefaults(scope), record = current.maintenance?.schedule
+    const current = await readMoteQuickDefaults(scope, false), record = current.maintenance?.schedule
     const resource = current.source?.resource, originalResource = saved?.source?.resource
     if (current.issue || !record || !moteHeartbeatReadingMatchesSource(current) || inputIdentity(record) !== inputIdentity(schedule) ||
         !resource || !originalResource || resource.hostId !== ownerHostId ||
@@ -341,6 +352,8 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
         </details>
         </> : null}
         {loading ? <p role="status" className="mote-details__hint">{originalHeartbeat ? 'Reading the original arrangement…' : 'Reading MOTE.md…'}</p> : null}
+        {!loading && saved && !saved.issue && (!saved.choices || saved.choices.executors === null || saved.choices.destinations === null) ? <p role="status" className="mote-details__hint">Reading the remaining choices. Your saved settings can still be edited.</p> : null}
+        {saved?.choices?.issues ? <div role="status" className="mote-details__issue">{Object.values(saved.choices.issues).join(' ')}<button className="small-button" type="button" onClick={() => setAttempt(value => value + 1)}>Reread choices</button></div> : null}
         {draftRestoreIssue ? <p role="status" className="mote-details__issue">The saved original request could not be decoded. Its stored input and your Agent are kept; no replacement request will be sent.</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<button className="small-button" type="button" onClick={() => setAttempt(value => value + 1)}>Reread</button></div> : null}
       </div>

@@ -2,7 +2,7 @@ import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
-import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, sameMoteDefaultConversation, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { useMoteQuickDraft } from './useMoteQuickDraft'
 
 type Props = { target: MotePreferencesTarget; client: AgentMuxHostedClient | null; visible: boolean;
@@ -29,13 +29,16 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
     active: '已安排自动心跳', paused: '心跳安排已暂停', disabled: '自动维持未启用', unbound: '主对话尚未绑定', unconfirmed: '实际安排尚未确认'
   }[maintenance.status] : '实际安排尚未读取'
   const copy = (value: unknown) => { setCopyIssue(''); void copyText(JSON.stringify(value, null, 2), error => setCopyIssue(error instanceof Error ? error.message : String(error))) }
-  const executor = draft.values.executorId ?? '', conversations = read?.choices.conversations ?? [], executors = read?.choices.executors ?? []
+  const executor = draft.values.executorId ?? '', conversations = read?.choices?.conversations ?? [], executors = read?.choices?.executors ?? []
   const conversation = draft.values.conversation ? JSON.stringify(draft.values.conversation) : ''
-  const destinations = read?.choices.destinations ?? [], destination = model.destination ? JSON.stringify(model.destination) : ''
+  const destinations = read?.choices?.destinations ?? [], destination = model.destination ? JSON.stringify(model.destination) : ''
+  const changesMain = draft.baseline !== null && !sameMoteDefaultConversation(draft.baseline.defaults.conversation, draft.values.conversation)
   const blocked = draft.attempts.find(a => a.input.operationId === draft.blockedAttemptId)
   return <section className="mobile-mote-quick-editor" aria-label="Mote 快捷配置编辑">
     <button type="button" className="mobile-text-button" onClick={onClose}>返回 Profile</button><h3>快捷配置</h3>
     <p>设置主对话、自动流转策略与心跳。</p>
+    {read?.status === 'ready' && (!read.choices || read.choices.executors === null || read.choices.destinations === null) && <p role="status">正在读取其余候选；已保存的配置仍可编辑和保存。</p>}
+    {read?.choices?.issues && <MobileNotice kind="warning" owner={client} identity={[JSON.stringify(target),read.choices.issues.executors,read.choices.issues.locations]} role="status">{Object.values(read.choices.issues).join(' ')}<button type="button" className="mobile-text-button" onClick={() => { void model.inspect() }}>重新核对候选</button></MobileNotice>}
     <MobileNotice dismissible={!model.busy && !model.adoptionBusy} kind={blocked && !model.busy && !model.adoptionBusy ? "warning" : "feedback"} owner={client} identity={[JSON.stringify(target),blocked?.input.operationId,blocked?.phase,model.notice]} role="status">{model.busy ? '正在保存配置…' : model.adoptionBusy ? '正在采用当前修订…' : blocked ? '保存还没确认。' : model.notice || '正在核对配置…'}</MobileNotice>
     <form onSubmit={event => { event.preventDefault()
       if (moteMinutesToMs(minutes, { wholeMinutes: true }) === null) { setIntervalIssue('心跳间隔请填至少 1 分钟的整数。'); return }
@@ -87,9 +90,10 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
           <pre>{JSON.stringify(operation, null, 2)}</pre>
         </article>)}</details>}
       </fieldset>
-      {destinations.length > 1 ? <label>保存位置<select aria-label="保存位置" value={destination} onChange={event => model.setDestination(destinations.find(d => JSON.stringify(d.reference) === event.target.value)?.reference ?? null)}>
-        <option value="">选择保存位置</option>{destinations.map(d => <option key={JSON.stringify(d.reference)} value={JSON.stringify(d.reference)}>{d.label}</option>)}</select></label>
-        : <p>{destinations.length === 1 ? `保存位置：${destinations[0]!.label}` : '保存位置还没确认，可以重新核对。'}</p>}
+      {changesMain ? destinations.length > 1 ? <label>主对话展示位置<select aria-label="主对话展示位置" value={destination} onChange={event => model.setDestination(destinations.find(d => JSON.stringify(d.reference) === event.target.value)?.reference ?? null)}>
+        <option value="">选择展示位置</option>{destinations.map(d => <option key={JSON.stringify(d.reference)} value={JSON.stringify(d.reference)}>{d.label}</option>)}</select></label>
+        : <p>{destinations.length === 1 ? `主对话展示位置：${destinations[0]!.label}` : '更换主对话需要确认展示位置，可以重新核对。'}</p>
+        : draft.baseline ? <p>保存偏好无需选择展示位置，也不会切换主对话。</p> : null}
       <div className="mobile-mote-file-editor__actions"><button type="submit" className="mobile-text-button" disabled={model.busy || model.adoptionBusy}>保存快捷配置</button>
         <button type="button" className="mobile-text-button" onClick={() => { void model.inspect() }}>核对当前配置</button>
         <button type="button" className="mobile-text-button" onClick={() => copy(draft)}>复制配置与请求</button></div>

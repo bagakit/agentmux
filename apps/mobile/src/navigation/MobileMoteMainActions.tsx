@@ -46,12 +46,13 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
     let live = true
     setReading(null)
     const runtime = client.runtimeOwnerIdentity?.(), recordId = owner.recordIdentity()
-    void Promise.all([client.forwardRpc('space.mote.preferences.read', { kind: 'quick', target }),
+    const preferencesInput = { kind: 'quick' as const, target, includeChoices: 'executors' as const }
+    void Promise.all([client.forwardRpc('space.mote.preferences.read', preferencesInput),
       client.forwardRpc('space.mote.dialogue.read', { target, kind: 'main' }), client.forwardRpc('space.state', {})]).then(async ([raw, dialogue, spatial]) => {
       const current = client.runtimeOwnerIdentity?.()
       if (!live) return
       if (runtime?.runtimeId !== current?.runtimeId || runtime?.ownerInstanceId !== current?.ownerInstanceId) throw Error('Mac 连接已变化，请刷新后核对。')
-      const preferences = parseMotePreferencesReadResult(raw, { kind: 'quick', target })
+      const preferences = parseMotePreferencesReadResult(raw, preferencesInput)
       const page = parseMoteDialogueResult('space.mote.dialogue.read', dialogue, { target, kind: 'main' })
       const device = owner.snapshot().record
       const original = (device.agentCreates ?? []).filter(item => item.runtimeId === runtime?.runtimeId && item.deviceHostId === (device.host?.hostId ?? null) && item.input.moteMain && sameMotePreferencesTarget(item.input.moteMain.target, target) && item.phase !== 'confirmed')
@@ -109,12 +110,13 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
     return () => { unlisten(); if (queuedInspection.current === id) queuedInspection.current = null }
   }, [client, visible, result?.operationId, inputSelection])
   const baseline = reading && moteQuickBaseline(reading.preferences)
-  const executor = reading?.preferences.choices.executors.find(item => item.id === reading.preferences.defaults?.executorId)
+  const executor = reading?.preferences.choices?.executors?.find(item => item.id === reading.preferences.defaults?.executorId)
   const readIssue = !reading ? null : reading.preferences.status !== 'ready' || !baseline || reading.preferences.issue
     ? reading.preferences.issue ?? 'MOTE 配置还没确认，请刷新。'
     : reading.dialogue.main.status !== 'ready' || reading.dialogue.main.documentRevision !== (baseline.document?.revision ?? null) || !sameMoteQuickDefaults(reading.dialogue.main.current ? { conversation: reading.dialogue.main.current } : {}, baseline.defaults.conversation ? { conversation: baseline.defaults.conversation } : {})
       ? '主角色与配置的版本还没对上，请刷新。'
-      : !executor ? '先配置此 Mote 的默认 Executor，再新建 Main Agent。' : null
+      : !executor ? reading.preferences.choices?.issues?.executors ?? (reading.preferences.defaults?.executorId
+        ? '已保存的 Executor 暂未在原 Host 中确认，请重新核对。' : '先配置此 Mote 的默认 Executor，再新建 Main Agent。') : null
   async function run(action: 'create' | 'advance', query?: MobileMoteStartQuery, selectedOperationId?: string, onRetained?: () => void | Promise<void>) {
     if (!client?.forwardRpc || flight.current || !visible) return
     const original = source.current, recordId = owner.recordIdentity(), runtime = client.runtimeOwnerIdentity?.()
