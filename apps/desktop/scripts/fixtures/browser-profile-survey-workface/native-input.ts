@@ -10,7 +10,8 @@ export async function nativeUntil<T>(read: () => T | Promise<T>, label: string, 
 
 /** The production App and its original site receive native CDP input, never setter events. */
 export function nativeInput(contents: WebContents, trace: any[]) {
-  if (!contents.debugger.isAttached()) contents.debugger.attach('1.3')
+  const attachedHere=!contents.debugger.isAttached()
+  if (attachedHere) contents.debugger.attach('1.3')
   const read = (expression: string) => contents.executeJavaScript(expression)
   const key = async (key: string, code: string, virtual: number, modifiers = 0, commands?: string[]) => {
     for (const type of ['keyDown', 'keyUp']) await contents.debugger.sendCommand('Input.dispatchKeyEvent', {
@@ -72,5 +73,5 @@ export function nativeInput(contents: WebContents, trace: any[]) {
     attempt.state='confirmed'
     await pause(70)
   }
-  return { read, click, fill, select, key }
+  return { read, click, fill, select, key, release() { if(attachedHere&&!contents.isDestroyed()&&contents.debugger.isAttached())contents.debugger.detach() } }
 }

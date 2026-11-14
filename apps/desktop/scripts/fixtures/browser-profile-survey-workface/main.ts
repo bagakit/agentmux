@@ -4,6 +4,9 @@ import { persistentTask } from './persistent-task'
 import { admissionGeometry } from './admission-geometry'
 import { profileSwitchPorts } from './profile-switch-ports'
 import { profileSwitchCase } from './profile-switch-case'
+import { completeCase } from './complete-case'
+import { completePorts } from './complete-ports'
+import { cliFollow } from './cli-follow'
 import { browserProfilePartition } from '../../../src/main/browser-profile-store'
 import { settingsCase } from './settings-case'
 import { spawn } from 'node:child_process'
@@ -35,7 +38,7 @@ async function until<T>(read: () => Promise<T> | T, label: string, budget = 1500
 let window: BrowserWindow | undefined, core: any, sdk: any, rpc: any, hosted: any, hostServer: any, runtime: RuntimeController | undefined,
   privateHost: Awaited<ReturnType<typeof startAgentMuxHost>> | undefined, releaseIpc: (() => Promise<void>) | undefined, windows: WorkbenchWindows | undefined, access: any
 let releaseObservationFaults = () => {}
-async function cli(args: string[], code = '', actor?: string): Promise<any> {
+async function cliEnvironment(actor?: string) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
   Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
     AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json') })
@@ -43,6 +46,10 @@ async function cli(args: string[], code = '', actor?: string): Promise<any> {
     const credential = JSON.parse(await readFile(join(directory, actor + '-credential.json'), 'utf8'))
     Object.assign(env, { AGENTMUX_AGENT_SESSION_ID: credential.agentSessionId, AGENTMUX_AGENT_CAPABILITY: credential.capability })
   }
+  return env
+}
+async function cli(args: string[], code = '', actor?: string): Promise<any> {
+  const env=await cliEnvironment(actor)
   return await new Promise((resolve, reject) => {
     const child = spawn(process.env.AGENTMUX_PROFILE_SURVEY_NODE!, [process.env.AGENTMUX_PROFILE_SURVEY_CLI!, '--endpoint', 'unix:' + desktopBusinessSocketPath(), ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = '', stderr = ''
@@ -70,12 +77,13 @@ function nativePage(window: BrowserWindow, url: string, profileId: string) {
 async function result(args: string[], input = '') { const value = await cli(args,input); assert.equal(value.code,0,JSON.stringify(value.value)); assert.equal(value.value.ok,true); return value.value.result }
 async function run() {
  await app.whenReady()
- if (phase === 'first') { await mkdir(join(directory,'state'),{recursive:true}); await mkdir(join(directory,'workspace'),{recursive:true}); await mkdir(join(directory,'legacy-workspace'),{recursive:true}); if(selectedCase==='profile-switch'){await mkdir(join(directory,'notes'),{recursive:true});await writeFile(join(directory,'legacy-workspace/original.txt'),'Original complete research input.')} await writeFile(join(directory,'workspace/original.txt'),'Original authorized Workspace file.'); await writeFile(join(directory,'state/notes-location.json'),JSON.stringify({schemaVersion:1,directory:join(directory,'notes'),operations:{},pending:null})) }
+ if (phase === 'first') { await mkdir(join(directory,'state'),{recursive:true}); await mkdir(join(directory,'workspace'),{recursive:true}); await mkdir(join(directory,'legacy-workspace'),{recursive:true}); if(selectedCase==='profile-switch'||selectedCase==='complete'){await mkdir(join(directory,'notes'),{recursive:true});await writeFile(join(directory,'legacy-workspace/original.txt'),'Original complete research input.')} await writeFile(join(directory,'workspace/original.txt'),'Original authorized Workspace file.'); await writeFile(join(directory,'state/notes-location.json'),JSON.stringify({schemaVersion:1,directory:join(directory,'notes'),operations:{},pending:null})) }
  const store = new AgentMuxFileAgentSessionStore(join(directory,'sessions.json'))
  const configStore=new ConfigStore(join(directory,'config.json'))
  const initial={...structuredClone(DEFAULT_CONFIG),hosts:[{id:'local',kind:'local',label:'Private Profile Survey proof'}],workspaces:[{id:workspaceId,name:'Private mixed task',kind:'folder',hostId:'local',path:join(directory,'workspace')},{id:legacyWorkspaceId,name:'Original whole-Zone exploration',kind:'folder',hostId:'local',path:join(directory,'legacy-workspace')}],executors:{proof:{providerId:'codex',label:'Private synthetic Provider',command:join(source,'packages/core/test/fixtures/fake-codex-cli.mjs'),args:[],injectAgentMuxGuide:false,env:{AGENTMUX_FAKE_READY_MODE:'before',AGENTMUX_FAKE_NATIVE_RECORD:'1',AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY:join(directory,'native-records')}}},browser:{...DEFAULT_CONFIG.browser,agentAutomation:true},notifications:{mode:'off'}}
+ if(selectedCase==='complete')(initial.executors.proof.env as Record<string,string>).AGENTMUX_FAKE_CAPABILITY_RECEIPT=join(directory,'workface-credential.json')
  let config=phase==='first'?await configStore.save(initial as any):await configStore.get()
- if(selectedCase==='profile-switch')config=await configStore.get()
+ if(selectedCase==='profile-switch'||selectedCase==='complete')config=await configStore.get()
  privateHost=await startAgentMuxHost({store,socketPath:join(directory,'semantic.sock'),desktopSocketPath:desktopBusinessSocketPath(),configurationPath:configStore.filePath,mobilePort:0,mobileBuildDirectory:join(directory,'no-mobile-assets')})
  core=privateHost.client;hosted=privateHost.hosted;hostServer=privateHost.server
  rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:join(directory,'semantic.sock')}})
@@ -85,16 +93,31 @@ async function run() {
  window=new BrowserWindow({width:1280,height:900,show:false,title:'Private Profile Survey workface',webPreferences:{preload:join(directory,'preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}})
  const contents=window.webContents; contents.on('console-message',(event:any)=>{if(event.level==='error')console.error('Profile Survey Renderer:',event.message)})
  windows=new WorkbenchWindows(window,new WorkbenchWindowStore(join(directory,'windows.json')),()=>[{x:0,y:0,width:1600,height:1000}])
+ if(selectedCase==='complete'){
+  // Same thin Main bootstrap wiring as production index.ts; policy stays in WorkbenchWindows.
+  contents.setWindowOpenHandler(details=>{
+   const outcome=windows!.windowOpen(details,()=>{throw new Error('External App opening is outside this private fixture')})
+   ;(receipt.auxiliaryBootstrap??=[]).push({event:'window-open',senderContentsId:contents.id,path:new URL(details.url).pathname,outcome:outcome.action})
+   return outcome
+  })
+  contents.on('did-create-window',(child,details)=>{
+   windows!.createdWindow(child,details)
+   const url=new URL(details.url)
+   ;(receipt.auxiliaryBootstrap??=[]).push({event:'did-create-window',senderContentsId:contents.id,contentsId:child.webContents.id,path:url.pathname,windowId:url.searchParams.get('window'),documentGeneration:url.searchParams.get('document')})
+  })
+ }
  access=createDesktopApplicationAccessOwner(runtime,join(directory,'application-access.sqlite'))
  let rejectSurveyWrites=false, rejectedWrites=0, rejectedSurveyBrowserId:string|null=null, loseProfileDirectoryAck=selectedCase==='profile-switch'&&phase==='first'
- const switchPorts=selectedCase==='profile-switch'?profileSwitchPorts(window,receipt,enabled=>{loseProfileDirectoryAck=enabled},browserId=>{rejectSurveyWrites=browserId!==null;rejectedSurveyBrowserId=browserId},()=>{rejectSurveyWrites=true;rejectedSurveyBrowserId=null}):null
+ const switchPorts=selectedCase==='profile-switch'||selectedCase==='complete'?profileSwitchPorts(window,receipt,enabled=>{loseProfileDirectoryAck=enabled},browserId=>{rejectSurveyWrites=browserId!==null;rejectedSurveyBrowserId=browserId},()=>{rejectSurveyWrites=true;rejectedSurveyBrowserId=null}):null
+ const completeObserver=selectedCase==='complete'?completePorts(receipt):null
+ const completeReaders:ReturnType<typeof cliFollow>[]=[]
  let holdProbeAck=false, releaseProbeAck: ((lose:boolean)=>void)|undefined
  const probeAck={hold(){holdProbeAck=true},release(lose:boolean){releaseProbeAck?.(lose)}}
- releaseObservationFaults=()=>{switchPorts?.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false)}
+ releaseObservationFaults=()=>{switchPorts?.dispose();completeObserver?.dispose();for(const reader of completeReaders)void reader.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false)}
  const userState=new WorkbenchUserStateStore(join(directory,'workbench-user-state.json'),{write:async(path,value,options)=>{const parsed=JSON.parse(String(value));if(rejectSurveyWrites&&path.endsWith('workbench-user-state.json')&&parsed.state?.surveyPageReferences?.some((page:any)=>page.browserId===rejectedSurveyBrowserId)){rejectedWrites++;if(selectedCase==='profile-switch')(receipt.profileSwitchPreferenceFailures??=[]).push({browserId:rejectedSurveyBrowserId});throw Object.assign(new Error('Private fixture original preference writer unavailable'),{code:'EIO'})}return durableWriteFile(path,value,options)}})
- const originalSend=contents.send.bind(contents);contents.send=(channel,...args)=>{if(loseProfileDirectoryAck&&channel==='browser:profilesChanged'){receipt.droppedProfileListPushes=(receipt.droppedProfileListPushes??0)+1;return}if(switchPorts?.observeSend(channel,args,originalSend))return;originalSend(channel,...args)}
+ const originalSend=contents.send.bind(contents);contents.send=(channel,...args)=>{completeObserver?.event(channel,args);if(loseProfileDirectoryAck&&channel==='browser:profilesChanged'){receipt.droppedProfileListPushes=(receipt.droppedProfileListPushes??0)+1;return}if(switchPorts?.observeSend(channel,args,originalSend))return;originalSend(channel,...args)}
  const originalHandle=ipcMain.handle.bind(ipcMain);ipcMain.handle=(channel,handler)=>originalHandle(channel,async(event,...args)=>{
-  if(channel.startsWith('browser:')||channel==='ui:writeWorkbenchState')receipt.ipc.push({channel,exactSender:event.sender===contents,exactFrame:event.senderFrame===contents.mainFrame})
+  if(channel.startsWith('browser:')||channel==='ui:writeWorkbenchState'||selectedCase==='complete'&&channel.startsWith('ui:workbenchWindows'))receipt.ipc.push({channel,exactSender:event.sender===contents,exactFrame:event.senderFrame===contents.mainFrame})
   const close=channel==='browser:close'?{browserId:args[0],ack:'pending'}:null
   if(close)receipt.closeCalls.push(close)
   let observed
@@ -113,6 +136,13 @@ async function run() {
  const click=async(selector:string)=>{const point=await until(()=>evaluate(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(selector)})].find(node=>node.checkVisibility());if(!e)return null;e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`),'actual pointer target');for(const type of ['mouseMoved','mousePressed','mouseReleased'])await contents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:point.x,y:point.y,...(type==='mouseMoved'?{}:{button:'left',clickCount:1})});await delay(80)}
  receipt.initial=await facts()
  assert.ok(await evaluate('Boolean(document.querySelector(".surface-navigation"))'),'Full production App must mount')
+ if(selectedCase==='complete'){
+  assert.ok(switchPorts&&completeObserver)
+  await completeCase({phase,directory,window,core,store,evaluate,result,cli,receipt,ports:switchPorts,observation:completeObserver,taskWorkspaceId:workspaceId,pageUrl,
+   follow:async(operationId:string)=>{const reader=cliFollow(process.env.AGENTMUX_PROFILE_SURVEY_NODE!,process.env.AGENTMUX_PROFILE_SURVEY_CLI!,'unix:'+desktopBusinessSocketPath(),await cliEnvironment('workface'),operationId,receipt);completeReaders.push(reader);return reader}})
+  assert.equal(receipt.complete?.completed,true,'Only the dedicated nonempty complete workface oracle may qualify T004')
+  receipt.businessPassed=true;receipt.passed=true;return
+ }
  if(selectedCase==='settings'){await settingsCase({phase,directory,window,evaluate,result,receipt,probeAck});receipt.businessPassed=true;receipt.passed=true;return}
  if(selectedCase==='profile-switch'){
   assert.ok(switchPorts)
@@ -225,6 +255,6 @@ async function run() {
 void run().catch(async error=>{receipt.failure={name:error.name,message:error.message,stack:error.stack};console.error(error);if(window&&!window.isDestroyed())try{receipt.failureFacts=await window.webContents.executeJavaScript('profileSurveyNative.read()');await writeFile(join(directory,phase+'-failure.png'),(await window.capturePage()).toPNG())}catch{}}).finally(async()=>{
  const failures:string[]=[]
  releaseObservationFaults()
- for(const release of [async()=>{if(window&&!window.isDestroyed())await window.webContents.executeJavaScript('profileSurveyNative.checkpoint()')},async()=>{if((phase==='restart'||!receipt.passed)&&core)for(const session of core.agentSessions())await core.stopAgent(session.agentSessionId,session.run)},()=>releaseIpc?.(),()=>runtime?.dispose(),()=>access?.dispose(),()=>windows?.dispose(),()=>sdk?.dispose(),()=>rpc?.dispose(),()=>privateHost?.dispose(),()=>{if(window&&!window.isDestroyed())window.destroy()}])try{await release()}catch(error){failures.push(String(error))}
+ for(const release of [async()=>{if(window&&!window.isDestroyed())await window.webContents.executeJavaScript('profileSurveyNative.checkpoint()')},async()=>{if((phase==='restart'||!receipt.passed)&&core)for(const session of core.agentSessions()){if(selectedCase==='complete'&&receipt.complete?.unstartedColdSessionIds?.includes(session.agentSessionId))continue;await core.stopAgent(session.agentSessionId,session.run)}},()=>releaseIpc?.(),()=>runtime?.dispose(),()=>access?.dispose(),()=>windows?.dispose(),()=>sdk?.dispose(),()=>rpc?.dispose(),()=>privateHost?.dispose(),()=>{if(window&&!window.isDestroyed())window.destroy()}])try{await release()}catch(error){failures.push(String(error))}
  receipt.cleanupFailures=failures;await writeFile(join(directory,phase+'-receipt.json'),JSON.stringify(receipt,null,2));if(receipt.passed&&!failures.length)app.quit();else app.exit(1)
 })

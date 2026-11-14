@@ -17,7 +17,6 @@ const { build: viteBuild } = require('vite')
 const args = process.argv.slice(2), outputIndex = args.indexOf('--output'), caseIndex = args.indexOf('--case'), mutationIndex = args.indexOf('--mutation')
 const selectedCase = caseIndex < 0 ? 'complete' : args[caseIndex + 1]
 assert.ok(['admission', 'profile-switch', 'settings', 'complete'].includes(selectedCase), 'Choose an exact Profile Survey case')
-assert.ok(['admission', 'profile-switch', 'settings'].includes(selectedCase), 'The complete case has no dedicated T004 business oracle yet; it cannot qualify through admission/profile-switch')
 const mutation = mutationIndex < 0 ? null : args[mutationIndex + 1]
 const mutationCases = { admission: {
   'omit-explicit-admission': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'if (request.profileId !== undefined) {', after: 'if (false && request.profileId !== undefined) {' },
@@ -113,7 +112,7 @@ receipt.originBoundary = 'Synthetic local HTTP identities, actual two origins; n
 async function execute(phase) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
   Object.assign(env, { AGENTMUX_PROFILE_SURVEY_ROOT: directory, AGENTMUX_PROFILE_SURVEY_SOURCE: root, AGENTMUX_PROFILE_SURVEY_PHASE: phase,
-    AGENTMUX_PROFILE_SURVEY_ORIGINS: JSON.stringify({primaryOrigin:origins.primaryOrigin,secondaryOrigin:origins.secondaryOrigin,loginUrl:origins.loginUrl,identityUrl:origins.identityUrl,childUrl:origins.childUrl,downloadUrl:origins.downloadUrl}), AGENTMUX_PROFILE_SURVEY_PAGE_URL: pageUrl, AGENTMUX_PROFILE_SURVEY_CASE: selectedCase,
+    AGENTMUX_PROFILE_SURVEY_ORIGINS: JSON.stringify({primaryOrigin:origins.primaryOrigin,secondaryOrigin:origins.secondaryOrigin,loginUrl:origins.loginUrl,identityUrl:origins.identityUrl,childUrl:origins.childUrl,downloadUrl:origins.downloadUrl,...(selectedCase==='complete'?{artifact:{filename:origins.artifactFor('workface-person').filename,sha256:origins.artifactFor('workface-person').sha256,base64:origins.artifactFor('workface-person').bytes.toString('base64')}}:{})}), AGENTMUX_PROFILE_SURVEY_PAGE_URL: pageUrl, AGENTMUX_PROFILE_SURVEY_CASE: selectedCase,
     AGENTMUX_PROFILE_SURVEY_NODE: process.execPath, AGENTMUX_PROFILE_SURVEY_CLI: join(dist, 'agentmux.js'),
     AGENTMUX_RUNTIME_DIRECTORY: join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
     AGENTMUX_SPATIAL_STATE_STORE: join(directory, 'state/spatial-state.json'),
@@ -205,6 +204,11 @@ try {
     } }] } },
     plugins: [rendererSourcePlugin()],
     build: { outDir: join(directory, 'renderer'), emptyOutDir: false, minify: false, sourcemap: false, target: 'esnext' } })
+  if(selectedCase==='complete'){
+    // Production's privileged App portals into this exact script-free auxiliary shell.
+    const shell=join(root,'apps/desktop/src/renderer/workbench-window.html')
+    await bind(shell);await copyFile(shell,join(directory,'renderer/workbench-window.html'))
+  }
   for (const required of ['apps/desktop/src/renderer/src/main.tsx', 'apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx', 'apps/desktop/src/renderer/src/lib/workbench-projection.ts']) assert.ok(rendererInputs.has(join(root, required)), 'Real Renderer consumer is bundled: ' + required)
   await writeFile(join(directory, 'bootstrap.cjs'), `const{app}=require('electron'),fs=require('node:fs'),path=require('node:path');const root=${JSON.stringify(directory)};for(const key of['home','appData','userData','sessionData']){const p=path.join(root,key);fs.mkdirSync(p,{recursive:true});app.setPath(key,p)}const fail=error=>{console.error(error);fs.writeFileSync(path.join(root,process.env.AGENTMUX_PROFILE_SURVEY_PHASE+'-receipt.json'),JSON.stringify({passed:false,failure:{name:error.name,message:error.message,stack:error.stack},cleanupFailures:[]}));app.exit(1)};process.on('uncaughtException',fail);app.whenReady().then(()=>import(${JSON.stringify(join(dist, 'main.mjs'))})).catch(fail);`)
   for(const file of [dist,join(directory,'renderer'),join(directory,'preload.cjs'),join(directory,'bootstrap.cjs')])await bindArtifact(file)
@@ -214,6 +218,7 @@ try {
   assert.notEqual(first.pid, restart.pid, 'Recovery uses a second physical process')
   assert.equal(first.businessPassed, true, 'Boot or gallery rendering cannot qualify admission'); assert.equal(restart.businessPassed, true); assert.deepEqual(restart.recoveredIdentity, first.savedIdentity, 'Second PID must read original Profile/Browser/Region/Survey and mixed Task data without reseeding')
   if(selectedCase==='profile-switch')for(const phase of [first,restart]){assert.equal(phase.profileSwitch?.completed,true);assert.ok(phase.cases.some(item=>item.kind==='profile-switch-dedicated-oracle'&&item.passed),'No admission fallthrough can qualify profile-switch')}
+  if(selectedCase==='complete')for(const phase of [first,restart]){assert.equal(phase.complete?.completed,true);assert.ok(phase.complete.cases.length>0);assert.ok(phase.cases.some(item=>item.kind==='complete-dedicated-oracle'&&item.passed),'No admission/profile-switch fallthrough can qualify complete')}
   for (const [file, digest] of sources) assert.equal(hash(await readFile(resolve(root, file))), digest, 'Qualification candidate remained unchanged: ' + file)
   for(const [file,binding] of artifacts)assert.equal(hash(await readFile(join(directory,file))),binding.sha256,'The exact loaded native artifact remained unchanged: '+file)
   receipt.passed = true; await save()
