@@ -29,7 +29,7 @@ import { parseBrowserStructuredOutputRequest } from '@agentmux/browser/browser-s
 import { resolveBrowserStructuredTarget } from '@agentmux/browser/browser-structured-target'
 import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '@agentmux/browser/model/browser-outcome-criteria'
 
-import { BaseWindow, dialog, session, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type WebContents, type WebFrameMain, type Session } from 'electron'
+import { BaseWindow, dialog, nativeImage, session, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, parseAmuxObjectLink, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
 import {
@@ -85,7 +85,7 @@ import { registerBrowserSessionPermissions } from './browser-session-permissions
 import { BrowserSitePermissions, browserPermissionOrigin, type BrowserPermissionContext } from './browser-site-permissions.js'
 import type { BrowserSitePermission, BrowserSitePermissionAnswer, BrowserSitePermissionDecision, BrowserSitePermissionState } from '../shared/browser-site-permissions.js'
 import { capturePageImage } from '@agentmux/native-desktop/image'
-import { browserPagePixels } from './browser-image.js'
+import { browserPagePixels, exportBrowserPageImage } from './browser-image.js'
 import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
 import { safeBrowserUrl, startBrowserOperationStep, recordBrowserOperationTarget, summarizeBrowserValue } from '@agentmux/browser/browser-operation-step'
@@ -550,7 +550,7 @@ export class BrowserViewManager {
   private nativeVisibilityRevision = 0
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   /** Page CSS px → `Input.*` coordinates under the emulation applyViewport actually applied; absent means 1. */
-  private readonly inputScales = new WeakMap<WebContents, number>()
+  private readonly viewportScales = new WeakMap<WebContents, { input: number; fit: number }>()
   private readonly pendingFinds = new WeakMap<WebContents, () => void>()
   /** Optional App appearance projection; the receiver rechecks the original native document. */
   capsuleDocumentReady: ((browserId: string) => void) | undefined
@@ -2764,13 +2764,20 @@ export class BrowserViewManager {
       capture: async (): Promise<BrowserScreenshotCapture['image']> => {
         requireCurrent()
         if (transport) {
-          const captured = await transport.sendCommand('Page.captureScreenshot', prepared!.parameters)
+          // CDP clip capture restores its own emulation state, which does not
+          // include Electron's native Viewport. Export from the unchanged raster.
+          const captured = await transport.sendCommand('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })
           requireCurrent()
           const data = (captured as { data?: unknown } | null)?.data
           if (typeof data !== 'string' || data.length === 0 || data.length > BROWSER_PNG_MAX_BASE64_CHARS) throw new Error('Browser screenshot must contain bounded base64 PNG data')
           const bytes = Buffer.from(data, 'base64')
           if (bytes.toString('base64') !== data) throw new Error('Browser screenshot must contain canonical base64 PNG data')
-          return await capturePageImage({ capture: async () => ({ png: bytes }) })
+          const original = await capturePageImage({ capture: async () => ({ png: bytes }) })
+          if (!prepared?.region || !before?.deviceScaleFactor) return original
+          const image = nativeImage.createFromBuffer(bytes)
+          const pixelsPerCssPixel = before.deviceScaleFactor * (this.viewportScales.get(view.webContents)?.fit ?? 1)
+          const exported = exportBrowserPageImage(image, pixelsPerCssPixel, prepared.region)
+          return await capturePageImage({ capture: async () => browserPagePixels(exported) })
         }
         return await capturePageImage({ capture: async () => {
           const captured = await view.webContents.capturePage(undefined, { stayHidden: true })
@@ -4084,7 +4091,7 @@ export class BrowserViewManager {
       beginNativeInput: () => this.beginAgentInput(entry, observingView),
       ...(signal ? { signal } : {}),
       ...(interrupts ? { interrupts } : {}),
-      inputScale: () => this.inputScales.get(observingView.webContents) ?? 1,
+      inputScale: () => this.viewportScales.get(observingView.webContents)?.input ?? 1,
       ...(Number.isFinite(deadlineMillis) ? { remainingMillis: () => deadlineMillis - performance.now() } : {}),
       ...(this.downloads && signal ? { downloads: browserDownloadPort({ store: this.downloads, signal, context: () => {
         const view = requireLive()
@@ -5555,7 +5562,7 @@ export class BrowserViewManager {
     const screen = screenOverride === undefined ? entry.storage.mode === 'normal' && entry.storage.profileId && !('capsule' in entry.storage) ? this.profiles.environmentSettings?.(entry.storage.profileId)?.screen : undefined : screenOverride
     if (size === null && !screen) {
       contents.disableDeviceEmulation()
-      this.inputScales.delete(contents)
+      this.viewportScales.delete(contents)
       return
     }
     // Desktop emulation includes page zoom in its layout size. Compensate locally:
@@ -5563,7 +5570,7 @@ export class BrowserViewManager {
     const zoom = contents.getZoomFactor()
     if (size === null) {
       contents.enableDeviceEmulation({ screenPosition: 'desktop', screenSize: screen!, viewPosition: { x: 0, y: 0 }, deviceScaleFactor: 0, viewSize: { width: 0, height: 0 }, scale: 1 })
-      this.inputScales.delete(contents)
+      this.viewportScales.delete(contents)
       return
     }
     const viewSize = size.screenPosition === 'desktop'
@@ -5585,7 +5592,7 @@ export class BrowserViewManager {
     })
     // `Input.*` coordinates are in the emulated view's units: desktop layout already includes page zoom,
     // a mobile layout does not. Recorded here so dispatch uses what was applied, not a second derivation.
-    this.inputScales.set(contents, size.screenPosition === 'desktop' ? scale : scale / zoom)
+    this.viewportScales.set(contents, { input: size.screenPosition === 'desktop' ? scale : scale / zoom, fit: scale })
   }
 
   /**

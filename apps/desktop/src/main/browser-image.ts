@@ -18,6 +18,20 @@ export function browserPagePixels(image: NativeImage): { png: Buffer; width: num
   return { png: image.toPNG(), width, height }
 }
 
+/** Export the original raster; CDP clip capture can overwrite Electron's device emulation. */
+export function exportBrowserPageImage(image: NativeImage, pixelsPerCssPixel: number,
+  region: { x: number; y: number; width: number; height: number; pixelRatio: number }): NativeImage {
+  const size = image.getSize()
+  // Quantize only to original raster pixels. Request validation and output budgets
+  // already belong to prepareBrowserScreenshot; no page geometry is changed here.
+  const x = Math.min(size.width - 1, Math.round(region.x * pixelsPerCssPixel)), y = Math.min(size.height - 1, Math.round(region.y * pixelsPerCssPixel))
+  const right = Math.min(size.width, Math.max(x + 1, Math.round((region.x + region.width) * pixelsPerCssPixel)))
+  const bottom = Math.min(size.height, Math.max(y + 1, Math.round((region.y + region.height) * pixelsPerCssPixel)))
+  const cropped = x === 0 && y === 0 && right === size.width && bottom === size.height
+    ? image : image.crop({ x, y, width: right - x, height: bottom - y })
+  return cropped.resize({ width: Math.ceil(region.width * region.pixelRatio), height: Math.ceil(region.height * region.pixelRatio), quality: 'best' })
+}
+
 export function nativeImageFromBrowserPng(
   input: BrowserPng,
   createFromBuffer: (buffer: Buffer) => NativeImage
