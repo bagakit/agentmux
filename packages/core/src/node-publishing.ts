@@ -1,9 +1,12 @@
 import { AgentMuxError } from './errors.js';
+import { parseNodeLocationPolicy, parseNodeMapLocation, type NodeMapLocation, type NodeLocationPolicy } from './node-location.js';
+export { type NodeMapLocation, type NodeLocationPolicy, readMapCoordinates } from './node-location.js';
 import { rpcCount, rpcRecord, rpcString } from './rpc-data.js';
 /** This Core's publication; routes and existing full-owner capabilities stay independent. */
 export type NodePublishingPolicy = {
     alias: string;
     shareResources: boolean;
+    mapLocation?: NodeLocationPolicy;
     allowedPaths: string[];
     deniedPaths: string[];
     defaultPath: string | null;
@@ -158,7 +161,7 @@ export type NodeFileTarget = NodeRoute & {
 };
 export const NODE_PUBLISHING_METHODS = {
     'settings.node.inspect': 'short', 'settings.node.configure': 'long', 'settings.node.resources': 'long',
-    'node.inspect': 'short', 'node.resources': 'long', 'node.files.list': 'long', 'node.files.read': 'long', 'node.resolve': 'short'
+    'node.location': 'short', 'node.inspect': 'short', 'node.resources': 'long', 'node.files.list': 'long', 'node.files.read': 'long', 'node.resolve': 'short'
 } as const;
 export type NodePublishingMethod = keyof typeof NODE_PUBLISHING_METHODS;
 /** A saved client route qualified by the original semantic Runtime. */
@@ -179,6 +182,7 @@ export type NodePublishingParams = {
         policy: NodePublishingPolicy;
     };
     'settings.node.resources': Record<string, never>;
+    'node.location': NodeRoute;
     'node.inspect': NodeRoute;
     'node.resources': NodeRoute;
     'node.files.list': NodeFileTarget & {
@@ -199,6 +203,7 @@ export type NodePublishingResults = {
     'settings.node.inspect': NodeSettings;
     'settings.node.configure': NodeSettings;
     'settings.node.resources': NodeResources;
+    'node.location': { node: NodeIdentity; location: NodeMapLocation | null; meshPeer?: { networkId: string; peerId: string } };
     'node.inspect': NodePublication;
     'node.resources': NodeResources;
     'node.files.list': NodeFileList;
@@ -216,7 +221,7 @@ export function nodeAlias(value: unknown): string {
     return value as string;
 }
 export function parseNodePublishingPolicy(value: unknown): NodePublishingPolicy {
-    const p = rpcRecord(value, ['alias', 'shareResources', 'allowedPaths', 'deniedPaths', 'defaultPath']);
+    const p = rpcRecord(value, ['alias', 'shareResources', 'allowedPaths', 'deniedPaths', 'defaultPath', 'mapLocation']);
     if (typeof p.shareResources !== 'boolean')
         failure('Resource publication must be boolean.');
     const paths = (value: unknown): string[] => {
@@ -230,7 +235,7 @@ export function parseNodePublishingPolicy(value: unknown): NodePublishingPolicy 
     };
     if (p.defaultPath !== null && (typeof p.defaultPath !== 'string' || !p.defaultPath.startsWith('/') || p.defaultPath.includes('\0')))
         failure('The default path must be null or a literal absolute path.');
-    return { alias: nodeAlias(p.alias), shareResources: p.shareResources as boolean, allowedPaths: paths(p.allowedPaths), deniedPaths: paths(p.deniedPaths), defaultPath: p.defaultPath as string | null };
+    return { alias: nodeAlias(p.alias), shareResources: p.shareResources as boolean, allowedPaths: paths(p.allowedPaths), deniedPaths: paths(p.deniedPaths), defaultPath: p.defaultPath as string | null, ...(p.mapLocation === undefined ? {} : { mapLocation: parseNodeLocationPolicy(p.mapLocation) }) };
 }
 export function parseNodeRootReference(value: unknown): NodeRootReference {
     const p = rpcRecord(value, ['runtimeId', 'rootId', 'policyRevision']);
@@ -350,6 +355,14 @@ export function parseNodePublishingResult<M extends NodePublishingMethod>(method
         if (offset !== (requested.offset ?? 0) || !Number.isSafeInteger(totalBytes) || offset > totalBytes || bytes > (requested.maxBytes ?? 64 * 1024) || offset + bytes > totalBytes || nextOffset !== (offset + bytes < totalBytes ? offset + bytes : null))
             fail();
         return { root: originalRoot, path: target.path, encoding: 'base64', data, totalBytes, offset, nextOffset, revision } as NodePublishingResults[M];
+    }
+    if (method === 'node.location') {
+        const p = rec(value, ['node', 'location', 'meshPeer']), node = identity(p.node);
+        if (route.expectedRuntimeId !== undefined && route.expectedRuntimeId !== node.runtimeId) return fail();
+        const location = p.location === null ? null : parseNodeMapLocation(p.location);
+        if (p.meshPeer === undefined) return { node, location } as NodePublishingResults[M];
+        const peer = rec(p.meshPeer, ['networkId', 'peerId']);
+        return { node, location, meshPeer: { networkId: text(peer.networkId), peerId: text(peer.peerId) } } as NodePublishingResults[M];
     }
     const isResources = method === 'node.resources' || method === 'settings.node.resources';
     const p = rec(value, isResources ? ['node', 'policyRevision', 'status', 'sample', 'code', 'message'] : ['node', 'policyRevision', 'resourcesShared', 'roots', 'landing']);

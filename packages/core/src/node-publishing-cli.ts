@@ -7,6 +7,7 @@ const summaries: Record<NodePublishingMethod, string> = {
     'settings.node.inspect': 'Read one original operator Node’s complete policy and original save receipt.',
     'settings.node.configure': 'Compare and durably save one original operator Node’s publication policy once.',
     'settings.node.resources': 'Read this owner’s actual resources and Core I/O operation counters independently of public sharing.',
+    'node.location': 'Read this Node’s optional map position, source and current network identity.',
     'node.inspect': 'Read exactly one Node’s published identity, roots and landing reference.',
     'node.resources': 'Read permitted OS, Core-process and I/O operation measurements, or explicit withheld.',
     'node.files.list': 'Read one continuing page inside an original published root.',
@@ -14,14 +15,14 @@ const summaries: Record<NodePublishingMethod, string> = {
     'node.resolve': 'Match a published Node locator or pin its original Runtime across rename.'
 };
 const inputs: Record<NodePublishingMethod, string> = {
-    'settings.node.inspect': '{operationId?,target?:{hostId,expectedRuntimeId}}', 'settings.node.configure': '{target?:{hostId,expectedRuntimeId},expectedRevision,operationId,policy:{alias,shareResources,allowedPaths,deniedPaths,defaultPath}}',
-    'settings.node.resources': '{}', 'node.inspect': '{hostId,expectedRuntimeId?}', 'node.resources': '{hostId,expectedRuntimeId?}',
+    'settings.node.inspect': '{operationId?,target?:{hostId,expectedRuntimeId}}', 'settings.node.configure': '{target?:{hostId,expectedRuntimeId},expectedRevision,operationId,policy:{alias,shareResources,allowedPaths,deniedPaths,defaultPath,mapLocation?:{coordinates,label,estimatePublicEgress}}}',
+    'settings.node.resources': '{}', 'node.inspect': '{hostId,expectedRuntimeId?}', 'node.location': '{hostId,expectedRuntimeId?}', 'node.resources': '{hostId,expectedRuntimeId?}',
     'node.files.list': '{hostId,expectedRuntimeId?,root:{runtimeId,rootId,policyRevision},path,offset?,limit?,expectedRevision?}',
     'node.files.read': '{hostId,expectedRuntimeId?,root:{runtimeId,rootId,policyRevision},path,offset?,maxBytes?,expectedRevision?}',
     'node.resolve': '{hostId,expectedRuntimeId?,alias?}'
 };
 export const NODE_PUBLISHING_CLI_COMMANDS: readonly AgentMuxCliCommand[] = (Object.keys(NODE_PUBLISHING_METHODS) as NodePublishingMethod[]).map(method => {
-    const route = method === 'node.inspect' || method === 'node.resources' || method === 'node.resolve';
+    const route = method === 'node.location' || method === 'node.inspect' || method === 'node.resources' || method === 'node.resolve';
     const operatorPolicy = method === 'settings.node.inspect' || method === 'settings.node.configure';
     const optional = method === 'settings.node.inspect' || method === 'settings.node.resources';
     return { method, usage: operatorPolicy ? '[--host ID --expected-runtime ID] ' + (optional ? '[--input <FILE|->]' : '--input <FILE|->') : route ? '[--host ID] [--expected-runtime ID]' + (method === 'node.resolve' ? ' [--alias LABEL]' : '') : optional ? '[--input <FILE|->]' : '--input <FILE|->', summary: summaries[method],

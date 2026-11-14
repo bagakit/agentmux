@@ -123,6 +123,7 @@ export class AgentMuxControlServer {
   private readonly relayGateway: CoreRelayGateway
   private readonly localPrincipal: AgentMuxRpcPrincipal = { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }
   readonly path: string
+  localMeshPeer() { return this.relayGateway.localPeer() }
   constructor(private readonly options: AgentMuxControlServerOptions = {}, path?: string) {
     this.relayGateway = new CoreRelayGateway(options.relayGateway, options.meshState, options.meshEndpoint ? { source: options.meshEndpoint, server: this } : undefined)
     this.path = path ?? options.socketPath ?? defaultAgentMuxControlSocketPath()

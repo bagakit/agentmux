@@ -271,7 +271,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       capsuleRuntime: options.service?.capsuleRuntime ?? capsules.runtime,
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
-      nodePublishing: new NodePublishingOwner({ stateDirectory, runtimeId, ownerInstanceId }),
+      nodePublishing: new NodePublishingOwner({ stateDirectory, runtimeId, ownerInstanceId, meshPeer: () => server?.localMeshPeer() }),
       coreClients: async (hostId, read) => [{ hostId: 'local', client: client! }, ...(await (read === undefined
         ? options.coreClients?.(hostId) : options.coreClients?.(hostId, read)) ?? [])],
       hostedRuntime: () => hosted!,

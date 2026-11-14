@@ -7,6 +7,7 @@ import { AgentMuxError } from './errors.js';
 import { durableWriteFile } from './durable-write.js';
 import { mintObjectId } from './object-id.js';
 import { readNodePublishedDirectory, type NodeDirectoryWitness } from './node-publishing-files.js';
+import { NodeLocationSource } from './node-location-source.js';
 import { parseNodePublishingPolicy, type NodePublishingPolicy, type NodePolicyOperation, type NodeSettings, type NodePublication, type NodeRootReference, type NodeResources, type NodeResourceSample, type NodeMetric, type NodePublishingMethod, type NodePublishingParams, type NodePublishingResults, type NodePublishingPort } from './node-publishing.js';
 const digest = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const inside = (root: string, path: string) => path === root || path.startsWith(root === sep ? root : root + sep);
@@ -37,11 +38,13 @@ const witness = async (path: string): Promise<NodeDirectoryWitness> => { const i
 export class NodePublishingOwner implements NodePublishingPort {
     private tail: Promise<void> = Promise.resolve();
     private readonly file: string;
+    private readonly locations = new NodeLocationSource();
     private reading: Promise<State> | undefined;
     constructor(private readonly options: {
         stateDirectory: string;
         runtimeId: string;
         ownerInstanceId: string;
+        meshPeer?: () => { networkId: string; peerId: string } | undefined;
         /** Test/embedding durability port; the production default confirms file and naming directory. */
         write?: typeof durableWriteFile;
     }) { this.file = join(options.stateDirectory, 'node-publication.json'); }
@@ -124,6 +127,8 @@ export class NodePublishingOwner implements NodePublishingPort {
             if (current.revision !== input.expectedRevision)
                 return denied('Node settings changed. Read the current policy and preserve your edits before saving.', 'NODE_POLICY_CHANGED');
             const policy = parseNodePublishingPolicy(input.policy);
+            // An older operator may submit only the fields it understands.
+            if (current.policy.mapLocation && !policy.mapLocation) policy.mapLocation = current.policy.mapLocation;
             policy.allowedPaths = policy.allowedPaths.map(p => resolve(p));
             policy.deniedPaths = policy.deniedPaths.map(p => resolve(p));
             policy.defaultPath = policy.defaultPath === null ? null : resolve(policy.defaultPath);
@@ -281,6 +286,14 @@ export class NodePublishingOwner implements NodePublishingPort {
             throw error; return denied('The original Node publication is unavailable. Ask its owner to inspect the saved settings.', 'NODE_PUBLICATION_UNAVAILABLE'); }), route = input as NodePublishingParams['node.inspect'];
         if (route.expectedRuntimeId !== undefined && route.expectedRuntimeId !== this.options.runtimeId)
             return denied('This route reached a different original Node Runtime.', 'NODE_RUNTIME_MISMATCH');
+        if (method === 'node.location') {
+            const location = await this.locations.read(this.options.runtimeId, state.policy.mapLocation, signal);
+            signal?.throwIfAborted();
+            const current = await this.state();
+            const published = isDeepStrictEqual(current.policy.mapLocation, state.policy.mapLocation) ? location : null;
+            const meshPeer = published ? this.options.meshPeer?.() : undefined;
+            return { node: this.node(current), location: published, ...(meshPeer ? { meshPeer } : {}) } as NodePublishingResults[M];
+        }
         if (method === 'node.resources' || method === 'settings.node.resources')
             return await this.resources(state, method === 'settings.node.resources', signal) as NodePublishingResults[M];
         if (method === 'node.files.list' || method === 'node.files.read') {

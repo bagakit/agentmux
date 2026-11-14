@@ -109,6 +109,9 @@ export class CoreRelayGateway implements MeshNetworkPort {
       }
     }, adopt: state => this.adopt(state) })
   }
+  localPeer(): { networkId: string; peerId: string } | undefined {
+    return this.activeMesh && { networkId: this.activeMesh.networkId, peerId: this.activeMesh.identity.peerId }
+  }
   inspect(): AgentMuxRelayInspection { return { gateway: structuredClone(this.state) } }
   start(shared?: { server: Server; tls: boolean }): void {
     if (this.startup || this.shutdown.signal.aborted) return
