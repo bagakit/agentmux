@@ -7,21 +7,27 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 
-assert.ok(process.argv.slice(2).every(arg => arg === '--mutations'))
+assert.ok(process.argv.slice(2).every(arg => ['--mutations', '--screenshot-mutations'].includes(arg)))
 const require = createRequire(resolve('apps/desktop/package.json'))
 const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
-const out = resolve('.tmp/browser-viewport-cli/proof')
-await mkdir(out, { recursive: true })
+const proofRoot = resolve('.tmp/browser-viewport-cli')
+await mkdir(proofRoot, { recursive: true })
+const out = await mkdtemp(join(proofRoot, 'proof-'))
+console.log('Viewport proof: ' + out)
 const receipt = { passed: false, source: {}, runs: [] }
 const files = ['packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/browser-viewport.ts',
   'packages/core/src/browser-page-capability.ts', 'packages/browser/src/browser-page-dispatch.ts',
-  'apps/desktop/src/main/browser-view-manager.ts']
+  'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/browser-image.ts',
+  'packages/browser/src/browser-screenshot-options.ts',
+  'apps/desktop/scripts/fixtures/browser-viewport-cli/main.ts', 'apps/desktop/scripts/verify-browser-viewport-cli.mjs']
 for (const file of files) receipt.source[file] = createHash('sha256').update(await readFile(file)).digest('hex')
 const work = await mkdtemp(join(tmpdir(), 'amux-vp-'))
 const mutants = {
   'omit-native-apply': ['browser-view-manager.ts', '    this.applyViewport(entry, entry.view, ownedViewport)', '    void ownedViewport'],
   'omit-owner-dispatch': ['browser-page-dispatch.ts', '        return context.setViewport(args[0])', '        return context.pageInfo()'],
-  'omit-cli-call': ['agentmux-cli-commands.ts', 'code: `return await setViewport(${JSON.stringify(viewport)})`', 'code: `return await pageInfo()`']
+  'omit-cli-call': ['agentmux-cli-commands.ts', 'code: `return await setViewport(${JSON.stringify(viewport)})`', 'code: `return await pageInfo()`'],
+  'restore-cdp-clip': ['browser-view-manager.ts', "transport.sendCommand('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })", "transport.sendCommand('Page.captureScreenshot', prepared!.parameters)"],
+  'omit-image-crop': ['browser-image.ts', 'image.crop({ x, y, width: right - x, height: bottom - y })', 'image']
 }
 async function dependencies(destination, source) {
   await mkdir(destination, { recursive: true })
@@ -33,7 +39,9 @@ async function dependencies(destination, source) {
   }
 }
 try {
-  for (const name of ['baseline', ...(process.argv.includes('--mutations') ? Object.keys(mutants) : []), 'restored']) {
+  const selected = process.argv.includes('--screenshot-mutations') ? ['restore-cdp-clip', 'omit-image-crop']
+    : process.argv.includes('--mutations') ? Object.keys(mutants) : []
+  for (const name of ['baseline', ...selected, ...(selected.length ? ['restored'] : [])]) {
     const root = join(work, 'r' + receipt.runs.length); await mkdir(root)
     for (const pkg of ['core', 'browser']) await dependencies(join(root, 'node_modules'), resolve('packages', pkg, 'node_modules'))
     await dependencies(join(root, 'node_modules'), resolve('apps/desktop/node_modules'))
@@ -52,6 +60,7 @@ try {
     await build({ ...options, entryPoints: ['packages/core/src/agentmux.ts'], outfile: join(root, 'cli.mjs') })
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_|ELECTRON_RUN_AS_NODE$)/.test(key)))
     env.AGENTMUX_VIEWPORT_CLI_ROOT = root
+    env.AGENTMUX_VIEWPORT_CLI_OUT = out
     const result = await new Promise((resolveChild, reject) => {
       const child = spawn(require('electron'), [join(root, 'main.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = '', stderr = '', expired = false, escalation
