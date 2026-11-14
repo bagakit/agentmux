@@ -12,7 +12,7 @@ import { RuntimeController } from '../../src/main/runtime-controller.js'
 /** Two actual Source services and private vendored Native daemons. All Zone and
  * Space identities come from Source folder registration, never a fixture graph.
  * Main uses its production local carrier factory; only the configured map is a leaf. */
-export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<unknown>>, options: { scratch?: boolean } = {}) {
+export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<unknown>>, options: { scratch?: boolean; sharedProject?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'amx-source-files-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
@@ -20,7 +20,8 @@ export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<un
   vi.stubEnv('AGENTMUX_WORKSPACE_MOVE_HELPER', helper)
   const sources = []
   for (const id of ['source-a', 'source-b']) {
-    const directory = join(root, id), state = join(directory, 'state'), runtimeDirectory = join(directory, 'runtime'), project = join(directory, 'project')
+    const directory = join(root, id), state = join(directory, 'state'), runtimeDirectory = join(directory, 'runtime')
+    const project = options.sharedProject ? join(root, 'shared-project') : join(directory, 'project')
     await Promise.all([mkdir(state, { recursive: true }), mkdir(runtimeDirectory, { recursive: true }), mkdir(project, { recursive: true })])
     const daemon = spawn(resolve('packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
       ['--socket', join(runtimeDirectory, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
