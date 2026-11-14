@@ -12,7 +12,7 @@ afterEach(()=>cleanup())
 it('the actual workflow glyph consumes shared drawing and style while keeping recorded versus streaming and status semantics',async()=>{
  await dom.render(<><WorkflowStatusGlyph status="running" size={16}/><WorkflowStatusGlyph status="running" size={16} recorded/>{(['completed','failed','killed','paused','queued'] as const).map(status=><WorkflowStatusGlyph key={status} status={status} size={12}/>)}</>)
  const running=[...dom.container.querySelectorAll<SVGSVGElement>('.wf-ico--running')]
- expect(running).toHaveLength(2);expect(running[0]!.closest('[data-icon-animation]')?.getAttribute('data-icon-animation')).toBe('spin');expect(running[1]!.closest('[data-icon-animation]')).toBeNull()
+ expect(running).toHaveLength(2);expect(running[0]!.closest('[data-icon-animation]')?.getAttribute('data-icon-animation')).toBe('orbit');expect(running[1]!.closest('[data-icon-animation]')).toBeNull()
  for(const svg of running){expect(svg.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.workflow-running'));expect(svg.getAttribute('width')).toBe('16');expect(svg.style.strokeWidth).toBe('var(--icon-stroke-width, 1.75)')}
  const symbol=document.getElementById(semanticIconHref('status.workflow-running').slice(1))!,defaultGeometry=symbol.innerHTML
  expect(symbol.querySelectorAll('circle')).toHaveLength(2);expect(symbol.querySelector('circle:last-child')?.getAttribute('stroke-linecap')).toBeNull()
