@@ -58,7 +58,7 @@ export async function createSpaceMemberProgressFixture(cleanup: Array<() => Prom
     return { target, owner: execution, progress: foreign ? managerD : managerB, inputTarget: { hostId: 'local', agentSessionId: sid, providerId: 'codex', workspacePath: execution.root } }
   }
   await h.configure(h.b, [{ id: 'collision', route: h.route }], [h.grant('A-progress', h.a.identity, h.b.identity, ['space.member.call'])])
-  const scopes = ['runtime.owner.identity', 'runtime.invoke/readAgentInputEpoch', 'agent.progress.list', 'agent.progress.create', 'agent.progress.action', 'agent.progress.update', 'file.upload', 'file.upload.inspect']
+  const scopes = ['message.ls', 'message.read', 'message.dispatch.ls', 'message.dispatch.read', 'runtime.owner.identity', 'runtime.invoke/readAgentInputEpoch', 'agent.progress.list', 'agent.progress.create', 'agent.progress.action', 'agent.progress.update', 'file.upload', 'file.upload.inspect']
   await h.configure(h.c, [], [h.grant('B-progress', h.b.identity, h.d.identity, scopes)])
   await h.configure(h.d, [], [h.grant('C-progress', h.c.identity, h.d.identity, scopes)])
   return { ...h, coreB, spatial, tick, admit, filesB, filesD,
