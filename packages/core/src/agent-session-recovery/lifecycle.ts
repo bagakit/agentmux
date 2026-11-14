@@ -567,7 +567,7 @@ export class AgentSessionRunLifecycle {
         hookBinding.endpoint,
         plan.hookLaunchIssue
       )
-      const workspaceTrust = await this.ports.hooks.prepareOwnedWorkspaceTrust(provider, current.workspacePath, current.agentSessionId, input.env ?? {}, lifecycleOperationId)
+      const workspaceTrust = await this.ports.hooks.prepareOwnedWorkspaceTrust(provider, current.workspacePath, current.agentSessionId, input.env ?? {}, lifecycleOperationId, current.toolExecution)
       if (continuity && workspaceTrust) continuity.workspaceTrust = workspaceTrust
       if (reservation.kind === 'reopen') {
         const admittedReservation = reservation

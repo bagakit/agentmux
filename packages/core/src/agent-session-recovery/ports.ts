@@ -75,7 +75,7 @@ export type AgentSessionRecoveryPorts = {
     endpoint?: { url: string; token: string },
     launchIssue?: { code: string; message: string }
   ): Promise<boolean>;
-    prepareOwnedWorkspaceTrust(provider: AgentProvider, workspacePath: string, agentSessionId: string, env: Readonly<Record<string, string>>, lifecycleOperationId: string): Promise<import('../workspace-trust-preparation.js').AgentWorkspaceTrustPreparation | undefined>;
+    prepareOwnedWorkspaceTrust(provider: AgentProvider, workspacePath: string, agentSessionId: string, env: Readonly<Record<string, string>>, lifecycleOperationId: string, toolExecution?: import('../agent-tool-execution.js').AgentToolExecutionBinding): Promise<import('../workspace-trust-preparation.js').AgentWorkspaceTrustPreparation | undefined>;
     requireHookIngressOwner(): Promise<void>;
     settleHookRestore(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run'>): void;
     observeHookRestoreFailure(session: AgentMuxStoredAgentSession, phase: 'listen' | 'binding', error: unknown): void;
