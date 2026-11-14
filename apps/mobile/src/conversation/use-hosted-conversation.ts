@@ -4,21 +4,21 @@ import { describeConversationWindow, projectConversationWindow } from '@agentmux
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentSessionHistoryPage } from '@agentmux/core'
 import { agentEvidenceStale, msUntilSemanticStatusStale, type AgentObservation } from '@agentmux/core/agent-status'
-import { errorMessage } from './delivery'
+import { readMobileConversationSession, type MobileConversationMetadata } from './mobile-conversation-session'
 
 /** `paired` says whether this device holds a Mac connection link; absent when the owner has not established it. */
 export type MobileConnection = { state: 'unavailable' | 'connecting' | 'connected' | 'disconnected'; message: string; issue?: string; paired?: boolean }
 type PageOwner = { client: AgentMuxHostedClient; agentSessionId: string; hostId?: string; workspacePath?: string }
-type Metadata = { id: string | null; session: AgentMuxAgentSession | null; notice: string | null; disconnected: boolean;
+type Metadata = { owner: AgentMuxHostedClient | null; id: string | null; session: AgentMuxAgentSession | null; metadata: MobileConversationMetadata; disconnected: boolean;
   activity: { owner: object; hostId: string; runId: string; observation: AgentObservation } | null }
-const empty = (id: string | null): Metadata => ({ id, session: null, notice: null, disconnected: false, activity: null })
+const empty = (id: string | null, owner: AgentMuxHostedClient | null): Metadata => ({ owner, id, session: null, metadata: { state: 'loading', issue: null }, disconnected: false, activity: null })
 const sameSource = (a: AgentSessionHistoryPage, b: AgentSessionHistoryPage) => a.agentSessionId === b.agentSessionId && a.sourceHostId === b.sourceHostId && a.source.providerId === b.source.providerId && a.source.nativeSessionId === b.source.nativeSessionId
 
 /** Complete accepted public Reader frames; transport loss retains the original view and resource owner. */
 export function useHostedConversation(client: AgentMuxHostedClient | null, id: string | null, active: boolean,
   beforeCommit?: (frame: ReturnType<typeof projectConversationWindow>) => boolean) {
-  const [metadata, setMetadata] = useState<Metadata>(() => empty(id))
-  const selected = metadata.id === id ? metadata : empty(id)
+  const [metadata, setMetadata] = useState<Metadata>(() => empty(id, client))
+  const selected = metadata.id === id && metadata.owner === client ? metadata : empty(id, client)
   const activityOwner = useMemo(() => ({}), [client, id, active])
   const view = useConversationView(client, id ? { hostId: 'local', agentSessionId: id } : undefined, active, {
     beforeCommit: snapshot => beforeCommit?.(projectConversationWindow(snapshot)) !== false
@@ -36,27 +36,47 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
   const answerPage = answers.reading?.historyPage ?? null
   const answerContext = answerPage && reading?.historyPage && sameSource(answerPage, reading.historyPage) ? answerPage : reading?.historyPage ?? null
 
+  const metadataScope = useRef({ client, id, mounted: true })
+  metadataScope.current.client = client; metadataScope.current.id = id
+  const metadataEpoch = useRef(0)
+  useEffect(() => { metadataScope.current.mounted = true; return () => { metadataScope.current.mounted = false } }, [])
+  const readMetadata = useCallback(async (preferCache = false) => {
+    if (!client || !id) return null
+    const generation = ++metadataEpoch.current
+    let cached: AgentMuxAgentSession | null = null
+    if (preferCache) { try { cached = client.agentSession(id) } catch { /* Read the exact owner below. */ } }
+    const result = cached?.agentSessionId === id ? { session: cached, metadata: { state: 'active' as const, issue: null } }
+      : await readMobileConversationSession(client, id)
+    if (!metadataScope.current.mounted || metadataScope.current.client !== client || metadataScope.current.id !== id || generation !== metadataEpoch.current) return null
+    setMetadata(previous => {
+      const original = previous.id === id && previous.owner === client ? previous : empty(id, client)
+      return { ...original, session: result.metadata.state === 'unconfirmed' ? original.session : result.session, metadata: result.metadata }
+    })
+    return result
+  }, [client, id])
   useEffect(() => {
     let live = true, epoch = 0, readingActivity = false, dirty = false
     let expiry: ReturnType<typeof setTimeout> | undefined
-    setMetadata(value => value.id === id ? value : empty(id))
+    let latestSession = selected.session
+    setMetadata(value => value.id === id && value.owner === client ? value : empty(id, client))
     if (!client || !id || !active) return
-    const patch = (next: Partial<Metadata>) => { if (live) setMetadata(value => ({ ...(value.id === id ? value : empty(id)), ...next })) }
+    const patch = (next: Partial<Metadata>) => { if (live) setMetadata(value => ({ ...(value.id === id && value.owner === client ? value : empty(id, client)), ...next })) }
     function clearActivity() { epoch++; if (expiry) clearTimeout(expiry); expiry = undefined; patch({ activity: null }) }
-    function sessionMetadata() {
-      try {
-        const session = client!.agentSession(id!)
-        if (session.agentSessionId !== id) throw new Error('The Host returned another Session’s metadata. The original reading is retained.')
-        patch({ session })
-      } catch (error) { patch({ notice: errorMessage(error) }) }
+    async function sessionMetadata(exact = false): Promise<void> {
+      const result = await readMetadata(!exact)
+      if (!live || !result) return
+      latestSession = result.metadata.state === 'unconfirmed' ? latestSession : result.session
+      if (latestSession && result.metadata.state === 'active') void readActivity()
+      else clearActivity()
     }
     async function readActivity(): Promise<void> {
-      if (!live || document.hidden) return
+      if (!live || document.hidden || !latestSession) return
       const generation = ++epoch
       if (readingActivity) { dirty = true; return }
       readingActivity = true
       try {
-        const value = await client!.statusAgent(id!), original = client!.agentSession(id!)
+        const original = latestSession!
+        const value = await client!.statusAgent(id!)
         if (!live || generation !== epoch) return
         if (value.session.agentSessionId !== id || original.agentSessionId !== id || value.session.hostId !== original.hostId ||
           value.session.run.runId !== original.run.runId || value.run.runId !== original.run.runId) { clearActivity(); return }
@@ -72,27 +92,28 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
     const unlisten = client.onEvent(event => {
       if (!live) return
       if (event.type === 'connection-state') {
-        clearActivity(); patch({ disconnected: event.state !== 'restored', notice: event.state === 'restored' ? null :
-          'The original Host is unreachable. Reading and drafts are retained; unconfirmed writes are not resent.' })
-        if (event.state === 'restored') { sessionMetadata(); void readActivity(); void view.resume(); if (hasQuestion) void answers.resume() }
+        clearActivity(); patch({ disconnected: event.state !== 'restored' })
+        if (event.state === 'restored') { void sessionMetadata(true); void view.resume(); if (hasQuestion) void answers.resume() }
       } else if (event.type === 'agent-session' && event.session.agentSessionId === id) {
-        sessionMetadata(); clearActivity(); void readActivity()
+        clearActivity(); void sessionMetadata()
       } else if ((event.type === 'agent-status' || event.type === 'process-state') && event.agentSessionId === id) {
         clearActivity(); void readActivity()
-      } else if (event.type === 'agent-error' && (!event.agentSessionId || event.agentSessionId === id)) patch({ notice: event.message })
+      } else if (event.type === 'run-removed' && event.agentSessionId === id || event.type === 'agent-session-record-deleted' && event.agentSessionId === id) {
+        clearActivity(); void sessionMetadata(true)
+      }
     })
     const foreground = () => { if (document.hidden) clearActivity(); else void readActivity() }
     document.addEventListener('visibilitychange', foreground)
-    sessionMetadata(); void readActivity()
+    void sessionMetadata()
     return () => { live = false; if (expiry) clearTimeout(expiry); document.removeEventListener('visibilitychange', foreground); unlisten() }
-  }, [client, id, active, activityOwner, view.resume, answers.resume, hasQuestion])
-  const refresh = useCallback(() => view.refresh(), [view.refresh])
+  }, [client, id, active, activityOwner, view.resume, answers.resume, hasQuestion, readMetadata])
+  const refresh = useCallback(async () => { await Promise.all([view.refresh(), readMetadata()]) }, [view.refresh, readMetadata])
   const activity = active && selected.activity?.owner === activityOwner &&
     selected.activity.hostId === selected.session?.hostId && selected.activity.runId === selected.session?.run.runId ? selected.activity.observation : null
-  return { ...selected, activity, readProcessDetail: view.readProcessDetail, held: view.held, acceptHeld: view.acceptHeld, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
+  return { id: selected.id, metadataClient: selected.owner, session: selected.session, metadata: selected.metadata, disconnected: selected.disconnected, activity, readProcessDetail: view.readProcessDetail, held: view.held, acceptHeld: view.acceptHeld, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
     readError: view.error, readActivity: { sourceRead: view.sourceRead, loading: view.loading },
     pageOwner: view.snapshot ? pageOwner.current?.owner ?? null : null, answerContext, reading: view.loading,
     olderWindow: view.historical, capturedHasMore: view.hasMore, newerAvailable: view.newerAvailable || view.held,
-    notice: view.error?.message ?? view.observationError?.message ?? answers.error?.message ?? selected.notice,
+    notice: view.error?.message ?? view.observationError?.message ?? answers.error?.message ?? null,
     refresh, older: view.earlier, newer: view.newer, hasNewer: view.hasNewer }
 }

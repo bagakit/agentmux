@@ -14,7 +14,7 @@ type ReaderOwner = {
 }
 const unavailable = async () => null
 const emptyReading: Reading = {
-  id: null, session: null, notice: null, disconnected: false, activity: null,
+  id: null, metadataClient: null, session: null, metadata: { state: 'loading', issue: null }, notice: null, disconnected: false, activity: null,
   readProcessDetail: async () => { throw new Error('还没确认对话的来源。') },
   held: false, acceptHeld: () => {}, page: null, timeline: null, projection: null, readError: null,
   readActivity: { sourceRead: null, loading: false }, pageOwner: null, answerContext: null, reading: false,
