@@ -11,6 +11,9 @@ import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
+import { useMoteWorkfaceScope } from '../lib/mote-workface'
+import { useMoteHeartbeatReading } from '../lib/mote-heartbeat-reading'
+import { moteHeartbeatReadingPresentation } from '../lib/mote-heartbeat-presentation'
 
 export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
   placement?: 'compact' | 'floating'; style?: CSSProperties
@@ -21,6 +24,9 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
   const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
   const identityConfirmed = Boolean(floating.targetTopicId || target.tab || typeof floating.targetTabId !== 'string')
   const topic = identityConfirmed ? topics?.find(item => item.id === target.topicId) : undefined
+  const scope = useMoteWorkfaceScope(workspace?.id, target.topicId, identityConfirmed && placement === 'compact')
+  const heartbeat = useMoteHeartbeatReading(identityConfirmed ? scope : null, placement === 'compact')
+  const care = moteHeartbeatReadingPresentation(heartbeat.saved, heartbeat.unavailable)
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const iconTarget = useMemo(() => workspace && topic ? topicSpaceIconTarget(workspace, topic, bindings) : undefined, [workspace, topic, bindings])
   const manualIcon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
@@ -49,8 +55,9 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
           moteAvailability={topic && (!target.tabId || target.region?.kind === 'launcher') ? 'no-agent' : target.region && target.region.kind !== 'agent' ? 'static' : 'restoring'}
           avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId ?? (identityConfirmed ? target.topicId : undefined)} />
         {target.session ? <span className={className + '__status'} aria-hidden="true"><StatusDot status={target.session.status} /></span> : null}
+        <span className="mote-heartbeat-entry" data-mote-care={care.state} aria-hidden="true">{care.marker}</span>
       </span>
-      <span hidden id="mote-shortcut-status">{target.label} · {target.statusText}</span>
+      <span hidden id="mote-shortcut-status">{target.label} · {target.statusText} · {care.label}</span>
     </button>
   </div>
   const closeForEditor = () => {

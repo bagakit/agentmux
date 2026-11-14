@@ -1,6 +1,6 @@
 import type { FileDocument } from '@agentmux/core'
 import type { FileReadResult } from '@agentmux/core/files'
-import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MotePresenceReading } from '@agentmux/core/mote-preferences'
+import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MotePresenceReading, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from './mote-workface'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
@@ -14,6 +14,9 @@ export type SavedMoteQuickMode = { document: FileDocument | null; defaults: Mote
 export async function readMoteQuickDefaults(scope: MoteWorkfaceScope): Promise<SavedMoteQuickMode> {
   const target = moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings)
   if (!target) return { document: null, defaults: {}, issue: 'The original Mote resource is unconfirmed. Its settings and conversations remain available.' }
+  return readMoteQuickTarget(target)
+}
+export async function readMoteQuickTarget(target: MotePreferencesTarget): Promise<SavedMoteQuickMode> {
   const input = { kind: 'quick' as const, target }, result = parseMotePreferencesReadResult(await api.motePreferences.read(input), input)
   return { document: result.source?.result.status === 'read' ? result.source.result.document : null, defaults: result.defaults ?? {}, ...(result.source ? { source: result.source } : {}), ...(result.issue ? { issue: result.issue } : {}), ...(result.maintenance ? { maintenance: result.maintenance } : {}) }
 }
