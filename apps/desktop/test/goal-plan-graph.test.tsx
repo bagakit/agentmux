@@ -152,7 +152,7 @@ describe('Goal plan graph', () => {
     await dom.render(<GlobalBoardSurface />)
     expect(dom.container.querySelector('.goals-detail')).not.toBeNull()
     expect(graph()!.querySelector('[data-goal-plan-node]')).toBeNull()
-    expect(graph()!.querySelectorAll('button')).toHaveLength(1)
+    expect([...graph()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Choose Supervisor to plan', 'Open goal discussion'])
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
     expect(graph()!.textContent).toContain('Tasks and dependencies')
     expect(graph()!.textContent).toContain('No execution plan yet')

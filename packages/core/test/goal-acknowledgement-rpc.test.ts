@@ -20,7 +20,7 @@ function original(request: AgentMuxControlRequest): AgentMuxControlResult {
     const demand = { ...pending, id: request.demandId ?? 'owner-generated', title: request.title, description: request.description ?? '', status: 'backlog' as const }
     return { operation: request.operation, demand, receipt: { demandId: demand.id, createdAt: demand.createdAt } }
   }
-  if (request.operation === 'demand.discuss') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, requestId: request.requestId, mode: request.mode, tabId: 'original-tab', regionId: 'original-region', hostId: null, agentSessionId: null } }
+  if (request.operation === 'demand.discuss') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, requestId: request.requestId, route: 'discussion', mode: request.mode, tabId: 'original-tab', regionId: 'original-region', hostId: null, agentSessionId: null } }
   if (request.operation === 'demand.confirm') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, confirmedRevision: 3, confirmedAt: 5 } }
   if (request.operation === 'demand.accept') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, alignmentRevision: 3, submissionId: 'exact-report', acceptedAt: 7, acceptedWithGaps: false } }
   throw new Error('Unexpected original request ' + request.operation)

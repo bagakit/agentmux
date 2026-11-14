@@ -3,6 +3,8 @@ import { parseDemandDelegations, type DemandDelegation } from '@agentmux/demand/
 import { parseGoalPlan, type GoalPlan, type GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { demandExecutionReferences, demandResponsibilityScope } from '../../../../../packages/demand/src/responsibility'
 import type { GoalResponsibilityObservation } from '@agentmux/core/goal-responsibility'
+import { parseDemandPatrols, demandPatrolScope } from '../../../../../packages/demand/src/goal-patrol'
+import { parseGoalPatrolObservations } from '@agentmux/core/goal-patrol'
 import { hostGoalPlan } from '@agentmux/host/goal-projection'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -87,6 +89,32 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
           agentNames: { ...state.agentNames, [worker.id]: 'Atlas · Recovery engineer', [owner.id]: 'Mira · Independent review' } })
         render()
       })
+    },
+    request(state: 'none' | 'prepared' | 'delivered' | 'missing' | 'unknown' | 'stale') {
+      seed('confirmed')
+      const store = useAppStore.getState(), goal = store.demands[store.selectedDemandId!]!, agents = store.sessions.filter(session => session.kind === 'agent')
+      const supervisor = agents[1] ?? agents[0]!, now = goal.updatedAt
+      const next = { ...goal, title: 'Restore the original workspace', supervisorSessionId: state === 'none' ? null : supervisor.control.agentSessionId,
+        assigneeSessionIds: state === 'none' ? [] : [supervisor.control.agentSessionId], plan: undefined, planState: undefined, responsibility: undefined }
+      const reason = { prepared: 'The Supervisor is working. This original planning request waits for eligible input; the current draft and Agent remain available.',
+        delivered: 'The original planning input is confirmed. Waiting for this Supervisor to save a newer plan in the same Goal.',
+        missing: 'The original Supervisor Host is unavailable. Reconnect its original Host, then continue this saved request; no replacement Agent was created.',
+        unknown: 'The original input receipt could not be read. Check this same request; it is never automatically resent.',
+        stale: 'The original Supervisor Run changed. Explicitly continue this never-attempted request on its recovered same Session.' }
+      const patrols = state === 'none' ? [] : parseDemandPatrols([{ purpose: 'plan', planRevision: 0, operationId: 'original-planning-request',
+        expectedScope: demandPatrolScope(next as never, 'plan'), executions: [], supervisorAgentSessionId: supervisor.control.agentSessionId,
+        context: JSON.stringify({ goalId: goal.id, planRevision: 0 }), requestedBy: { kind: 'user', id: 'preview-person' }, requestedAt: now,
+        attempts: state === 'missing' ? [] : [{ operationId: 'original-planning-input', actionOperationId: 'original-planning-request', intentId: 'original-planning-input',
+          target: { hostId: supervisor.control.hostId, agentSessionId: supervisor.control.agentSessionId,
+            runId: state === 'stale' ? 'original-earlier-run' : supervisor.control.run.runId, providerId: supervisor.providerId, workspacePath: supervisor.workspacePath },
+          agentMuxNote: 'Original saved planning request', preparedAt: now, ...(['delivered', 'unknown'].includes(state) ? { attemptedAt: now } : {}) }] }])
+      const patrolObservations = state === 'none' ? [] : parseGoalPatrolObservations([{ operationId: 'original-planning-request', state, reason: reason[state] }], ['original-planning-request'])
+      const observed = { ...next, patrols, patrolObservations }
+      api.demands.delegation = async (operation, input) => input.goalId === goal.id && operation === 'goal.delegations'
+        ? { goalId: goal.id, goalUpdatedAt: goal.updatedAt, diskDurability: 'confirmed', delegations: [], patrols, patrolObservations }
+        : originalDelegation(operation, input)
+      flushSync(() => { useAppStore.setState({ demands: { [goal.id]: observed as never }, goalDiscussionRequests: state === 'none' ? {} : {
+        [JSON.stringify([goal.id, 'plan'])]: { goalId: goal.id, mode: 'plan', requestId: 'original-planning-request' } }, agentNames: { ...store.agentNames, [supervisor.id]: 'Mira' } }); render() })
     },
     facts() {
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!

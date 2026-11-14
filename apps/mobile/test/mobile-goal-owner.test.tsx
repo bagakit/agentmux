@@ -55,7 +55,7 @@ beforeEach(async () => {
       const binding = discussions.get(goal!.id) ?? { tabId: 'discussion-tab:' + goal!.id, regionId: 'discussion-region:' + goal!.id, sessionId: 'discussion-agent:' + goal!.id }
       discussions.set(goal!.id, binding)
       return { operation: request.operation, demand: projectHostGoal(goal!), receipt: { demandId: goal!.id, requestId: request.requestId,
-        mode: request.mode, tabId: binding.tabId, regionId: binding.regionId, hostId: 'local', agentSessionId: binding.sessionId } }
+        route: 'discussion', mode: request.mode, tabId: binding.tabId, regionId: binding.regionId, hostId: 'local', agentSessionId: binding.sessionId } }
     }
     const result = await hostGoals.execute(request, undefined)
     if (!result || !result.operation.startsWith('demand.')) throw new Error('The original Host did not handle this Goal operation: ' + request.operation)

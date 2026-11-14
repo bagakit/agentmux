@@ -32,26 +32,27 @@ it('the public CLI submits and reconciles an original managed planning input, th
   await contributeGoalDiscussionBinding({ spatial, goalId, binding: { schema: 'agentmux.goal-discussion-binding.v1', tabId: 'discussion-tab', regionId: 'discussion-region',
     recipient: { kind: 'agent', hostId: 'local', agentSessionId: 'discussion' } } })
   const args = ['goal', 'discuss', '--goal', goalId, '--mode', 'plan', '--operation-id', operationId]
-  const first = await f.call('supervisor', args)
-  expect(first.receipt).toMatchObject({ mode: 'plan', operationId, agentSessionId: 'discussion', tabId: 'discussion-tab' })
-  const messageId = deriveObjectId('goal-discussion-message', operationId)
-  const message = (await f.call('supervisor', ['message', 'read', '--host', 'local', '--message-id', messageId])).message
-  expect(message, 'A planning request must reach the original Core message journal; navigation is not input.').not.toBeNull()
-  expect(message.envelope).toMatchObject({ operationId, recipientSessionId: 'discussion', senderSessionId: 'supervisor' })
-  expect(message.envelope.body).toContain(`Make and save a dependency plan inside the existing Goal ${goalId}.`)
-  expect(message.envelope.body).toContain('goal plan revise --input FILE')
-  const input = await f.client().inspectAgentPromptSubmission({ kind: 'message', agentSessionId: 'discussion', expectedRun: { runId: 'run-discussion' }, messageId })
-  expect(input?.admission).toMatchObject({ acknowledged: true, inputKey: { kind: 'message', agentSessionId: 'discussion', expectedRun: { runId: 'run-discussion' }, messageId } })
+  const current = (await f.original.store.readMetadata('supervisor'))!, now = Date.now()
+  await f.original.store.compareAndSwapMetadata(current, { ...current, semanticStatus: { state: 'done', source: 'native-hook', observedAt: now, stateEnteredAt: now,
+    nativeTurnId: 'planning-ready' }, updatedAt: now })
+  await (f.client() as unknown as { registry: { load(host: string): Promise<void> } }).registry.load('local')
+  vi.spyOn((f.client() as unknown as { screenEvidence: { wait(): Promise<number> } }).screenEvidence, 'wait').mockResolvedValue(0)
+  const first = await f.call('discussion', args)
+  expect(first.receipt).toMatchObject({ route: 'supervisor', mode: 'plan', operationId, agentSessionId: 'supervisor', requestOperationId: operationId })
+  const goal = (await f.call(null, ['goal', 'inspect', '--goal', goalId])).goal
+  const request = goal.patrols.find((item: { purpose?: string }) => item.purpose === 'plan'), attempt = request.attempts[0]
+  expect(request).toMatchObject({ requestedBy: { kind: 'agent', id: 'discussion' }, supervisorAgentSessionId: 'supervisor' })
+  expect(attempt.agentMuxNote).toContain('goal plan revise')
+  expect(attempt.agentMuxNote).toContain('agentmux.goal-plan-request.v1')
+  const input = await f.client().inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: 'supervisor', expectedRun: { runId: 'run-supervisor' }, submissionId: attempt.operationId })
+  expect(input?.admission).toMatchObject({ acknowledged: true, inputKey: { kind: 'prompt', agentSessionId: 'supervisor', expectedRun: { runId: 'run-supervisor' }, submissionId: attempt.operationId } })
+  expect(input?.admission?.intent?.message?.authorHuman).toBeUndefined()
   expect((await f.call(null, ['goal', 'plan', '--goal', goalId])).plan).toBeUndefined()
   const nativeWrites = () => f.original.rawInput.mock.calls.length + (f.native.input as { mock: { calls: unknown[] } }).mock.calls.length
-  const beforeRetry = nativeWrites()
-  expect(beforeRetry).toBeGreaterThan(0)
-  // Changing real project context makes resubmission a different frozen body. A repeat
-  // request must read the original admission, not re-run the producer against new context.
+  const beforeRetry = nativeWrites(); expect(beforeRetry).toBeGreaterThan(0)
   await f.call(null, ['goal', 'update', '--goal', goalId, '--project', workspaceProjectId({ id: 'original-project', name: 'Original project', hostId: 'local', path: directory })])
-  const retry = await f.call('supervisor', args)
-  expect(retry.receipt).toEqual(first.receipt)
-  expect(nativeWrites()).toBe(beforeRetry)
+  const retry = await f.call('discussion', args)
+  expect(retry.receipt).toEqual(first.receipt); expect(nativeWrites()).toBe(beforeRetry)
   const revision = { goalId, revision: { operationId: 'original-plan-revision', expectedRevision: 0, alignmentRevision: 1, nodes: [
     { id: 'prepare', title: 'Prepare', outcome: 'A checked input', dependsOn: [], criterionIds: ['result'], check: 'check prepare', executor: null },
     { id: 'deliver', title: 'Deliver', outcome: 'The checked result', dependsOn: ['prepare'], criterionIds: ['result'], check: 'check deliver', executor: null }
@@ -66,6 +67,6 @@ it('the public CLI submits and reconciles an original managed planning input, th
   expect(read.goal).toMatchObject({ supervisorSessionId: 'supervisor', alignment: { confirmedAt: null }, plan: { revision: 1 } })
   expect(read.goal.delegations ?? []).toEqual([])
   expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
-  if (process.env.GOAL_PLANNING_FACTS) appendFileSync(process.env.GOAL_PLANNING_FACTS, JSON.stringify({ cli: f.cliReceipts, originalInput: input, originalMessage: message,
+  if (process.env.GOAL_PLANNING_FACTS) appendFileSync(process.env.GOAL_PLANNING_FACTS, JSON.stringify({ cli: f.cliReceipts, originalInput: input, planningRequest: request,
     originalReceipt: first.receipt, retryReceipt: retry.receipt, nativeWritesBeforeRetry: beforeRetry, nativeWritesAfterRetry: nativeWrites(), plan: saved.plan, finalGoal: read.goal }) + '\n')
 })

@@ -55,6 +55,6 @@ describe('Goal plan guidance reaches its readers', () => {
     expect(manager).toContain('When explicitly asked to plan')
     expect(manager).toContain('manager guidance is not a Supervisor grant')
     const help = agentMuxCommandHelp('goal.discuss')!
-    for (const fact of ['open|grill|grounding|plan', '--operation-id', 'input, not a saved plan', 'never starts work']) expect(help, fact).toContain(fact)
+    for (const fact of ['open|grill|grounding|plan', '--operation-id', 'A receipt is not a saved plan', 'route=supervisor', 'Busy input retains preparation', 'never starts work']) expect(help, fact).toContain(fact)
   })
 })

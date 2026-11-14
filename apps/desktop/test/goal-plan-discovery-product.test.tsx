@@ -78,9 +78,9 @@ afterEach(async () => {
   } finally { container.remove(); vi.restoreAllMocks(); vi.unstubAllEnvs() }
 })
 async function mount() { await act(async () => root.render(<GlobalBoardSurface />)) }
-async function save(alignment = true) {
+async function save(alignment = true, supervisor: string | null = fixture.primary.agentSessionId) {
   await useAppStore.getState().createDemand({ id: 'discovery', title: 'Preserve the same work', description: originalDescription,
-    supervisorSessionId: null, assigneeSessionIds: [], sessionIds: [], status: 'in_progress' })
+    supervisorSessionId: supervisor, assigneeSessionIds: supervisor ? [supervisor] : [], sessionIds: [], status: 'in_progress' })
   if (alignment) await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
   useAppStore.setState({ selectedDemandId: 'discovery' }); fixture.host.clear(); await mount()
   expect((await fixture.host.demands.get('discovery'))?.plan).toBeUndefined()
@@ -127,7 +127,6 @@ const renderedStates = () => [...container.querySelectorAll<HTMLElement>('[data-
 async function expectSavedGraph() {
   // Original product refresh reads the same Host owner; the mounted component is
   // retained. No test writes any Renderer plan or Domain plan field.
-  await act(async () => useAppStore.getState().refreshDemand('discovery'))
   await vi.waitFor(() => {
     expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(node => node.dataset.goalPlanNode)).toEqual(['inspect', 'preserve'])
     expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-edge]')].map(edge => edge.dataset.goalPlanEdge)).toEqual(['inspect>preserve'])
@@ -142,26 +141,21 @@ async function expectSavedGraph() {
   evidence.push({ phase: 'real-owner-to-mounted-graph', goal, nodes: ['inspect', 'preserve'], edge: 'inspect>preserve', states: renderedStates() })
 }
 
-it('first planning input ACK leaves the real empty Goal empty until a person uses the public plan producer', async () => {
-  await save(); const before = (await fixture.host.demands.get('discovery'))!
-  const request = await requestPlan(), original = binding(), recipient = fixture.core.core.agentSession(original.recipient.agentSessionId)
-  const creation = await fixture.core.core.inspectAgentCreation(recipient.agentSessionId)
-  expect(creation.creation?.createOperationId).toBe(before.discussionOperationId)
-  const intent = (await fixture.host.demands.get('discovery'))!.discussionIntent!
-  expect(intent).toMatchObject({ requestOperationId: request.requestId, mode: 'plan' })
-  expect(intent.prompt).toBe('Make a plan for this existing Goal: discovery.')
-  expect(JSON.stringify(fixture.core.start.mock.calls.at(-1)?.[0])).toContain(intent.prompt)
-  expect(intent.agentMuxNote).toContain('goal plan revise')
-  expect((await fixture.host.demands.get('discovery'))!.plan).toBeUndefined()
-  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
-  expect((await fixture.host.demands.get('discovery'))!.supervisorSessionId).toBe(before.supervisorSessionId)
-  expect((await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() })).code).toBe(0)
+it('the original Goal record reaches the store and mounted graph before a delegation observer can repair it', async () => {
+  const supervisor = fixture.primary.agentSessionId
+  await useAppStore.getState().createDemand({ id: 'discovery', title: 'Preserve the same work', description: originalDescription,
+    supervisorSessionId: supervisor, assigneeSessionIds: [supervisor], sessionIds: [], status: 'in_progress' })
+  await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
+  const saved = await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() }, supervisorCredentials())
+  expect(saved.code, saved.stderr).toBe(0)
+  const owned = await fixture.host.rpc.call('goal.plan', { goalId: 'discovery' })
+  expect(owned.planState).toBeDefined()
+  await useAppStore.getState().refreshDemand('discovery')
+  // No component or delegation observer has been mounted. This exact record path
+  // must retain the owner state before another legitimate observation can supply it.
+  expect(useAppStore.getState().demands.discovery?.planState).toEqual(owned.planState)
+  useAppStore.setState({ selectedDemandId: 'discovery' }); await mount()
   await expectSavedGraph()
-  // The public CLI reads the same Goal record and derivation the mounted graph shows.
-  const listed = await cli(['goal', 'ls', '--goal', 'discovery'])
-  expect(listed.code, listed.stderr).toBe(0)
-  const [record] = JSON.parse(listed.stdout).result.goals as Array<{ id: string; planState?: GoalPlanState }>
-  expect(record?.planState?.nodes.map(node => [node.id, node.state])).toEqual(renderedStates())
 })
 
 it('a node delegation read returns the Host owner derivation to the mounted graph', async () => {
@@ -198,190 +192,117 @@ it('a node delegation read returns the Host owner derivation to the mounted grap
   evidence.push({ phase: 'delegation-read-to-mounted-graph', goal, owned, rendered: renderedStates() })
 })
 
-it('reused discussion receives canonical planning input without implicit management or execution', async () => {
-  await save(); await act(async () => useAppStore.getState().openDemandPmo('discovery'))
-  const original = binding(), agent = fixture.core.core.agentSession(original.recipient.agentSessionId)
-  const starts = fixture.core.start.mock.calls.length
-  const request = await requestPlan()
-  const input = await fixture.core.core.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: agent.agentSessionId, expectedRun: agent.run, submissionId: request.requestId })
-  expect(input?.admission?.acknowledged).toBe(true)
-  expect(input?.admission?.intent?.message?.userContent).toBe('Make a plan for this existing Goal: discovery.')
-  expect(input?.admission?.intent?.message?.systemContext).toContain('goal plan revise')
-  expect(binding()).toEqual(original); expect(fixture.core.start.mock.calls.length).toBe(starts)
-  expect((await fixture.host.demands.get('discovery'))!.supervisorSessionId).toBeNull()
-  expect((await fixture.host.demands.get('discovery'))!.delegations ?? []).toEqual([])
-  // The producer here is an actual transport-authenticated person. The separate
-  // Host consumer proves a discussion Agent cannot sign as the Supervisor.
-  expect((await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() })).code).toBe(0)
+
+async function nativeState(state: 'done' | 'working', id = fixture.primary.agentSessionId) {
+  const previous = (await fixture.core.store.readMetadata(id))!, now = Date.now()
+  await fixture.core.store.compareAndSwapMetadata(previous, { ...previous, semanticStatus: { state, source: 'native-hook', observedAt: now, stateEnteredAt: now,
+    nativeTurnId: 'planning-' + now }, updatedAt: now })
+  await (fixture.core.core as unknown as { registry: { load(host: string): Promise<void> } }).registry.load('local')
+}
+function supervisorCredentials() {
+  const id = fixture.primary.agentSessionId
+  const capability = fixture.core.start.mock.calls.map(([spec]) => (spec as { env?: Record<string, string | undefined> }).env)
+    .find(env => env?.AGENTMUX_AGENT_SESSION_ID === id)?.AGENTMUX_AGENT_CAPABILITY
+  expect(capability).toEqual(expect.any(String)); return { id, capability: capability! }
+}
+function planningRequest() {
+  return (useAppStore.getState().demands.discovery?.patrols ?? []).find(item => item.purpose === 'plan')!
+}
+
+it('a planning input reaches the Supervisor and only its saved public plan replaces the real empty Goal with the owner DAG', async () => {
+  await save(); await nativeState('done')
+  const before = (await fixture.host.demands.get('discovery'))!, starts = fixture.core.start.mock.calls.length
+  const request = await requestPlan(), original = planningRequest()
+  expect(original, 'The new planning request belongs to the Supervisor request owner').toBeDefined()
+  const attempt = original.attempts[0]!
+  expect(original).toMatchObject({ purpose: 'plan', operationId: request.requestId, supervisorAgentSessionId: fixture.primary.agentSessionId, planRevision: 0 })
+  expect(attempt.target.agentSessionId).toBe(fixture.primary.agentSessionId)
+  const admitted = await fixture.core.core.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: attempt.target.agentSessionId,
+    expectedRun: { runId: attempt.target.runId }, submissionId: attempt.operationId })
+  expect(admitted?.admission?.acknowledged).toBe(true)
+  expect(admitted?.admission?.intent?.message?.systemContext).toContain('goal plan revise')
+  expect(admitted?.admission?.intent?.message?.authorHuman).toBeUndefined()
+  expect(container.querySelector('[data-goal-plan-request-feedback]')?.textContent).toContain('waiting for a saved plan')
+  expect(container.querySelector('[aria-label="PMO 巡查"]')).toBeNull()
+  expect(fixture.core.start.mock.calls.length).toBe(starts)
+  expect((await fixture.host.demands.get('discovery'))!.discussionIntent).toBeUndefined()
+  expect((await fixture.host.demands.get('discovery'))!.discussionOperationId).toBe(before.discussionOperationId)
+  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
+  const saved = await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() }, supervisorCredentials())
+  expect(saved.code, saved.stderr).toBe(0)
+  expect(JSON.parse(saved.stdout).result.plan.history[0].author).toMatchObject({ kind: 'agent', id: fixture.primary.agentSessionId })
   await expectSavedGraph()
+  const listed = await cli(['goal', 'ls', '--goal', 'discovery'])
+  expect(listed.code, listed.stderr).toBe(0)
+  const [record] = JSON.parse(listed.stdout).result.goals as Array<{ id: string; planState?: GoalPlanState }>
+  expect(record?.planState?.nodes.map(node => [node.id, node.state])).toEqual(renderedStates())
 })
 
-it('missing alignment preserves the undefined Goal and refuses a fabricated plan', async () => {
-  await save(false); await requestPlan()
-  const goal = (await fixture.host.demands.get('discovery'))!
+it('without a Supervisor the original action is saved before the picker and only an explicit later click sends', async () => {
+  await save(true, null)
+  const before = (await fixture.host.demands.get('discovery'))!
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-request]')!.click())
+  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
+  const key = JSON.stringify(['discovery', 'plan']), reference = useAppStore.getState().goalDiscussionRequests[key]!
+  expect((await user.read())!).toContain(reference.requestId)
+  expect(fixture.host.executed('demand.discuss')).toEqual([])
+  expect(await fixture.host.demands.get('discovery')).toEqual(before)
+  await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Cancel')!.click() })
+  await act(async () => useAppStore.getState().updateDemand('discovery', { supervisorSessionId: fixture.primary.agentSessionId, assigneeSessionIds: [fixture.primary.agentSessionId] }))
+  expect(fixture.host.executed('demand.discuss')).toEqual([])
+  await nativeState('done'); const request = await requestPlan()
+  expect(request.requestId).toBe(reference.requestId)
+  expect(planningRequest().supervisorAgentSessionId).toBe(fixture.primary.agentSessionId)
+})
+
+it('missing alignment keeps its real gap in the Supervisor request and refuses a fabricated plan', async () => {
+  await save(false); await nativeState('done'); await requestPlan()
+  const goal = (await fixture.host.demands.get('discovery'))!, attempt = goal.patrols![0]!.attempts[0]!
   expect(goal.alignment).toBeUndefined(); expect(goal.plan).toBeUndefined()
-  expect(goal.discussionIntent?.agentMuxNote).toMatch(/clarif|criteria|proposal/iu)
-  const rejected = await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() })
+  expect(attempt.agentMuxNote).toContain('If the proposal is missing')
+  const rejected = await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() }, supervisorCredentials())
   expect(rejected.code).toBe(1); expect(rejected.stderr).toContain('current Goal proposal version')
-  await act(async () => useAppStore.getState().refreshDemand('discovery'))
   expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
-  expect((await fixture.host.demands.get('discovery'))!.alignment).toBeUndefined()
-  expect((await fixture.host.demands.get('discovery'))!.supervisorSessionId).toBeNull()
 })
 
 it('lost planning receipt retains the original request through Renderer rehydrate without repeating input', async () => {
-  await save(); await act(async () => useAppStore.getState().openDemandPmo('discovery'))
-  const original = binding(), agent = fixture.core.core.agentSession(original.recipient.agentSessionId)
+  await save(); await nativeState('done')
   const gate = fixture.host.once('demand.discuss', { kind: 'lose-receipt' }, request => request.mode === 'plan')
   const request = await requestPlan(); await gate.committed
-  const accepted = [...fixture.core.writes]
+  const accepted = [...fixture.core.writes], original = (await fixture.host.demands.get('discovery'))!.patrols!.find(item => item.purpose === 'plan')!
   const storage = (await user.read())!
   expect(storage).toContain(request.requestId)
   expect(userWrites.some(write => write.payload.includes(request.requestId))).toBe(true)
   expect(user.observe().lastConfirmedWrite?.diskDurability).toBe('confirmed')
-  // A fresh production document owner reads the actual original native file.
-  // The Store rehydrate below is a Renderer remount, not a claim of App restart.
-  const { createWorkbenchUserDocument, WORKBENCH_USER_STATE_KEY } = await import('../src/renderer/src/lib/workbench-user-storage')
-  const freshDocument = createWorkbenchUserDocument({ readWorkbenchState: () => user.read(), importWorkbenchState: value => user.importIfAbsent(value), writeWorkbenchState: value => user.write(value) }, () => window.localStorage)
-  const restored = await freshDocument.persistent.storage.getItem(WORKBENCH_USER_STATE_KEY)
-  expect(JSON.stringify(restored)).toContain(request.requestId)
-  evidence.push({ phase: 'native-original-request', storage, freshDocumentRead: restored, nativeInputCount: accepted.length })
-  await act(async () => root.unmount()); await useAppStore.persist.rehydrate()
-  root = createRoot(container); await mount(); await requestPlan()
+  await act(async () => root.unmount()); await useAppStore.persist.rehydrate(); root = createRoot(container); await mount()
+  await requestPlan()
   const attempts = fixture.host.executed('demand.discuss').filter(value => value.mode === 'plan')
-  expect(attempts).toHaveLength(2); expect(attempts.map(value => value.requestId)).toEqual([request.requestId, request.requestId])
+  expect(attempts.map(value => value.requestId)).toEqual([request.requestId, request.requestId])
   expect(fixture.core.writes).toEqual(accepted)
-  expect(binding()).toEqual(original); expect(fixture.core.core.agentSession(agent.agentSessionId).run).toEqual(agent.run)
+  expect(planningRequest().operationId).toBe(original.operationId)
   expect((await fixture.host.demands.get('discovery'))!.plan).toBeUndefined()
   expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
-})
-
-it('finishes the original frozen clarification creation before sending a new planning request', async () => {
-  await save()
-  const creationOperationId = (await fixture.host.demands.get('discovery'))!.discussionOperationId
-  const { AgentMuxControlServer } = await import('@agentmux/core')
-  const call = AgentMuxControlServer.prototype.callRpc, starts = fixture.core.start.mock.calls.length
-  let withheld = false
-  // The real Core commits the original creation. Only its reply back to the
-  // Host discussion owner is lost, before the Host can save its binding.
-  vi.spyOn(AgentMuxControlServer.prototype, 'callRpc').mockImplementation(async function (method, ...args) {
-    const result = await call.call(this, method, ...args)
-    if (method === 'agent.open' && !withheld) { withheld = true; throw Error('Private original agent.open reply withheld after actual creation') }
-    return result
-  })
-  await expect(useAppStore.getState().requestDemandPmoTask('discovery', 'grill')).rejects.toBeTruthy()
-  expect(withheld).toBe(true); expect(fixture.core.start.mock.calls.length).toBe(starts + 1)
-  const frozen = (await fixture.host.demands.get('discovery'))!.discussionIntent!
-  expect(frozen.mode).toBe('grill')
-  const request = await requestPlan(), original = binding(), agent = fixture.core.core.agentSession(original.recipient.agentSessionId)
-  expect(request.requestId).not.toBe(frozen.requestOperationId)
-  const created = await fixture.core.core.inspectAgentCreation(agent.agentSessionId)
-  expect(created.creation?.createOperationId).toBe(creationOperationId)
-  expect((await fixture.host.demands.get('discovery'))!.discussionIntent).toEqual(frozen)
-  const input = await fixture.core.core.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: agent.agentSessionId, expectedRun: agent.run, submissionId: request.requestId })
-  expect(input?.admission?.acknowledged).toBe(true)
-  expect(input?.admission?.intent?.message?.userContent).toBe('Make a plan for this existing Goal: discovery.')
-  const timeline = (await fixture.core.store.loadTimeline(agent.agentSessionId)).items.filter(item => item.kind === 'user_message')
-  expect(timeline.filter(item => item.content === 'Clarify this existing Goal.')).toHaveLength(1)
-  expect(timeline.filter(item => item.content === 'Make a plan for this existing Goal: discovery.')).toHaveLength(1)
-  expect(fixture.core.core.agentSessions().filter(value => value.agentSessionId !== fixture.primary.agentSessionId)).toHaveLength(1)
-  expect(fixture.core.start.mock.calls.length).toBe(starts + 1)
-  expect((await fixture.host.demands.get('discovery'))!.plan).toBeUndefined()
-  evidence.push({ phase: 'frozen-clarification-then-plan', creationOperationId, frozen, request, created, input, timeline })
 })
 
 it('a failed native planning-reference save sends no Host request and retry keeps the original reference', async () => {
-  await save(); await act(async () => useAppStore.getState().openDemandPmo('discovery'))
-  const original = binding(), accepted = [...fixture.core.writes]
-  let rejectedPayload = ''
+  await save(); await nativeState('done')
+  const accepted = [...fixture.core.writes]; let rejectedPayload = ''
   vi.mocked(api.ui.writeWorkbenchState).mockImplementationOnce(async payload => { rejectedPayload = payload; throw Error('Private planning-reference save refused') })
   await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-request]')!.click())
-  await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('Private planning-reference save refused') }, { timeout: 10_000 })
+  await vi.waitFor(() => expect(container.textContent).toContain('Private planning-reference save refused'))
   expect(fixture.host.executed('demand.discuss').filter(value => value.mode === 'plan')).toEqual([])
   expect(fixture.core.writes).toEqual(accepted)
-  const persistedValues = Object.values(JSON.parse(rejectedPayload).state).flatMap(value => value && typeof value === 'object' ? Object.values(value) : [])
-  const reference = persistedValues.find((value: any) => value?.goalId === 'discovery' && value?.mode === 'plan') as { requestId: string }
-  expect(reference?.requestId).toEqual(expect.any(String))
-  const request = await requestPlan()
-  expect(request.requestId).toBe(reference.requestId)
-  expect(binding()).toEqual(original)
-  expect((await fixture.host.demands.get('discovery'))!.plan).toBeUndefined()
-  expect((await fixture.host.demands.get('discovery'))!.supervisorSessionId).toBeNull()
-  evidence.push({ phase: 'native-save-refusal-before-input', rejectedPayload, request, unchangedInputBeforeRetry: accepted })
+  const reference = JSON.parse(rejectedPayload).state.goalDiscussionRequests[JSON.stringify(['discovery', 'plan'])]
+  expect(reference.requestId).toEqual(expect.any(String))
+  const request = await requestPlan(); expect(request.requestId).toBe(reference.requestId)
 })
 
-it.each(['none', 'existing'] as const)('ordinary legacy Goal preserves %s supervision through the first plan and graph', async role => {
-  const supervisor = role === 'existing' ? fixture.primary.agentSessionId : null
-  // Ordinary Domain creation naturally has no UI creation provenance. Do not
-  // simulate a legacy Goal by removing fields from a modern UI-created one.
-  await fixture.host.demands.create({ id: 'discovery', title: 'Preserve the same work', description: originalDescription,
-    status: 'in_progress', supervisorSessionId: supervisor, assigneeSessionIds: supervisor ? [supervisor] : [], sessionIds: supervisor ? [supervisor] : [] })
-  const before = (await fixture.host.demands.get('discovery'))!, starts = fixture.core.start.mock.calls.length
-  const assertNoDiscussionSource = async () => {
-    const current = (await fixture.host.demands.get('discovery'))!
-    expect(current.creationOrigin).toBeUndefined(); expect(current.discussionOperationId).toBeUndefined(); expect(current.discussionIntent).toBeUndefined()
-    expect(current.plan).toBeUndefined(); expect(current.supervisorSessionId).toBe(supervisor)
-    expect(readGoalDiscussionBinding(currentCoreSpatialGraph()!, 'discovery')).toBeNull()
-    expect(fixture.core.start.mock.calls.length).toBe(starts)
-  }
-  await assertNoDiscussionSource()
-  await useAppStore.getState().refreshDemand('discovery')
-  useAppStore.setState({ selectedDemandId: 'discovery' }); await mount()
-  await act(async () => useAppStore.getState().refreshDemand('discovery'))
-  await assertNoDiscussionSource()
-  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
-  await act(async () => useAppStore.getState().updateDemand('discovery', { alignment: proposal }))
-  await assertNoDiscussionSource()
-  fixture.host.clear()
-  const request = await requestPlan(), original = binding(), recipient = fixture.core.core.agentSession(original.recipient.agentSessionId)
-  const registered = (await fixture.host.demands.get('discovery'))!, intent = registered.discussionIntent!
-  expect(registered.id).toBe(before.id); expect(registered.createdAt).toBe(before.createdAt); expect(registered.description).toBe(before.description)
-  expect(registered.creationOrigin).toBeUndefined(); expect(registered.supervisorSessionId).toBe(supervisor)
-  expect(registered.assigneeSessionIds).toEqual(before.assigneeSessionIds)
-  expect(registered.participations.some(item => item.kind === 'create')).toBe(false)
-  expect(registered.discussionOperationId).toEqual(expect.any(String))
-  expect(intent).toMatchObject({ mode: 'plan', requestOperationId: request.requestId, prompt: 'Make a plan for this existing Goal: discovery.' })
-  const created = await fixture.core.core.inspectAgentCreation(recipient.agentSessionId)
-  expect(created.creation?.createOperationId).toBe(registered.discussionOperationId)
-  expect(fixture.core.start.mock.calls.length).toBe(starts + 1)
-  if (supervisor) expect(recipient.agentSessionId).not.toBe(supervisor)
-  const timeline = (await fixture.core.store.loadTimeline(recipient.agentSessionId)).items
-  expect(timeline.some(item => item.kind === 'system_message' && item.source === 'agentmux' && item.content.includes(intent.agentMuxNote))).toBe(true)
-  expect(timeline.some(item => item.kind === 'user_message' && item.content === intent.prompt)).toBe(true)
-  expect(registered.plan).toBeUndefined(); expect(registered.alignment?.confirmedAt).toBeNull()
-  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
-  expect((await fixture.host.demands.list()).map(goal => goal.id)).toEqual(['discovery'])
-  expect((await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision('ordinary-legacy-plan') })).code).toBe(0)
-  await expectSavedGraph()
-  expect((await fixture.host.demands.get('discovery'))!.supervisorSessionId).toBe(supervisor)
-  expect((await fixture.host.demands.get('discovery'))!.creationOrigin).toBeUndefined()
-  evidence.push({ phase: 'ordinary-legacy-goal-to-real-graph', role, before, registered, request, original, created, timeline })
-})
-
-it('legacy pending creation origin remains pending through real planning input and the saved graph', async () => {
-  // Omitting the Supervisor field is deliberate: this original creation still
-  // has an unresolved requester default, but no original discussion source.
-  await fixture.host.demands.create({ id: 'discovery', title: 'Preserve the same work', description: originalDescription,
-    status: 'in_progress', assigneeSessionIds: [], sessionIds: [] },
-  { operationId: 'legacy-original-creation', creationOrigin: { requesterAsSupervisor: true } })
-  const before = (await fixture.host.demands.get('discovery'))!
-  expect(before.creationOrigin).toMatchObject({ operationId: 'legacy-original-creation', requesterParticipationId: null, supervisorDefaultPending: true })
-  expect(before.discussionOperationId).toBeUndefined(); expect(before.discussionIntent).toBeUndefined(); expect(before.supervisorSessionId).toBeNull()
-  await useAppStore.getState().refreshDemand('discovery')
-  await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
-  useAppStore.setState({ selectedDemandId: 'discovery' }); await mount()
-  const request = await requestPlan(), original = binding(), registered = (await fixture.host.demands.get('discovery'))!
-  expect(registered.creationOrigin).toEqual(before.creationOrigin)
-  expect(registered.supervisorSessionId).toBeNull(); expect(registered.assigneeSessionIds).toEqual([])
-  expect(registered.participations).toMatchObject([{ kind: 'discussion', agentSessionId: original.recipient.agentSessionId, operationId: registered.discussionOperationId }])
-  expect(registered.plan).toBeUndefined(); expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
-  const timeline = (await fixture.core.store.loadTimeline(original.recipient.agentSessionId)).items
-  expect(timeline.some(item => item.kind === 'system_message' && item.source === 'agentmux' && item.content.includes(registered.discussionIntent!.agentMuxNote))).toBe(true)
-  expect(timeline.some(item => item.kind === 'user_message' && item.content === 'Make a plan for this existing Goal: discovery.')).toBe(true)
-  expect((await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision('legacy-pending-origin-plan') })).code).toBe(0)
-  await expectSavedGraph()
-  const final = (await fixture.host.demands.get('discovery'))!
-  expect(final.creationOrigin).toEqual(before.creationOrigin); expect(final.supervisorSessionId).toBeNull()
-  expect(final.createdAt).toBe(before.createdAt); expect((await fixture.host.demands.list()).map(goal => goal.id)).toEqual(['discovery'])
-  evidence.push({ phase: 'legacy-pending-origin-to-real-graph', before, registered, request, original, timeline, final })
+it('an existing dedicated discussion is retained while a new plan request goes only to its distinct Supervisor', async () => {
+  await save(); await act(async () => useAppStore.getState().openDemandPmo('discovery'))
+  const original = binding(), starts = fixture.core.start.mock.calls.length
+  expect(original.recipient.agentSessionId).not.toBe(fixture.primary.agentSessionId)
+  await nativeState('done'); await requestPlan()
+  expect(planningRequest().attempts[0]!.target.agentSessionId).toBe(fixture.primary.agentSessionId)
+  expect(binding()).toEqual(original); expect(fixture.core.start.mock.calls.length).toBe(starts)
+  expect((await fixture.host.demands.get('discovery'))!.delegations ?? []).toEqual([])
 })

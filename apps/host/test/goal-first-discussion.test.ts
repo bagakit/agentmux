@@ -44,10 +44,10 @@ async function fixture() {
     spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial, runtime, agentMuxContext: request => goals.contextForSpatialOpen(request) }) })
   await server.start(); cleanup.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
-  return { io, goals, spatial, primary, rpc }
+  return { io, goals, spatial, primary, rpc, socketPath: server.path }
 }
 
-it('concurrent public first discussions converge on one original Core creation and retain both explicit planning inputs', async () => {
+it('concurrent public first discussions converge on one original Core creation and retain both explicit clarification inputs', async () => {
   const f = await fixture(), goalId = 'legacy-concurrent'
   await f.goals.demands.create({ id: goalId, title: 'Original legacy Goal', description: 'Keep the same outcome and context.' })
   const prepare = f.goals.demands.prepareDiscussion.bind(f.goals.demands)
@@ -55,7 +55,7 @@ it('concurrent public first discussions converge on one original Core creation a
   const gate = new Promise<void>(resolve => { release = resolve })
   vi.spyOn(f.goals.demands, 'prepareDiscussion').mockImplementation(async (...args) => { if (++count === 2) release(); await gate; return prepare(...args) })
   const before = f.io.start.mock.calls.length
-  const requests = ['first-request', 'second-request'].map(operationId => ({ goalId, mode: 'plan' as const, operationId }))
+  const requests = ['first-request', 'second-request'].map(operationId => ({ goalId, mode: 'grill' as const, operationId }))
   const results = await Promise.allSettled(requests.map(request => f.rpc.call('goal.discuss', request)))
   const receipts = []
   for (let index = 0; index < results.length; index++) {
@@ -73,7 +73,7 @@ it('concurrent public first discussions converge on one original Core creation a
   const session = await f.io.core.inspectAgentCreation(sessionId)
   expect(session).toMatchObject({ kind: 'agent', creation: { createOperationId: goal.discussionOperationId } })
   const timeline = await f.io.core.sessionTimeline(sessionId)
-  const inputs = timeline.items.filter(item => item.kind === 'user_message' && item.content === `Make a plan for this existing Goal: ${goalId}.`)
+  const inputs = timeline.items.filter(item => item.kind === 'user_message' && item.content === 'Clarify this existing Goal.')
   expect(inputs).toHaveLength(2)
   expect(goal.creationOrigin).toBeUndefined(); expect(goal.supervisorSessionId).toBeNull(); expect(goal.plan).toBeUndefined()
   if (process.env.GOAL_PLANNING_FACTS) appendFileSync(process.env.GOAL_PLANNING_FACTS, JSON.stringify({ legacyConcurrent: { requests, initialOutcomes: results.map(result => result.status), receipts,
@@ -91,7 +91,7 @@ it('a real binding contributed during public reservation preserves the original 
     return receipt
   })
   let issue: unknown
-  try { await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'original-contributed-request' }) } catch (error) { issue = error }
+  try { await f.rpc.call('goal.discuss', { goalId, mode: 'grill', operationId: 'original-contributed-request' }) } catch (error) { issue = error }
   expect(f.io.start.mock.calls.length).toBe(before)
   expect(issue).toMatchObject({ code: 'GOAL_DISCUSSION_UNCONFIRMED' })
   expect(readGoalDiscussionBinding((await f.spatial.read())!.graph, goalId)).toEqual(retained)
@@ -110,7 +110,7 @@ it('a public later discussion records ordinary participation without resolving a
   const before = (await f.goals.demands.create({ id: goalId, title: 'Original legacy Goal' },
     { operationId: 'old-goal-create', creationOrigin: { requesterAsSupervisor: true } })).demand
   const starts = f.io.start.mock.calls.length
-  const result = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'old-goal-create' })
+  const result = await f.rpc.call('goal.discuss', { goalId, mode: 'grill', operationId: 'old-goal-create' })
   const after = (await f.goals.demands.get(goalId))!
   expect(after.creationOrigin).toEqual(before.creationOrigin)
   expect(after.creationOrigin?.requesterParticipationId).toBeNull(); expect(after.creationOrigin?.supervisorDefaultPending).toBe(true)
@@ -129,17 +129,118 @@ it('a public CAS loser reads an already committed winner without needing another
   const prepare = f.goals.demands.prepareDiscussion.bind(f.goals.demands), before = f.io.start.mock.calls.length
   let winner!: Awaited<ReturnType<typeof f.rpc.call<'goal.discuss'>>>
   vi.spyOn(f.goals.demands, 'prepareDiscussion').mockImplementationOnce(async (...args) => {
-    winner = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'known-winner-request' })
+    winner = await f.rpc.call('goal.discuss', { goalId, mode: 'grill', operationId: 'known-winner-request' })
     return prepare(...args)
   })
-  const loser = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'original-loser-request' })
+  const loser = await f.rpc.call('goal.discuss', { goalId, mode: 'grill', operationId: 'original-loser-request' })
   expect(loser.receipt.agentSessionId).toBe(winner.receipt.agentSessionId)
   expect(f.io.start.mock.calls.length).toBe(before + 1)
   const goal = (await f.goals.demands.get(goalId))!
   expect(goal.discussionIntent?.requestOperationId).toBe('known-winner-request')
   const timeline = await f.io.core.sessionTimeline(loser.receipt.agentSessionId!)
-  const inputs = timeline.items.filter(item => item.kind === 'user_message' && item.content === `Make a plan for this existing Goal: ${goalId}.`)
+  const inputs = timeline.items.filter(item => item.kind === 'user_message' && item.content === 'Clarify this existing Goal.')
   expect(inputs).toHaveLength(2)
   if (process.env.GOAL_PLANNING_FACTS) appendFileSync(process.env.GOAL_PLANNING_FACTS, JSON.stringify({ legacyWinner: { goal, winner, loser, startsBefore: before,
     startsAfter: f.io.start.mock.calls.length, inputCount: inputs.length } }) + '\n')
+})
+
+async function nativeState(f: Awaited<ReturnType<typeof fixture>>, state: 'working' | 'done', id = f.primary.agentSessionId) {
+  const previous = (await f.io.store.readMetadata(id))!, now = Date.now()
+  await f.io.store.compareAndSwapMetadata(previous, { ...previous, semanticStatus: { state, source: 'native-hook', observedAt: now, stateEnteredAt: now,
+    nativeTurnId: 'planning-' + now }, updatedAt: now })
+  const core = f.io.core as unknown as { registry: { load(host: string): Promise<void> }; publisher: { publish(event: unknown): void } }
+  await core.registry.load('local')
+  core.publisher.publish({ type: 'agent-status', agentSessionId: id, state, evidence: { source: 'native-hook', observedAt: now } })
+}
+async function supervisor(f: Awaited<ReturnType<typeof fixture>>) {
+  const capability = f.io.start.mock.calls.map(([spec]) => (spec as { env?: Record<string, string | undefined> }).env)
+    .find(env => env?.AGENTMUX_AGENT_SESSION_ID === f.primary.agentSessionId)?.AGENTMUX_AGENT_CAPABILITY
+  expect(capability).toEqual(expect.any(String))
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.socketPath },
+    credentials: { agentSessionId: f.primary.agentSessionId, capability: capability! } })
+  cleanup.push(() => rpc.dispose()); return rpc
+}
+
+it('a planning request refuses missing management and self-request before any Goal or Core input changes', async () => {
+  const f = await fixture(), goalId = 'planning-without-manager'
+  await f.goals.demands.create({ id: goalId, title: 'Original Goal' })
+  const before = await f.goals.demands.get(goalId), writes = [...f.io.writes], starts = f.io.start.mock.calls.length
+  await expect(f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'missing-supervisor-request' })).rejects.toMatchObject({ code: 'GOAL_PLAN_SUPERVISOR_REQUIRED' })
+  expect(await f.goals.demands.get(goalId)).toEqual(before)
+  await f.goals.demands.update(goalId, { supervisorSessionId: f.primary.agentSessionId, assigneeSessionIds: [f.primary.agentSessionId] })
+  const assigned = await f.goals.demands.get(goalId), manager = await supervisor(f)
+  await expect(manager.call('goal.discuss', { goalId, mode: 'plan', operationId: 'self-plan-request' })).rejects.toMatchObject({ code: 'GOAL_PLAN_REQUEST_SELF' })
+  expect(await f.goals.demands.get(goalId)).toEqual(assigned)
+  expect(f.io.writes).toEqual(writes); expect(f.io.start.mock.calls.length).toBe(starts); expect(f.io.stop).not.toHaveBeenCalled()
+  await f.io.core.submitAgentPrompt({ agentSessionId: f.primary.agentSessionId, ...agentPromptCondition(f.io.core.agentSession(f.primary.agentSessionId)), prompt: 'Healthy manual input after refused plan request', operationId: 'manual-after-plan-refusal', authorHuman: true })
+  expect((await f.io.core.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: f.primary.agentSessionId, expectedRun: f.primary.run, submissionId: 'manual-after-plan-refusal' }))?.admission?.acknowledged).toBe(true)
+})
+
+it('a busy Supervisor retains coalesced planning operations and native eligibility sends the original input once', async () => {
+  const f = await fixture(), goalId = 'busy-planning'
+  await f.goals.demands.create({ id: goalId, title: 'Original outcome', supervisorSessionId: f.primary.agentSessionId, assigneeSessionIds: [f.primary.agentSessionId] })
+  await f.goals.demands.proposeAlignment(goalId, { summary: 'Original useful result', criteria: [{ id: 'result', text: 'Check the same outcome' }], openQuestions: [] })
+  await nativeState(f, 'working'); await f.goals.start()
+  const writes = [...f.io.writes]
+  const results = await Promise.all(['planning-a', 'planning-b'].map(operationId => f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId })))
+  expect(results.map(result => result.receipt.route)).toEqual(['supervisor', 'supervisor'])
+  const requested = (await f.goals.demands.get(goalId))!, original = requested.patrols![0]!
+  expect(requested.patrols).toHaveLength(1)
+  expect(new Set(results.map(result => result.receipt.route === 'supervisor' ? result.receipt.requestOperationId : null))).toEqual(new Set([original.operationId]))
+  expect(original.requestOperationIds).toHaveLength(1); expect(original.attempts[0]!.attemptedAt).toBeUndefined()
+  expect(f.io.writes).toEqual(writes); expect(requested.discussionIntent).toBeUndefined(); expect(requested.participations).toEqual([])
+  await f.goals.demands.prepareDispatch(goalId, { operationId: 'unrelated-start', hostId: 'local', agentSessionId: f.primary.agentSessionId,
+    runId: f.primary.run.runId, execution: 'finite', prompt: 'Unrelated original execution' })
+  const pending = await f.rpc.call('goal.plan', { goalId })
+  expect(pending.patrolObservations?.[0]?.state).toBe('prepared')
+  await nativeState(f, 'done')
+  await vi.waitFor(async () => {
+    const read = await f.rpc.call('goal.plan', { goalId })
+    expect(read.patrolObservations?.[0]?.state).toBe('delivered')
+  })
+  const delivered = [...f.io.writes]
+  expect(delivered.length).toBeGreaterThan(writes.length)
+  for (const operationId of ['planning-a', 'planning-b']) await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId })
+  expect(f.io.writes).toEqual(delivered)
+  const manager = await supervisor(f)
+  await manager.call('goal.plan.revise', { goalId, revision: { operationId: 'actual-supervisor-plan', expectedRevision: 0, alignmentRevision: 1,
+    nodes: [{ id: 'deliver', title: 'Deliver', outcome: 'Original outcome', dependsOn: [], criterionIds: ['result'], check: 'check original', executor: null }] } })
+  const complete = await f.rpc.call('goal.plan', { goalId })
+  expect(complete.patrolObservations?.[0]).toMatchObject({ state: 'planned', planRevision: 1 })
+  await expect(manager.call('goal.patrol.report', { goalId, patrolOperationId: original.operationId, report: { operationId: 'not-plan-completion',
+    summary: 'Input is not a saved plan', progress: [], nextOwner: { kind: 'human', agentSessionId: null, action: 'Review' } } })).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+  expect((await f.goals.demands.get(goalId))!.patrols![0]!.report).toBeUndefined(); expect(f.io.stop).not.toHaveBeenCalled()
+})
+
+it('a Supervisor change keeps the original planning request stale and only a new operation targets the new manager', async () => {
+  const f = await fixture(), goalId = 'changed-planning-supervisor'
+  const next = await f.io.core.createAgent({ agentSessionId: 'next-manager', providerId: 'claude', executorId: 'claude', workspacePath: f.primary.workspacePath,
+    createOperationId: 'next-manager-create', injectAgentMuxGuide: false })
+  await f.goals.demands.create({ id: goalId, title: 'Original outcome', supervisorSessionId: f.primary.agentSessionId, assigneeSessionIds: [f.primary.agentSessionId] })
+  await nativeState(f, 'working'); await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'old-manager-request' })
+  await f.goals.demands.update(goalId, { supervisorSessionId: next.agentSessionId, assigneeSessionIds: [f.primary.agentSessionId, next.agentSessionId] })
+  expect((await f.rpc.call('goal.plan', { goalId })).patrolObservations?.[0]?.state).toBe('stale')
+  const repeated = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'old-manager-request' })
+  expect(repeated.receipt.agentSessionId).toBe(f.primary.agentSessionId)
+  const fresh = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'explicit-new-manager-request' })
+  expect(fresh.receipt.agentSessionId).toBe(next.agentSessionId)
+  expect((await f.goals.demands.get(goalId))!.patrols).toHaveLength(2); expect(f.io.stop).not.toHaveBeenCalled()
+})
+
+it('an old claimed discussion planning operation is only reconciled while a new operation uses the Supervisor', async () => {
+  const f = await fixture(), goalId = 'claimed-planning-discussion'
+  const next = await f.io.core.createAgent({ agentSessionId: 'real-manager', providerId: 'claude', executorId: 'claude', workspacePath: f.primary.workspacePath,
+    createOperationId: 'real-manager-create', injectAgentMuxGuide: false })
+  await f.goals.demands.create({ id: goalId, title: 'Original outcome', supervisorSessionId: next.agentSessionId, assigneeSessionIds: [next.agentSessionId] })
+  await contributeGoalDiscussionBinding({ spatial: f.spatial, goalId, binding: { schema: 'agentmux.goal-discussion-binding.v1', tabId: 'primary-tab', regionId: 'primary-region',
+    recipient: { kind: 'agent', hostId: 'local', agentSessionId: f.primary.agentSessionId } } })
+  await f.io.core.submitAgentPrompt({ agentSessionId: f.primary.agentSessionId, ...agentPromptCondition(f.io.core.agentSession(f.primary.agentSessionId)),
+    prompt: 'Make a plan for this existing Goal: ' + goalId + '.', operationId: 'old-claimed-plan', authorHuman: true })
+  const writes = [...f.io.writes]
+  const old = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'old-claimed-plan' })
+  expect(old.receipt).toMatchObject({ route: 'discussion', agentSessionId: f.primary.agentSessionId, tabId: 'primary-tab' })
+  expect(f.io.writes).toEqual(writes); expect((await f.goals.demands.get(goalId))!.patrols).toBeUndefined()
+  const fresh = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'explicit-new-plan' })
+  expect(fresh.receipt).toMatchObject({ route: 'supervisor', agentSessionId: next.agentSessionId })
+  expect(readGoalDiscussionBinding((await f.spatial.read())!.graph, goalId)?.recipient).toMatchObject({ agentSessionId: f.primary.agentSessionId })
 })

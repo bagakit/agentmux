@@ -72,36 +72,22 @@ it('the exact frozen platform source refuses another valid placement before nati
   await expect(f.owner.contextForSpatialOpen({ ...canonical, destination: { ...canonical.destination, newTab: undefined, tabId: 'another-tab', regionId: 'another-launcher' } })).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
   await expect(f.owner.contextForSpatialOpen({ ...canonical, focus: true })).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
 })
-it('freezes a first planning request with its actual Goal and read/save instructions, without creating a plan or granting a role', async () => {
-  const f = await fixture(), request = { ...f.request, mode: 'plan' as const, executorId: 'claude' }
-  await expect(f.owner.execute(request, {})).rejects.toThrow('native-boundary')
-  const goal = (await f.demands.get(request.demandId))!
-  expect(goal.discussionIntent).toMatchObject({ mode: 'plan', requestOperationId: request.requestId,
-    prompt: `Make a plan for this existing Goal: ${goal.id}.` })
-  const note = goal.discussionIntent!.agentMuxNote
-  expect(note).toContain(`Make and save a dependency plan inside the existing Goal ${goal.id}.`)
-  expect(note).toContain('goal plan revise --input FILE')
-  expect(note).toContain('A current proposal allows planning before human confirmation.')
-  expect(note).toContain('Do not invent intent, standards, human approval or a placeholder plan')
-  expect(note).toContain('does not grant Supervisor authority')
-  expect(goal.plan).toBeUndefined(); expect(goal.alignment).toBeUndefined(); expect(goal.supervisorSessionId).toBeNull()
-  const original = f.call.mock.calls[0]![1] as any
-  expect(original.content.prompt).toBe(goal.discussionIntent!.prompt)
-  const context = await f.owner.contextForSpatialOpen({ ...original, schemaVersion: 1, operation: 'agent.open', requestId: original.operationId })
-  expect(context).toBe(note)
-  await expect(f.owner.execute({ ...request, mode: 'grill' }, {})).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
-  expect(f.call).toHaveBeenCalledTimes(1)
+it('a new planning request never reserves a dedicated discussion or starts a replacement Agent', async () => {
+  const f = await fixture(), before = await f.demands.get(f.request.demandId)
+  await expect(f.owner.execute({ ...f.request, mode: 'plan', executorId: 'claude' }, {})).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  expect(await f.demands.get(f.request.demandId)).toEqual(before)
+  expect(f.call).not.toHaveBeenCalled()
 })
 it('an explicit legacy discussion uses a distinct original source and preserves pending Goal creation provenance', async () => {
   const f = await fixture()
   await f.demands.create({ id: 'legacy', title: 'Original legacy Goal' }, { operationId: 'same-request', creationOrigin: { requesterAsSupervisor: true } })
   const before = (await f.demands.get('legacy'))!
-  const request = { ...f.request, demandId: 'legacy', requestId: 'same-request', mode: 'plan' as const, executorId: 'claude' }
+  const request = { ...f.request, demandId: 'legacy', requestId: 'same-request', mode: 'grill' as const, executorId: 'claude' }
   await expect(f.owner.execute(request, {})).rejects.toThrow('native-boundary')
   const goal = (await f.demands.get('legacy'))!, expected = await goalPmoOperation({ goalId: goal.id, creationOperationId: request.requestId }, 'discussion-create')
   expect(goal.discussionOperationId).toBe(expected); expect(expected).toMatch(/^goal_pmo_create_/u)
   expect(expected).not.toBe(await goalPmoOperation({ goalId: goal.id, creationOperationId: request.requestId }, 'create'))
-  expect(goal.discussionIntent).toMatchObject({ requestOperationId: request.requestId, mode: 'plan', prompt: 'Make a plan for this existing Goal: legacy.' })
+  expect(goal.discussionIntent).toMatchObject({ requestOperationId: request.requestId, mode: 'grill', prompt: 'Clarify this existing Goal.' })
   expect(goal.creationOrigin).toEqual(before.creationOrigin); expect(goal.supervisorSessionId).toBeNull(); expect(goal.participations).toEqual(before.participations)
   const call = f.call.mock.calls[0]![1] as any
   expect(call.operationId).toBe(expected)
@@ -120,10 +106,10 @@ it('a canonical binding contributed during reservation prevents any replacement 
       recipient: { kind: 'agent', hostId: 'local', agentSessionId: 'original-bot' } }
     return receipt
   })
-  await expect(f.owner.execute({ ...f.request, demandId: 'legacy', mode: 'plan', executorId: 'claude' }, {})).rejects.toMatchObject({ code: 'GOAL_DISCUSSION_UNCONFIRMED' })
+  await expect(f.owner.execute({ ...f.request, demandId: 'legacy', mode: 'grill', executorId: 'claude' }, {})).rejects.toMatchObject({ code: 'GOAL_DISCUSSION_UNCONFIRMED' })
   expect(f.call).not.toHaveBeenCalled()
   expect(f.graph.resources['owned:goal-discussion:legacy'].recipient.agentSessionId).toBe('original-bot')
-  expect((await f.demands.get('legacy'))!.discussionIntent?.mode).toBe('plan')
+  expect((await f.demands.get('legacy'))!.discussionIntent?.mode).toBe('grill')
 })
 
 it('failed spatial observation never reserves a legacy discussion or reaches Native creation', async () => {
@@ -132,6 +118,6 @@ it('failed spatial observation never reserves a legacy discussion or reaches Nat
   const before = await f.demands.get('legacy')
   const owner = createHostGoalDiscussions({ configurationPath: '', demands: f.demands, spatial: { read: async () => null } as never,
     runtime: {} as never, call: f.call as never, confirmParticipation: async () => {} })
-  await expect(owner.execute({ ...f.request, demandId: 'legacy', mode: 'plan' }, {})).rejects.toMatchObject({ code: 'GOAL_DISCUSSION_UNCONFIRMED' })
+  await expect(owner.execute({ ...f.request, demandId: 'legacy', mode: 'grill' }, {})).rejects.toMatchObject({ code: 'GOAL_DISCUSSION_UNCONFIRMED' })
   expect(await f.demands.get('legacy')).toEqual(before); expect(f.call).not.toHaveBeenCalled()
 })

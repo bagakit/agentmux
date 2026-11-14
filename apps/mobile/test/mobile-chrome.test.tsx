@@ -64,7 +64,7 @@ function originalClient() {
     if (method === 'goal.ls') return { goals: [goal] }
     if (method === 'goal.inspect') return { goal, goalContinuations: [] }
     if (method === 'goal.decisions') return { goalId: goal.id, decisions: [] }
-    if (method === 'goal.discuss') return { goal, receipt: { goalId: goal.id, tabId: 'main-tab', regionId: 'main-region', hostId: 'local', agentSessionId: 'session-original', mode: params.mode, operationId: params.operationId } }
+    if (method === 'goal.discuss') return { goal, receipt: { route: 'discussion', goalId: goal.id, tabId: 'main-tab', regionId: 'main-region', hostId: 'local', agentSessionId: 'session-original', mode: params.mode, operationId: params.operationId } }
     if (method === 'topic.category.ls') return { categories: [category], unavailable: [] }
     if (method === 'topic.ls') return { topics: [topic], unavailable: [] }
     if (method === 'topic.inspect') return { topic, unavailable: [] }

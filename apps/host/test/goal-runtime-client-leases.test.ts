@@ -53,6 +53,8 @@ it('subscribes a later original remote lease and keeps the same Session ID scope
   expect((await f.runtime.observeGoalAgent('remote', 'shared-session-id')).session.run.runId).toBe('remote-original-run')
   expect((await f.runtime.observeGoalAgent('local', 'shared-session-id')).session.run.runId).toBe('local-run')
   await expect(f.runtime.resolveGoalAgent('shared-session-id')).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  expect((await f.runtime.resolveGoalAgent('shared-session-id', 'remote')).status.session.run.runId).toBe('remote-original-run')
+  expect((await f.runtime.resolveGoalAgent('shared-session-id', 'local')).status.session.run.runId).toBe('local-run')
 })
 
 it('replaces the exact remote client observer and ignores a queued event from the released lease', async () => {
@@ -100,4 +102,26 @@ it('rejects a late creation inspection after the exact Host lease changes withou
   expect(inspect).toHaveBeenCalledExactlyOnceWith('shared-session-id')
   expect((await f.runtime.observeGoalAgent('local', 'shared-session-id')).session.run.runId).toBe('local-run')
   expect((await f.runtime.observeGoalAgent('remote', 'shared-session-id')).session.run.runId).toBe('remote-replacement-run')
+})
+
+it('a planning requester with the same Session ID on another Host neither impersonates nor blocks the retained Supervisor', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const { openDemandStore } = await import('@agentmux/demand'), { GoalPatrolOwner } = await import('../src/goal-patrol-owner.js')
+  const directory = await mkdtemp(join(tmpdir(), 'goal-planning-address-'))
+  const f = fixture(); f.change([{ hostId: 'remote', client: f.firstRemote.client }])
+  const demands = openDemandStore({ root: directory })
+  const read = vi.fn(async () => { throw Error('Planning must not synchronize unrelated execution history') })
+  const owner = new GoalPatrolOwner(demands, f.runtime, read, () => {})
+  try {
+    await demands.create({ id: 'goal', title: 'Original outcome', supervisorSessionId: 'shared-session-id', assigneeSessionIds: ['shared-session-id'] })
+    await demands.proposeAlignment('goal', { summary: 'Original outcome', criteria: [{ id: 'result', text: 'Check the original result' }], openQuestions: [] })
+    await demands.revisePlan('goal', { operationId: 'original-remote-plan', expectedRevision: 0, alignmentRevision: 1,
+      nodes: [{ id: 'deliver', title: 'Deliver', outcome: 'Original outcome', criterionIds: ['result'], dependsOn: [], check: 'check original', executor: null }] },
+    { kind: 'agent', id: 'shared-session-id', hostId: 'remote' })
+    await owner.request('goal', 'local-namesake-request', {}, { actor: { kind: 'agent', id: 'shared-session-id' }, hostId: 'local', runId: 'local-run' }, 'plan')
+    const request = (await demands.get('goal'))!.patrols![0]!
+    expect(request.attempts[0]!.target).toMatchObject({ hostId: 'remote', agentSessionId: 'shared-session-id', runId: 'remote-original-run' })
+    expect(JSON.parse(request.context).requester).toMatchObject({ hostId: 'local', runId: 'local-run' })
+    expect(read).not.toHaveBeenCalled()
+  } finally { owner.dispose(); await rm(directory, { recursive: true, force: true }) }
 })

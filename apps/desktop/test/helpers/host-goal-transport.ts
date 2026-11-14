@@ -79,6 +79,12 @@ export async function openHostGoalTransport(options: {
   server = new AgentMuxControlServer({ socketPath: join(directory, 'rpc.sock'), ...ports })
   await server.start()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  const changeReaders = new Set<(ids: string[], snapshot: boolean) => void>()
+  const changes = await rpc.subscribe('goal.watch', {}, {
+    onInitial: value => { for (const listener of changeReaders) listener(value.goalIds, true) },
+    onEvent: event => { if (event.type === 'change') for (const listener of changeReaders) listener(event.data.goalIds, false) }
+  })
+  vi.spyOn(api.demands, 'onChanged').mockImplementation(listener => { changeReaders.add(listener); return () => { changeReaders.delete(listener) } })
 
   const requests: GoalRequest[] = []
   const faults: Array<{ operation: GoalOperation; match: (request: GoalRequest) => boolean; fault: GoalTransportFault;
@@ -152,7 +158,7 @@ export async function openHostGoalTransport(options: {
       for (const gate of faults.splice(0)) gate.release()
       await this.settle()
       const failures: unknown[] = []
-      for (const release of [() => rpc.dispose(), () => server.stop(), () => hostGoals.dispose(), ...(beforeRemove ? [beforeRemove] : []), () => rm(directory, { recursive: true, force: true })]) {
+      for (const release of [() => changes.dispose(), () => rpc.dispose(), () => server.stop(), () => hostGoals.dispose(), ...(beforeRemove ? [beforeRemove] : []), () => rm(directory, { recursive: true, force: true })]) {
         try { await release() } catch (error) { failures.push(error) }
       }
       if (failures.length) throw new AggregateError(failures, 'The Host Goal transport fixture did not dispose cleanly: ' + failures.map(String).join('; '))

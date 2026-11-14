@@ -8,7 +8,7 @@ import { App } from '../../../src/renderer/src/App'
 import { projectLinksPreview } from './project-links'
 import { mainMotePreview } from './main-mote'
 import { goalPlanPreview } from './plan'
-import { useAppStore, retainGoalFiniteStartIntent } from '../../../src/renderer/src/store'
+import { useAppStore, retainGoalFiniteStartIntent, checkpointSpatialWorkbench } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
@@ -19,11 +19,16 @@ import { projectWorkspaces } from '../../../src/renderer/src/lib/workspace-proje
 import { applyConfigEdit } from '../../../src/shared/config-edit'
 import type { ComposerShortcut, GoalsCommonActionRef } from '../../../src/shared/contracts'
 import '../../../src/renderer/src/styles/index.css'
+// Only the private restart probe supplies this real, disk-backed Core owner bridge.
+const restartSpatial = (window as unknown as { goalsRestartSpatial?: Pick<typeof api.spatial, 'read' | 'commit'> }).goalsRestartSpatial
+if (restartSpatial) Object.assign(api.spatial, restartSpatial)
+const planningRestart = (window as unknown as { goalsPlanningRestart?: { phase: string; list: typeof api.demands.list; execute: typeof api.goals.execute; delegation: typeof api.demands.delegation; createGoal(goal: DemandRecord): Promise<void> } }).goalsPlanningRestart
+if (planningRestart) { api.demands.list = planningRestart.list; api.goals.execute = planningRestart.execute; api.demands.delegation = planningRestart.delegation }
 await useAppStore.getState().initialize()
 const initial = useAppStore.getState()
 function workflowRestartFacts() {
   const state = useAppStore.getState()
-  return { intents: state.goalFiniteStartIntents, discussions: state.demandPmoTabIds, tabs: state.tabs, layouts: state.layouts,
+  return { planningRequests: state.goalDiscussionRequests, intents: state.goalFiniteStartIntents, discussions: state.demandPmoTabIds, tabs: state.tabs, layouts: state.layouts,
     drafts: state.agentComposerDrafts, selected: state.selectedDemandId, surface: state.mainSurface }
 }
 const restoredWorkflow = workflowRestartFacts()
@@ -144,10 +149,19 @@ function seed(mode = 'many') {
     agentFocus: mode === 'recent' ? { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: _hygiene_fixtureTime(23734400000), identity: { name: sessions[0]!.label, kind: sessions[0]!.kind, providerId: sessions[0]!.providerId, hostId: project.hostId, workspacePath: projectWorkspace.path, project: { id: projectWorkspace.id, name: projectWorkspace.name } } }] }, pmo: { sessionId: null } } : EMPTY_AGENT_FOCUS,
     layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true }); root?.render(<App key={mode} />) })
 }
-seed()
+if (planningRestart?.phase !== 'restore') seed()
 root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
 Object.assign(window, { goalsVisual: { seed,
   workflowRestartFacts,
+  preparePlanningRestart: async () => {
+    if (!planningRestart) throw new Error('The private original Host bridge is required')
+    const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
+    await planningRestart.createGoal(goal)
+    await state.refreshDemand(goal.id)
+    await checkpointSpatialWorkbench()
+    return goal.id
+  },
+  planningRestartFacts: () => { const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!; return { ...workflowRestartFacts(), goal, feedback: document.querySelector('[data-goal-plan-request-feedback]')?.textContent } },
   restoredWorkflow: () => restoredWorkflow,
   saveWorkflowRestart: async () => {
     const state = useAppStore.getState(), goal = state.demands[goals[0]!.id]!
