@@ -1725,6 +1725,26 @@ async function retired() {
 }
 
 describe('Real caller ownership and healthy retained identities', () => {
+ it('temporary History keeps its explicit Return and body Escape with the original Terminal and draft', async () => {
+  await seed('terminal'); await render(pane())
+  const terminal = container.querySelector('[data-terminal-visible]')!
+  await click('Header history')
+  const feed = container.querySelector<HTMLElement>('.activity-feed')!
+  expect(feed).not.toBeNull(); expect(feed.textContent).toContain('Reply 353')
+  expect(terminal.getAttribute('data-terminal-visible')).toBe('false')
+  await click('Return')
+  expect(feed.isConnected).toBe(true); expect(feed.closest('[hidden]')).not.toBeNull()
+  expect(terminal.getAttribute('data-terminal-visible')).toBe('true')
+  await click('Header history')
+  expect(container.querySelector('.activity-feed')).toBe(feed)
+  expect(feed.closest('[hidden]')).toBeNull()
+  await act(async () => feed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  await flush()
+  expect(feed.isConnected).toBe(true); expect(feed.closest('[hidden]')).not.toBeNull()
+  expect(terminal.getAttribute('data-terminal-visible')).toBe('true')
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('ORIGINAL UNSENT DRAFT')
+  expect(useAppStore.getState().sessions[0]!.control).toEqual(control)
+ })
  it('opens from Terminal in the same Activity, returns by body Escape and preserves original Terminal and draft', async () => {
   await seed('terminal'); await render(pane())
   const terminal = container.querySelector('[data-terminal-visible]')!

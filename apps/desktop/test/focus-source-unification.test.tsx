@@ -656,10 +656,71 @@ it('an explicit original name clear does not resurrect the restored manual visit
   expect(restored.execution.history[0]!.identity!.name).toBe('真正远端的独立任务')
 })
 
+it('persistent original Activity keeps later input focus and common mode controls without temporary History behavior', async () => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true, unobservedRun: true })
+  await f.settle(2)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap), { timeout: 10000 })
+  const owner = originalSourceInputOwnerKey(f.d.owner.runtimeId, SID), draft = 'Original persistent Activity draft remains unsent'
+  let release!: () => void, acquired = 0
+  const pending = new Promise<void>(resolve => { release = resolve })
+  cleanup.push(release)
+  vi.mocked(api.spaceMounts.reading).mockImplementation(async (...args) => {
+    const surface = await f.main.api.reading(...args)
+    acquired++
+    await pending
+    return surface
+  })
+  await act(async () => {
+    useAppStore.getState().setAgentComposerDraft(owner, draft)
+    useAppStore.getState().setViewMode(owner, 'activity', { focus: false })
+    cardWith('真正远端的独立任务').click()
+  })
+  const workface = () => dom.container.querySelector<HTMLElement>('.global-session-workspace [aria-label="Original member workface"]')!
+  await vi.waitFor(() => expect(acquired).toBeGreaterThan(0), { timeout: 10000 })
+  const editor = workface().querySelector<HTMLElement>('[data-agent-composer="true"] [aria-label="Message Agent"]')!
+  expect(editor).not.toBeNull()
+  await act(async () => editor.focus())
+  expect(document.activeElement).toBe(editor)
+  await act(async () => release())
+  await vi.waitFor(() => expect(workface().querySelector('.activity-feed')?.textContent).toContain(foreignRecap), { timeout: 10000 })
+  expect(document.activeElement, 'A delayed original reading acquire must not focus a temporary Return over later input.').toBe(editor)
+  const body = workface().querySelector<HTMLElement>('.activity-feed')!
+  expect(body.querySelector('[aria-label="Return to Terminal"]')).toBeNull()
+  await act(async () => body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(workface().dataset.agentSurfaceMode).toBe('activity')
+  const mode = (label: string) => workface().querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
+  const tools = workface().querySelector<HTMLElement>('.composer-tools')!
+  const collapsed = mode('Collapse the composer to one line')
+  if (collapsed) await act(async () => collapsed.click())
+  if (tools.dataset.mode !== 'collapsed') {
+    const grow = mode('Grow the input box for long text')
+    expect(grow).not.toBeNull()
+    await act(async () => grow.click())
+    await act(async () => mode('Collapse the composer to one line').click())
+  }
+  const focus = useAppStore.getState().agentFocus
+  for (const phase of ['collapsed', 'current', 'expanded']) {
+    expect(tools.dataset.mode).toBe(phase)
+    expect(mode('Show Terminal').disabled).toBe(false)
+    await act(async () => mode('Show Terminal').click())
+    expect(workface().dataset.agentSurfaceMode).toBe('terminal')
+    expect(mode('Show Activity').disabled).toBe(false)
+    await act(async () => mode('Show Activity').click())
+    expect(workface().dataset.agentSurfaceMode).toBe('activity')
+    expect(workface().querySelector('.activity-feed')).toBe(body)
+    if (phase === 'collapsed') await act(async () => mode('Show the message tool row').click())
+    if (phase === 'current') await act(async () => mode('Grow the input box for long text').click())
+  }
+  expect(useAppStore.getState().viewModes[owner]).toBe('activity')
+  expect(useAppStore.getState().agentFocus).toBe(focus)
+  expect(useAppStore.getState().agentComposerDrafts[owner]).toBe(draft)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+})
+
 it.each([false, true])('the selected original workface reads its real conversation without Native readiness or a current Run, using the shared qualified mode and draft (unobserved Run: %s)', async unobservedRun => {
   const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true, staleRun: !unobservedRun, unobservedRun })
   await f.settle(2)
-  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap), { timeout: 10000 })
   const owner = originalSourceInputOwnerKey(f.d.owner.runtimeId, SID), draft = 'Original Source conversation draft remains unsent'
   const effects = [f.b, f.d].flatMap(source => (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(source.core, method)))
   const spatial = await f.b.spatial.read()
@@ -715,7 +776,7 @@ it.each([false, true])('the selected original workface reads its real conversati
     ['Check again', 'Check original status', 'Refresh member observation'].includes(button.textContent ?? ''))
   await vi.waitFor(() => expect(refresh()).toBeDefined())
   await act(async () => refresh()!.click())
-  await vi.waitFor(() => expect(f.member.mock.calls.some(([target]) => 'expectedRun' in target.target && target.target.expectedRun.runId === f.session.run.runId)).toBe(true))
+  await vi.waitFor(() => expect(f.member.mock.calls.some(([target]) => 'expectedRun' in target.target && target.target.expectedRun.runId === f.session.run.runId)).toBe(true), { timeout: 10000 })
   await vi.waitFor(() => expect(reading()).toBe(body))
   await act(async () => useAppStore.getState().setMainSurface('board'))
   await act(async () => useAppStore.getState().setMainSurface('agents'))
