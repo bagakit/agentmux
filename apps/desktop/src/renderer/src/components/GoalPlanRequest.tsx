@@ -24,7 +24,7 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   const original = requests.find(item => item.operationId === retained?.requestId || item.requestOperationIds?.includes(retained?.requestId ?? '')) ?? requests.at(-1)
   const observed = original && demand.patrolObservations?.find(item => item.operationId === original.operationId)
   const attempt = original?.attempts.at(-1), target = original?.supervisorAgentSessionId ?? demand.supervisorSessionId
-  const presentation = useGoalAgentPresentation(target, attempt?.target.hostId)
+  const presentation = useGoalAgentPresentation(original && !attempt ? null : target, attempt?.target.hostId)
   const currentPresentation = useGoalAgentPresentation(demand.supervisorSessionId)
   const currentRun = useAppStore(state => {
     const matches = state.sessions.filter(item => item.kind === 'agent' && item.control.agentSessionId === target &&
@@ -58,23 +58,25 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   return <div className="goal-plan__request" data-goal-plan-request-feedback>
     {!demand.supervisorSessionId ? <>
       <p className="goals-muted">The Supervisor makes and saves this Goal’s plan. Choose a Supervisor first; choosing does not send a request.</p>
-      <button type="button" className="small-button" data-goal-plan-request disabled={working} onClick={chooseSupervisor}>Choose Supervisor to plan</button>
-    </> : <div className="goals-inline-actions">
+      <button type="button" className="small-button" data-goal-plan-request={original ? undefined : true} disabled={working} onClick={chooseSupervisor}>Choose Supervisor to plan</button>
+    </> : null}
+    {demand.supervisorSessionId || original ? <div className="goals-inline-actions">
       <button type="button" className="small-button" data-goal-plan-request disabled={pending || busy || working} onClick={() => { setUnsentSelection(null); onRequest() }}>
         {pending ? `Preparing request to ${presentation.name ?? 'Supervisor'}…` : original ? `Check request to ${presentation.name ?? 'original Supervisor'}`
           : retained && retained.requestId !== unsentSelection ? `Check request to ${currentPresentation.name ?? 'Supervisor'}` : `Ask ${currentPresentation.name ?? 'Supervisor'} to plan`}
       </button>
-      {newRequest ? <button type="button" className="small-button" disabled={working || pending} onClick={() => void run(async () => {
+      {newRequest && demand.supervisorSessionId ? <button type="button" className="small-button" disabled={working || pending} onClick={() => void run(async () => {
         await useAppStore.getState().requestDemandPmoTask(demand.id, 'plan', { newRequest: true })
       })}>New request to {currentPresentation.name ?? 'current Supervisor'}</button> : null}
-      {target ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(target, attempt?.target.hostId ?? presentation.hostId ?? undefined)}>
+      {target ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(original ? attempt?.target.agentSessionId ?? null : target,
+        original ? attempt?.target.hostId : presentation.hostId ?? undefined, original && !attempt ? 'The original Supervisor destination is unconfirmed. Check the retained request to read its destination.' : undefined)}>
         Open {presentation.name ?? 'Supervisor'} conversation</button> : null}
       {canContinue ? <button type="button" className="small-button" disabled={working} onClick={() => void run(async () => {
         const cut = beginGoalDelegationRead()
         applyGoalDelegationResult(await api.demands.delegation('goal.patrol.continue', { goalId: demand.id, patrolOperationId: original.operationId,
           operationId: mintObjectId(), expectedRunId: currentRun }), cut)
       })}>Continue original planning request</button> : null}
-    </div>}
+    </div> : null}
     {observed ? <p className="goals-service" role="status"><strong>{labels[observed.state]}</strong><span>{observed.reason}</span></p>
       : original ? <p className="goals-caption" role="status">Planning request saved. Reading its original input receipt…</p>
       : retained ? <p className="goals-caption" role="status">Your planning request is retained. {demand.supervisorSessionId ? 'Check the original request before sending again.' : 'Choose a Supervisor, then explicitly send it.'}</p> : null}

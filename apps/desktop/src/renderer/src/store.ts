@@ -1,5 +1,5 @@
 import { refreshGoalDelegations } from './lib/goal-delegation-work'
-import { requestAgentConversationFloatingOpen } from './lib/pmo-teams-topic-floating'
+import { bindAgentConversationFloatingTarget, requestAgentConversationFloatingOpen } from './lib/pmo-teams-topic-floating'
 import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordDelete } from './lib/session-record-delete'
 import type { AgentSessionRecordDeleteInput } from '@agentmux/core/agent-session-record'
 import { readingProjection, sameReadingPosition, type FileViewReadingBinding, type FileViewReadingProjection, type FileViewReadings } from './lib/file-view-reading'
@@ -5314,8 +5314,13 @@ async function openGoalPmo(demandId: string, mode: 'open' | GoalDiscussionTaskMo
     // This does not require a spatial save or certify the eventual recipient delivery.
     await requestWorkbenchStorageFlush(false)
   }
-  const target = mode === 'plan' ? state.demands[demandId]?.supervisorSessionId : null
-  if (target) requestAgentConversationFloatingOpen(target, undefined, 'Planning request saved; preparing input for this Goal’s Supervisor.')
+  const original = mode === 'plan' ? state.demands[demandId]?.patrols?.find(item => item.purpose === 'plan' &&
+    (item.operationId === request.requestId || item.requestOperationIds?.includes(request.requestId))) : undefined
+  const target = original?.attempts.at(-1)?.target
+  // Only the frozen request or its Host receipt qualifies a destination. Until
+  // then, open the request without guessing a Host from the current inventory.
+  const entry = mode === 'plan' ? requestAgentConversationFloatingOpen(target?.agentSessionId ?? null, target?.hostId,
+    'Planning request saved; reading its original Supervisor destination.') : undefined
   const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.discuss', requestId: request.requestId, demandId, mode, ...(request.executorId ? { executorId: request.executorId } : {}) })
   if (result.operation !== 'demand.discuss') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original discussion returned another operation.')
   const goal = hostGoalRecord(result.demand)
@@ -5336,6 +5341,7 @@ async function openGoalPmo(demandId: string, mode: 'open' | GoalDiscussionTaskMo
     }
   }
   if (result.receipt.route === 'supervisor') {
+    if (entry !== undefined && result.receipt.hostId) bindAgentConversationFloatingTarget(entry, result.receipt.agentSessionId, result.receipt.hostId)
     const receipt: GoalPmoReceipt = { route: 'supervisor', agentSessionId: result.receipt.agentSessionId, hostId: result.receipt.hostId, requestOperationId: result.receipt.requestOperationId }
     options?.onReceipt?.(receipt)
     await refreshGoalDelegations(demandId)

@@ -370,10 +370,8 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
   })
 }
 
-/** Open the original Agent synchronously, before any business input or recovery awaits. */
-export function requestAgentConversationFloatingOpen(agentSessionId: string | null, hostId?: string, entryMessage?: string, originalReference?: WorkbenchProjectionSelection,
-  entryContext?: PmoTeamsTopicFloatingState['entryContext']): number {
-  cancelClose(); captureFocus()
+/** Resolve only the requested original Agent's presentation; an unknown target stays unselected. */
+function agentConversationSelection(agentSessionId: string | null, hostId?: string, originalReference?: WorkbenchProjectionSelection) {
   const current = useAppStore.getState(), previous = snapshot()
   const suppliedReference = originalReference ? { displayWorkspaceId: originalReference.displayWorkspaceId, groupId: originalReference.groupId,
     tabId: originalReference.tabId, regionId: originalReference.regionId } : undefined
@@ -390,18 +388,36 @@ export function requestAgentConversationFloatingOpen(agentSessionId: string | nu
     .map(group => ({ displayWorkspaceId, groupId: group.id, tabId: candidate.tab.id, regionId: candidate.region.regionId }))) : []
   const retained = sameOriginal && previous.reference ? references.find(reference => sameWorkbenchProjectionSelection(reference, previous.reference!)) : undefined
   const reference = suppliedReference ?? retained ?? (sameOriginal && previous.reference ? previous.reference : references.length === 1 ? references[0] : null)
+  return { sameOriginal, session, selection: {
+    agentTarget: { agentSessionId, ...(hostId ? { hostId } : {}) }, targetTopicId: undefined,
+    targetTabId: suppliedReference?.tabId ?? candidate?.tab.id ?? (sameOriginal ? previous.targetTabId ?? null : null), reference,
+    targetAgent: session?.control.kind === 'agent' ? { hostId: session.control.hostId, sessionId: session.control.agentSessionId, presentationSessionId: session.id } : sameOriginal ? previous.targetAgent : undefined
+  } }
+}
+
+/** Open the original Agent synchronously, before any business input or recovery awaits. */
+export function requestAgentConversationFloatingOpen(agentSessionId: string | null, hostId?: string, entryMessage?: string, originalReference?: WorkbenchProjectionSelection,
+  entryContext?: PmoTeamsTopicFloatingState['entryContext']): number {
+  cancelClose(); captureFocus()
+  const previous = snapshot(), { sameOriginal, session, selection } = agentConversationSelection(agentSessionId, hostId, originalReference)
   const sameEntry = Boolean(sameOriginal && entryContext && previous.entryContext && JSON.stringify(entryContext) === JSON.stringify(previous.entryContext))
   const conversationEntry = sameEntry && previous.conversationEntry !== undefined ? previous.conversationEntry : nextConversationEntry()
-  update({ open: true, preview: false, agentTarget: { agentSessionId, ...(hostId ? { hostId } : {}) },
-    targetTopicId: undefined, targetTabId: suppliedReference?.tabId ?? candidate?.tab.id ?? (sameOriginal ? previous.targetTabId ?? null : null), reference,
-    targetAgent: session?.control.kind === 'agent' ? { hostId: session.control.hostId, sessionId: session.control.agentSessionId, presentationSessionId: session.id } : sameOriginal ? previous.targetAgent : undefined,
-    entryMessage, entryContext, conversationEntry })
-  if (session && reference) current.setViewMode(session.id, 'activity', { focus: false })
+  update({ open: true, preview: false, ...selection, entryMessage, entryContext, conversationEntry })
+  if (session && selection.reference) useAppStore.getState().setViewMode(session.id, 'activity', { focus: false })
   requestAnimationFrame(() => {
-    if (snapshot().open && snapshot().agentTarget?.agentSessionId === agentSessionId && snapshot().conversationEntry === conversationEntry)
+    if (snapshot().open && snapshot().conversationEntry === conversationEntry)
       document.querySelector<HTMLElement>('[data-pmo-teams-topic-floating]')?.focus({ preventScroll: true })
   })
   return conversationEntry
+}
+
+/** A receipt may bind its own open entry, never reopen or focus a later human choice. */
+export function bindAgentConversationFloatingTarget(expectedEntry: number, agentSessionId: string, hostId: string): void {
+  const previous = snapshot()
+  if (!previous.open || previous.conversationEntry !== expectedEntry) return
+  const { session, selection } = agentConversationSelection(agentSessionId, hostId)
+  update({ ...selection, entryMessage: undefined })
+  if (session && selection.reference) useAppStore.getState().setViewMode(session.id, 'activity', { focus: false })
 }
 export function setAgentConversationFloatingMessage(agentSessionId: string | null, entryMessage?: string, expectedEntry?: number): void {
   if (snapshot().agentTarget?.agentSessionId === agentSessionId && (expectedEntry === undefined || snapshot().conversationEntry === expectedEntry)) update({ entryMessage }, false)
