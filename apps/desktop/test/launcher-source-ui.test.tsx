@@ -38,7 +38,9 @@ it('Remote preparation hands the original confirmed Source selection to its real
   vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, input, signal) => { calls.push(method); return f.api.call(method, input, signal) })
   vi.spyOn(storeModule, 'checkpointMountedSpaceInputs').mockResolvedValue(undefined)
   await dom.render(<RemoteExecutionSettingsPane config={config} active onClose={closed} onNavigate={vi.fn()} />)
-  await act(async () => button('Set up new work').click())
+  const prepareTab = dom.container.querySelector<HTMLButtonElement>('[role="tab"][id$="-start-tab"]')!
+  expect(prepareTab.closest('[hidden],[inert]')).toBeNull()
+  await act(async () => prepareTab.click())
   await vi.waitFor(async () => { await act(async () => {}); expect(button('Open in Launcher').disabled).toBe(false) })
   await act(async () => button('Open in Launcher').click())
   await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce())
