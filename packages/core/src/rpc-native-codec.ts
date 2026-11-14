@@ -3,6 +3,7 @@ import { parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult } from './object-avatar.js'
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod } from './space-close.js'
+import { parseFileMutationWatchParams, parseFileMutationWatchOpening } from './public-rpc-file-mutations.js'
 import { parseTailcatConfigurationParams, parseTailcatConfigurationResult } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
 import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult, parseFileMoveParams, parseFileMoveResult, parseFileDeleteParams, parseFileDeleteResult, parseFileDeleteSnapshotsParams, parseFileDeleteSnapshotsResult } from './public-rpc-file-path.js'
@@ -482,6 +483,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'file.delete.snapshots') return parseFileDeleteSnapshotsResult(value, parseFileDeleteSnapshotsParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.delete') return parseFileDeleteResult(value, parseFileDeleteParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.move') return parseFileMoveResult(value, parseFileMoveParams(params)) as unknown as Record<string, unknown>
+    if (method === 'file.mutation.watch') return parseFileMutationWatchOpening(value, parseFileMutationWatchParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.stat') return parseFileStatResult(value, parseFileStatParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.mkdir') return parseFileMkdirResult(value, parseFileMkdirParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.mutation.inspect') return parseFileMutationInspectResult(value, parseFileMutationInspectParams(params)) as unknown as Record<string, unknown>

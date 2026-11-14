@@ -1,3 +1,4 @@
+import { parseFileMutationWatchParams, parseFileMutationWatchOpening, parseFileMutationEffect, type FileMutationWatchOpening } from './public-rpc-file-mutations.js'
 import { agentMuxRpcSshArguments } from './ssh-runtime-target.js'
 export { agentMuxRpcSshArguments } from './ssh-runtime-target.js'
 import { parseTerminalInspection, parseTerminalOutputParams } from './terminal-observation.js'
@@ -214,6 +215,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
   if (method === 'agent.conversation.watch') return parseConversationWatchOpening(p, params as import('./conversation.js').ConversationRef)
   if (method === 'space.snapshot' || method === 'space.watch') return parseSpaceStreamOpening(p, params as SpaceWatch)
   if (method === 'space.sessions.watch') return parseSpaceSessionsStreamOpening(p, (params as import('./space-sessions.js').SpaceSessionsParams['space.sessions.watch']).reference)
+  if (method === 'file.mutation.watch') return parseFileMutationWatchOpening(p, parseFileMutationWatchParams(params))
   if (method === 'goal.watch') return parseGoalChanges(p)
   if (method === 'connection.metadata.watch') { rpcRecord(p, [], 'CONTROL_PROTOCOL_ERROR'); return {} }
   if (method === 'settings.appearance.watch') { rpcRecord(p, ['observation'], 'CONTROL_PROTOCOL_ERROR'); return { observation: parseAppearanceObservation(p.observation) } }
@@ -294,6 +296,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   }
   if (method === 'agent.conversation.watch' && event.type === 'snapshot') return { ...event, data: parseConversationObservation(event.data, initial as ConversationWatchOpening) }
   if ((method === 'space.snapshot' || method === 'space.watch' || method === 'space.sessions.watch') && event.type === 'snapshot') return { type: 'snapshot', data: parseHostedTransferChunk(event.data) }
+  if (method === 'file.mutation.watch' && event.type === 'effect') return { type: 'effect', data: parseFileMutationEffect(event.data, (initial as FileMutationWatchOpening).resource) }
   if (method === 'goal.watch' && event.type === 'change') return { type: 'change', data: parseGoalChanges(event.data) }
   if (method === 'connection.metadata.watch' && event.type === 'change') return { type: 'change', data: parseChannelMetadataChange(event.data) }
   if (method === 'settings.appearance.watch' && event.type === 'snapshot') {

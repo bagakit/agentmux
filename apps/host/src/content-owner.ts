@@ -1,3 +1,4 @@
+import { FileMutationObservations } from './file-mutation-observations.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxError, spatialCatalog, type AgentMuxClient, type AgentMuxSpatialStateStore, type AgentMuxRpcServiceOptions, type AgentMuxRpcFilesOwner, type NotebookObservationPort } from '@agentmux/core'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
@@ -72,7 +73,8 @@ export function createHostContent(options: {
     }
   } })
   const titleWriter: NoteTitleFileWriter = new NoteTitleFileWriter(files, notebookStore)
-  const pathMutations = new FilePathMutations({ directory: join(dirname(options.configurationPath), 'file-path-mutations'), files: ordinary,
+  const effects = new FileMutationObservations()
+  const pathMutations = new FilePathMutations({ effects, directory: join(dirname(options.configurationPath), 'file-path-mutations'), files: ordinary,
     noteLease: work => notebookStore.runWithWriteLease(work),
     retainPaths: async (workspace, paths) => {
       const current = await configuration()
@@ -102,7 +104,7 @@ export function createHostContent(options: {
     const writer = new NoteFileWriter(files, { state: () => notebookStore.read(), owner: observation }, notebookStore)
     const guarded = <T>(owner: WorkspaceRecord, input: { path: string }, save: (workspace: WorkspaceRecord) => Promise<T>) => writeOriginalNoteResource(storage, owner, input, save)
     let shared: NoteSharedBlockOwner
-    const publicFiles = new FileReadOwner({
+    const publicFiles = new FileReadOwner({ effects,
       paths: {
         stat: (owner, path, includeRevision) => pathMutations.stat(local(owner), path, includeRevision),
         mkdir: (owner, input, context) => pathMutations.mkdir(local(owner), input, context),
@@ -140,6 +142,7 @@ export function createHostContent(options: {
     return { files: publicFiles, observation, workspace }
   }
   const publicFiles: AgentMuxRpcFilesOwner = {
+    watchMutations: async (...args) => (await owners()).files.watchMutations(...args),
     stat: async (...args) => (await owners()).files.stat(...args),
     mkdir: async (...args) => (await owners()).files.mkdir(...args),
     move: async (...args) => (await owners()).files.move(...args),

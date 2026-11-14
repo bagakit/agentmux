@@ -4,6 +4,7 @@ import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenDescribe, parseAgentOpenDescrip
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { avatarActorIdentity, isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult, parseAvatarActor, type AvatarExecutionContext, type ObjectAvatarMethod, type ObjectAvatarPort } from './object-avatar.js'
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod, type SpaceCloseActor } from './space-close.js'
+import { parseFileMutationWatchParams, parseFileMutationWatchOpening, parseFileMutationEffect } from './public-rpc-file-mutations.js'
 import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
 import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult, parseFileMoveParams, parseFileMoveResult, parseFileDeleteParams, parseFileDeleteResult, parseFileDeleteSnapshotsParams, parseFileDeleteSnapshotsResult } from './public-rpc-file-path.js'
@@ -2199,7 +2200,7 @@ export class AgentMuxRpcService {
         const input = parseFileCreateParams(params)
         context.signal?.throwIfAborted()
         if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
-        const result = this.ports.files ? await this.ports.files.create(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.create', input, context)
+        const result = this.ports.files ? await this.ports.files.create(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal, ...(caller ? { callerHostId: caller.hostId } : {}) }) : await this.ports.forwardControl!('file.create', input, context)
         return boundedFileResult(parseFileCreateResult(result, input), context.responseId, input.path.endsWith(NOTE_FILE_EXTENSION) && readNoteMarkdownHeader(input.content).status === 'valid') as AgentMuxRpcResult<M>
       }
 
@@ -4721,6 +4722,14 @@ export class AgentMuxRpcService {
         if (request.operation !== 'browser.subscribe' || !this.ports.subscribeBrowserOperation) throw new AgentMuxError('Browser subscriptions are unavailable.', 'BROWSER_SUBSCRIBE_UNSUPPORTED')
         const sub = await this.ports.subscribeBrowserOperation(request, event => emit({ type: 'progress', data: event }))
         initial = { runOperation: sub.runOperation, gap: sub.gap }; cleanup = () => sub.dispose()
+      } else if (method === 'file.mutation.watch') {
+        const input = parseFileMutationWatchParams(params)
+        if (!this.ports.files?.watchMutations) throw new AgentMuxError('The original Host Files live observer is unavailable. Keep the original workface and requests.', 'CONTROL_UNAVAILABLE')
+        const sub = await this.ports.files.watchMutations(input, event => emit({ type: 'effect', data: parseFileMutationEffect(event) }),
+          error => { const terminal = emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }); void dispose(); return terminal }, controller.signal,
+          { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal,
+            ...(caller ? { callerHostId: caller.hostId } : {}), assertCurrent: async () => { await context.assertCurrent?.(); await this.assertRuntimeFence(context) } })
+        cleanup = () => sub.dispose(); initial = parseFileMutationWatchOpening(sub.initial, input); start = () => sub.start()
       } else if (method === 'goal.watch') {
         rpcRecord(params, [])
         if (!this.ports.goalChanges) throw new AgentMuxError('The original Goal change owner is unavailable. Keep the last confirmed Goal and reconnect this reader.', 'CONTROL_UNAVAILABLE')

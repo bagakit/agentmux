@@ -8,8 +8,10 @@ import { parseFileReadParams, parseFileListParams, parseFileWriteParams, parseFi
 import type { AgentMuxSpaceCatalog, AgentMuxZoneFact } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from './mote-topic-model.js'
 import type { WorkspaceFileReadBudget } from './workspace-file-bytes.js'
+import type { FileMutationObservations } from './file-mutation-observations.js'
 
 export type FileResourcePorts<W extends FileWorkspace> = {
+  effects?: FileMutationObservations
   catalog(): Promise<AgentMuxSpaceCatalog | null>
   retiredZone?(zoneId: string): Promise<unknown>
   topicForDirectory?(workspace: W, directory: string): Promise<ScratchDirectoryFact | null>
@@ -63,12 +65,14 @@ export class FileResourceOwner<W extends FileWorkspace> {
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_WRITE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
   async create(input: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult> {
-    const params = parseFileCreateParams(input), resolved = await this.resolve(params)
+    const params = structuredClone(parseFileCreateParams(input)), provenance = context && { ...context, ...(context.actor ? { actor: { ...context.actor } } : {}) }, resolved = await this.resolve(params)
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: resolved.message } }
     const { resource, workspace } = resolved
     if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original File mapping changed. Read that exact target before deciding another create.', 'FILE_RESOURCE_MISMATCH')
     try {
-      return { resource, result: publicWrite(await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: null }, context)) }
+      const result = publicWrite(await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: null }, provenance))
+      if (result.status === 'written') this.ports.effects?.publish({ type: 'created-file', resource, revision: result.revision }, provenance)
+      return { resource, result }
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
   protected async resolve(params: FileReadParams, observedCatalog?: AgentMuxSpaceCatalog | null): Promise<{ resource: FileReadResource; workspace: W } | { message: string }> {

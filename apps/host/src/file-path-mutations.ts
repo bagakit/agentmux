@@ -13,6 +13,7 @@ import type { OrdinaryWorkspaceFiles } from './ordinary-files.js'
 import type { FileDeleteHistory } from './file-delete-history.js'
 import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import { FILE_DELETE_SNAPSHOT_REFERENCE_BYTES } from '@agentmux/core/files'
+import type { FileMutationObservations } from './file-mutation-observations.js'
 
 type Actor = NonNullable<FilePathMutationContext['actor']>
 type Locator = { root: string; path: string }
@@ -54,6 +55,7 @@ const targetKeys = ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePat
 export class FilePathMutations {
   private readonly inFlight = new Map<string, { action: 'mkdir'; digest: string; promise: Promise<FileMkdirResult> } | { action: 'move'; digest: string; promise: Promise<FileMoveResult> } | { action: 'delete'; digest: string; promise: Promise<FileDeleteResult> }>()
   constructor(private readonly ports: {
+    effects?: FileMutationObservations
     directory: string
     files: Pick<OrdinaryWorkspaceFiles, 'statPath' | 'mkdirPath' | 'inspectPathMutation' | 'pathMutationLocation' | 'movePath' | 'inspectMovePath' | 'executionDirectoryRelated' | 'deletePath'>
     directoryScope?: (isRelated: (cwd: string) => Promise<boolean>) => ReturnType<AgentMuxClient['retainExecutionDirectoryMutation']>
@@ -250,6 +252,7 @@ export class FilePathMutations {
   }
   private async execute(workspace: WorkspaceRecord, input: FileMkdirParams, originalActor: Actor, callerHostId: string | undefined, fingerprint: string): Promise<FileMkdirResult> {
     const result = (receipt: FilePathMutationReceipt): FileMkdirResult => ({ operationId: input.operationId, resource: input.expectedResource, result: receipt })
+    const publish = (receipt: FilePathMutationReceipt): FileMkdirResult => { const value = result(receipt); if (receipt.filesystem === 'created') this.ports.effects?.publish({ type: 'path-mutation', action: 'mkdir', request: input, receipt: value }, { actor: originalActor, ...(callerHostId ? { callerHostId } : {}) }); return value }
     let prior
     try { prior = await this.load(input.operationId, fingerprint) } catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'FILE_MUTATION_CONFLICT') throw cause; return result(unknown(cause, 'FILE_MUTATION_RECORD_UNAVAILABLE')) }
     if (prior) {
@@ -282,9 +285,9 @@ export class FilePathMutations {
       })) } catch (cause) { return result(unknown(cause)) }
       try {
         await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, result: receipt }), { mode: 0o600, requireDirectorySync: true })
-        return result(receipt)
+        return publish(receipt)
       } catch (cause) {
-        return result({ ...receipt, durability: 'unconfirmed', code: 'FILE_MUTATION_RESULT_UNCONFIRMED',
+        return publish({ ...receipt, durability: 'unconfirmed', code: 'FILE_MUTATION_RESULT_UNCONFIRMED',
           message: 'The filesystem result is separate from its unconfirmed record save. Keep this operation and inspect it without replaying. ' + (cause instanceof Error ? cause.message : String(cause)) })
       }
     })
@@ -301,6 +304,7 @@ export class FilePathMutations {
   }
   move(workspace: WorkspaceRecord, raw: FileMoveParams, context: FilePathMutationContext | undefined): Promise<FileMoveResult> {
     const input = structuredClone(parseFileMoveParams(raw)), originalActor = actor(context)
+    context = context && { ...context, actor: originalActor }
     if (workspace.id !== input.expectedResource.workspaceId || workspace.hostId !== input.expectedResource.hostId || workspace.path !== input.expectedResource.workspacePath) throw new AgentMuxError('The original move Workspace mapping changed.', 'FILE_RESOURCE_MISMATCH')
     const fingerprint = digest(input, originalActor, context?.callerHostId, 'move'), prior = this.inFlight.get(input.operationId)
     if (prior) {
@@ -313,7 +317,9 @@ export class FilePathMutations {
     return promise
   }
   private async executeMove(workspace: WorkspaceRecord, input: FileMoveParams, originalActor: Actor, context: FilePathMutationContext | undefined, fingerprint: string): Promise<FileMoveResult> {
+    const callerHostId = context?.callerHostId
     const result = (receipt: FileMoveReceipt): FileMoveResult => ({ operationId: input.operationId, resource: input.expectedResource, destination: input.destination.expectedResource, result: receipt })
+    const publish = (receipt: FileMoveReceipt): FileMoveResult => { const value = result(receipt); if (receipt.filesystem === 'moved') this.ports.effects?.publish({ type: 'path-mutation', action: 'move', request: input, receipt: value }, { actor: originalActor, ...(callerHostId ? { callerHostId } : {}) }); return value }
     let prior: Original | null
     try { prior = await this.load(input.operationId, fingerprint) } catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'FILE_MUTATION_CONFLICT') throw cause; return result(moveUnknown(cause, 'FILE_MUTATION_RECORD_UNAVAILABLE')) }
     if (prior) {
@@ -401,8 +407,8 @@ export class FilePathMutations {
       try { await this.ports.notes.apply(prepared.notePlan, input.operationId, originalActor); return { ...effect, noteMetadata: { status: 'recorded' as const } } }
       catch (cause) { return { ...effect, noteMetadata: { status: 'unconfirmed' as const, message: cause instanceof Error ? cause.message : String(cause) } } }
     }) } catch (cause) { receipt = moveUnknown(cause) }
-    try { await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, result: receipt }), { mode: 0o600, requireDirectorySync: true }); return result(receipt) }
-    catch (cause) { return result({ ...receipt, durability: 'unconfirmed', code: 'FILE_MUTATION_RESULT_UNCONFIRMED', message: 'The original move result save is unconfirmed; no action may be replayed. ' + (cause instanceof Error ? cause.message : String(cause)) }) }
+    try { await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, result: receipt }), { mode: 0o600, requireDirectorySync: true }); return publish(receipt) }
+    catch (cause) { return publish({ ...receipt, durability: 'unconfirmed', code: 'FILE_MUTATION_RESULT_UNCONFIRMED', message: 'The original move result save is unconfirmed; no action may be replayed. ' + (cause instanceof Error ? cause.message : String(cause)) }) }
   }
 
   private observeDelete(value: DeleteOriginal): FileDeleteReceipt {
@@ -427,6 +433,7 @@ export class FilePathMutations {
   }
   private async executeDelete(workspace: WorkspaceRecord, input: FileDeleteParams, originalActor: Actor, callerHostId: string | undefined, fingerprint: string): Promise<FileDeleteResult> {
     const result = (receipt: FileDeleteReceipt): FileDeleteResult => ({ operationId: input.operationId, resource: input.expectedResource, result: receipt })
+    const publish = (receipt: FileDeleteReceipt): FileDeleteResult => { const value = result(receipt); if (receipt.filesystem === 'deleted') this.ports.effects?.publish({ type: 'path-mutation', action: 'delete', request: input, receipt: value }, { actor: originalActor, ...(callerHostId ? { callerHostId } : {}) }); return value }
     let prior: Original | null
     try { prior = await this.load(input.operationId, fingerprint) } catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'FILE_MUTATION_CONFLICT') throw cause; return result(deleteUnknown(cause, 'FILE_MUTATION_RECORD_UNAVAILABLE')) }
     if (prior) {
@@ -492,8 +499,8 @@ export class FilePathMutations {
         catch (cause) { return { ...effect, noteHistory: { status: 'unconfirmed', message: cause instanceof Error ? cause.message : String(cause) } } }
       } finally { scope.release() } // The original finite worker has actually closed.
     }) } catch (cause) { receipt = deleteUnknown(cause) }
-    try { await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, result: receipt }), { mode: 0o600, requireDirectorySync: true }); return result(receipt) }
-    catch (cause) { return result({ ...receipt, durability: 'unconfirmed', code: 'FILE_MUTATION_RESULT_UNCONFIRMED', message: 'The original delete result save is unconfirmed. Keep the original request and inspect without replaying. ' + (cause instanceof Error ? cause.message : String(cause)) }) }
+    try { await durableWriteFile(this.path(input.operationId), JSON.stringify({ ...prepared, result: receipt }), { mode: 0o600, requireDirectorySync: true }); return publish(receipt) }
+    catch (cause) { return publish({ ...receipt, durability: 'unconfirmed', code: 'FILE_MUTATION_RESULT_UNCONFIRMED', message: 'The original delete result save is unconfirmed. Keep the original request and inspect without replaying. ' + (cause instanceof Error ? cause.message : String(cause)) }) }
   }
 
 }

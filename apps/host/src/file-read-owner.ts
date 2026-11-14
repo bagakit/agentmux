@@ -12,12 +12,15 @@ import { parseFileStatParams, parseFileMkdirParams, parseFileMutationInspectPara
   type FileStatResult, type FileMkdirParams, type FileMkdirResult, type FileMutationInspectParams,
   type FileMutationInspectResult, type FilePathMutationContext, parseFileDeleteParams, type FileDeleteParams, type FileDeleteResult } from '@agentmux/core/files'
 import type { FilePathMutations } from './file-path-mutations.js'
+import { parseFileMutationWatchParams, type FileMutationWatchOwner } from '@agentmux/core/files'
+import type { FileMutationObservations } from './file-mutation-observations.js'
 
 const publicWrite = (value: WorkspaceFileWriteResult): WorkspaceFileWriteResult => { if (value.status !== 'written') return value; const { fileWitness: _internal, ...receipt } = value; return receipt }
 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
 export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends FileResourceOwner<W> implements AgentMuxRpcFilesOwner {
   constructor(protected override readonly ports: {
+    effects?: FileMutationObservations
     paths?: Pick<FilePathMutations, 'stat' | 'mkdir' | 'move' | 'delete' | 'deleteSnapshots' | 'inspect'>
     share?: AgentMuxRpcFileShareOwner
     catalog(): Promise<AgentMuxSpaceCatalog | null>
@@ -35,6 +38,14 @@ export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends 
       undo?(workspace: W, input: WorkspaceFileUndoInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
     }
   }) { super(ports) }
+  async watchMutations(...[raw, onEffect, onEnd, signal, context]: Parameters<FileMutationWatchOwner['watchMutations']>): ReturnType<FileMutationWatchOwner['watchMutations']> {
+    context = { ...context, ...(context.actor ? { actor: { ...context.actor } } : {}) }
+    const params = structuredClone(parseFileMutationWatchParams(raw)), resolved = await this.resolve(params)
+    signal.throwIfAborted(); await context.assertCurrent?.()
+    if ('message' in resolved || !this.ports.effects) throw new AgentMuxError('message' in resolved ? resolved.message : 'The original Files live observer is unavailable.', 'FILE_MUTATION_OBSERVATION_UNAVAILABLE')
+    const reader = this.ports.effects.subscribe(resolved.resource, context, onEffect, onEnd, signal)
+    return { initial: { resource: resolved.resource, delivery: 'live-only' }, start: reader.start, dispose: reader.dispose }
+  }
   async stat(input: FileStatParams): Promise<FileStatResult> {
     const params = parseFileStatParams(input), resolved = await this.resolve(params)
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_STAT_UNCONFIRMED', message: resolved.message } }
