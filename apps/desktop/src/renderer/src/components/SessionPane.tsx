@@ -44,6 +44,7 @@ import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } fro
 import { formatConversationAnnotation } from '../lib/conversation-annotation-delivery'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ExecutionConnectingSurface, useLegacyExecutionRecovery } from './PendingExecutionRecovery'
+import { SourceCoordinatorRequests } from './SourceCoordinatorRequests'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { ContinuitySupervisionNotice } from './ContinuitySupervisionNotice'
 import { SessionRecoveryActions } from './SessionRecoveryActions'
@@ -1086,6 +1087,7 @@ export function SessionPane({
       <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="connecting">
           {sessionHeader()}
           {takeoverSurface}
+          {mailboxOrigin.tabId && mailboxOrigin.regionId ? <SourceCoordinatorRequests active={visible && !parked} coordinatorControls={!pendingLaunch} origin={{ tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId }} /> : null}
           {connectingSurface}
         {surfaceKind === 'agent' && !pendingLaunch && historyCatalogue.error ? <ServiceWindowNotice notice={{
           kind: 'indeterminate', notice: { step: `Retained history metadata could not be read: ${historyCatalogue.error}`,
@@ -1335,6 +1337,7 @@ export function SessionPane({
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
       {frontendObservationNotice}
       {session.kind === 'agent' && session.toolExecution ? <AgentToolExecutionNotice session={session} visible={visible} /> : null}
+      {session.kind === 'agent' && mailboxOrigin.tabId && mailboxOrigin.regionId ? <SourceCoordinatorRequests active={visible && !parked} coordinatorControls={!pendingLaunch} origin={{ tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId }} /> : null}
       <div ref={bodyRef} className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && activityShown ? 'workflow' : undefined}>
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || needsSessionSurface || terminalLifetime.current.opened ? (

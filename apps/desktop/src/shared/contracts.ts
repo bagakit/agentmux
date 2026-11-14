@@ -2006,6 +2006,7 @@ export type AgentMuxDesktopApi = {
     snapshot(): Promise<RuntimeSnapshot>
     /** Current Desktop connection observations; never waits for Session membership. */
     endpointWarnings(): Promise<RuntimeEndpointWarning[]>
+    executionCoordinatorTarget(): Promise<AgentExecutionRecoveryReference['coordinator']>
     resolveExecutionBinding(input: AgentExecutionLegacyLocator): Promise<AgentExecutionLegacyObservation | null>
     executionBinding(bindingId: string | AgentExecutionRecoveryReference, view?: 'association'): Promise<import('@agentmux/core').AgentExecutionInspection | null>
     rejoinExecutionBinding(bindingId: string): Promise<import('@agentmux/core').AgentExecutionInspection>

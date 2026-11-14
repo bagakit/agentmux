@@ -5,6 +5,7 @@ import type { AgentExecutionLegacyLocator, AgentExecutionLegacyObservation, Agen
 import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
 export function createExecutionBindingApi(ipc: Pick<IpcRenderer, 'invoke' | 'on' | 'off'>) {
   return {
+    executionCoordinatorTarget: (): Promise<AgentExecutionRecoveryReference['coordinator']> => ipc.invoke('sessions:executionCoordinatorTarget'),
     resolveExecutionBinding: (input: AgentExecutionLegacyLocator): Promise<AgentExecutionLegacyObservation | null> => ipc.invoke('sessions:resolveExecutionBinding', input),
     executionBinding: (bindingId: string | AgentExecutionRecoveryReference, view?: 'association'): Promise<AgentExecutionInspection | null> => view === undefined
       ? ipc.invoke('sessions:executionBinding', bindingId) : ipc.invoke('sessions:executionBinding', bindingId, view),

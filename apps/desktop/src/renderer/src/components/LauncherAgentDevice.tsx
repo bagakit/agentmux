@@ -10,7 +10,6 @@ import { AgentWorkModeSetup } from './AgentWorkModeSetup'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import type { LauncherSourceExecution } from '../lib/launcher-source'
-import { AgentExecutionRelation } from './AgentExecutionRelation'
 
 const ModeIcon = semanticIconComponent('object.remote-execution')
 const DownIcon = semanticIconComponent('navigation.down')
@@ -55,13 +54,8 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
   </span>
   return <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
     <span className="launcher-work-arrangement"><Dialog.Trigger asChild><button ref={setAnchor} type="button" className="launcher-work-arrangement__trigger" disabled={disabled || !active}
-      aria-label="Agent location" title={sourceExecution ? `Project on ${workHostLabel(hosts, workspace.hostId)} · Agent Runtime ${sourceExecution.agentTarget.runtimeId}` : `Agent on ${workHostLabel(hosts, placement.agentHostId)} · Project on ${workHostLabel(hosts, placement.projectHostId)}`}>
-      {sourceExecution ? <><AgentExecutionRelation projectLocal={hosts.find(host => host.id === workspace.hostId)?.kind === 'local'}
-        agentLocal={hosts.find(host => host.id === workspace.hostId)?.kind === 'local' && sourceExecution.agentTarget.runtimeId === sourceExecution.target.reference.runtimeId}
-        relation={sourceExecution.agentTarget.runtimeId === sourceExecution.target.reference.runtimeId ? { kind: 'same-device' } : sourceExecution.agentTarget.adoptedRoute
-          ? sourceExecution.agentTarget.adoptedRoute.hops.length > 1 ? { kind: 'cascade', hops: sourceExecution.agentTarget.adoptedRoute.hops.length } : { kind: 'direct' } : { kind: 'unconfirmed' }} />
-        <span>{sourceExecution.agentTarget.runtimeId === sourceExecution.target.reference.runtimeId ? 'Project device' : sourceExecution.agentTarget.hostId}</span></>
-        : <AgentWorkModeBadge placement={placement} hosts={hosts} showLocal hideTooltip={open || !active} />}<DownIcon size={11} /></button></Dialog.Trigger></span>
+      aria-label="Agent location" title={sourceExecution ? undefined : `Agent on ${workHostLabel(hosts, placement.agentHostId)} · Project on ${workHostLabel(hosts, placement.projectHostId)}`}>
+      <AgentWorkModeBadge sourceSelection={sourceExecution} placement={placement} hosts={hosts} showLocal hideTooltip={open || !active} /><DownIcon size={11} /></button></Dialog.Trigger></span>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Content ref={attach} className="launcher-work-arrangement__dialog" style={{ visibility: 'hidden' }}
         onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>

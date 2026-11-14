@@ -7,6 +7,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore, adoptAgentRegionObservation, type AgentRegionReference } from '../store'
 import { SettingsNavigation } from './SettingsNavigation'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
+import { associateRetainedSourceCoordinator } from '../lib/source-coordinator-request'
 
 const referenceKey = (target: AgentExecutionRecoveryReference) => JSON.stringify([target.coordinator.hostId, target.coordinator.runtimeId, target.reference.bindingId, target.reference.agentSessionId, target.reference.createOperationId])
 
@@ -67,6 +68,11 @@ export function PendingExecutionRecovery({ target, origin, ...surface }: Compone
       const result = await api.sessions.continueExecution(target)
       if (result.created.agentSessionId !== target.reference.agentSessionId || result.creation?.createOperationId !== target.reference.createOperationId)
         throw new Error('The response did not confirm this original Session and creation. Its request is retained.')
+      // L has its own retained owner/receipt. Its failure cannot withdraw the
+      // confirmed C or prevent this original recovery from being presented.
+      void associateRetainedSourceCoordinator(target, result.created).catch(error => {
+        if (latest.current === source && source.active) setFeedback({ key, message: `The original Agent result is confirmed; its private project-link input is unreadable: ${presentError(error)}` })
+      })
       const canonical = await useAppStore.getState().canonicalizeAgentLaunch(result) ?? result
       // An already-authorized result may update its exact original Store owner even
       // after this reader hides; it never navigates or replaces a changed workface.

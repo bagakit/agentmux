@@ -57,6 +57,7 @@ import { useSourceLauncher } from '../hooks/useSourceLauncher'
 import { SourceLauncherRequest } from './SourceLauncherRequest'
 import { mountedAgentOpenInput, mountedAgentOpenKey, type MountedAgentOpenInput } from '../lib/space-mount-launch'
 import { ordinarySourceLauncherRequests, sendSourceLauncherRequest } from '../lib/source-launcher-request'
+import { SourceCoordinatorRequests } from './SourceCoordinatorRequests'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -407,9 +408,16 @@ export function NewTabSurface({
     if (!original && (!sourceExecution || !launcherSourceMatches(sourceExecution, workspace))) throw Error('The original Source project changed. Its draft and request are retained.')
     const source = sourceExecution
     if (!original && !source) throw Error('The original Source target is unavailable. Your draft is retained.')
+    if (!original && source?.kind === 'source-coordinator') {
+      const selected = sourceLauncher.selected
+      if (!selected || selected.executorId !== displayedExecutorId) throw Error('The selected original Coordinator declaration is unconfirmed. Your input is retained.')
+      return await useAppStore.getState().launchAgent(selected.executorId, expandSemanticReferences(prompt), tabGroupId, slot,
+        { ...launchOptionSelection }, { ...names }, undefined, undefined, { selection: source, executor: selected })
+    }
+    const sourceOwned = source && source.kind !== 'source-coordinator' ? source : undefined
     const input: MountedAgentOpenInput = original ?? { kind: 'agent-open', target: source!.target,
       slot: { kind: 'region', ...slot }, submitted: false, origin: { kind: 'ordinary-launcher', launcherId: warmLauncherId({ tabGroupId, regionId: slot.regionId }), project: source!.project, names: { ...names } },
-      request: { operationId: crypto.randomUUID(), content: { kind: 'new-agent', executorId: displayedExecutorId, agentTarget: source!.agentTarget,
+      request: { operationId: crypto.randomUUID(), content: { kind: 'new-agent', executorId: displayedExecutorId, agentTarget: sourceOwned!.agentTarget,
         prompt: expandSemanticReferences(prompt), launchOptions: { ...launchOptionSelection },
         ...(useAppStore.getState().agentComposerNotes[slot.regionId] === undefined ? {} : { agentMuxNote: useAppStore.getState().agentComposerNotes[slot.regionId] }) },
         destination: { spaceId: source!.target.reference.spaceId, zoneId: source!.target.zoneId, newTab: true }, focus: false } }
@@ -469,7 +477,7 @@ export function NewTabSurface({
 
   const sourceSupportIssue = sourceSelectionIssue ?? sourceLauncher.issue ?? (sourceMode ? !sourceExecution || !launcherSourceMatches(sourceExecution, workspace)
     ? 'The original project is unconfirmed. Your complete draft is kept; review Agent location.'
-    : !sourceLauncher.description ? 'Reading this project device’s launch support…' : !sourceLauncher.description.contracts.ordinaryLaunch
+    : !sourceLauncher.description ? 'Reading this project device’s launch support…' : !(sourceExecution.kind === 'source-coordinator' ? sourceLauncher.description.contracts.externalAssociation : sourceLauncher.description.contracts.ordinaryLaunch)
       ? `Update AgentMux Core on ${host?.label ?? 'this project device'} before launching this arrangement. The current Core cannot retain its complete launch fields.`
       : !sourceLauncher.selected ? 'Reading the selected Agent’s declarations…' : !sourceLauncher.selected.creationContract
         ? 'This Agent device has not confirmed support for complete launch fields. Review it through the project device; your draft is kept.' : undefined : undefined)
@@ -504,6 +512,7 @@ export function NewTabSurface({
       {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busy !== null}
         onContinue={original => { if (original.slot.kind === 'region') void run('agent', () => launchAtSource({ tabId: original.slot.kind === 'region' ? original.slot.tabId : '', regionId: original.slot.kind === 'region' ? original.slot.regionId : '' }, original)) }} />)}
       {retainedSourceRequests.issue ? <p role="status">{retainedSourceRequests.issue}</p> : null}
+      <SourceCoordinatorRequests active={motionActive && !moteId} origin={{ launcherId }} />
       {splitExecution && !splitWorkspaceSupported ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: splitProjectUnsupported ? 'Separate tools need project folders' : 'Original Agent location is unconfirmed',
         mode: 'Your original project, Agent selection and task are kept. No request has been sent.',

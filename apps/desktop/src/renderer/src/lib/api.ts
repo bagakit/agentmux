@@ -1073,6 +1073,7 @@ const mockApi: AgentMuxDesktopApi = {
     snapshot: async () => structuredClone(mockSnapshot),
     endpointWarnings: async () => structuredClone(mockSnapshot.runtimeEndpointWarnings ?? []),
     resolveExecutionBinding: async () => null,
+    executionCoordinatorTarget: async () => { throw new Error('Reading the original Coordinator requires its native Desktop owner.') },
     executionBinding: async () => null,
     rejoinExecutionBinding: async () => { throw new Error('Original tool connection recovery requires the native Desktop.') },
     continueExecution: async () => { throw new Error('Continuing the original split creation requires the native Desktop.') },

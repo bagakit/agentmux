@@ -1,6 +1,9 @@
 import { openSourceFolderInput } from './lib/space-mount-view'
 import { observeMountedSpaceWindow } from './lib/mounted-space-observation'
 import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSelection, type MountedLauncherSlot } from './lib/space-mount-launch'
+import { editSourceCoordinatorInput, sourceCoordinatorInputKey, type SourceCoordinatorInput } from './lib/source-coordinator-input'
+import { associateCreatedSourceCoordinator } from './lib/source-coordinator-request'
+import { launcherSourceMatches, type SourceCoordinatorStart } from './lib/launcher-source'
 import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistration, mountedSpaceInput, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
 import { ordinarySpaceMember, type OrdinaryMemberReference } from './lib/ordinary-space-member'
 import { observeMountedSessions, type MountedSessionObservation, type MountedSessionUpdate } from './lib/space-mount-sessions'
@@ -216,6 +219,7 @@ import { primaryMoteExecutorChoice } from './lib/primary-mote-executor'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, initializeMoteFloatingPreferences, moteFloatingUnreadEditsPending } from './lib/pmo-teams-topic-floating'
 import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import type {
+  AgentLaunchInput,
   AgentLaunchResult,
   LaunchOptionSelection,
   AgentSessionControl,
@@ -1046,6 +1050,7 @@ export type AppState = GitReadingActions & {
   openSourceFolder(target: SpaceMountRecord): void
   retainSpaceMountRegistration(key: string, update: (current: MountedSpaceRegistrationInput | undefined) => MountedSpaceRegistrationInput | undefined): void
   retainSpaceMountAgentOpen(key: string, update: (current: MountedAgentOpenInput | undefined) => MountedAgentOpenInput | undefined): void
+  retainSourceCoordinatorInput(key: string, update: (current: SourceCoordinatorInput | undefined) => SourceCoordinatorInput | undefined): void
   editSpaceMountLauncher(key: string, slot: MountedLauncherSlot, selection: MountedLauncherSelection): void
   selectSpaceMount(key: string | null): void
   editSpaceMountView(key: string, view: SpaceMountView): void
@@ -1668,7 +1673,8 @@ export type AppState = GitReadingActions & {
      */
     names?: { agentName?: string | undefined; tabName?: string | undefined; nameSource?: 'derived' },
     agentMuxNote?: string,
-    pmo?: { intent: GoalPmoIntent; onCreated: (result: AgentLaunchResult) => void }
+    pmo?: { intent: GoalPmoIntent; onCreated: (result: AgentLaunchResult) => void },
+    sourceStart?: SourceCoordinatorStart
   ): Promise<void>
   launchTerminal(
     tabGroupId: string,
@@ -5565,6 +5571,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   retainSpaceMountAgentOpen(key, update) {
     set(state => ({ mountedSpaceInputs: editMountedAgentOpen(state.mountedSpaceInputs, key, update) }))
+  },
+  retainSourceCoordinatorInput(key, update) {
+    set(state => ({ mountedSpaceInputs: editSourceCoordinatorInput(state.mountedSpaceInputs, key, update) }))
   },
   editSpaceMountLauncher(key, slot, selection) {
     set(state => ({ mountedSpaceInputs: editMountedLauncherSelection(state.mountedSpaceInputs, key, slot, selection) }))
@@ -10797,7 +10806,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   inspectNoteHistory: (tabId, regionId, noteId) => readNoteHistoryTarget(tabId, regionId, noteId, true),
   applyNoteHistory: enqueueNoteHistoryAction,
-  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions, names, agentMuxNote, pmo) {
+  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions, names, agentMuxNote, pmo, sourceStart) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -10812,13 +10821,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       activeWorkspaceId: state.activeWorkspaceId
     })
     const resourceWorkspace = state.config?.workspaces.find((item) => item.id === workspaceId)
-    const agentWorkspaceId = launcherSurface?.kind === 'launcher' ? launcherSurface.agentWorkspaceId : undefined
+    const agentWorkspaceId = sourceStart ? undefined : launcherSurface?.kind === 'launcher' ? launcherSurface.agentWorkspaceId : undefined
     const workspace = agentWorkspaceId ? state.config?.workspaces.find(item => item.id === agentWorkspaceId) : resourceWorkspace
     if (!resourceWorkspace || !workspace) throw new Error('Select the original project and Agent workspace first')
     if (agentWorkspaceId && (isScratchWorkspaceId(resourceWorkspace.id) || isScratchWorkspaceId(workspace.id))) {
       throw new Error('Separate execution requires two registered project workspaces. The original Mote and draft are retained.')
     }
-    const toolWorkspace = agentWorkspaceId ? { id: resourceWorkspace.id, hostId: resourceWorkspace.hostId, path: resourceWorkspace.path } : undefined
+    if (sourceStart && (!launcher || pmo || isScratchWorkspaceId(resourceWorkspace.id) || !launcherSourceMatches(sourceStart.selection, resourceWorkspace) ||
+        sourceStart.executor.executorId !== executorId || !sourceStart.executor.configRevision ||
+        !sourceStart.selection.coordinator.hostId || !sourceStart.selection.coordinator.runtimeId || !sourceStart.selection.coordinator.homeDirectory))
+      throw new Error('The original Source and independent Coordinator selection changed. Your existing work and input are retained.')
+    const toolWorkspace = agentWorkspaceId || sourceStart ? { id: resourceWorkspace.id, hostId: resourceWorkspace.hostId, path: resourceWorkspace.path } : undefined
+    const executionHostId = sourceStart?.selection.coordinator.hostId ?? workspace.hostId
     const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
     if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Agent display position is unavailable')
@@ -10849,9 +10863,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const submittedNames = originalNames &&
       (originalNames.agentName.trim() || undefined) === requestedNames.agentName &&
       (originalNames.tabName.trim() || undefined) === requestedNames.tabName ? originalNames : undefined
-    const executor = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId], toolWorkspace ? 'host' : undefined).find(item => item.id === executorId)
+    const executor = sourceStart ? { id: sourceStart.executor.executorId, providerId: sourceStart.executor.providerId, executorRevision: sourceStart.executor.configRevision }
+      : executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId], toolWorkspace ? 'host' : undefined).find(item => item.id === executorId)
     const selectedHostExecutor = launcherSurface?.kind === 'launcher' ? launcherSurface.agentExecutor : undefined
-    if (toolWorkspace && (!selectedHostExecutor || selectedHostExecutor.hostId !== workspace.hostId || selectedHostExecutor.executorId !== executorId ||
+    if (toolWorkspace && !sourceStart && (!selectedHostExecutor || selectedHostExecutor.hostId !== workspace.hostId || selectedHostExecutor.executorId !== executorId ||
       !executor?.executorRevision || selectedHostExecutor.executorRevision !== executor.executorRevision)) {
       throw new Error('Select the exact Agent Host configuration for this launch. The original project and draft are kept.')
     }
@@ -10861,6 +10876,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const launchNote = agentMuxNote ?? state.agentComposerNotes[regionId]
     const createOperationId = pmo?.intent.creationOperationId === undefined ? mintObjectId() : await goalPmoOperation(pmo.intent, 'create')
     const sessionId = pmo?.intent.creationOperationId === undefined ? mintObjectId() : await api.sessions.resolveCreationSessionId(workspace.hostId, createOperationId)
+    let reachRequest: AgentLaunchInput | undefined = sourceStart ? {
+      executorId, executorRevision: sourceStart.executor.configRevision, hostId: executionHostId,
+      workspacePath: sourceStart.selection.coordinator.homeDirectory, agentSessionId: sessionId, createOperationId,
+      launcher: { tabId, regionId }, toolWorkspace: toolWorkspace!, prompt,
+      sourceCoordinator: { hostId: executionHostId, runtimeId: sourceStart.selection.coordinator.runtimeId,
+        resourceRuntimeId: sourceStart.selection.target.reference.runtimeId, workingDirectory: 'device-home' },
+      ...(launchOptions === undefined ? {} : { launchOptions }), ...(launchNote === undefined ? {} : { agentMuxNote: launchNote })
+    } : undefined
+    const reachInput: SourceCoordinatorInput | undefined = sourceStart && reachRequest ? {
+      kind: 'source-coordinator-launch', origin: { launcherId: warmLauncherId({ tabGroupId, regionId }), slot: { tabId, regionId },
+        project: sourceStart.selection.project, names: submittedNames ?? { agentName: names?.agentName ?? '', tabName: names?.tabName ?? '' } },
+      target: sourceStart.selection.target, request: { ...reachRequest, agentSessionId: sessionId, createOperationId,
+        toolWorkspace: toolWorkspace!, sourceCoordinator: reachRequest.sourceCoordinator! }, submitted: false,
+      association: { operationId: mintObjectId(), submitted: false }
+    } : undefined
+    // Pending presentation and durable user intention share the exact same request.
+    if (reachInput) reachRequest = reachInput.request
     const live = get(), liveTargetTab = launcher ? live.tabs[tabId] : targetTab
     const liveLayout = live.layouts[displayWorkspaceId!]
     if (pmo && (!liveTargetTab || launcher && liveTargetTab.regions[regionId] !== launcherSurface ||
@@ -10890,7 +10922,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       },
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
-        [sessionId]: { events: [], overflowed: false, request: { executorId, hostId: workspace.hostId, workspacePath: workspace.path, createOperationId, prompt,
+        [sessionId]: { events: [], overflowed: false, request: reachRequest ?? { executorId, hostId: workspace.hostId, workspacePath: workspace.path, createOperationId, prompt,
           ...(launcher ? { launcher: { tabId, regionId }, executionWorkspaceId: workspace.id } : {}),
           ...(launchOptions ? { launchOptions } : {}),
           ...(toolWorkspace ? { toolWorkspace, executionWorkspaceId: workspace.id, executorRevision: executor!.executorRevision! } : {}),
@@ -10900,6 +10932,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let dispatchStarted = false
     let creationObserved = false
     try {
+      if (reachInput) {
+        get().retainSourceCoordinatorInput(sourceCoordinatorInputKey(reachInput.request), () => ({ ...reachInput, submitted: true }))
+        await checkpointMountedSpaceInputs()
+        if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId))
+          throw new Error('The original Reach workface changed before dispatch. Its complete C/L intention is retained; no replacement was sent.')
+      }
       if (scratchTopicId && targetTab.topicPreparation === 'mote') {
         await api.scratch.ensureMote(resourceWorkspace.id, scratchTopicId)
         if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId)) {
@@ -10914,7 +10952,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         })
       }
       dispatchStarted = true
-      const launched = await api.sessions.launchAgent({
+      const launched = await api.sessions.launchAgent(reachRequest ?? {
         ...(launcher ? { launcher: { tabId, regionId }, executionWorkspaceId: workspace.id } : {}),
         ...(toolWorkspace ? { toolWorkspace } : {}),
         executorId,
@@ -10929,6 +10967,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         createOperationId
       }, pmo?.intent)
       creationObserved = true
+      if (reachInput) void associateCreatedSourceCoordinator(reachInput, launched.created).catch(error => {
+        get().retainSourceCoordinatorInput(sourceCoordinatorInputKey(reachInput.request), current => current?.request === reachInput.request
+          ? { ...current, association: { ...current.association, issue: presentError(error) } } : current)
+      })
       const placementNoticeKey = JSON.stringify(['native-creation', createOperationId])
       // A Launcher position is retried by the workface's own background save; a discussion binding by its owner.
       const placement = launched.placementIssue
@@ -11019,9 +11061,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
       // 名字与草稿同一时机落地：Agent 已经挂上，两个 id 才真正指向一个存在的东西。失败路径不写，
       // 否则会留下一个指向已消失 session 的孤儿名字。留空即不写，显示名交还派生链。
-      if (requestedNames.agentName) await commitDisplayName({ kind: 'agent-session', id: sessionId }, requestedNames.agentName, names?.nameSource ?? 'launch', 0)
+      if (!sourceStart && requestedNames.agentName) await commitDisplayName({ kind: 'agent-session', id: sessionId }, requestedNames.agentName, names?.nameSource ?? 'launch', 0)
         .catch(error => get().reportWorkbenchSaveFailure(error))
-      if (requestedNames.tabName) await commitDisplayName({ kind: 'tab', id: tabId }, requestedNames.tabName, names?.nameSource ?? 'launch', requestedTabNameRevision)
+      if (!sourceStart && requestedNames.tabName) await commitDisplayName({ kind: 'tab', id: tabId }, requestedNames.tabName, names?.nameSource ?? 'launch', requestedTabNameRevision)
         .catch(error => get().reportWorkbenchSaveFailure(error))
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
       if (priorFailure && get().notificationEvents.includes(priorFailure)) {
@@ -11034,6 +11076,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           event: { source: 'mote-primary-agent', key: createOperationId, object: { kind: 'region', id: regionId, hostId: result.created.hostId, workspaceId: workspace.id } }
         }))
     } catch (error) {
+      if (reachInput) get().retainSourceCoordinatorInput(sourceCoordinatorInputKey(reachInput.request), current => current?.request === reachInput.request
+        ? { ...current, submitted: dispatchStarted, issue: presentError(error) } : current)
       const ownerFailure = error as { controlFailure?: import('@agentmux/core').AgentMuxControlFailure } | null
       if (dispatchStarted && (creationObserved || ownerFailure?.controlFailure?.disposition !== 'not_applied')) {
         // A rejected invoke can arrive after start. Only a structured owner not_applied fact
@@ -11043,7 +11087,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             agentSessionId: sessionId, createOperationId,
             controlFailure: ownerFailure?.controlFailure?.disposition === 'unknown' ? ownerFailure.controlFailure
               : { disposition: 'unknown' as const, confirmedInputBytes: null } })
-        set(current => reducePendingAgentLaunchIssue(current, sessionId, { hostId: workspace.hostId, createOperationId },
+        set(current => reducePendingAgentLaunchIssue(current, sessionId, { hostId: executionHostId, createOperationId },
           { message: presentError(error), code: typeof retained.code === 'string' ? retained.code : null,
             ...((error as { executionRecovery?: import('../../shared/contracts').AgentExecutionRecoveryReference })?.executionRecovery
               ? { executionRecovery: (error as { executionRecovery: import('../../shared/contracts').AgentExecutionRecoveryReference }).executionRecovery } : {}) }))
