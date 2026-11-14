@@ -98,6 +98,7 @@ function LocalFocusContextMenu({ open, context, children, onOpenChange, onRename
     actionOwnsFocus.current = true
     setTakeover({ kind: 'session', hostId: current.control.hostId, agentSessionId: current.control.agentSessionId, presentationSessionId: current.id,
       expectedRun: { ...current.control.run }, cwd: current.workspacePath, label: context.name, executorId: current.executorId,
+      ...(context.access?.identity.runtimeId ? { expectedRuntimeId: context.access.identity.runtimeId } : {}),
       diagnostic: current.status.detail ?? context.detail, origin: { sessionId: current.id },
       ...(derived ? { derived: { id: derived.id, label: derived.label, instruction: derived.instruction } } : {}) })
   }

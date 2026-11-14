@@ -244,7 +244,7 @@ export function SessionPane({
   useObservedConsumerCommit('sessionPane', observationVisible)
   const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: visible && !readOnly }), [sessionId, visible, readOnly])
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
-  const [takeoverSelection, setTakeoverSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; derived?: AgentDerivedAction } | null>(null)
+  const [takeoverSelection, setTakeoverSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; derived?: AgentDerivedAction; destinationKind?: 'club' } | null>(null)
   const [learningSelection, setLearningSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; open: boolean } | null>(null)
   const primaryPresentation = useWorkbenchBrowserPresentation()
   const primaryReference = primaryPresentation.reference
@@ -719,6 +719,7 @@ export function SessionPane({
       return
     }
     if (derivedRequest.actionId === 'pass-on-experience') { learnAt(mailboxOrigin)?.(); return }
+    if (derivedRequest.actionId === 'mote-promotion') { setTakeoverSelection({ key: takeoverKey, displayId: null, origin: mailboxOrigin, trigger: null, destinationKind: 'club' }); return }
     if (derivedRequest.actionId === 'take-over') { takeOverAt(mailboxOrigin)?.(); return }
     const action = useAppStore.getState().config?.agentDerivedActions?.actions?.find(item => item.id === derivedRequest.actionId && item.base === 'new-agent')
     if (action) derivedAt(mailboxOrigin)?.(action)
@@ -730,6 +731,7 @@ export function SessionPane({
       returnTrigger={learningSelection.trigger} onClose={() => setLearningSelection(value => value ? { ...value, open: false } : null)} /> : null}{takeoverSelection?.key === takeoverKey && takeoverSelection.displayId === displayId &&
     JSON.stringify(takeoverSelection.origin) === JSON.stringify(origin) ? <SessionTakeoverSurface key={takeoverKey} active={active}
     returnTrigger={takeoverSelection.trigger} onClose={() => setTakeoverSelection(null)} source={{
+    ...(takeoverSelection.destinationKind ? { destinationKind: takeoverSelection.destinationKind } : {}),
     ...(takeoverSelection.derived ? { derived: { id: takeoverSelection.derived.id, label: takeoverSelection.derived.label, instruction: takeoverSelection.derived.instruction } } : {}),
     agentSessionId: sessionId, hostId: takeoverOriginal?.hostId, cwd: takeoverOriginal?.cwd,
     label: agentInputIdentity ?? userName ?? tabName ?? session?.label ?? sessionId,

@@ -75,25 +75,3 @@
   .topic-promotion-dialog[data-phase='writing'] .topic-promotion__line::before,
   .topic-promotion-notice__seal::before { display: none; }
 }
-
-.agent-promotion-feedback { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
-.agent-promotion-feedback button { flex: none; }
-
-.agent-promotion__heading { display: flex; align-items: center; gap: 10px; }
-.agent-promotion__clubs { margin: 22px 0 0; padding: 0; border: 0; min-width: 0; }
-.agent-promotion__clubs legend { margin-bottom: 10px; color: var(--text-2); font-size: var(--fs-meta); }
-.agent-promotion__club { display: flex; align-items: center; gap: 10px; margin-top: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
-.agent-promotion__club[data-selected='true'] { border-color: color-mix(in srgb, #80bd9b 70%, var(--line)); background: color-mix(in srgb, #80bd9b 9%, var(--surface-1)); }
-.agent-promotion__club input { flex-shrink: 0; margin: 0; accent-color: #80bd9b; }
-.agent-promotion__club > span:last-child { min-width: 0; overflow-wrap: anywhere; }
-.agent-promotion__club small, .agent-promotion__frozen small { display: block; margin-top: 4px; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
-.agent-promotion__new { margin-top: 14px; border-style: dashed; }
-.agent-promotion__pending { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; font-size: var(--fs-meta); }
-.agent-promotion__pending button { white-space: normal; text-align: left; }
-.agent-promotion__frozen { display: flex; align-items: center; gap: 10px; margin-top: 20px; padding: 12px; border-radius: 10px; background: var(--surface-2); }
-.agent-promotion__pending button small { display: block; margin-top: 4px; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
-.agent-promotion__frozen details { margin-top: 8px; color: var(--text-3); font-size: var(--fs-meta); }
-.agent-promotion__frozen small { overflow-wrap: anywhere; }
-.agent-region-header .agent-promotion-feedback { pointer-events: auto; line-height: 14px; white-space: nowrap; }
-.agent-region-header-home .agent-promotion-feedback { align-self: flex-start; }
-.agent-region-header .agent-promotion-feedback .icon-button { width: 16px; height: 14px; min-height: 14px; padding: 0; line-height: 1; }
