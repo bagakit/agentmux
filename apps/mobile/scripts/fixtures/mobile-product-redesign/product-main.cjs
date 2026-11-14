@@ -631,6 +631,11 @@ app.whenReady().then(async () => {
     await resize(390, 844)
     await read('mobileProductScene.setAppearance("dark")')
     await capture('commands-custom-phone')
+    // Leaving the editor ends its demand. Opening the original command tool then
+    // starts a new read instead of reusing an uninterrupted observation.
+    await read('document.querySelector(".mobile-session-toolbar [data-mobile-back]").focus()')
+    await until('document.activeElement?.matches(".mobile-session-toolbar [data-mobile-back]")')
+    await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     await read('mobileProductScene.setPromptReadFailure(true)')
     await button('Choose a command')
     await until('document.querySelector(".mobile-command-menu").innerText.includes("重试读取 Commands")')
