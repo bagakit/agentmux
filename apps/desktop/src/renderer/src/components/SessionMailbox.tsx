@@ -267,7 +267,9 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   const [progress, setProgress] = useState<{ target: string; status: ContinuousProgressStatus }>()
   const onProgressStatus = useCallback((status: ContinuousProgressStatus) => setProgress({ target: progressTarget, status }), [progressTarget])
   const progressStatus = progress?.target === progressTarget ? progress.status : 'unconfirmed'
-  const progressLabel = `Continuous progress: ${progressStatus}${progressStatus === 'inactive' ? ' (not enabled)' : ''}`
+  const saveUnconfirmed = progressStatus === 'save-unconfirmed'
+  const progressLabel = saveUnconfirmed ? 'Automation: scheduled message save unconfirmed'
+    : `Continuous progress: ${progressStatus}${progressStatus === 'inactive' ? ' (not enabled)' : ''}`
   const ProgressIcon = progressStatus === 'active' ? ThemeActionRepeatIcon : progressStatus === 'paused' ? ThemeActionPauseIcon : ThemeStatusUnknownIcon
 
   const storeSession = useAppStore((state) =>
@@ -625,7 +627,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       .call(popover.current, { source: trigger.current! })
   }
   const mailbox = <>
-    <button ref={trigger} type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={hasProgress ? progressStatus : undefined}
+    <button ref={trigger} type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={hasProgress ? (saveUnconfirmed ? 'unconfirmed' : progressStatus) : undefined}
       aria-label={mailboxLabel}
       title={mailboxLabel} popoverTarget={id} popoverTargetAction="toggle"
       onPointerEnter={enter} onPointerLeave={leave}
@@ -755,8 +757,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       {hasProgress && folder !== 'progress' ? <button ref={automationEntry} type="button" className="composer-mailbox__automation" aria-label="Automation"
         aria-describedby={`${id}-automation-status`} onClick={openAutomation}>
         <ThemeObjectAutomationIcon size={14} aria-hidden="true" /><span>Automation</span>
-        <span id={`${id}-automation-status`} className="composer-mailbox__automation-status" data-status={progressStatus}>
-          {progressStatus === 'active' ? 'Running' : progressStatus === 'paused' ? 'Paused' : progressStatus === 'inactive' ? 'Not enabled' : 'Status unknown'}</span>
+        <span id={`${id}-automation-status`} className="composer-mailbox__automation-status" data-status={saveUnconfirmed ? 'unconfirmed' : progressStatus}>
+          {saveUnconfirmed ? 'Save unconfirmed' : progressStatus === 'active' ? 'Running' : progressStatus === 'paused' ? 'Paused' : progressStatus === 'inactive' ? 'Not enabled' : 'Status unknown'}</span>
         <span aria-hidden="true">›</span>
       </button> : null}
     </div>

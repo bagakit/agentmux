@@ -8,14 +8,14 @@ import { api } from '../lib/api'
 import { ContinuousProgressPanel } from './ContinuousProgressPanel'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
-import { CalendarScheduleControl } from './CalendarScheduleControl'
+import { CalendarScheduleControl, type CalendarScheduleStatus } from './CalendarScheduleControl'
 import { useAppStore } from '../store'
 import { resolveAutomationPreferences } from '../../../shared/automation-preferences'
 import type { ProgressUpdateRequest, ProgressRequest, OriginalContinuousProgressControl } from '../../../shared/continuous-progress'
 import { useLauncherState, checkpointLauncherState, initializeLauncherState } from '../lib/launcher-state'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
-export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
+export type ContinuousProgressStatus = CalendarScheduleStatus
 function recordedProgressRequest(request: ProgressRequest, loop: ContinuousProgressLoop | undefined): boolean {
   if (!loop || ['hostId', 'agentSessionId', 'providerId', 'workspacePath'].some(key =>
     loop[key as keyof typeof request.input.target] !== request.input.target[key as keyof typeof request.input.target])) return false
@@ -156,7 +156,8 @@ export function ContinuousProgressControl({ session, original, targetName, onSta
   }, [target, loop?.loopId, observedTarget])
   const status: ContinuousProgressStatus = pendingRequest || previousRequests?.some(request => request.dispatch !== 'prepared') || error || observationError || displayed?.lastOutcome === 'unknown' || observedTarget !== target
     ? 'unconfirmed' : loop?.status === 'active' ? 'active' : loop?.status === 'paused' ? 'paused' : 'inactive'
-  const combinedStatus = original ? status : [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
+  const combinedStatus = original ? status : calendarStatus === 'save-unconfirmed' ? calendarStatus
+    : [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
   useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
   async function performRequest(request: ProgressRequest) {
     const captured = target

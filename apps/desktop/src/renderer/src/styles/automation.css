@@ -79,6 +79,8 @@
 .automation-create__body { display: grid; gap: var(--sp-5); min-width: 0; }
 .automation-editor .schedule-create[data-embedded] { padding: 0; border: 0; }
 .automation-editor .schedule-create[data-embedded] > summary { display: none; }
+.automation-editor .schedule-create[data-embedded] > .calendar-schedules__notice { margin-bottom: var(--sp-5); }
+.calendar-schedules__original { display: grid; gap: var(--sp-3); overflow-wrap: anywhere; }
 .automation-editor .calendar-schedules__form { padding-top: 0; }
 .automation-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); margin: 0; padding: 0; border: 0; min-width: 0; }
 .automation-choice > legend { padding: 0 0 var(--sp-3); font-size: var(--fs-meta); color: var(--text-3); }

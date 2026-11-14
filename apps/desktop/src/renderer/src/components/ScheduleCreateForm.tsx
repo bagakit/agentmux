@@ -11,12 +11,13 @@ import { useScheduleOperation } from '../lib/schedule-controller'
 import type { ScheduleFormDraft, ScheduleRequest } from '../lib/schedule-draft'
 import { resolveAutomationPreferences, automationCalendarTimezone, automationCheckInPolicy } from '../../../shared/automation-preferences'
 import { ScheduleOperationNotice } from './ScheduleOperationNotice'
+import { scheduleRuleLabel } from './ScheduleArrangementRow'
 
 const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const inputFields = ['timing', 'kind', 'timezone', 'time', 'date', 'weekday', 'day', 'month', 'fold', 'delay', 'delayUnit', 'prompt', 'checkIn', 'context'] as const
 const targetFields = ['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const
 export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage, initialMessageContext, onMessageChange, initialDate, records = [],
-  defaultKind = 'daily', openRequest, onShowSaved, embedded = false }: {
+  defaultKind = 'daily', openRequest, onShowSaved, embedded = false, reviewOriginal = false }: {
   draftKey: string; target?: ContinuousProgressTarget | undefined; onReceipt(record: ContinuousProgressLoop): void
   initialMessage?: string | undefined; initialMessageContext?: string | undefined; onMessageChange?: ((value: string) => void) | undefined
   initialDate?: string; defaultKind?: ScheduleFormDraft['kind']
@@ -24,6 +25,7 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
   openRequest?: { sequence: number; date: string; time?: string } | undefined
   onShowSaved?: ((record: ContinuousProgressLoop) => void) | undefined
   embedded?: boolean
+  reviewOriginal?: boolean
 }) {
   const timingName = useId()
   const [fallback] = useState<ScheduleFormDraft>(() => {
@@ -58,6 +60,8 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
     if (request.action === 'create') setSavedArrangement({ key: draftKey, record })
   }
   const operation = useScheduleOperation(draftKey, onReceipt, confirmed)
+  const original = operation.pending?.action === 'create' ? operation.pending.params : undefined
+  const reviewing = reviewOriginal || (embedded && !!original && !saved)
   const locked = operation.busy || !!operation.pending
   const element = useRef<HTMLDetailsElement>(null), handled = useRef<number | undefined>(undefined)
   useEffect(() => {
@@ -117,7 +121,12 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
     }
   }}>
     <summary>{embedded ? 'Scheduled message' : 'New arrangement'}</summary>
-    <form className="calendar-schedules__form" onSubmit={event => { event.preventDefault(); create() }}>
+    {embedded ? <ScheduleOperationNotice operation={operation} /> : null}
+    {reviewing && original ? <div className="calendar-schedules__original">
+      <p className="continuous-progress-control__help">{original.afterMs === undefined ? scheduleRuleLabel(original) : `Countdown · ${original.afterMs / 1000} seconds`}</p>
+      <p className="continuous-progress-control__prompt">{original.prompt}</p>
+    </div> : null}
+    <form className="calendar-schedules__form" hidden={reviewing} onSubmit={event => { event.preventDefault(); create() }}>
       {embedded ? <fieldset className="automation-choice automation-choice--timing" aria-label="Arrangement timing">
         <legend>When</legend>
         {([['everyMs', 'Repeat'], ['calendar', 'Calendar'], ['afterMs', 'Countdown']] as const).map(([value, label]) => <label key={value}>
@@ -159,6 +168,6 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
       <p className="continuous-progress-control__help automation-runtime-note">The Host must be running.{form.timing === 'afterMs' ? ' Countdown pause does not stop the clock.' : ''}</p>
       <button type="submit" className={embedded ? "automation-button automation-button--primary automation-submit" : "small-button"} disabled={locked || !form.prompt.trim()}>Save arrangement</button>
     </form>
-    <ScheduleOperationNotice operation={operation} />
+    {!embedded ? <ScheduleOperationNotice operation={operation} /> : null}
   </details>{savedArrangement?.key === draftKey ? <div className="schedule-create__confirmation" role="status"><span>Arrangement saved.</span>{onShowSaved ? <button type="button" onClick={() => onShowSaved(savedArrangement.record)}>View arrangement</button> : null}</div> : null}</>
 }

@@ -10,7 +10,7 @@ import { ScheduleOperationNotice } from './ScheduleOperationNotice'
 const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const MoteIcon = semanticIconComponent('object.mote')
 const ScheduleIcon = semanticIconComponent('object.schedule')
-export function scheduleRuleLabel(schedule: ContinuousProgressLoop): string {
+export function scheduleRuleLabel(schedule: Pick<ContinuousProgressLoop, 'everyMs' | 'calendar' | 'afterMs'>): string {
   if (schedule.everyMs !== undefined) return schedule.everyMs === 60000 ? 'Every minute' : 'Every ' + schedule.everyMs / 60000 + ' minutes'
   if (!schedule.calendar) return 'One-shot countdown'
   const rule = schedule.calendar
