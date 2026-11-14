@@ -165,7 +165,7 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection', 'pin', 'moteMain'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'includeChoices', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection', 'pin', 'moteMain'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }

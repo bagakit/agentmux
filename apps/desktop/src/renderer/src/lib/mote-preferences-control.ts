@@ -9,8 +9,8 @@ export async function readMotePreferences(input: MoteQuickPreferencesReadInput):
 export async function executeMotePreferencesControl(request: Extract<AgentMuxControlRequest, { operation: 'space.mote.preferences.read' | 'space.mote.preferences.save' }>, signal?: AbortSignal): Promise<AgentMuxControlResult> {
   signal?.throwIfAborted()
   if (request.operation === 'space.mote.preferences.read') {
-    const input = { kind: request.kind, target: request.target }
-    return { operation: request.operation, ...parseMotePreferencesReadResult(await api.motePreferences.read(input), input) }
+    const { operation, requestId: _requestId, schemaVersion: _schema, ...input } = request
+    return { operation, ...parseMotePreferencesReadResult(await api.motePreferences.read(input), input) }
   }
   const { operation, requestId, schemaVersion: _schema, ...input } = request
   const params = { ...input, operationId: requestId }
