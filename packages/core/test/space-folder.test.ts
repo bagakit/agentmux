@@ -83,7 +83,7 @@ it('reads back an unknown registration through original space objects without re
   expect(inspected).toMatchObject({ reference: original.reference, source: original.source, zoneId: zones[0]!.zoneId, resource: f.input.expectedResource })
   expect(inspected).not.toHaveProperty('created'); expect(inspected).not.toHaveProperty('diskDurability')
 })
-it('the original inspection reports current absence and ambiguity without picking an alias or issuing registration', async () => {
+it('reads only the exact configured registration even when other Spaces and Zones share the resource', async () => {
   const f = await fixture()
   await expect(inspectFolderSpaceRegistration(f.rpc, f.input)).rejects.toMatchObject({ code: 'SPATIAL_STATE_ABSENT' })
   expect(await f.store.read()).toBeNull()
@@ -93,12 +93,23 @@ it('the original inspection reports current absence and ambiguity without pickin
   expect(await inspectFolderSpaceRegistration(f.rpc, f.input)).toBeNull()
   expect((await f.store.read())!.graph.spaces).toEqual([])
   const registered = await f.rpc.call('space.folder.register', f.input), state = (await f.store.read())!
+  const anotherZone = { ...state.graph.zones[0]!, zoneId: 'another-directory-zone' }
+  const aliasBindings = [
+    { spaceId: 'another-folder-alias', zoneId: registered.zoneId },
+    { spaceId: registered.reference.spaceId, zoneId: anotherZone.zoneId }
+  ]
   await f.store.commit({ expectedRevision: state.revision, graph: { ...state.graph,
     spaces: [...state.graph.spaces, { ...state.graph.spaces[0]!, spaceId: 'another-folder-alias' }],
-    bindings: [...state.graph.bindings, { spaceId: 'another-folder-alias', zoneId: registered.zoneId }] } })
+    zones: [...state.graph.zones, anotherZone],
+    bindings: [...state.graph.bindings, ...aliasBindings] } })
   const before = await readFile(f.store.path, 'utf8')
-  await expect(inspectFolderSpaceRegistration(f.rpc, f.input)).rejects.toMatchObject({ code: 'SPACE_REGISTRATION_AMBIGUOUS' })
+  await expect(inspectFolderSpaceRegistration(f.rpc, f.input)).resolves.toMatchObject({
+    reference: registered.reference, zoneId: registered.zoneId, workspaceId: f.input.workspaceId
+  })
   expect(await readFile(f.store.path, 'utf8')).toBe(before)
+  const current = (await f.store.read())!
+  await f.store.commit({ expectedRevision: current.revision, graph: { ...current.graph, bindings: aliasBindings } })
+  await expect(inspectFolderSpaceRegistration(f.rpc, f.input)).resolves.toBeNull()
 })
 it.skipIf(!process.env.SPACE_FOLDER_CLI)('the actual candidate CLI registers the original private Core Folder and reads its public scoped snapshot', async () => {
   const f = await fixture(), input = join(f.root, 'resource.json')

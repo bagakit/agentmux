@@ -11,6 +11,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import * as storeModule from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { mountedAgentOpenInput, mountedAgentOpenKey } from '../src/renderer/src/lib/space-mount-launch'
+import { mountedRegistrationKey } from '../src/renderer/src/lib/space-mount-view'
 import { api } from '../src/renderer/src/lib/api'
 import { spaceMountFixture, spaceMountTransport } from './helpers/space-mount-fixture'
 import { createHostRouteInventoryFixture } from '../../../packages/core/test/helpers/host-route-inventory-fixture'
@@ -80,6 +81,33 @@ it('explicit ordinary preparation reads the original Source catalogue and regist
   expect(await f.cores[0]!.store.read()).toBeNull()
   expect(b.hostChoiceReads.calls).toBe(1)
   } finally { releaseChoices() }
+})
+
+it('applies the project device for a retained Folder registration with multiple original Zones', async () => {
+  const f = await spaceMountFixture(cleanup), local = f.cores[0]!, selected = vi.fn()
+  const config = { ...composerConfig, workspaces: [{ ...project, hostId: local.id }] }
+  const registration = { runtimeId: local.identity.runtimeId, workspaceId: local.workspace.id,
+    expectedResource: { hostId: local.workspace.hostId, workspacePath: local.workspace.path, projectRootPath: local.workspace.path } }
+  const saved = await f.api.call('register', { hostId: local.id, registration })
+  const state = (await local.store.read())!
+  const zone = { ...state.graph.zones[0]!, zoneId: 'original-other-zone' }
+  await local.store.commit({ expectedRevision: state.revision, graph: { ...state.graph,
+    zones: [...state.graph.zones, zone], bindings: [...state.graph.bindings, { spaceId: saved.reference.spaceId, zoneId: zone.zoneId }] } })
+  const before = await local.store.read()
+  const input = { kind: 'folder-registration' as const, hostId: local.id, registration, submitted: true }
+  useAppStore.setState({ config, mountedSpaceInputs: { [mountedRegistrationKey(input)]: input } })
+  const calls = vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, params, signal) => f.api.call(method, params, signal))
+  await dom.render(<SourceAgentTargetSetup config={config} fixedResourceWorkspaceId={project.id} active actionLabel="Apply" onApply={selected} />)
+  await vi.waitFor(async () => { await act(async () => {}); expect(button('Apply').disabled).toBe(false) })
+  await act(async () => button('Apply').click())
+  await vi.waitFor(() => expect(selected).toHaveBeenCalledOnce())
+  expect(selected.mock.calls[0]![0]).toMatchObject({ source: {
+    target: { hostId: local.id, reference: saved.reference, zoneId: saved.zoneId, workspaceId: saved.workspaceId },
+    agentTarget: { hostId: 'local', runtimeId: local.identity.runtimeId }
+  } })
+  expect(calls.mock.calls.map(([method]) => method)).toContain('inspectRegistration')
+  expect(calls.mock.calls.map(([method]) => method)).not.toContain('register')
+  expect(await local.store.read()).toEqual(before)
 })
 
 async function routedLauncher(catalogue?: Promise<void>, explicit = true, observation?: { availability: 'missing' | 'check-failed'; cause: { code: string; message: string } }, withoutConfiguration = false,
