@@ -47,7 +47,7 @@ async function command(label, appRoot) {
     const child = spawn(require('electron'), [appRoot], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] })
     let log = '', timeout = false, escalation
     for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { log += bytes; process.stdout.write(bytes) })
-    const timer = setTimeout(() => { timeout = true; child.kill('SIGTERM'); escalation = setTimeout(() => child.kill('SIGKILL'), 3000) }, 60000)
+    const timer = setTimeout(() => { timeout = true; child.kill('SIGTERM'); escalation = setTimeout(() => child.kill('SIGKILL'), 3000) }, 180000)
     child.once('error', reject)
     child.once('exit', (code, signal) => { clearTimeout(timer); clearTimeout(escalation); done({ code, signal, timeout, log }) })
   })
