@@ -61,6 +61,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
     .some(value => value.toLocaleLowerCase().includes(filter)))
   const executors = executorsForHost(config, hostId, detections, inventory).filter(item => item.detection?.state !== 'missing')
   const selectionCurrent = !executorId || (configValuesEqual(selectionHost, host) && executors.some(item => item.id === executorId))
+  const pickerExecutors = selectionCurrent ? executors : executors.filter(item => item.id !== executorId)
 
   async function open(workspace: WorkspaceRecord, startExecutor = '', selectedHost = selectionHost): Promise<void> {
     if (!visible.current) return
@@ -150,7 +151,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
       <label className="host-projects__path"><span>Folder path</span><TextInput value={path} placeholder="Project directory"
         onChange={event => setPath(event.target.value)} /></label>
       <label><span>Name <small>optional</small></span><TextInput value={name} placeholder="Project name" onChange={event => setName(event.target.value)} /></label>
-      <label className="host-projects__executor"><span>Prepare an Agent <small>optional</small></span><AgentExecutorPicker presentation="field" label="Prepare an Agent" selected={executorId} executors={executors} unsetLabel="Open without an Agent" onSelect={id => { setExecutorId(id); setSelectionHost(host ? structuredClone(host) : undefined) }} /></label>
+      <label className="host-projects__executor"><span>Prepare an Agent <small>optional</small></span><AgentExecutorPicker presentation="field" label="Prepare an Agent" selected={executorId} executors={pickerExecutors} unsetLabel="Open without an Agent" onSelect={id => { setExecutorId(id); setSelectionHost(host ? structuredClone(host) : undefined) }} /></label>
       <p className="field-hint host-projects__path">Opens this folder on the saved Host. Prepare an Agent in its Launcher and review the work mode before starting.</p>
       {host?.kind === 'ssh' ? <div className="host-projects__path" role="status">
         <p className="field-hint">{inventoryMatches && inventory.state === 'error'
