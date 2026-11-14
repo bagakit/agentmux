@@ -9,6 +9,7 @@ import { useState } from 'react'
 import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
 import { conversationRevision, projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
 import { normalizeSessionHistoryPage } from '../../../../../packages/core/src/session-history'
+import { postureControlDigest, type PostureInspect, type PostureInspection, type PostureReceipt, type PostureSet } from '../../../../../packages/core/src/agent-posture'
 import { selectSpatialCatalog } from '../../../../../packages/core/src/spatial-destination'
 import { moteNoticeCaptureFixture } from '../../../../../packages/client-ui/test/fixtures/mote-notice'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -147,6 +148,8 @@ const responsiveKnowledge = () => responsiveWorkfaces ? { ...knowledge, sources:
 const responsiveSecondKnowledge = () => ({ ...knowledge, entryId: '33333333-3333-4333-8333-333333333333', title: '第二周的对照观察', content: '# 对照观察\n\n这是另一个准确条目的正文，左侧选择它后应回到本条阅读。', form: 'derived', sources: [] })
 let conversationStatusScene: 'active' | 'retired' | 'retired-reading' | 'unconfirmed' | 'parallel' = 'active'
 let agentMenuScene = false, densityScene = false, copyFails = false, auxiliaryDensityScene = false
+let holdNextPosture = false, settlePosture: (() => void) | undefined
+const postureReceipts = new Map<string, PostureReceipt>()
 let creationUpdateScene = false, rejectUpdatePreflight: (() => void) | null = null
 const copiedTexts: string[] = []
 const menuAgentName = '讨论布局与原始资料核对的协作 Agent'
@@ -217,6 +220,39 @@ const client = {
   releaseRunAttachment: async (run: { runId: string }) => { record('sdk.releaseRunAttachment', { runId: run.runId }) },
   resizeAgent: async (id: string, run: { runId: string }, cols: number, rows: number) => { record('sdk.resizeAgent', { id, runId: run.runId, cols, rows }); throw Error('The captured terminal never resizes the Mac grid') },
   catalog: () => { record('sdk.catalog'); requireExactDirectory(); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
+  inspectAgentPosture: async (input: PostureInspect): Promise<PostureInspection> => {
+    record('sdk.inspectAgentPosture', input)
+    const { hostId, agentSessionId, operationId, expectedRun } = input
+    if (operationId) return { kind: 'operation', agentSessionId, operationId, operation: postureReceipts.get(operationId) ?? null }
+    const session = sessions.find(value => value.agentSessionId === agentSessionId)
+    const control = client.catalog().find(value => value.id === session?.providerId)?.postureControl
+    if (!session || !control || expectedRun?.runId !== session.run.runId) throw Error('No matching original posture declaration')
+    return { kind: 'declaration', target: { hostId, agentSessionId, runtimeId: 'runtime-original', providerId: session.providerId,
+      expectedRun: session.run }, control, controlDigest: postureControlDigest(control), currentMode: { status: 'unknown' } }
+  },
+  setAgentPosture: async (input: PostureSet): Promise<PostureReceipt> => {
+    record('sdk.setAgentPosture', input)
+    const { operationId, target, controlId, modeId, expectedControlDigest } = input
+    const { control, target: declaredTarget, controlDigest } = await client.inspectAgentPosture({
+      hostId: target.hostId, agentSessionId: target.agentSessionId, expectedRun: target.expectedRun
+    }) as Extract<PostureInspection, { kind: 'declaration' }>
+    if (JSON.stringify(declaredTarget) !== JSON.stringify(target) || control?.id !== controlId ||
+        !control.modes.some(mode => mode.id === modeId) || controlDigest !== expectedControlDigest) throw Error('Wrong original posture request')
+    const held = holdNextPosture
+    if (held) {
+      holdNextPosture = false
+      await new Promise<void>(resolve => { settlePosture = resolve })
+      settlePosture = undefined
+    }
+    const receipt: PostureReceipt = { action: 'agent-posture', operationId, target, controlId, modeId,
+      actor: { kind: 'device', id: 'fixture-device' }, phase: 'settled', outcome: held ? 'unknown' : 'applied',
+      nativeOperationId: operationId, runtime: { runtimeId: target.runtimeId, instanceId: 'fixture-native', buildIdentity: 'fixture', protocolVersion: 1 },
+      acknowledgement: held ? null : { runId: target.expectedRun.runId, appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1 },
+      diskDurability: 'confirmed' }
+    postureReceipts.set(operationId, receipt)
+    record('sdk.postureReceipt', receipt)
+    return receipt
+  },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
   onStatusEvent: (listener: (event: AgentMuxClientEvent) => void) => { statusListeners.add(listener); record('sdk.onStatusEvent'); return () => { statusListeners.delete(listener); record('sdk.releaseStatusEvent') } },
   runtimeOwnerIdentity: () => composerFixture && !composerRuntimeKnown ? null : ({ runtimeId: 'runtime-original', ownerInstanceId: 'owner-original', availability: connected ? 'connected' : 'disconnected' }),
@@ -651,6 +687,18 @@ function Scene() {
     },
     prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
     prepareAuxiliaryDensity: () => { auxiliaryDensityScene = true; agentMenuScene = true },
+    preparePostureControls: () => {
+      // Permission control belongs to the connected original Runtime. The
+      // general directory fixture also includes foreign, read-only members.
+      for (const session of [main, result]) {
+        session.hostId = 'local'
+        for (const region of catalog.regions) {
+          if (region.agentSessionId === session.agentSessionId && region.execution) region.execution.hostId = 'local'
+        }
+      }
+    },
+    holdNextPosture: () => { holdNextPosture = true },
+    settlePosture: () => settlePosture?.(),
     prepareDensity: () => {
       densityScene = true; agentMenuScene = true
       const provider = __AGENTMUX_MOBILE_PROVIDER_CATALOG__.find(value => value.postureControl)
@@ -659,6 +707,7 @@ function Scene() {
       main.semanticStatus = { state: 'working', source: 'native-hook', observedAt: Date.now() }
       catalog.agentPresentation![0]!.name = menuAgentName
       catalog.agentPresentation![0]!.providerId = provider.id
+      return provider.postureControl
     },
     seedDensityRetainedUpload: async () => {
       const upload = { runtimeId: 'runtime-original', identity: { hostId: main.hostId, agentSessionId: main.agentSessionId,

@@ -36,6 +36,9 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'posture-menu-no-return-focus': { file: 'packages/client-ui/src/components/HoverDropdownMenu.tsx',
+      before: 'if (menu.hover.current) event.preventDefault()\n        onCloseAutoFocus?.(event)',
+      after: 'event.preventDefault()\n        onCloseAutoFocus?.(event)' },
     'agent-locations-transparent-sheet': { file: 'apps/mobile/src/navigation/agent-locations.css', before: "animation-name: mobile-agent-locations-enter;", after: 'animation-name: mobile-sheet-enter;' },
     'connection-inline-notice': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: '      {readers}', after: '      {readers}\n      {connection.issue ? <div className="mobile-conversation__connection">{connection.issue}</div> : null}' },
     'metadata-bottom-notice': { file: 'apps/mobile/src/MobileApp.tsx', before: '    <div className="mobile-notice-stack">', after: '    <div className="mobile-notice-stack">\n      {conversationStatus?.metadata.issue ? <div className="mobile-service-notice">{conversationStatus.metadata.issue}</div> : null}' },
