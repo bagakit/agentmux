@@ -76,7 +76,7 @@ async function run() {
   source = new BrowserWindow({ x: area.x + 40, y: area.y + 40, width: 740, height: 520, webPreferences: { backgroundThrottling: false } })
   source.setAlwaysOnTop(true, 'floating')
   const rows = Array.from({ length: 24 }, (_, i) => `<section style="height:85px;box-sizing:border-box;padding:14px 24px;background:hsl(${i * 47 % 360} 30% 92%);color:#213044;border-bottom:1px solid #aebbc7"><b>${i + 1} · Capture evidence</b><div>Scroll the real source while the original screenshot surface stays in place.</div><small id="counter-${i}">Screen capture</small></section>`).join('')
-  await source.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<body style="margin:0;font:14px/1.5 system-ui;user-select:none">' + rows + '</body>'))
+  await source.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><body style="margin:0;font:14px/1.5 system-ui;user-select:none"><main style="height:calc(100vh + 85px);overflow:clip">' + rows + '</main></body>'))
   await js(source, "window.sourceClicks=0;window.sourceWheels=[];window.scrollSettled=false;document.addEventListener('scrollend',()=>{window.scrollSettled=true});document.body.addEventListener('pointerdown',()=>{window.sourceClicks++;document.querySelector('#counter-4').textContent='Click received'});document.body.addEventListener('wheel',e=>window.sourceWheels.push(e.deltaY),{passive:true})")
   const bounds = source.getContentBounds(), rect = { x: bounds.x + 32, y: bounds.y + 32, width: 480, height: 260 }
   surface = new CaptureSurface({ appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }), native: () => native,
@@ -95,8 +95,14 @@ async function run() {
     await until('frozen screenshot presented', () => overlay.isVisible() && js(overlay, "document.querySelector('img[alt=\"Captured image\"]')?.naturalWidth > 0"))
     const offset = overlay.getBounds()
     overlay.webContents.debugger.attach('1.3')
-    for (const [type, x, y] of [['mousePressed', rect.x - offset.x, rect.y - offset.y], ['mouseMoved', rect.x + rect.width - offset.x, rect.y + rect.height - offset.y], ['mouseReleased', rect.x + rect.width - offset.x, rect.y + rect.height - offset.y]] as const)
-      await overlay.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, pointerType: 'pen', button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1 })
+    // A virtual touch has its own pointer identity; trackpad motion during this
+    // fixture cannot move the test's pen to another native window mid-drag.
+    await overlay.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+    const from = { x: rect.x - offset.x, y: rect.y - offset.y, id: 1 }
+    const to = { x: from.x + rect.width, y: from.y + rect.height, id: 1 }
+    for (const [type, touchPoints] of [['touchStart', [from]], ['touchMove', [to]], ['touchEnd', []]] as const)
+      await overlay.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type, touchPoints })
+    await overlay.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false })
     await until('selection toolbar', () => js(overlay, "!!document.querySelector('.image-annotation-editor__capture-bar')"))
     if (!publicEntry) await click(overlay, 'Scrolling')
     await until('scrolling Start is ready', () => js(overlay, "[...document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='Start scrolling capture'&&!b.disabled)"))
@@ -122,6 +128,7 @@ async function run() {
   await until('fresh native baseline before input', () => js(overlay, 'window.captureSequence.load().then(s=>s.frames[0].capturedAt>s.source.capturedAt)'))
   const sourcePoint = { x: Math.round(selected.x + selected.width / 2), y: Math.round(selected.y + selected.height / 2) }
   await writeFile(join(out, 'awaiting-input.json'), JSON.stringify({ phase: 'source-input', pid: process.pid, sourceBounds: source.getBounds(), requested: rect, selected, sourcePoint, overlayId: overlay.id }))
+  const initialOffset = await js(source, 'document.scrollingElement.scrollTop')
   if (!humanInput) {
     const sourceHit = await clickAt(source, sourcePoint)
     const { at } = await routeTo(source, sourcePoint)
@@ -131,6 +138,7 @@ async function run() {
   await until('source received click and wheel', () => js(source, 'window.sourceClicks===1&&window.sourceWheels.length>0&&window.scrollSettled&&document.scrollingElement.scrollTop>0'), humanInput)
   await until('actual scrolled pixels accepted', async () => (await js(overlay, 'window.captureSequence.load()')).frames.length >= 2)
   const sourceInput = await js(source, '({clicks:window.sourceClicks,wheels:window.sourceWheels,scroll:document.scrollingElement.scrollTop})')
+  assert.ok(sourceInput.scroll > initialOffset, 'the original source must actually scroll after input')
   const toolbarBounds = await js(overlay, "document.querySelector('.capture-live-toolbar').getBoundingClientRect().toJSON()")
   const overlayFrame = overlay.getBounds()
   const left = Math.max(0, Math.min(selected.x, overlayFrame.x + toolbarBounds.left) - 8)
@@ -166,7 +174,7 @@ async function run() {
   await until('review ready', () => js(review, "document.body.textContent.includes('Confirm') && !document.querySelector('button.primary-button').disabled"))
   assert.equal(overlay.isVisible(), false, 'the original surface is retained hidden for Resume until this original operation ends')
   await click(review, 'Confirm'); await closed
-  assert.equal(delivered.height, Math.round((selected.height + sourceInput.scroll) * sourceSelection.scale), 'the original editor gets the actual native long image')
+  assert.equal(delivered.height, Math.round((selected.height + sourceInput.scroll - initialOffset) * sourceSelection.scale), 'the original editor gets the actual native long image')
   await until('confirm released original windows', () => review.isDestroyed() && overlay.isDestroyed())
   assert.deepEqual(BrowserWindow.getAllWindows().map(window => window.id), [source.id], 'delivery releases all original overlays and the review')
   result.observations.push({ physicalInput: humanInput, toolbarStopped: true, sourceInput, originalEditor: true, guiOutput: [delivered.width, delivered.height] })
