@@ -1,3 +1,4 @@
+import { Notice } from '@agentmux/client-ui/components/Notice'
 import type { AgentMuxRunStorageObservation } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
@@ -66,14 +67,14 @@ export function TerminalStorageDetails({ control, scope, visible = true, continu
       {checking ? 'Checking storage…' : observation ? 'Refresh storage' : 'Check storage'}
     </Button></header>
     {!observation && !error ? <p>Read this Run’s storage facts on demand. This check leaves terminal input unchanged.</p> : null}
-    {error ? <p role="status" className="terminal-storage-details__failure">Storage check did not complete: {error} Your original terminal is kept; retry this same Run.</p> : null}
+    {error ? <Notice role="status" tone="warning" density="compact" heading="Storage check did not complete"><p>{error} Your original terminal is kept; retry this same Run.</p></Notice> : null}
     {observation ? <>
       <p className="terminal-storage-details__sample">Sampled {new Date(observation.observedAt).toLocaleTimeString()} · {observation.runtime.hostId}</p>
       <dl className="terminal-storage-details__identity"><div><dt>Run</dt><dd>{observation.run.runId}</dd></div><div><dt>Runtime</dt><dd>{observation.runtime.instanceId}</dd></div></dl>
       {observation.status === 'unsupported' ? <p role="status">{observation.message} Storage limits and persistence state are unknown; existing terminal capabilities are unchanged.</p> : null}
     </> : null}
     {storage ? <>
-      {persistence?.firstFailure ? <div className="terminal-storage-details__failure" role="status"><strong>Storage persistence failure</strong><p>{persistence.firstFailure}</p><p>The original owner error and stage are retained. This does not by itself mean PTY source bytes were lost.</p></div> : null}
+      {persistence?.firstFailure ? <Notice role="status" tone="error" density="compact" heading="Storage persistence failure"><p>{persistence.firstFailure}</p><p>The original owner error and stage are retained. This does not by itself mean PTY source bytes were lost.</p></Notice> : null}
       <dl className="terminal-storage-details__metrics">
         <div><dt>Memory byte interval</dt><dd>[{storage.memory.firstAvailableByte.toLocaleString()}, {storage.memory.latestOutputByte.toLocaleString()}) B</dd></div>
         <div><dt>Durable earliest byte</dt><dd>Unknown · not exposed by this observation</dd></div>

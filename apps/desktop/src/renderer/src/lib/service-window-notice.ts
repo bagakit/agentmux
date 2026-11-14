@@ -168,6 +168,9 @@ export function serviceNoticeAriaLive(kind: ServiceNoticeClass['kind']): Service
   return SERVICE_NOTICE_ARIA_LIVE[kind]
 }
 
+const serviceNoticeTones = { healthy: 'info', 'process-degraded': 'warning', indeterminate: 'unknown', 'agent-broken': 'error' } as const
+export const serviceNoticeTone = (kind: ServiceNoticeKind) => serviceNoticeTones[kind]
+
 /**
  * 一个真实渲染点用到的映射：把 Agent Session 的诚实事实映成一个步骤结局。
  *

@@ -17,7 +17,6 @@
 .mote-private-chat__app { margin-top: calc(-1 * var(--sp-2)); color: var(--text-3); font: var(--fs-meta)/1.6 var(--font-mono); overflow-wrap: anywhere; }
 .mote-private-chat__number { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-3); }
 .mote-private-chat__number input { min-width: 0; width: 100%; }
-.mote-private-chat__service { margin: 0; padding-left: var(--sp-3); border-left: 2px solid var(--amber-text); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
 .mote-private-chat__activity { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-3); font-size: var(--fs-meta); }
 .mote-private-chat__notice { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
 .mote-chat-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }

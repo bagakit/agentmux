@@ -44,7 +44,7 @@
 .session-takeover__footer > span { display: flex; align-items: center; gap: 8px; }
 .session-takeover__back { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
 .session-takeover__back > span { padding: 0 4px; border: 1px solid var(--line-soft); border-radius: 3px; color: var(--text-3); font-size: 10px; }
-.session-takeover__issue { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--line-soft); border-left: 2px solid var(--amber); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-meta); line-height: 1.6; }
+.session-takeover__issue { margin-top: 20px; }
 .session-takeover__issue strong { color: var(--text); font-weight: 600; }
 .session-takeover__issue p { margin: 4px 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .session-takeover__issue-actions { display: flex; flex-wrap: wrap; gap: 8px; }

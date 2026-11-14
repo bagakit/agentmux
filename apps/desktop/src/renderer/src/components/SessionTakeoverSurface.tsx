@@ -1,3 +1,4 @@
+import { Notice } from '@agentmux/client-ui/components/Notice'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -351,8 +352,9 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
           : <span>{source.derived ? 'The original work is read automatically. Your original session stays here.' : 'Context follows automatically. Your original session stays here.'}</span>}
         <button type="button" className="session-takeover__back" onClick={() => close()}>Back<span aria-hidden="true">Esc</span></button>
       </div>
-      {issue ? <div className="session-takeover__issue" role="status">
-        <strong>{closedRequest ? 'Takeover Agent was closed' : unconfirmed ? 'Takeover is not confirmed' : 'Could not take over'}</strong><p>{issue}</p>
+      {issue ? <Notice className="session-takeover__issue" role="status" tone={unconfirmed ? 'unknown' : 'warning'}
+        heading={closedRequest ? 'Takeover Agent was closed' : unconfirmed ? 'Takeover is not confirmed' : 'Could not take over'}>
+        <p>{issue}</p>
         <div className="session-takeover__issue-actions">
           {closedRequest ? <Button type="button" disabled={busy} onClick={chooseAnother}>Choose another Agent</Button> : null}
           {currentReport?.agent && currentReport.to && currentReport.outcome === 'partial' ? <Button type="button" onClick={() => { focusTakeoverResult(workingSource, currentReport); close(false) }}>Open created Agent</Button> : null}
@@ -360,7 +362,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
           {workingSource.coreRequest && !closedRequest ? <Button type="button" disabled={busy} onClick={() => { const request = workingSource.coreRequest!; if (request.content.kind === 'takeover-agent') { admitted.current = false; void choose(request.content.executorId) } }}>Continue original Takeover</Button> : null}
           <Button type="button" disabled={busy} onClick={() => { void check() }}><ThemeActionRefreshIcon size={12} /> Check again</Button>
         </div>
-      </div> : null}
+      </Notice> : null}
     </div>
   </section>
 }

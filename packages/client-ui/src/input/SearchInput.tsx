@@ -1,7 +1,7 @@
 import { useImperativeHandle, useRef } from 'react'
 import { IconButton } from '../components/IconButton.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
-import { SemanticIcon } from '../theme/icons.js'
+import { SemanticIcon } from '../theme/semantic-icon.js'
 import { InputGroup } from './InputGroup.js'
 import { TextInput, type TextInputProps } from './TextInput.js'
 

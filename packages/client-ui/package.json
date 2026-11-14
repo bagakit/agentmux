@@ -71,6 +71,11 @@
       "browser": "./src/components/ActionFeedback.tsx",
       "import": "./dist/components/ActionFeedback.js"
     },
+    "./components/Notice": {
+      "types": "./src/components/Notice.tsx",
+      "browser": "./src/components/Notice.tsx",
+      "import": "./dist/components/Notice.js"
+    },
     "./components/InlineRenameField": {
       "types": "./src/components/InlineRenameField.tsx",
       "browser": "./src/components/InlineRenameField.tsx",
@@ -78,6 +83,7 @@
     },
     "./styles/semantic-icons.css": "./src/styles/semantic-icons.css",
     "./styles/inline-rename-field.css": "./src/styles/inline-rename-field.css",
+    "./styles/notice.css": "./src/styles/notice.css",
     "./patterns/agent-work-location": {
       "types": "./src/patterns/agent-work-location.tsx",
       "browser": "./src/patterns/agent-work-location.tsx",

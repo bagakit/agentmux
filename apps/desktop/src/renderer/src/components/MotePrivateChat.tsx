@@ -1,3 +1,4 @@
+import { Notice } from '@agentmux/client-ui/components/Notice'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useContext, useEffect, useRef, useState } from 'react'
 import { Switch, TextInput } from '@agentmux/client-ui/input'
@@ -236,7 +237,7 @@ function MotePrivateChatPanel({ scope, target: initialTarget, active, reference,
       <label><span>New guest allowance<small>Total messages for each new guest. Zero blocks new guests until you explicitly grant an allowance.</small></span><TextInput type="number" min="0" step="1" aria-label="New guest message allowance" value={strangers} disabled={saving} onChange={event => { edited.current++; retainPolicy(draftOwner(), draft, minutes, event.target.value); setStrangers(event.target.value); setNotice('') }} /></label>
     </div>
     <p className="mote-details__hint">A new Agent receives references to the three most recent conversations and can look up older conversations.</p>
-    {service?.enabled === false ? <p role="status" className="mote-private-chat__service">Automatic chat sync is off. This Mote’s setting is kept; resume sync in the original connector settings to receive and reply.</p> : !service && ready ? <p role="status" className="mote-details__hint">The automatic sync policy is not confirmed. This saved choice does not prove messages are flowing.</p> : null}
+    {service?.enabled === false ? <Notice role="status" tone="info" density="compact" heading="Automatic chat sync is off"><p>Resume sync in the original connector settings to receive and reply.</p></Notice> : !service && ready ? <p role="status" className="mote-details__hint">The automatic sync policy is not confirmed. This saved choice does not prove messages are flowing.</p> : null}
     {reading ? <p role="status" className="mote-private-chat__activity"><LoadingIcon size={13} animation="spin" />{ready ? 'Refreshing chat settings…' : 'Reading chat settings…'}</p> : null}
     {persistenceIssue ? <p role="status" className="mote-details__issue">{persistenceIssue}</p> : null}
     {issue || policyFeedback?.issue ? <p role="status" className="mote-details__issue">{issue || policyFeedback?.issue}</p> : notice ? <p role="status" className="mote-private-chat__notice">{notice}</p> : null}

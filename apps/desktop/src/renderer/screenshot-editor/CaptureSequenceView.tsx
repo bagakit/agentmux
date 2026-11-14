@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Notice } from '@agentmux/client-ui/components/Notice'
 import { BROWSER_PNG_MAX_BYTES, BROWSER_PNG_MAX_DIMENSION, BROWSER_PNG_MAX_PIXELS } from '@agentmux/browser/model/page'
 import type { BrowserPng } from '../../shared/contracts'
 import type { CaptureSequenceApi, CaptureSequenceInput, GifKeyframe, SequenceFrame, SequenceSnapshot } from '../../shared/capture-sequence'
 import { inspectGif, writeGifMetadata } from '../../shared/gif-metadata'
 import { matchScroll, type PixelFrame } from '../../shared/scroll-stitch'
+import '@agentmux/client-ui/styles/notice.css'
 import './capture-sequence.css'
 
 async function pixels(image: BrowserPng) {
@@ -178,7 +180,7 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
     <div className="capture-sequence__preview capture-review__canvas" aria-label="Long screenshot preview" aria-busy={preparing}>
       {longImage ? <img src={longImage.dataUrl} alt="Scrolling capture preview" style={{ maxWidth: longImage.width }} /> : <p role="status">{preparing ? 'Preparing preview…' : 'Preview could not be composed. Adjust the last frame or retake the screenshot.'}</p>}
     </div>
-    {issue || snapshot.issue ? <p className="capture-sequence__issue" role="status">{issue ?? snapshot.issue}</p> : null}
+    {issue || snapshot.issue ? <Notice className="capture-sequence__issue" messageRole="status" tone="warning" density="compact"><p>{issue ?? snapshot.issue}</p></Notice> : null}
     <footer className="capture-review__footer" inert={discarding}>
       <div className="capture-review__secondary">
         <button className="capture-review__text-button" disabled={busy || preparing} onClick={() => void action(() => api.retake(input.requestId))}>Retake</button>
@@ -221,6 +223,6 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
       <div className="capture-sequence__playback"><button disabled={busy} onClick={() => setPlaying(v => !v)}>{playing ? 'Pause' : 'Play'}</button><button disabled={busy || index <= 0} aria-label="Previous frame" onClick={() => select(index - 1)}>‹</button><div className="capture-sequence__track"><input type="range" aria-label="Current frame" min={0} max={frames.length - 1} value={index} disabled={busy} onChange={e => select(Number(e.target.value))} /><div className="capture-sequence__markers">{keyframes.map(k => <button key={k.frameIndex} aria-label={`Go to keyframe ${k.frameIndex + 1}`} title={`Frame ${k.frameIndex + 1}: ${k.note}`} style={{ left: `${frames.length > 1 ? k.frameIndex / (frames.length - 1) * 100 : 0}%` }} onClick={() => select(k.frameIndex)} />)}</div></div><button aria-label="Next frame" disabled={busy || index >= frames.length - 1} onClick={() => select(index + 1)}>›</button><output>{index + 1} / {frames.length} · {(time / 1000).toFixed(2)} s</output></div>
       <div className="capture-sequence__export"><button disabled={busy} onClick={() => void action(async () => { const result = await api.saveGif(input.requestId, await encode()); if (result.status === 'saved') setIssue('GIF saved with keyframe notes.') })}>Save GIF…</button><button className="primary-button" disabled={busy} onClick={() => void action(async () => { await api.attachGif(input.requestId, await encode()) })}>Use GIF</button></div>
     </footer> : null}
-    {issue || snapshot.issue ? <p className="capture-sequence__issue" role="status">{issue ?? snapshot.issue}</p> : null}
+    {issue || snapshot.issue ? <Notice className="capture-sequence__issue" messageRole="status" tone="warning" density="compact"><p>{issue ?? snapshot.issue}</p></Notice> : null}
   </main>
 }

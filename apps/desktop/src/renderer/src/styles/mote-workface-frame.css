@@ -206,10 +206,7 @@
 .mote-ideas__empty strong, .mote-ideas__welcome h4 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
 .mote-ideas__empty p, .mote-ideas__welcome p { margin: 0; max-width: 30ch; font-size: var(--fs-meta); line-height: 1.7; }
 .mote-ideas__welcome { display: none; }
-.mote-ideas__service { display: flex; flex-wrap: wrap; align-items: start; gap: 8px; margin-top: 12px; padding: 9px 10px; border-inline-start: 2px solid var(--amber); background: color-mix(in srgb, var(--amber) 6%, var(--surface-0)); border-radius: var(--radius-sm); }
-.mote-ideas__service > div { flex: 1 0 min(100%, 140px); min-width: 0; font-size: var(--fs-meta); overflow-wrap: anywhere; }
-.mote-ideas__service strong { color: var(--text); font-weight: 600; }
-.mote-ideas__service p { margin: 4px 0 0; color: var(--text-2); line-height: 1.5; }
+.mote-ideas__service { margin-top: 12px; }
 .mote-ideas__tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 8px; margin-bottom: 14px; }
 .mote-ideas__tools > :is([open], :has(details[open], .mote-idea-controls__arrangement)) { flex: 1 0 100%; }
 .mote-ideas__request { min-width: 0; }

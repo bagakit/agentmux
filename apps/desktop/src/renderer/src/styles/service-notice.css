@@ -44,5 +44,4 @@
 .terminal-storage-details dt { color: var(--text-3); }
 .terminal-storage-details dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .terminal-storage-details__identity dd { font-family: var(--font-mono); font-size: var(--fs-micro); }
-.terminal-storage-details__failure { padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--amber); background: var(--amber-wash); }
 .terminal-storage-details h4 { margin: var(--sp-5) 0 var(--sp-3); font-size: inherit; font-weight: 550; }

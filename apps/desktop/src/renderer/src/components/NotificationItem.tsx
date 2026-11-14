@@ -2,15 +2,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { NoticeIcon, NoticeSurface } from '@agentmux/client-ui/components/Notice'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { serviceNoticeAriaLive, type ServiceNoticeKind } from '../lib/service-window-notice'
+import { serviceNoticeAriaLive, serviceNoticeTone, type ServiceNoticeKind } from '../lib/service-window-notice'
 import { notificationPreview } from '../lib/notification-preview'
 import { notificationLevels, type notificationTimestamp } from '../lib/notification-center'
 
-const WarningIcon = semanticIconComponent('status.warning')
-const InfoIcon = semanticIconComponent('status.info')
-const UnknownIcon = semanticIconComponent('status.unknown')
-const FailureIcon = semanticIconComponent('status.failed')
 const ReadIcon = semanticIconComponent('status.selected')
 const ChevronIcon = semanticIconComponent('navigation.disclosure')
 
@@ -39,7 +36,6 @@ function useInvalidateOnUnmount(generation: RefObject<number>) {
 
 /** Shared compact presentation. Reading, copying and navigation never settle the original issue. */
 export function NotificationItem({ title, kind, detail, summary, impact, children, action, actions, eventId, noticeId, unread, onRead, timestamp, occurrences, subjectHeading }: NotificationItemProps) {
-  const Icon = kind === 'agent-broken' ? FailureIcon : kind === 'process-degraded' ? WarningIcon : kind === 'indeterminate' ? UnknownIcon : InfoIcon
   const [copy, setCopy] = useState<{ detail: string; label: string } | null>(null)
   const [expanded, setExpanded] = useState(false)
   const generation = useRef(0), currentDetail = useRef(detail)
@@ -55,7 +51,7 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
   }
   const volume = serviceNoticeAriaLive(kind)
   const heading = useMemo(() => notificationPreview(title, 'title'), [title])
-  return <article className="notification-item" data-kind={kind} data-unread={unread ?? false} data-event-id={eventId} data-notice-id={noticeId}
+  return <NoticeSurface as="article" appearance="row" className="notification-item" data-kind={kind} data-unread={unread ?? false} data-event-id={eventId} data-notice-id={noticeId}
     role={volume === 'assertive' ? 'alert' : 'status'} aria-live={volume}>
     <div className="notification-item__body">
       {subjectHeading || action || actions ? <div className="notification-item__toolbar">
@@ -73,7 +69,7 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
           }
         }}>
           <summary className="notification-item__headline" aria-label={`${notificationLevels[kind].label}. Details: ${heading}`} title={heading}>
-            <Icon size={14} className="notification-item__icon" aria-hidden="true" />
+            <NoticeIcon tone={serviceNoticeTone(kind)} size={14} />
             <span className="notification-item__level">{notificationLevels[kind].label}</span>
             <strong className="notification-item__title">{heading}</strong>
             <ChevronIcon size={12} className="notification-item__disclosure" aria-hidden="true" />
@@ -94,5 +90,5 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
         {occurrences && occurrences > 1 ? <span title="Repeated observations of this original event">{occurrences} observations</span> : null}
       </div> : null}
     </div>
-  </article>
+  </NoticeSurface>
 }

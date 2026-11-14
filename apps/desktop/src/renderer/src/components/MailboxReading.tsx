@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { MailboxRecordRow as RecordRow, type MailboxRecordRowProps } from '@agentmux/client-ui/components/MailboxRecordRow'
+import { Notice } from '@agentmux/client-ui/components/Notice'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 
@@ -11,8 +12,10 @@ const DoneIcon = semanticIconComponent('status.selected')
 const WarningIcon = semanticIconComponent('status.warning')
 
 export function MailboxSourceNotice({ title, message, action, onAction }: { title: string; message: string; action: string; onAction(): void }) {
-  return <div className="composer-mailbox__source-notice"><details><summary>{title}</summary><p>{message}</p><p>Existing records are kept. {action} to read this same source again.</p></details>
-    <button type="button" className="composer-tool" onClick={onAction} title={action} aria-label={action}><ThemeActionRefreshIcon size={14} aria-hidden="true" /></button></div>
+  return <Notice density="compact" tone="unknown" className="composer-mailbox__source-notice"
+    actions={<button type="button" className="composer-tool" onClick={onAction} title={action} aria-label={action}><ThemeActionRefreshIcon size={14} aria-hidden="true" /></button>}>
+    <details><summary>{title}</summary><p>{message}</p><p>Existing records are kept. {action} to read this same source again.</p></details>
+  </Notice>
 }
 
 

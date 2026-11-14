@@ -1,3 +1,4 @@
+import { Notice } from '@agentmux/client-ui/components/Notice'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentLearningOperation, AgentLearningSource, AgentLearningTarget } from '@agentmux/core/agent-learning'
@@ -155,9 +156,9 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
         expectedRevision: operation.revision, target: selectedTarget, executorId, confirmationId: mintObjectId() })).operation, submittedDraft)
     }, 'confirm')
   }
-  const issueNotice = issue ? <div className="session-takeover__issue" role="status"><strong>Original result needs attention</strong><p>{issue.message}</p>
+  const issueNotice = issue ? <Notice className="session-takeover__issue" role="status" tone="unknown" heading="Original result needs attention"><p>{issue.message}</p>
     <p>The original work and request are kept.</p><div className="session-learning__actions"><Button type="button" disabled={busy} onClick={() => void refresh()}>Inspect original request</Button>
-      {issue.action === 'confirm' ? <Button type="button" disabled={busy || dirty || !executorId || !selectedTarget} onClick={() => void confirm()}>Retry exact confirmation</Button> : null}</div></div> : null
+      {issue.action === 'confirm' ? <Button type="button" disabled={busy || dirty || !executorId || !selectedTarget} onClick={() => void confirm()}>Retry exact confirmation</Button> : null}</div></Notice> : null
   return <section ref={surface} className="session-takeover session-learning" aria-label="Review Agent experience" hidden={!active} inert={!active} aria-busy={busy}
     onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
     <div className="session-takeover__content">

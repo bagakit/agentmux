@@ -26,7 +26,7 @@
 .capture-sequence__playback input { flex: 1; min-width: 70px; accent-color: var(--green, #8c9fff); }
 .capture-sequence__playback output { font-size: 12px; font-variant-numeric: tabular-nums; }
 .capture-sequence__export { justify-content: flex-end; }
-.capture-sequence__issue { flex-shrink: 0; padding: 8px 10px; border-left: 2px solid var(--green, #8c9fff); max-height: 90px; overflow: auto; }
+.capture-sequence__issue { flex-shrink: 0; max-height: 90px; overflow: auto; }
 @media (max-width: 620px) { .capture-sequence { padding: 12px; gap: 10px; } .capture-sequence__body { flex-direction: column; } .capture-sequence aside { width: auto; max-height: 180px; flex-shrink: 0; } .capture-sequence aside nav { display: flex; overflow-x: auto; } .capture-sequence nav button { min-width: 130px; max-width: 200px; } }
 
 .capture-sequence__track { flex: 1; min-width: 70px; display: grid; gap: 4px; }

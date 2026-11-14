@@ -116,9 +116,6 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .notification-group__unread, .notification-item__read::before { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); }
 .notification-item { font-size: var(--fs-body); line-height: 1.5; }
 .notification-item + .notification-item { border-top: 1px solid var(--line-soft); }
-.notification-item__icon { flex: none; color: var(--text-3); }
-.notification-item[data-kind="process-degraded"] .notification-item__icon, .notification-item[data-kind="process-degraded"] .notification-item__level { color: var(--amber-text); }
-.notification-item[data-kind="agent-broken"] .notification-item__icon, .notification-item[data-kind="agent-broken"] .notification-item__level { color: var(--red-text); }
 .notification-item__body { min-width: 0; }
 .notification-item__toolbar { display: flex; align-items: center; gap: var(--sp-2); min-height: 26px; }
 .notification-item__title { display: block; flex: 1; min-width: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 450; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

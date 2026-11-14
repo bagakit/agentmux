@@ -1,5 +1,6 @@
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { Notice } from '@agentmux/client-ui/components/Notice'
 import { TopicKnowledgePanel } from './TopicKnowledgePanel'
 import { MoteQuickMode } from './MoteQuickMode'
 import { useMoteSpace } from './MoteSpaceFrame'
@@ -228,8 +229,10 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
     }
   }, [ideasActive, reading, selected])
   const notesIssue = <>
-    {directory.status === 'unconfirmed' ? <div className="mote-ideas__service"><div role="status"><strong>Notes are unconfirmed</strong><p>{directory.issue}</p></div>
-      <Button type="button" onClick={() => setDirectoryAttempt(value => value + 1)}>Retry notes</Button></div> : null}
+    {directory.status === 'unconfirmed' ? <Notice className="mote-ideas__service" messageRole="status" tone="unknown" heading="Notes are unconfirmed"
+      actions={<Button type="button" onClick={() => setDirectoryAttempt(value => value + 1)}>Retry notes</Button>}>
+      <p>{directory.issue}</p>
+    </Notice> : null}
     {directory.status === 'loading' ? <p role="status" className="mote-details__hint">Reading notes…</p> : null}
   </>
   return <div ref={content} className="mote-details__content" role="tabpanel" aria-label={section === 'profile' ? 'Mote profile' : 'Mote ideas'}

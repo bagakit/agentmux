@@ -224,8 +224,6 @@
 .service-window { margin: var(--sp-2) var(--sp-3) 0; padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: var(--surface-1); min-width: 0; }
 .service-window--surface { display: flex; flex: 1; min-height: 0; height: 100%; margin: 0; padding: 0; border-radius: 0; background: var(--surface-0); }
 .service-window--surface .surface-state { --surface-state-width: 520px; }
-.service-window__icon { display: inline-flex; color: var(--amber); }
-.service-window[data-kind='indeterminate'] .service-window__icon { color: var(--text-3); }
 .service-window :is(.surface-state__title, .surface-state__description), .service-window__original { white-space: pre-wrap; }
 .service-window__original { display: grid; gap: var(--sp-2); max-height: min(18rem, 40vh); overflow-y: auto; padding-block: var(--sp-2); user-select: text; }
 .service-window__original:focus-visible { outline: var(--focus-line) solid 1px; outline-offset: 2px; }

@@ -1,12 +1,9 @@
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { NoticeIcon, NoticeSurface } from '@agentmux/client-ui/components/Notice'
 import type { ReactNode } from 'react'
-import { serviceNoticeAriaLive, type RenderableServiceNotice } from '../lib/service-window-notice'
+import { serviceNoticeAriaLive, serviceNoticeTone, type RenderableServiceNotice } from '../lib/service-window-notice'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
 import { SurfaceState } from './SurfaceState'
-
-const ThemeStatusInfoIcon = semanticIconComponent('status.info')
-
 
 export type ServiceNoticeDisclosureIdentity = Pick<ServiceNoticeItem, 'id' | 'occurrence' | 'cause' | 'readKey' | 'readScope' | 'readOrigin'> & {
   scope: string
@@ -53,14 +50,14 @@ export function ServiceWindowNotice({
   const ariaLive = serviceNoticeAriaLive(notice.kind)
   const visible = summary ?? notice.notice
   return (
-    <aside
+    <NoticeSurface as="aside" appearance="row"
       className={`service-window service-window--${layout}`}
       data-kind={notice.kind}
       role={ariaLive === 'assertive' ? 'alert' : 'status'}
       aria-live={ariaLive}
     >
       <SurfaceState layout={layout}
-        identity={<span className="service-window__icon" aria-hidden="true"><ThemeStatusInfoIcon size={layout === 'surface' ? 24 : 14} /></span>}
+        identity={<NoticeIcon tone={serviceNoticeTone(notice.kind)} size={layout === 'surface' ? 24 : 14} />}
         title={visible.step}
         description={<><span className="service-window__mode">{visible.mode}</span><span className="service-window__restore">{visible.restore}</span></>}
         actions={actions}
@@ -71,6 +68,6 @@ export function ServiceWindowNotice({
             <span>{notice.notice.restore}</span>
           </div>
         } : undefined} />
-    </aside>
+    </NoticeSurface>
   )
 }

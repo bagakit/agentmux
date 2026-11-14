@@ -3,7 +3,7 @@ import { formatAmuxObjectLink } from '@agentmux/core/sharing'
 import type { ReactNode } from 'react'
 import type { ConversationRecord } from '../lib/conversation-records.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
-import { SemanticIcon } from '../theme/icons.js'
+import { NoticeIcon, NoticeSurface } from './Notice.js'
 import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
 import { useObjectLinkRenderer } from '../platform.js'
 
@@ -14,9 +14,9 @@ export function ConversationTurnFailure({ failure, record, children }: {
   const source = record.source
   const renderObjectLink = useObjectLinkRenderer()
   const target = { kind: 'agent' as const, agentSessionId: record.agentSessionId }, uri = formatAmuxObjectLink(target)
-  return <section className="conversation-turn-failure" aria-label="请求失败" data-turn-failure-record-id={record.rawId}
+  return <NoticeSurface as="section" className="conversation-turn-failure" aria-label="请求失败" data-turn-failure-record-id={record.rawId}
     data-conversation-layout-key={record.presentationKey ?? record.id} data-message-source-key={conversationMessageSourceKey(record.agentSessionId, source)}>
-    <div className="conversation-turn-failure__heading"><SemanticIcon name="status.warning" size={15} /><strong>请求失败</strong>
+    <div className="conversation-turn-failure__heading"><NoticeIcon tone="error" /><strong>请求失败</strong>
       <span>{source.kind === 'native' ? source.providerId : '捕获记录'}</span></div>
     <p className="conversation-turn-failure__cause">{failure.message}</p>
     <p className="conversation-turn-failure__recovery">{failure.recovery}</p>
@@ -37,5 +37,5 @@ export function ConversationTurnFailure({ failure, record, children }: {
         <ConversationRetainedDetails className="conversation-turn-failure__original" summary="原始记录">{children}</ConversationRetainedDetails>
       </>}
     </ConversationRetainedDetails>
-  </section>
+  </NoticeSurface>
 }
