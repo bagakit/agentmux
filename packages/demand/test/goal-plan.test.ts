@@ -207,9 +207,10 @@ describe('node delegation and review', () => {
   })
 
   it('names node criteria that the current proposal no longer has', async () => {
-    await store.revisePlan('goal', { operationId: 'plan-2', expectedRevision: 1, alignmentRevision: 1, nodes: [node('a', [], { criterionIds: ['api', 'gone'] })] }, supervisor)
     const goal = (await store.get('goal'))!
-    expect(projectGoalPlan(goal.plan!, [], goal.alignment!.criteria).nodes[0]!.staleCriteria).toEqual(['gone'])
+    // A retained historical plan can name removed criteria; new revisions cannot write those references.
+    const historicalPlan = { ...goal.plan!, nodes: [node('a', [], { criterionIds: ['api', 'gone'] })] }
+    expect(projectGoalPlan(historicalPlan, [], goal.alignment!.criteria).nodes[0]!.staleCriteria).toEqual(['gone'])
   })
 
   it('names every reason a node needs reconciliation, and an unknown node cannot be delegated', async () => {
@@ -223,10 +224,10 @@ describe('node delegation and review', () => {
   })
 
   it('never offers a node that covers no success criterion, while a cancelled node needs no reconciliation', async () => {
-    await store.revisePlan('goal', { operationId: 'plan-2', expectedRevision: 1, alignmentRevision: 1,
-      nodes: [node('a', [], { criterionIds: [] }), node('b', [], { criterionIds: ['gone'], cancelled: true })] }, supervisor)
     const goal = (await store.get('goal'))!
-    const projection = projectGoalPlan(goal.plan!, [], goal.alignment!.criteria)
+    // Old saved nodes remain readable even though a new revision must write valid nonempty criteria.
+    const historicalPlan = { ...goal.plan!, nodes: [node('a', [], { criterionIds: [] }), node('b', [], { criterionIds: ['gone'], cancelled: true })] }
+    const projection = projectGoalPlan(historicalPlan, [], goal.alignment!.criteria)
     expect(projection.nodes.map(item => [item.node.id, item.state, item.unknown])).toEqual([['a', 'unknown', ['criteria']], ['b', 'cancelled', []]])
     expect(projection).toMatchObject({ done: 0, total: 1, next: [] })
   })
