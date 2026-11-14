@@ -7,7 +7,7 @@ import { captureWorkbenchClose, workbenchCloseBrowsersAlreadyApplied } from '../
 function browser(regionId = 'original-region', browserId = 'original-browser') {
   return { id: browserId, navigationId: 'original-navigation', kind: 'browser' as const, regionId, browserId, workspaceId: 'W',
     url: 'about:blank', title: '', mode: 'normal' as const, viewport: 'responsive' as const, agent: null,
-    loading: false, canGoBack: false, canGoForward: false, error: null }
+    loading: false, canGoBack: false, canGoForward: false, error: null, profileId: 'original-profile', driving: false, appLinkPrompt: null }
 }
 function original(mixed?: 'file' | 'agent') {
   let tab = createWorkbenchTab('original-tab', browser())
