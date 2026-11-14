@@ -236,11 +236,14 @@ describe('quick-mode original consumer counterexamples', () => {
   })
   it('Profile displays saved choices and reopens them selected, while Cancel never writes', async () => {
     preferences(); const text = serializeMoteQuickMode('', { executorId: 'fixture', conversation })
-    const read = vi.spyOn(api.files, 'readPublic').mockImplementation(async params => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: moteTopics[0]!.directoryPath, path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path }, result: { status: 'read', document: { path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path, content: text, revision: 'sha256:' + '1'.repeat(64) } } }))
+    vi.spyOn(api.files, 'readPublic').mockImplementation(async params => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: moteTopics[0]!.directoryPath, path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path }, result: { status: 'read', document: { path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path, content: text, revision: 'sha256:' + '1'.repeat(64) } } }))
+    const read = vi.spyOn(api.motePreferences, 'read').mockImplementation(async params => ({ kind: 'quick', target: params.target, status: 'ready', main: true, issue: null,
+      source: await api.files.readPublic({ ...params.target, expectedResource: params.target.expectedResource, path: 'MOTE.md' }),
+      defaults: { executorId: 'fixture', conversation }, choices: { executors: [{ id: 'fixture', name: 'Fixture', providerId: 'fixture' }], conversations: [], destinations: [] } }))
     const write = vi.spyOn(api.files, 'write'), create = vi.spyOn(api.files, 'create')
     useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
     await app.mount()
-    const timing = app.container.querySelector('.mote-quick-mode [data-semantic-icon="action.configure-reconnect"]'); expect(timing).not.toBeNull(); expect(timing!.closest('button')?.textContent).toContain('Reconnect')
+    const timing = app.container.querySelector('.mote-quick-mode [data-semantic-icon="action.configure-reconnect"]'); expect(timing).not.toBeNull(); expect(timing!.closest('button')?.textContent).toContain('Automatic heartbeat')
     await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Edit quick mode"]')!)
     const agent = document.querySelector<HTMLButtonElement>('[aria-label="Executor for new chat"]')!, selected = document.querySelector<HTMLButtonElement>('.selection-field[aria-label="Main Agent"]')!
     expect(agent.dataset.value).toBe('fixture'); expect(JSON.parse(selected.dataset.value!)).toEqual(conversation)
@@ -254,12 +257,13 @@ describe('quick-mode original consumer counterexamples', () => {
     await moteClick(document.querySelector<HTMLElement>('[aria-label="Close quick mode"]')!)
     expect(write).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
   })
-  it('conflicting source revision refuses only Save and keeps user choices, input and Agent', async () => {
+  it('an unconfirmed source refuses only Save and keeps user choices, input and Agent', async () => {
     const topic = preferences(), scope = { topic, workspace: scratchWorkspace, rootPath: topic.directoryPath.slice(scratchWorkspace.path.length + 1) }
     const text = serializeMoteQuickMode('', { executorId: 'fixture', conversation }), open = vi.fn()
+    const save = vi.spyOn(api.motePreferences, 'save')
     vi.spyOn(api.files, 'readPublic').mockImplementation(async params => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: moteTopics[0]!.directoryPath, path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path }, result: { status: 'read', document: { path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path, content: text, revision: 'sha256:' + '2'.repeat(64) } } }))
-    await expect(saveMoteQuickDefaults(scope, { executorId: 'fixture', conversation }, { document: { path: scope.rootPath + '/MOTE.md', content: text, revision: 'sha256:' + '1'.repeat(64) }, defaults: { executorId: 'fixture', conversation } }, open, () => true)).rejects.toThrow('kept')
-    expect(api.files.readPublic).toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
+    await expect(saveMoteQuickDefaults(scope, { executorId: 'fixture', conversation }, { document: { path: scope.rootPath + '/MOTE.md', content: text, revision: 'sha256:' + '1'.repeat(64) }, defaults: { executorId: 'fixture', conversation } }, open, () => true)).rejects.toThrow('Keep your draft')
+    expect(save).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
   })
 })
 
