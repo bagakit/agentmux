@@ -892,6 +892,9 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
     !options?.goalContinuation && !options?.goalPmo && !options?.goalDispatch &&
     (options?.execution === undefined || options.execution === 'immediate')
   if (!direct || session?.kind !== 'agent') return
+  // Browser tasks address the conversation, even when a click dispatches them
+  // immediately. They must not answer native trust/login or question screens.
+  if (recipient) return { expectedRun: { ...recipient.run }, admissionIntent: { kind: 'session-conversation' } }
   if (session.pendingInteraction) return interactionNativeComposerBinding(session)
   return initialNativeComposerBinding(session) ??
     { expectedRun: { ...(recipient ?? session.control).run }, admissionIntent: { kind: options?.moteMain ? 'session-conversation' : 'manual-actor' } }
