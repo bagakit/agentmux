@@ -54,7 +54,7 @@ import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecor
 import { agentTakeoverPrompt } from './agent-takeover-context.js'
 import { agentDerivedActionPrompt, isAgentBuiltInDerivedActionId, parseAgentDerivedActionFields } from './agent-derived-actions.js'
 import { reconcileMoteMainSetup } from './mote/main-setup.js'
-import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote/dialogue.js'
+import { isMoteDialogueMethod, moteHeartbeatFaultPause, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote/dialogue.js'
 import { moteInputObservationId } from './mote/input.js'
 import { parseCreationContinueParams, parseCreationContinueReceipt, parseCreationContinueResult } from './agent-creation-continue.js'
 import { parseAgentExecutionReference } from './errors.js'
@@ -4466,9 +4466,9 @@ export class AgentMuxRpcService {
       // maintenance reading is often the Host's own failed recovery attempt on this same Session; that
       // observation gap does not take away the explicit entry, which reports its own Core result.
       if (!prefs || prefs.status !== 'ready') throw new AgentMuxError('The original main settings are unconfirmed. Its history and manual recovery remain available.', 'CONTROL_UNAVAILABLE')
-      if (prefs.defaults?.presence?.enabled === false || prefs.maintenance?.status === 'paused' || prefs.maintenance?.status === 'disabled' ||
-          // An unconfirmed reading still carries its last known schedule; an explicit pause or stop there wins.
-          prefs.maintenance?.schedule?.status === 'paused' || prefs.maintenance?.schedule?.status === 'stopped' ||
+      const maintenance = prefs.maintenance, schedule = maintenance?.schedule
+      const held = (maintenance?.status === 'paused' || schedule?.status === 'paused') && !moteHeartbeatFaultPause(schedule)
+      if (prefs.defaults?.presence?.enabled === false || maintenance?.status === 'disabled' || held || schedule?.status === 'stopped' ||
           observed.run.exitReason === 'user-stopped' || observed.session.continuity?.supervision?.cancellation || observed.session.continuity?.supervision?.phase === 'cancelled')
         throw new AgentMuxError('The original main was explicitly paused, stopped or cancelled. Its history remains readable; use its original explicit recovery or maintenance control.', 'MOTE_MAIN_RECOVERY_PAUSED')
     }

@@ -1,5 +1,12 @@
 import type { MoteDefaultConversation, MotePreferencesTarget } from './preferences.js'
 import type { FileReadResource } from '../public-rpc-files.js'
+import type { ContinuousProgressLoop } from '../continuous-progress-scheduler.js'
+
+/** These pauses hold automatic input, while the saved Main can still recover without input. */
+export function moteHeartbeatFaultPause(schedule: Pick<ContinuousProgressLoop, 'status' | 'pause'> | null | undefined): boolean {
+  return schedule?.status === 'paused' &&
+    (schedule.pause?.reason === 'input-unconfirmed' || schedule.pause?.reason === 'persistence-unconfirmed')
+}
 
 /** The original durable Mote content identity, never a display occurrence or an Agent SID. */
 export type MoteDialogueIdentity = { hostId: string; moteId: string }

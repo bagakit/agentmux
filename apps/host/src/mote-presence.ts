@@ -7,7 +7,7 @@ import { dirname, basename } from 'node:path'
 import { spatialCatalog, AgentMuxError, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { DEFAULT_MOTE_PRESENCE, type MotePreferencesTarget, type MotePresenceReading, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from '@agentmux/core/mote-preferences'
 import type { ConnectionEnrollmentCallContext } from '@agentmux/core/connections'
-import { MOTE_SUPERVISION_GUIDANCE, type MoteMainReader, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
+import { MOTE_SUPERVISION_GUIDANCE, moteHeartbeatFaultPause, type MoteMainReader, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { MoteHeartbeatSource, MoteDialogueCallContext } from '@agentmux/core/mote-dialogue'
@@ -145,7 +145,7 @@ export function createHostMotePresence(options: {
       // Rebinding revokes only future actions. Claimed/unknown records stay on their original target.
       for (const loop of arrangements) if (loop.status !== 'stopped' && (loop.managedSource!.revision !== main.roleRevision || !preference.enabled || !main.current)) {
         const method = loop.managedSource!.revision === main.roleRevision && main.current && !preference.enabled ? 'schedule.pause' : 'schedule.cancel'
-        if (method === 'schedule.pause' && loop.status === 'paused') continue
+        if (method === 'schedule.pause' && loop.status === 'paused' && !moteHeartbeatFaultPause(loop)) continue
         await options.schedules.call(method, { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-revoke-' + digest([loop.loopId, loop.revision, main.roleRevision, preference.enabled]) }, undefined, 'source-disabled')
       }
       const current = options.schedules.listManaged(sourceId).filter(value => value.managedSource?.revision === main.roleRevision)
@@ -174,15 +174,21 @@ export function createHostMotePresence(options: {
       readings.set(id, { status: loop.status === 'active' ? 'active' : 'paused', schedule: loop, issue: loop.status === 'active' ? null : loop.status === 'stopped'
         ? 'The original automatic arrangement was stopped. Inspect its retained record and explicitly configure any future automatic work.'
         : loop.lastDecision ?? 'Original automatic maintenance is paused. Resume that exact arrangement explicitly.' })
-      if (loop.status !== 'active') return
+      if (loop.status !== 'active' && !moteHeartbeatFaultPause(loop)) return
       const observed = await read(() => client.statusAgent(original.agentSessionId))
       assertExecutionCurrent()
       if (observed.run.state === 'running') return
       if (observed.run.exitCode === 0 || observed.run.exitReason === 'user-stopped' || observed.session.continuity?.supervision?.cancellation) {
-        loop = (await options.schedules.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-ended-' + digest([loop.loopId, observed.session.run]) }, undefined, 'execution-ended')).schedule
+        if (loop.status === 'active') loop = (await options.schedules.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-ended-' + digest([loop.loopId, observed.session.run]) }, undefined, 'execution-ended')).schedule
         readings.set(id, { status: 'paused', schedule: loop, issue: 'The original Agent exited normally or was cancelled. Resume the original arrangement explicitly.' }); return
       }
       await read(() => options.main.assertCurrent(main)); assertOpen()
+      // A fault pause retains its input. The original standing intent admits only Session recovery here.
+      const source = await read(() => qualify(loop!))
+      if (source.action === 'defer') throw new Error(source.reason)
+      const currentLoop = options.schedules.inspectLoop(loop.loopId)
+      if (source.action === 'pause' || !currentLoop || currentLoop.revision !== loop.revision || currentLoop.futureIntentId !== loop.futureIntentId ||
+          currentLoop.status !== 'active' && !moteHeartbeatFaultPause(currentLoop)) return
       assertExecutionCurrent()
       const operationId = 'mote-maintain-' + digest([sourceId, main.roleRevision, observed.session.run])
       const recovered = await awaitUntilCancelled(() => { assertExecutionCurrent(); return client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: observed.session.run, operationId, trigger: 'standing-maintenance', standingIntent: { ...loop!.managedSource!, intentId: loop!.futureIntentId!, operationId: loop!.currentDefinition?.operationId ?? loop!.creationOperationId! }, policy: { continuationEnabled: false, reminderMode: 'off' } }) }, signal)
