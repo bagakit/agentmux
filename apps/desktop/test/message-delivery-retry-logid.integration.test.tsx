@@ -736,3 +736,21 @@ it('does not use a controlled input timeline row to confirm location or prevent 
  expect(row().textContent).not.toContain('输入已确认')
  expect(submit).not.toHaveBeenCalled()
 })
+
+it.each([['structured protocol', true, 'session-conversation'], ['terminal', false, 'manual-actor']] as const)(
+  'sends through the mounted original %s Composer input', async (label, structured, intent) => {
+    const draft = `Original ${label} Composer input`
+    const originalSession = composerSession()
+    const session = structured ? { ...originalSession, structuredPromptInput: true as const } : originalSession
+    useAppStore.setState({ sessions: [session], agentSteerQueues: {}, agentComposerDrafts: { [sid]: draft } })
+    vi.mocked(api.sessions.refresh).mockResolvedValue(session)
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
+    await dom.render(<AgentSessionComposer sessionId={sid} />)
+    await click(action(dom.container, 'Send'))
+    await settled(() => expect(submit, JSON.stringify(queue().map(item => ({
+      error: item.error, errorCode: item.errorCode, binding: item.directInputBinding, status: item.status
+    })))).toHaveBeenCalledOnce())
+    expect(submit.mock.calls[0]!.slice(0, 2)).toEqual([session.control, draft])
+    expect(submit.mock.calls[0]![3]).toEqual({ expectedRun: session.control.run, admissionIntent: { kind: intent } })
+  }
+)

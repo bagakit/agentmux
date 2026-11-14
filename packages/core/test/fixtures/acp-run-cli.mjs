@@ -15,6 +15,16 @@ const update = update => send({ method: 'session/update', params: { sessionId, u
 const permission = (id, toolCallId) => send({ id, method: 'session/request_permission',
   params: { sessionId, toolCall: { toolCallId, title: 'Original tool permission' }, options } })
 
+const configuration = [
+  { id: 'native-mode', name: 'Mode', type: 'select', category: 'mode', currentValue: 'native-ask',
+    options: [{ value: 'native-ask', name: 'Ask' }, { value: 'native-plan', name: 'Plan' }] },
+  { id: 'native-model', name: 'Model', type: 'select', category: 'model', currentValue: 'native-small',
+    options: [{ group: 'available', name: 'Available models', options: [
+      { value: 'native-small', name: 'Small' }, { value: 'native-large', name: 'Large' }
+    ] }] },
+  { id: 'native-verbose', name: 'Verbose', type: 'boolean', currentValue: false }
+]
+
 let pendingPrompt, cancelNotified = false
 for await (const line of createInterface({ input: process.stdin })) {
   const { id, method, params, result } = JSON.parse(line)
@@ -23,10 +33,19 @@ for await (const line of createInterface({ input: process.stdin })) {
   if (method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } })
   else if (method === 'session/new') {
     while (!existsSync(process.env.ACP_RUN_RELEASE)) await setTimeout(20)
-    reply({ sessionId })
+    reply({ sessionId, configOptions: configuration })
   } else if (method === 'session/resume' && params.sessionId === sessionId && process.env.ACP_RUN_RESUME_RELEASE) {
     while (!existsSync(process.env.ACP_RUN_RESUME_RELEASE)) await setTimeout(20)
     reply(readFileSync(process.env.ACP_RUN_RESUME_RELEASE, 'utf8') === 'mismatch' ? { sessionId: 'fixture-foreign-acp-session' } : {})
+  } else if (method === 'session/set_config_option' && params.sessionId === sessionId && typeof id === 'string') {
+    if (params.configId === 'native-model' && params.value === 'native-large') {
+      configuration[1].currentValue = params.value
+      configuration[0].currentValue = 'native-plan'
+      while (!existsSync(process.env.ACP_RUN_CONFIGURATION_RELEASE)) await setTimeout(20)
+    } else if (params.configId === 'native-verbose' && params.type === 'boolean' && params.value === true) {
+      configuration[2].currentValue = true
+    } else process.exit(5)
+    reply({ configOptions: configuration })
   } else if (method === 'session/prompt' && params.sessionId === sessionId && typeof id === 'string' && !pendingPrompt) {
     const draft = params.prompt?.[0]?.text
     if (draft?.endsWith('Original creation draft') || draft?.endsWith('Original resumed draft')) {

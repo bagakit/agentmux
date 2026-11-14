@@ -22,10 +22,11 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     const trace = join(scope.root, 'acp-run.ndjson'), release = join(scope.root, 'release-original-native-reply')
     const resumeRelease = join(scope.root, 'release-original-native-resume-reply')
     const cancelRelease = join(scope.root, 'release-original-native-cancel-reply')
+    const configRelease = join(scope.root, 'release-original-native-configuration-reply')
     const executorId = 'structured-acp-test'
     await core.configureHostExecutor({ executorId, config: {
       providerId: 'antigravity', label: 'Structured ACP test', command: entry('./fixtures/acp-run-cli.mjs'),
-      args: [], env: { ACP_RUN_TRACE: trace, ACP_RUN_RELEASE: release, ACP_RUN_RESUME_RELEASE: resumeRelease, ACP_RUN_CANCEL_RELEASE: cancelRelease }, injectAgentMuxGuide: false
+      args: [], env: { ACP_RUN_TRACE: trace, ACP_RUN_RELEASE: release, ACP_RUN_RESUME_RELEASE: resumeRelease, ACP_RUN_CANCEL_RELEASE: cancelRelease, ACP_RUN_CONFIGURATION_RELEASE: configRelease }, injectAgentMuxGuide: false
     } })
     const createOperationId = 'original-structured-acp'
     const spatial = new AgentMuxSpatialStateStore(join(scope.env.AGENTMUX_STATE_DIRECTORY!, 'spatial-state.json'))
@@ -48,10 +49,11 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     started = session
     expect(session.run).toEqual({ runId: result.agent.runId })
     expect((await spatial.read())?.graph.regions.some(region => region.agentSessionId === session.agentSessionId && region.runId === session.run.runId)).toBe(true)
-    const calls = async (): Promise<RecordedRequest[]> => await readFile(trace, 'utf8').then(body => body.trim().split('\n').map(line => JSON.parse(line)), error => {
+    const allCalls = async (): Promise<RecordedRequest[]> => await readFile(trace, 'utf8').then(body => body.trim().split('\n').map(line => JSON.parse(line)), error => {
       if (error.code === 'ENOENT') return []
       throw error
     })
+    const calls = async () => (await allCalls()).filter(call => call.method !== 'session/set_config_option')
     const initial = await until(calls, calls => calls.length >= 2, 'exact ACP initialization and creation')
     expect(initial.map(call => call.method)).toEqual(['initialize', 'session/new'])
     expect(initial[1]!.params).toEqual({ cwd: scope.root, mcpServers: [] })
@@ -75,7 +77,7 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(() => process.kill(nativePid, 0)).not.toThrow()
     await writeFile(release, 'complete the original request')
     const saved = await until(() => core.readAgentSession(session.agentSessionId), value => value?.creation?.initialPrompt === 'confirmed', 'original ACP identity and deferred input from the restarted Core')
-    expect(saved).toMatchObject({ agentSessionId: session.agentSessionId, run: session.run,
+    expect(saved).toMatchObject({ agentSessionId: session.agentSessionId, run: session.run, structuredPromptInput: true,
       nativeHandle: { kind: 'provider', providerId: 'antigravity', sessionId: 'fixture-original-acp-session' } })
     const initialInput = await until(calls, value => value.length >= 3, 'the original launch draft on the restarted Core')
     expect(initialInput.map(call => call.method)).toEqual(['initialize', 'session/new', 'session/prompt'])
@@ -93,18 +95,74 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(await calls()).toEqual(initialInput)
     expect(() => process.kill(nativePid, 0)).not.toThrow()
 
+    const inspectConfiguration = async (operationId?: string) => JSON.parse((await exec(process.execPath,
+      [...cli, 'agent', 'configuration', 'inspect', '--host', 'local', '--session', session.agentSessionId,
+        ...(operationId ? ['--operation-id', operationId] : ['--run', session.run.runId])], { env: scope.env })).stdout).result
+    const declaration = await inspectConfiguration()
+    expect(declaration).toMatchObject({ kind: 'configuration', target: { agentSessionId: session.agentSessionId, expectedRun: session.run },
+      snapshot: { options: [
+        { id: 'native-mode', currentValue: 'native-ask' },
+        { id: 'native-model', currentValue: 'native-small', choices: [
+          { value: 'native-small', group: { id: 'available', name: 'Available models' } },
+          { value: 'native-large', group: { id: 'available', name: 'Available models' } }
+        ] },
+        { id: 'native-verbose', type: 'boolean', currentValue: false }
+      ] } })
+    const configurationInput = { target: declaration.target, operationId: 'original-native-model-selection',
+      expectedRevision: declaration.snapshot.revision, configId: 'native-model', value: 'native-large' }
+    const chooseConfiguration = async (input: Record<string, unknown>) => {
+      const file = join(scope.root, 'configuration-set.json')
+      await writeFile(file, JSON.stringify(input))
+      const output = await exec(process.execPath, [...cli, 'agent', 'configuration', 'set', '--input', file], { env: scope.env })
+        .catch(error => {
+          const report = JSON.parse(error.stdout || error.stderr || '{}')
+          if (report.ok !== true) throw error
+          return { stdout: JSON.stringify(report) }
+        })
+      return JSON.parse(output.stdout).result
+    }
+    const configCalls = async () => (await allCalls()).filter(call => call.method === 'session/set_config_option')
+    const changing = chooseConfiguration(configurationInput)
+    void changing.catch(() => {})
+    await until(configCalls, value => value.length === 1, 'one original native model setter')
+    expect((await inspectConfiguration()).snapshot).toEqual(declaration.snapshot)
+    expect(await Promise.race([changing.then(() => 'returned'), wait(175, 'pending')])).toBe('pending')
+    await writeFile(configRelease, 'return the complete original configuration')
+    const changed = await changing
+    expect(changed).toMatchObject({ outcome: 'applied', diskDurability: 'confirmed',
+      acknowledgement: { options: [
+        { id: 'native-mode', currentValue: 'native-plan' }, { id: 'native-model', currentValue: 'native-large' },
+        { id: 'native-verbose', currentValue: false }
+      ] } })
+    expect(await configCalls()).toEqual([{ pid: nativePid, id: changed.nativeOperationId, method: 'session/set_config_option',
+      params: { sessionId: 'fixture-original-acp-session', configId: 'native-model', value: 'native-large' } }])
+    expect(await chooseConfiguration(configurationInput)).toEqual(changed)
+    expect((await chooseConfiguration({ ...configurationInput, operationId: 'stale-revision-native-change', value: 'native-small' })).outcome).toBe('not-applied')
+    expect(await configCalls()).toHaveLength(1)
+    const finalConfiguration = await chooseConfiguration({ ...configurationInput, operationId: 'original-boolean-native-selection',
+      configId: 'native-verbose', value: true, expectedRevision: changed.acknowledgement.revision })
+    expect(finalConfiguration).toMatchObject({ outcome: 'applied', acknowledgement: { options: [
+      { id: 'native-mode', currentValue: 'native-plan' }, { id: 'native-model', currentValue: 'native-large' },
+      { id: 'native-verbose', type: 'boolean', currentValue: true }
+    ] } })
+    expect((await configCalls())[1]).toMatchObject({ id: finalConfiguration.nativeOperationId,
+      params: { sessionId: 'fixture-original-acp-session', configId: 'native-verbose', value: true, type: 'boolean' } })
+
     const promptFile = join(scope.root, 'prompt.json')
-    await writeFile(promptFile, JSON.stringify({ prompt: 'Original structured request', expectedRun: session.run, afterSubmissionId: initialKey!.submissionId }))
+    await writeFile(promptFile, JSON.stringify({ prompt: 'Original structured request', expectedRun: session.run, execution: 'immediate', admissionIntent: { kind: 'session-conversation' } }))
     const submit = () => exec(process.execPath, [...cli, 'agent', 'input', 'submit', '--session', session.agentSessionId,
       '--operation-id', 'original-structured-prompt', '--input', promptFile], { env: scope.env })
     const promptResult = JSON.parse((await submit()).stdout).result
-    const promptCalls = await until(calls, value => value.length >= 4, 'the original native session/prompt')
+    const promptCalls = await until(calls, value => value.length >= 4, 'the original native session/prompt', 4_000)
+      .catch(async error => { throw new Error(JSON.stringify((await core.inspectAgentInput({ key: promptResult.key }))?.control ?? promptResult.input ?? null), { cause: error }) })
+    const originalPromptReceipt = await until(() => core.inspectAgentPromptSubmission(promptResult.key),
+      record => record?.admission?.native?.outcome === 'admitted', 'the original durable ACP input acknowledgement')
     const promptRequest = promptCalls[3]!
     expect(promptRequest).toMatchObject({ pid: nativePid, method: 'session/prompt',
       params: { sessionId: 'fixture-original-acp-session', prompt: [{ type: 'text', text: 'Original structured request' }] } })
-    expect(promptResult.record?.admission?.native).toMatchObject({ outcome: 'admitted', requestId: promptRequest.id })
-    expect(promptResult.record?.admission?.native).not.toHaveProperty('turnId')
-    expect(JSON.parse((await submit()).stdout).result.record.admission.native).toEqual(promptResult.record.admission.native)
+    expect(originalPromptReceipt?.admission?.native).toMatchObject({ outcome: 'admitted', requestId: promptRequest.id })
+    expect(originalPromptReceipt?.admission?.native).not.toHaveProperty('turnId')
+    expect(JSON.parse((await submit()).stdout).result.record.admission.native).toEqual(originalPromptReceipt?.admission?.native)
     expect(await calls()).toEqual(promptCalls)
     const readPermission = async () => (await core.readAgentSession(session.agentSessionId))?.pendingInteraction?.request
     const permission = await until(readPermission, request => request?.kind === 'permission', 'first exact ACP permission')
@@ -122,6 +180,14 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     await core.dispose()
     await scope.restart()
     core = await scope.client()
+    expect((await inspectConfiguration()).snapshot).toEqual(finalConfiguration.acknowledgement)
+    expect((await inspectConfiguration(configurationInput.operationId)).operation).toMatchObject({
+      outcome: 'applied', nativeOperationId: changed.nativeOperationId, acknowledgement: changed.acknowledgement
+    })
+    const liveConfiguration = await until(() => core.readAgentSession(session.agentSessionId),
+      value => value?.nativeConfiguration?.revision === finalConfiguration.acknowledgement.revision, 'the same native configuration in the Core consumer projection')
+    expect(liveConfiguration?.nativeConfiguration).toEqual(finalConfiguration.acknowledgement)
+    expect(await configCalls()).toHaveLength(2)
     const originalPermission = await until(readPermission, request => request?.id === permission?.id && !request?.responseUnavailableReason,
       'same unanswered ACP permission after Core restart')
     expect(originalPermission).toEqual(permission)
