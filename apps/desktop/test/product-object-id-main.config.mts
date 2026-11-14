@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
+import sourceConfig from './vitest.mote-context.config.mts'
 
 const selected = [
   'product-object-id-main.test.ts', 'browser-profile-store.test.ts', 'browser-input-history-store.test.ts',
@@ -13,6 +14,14 @@ const selected = [
   'topic-knowledge-observation.test.ts'
 ].map(name => 'apps/desktop/test/' + name).concat('packages/core/test/topic-cui.test.ts')
 const mutations: Record<string, { file: string; before: string; after: string; test: string }> = {
+  'artifact-current-id': { file: 'browser-result-artifact.ts',
+    before: 'if (oldId === keepId) continue', after: 'if (false) continue', test: 'browser-result-artifact.test.ts' },
+  'artifact-pre-eviction': { file: 'browser-result-artifact.ts',
+    before: '// The original tail admits just one candidate, bounded by the single-result limit.',
+    after: `for (const [oldId, old] of [...this.files].sort((a, b) => a[1].at - b[1].at)) {
+      if (this.files.size < MAX_ARTIFACTS && this.totalBytes + size <= MAX_STORE_BYTES) break
+      await this.remove(oldId); this.files.delete(oldId); this.totalBytes -= old.bytes
+    }`, test: 'browser-result-artifact.test.ts' },
   'collision-index': { file: 'browser-result-artifact.ts', before: 'while (this.files.has(id))', after: 'while (false)', test: 'browser-result-artifact.test.ts' },
   'new-path': { file: 'browser-result-artifact.ts', before: 'isObjectId(value) || ', after: '', test: 'browser-result-artifact.test.ts' },
   'old-path': { file: 'browser-result-artifact.ts', before: " || typeof value === 'string' && LEGACY_ID.test(value)", after: '', test: 'browser-result-artifact.test.ts' },
@@ -23,12 +32,15 @@ const mutations: Record<string, { file: string; before: string; after: string; t
 }
 const mutation = process.env.MAIN_ID_MUTATION ? mutations[process.env.MAIN_ID_MUTATION] : undefined
 if (process.env.MAIN_ID_MUTATION && !mutation) throw new Error('Unknown Main identity mutation')
-const sourcePath = (file: string) => resolve('apps/desktop/src/main', file)
+const sourcePath = (file: string) => resolve(file === 'browser-result-artifact.ts' ? 'packages/browser/src' : 'apps/desktop/src/main', file)
 export default defineConfig({
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
+  resolve: { ...sourceConfig.resolve, conditions: ['node', 'import', 'default'] },
+  ssr: { resolve: { conditions: ['node', 'import', 'default'] } },
   plugins: [{ name: 'main-identity-production-source', enforce: 'pre', transform(source, id) {
     const clean = id.split('?')[0]!
-    if (!clean.includes('/apps/desktop/src/main/') && !clean.endsWith('/packages/core/src/device-authority.ts')) return
+    if (!clean.includes('/apps/desktop/src/main/') && !clean.includes('/packages/browser/src/') &&
+        !clean.endsWith('/packages/core/src/durable-write.ts') && !clean.endsWith('/packages/core/src/device-authority.ts')) return
     let code = source
     if (mutation && clean === sourcePath(mutation.file)) {
       if (!code.includes(mutation.before)) throw new Error('Mutation failed to load its actual target')

@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { durableWriteFile } from '@agentmux/core'
+import { durableWriteFile as realWrite, DurableWriteError } from '../../../packages/core/src/durable-write'
 import { BrowserResultArtifactStore, readBrowserResultArtifact } from '@agentmux/browser/browser-result-artifact'
 import { runBrowserScript } from '@agentmux/browser/browser-script-runner'
 import { browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
@@ -11,8 +13,32 @@ import { BROWSER_RESULT_INLINE_BYTES, BROWSER_RESULT_MAX_BYTES, BROWSER_RESULT_M
 
 const context: BrowserResultContext = { workspaceId: 'workspace-a', browserId: 'browser-a', operationId: 'operation-a', navigationId: 'navigation-a' }
 const owner = { workspaceId: context.workspaceId, browserId: context.browserId }
+const fault = vi.hoisted(() => ({ remove: '', syncDirectory: '' }))
+vi.mock('@agentmux/core', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/core')>()
+  return { ...actual, durableWriteFile: vi.fn(actual.durableWriteFile) }
+})
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual,
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (String(args[0]) === fault.remove) throw Object.assign(new Error('owned cleanup denied'), { code: 'EACCES' })
+      return await actual.rm(...args)
+    },
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args)
+      if (String(args[0]) === fault.syncDirectory) handle.sync = async () => { throw new Error('directory acknowledgement unavailable') }
+      return handle
+    }
+  }
+})
 const owned: string[] = []
-afterEach(async () => { for (const directory of owned.splice(0)) await rm(directory, { recursive: true, force: true }) })
+afterEach(async () => {
+  fault.remove = ''; fault.syncDirectory = ''
+  vi.mocked(durableWriteFile).mockImplementation(realWrite)
+  vi.restoreAllMocks()
+  for (const directory of owned.splice(0)) await rm(directory, { recursive: true, force: true })
+})
 
 async function fixture(value: unknown = 'seed') {
   const directory = await mkdtemp(join(tmpdir(), 'amux-result-test-'))
@@ -24,7 +50,143 @@ async function fixture(value: unknown = 'seed') {
   return { directory, source, storePath, store }
 }
 
+async function fill(store: BrowserResultArtifactStore) {
+  const references: BrowserResultArtifactReference[] = []
+  for (let n = 0; n < 128; n++) references.push(await store.registerJSON({ ...context, operationId: `retained-${n}` }, { n }))
+  return references
+}
+
+async function expectRetained(store: BrowserResultArtifactStore, references: BrowserResultArtifactReference[]) {
+  for (const [n, reference] of references.entries()) {
+    const read = await readBrowserResultArtifact(store, reference, owner)
+    expect(JSON.parse(Buffer.from(read.data, 'base64').toString('utf8'))).toEqual({ n })
+  }
+}
+
 describe('bounded durable Browser result continuation', () => {
+  it.each(['data', 'json'])('pre-publication %s failure preserves every published reference at capacity', async extension => {
+    const { store, storePath } = await fixture()
+    const references = await fill(store)
+    const before = (await readdir(storePath)).sort()
+    const failure = Object.assign(new Error('candidate disk full'), { code: 'ENOSPC' })
+    vi.mocked(durableWriteFile).mockImplementation(async (path, bytes, options) => {
+      if (path.endsWith(`.${extension}`)) throw new DurableWriteError(path, 'before-replace', failure)
+      await realWrite(path, bytes, options)
+    })
+    await expect(store.registerJSON(context, { next: true })).rejects.toMatchObject({ code: 'ENOSPC', phase: 'before-replace' })
+    expect((await readdir(storePath)).sort()).toEqual(before)
+    await expectRetained(new BrowserResultArtifactStore(storePath), references)
+  }, 30_000)
+
+  it('directory ACK unknown preserves its exact candidate and old references before another explicit candidate', async () => {
+    const { store, storePath } = await fixture()
+    const references = await fill(store)
+    let candidate = ''
+    vi.mocked(durableWriteFile).mockImplementation(async (path, bytes, options) => {
+      if (path.endsWith('.json')) { candidate = path; fault.syncDirectory = storePath; expect(options?.requireDirectorySync).toBe(true) }
+      await realWrite(path, bytes, options)
+    })
+    await expect(store.registerJSON(context, { next: 'unconfirmed' })).rejects.toMatchObject({ path: candidate || expect.any(String), phase: 'after-replace' })
+    expect(candidate).not.toBe('')
+    const document = JSON.parse(await readFile(candidate, 'utf8'))
+    expect(document.reference.byteLength).toBe(Buffer.byteLength(JSON.stringify({ next: 'unconfirmed' })))
+    await expectRetained(new BrowserResultArtifactStore(storePath), references)
+    expect((await readdir(storePath)).length).toBe(258)
+    const writes = vi.mocked(durableWriteFile).mock.calls.length
+    await expect(store.registerJSON(context, { next: 'no second candidate' })).rejects.toThrow('directory acknowledgement unavailable')
+    expect(vi.mocked(durableWriteFile).mock.calls.length).toBe(writes)
+    expect((await readdir(storePath)).length).toBe(258)
+    fault.syncDirectory = ''
+    vi.mocked(durableWriteFile).mockImplementation(realWrite)
+    const latest = await store.registerJSON(context, { next: 'explicit later request' })
+    const restarted = new BrowserResultArtifactStore(storePath)
+    for (const reference of [document.reference, latest]) expect((await restarted.read(reference, owner)).returnedBytes).toBeGreaterThan(0)
+    expect((await readdir(storePath)).length).toBe(256)
+  }, 30_000)
+
+  it('committed reference survives retention failure and no second candidate bypasses unfinished cleanup', async () => {
+    const { store, storePath } = await fixture()
+    const references = await fill(store)
+    fault.remove = join(storePath, `${references[0]!.id}.json`)
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const reference = await store.registerJSON(context, { committed: true })
+    expect(warning).toHaveBeenCalledWith('Browser result committed; retention cleanup remains incomplete.', expect.objectContaining({ reference, error: expect.any(Error) }))
+    expect((await new BrowserResultArtifactStore(storePath).read(reference, owner)).returnedBytes).toBeGreaterThan(0)
+    expect((await readdir(storePath)).length).toBe(258)
+    const writes = vi.mocked(durableWriteFile).mock.calls.length
+    await expect(store.registerJSON(context, { notAdmitted: true })).rejects.toThrow('owned cleanup denied')
+    expect(vi.mocked(durableWriteFile).mock.calls.length).toBe(writes)
+    expect((await readdir(storePath)).length).toBe(258)
+    fault.remove = ''
+    const latest = await store.registerJSON(context, { healthy: true })
+    const restarted = new BrowserResultArtifactStore(storePath)
+    for (const item of [reference, latest]) expect((await restarted.read(item, owner)).returnedBytes).toBeGreaterThan(0)
+    expect((await readdir(storePath)).length).toBe(256)
+  }, 30_000)
+
+  it('candidate cleanup failure preserves the original write error and published results', async () => {
+    const { store, storePath } = await fixture()
+    const references = await fill(store)
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let original: DurableWriteError | undefined
+    vi.mocked(durableWriteFile).mockImplementation(async (path, bytes, options) => {
+      if (path.endsWith('.json')) {
+        fault.remove = path.replace(/\.json$/, '.data')
+        original = new DurableWriteError(path, 'before-replace', Object.assign(new Error('candidate full'), { code: 'ENOSPC' }))
+        throw original
+      }
+      await realWrite(path, bytes, options)
+    })
+    let caught: unknown
+    try { await store.registerJSON(context, { unpublished: true }) } catch (error) { caught = error }
+    expect(caught).toBe(original)
+    expect(caught).toMatchObject({ code: 'ENOSPC', phase: 'before-replace' })
+    expect(warning).toHaveBeenCalledWith('Browser result candidate cleanup failed; original write error retained.', expect.objectContaining({ error: expect.objectContaining({ code: 'EACCES' }) }))
+    await expectRetained(store, references)
+    expect((await readdir(storePath)).length).toBe(257)
+  }, 30_000)
+
+  it('the original tail admits one bounded candidate while later captures wait', async () => {
+    const { store, storePath } = await fixture()
+    const references = await fill(store)
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const reached = new Promise<void>(resolve => { entered = resolve })
+    let metadataWrites = 0, largestFileCount = 0, secondLoads = 0
+    vi.mocked(durableWriteFile).mockImplementation(async (path, bytes, options) => {
+      if (path.endsWith('.json') && ++metadataWrites === 1) { entered(); await gate }
+      await realWrite(path, bytes, options)
+      largestFileCount = Math.max(largestFileCount, (await readdir(storePath)).length)
+    })
+    const first = store.registerJSON(context, { first: '候选🙂' })
+    await reached
+    const second = store.registerJSON(context, { get later() { secondLoads++; return 'original later capture' } })
+    try {
+      expect(metadataWrites).toBe(1)
+      expect(secondLoads).toBe(0)
+      expect((await readdir(storePath)).length).toBe(257)
+      await expectRetained(store, references)
+    } finally { release() }
+    const saved = await Promise.all([first, second])
+    expect(metadataWrites).toBe(2)
+    expect(secondLoads).toBe(1)
+    expect(largestFileCount).toBe(258)
+    expect((await readdir(storePath)).length).toBe(256)
+    const restarted = new BrowserResultArtifactStore(storePath)
+    for (const reference of saved) expect((await restarted.read(reference, owner)).returnedBytes).toBeGreaterThan(0)
+  }, 30_000)
+
+  it('a clock rollback cannot evict the just-confirmed reference at capacity', async () => {
+    const { store, storePath } = await fixture()
+    await fill(store)
+    vi.spyOn(Date, 'now').mockReturnValue(1)
+    const reference = await store.registerJSON(context, { rollback: 'still published' })
+    expect(reference.capturedAt).toBe(1)
+    expect((await readdir(storePath)).length).toBe(256)
+    const read = await new BrowserResultArtifactStore(storePath).read(reference, owner)
+    expect(JSON.parse(Buffer.from(read.data, 'base64').toString('utf8'))).toEqual({ rollback: 'still published' })
+  }, 30_000)
+
   it('rejects a repeated random allocation using its original index and keeps both full results readable', async () => {
     const { store, storePath } = await fixture()
     const random = vi.spyOn(globalThis.crypto, 'getRandomValues').mockReturnValueOnce(new Uint8Array(9))
@@ -235,6 +397,12 @@ describe('bounded durable Browser result continuation', () => {
 
   it('storage is capped at 64 MiB including metadata and preserves unrelated files', async () => {
     const { store, source, storePath } = await fixture('x'.repeat(BROWSER_RESULT_MAX_BYTES - 2))
+    let peakOwnedBytes = 0
+    vi.mocked(durableWriteFile).mockImplementation(async (path, bytes, options) => {
+      await realWrite(path, bytes, options)
+      const sizes = await Promise.all((await readdir(storePath)).filter(name => /\.(json|data)$/.test(name)).map(name => stat(join(storePath, name))))
+      peakOwnedBytes = Math.max(peakOwnedBytes, sizes.reduce((sum, info) => sum + info.size, 0))
+    })
     const references: BrowserResultArtifactReference[] = []
     for (let i = 0; i < 9; i += 1) references.push(await store.import({ ...context, operationId: `operation-${i}` }, source))
     await writeFile(join(storePath, 'unrelated.txt'), 'preserve me')
@@ -242,6 +410,8 @@ describe('bounded durable Browser result continuation', () => {
     expect(payloadNames.length).toBeGreaterThan(0)
     const bytes = (await Promise.all(payloadNames.map(name => stat(join(storePath, name))))).reduce((sum, info) => sum + info.size, 0)
     expect(bytes).toBeLessThanOrEqual(64 * 1024 * 1024)
+    expect(peakOwnedBytes).toBeGreaterThan(64 * 1024 * 1024)
+    expect(peakOwnedBytes).toBeLessThanOrEqual(64 * 1024 * 1024 + BROWSER_RESULT_MAX_BYTES + 16 * 1024)
     await expect(store.read(references[0]!, owner)).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await store.read(references.at(-1)!, owner)).returnedBytes).toBe(16 * 1024)
     expect(await readFile(join(storePath, 'unrelated.txt'), 'utf8')).toBe('preserve me')
