@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { readWorkspaceDirectory, sourceFilesDiscoveryNamespace } from '../../lib/source-files-discovery'
+import { api } from '../../lib/api'
 import { useAppStore } from '../../store'
 import {
   createFileExplorerDirLoadScope,
@@ -15,7 +16,6 @@ import {
 } from './file-explorer-stale-dir-cache'
 import type { DirCache, TreeNode } from './file-explorer-types'
 import { fileExplorerContains } from '../../lib/file-explorer-scope'
-import { topicFileDirectory } from '../../lib/topic-files-address'
 import { useWorkspaceResource } from '../../hooks/useWorkspaceResource'
 
 function pathDepth(path: string): number {
@@ -40,22 +40,21 @@ export function flattenFileTree(
   return rows
 }
 
-export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '', active = true) {
+export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '', active = true, objectDirectory?: string | null) {
   const resource = useWorkspaceResource(workspaceId)
-  const objectDirectory = topicFileDirectory(workspaceId, rootPath)
   const source = useAppStore(state => objectDirectory ? undefined : state.sourceFilesInputs.selections[workspaceId])
   const readSources = useAppStore(state => objectDirectory ? undefined : state.sourceFilesInputs.readSources)
-  const namespace = useMemo(() => JSON.stringify([rootPath, sourceFilesDiscoveryNamespace(workspaceId, resource, source, readSources)]), [rootPath, workspaceId, resource?.hostId, resource?.path, source?.target, source?.locator, readSources])
+  const namespace = useMemo(() => JSON.stringify([rootPath, objectDirectory, sourceFilesDiscoveryNamespace(workspaceId, resource, source, readSources)]), [rootPath, objectDirectory, workspaceId, resource?.hostId, resource?.path, source?.target, source?.locator, readSources])
   const cachedNamespace = useRef(namespace)
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
   const cacheRef = useRef(dirCache)
   const loadTrackerRef = useRef(createFileExplorerDirLoadTracker())
   const staleDirsRef = useRef(new Set<string>())
-  const loadScope = useMemo(() => createFileExplorerDirLoadScope(workspaceId), [workspaceId, rootPath, resource?.hostId, resource?.path, source, readSources])
+  const loadScope = useMemo(() => createFileExplorerDirLoadScope(workspaceId), [workspaceId, rootPath, objectDirectory, resource?.hostId, resource?.path, source, readSources])
   cacheRef.current = dirCache
   const isCurrent = useCallback(() => {
     const state = useAppStore.getState(), current = state.config?.workspaces.find(value => value.id === workspaceId)
-    return (objectDirectory !== null || state.sourceFilesInputs.selections[workspaceId] === source && state.sourceFilesInputs.readSources === readSources) &&
+    return (!!objectDirectory || state.sourceFilesInputs.selections[workspaceId] === source && state.sourceFilesInputs.readSources === readSources) &&
       current?.hostId === resource?.hostId && current?.path === resource?.path
   }, [workspaceId, objectDirectory, source, readSources, resource?.hostId, resource?.path])
   const assertCurrent = () => { if (!isCurrent()) throw new Error('The original Files Source changed. Its candidates and input are kept; check that original folder before this action.') }
@@ -80,7 +79,9 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         [path]: { children: previous[path]?.children ?? [], loading: true, error: null }
       }))
       try {
-        const { entries, complete } = await readWorkspaceDirectory(workspaceId, path, useAppStore.getState)
+        const { entries, complete } = objectDirectory
+          ? { entries: await api.files.readDirectory(workspaceId, path), complete: true }
+          : await readWorkspaceDirectory(workspaceId, path, useAppStore.getState)
         if (!loadTrackerRef.current.isCurrent(token)) return false
         const children = entries.filter(entry => fileExplorerContains(rootPath, entry.path)).map((entry) => ({
           ...entry,
@@ -106,7 +107,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         return !options?.failOnError
       }
     },
-    [loadScope, workspaceId, rootPath, isCurrent]
+    [loadScope, workspaceId, rootPath, objectDirectory, isCurrent]
   )
 
   useLayoutEffect(() => {

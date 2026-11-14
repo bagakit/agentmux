@@ -37,8 +37,8 @@ export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenP
   const presentation = contentSlotPresentation(isScratch)
   const frame = (content: ReactNode) => <WorkspaceFilesFrame workspace={workspace} fileTopic={fileTopic} visible={visible} presentation={presentation}
     directoryFirst={presentation.showTopics} title={presentation.showTopics ? 'Files' : fileTopic?.title ?? workspace.name}
-    subtitle={presentation.showTopics ? fileTopic?.title ?? workspace.name : workspace.branch}
-    contextPath={fileTopic ? scratchTopicPhysicalPath(workspace, fileTopic) : workspace.path}
+    subtitle={presentation.showTopics ? fileTopic?.title ?? (selectedTopicId ? undefined : workspace.name) : workspace.branch}
+    contextPath={fileTopic ? scratchTopicPhysicalPath(workspace, fileTopic) : selectedTopicId ? null : workspace.path}
     actions={!selectedTopicId || topic && rootPath !== null ? actions : null}
     explorer={{ rootPath: rootPath ?? '', rootLabel: fileTopic?.title ?? workspace.name, revealRequest, onOpenPath, onOpenTerminal }}
     fileIssue={selectedTopicId && rootPath === null ? <div className="surface-inline-error" role="status">The selected object's file root is not confirmed. Its original workface is kept.

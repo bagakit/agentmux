@@ -27,12 +27,12 @@ export function WorkspaceFilesFrame({ workspace, visible, presentation, title, s
   explorer, explorerKey = workspace.id, fileIssue, fileTopic, children, directoryFirst = false, contextPath = workspace.path, showExplorer = true }: {
   workspace: WorkspaceRecord; visible: boolean; presentation: ContentSlotPresentation
   title: string; subtitle?: string | undefined; actions?: ReactNode
-  explorer: Omit<ComponentProps<typeof FileExplorer>, 'active' | 'workspaceId' | 'toolbarTarget'>
+  explorer: Omit<ComponentProps<typeof FileExplorer>, 'active' | 'workspaceId' | 'toolbarTarget' | 'objectDirectory'>
   explorerKey?: string; fileIssue?: ReactNode; fileTopic?: ScratchTopicSnapshot | undefined; children: ReactNode
-  directoryFirst?: boolean; contextPath?: string | undefined; showExplorer?: boolean
+  directoryFirst?: boolean; contextPath?: string | null | undefined; showExplorer?: boolean
 }) {
   const displayPath = usePathDisplay()
-  const directory = topicFileDirectory(workspace.id, explorer.rootPath ?? '')
+  const directory = fileTopic ? topicFileDirectory(workspace.id, explorer.rootPath ?? '') : null
   const objectZone = fileTopic && knownTopicContentSpaceId(workspace, fileTopic) ? topicContentZoneId(workspace, fileTopic) : undefined
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null)
   const override = useAppStore(state => state.explorerCollapsed[workspace.id])
@@ -45,12 +45,12 @@ export function WorkspaceFilesFrame({ workspace, visible, presentation, title, s
         {collapsed ? <ThemeNavigationDisclosureIcon size={13} /> : <ThemeNavigationDownIcon size={13} />}
         {directoryFirst ? <strong>{title}</strong> : null}
       </button>
-      <span title={displayPath(contextPath, workspace.hostId)}>{!directoryFirst ? <strong>{title}</strong> : null}{subtitle ? <small>{subtitle}</small> : null}</span>
+      <span title={contextPath ? displayPath(contextPath, workspace.hostId) : undefined}>{!directoryFirst ? <strong>{title}</strong> : null}{subtitle ? <small>{subtitle}</small> : null}</span>
       {workspace.hostId !== 'local' ? <em><ThemeObjectHostIcon size={11} /> {workspace.hostId}</em> : null}
       <div className="workspace-tool-context__actions">{actions}<div ref={setToolbarTarget} /></div>
     </div>
   const content = <Panel key="content" defaultSize={100 - presentation.fileTreeDefaultSize} minSize={directoryFirst ? 55 : 20}>{children}</Panel>
-  const fileContent = !collapsed ? fileIssue ?? <FileExplorer {...explorer} key={explorerKey} active={visible && showExplorer} workspaceId={workspace.id} toolbarTarget={toolbarTarget} /> : null
+  const fileContent = !collapsed ? fileIssue ?? <FileExplorer {...explorer} key={explorerKey} active={visible && showExplorer} workspaceId={workspace.id} objectDirectory={directory} toolbarTarget={toolbarTarget} /> : null
   const files = <Panel key="files" defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}
     maxSize={directoryFirst ? 45 : undefined} className={directoryFirst ? 'workspace-topic-files' : undefined}
     style={!showExplorer ? { display: 'none' } : collapsed ? directoryFirst ? { flexGrow: 0, flexShrink: 0, flexBasis: 'var(--topic-files-header-height)' } : { display: 'none' } : undefined}

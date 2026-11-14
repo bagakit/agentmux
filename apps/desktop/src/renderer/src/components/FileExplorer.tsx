@@ -398,13 +398,14 @@ function FileExplorerRootDropTarget({ disabled, rootPath, rootLabel }: { disable
 }
 
 export function FileExplorer({
-  revealRequest, createRequest, onCreateRequestHandled, toolbarTarget, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal, active = true
+  revealRequest, createRequest, onCreateRequestHandled, toolbarTarget, workspaceId: requestedWorkspaceId, objectDirectory, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal, active = true
 }: {
   active?: boolean
   onCreateRequestHandled?: (() => void) | undefined
   createRequest?: { requestId: number; parentPath: string } | undefined
   workspaceId?: string | undefined
   rootPath?: string | undefined
+  objectDirectory?: string | null | undefined
   rootLabel?: string | undefined
   onOpenPath?: ((path: string) => Promise<unknown>) | undefined
   onOpenTerminal?: ((path: string) => Promise<unknown>) | undefined
@@ -500,7 +501,7 @@ export function FileExplorer({
   const expanded = useMemo(() => new Set([...explorerState.expandedPaths].filter(path => fileExplorerContains(rootPath, path))), [explorerState.expandedPaths, rootPath])
   const selection = useMemo(() => updateFileExplorerSelectionPaths(explorerState.selection, path => fileExplorerContains(rootPath, path) ? path : null), [explorerState.selection, rootPath])
   const selectedPath = selection.activePath
-  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath, active)
+  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath, active, objectDirectory)
   const isMac = useMemo(() => isMacPlatform(), [])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const hoverExpandRef = useRef<{ path: string; timer: number } | null>(null)
