@@ -4487,13 +4487,21 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const metadata = agentSessionMetadata(session)
     const retired = db.prepare('SELECT 1 FROM retired_sessions WHERE id=?').get(id)
     if (retired) throw new AgentMuxError('Retired Agent Session conflicts with current identity.', 'INVALID_AGENT_SESSION_STORE')
-    for (const run of [session.run, ...session.retiredRuns]) {
-      const bound = db.prepare('SELECT session_id FROM run_bindings WHERE run_id=?').get(run.runId)
-      if (bound && bound.session_id !== id) throw new AgentMuxError('Run conflicts with another current or retired Session.', 'INVALID_AGENT_SESSION_STORE')
+    // Compare against the bindings themselves so a metadata save still repairs missing or stale rows.
+    const staleRuns = new Set(db.prepare('SELECT run_id FROM run_bindings WHERE session_id=?').all(id).map(row => row.run_id ?? null))
+    const newRuns = [session.run, ...session.retiredRuns].filter(run => !staleRuns.delete(run.runId))
+    if (newRuns.length) {
+      const findRunOwner = db.prepare('SELECT session_id FROM run_bindings WHERE run_id=?')
+      for (const run of newRuns) {
+        const bound = findRunOwner.get(run.runId)
+        if (bound && bound.session_id !== id) throw new AgentMuxError('Run conflicts with another current or retired Session.', 'INVALID_AGENT_SESSION_STORE')
+      }
     }
     const native = nativeBindingKey(session)
-    if (native) {
-      const bound = db.prepare('SELECT session_id FROM native_bindings WHERE native_key=?').get(native)
+    const staleNatives = new Set(db.prepare('SELECT native_key FROM native_bindings WHERE session_id=?').all(id).map(row => row.native_key ?? null))
+    const newNative = native !== null && !staleNatives.delete(native) ? native : null
+    if (newNative !== null) {
+      const bound = db.prepare('SELECT session_id FROM native_bindings WHERE native_key=?').get(newNative)
       if (bound && bound.session_id !== id) throw new AgentMuxError('Native identity conflicts with another Session.', 'INVALID_AGENT_SESSION_STORE')
     }
     const submission = session.terminalPromptSubmission?.submissionId
@@ -4506,10 +4514,19 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     for (const original of promptAdmissionRecords(session, captureNewInput && newPromptClaim(previous, session))) this.savePromptAdmission(db, original, receipt)
     db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json,future_present=excluded.future_present,creation_operation=excluded.creation_operation')
       .run(id, JSON.stringify(metadata), present, session.creation?.createOperationId ?? null)
-    db.prepare('DELETE FROM run_bindings WHERE session_id=?').run(id)
-    for (const run of [session.run, ...session.retiredRuns]) db.prepare('INSERT INTO run_bindings VALUES (?, ?)').run(run.runId, id)
-    db.prepare('DELETE FROM native_bindings WHERE session_id=?').run(id)
-    if (native) db.prepare('INSERT INTO native_bindings VALUES (?, ?)').run(native, id)
+    if (staleRuns.size) {
+      const removeRun = db.prepare('DELETE FROM run_bindings WHERE run_id IS ? AND session_id=?')
+      for (const runId of staleRuns) removeRun.run(runId, id)
+    }
+    if (newRuns.length) {
+      const insertRun = db.prepare('INSERT INTO run_bindings VALUES (?, ?)')
+      for (const run of newRuns) insertRun.run(run.runId, id)
+    }
+    if (staleNatives.size) {
+      const removeNative = db.prepare('DELETE FROM native_bindings WHERE native_key IS ? AND session_id=?')
+      for (const nativeKey of staleNatives) removeNative.run(nativeKey, id)
+    }
+    if (newNative !== null) db.prepare('INSERT INTO native_bindings VALUES (?, ?)').run(newNative, id)
     if (replaceFuture || session.futurePromptIntents !== undefined) {
       const changes=Object.entries(session.futurePromptIntents??{}).map(([intentId,next])=>({intentId,expected:this.futureIntent(db,id,intentId),next}))
       db.prepare('DELETE FROM future_intents WHERE session_id=?').run(id)
