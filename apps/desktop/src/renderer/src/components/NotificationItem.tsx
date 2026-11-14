@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -31,6 +31,11 @@ export type NotificationItemProps = {
   subjectHeading?: ReactNode
 }
 
+// Mount-lifetime closures outside the render scope do not retain the first render's props and their owners.
+function useInvalidateOnUnmount(generation: RefObject<number>) {
+  useEffect(() => () => { ++generation.current }, [generation])
+}
+
 /** Shared compact presentation. Reading, copying and navigation never settle the original issue. */
 export function NotificationItem({ title, kind, detail, summary, impact, children, action, actions, eventId, noticeId, unread, onRead, timestamp, occurrences, subjectHeading }: NotificationItemProps) {
   const Icon = kind === 'agent-broken' ? FailureIcon : kind === 'process-degraded' ? WarningIcon : kind === 'indeterminate' ? UnknownIcon : InfoIcon
@@ -38,7 +43,7 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
   const [expanded, setExpanded] = useState(false)
   const generation = useRef(0), currentDetail = useRef(detail)
   if (currentDetail.current !== detail) { currentDetail.current = detail; ++generation.current }
-  useEffect(() => () => { ++generation.current }, [])
+  useInvalidateOnUnmount(generation)
   async function copyDetails() {
     const action = ++generation.current
     setCopy({ detail, label: 'Copying…' })

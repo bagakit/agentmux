@@ -1,7 +1,7 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
-import { useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ACTIVITY_RETENTION_LIMIT, notificationEventIdentity, projectNotifications, useAppStore, type NotificationEvent, type NotificationEventObject } from '../store'
@@ -27,6 +27,37 @@ import type { AgentMuxClientNotificationSubject } from '@agentmux/core/control'
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeNavigationCollapseIcon = semanticIconComponent('action.close')
 
+// Cached views outlive their render; a closure built there would retain that render's whole Session array.
+function openSessionAction(label: string, sessionId: string, selectSession: (sessionId: string) => unknown): NonNullable<ServiceNoticeItem['action']> {
+  return { label: `Open ${label} Session`, run: () => selectSession(sessionId) }
+}
+
+// Its window listeners outlive individual renders; this scope keeps them from retaining the notice render.
+function useBellPopoverPosition(open: boolean, document: ReturnType<typeof useWorkbenchDocument>, triggerRef: RefObject<HTMLButtonElement | null>, detailsRef: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current, details = detailsRef.current
+    if (!open || !trigger || !details) return
+    // The explicit popover belongs to its bell. Overlaying the workface never
+    // resizes its editors or makes another Region's input height the anchor.
+    let disposed = false
+    const update = async () => {
+      const { x, y } = await computePosition(trigger, details, {
+        strategy: 'fixed', placement: 'top-end', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
+          apply({ availableHeight }) {
+            if (!disposed) details.style.maxHeight = `${Math.max(0, Math.min(480, availableHeight))}px`
+          }
+        })]
+      })
+      if (!disposed) Object.assign(details.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
+    }
+    const stopPosition = autoUpdate(trigger, details, () => { void update() })
+    return () => {
+      disposed = true
+      stopPosition()
+      for (const property of ['left', 'top', 'max-height', 'visibility']) details.style.removeProperty(property)
+    }
+  }, [open, document])
+}
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
@@ -88,29 +119,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const [category, setCategory] = useState<NotificationFilter>('all')
   const triggerRef = useRef<HTMLButtonElement>(null)
   const detailsRef = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const trigger = triggerRef.current, details = detailsRef.current
-    if (!open || !trigger || !details) return
-    // The explicit popover belongs to its bell. Overlaying the workface never
-    // resizes its editors or makes another Region's input height the anchor.
-    let disposed = false
-    const update = async () => {
-      const { x, y } = await computePosition(trigger, details, {
-        strategy: 'fixed', placement: 'top-end', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
-          apply({ availableHeight }) {
-            if (!disposed) details.style.maxHeight = `${Math.max(0, Math.min(480, availableHeight))}px`
-          }
-        })]
-      })
-      if (!disposed) Object.assign(details.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
-    }
-    const stopPosition = autoUpdate(trigger, details, () => { void update() })
-    return () => {
-      disposed = true
-      stopPosition()
-      for (const property of ['left', 'top', 'max-height', 'visibility']) details.style.removeProperty(property)
-    }
-  }, [open, document])
+  useBellPopoverPosition(open, document, triggerRef, detailsRef)
   const environment: ServiceNoticeItem[] = warning ? [{ id: 'shell', notice: {
     kind: 'process-degraded', notice: {
       step: 'Local shell environment is incomplete', mode: warning,
@@ -177,7 +186,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       let view = sessionNoticeViews.get(item)
       if (!view) {
         view = { ...item, id: JSON.stringify([session.hostId, session.id, item.id]),
-          action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } }
+          action: openSessionAction(session.label, session.id, selectSession) }
         sessionNoticeViews.set(item, view)
       }
       sessionOwners.set(view.id, session)
