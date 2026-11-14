@@ -277,7 +277,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
           {lane.collection && resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={lane.name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'collection', undefined, authoredTopicPresentation)}
             unavailable="Zone layout needs one confirmed Collection. Original members and their work surfaces remain available." />
-            <FocusProjectPreferences active={visible} collection projectKey={preferenceKey} name={lane.name} discussion={renderDiscussion ? state => renderDiscussion(lane, state) : undefined} /></> : null}</>}
+            <FocusProjectPreferences active={visible} collection {...(preferenceKey === undefined ? {} : { projectKey: preferenceKey })} name={lane.name} discussion={renderDiscussion ? state => renderDiscussion(lane, state) : undefined} /></> : null}</>}
         </div>
         , compact)}</div>
       </FocusLaneArticle>})}</div>})}
