@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 
 /**
  * durable-write 的关键契约是**顺序**：write → fsync(文件) → rename → fsync(目录)。
@@ -21,8 +22,34 @@ const ctl = vi.hoisted(() => ({
   openCount: 0,
   renameError: null as Error | null,
   dirSyncError: null as Error | null,
-  onFileWrite: null as (() => void) | null
+  onFileWrite: null as (() => void) | null,
+  nativeWriteError: null as Error | null,
+  nativeFsyncError: null as Error | null,
+  nativeCloseError: null as Error | null,
+  nativeWriteCount: 0,
+  inspectNativeWrite: null as ((fd: number) => void) | null
 }))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  const callback = (args: any[]) => args.at(-1) as (error: Error | null) => void
+  const writeFile = vi.fn((...args: any[]) => {
+    ctl.nativeWriteCount++
+    ctl.inspectNativeWrite?.(args[0])
+    if (ctl.nativeWriteError) { process.nextTick(callback(args), ctl.nativeWriteError); return }
+    return (actual.writeFile as any)(...args)
+  })
+  const fsync = vi.fn((...args: any[]) => {
+    if (ctl.nativeFsyncError) { process.nextTick(callback(args), ctl.nativeFsyncError); return }
+    return (actual.fsync as any)(...args)
+  })
+  const close = vi.fn((...args: any[]) => {
+    if (!ctl.nativeCloseError) return (actual.close as any)(...args)
+    const error = ctl.nativeCloseError, done = callback(args)
+    return actual.close(args[0], actualError => process.nextTick(done, actualError ?? error))
+  })
+  return { ...actual, writeFile, fsync, close }
+})
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
@@ -59,7 +86,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return { ...actual, open, rename }
 })
 
-import { durableWriteFile } from '../src/durable-write.js'
+import { durableWriteFile, DurableWriteError } from '../src/durable-write.js'
+import { openDirectoryWriteParent } from '../src/directory-write.js'
+import * as objectId from '../src/object-id.js'
 
 const roots: string[] = []
 
@@ -70,6 +99,11 @@ afterEach(async () => {
   ctl.renameError = null
   ctl.dirSyncError = null
   ctl.onFileWrite = null
+  ctl.nativeWriteError = null
+  ctl.nativeFsyncError = null
+  ctl.nativeCloseError = null
+  ctl.nativeWriteCount = 0
+  ctl.inspectNativeWrite = null
   vi.clearAllMocks()
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
 })
@@ -78,6 +112,11 @@ async function tempDir(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-durable-write-'))
   roots.push(root)
   return root
+}
+
+async function directoryParent(root: string) {
+  const identity = await lstat(root, { bigint: true })
+  return await openDirectoryWriteParent(root, { dev: identity.dev.toString(10), ino: identity.ino.toString(10), realpath: await realpath(root) })
 }
 
 function permissionBits(mode: number): number {
@@ -193,6 +232,61 @@ describe('durableWriteFile 失败与边界', () => {
     expect(ctl.openCount).toBeGreaterThan(0)
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+  })
+})
+
+describe('descriptor-relative durable writes', () => {
+  it('retains an unknown pre-existing temporary file when openat reports EEXIST', async () => {
+    const root = await tempDir(), path = join(root, 'state.json')
+    vi.spyOn(objectId, 'mintObjectId').mockReturnValue('fixed-object-id')
+    const temporaryPath = `${path}.${process.pid}.fixed-object-id.tmp`
+    await writeFile(temporaryPath, 'unknown occupant')
+    const parent = await directoryParent(root)
+    try {
+      await expect(durableWriteFile(path, 'replacement', { directory: parent })).rejects.toMatchObject({ code: 'EEXIST', phase: 'before-replace' })
+      expect(await readFile(temporaryPath, 'utf8')).toBe('unknown occupant')
+      expect(ctl.nativeWriteCount).toBe(0)
+      await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await parent.handle.close() }
+  })
+
+  it.each(['write', 'fsync'] as const)('cleans its own temp after %s failure and retains that primary error plus close cleanup', async stage => {
+    const root = await tempDir(), path = join(root, `${stage}.json`)
+    vi.spyOn(objectId, 'mintObjectId').mockReturnValue('fixed-object-id')
+    const temporaryPath = `${path}.${process.pid}.fixed-object-id.tmp`
+    const primary = new Error(`${stage} persistence failed`), close = new Error('close cleanup failed')
+    if (stage === 'write') ctl.nativeWriteError = primary
+    else ctl.nativeFsyncError = primary
+    ctl.nativeCloseError = close
+    const parent = await directoryParent(root)
+    try {
+      const failure = await durableWriteFile(path, 'replacement', { directory: parent }).catch(error => error)
+      expect(failure).toBeInstanceOf(DurableWriteError)
+      expect(failure.message).toBe(primary.message)
+      expect(failure.cause).toBe(primary)
+      expect(failure.phase).toBe('before-replace')
+      expect(failure.cleanupIncomplete).toBe(true)
+      expect(JSON.parse(failure.detail)).toMatchObject({ cleanupFailures: [{ operation: 'close', code: null, message: close.message }] })
+      expect(ctl.nativeWriteCount).toBe(1)
+      await expect(stat(temporaryPath)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await parent.handle.close() }
+  })
+
+  it('sets FD_CLOEXEC on the live native temporary descriptor', async () => {
+    const root = await tempDir(), path = join(root, 'cloexec.json')
+    const koffi = createRequire(import.meta.url)('koffi') as typeof import('koffi')
+    const library = koffi.load(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6')
+    const fcntl = library.func('int fcntl(int fd, int cmd, ...)') as (fd: number, command: number, type: string, argument: number) => number
+    let descriptorFlags: number | undefined
+    ctl.inspectNativeWrite = fd => { descriptorFlags = fcntl(fd, 1, 'int', 0) } // F_GETFD
+    const parent = await directoryParent(root)
+    try {
+      await durableWriteFile(path, 'payload', { directory: parent })
+      expect(descriptorFlags).toBeDefined()
+      expect(descriptorFlags! & 1).toBe(1) // FD_CLOEXEC
+      expect(await readFile(path, 'utf8')).toBe('payload')
+    } finally { await parent.handle.close() }
   })
 })
 

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -224,6 +224,21 @@ describe('Claude original tool execution policy', () => {
     expect(fresh.resource.mock.calls[0]?.[0]).toEqual({ tool: 'mcp__original_resource__TaskStop', tool_use_id: 'native-alias-0', task_id })
     expect(fresh.localEffects).not.toHaveBeenCalled()
   })
+  it('rejects an identical final symlink through the bound parent and preserves its external bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amux-claude-policy-link-')); roots.push(root)
+    const input = { workspacePath: root, bindingId: 'original-binding', serverName: 'original_resource', assertWorkspace: async () => {} }
+    const directory = await prepareClaudeExecutionPolicy(input)
+    const source = join(directory, 'hooks', 'register.js')
+    const external = join(root, 'external-register.js')
+    const original = await readFile(source)
+    await writeFile(external, original)
+    await rm(source)
+    await symlink(external, source)
+    await expect(prepareClaudeExecutionPolicy(input)).rejects.toMatchObject({ code: 'EXECUTION_BINDING_CONFLICT' })
+    expect(await readFile(external)).toEqual(original)
+    expect((await lstat(source)).isSymbolicLink()).toBe(true)
+  })
+
   it('installs immutable exact-binding plugin inputs without editing user settings or a retained generated revision', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amux-claude-policy-')); roots.push(root)
     const settings = join(root, '.claude', 'settings.json')

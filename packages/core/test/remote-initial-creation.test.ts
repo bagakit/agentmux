@@ -1,5 +1,5 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -19,6 +19,7 @@ import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 import { executionCreationId } from '../src/host-route-execution.js'
 import { AgentMuxError } from '../src/errors.js'
 import * as claudePolicy from '../src/providers/claude-execution-policy.js'
+import * as directoryWrite from '../src/directory-write.js'
 
 const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_REMOTE_CLIENT
   ? (await import(process.env.AGENTMUX_TEST_REMOTE_CLIENT)).AgentMuxClient : DefaultClient
@@ -190,6 +191,29 @@ describe('remote initial creation admission', () => {
     const outcome = await createSplit(f, split.request).then(value => ({ value }), error => ({ error }))
     expect(outcome).toHaveProperty('error')
     expect((outcome as { error: Error }).error).toMatchObject({ code: 'EXECUTION_BINDING_CONFLICT' })
+    expect(f.start).not.toHaveBeenCalled()
+    expect(await readdir(external)).toEqual([])
+  })
+
+  it('keeps Provider mkdir on the proven leaf when the root changes after assertWorkspace', async () => {
+    const f = await fixture(), split = await splitFrontend(f)
+    allowSplitLaunch(f, split.locator.workspacePath)
+    const external = join(f.root, 'provider-post-assert-mkdir-target')
+    await mkdir(external)
+    const leaf = split.locator.workspacePath, originalOpen = directoryWrite.openDirectoryWriteParent
+    let injected = false
+    vi.spyOn(directoryWrite, 'openDirectoryWriteParent').mockImplementation(async (path, expected) => {
+      const parent = await originalOpen(path, expected)
+      if (String(path) === leaf && !injected) {
+        injected = true
+        await rename(leaf, join(f.root, 'retired-provider-leaf'))
+        await symlink(external, leaf)
+      }
+      return parent
+    })
+    const outcome = await createSplit(f, split.request).then(value => ({ value }), error => ({ error }))
+    expect(outcome).toHaveProperty('error')
+    expect(injected).toBe(true)
     expect(f.start).not.toHaveBeenCalled()
     expect(await readdir(external)).toEqual([])
   })
