@@ -101,6 +101,7 @@ type Active = {
   /** The display whose overlay holds the selection; the others only show their frozen frame and cancel. */
   owner: number | null
   shown: boolean
+  shownMs: number | null
   backupSettled: boolean
   finalTimingExpected: boolean
   finalTimingWritten: boolean
@@ -116,6 +117,8 @@ type Active = {
 export class CaptureSurface {
   private active: Active | null = null
   private disposed = false
+  /** UI cancellation is immediate; native occupancy ends only when the actual queued producer settles. */
+  private producerTail: Promise<void> = Promise.resolve()
 
   constructor(private readonly ports: Ports) {
     ipcMain.handle(CAPTURE_SURFACE_CHANNEL, (event, action, input) => this.invoke(event, action, input))
@@ -149,7 +152,7 @@ export class CaptureSurface {
     requestTiming.presentMs ??= since(requestTiming.startedAt)
     const active: Active = { requestId: requestTiming.requestId, requestTiming, revision: 1, session, overlays: [], background: session.background ?? 'included', startedAt: requestTiming.startedAt, inputsReady, releaseInputs,
       windowsStartedMs: null, includedMs: null, excludedMs: null, nativeIncluded: null, nativeExcluded: null, dataReadyMs: null, framesMs: null,
-      owner: null, shown: false, backupSettled: false, finalTimingExpected: false, finalTimingWritten: false, finishing: false, fallback: undefined, visibleHosts: 0, focused: null, end }
+      owner: null, shown: false, shownMs: null, backupSettled: false, finalTimingExpected: false, finalTimingWritten: false, finishing: false, fallback: undefined, visibleHosts: 0, focused: null, end }
     const changed = () => active.end(Object.assign(new Error('The display layout changed during this capture, so its selection no longer matches the screen. Take the screenshot again.'),
       { code: 'display_configuration_changed' }))
     // A work area change (Dock or menu bar) leaves every frozen frame where it was; bounds, scale or rotation do not.
@@ -199,15 +202,21 @@ export class CaptureSurface {
     void secondPending.then(second => this.completeBackup(active, secondMode, second))
   }
 
-  private async freeze(active: Active, mode: CaptureBackground): Promise<NativeDisplayFrames | Error> {
-    try {
-      const result = await this.ports.native().captureDisplays({ includeHostWindows: mode === 'included' })
-      active[mode === 'included' ? 'nativeIncluded' : 'nativeExcluded'] = { response: result.timing,
-        displays: result.displays.map(frame => ({ displayId: frame.displayId, timing: frame.timing })) }
-      return result
+  private freeze(active: Active, mode: CaptureBackground): Promise<NativeDisplayFrames | Error> {
+    const produce = async (): Promise<NativeDisplayFrames | Error> => {
+      if (this.active !== active) return new Error('The original screenshot request is no longer current.')
+      try {
+        const result = await this.ports.native().captureDisplays({ includeHostWindows: mode === 'included' })
+        active[mode === 'included' ? 'nativeIncluded' : 'nativeExcluded'] = { response: result.timing,
+          displays: result.displays.map(frame => ({ displayId: frame.displayId, timing: frame.timing })) }
+        return result
+      }
+      catch (error) { return error instanceof Error ? error : new Error(message(error)) }
+      finally { active[mode === 'included' ? 'includedMs' : 'excludedMs'] = since(active.startedAt) }
     }
-    catch (error) { return error instanceof Error ? error : new Error(message(error)) }
-    finally { active[mode === 'included' ? 'includedMs' : 'excludedMs'] = since(active.startedAt) }
+    const result = this.producerTail.then(produce)
+    this.producerTail = result.then(() => undefined, () => undefined)
+    return result
   }
 
   /** Validate an entire exposure before any overlay consumes even one of its frames. */
@@ -315,6 +324,7 @@ export class CaptureSurface {
     const keys = active.overlays.find(overlay => overlay.input?.initialCrop) ?? target
     if (process.platform === 'darwin') app.focus({ steal: true })
     keys?.window.focus()
+    active.shownMs ??= since(active.startedAt)
     this.recordTiming(active, false)
     if (active.backupSettled) this.recordTiming(active, true)
   }
@@ -329,7 +339,7 @@ export class CaptureSurface {
       windowsLoadedMs: active.overlays.map(overlay => overlay.loadedMs), includedMs: active.includedMs, excludedMs: active.excludedMs,
       nativeIncluded: active.nativeIncluded, nativeExcluded: active.nativeExcluded,
       dataReadyMs: active.dataReadyMs, framesMs: active.framesMs, rendererMs: active.overlays.map(overlay => overlay.rendererMs),
-      presentedMs: active.overlays.map(overlay => overlay.presentedMs), shownMs: since(active.startedAt), showEventMs: active.overlays.map(overlay => overlay.showEventMs),
+      presentedMs: active.overlays.map(overlay => overlay.presentedMs), shownMs: active.shownMs!, showEventMs: active.overlays.map(overlay => overlay.showEventMs),
       actualVisible: active.overlays.map(overlay => !overlay.window.isDestroyed() && overlay.window.isVisible()), displays: active.overlays.length }
     // Keep the terminal diagnostic, and persist only after the workface has become usable.
     console.info('capture-surface timing ' + JSON.stringify(timing))
