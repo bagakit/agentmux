@@ -19,7 +19,10 @@ const compiling = process.argv[2] === '--compile'
 const verifying = process.argv[2] === '--verify'
 const scenarioIndex = compiling ? 5 : 4
 const scenario = process.argv[scenarioIndex] === '--scenario' ? process.argv[scenarioIndex + 1] : 'readability'
-assert.ok(['readability', 'perception', 'perception-scale', 'endpoints', 'dispatch-motion', 'region-headers'].includes(scenario), 'Use a declared capture scenario')
+const listCostOnly = !verifying && scenario === 'list-feedback' && process.env.COLLABORATION_CAPTURE_LIST_COST_ONLY === '1'
+const listVisualRefresh = !verifying && scenario === 'list-feedback' && process.env.COLLABORATION_CAPTURE_LIST_VISUAL_REFRESH === '1'
+assert.ok(!listVisualRefresh || !listCostOnly, 'The two-frame visual refresh never runs cost actions')
+assert.ok(['readability', 'perception', 'perception-scale', 'endpoints', 'dispatch-motion', 'region-headers', 'list-feedback'].includes(scenario), 'Use a declared capture scenario')
 assert.ok(compiling ? process.argv.length === 5 || process.argv.length === 7 && process.argv[5] === '--scenario' : ['--evidence', '--verify'].includes(process.argv[2]) && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> or --verify <completed evidence directory> [--scenario perception|perception-scale|endpoints|dispatch-motion]')
 if (verifying) {
   // Join the exact completed native observation once; never recapture or turn a
@@ -34,6 +37,16 @@ if (verifying) {
   assert.deepEqual(receipt.actual.failures, []); assert.deepEqual(receipt.actual.rendererErrors, [])
   assert.ok(receipt.actual.checks?.length && receipt.actual.checks.every(check => check.passed === true))
   if (scenario === 'dispatch-motion') createRequire(import.meta.url)(join(fixture, 'dispatch-motion.cjs')).verify(receipt.actual.dispatchMotion, receipt.frames)
+  if (scenario === 'list-feedback') {
+    const refresh = receipt.captureMode === 'visual-refresh'
+    const scene = createRequire(import.meta.url)(join(fixture, receipt.captureMode === 'cost-only' ? 'list-feedback-cost.cjs' : refresh ? 'list-feedback-visual-refresh.cjs' : 'list-feedback.cjs'))
+    scene.verify(receipt.captureMode === 'cost-only' ? receipt.actual.listFeedbackCost : refresh ? receipt.actual.listFeedbackVisualRefresh : receipt.actual.listFeedback, receipt.frames, receipt)
+    assert.deepEqual(receipt.changedResolverMetadata, [])
+    for (const name of scene.checks ?? (refresh ? ['list-visual-refresh-painted-middle', 'list-visual-refresh-original-failed-detail'] : ['list-native-bounded-cost'])) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed))
+    assert.equal(receipt.listSource.revision, receipt.compilation.sourceOverlay.revision)
+    for (const [file, field] of [['agent-operation-feedback.css', 'cssSHA256'], ['focus-context.css', 'focusContextCSSSHA256'], ['focus.css', 'focusCSSSHA256']]) assert.equal(receipt.listSource[field], receipt.compilation.cssSourceProof.loaded['apps/desktop/src/renderer/src/styles/' + file].sourceSHA256)
+    for (const cost of receipt.actual.listFeedbackCost?.costs ?? []) assert.equal(digest(await readFile(join(directory, cost.trace))), cost.traceSHA256)
+  }
   if (scenario === 'region-headers') {
     createRequire(import.meta.url)(join(fixture, 'region-headers.cjs')).verify(receipt.actual.regionHeaders, receipt.frames)
     assert.deepEqual(receipt.actual.regionHeaders.source, receipt.headerSource)
@@ -60,8 +73,8 @@ if (verifying) {
     }
   }
   const cameraWaits = receipt.actual.cameraWaits
-  assert.ok(cameraWaits?.length && cameraWaits.some(wait => wait.kind === 'locate'), 'Original camera completion must be observed for actual locates')
-  for (const wait of cameraWaits) {
+  if (scenario !== 'list-feedback') assert.ok(cameraWaits?.length && cameraWaits.some(wait => wait.kind === 'locate'), 'Original camera completion must be observed for actual locates')
+  for (const wait of cameraWaits ?? []) {
     assert.ok(['locate', 'frame'].includes(wait.kind) && typeof wait.label === 'string' && wait.label)
     assert.ok(wait.samples?.length && Object.hasOwn(wait, 'before') && wait.final)
     assert.deepEqual(wait.samples[0], wait.before); assert.deepEqual(wait.samples.at(-1), wait.final)
@@ -72,7 +85,7 @@ if (verifying) {
       assert.equal(wait.final.agentId, JSON.stringify(['local', wait.id]))
     }
   }
-  for (const name of scenario === 'region-headers' ? ['region-headers-native-material-and-placement', 'region-headers-native-keyboard-and-fold', 'region-headers-native-css-counterfactuals'] : scenario === 'dispatch-motion' ? ['dispatch-native-stages', ...(receipt.actual.dispatchMotion.refresh ? [] : ['dispatch-native-motion-policies']), 'dispatch-native-cost'] : scenario === 'endpoints' ? ['endpoints-original-phases-parallel-and-input', 'endpoints-original-theme-point-and-static', 'endpoints-original-mixed-group-and-keyboard'] : ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
+  for (const name of scenario === 'list-feedback' ? [] : scenario === 'region-headers' ? ['region-headers-native-material-and-placement', 'region-headers-native-keyboard-and-fold', 'region-headers-native-css-counterfactuals'] : scenario === 'dispatch-motion' ? ['dispatch-native-stages', ...(receipt.actual.dispatchMotion.refresh ? [] : ['dispatch-native-motion-policies']), 'dispatch-native-cost'] : scenario === 'endpoints' ? ['endpoints-original-phases-parallel-and-input', 'endpoints-original-theme-point-and-static', 'endpoints-original-mixed-group-and-keyboard'] : ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
   const verifiedPinned = pinnedSourceAfter(root, receipt.compilation.sourceOverlay, receipt.inputs)
   for (const key of ['inputs', 'harness']) {
     const entries = Object.entries(receipt[key] ?? {}); assert.ok(entries.length, 'Nonempty exact ' + key)
@@ -91,7 +104,7 @@ if (verifying) {
       else assert.equal(receipt.compilation.watchInputs[resolve(root, file)], sha)
     }
   }
-  assert.ok(receipt.frames?.length)
+  assert.ok(receipt.frames?.length || receipt.captureMode === 'cost-only' && receipt.actual.listFeedbackCost.costs.length === 8)
   assert.deepEqual(receipt.frames.map(({ sha256, ...frame }) => frame), receipt.actual.frames)
   for (const frame of receipt.frames) { const target = resolve(directory, frame.file); assert.ok(target.startsWith(directory + sep)); assert.equal(digest(await readFile(target)), frame.sha256, 'Changed native frame: ' + frame.file) }
   if (scenario === 'endpoints') createRequire(import.meta.url)(join(fixture, 'endpoints.cjs')).verify(receipt.actual.endpoints, receipt.frames, receipt.actual.nativeWorkers)
@@ -131,6 +144,7 @@ if (sourceRef) {
 const sourceBytes = file => sourcePin.read(file)
 const resolverMetadata = await captureResolverMetadata(root)
 const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', scenario: 'focus-map-' + scenario, capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
+  captureMode: listCostOnly ? 'cost-only' : listVisualRefresh ? 'visual-refresh' : 'visual-native',
   boundary: 'Current source App, actual initialization/Store, Focus List/Map and original Space workfaces, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. The distribution includes permanent empty areas, uneven populated groups, isolated members and observed dense cross-area relations. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no live Core lifecycle, Provider, Runtime, real messages, restart or installed-product claim.' }
 let compilationWrites = Promise.resolve()
 function publishCompilation(value) {
@@ -257,11 +271,11 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', 'css-source-overlay.mjs', 'capture-source-pin.mjs', 'renderer-cache.mjs', ...(scenario === 'region-headers' ? ['region-headers.cjs'] : []), ...(scenario === 'endpoints' ? ['endpoints.cjs'] : []), ...(scenario === 'dispatch-motion' ? ['dispatch-motion.cjs', 'dispatch-motion.md'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', 'css-source-overlay.mjs', 'capture-source-pin.mjs', 'renderer-cache.mjs', ...(scenario === 'list-feedback' ? ['list-feedback.cjs', 'list-feedback-cost.cjs', 'list-feedback.md', 'dispatch-motion.cjs', ...(listVisualRefresh ? ['list-feedback-visual-refresh.cjs'] : [])] : []), ...(scenario === 'region-headers' ? ['region-headers.cjs'] : []), ...(scenario === 'endpoints' ? ['endpoints.cjs'] : []), ...(scenario === 'dispatch-motion' ? ['dispatch-motion.cjs', 'dispatch-motion.md'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
   receipt.harnessSnapshot = {}
   for (const file of harnessFiles) { const name = relative(root, file), stored = join('harness-snapshot', name); await mkdir(join(evidence, stored, '..'), { recursive: true }); const bytes = await readFile(file); assert.equal(hash(bytes), receipt.harness[name]); await writeFile(join(evidence, stored), bytes); receipt.harnessSnapshot[name] = stored }
-  receipt.publicTransport = ['endpoints', 'dispatch-motion', 'region-headers'].includes(scenario) ? { boundary: 'No public transport or lifecycle operation is exercised by the isolated presentation increment. CLI navigation is separately owned evidence, not claimed by these frames.' } : { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
+  receipt.publicTransport = scenario === 'list-feedback' ? { boundary: 'Original List menu and confirmation reach only the declared private typed deferred Stop API. No Core/Provider lifecycle, public CLI or user Run executes. CLI navigation is separately owned evidence.' } : ['endpoints', 'dispatch-motion', 'region-headers'].includes(scenario) ? { boundary: 'No public transport or lifecycle operation is exercised by the isolated presentation increment. CLI navigation is separately owned evidence, not claimed by these frames.' } : { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   const cacheDirectory = process.env.COLLABORATION_CAPTURE_RENDERER_CACHE ? resolve(process.env.COLLABORATION_CAPTURE_RENDERER_CACHE) : null
   if (cacheDirectory) assert.equal(cacheDirectory, join(dirname(evidence), 'native-renderer-cache'), 'Only this task evidence parent owns the single renderer cache')
@@ -363,6 +377,18 @@ try {
     assert.equal(names.length, 1, 'The original emitted packet animation must be unambiguous before Native observation')
     env.COLLABORATION_CAPTURE_EXPECT_PACKET_ANIMATION = names[0]
   }
+  if (scenario === 'list-feedback') {
+    const file = 'apps/desktop/src/renderer/src/styles/agent-operation-feedback.css'
+    assert.ok(sourcePin.revision && receipt.compilation.cssSourceProof.loaded[file], 'List Native requires exact product pin and actual CSS reader')
+    const baseline = listCostOnly && process.env.COLLABORATION_CAPTURE_LIST_BASELINE === '1'
+    assert.equal(Object.values(receipt.compilation.cssSourceProof.outputs).some(output => output.keyframes.includes('focus-list-communication-arrive')), !baseline, 'The actual emitted List animation must match the declared original/candidate arm before Native')
+    receipt.listSource = { revision: sourcePin.revision, cssSHA256: receipt.compilation.cssSourceProof.loaded[file].sourceSHA256,
+      focusContextCSSSHA256: receipt.compilation.cssSourceProof.loaded['apps/desktop/src/renderer/src/styles/focus-context.css'].sourceSHA256,
+      focusCSSSHA256: receipt.compilation.cssSourceProof.loaded['apps/desktop/src/renderer/src/styles/focus.css'].sourceSHA256,
+      baseline,
+      comparisonBoundary: 'The immutable original baseline retains its original percentage-fill behavior and has no List A2A feedback. Candidate costs include visible feedback and the declared sibling-layout correction. Original identities/output/pending intent are protected, not pixel-equivalent UI; no mixed baseline, backport or pure-animation improvement claim.',
+      boundary: 'Exact Git product JS/CSS. Current fixture, observer, package/resolver metadata are separately hashed; no all-repository hermetic claim.' }
+  }
   const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.wasm': 'application/wasm' }
   server = createServer(async (request, response) => {
     try { const pathname = decodeURIComponent(new URL(request.url, 'http://fixture.test').pathname)
@@ -372,7 +398,7 @@ try {
   })
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   receipt.phase = 'capturing'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/?scenario=${scenario}`, privateRoot, evidence, scenario],
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/?scenario=${scenario}${listCostOnly ? '&cost=1' : ''}`, privateRoot, evidence, scenario],
     { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: ['perception-scale', 'dispatch-motion'].includes(scenario) ? 360000 : 210000, onLine: line => logs.push(line) })
   const actualText = await readFile(join(evidence, 'actual.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   if (actualText.trim()) receipt.actual = JSON.parse(actualText)
@@ -381,7 +407,7 @@ try {
   assert.ok(receipt.actual, 'The original source capture did not publish scene evidence')
   const controlLoaded = await readFile(join(evidence, 'control-loaded.jsonl'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   receipt.controlInputs = controlLoaded.trim() ? controlLoaded.trim().split('\n').map(line => JSON.parse(line)) : []
-  if (!['endpoints', 'dispatch-motion', 'region-headers'].includes(scenario)) assert.ok(receipt.controlInputs.some(input => input.path === 'packages/core/src/public-rpc-server.ts') && receipt.controlInputs.some(input => input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'Original Core server and source CLI must load in the public App join')
+  if (!['endpoints', 'dispatch-motion', 'region-headers', 'list-feedback'].includes(scenario)) assert.ok(receipt.controlInputs.some(input => input.path === 'packages/core/src/public-rpc-server.ts') && receipt.controlInputs.some(input => input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'Original Core server and source CLI must load in the public App join')
   for (const input of receipt.controlInputs) { assert.equal(input.originalSHA256, input.effectiveSHA256, 'Public join uses unmodified source'); if (sources[input.path]) assert.equal(sources[input.path], input.originalSHA256); sources[input.path] = input.originalSHA256 }
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
   const pinnedAfter = pinnedSourceAfter(root, receipt.compilation.sourceOverlay, sources)
@@ -404,6 +430,7 @@ try {
   assert.equal(receipt.changedHarness.length, 0, 'Capture harness changed during execution: ' + receipt.changedHarness.join(', '))
   if (scenario === 'endpoints') require(join(fixture, 'endpoints.cjs')).verify(receipt.actual.endpoints, receipt.frames, receipt.actual.nativeWorkers)
   if (scenario === 'dispatch-motion') require(join(fixture, 'dispatch-motion.cjs')).verify(receipt.actual.dispatchMotion, receipt.frames)
+  if (scenario === 'list-feedback') require(join(fixture, listCostOnly ? 'list-feedback-cost.cjs' : listVisualRefresh ? 'list-feedback-visual-refresh.cjs' : 'list-feedback.cjs')).verify(listCostOnly ? receipt.actual.listFeedbackCost : listVisualRefresh ? receipt.actual.listFeedbackVisualRefresh : receipt.actual.listFeedback, receipt.frames, receipt)
   if (scenario === 'region-headers') require(join(fixture, 'region-headers.cjs')).verify(receipt.actual.regionHeaders, receipt.frames)
   receipt.capturedPass = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }

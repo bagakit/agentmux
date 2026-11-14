@@ -143,7 +143,9 @@ const originalConfig = await api.config.get(), originalSnapshot = await api.sess
 const base = originalSnapshot.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent')
 if (!base || !originalConfig.workspaces[0]) throw Error('Nonempty typed platform samples required')
 const scenario = new URLSearchParams(location.search).get('scenario')
-const compact = scenario === 'endpoints' || scenario === 'dispatch-motion' || scenario === 'region-headers'
+const listFeedback = scenario === 'list-feedback'
+const listCost = listFeedback && new URLSearchParams(location.search).get('cost') === '1'
+const compact = scenario === 'endpoints' || scenario === 'dispatch-motion' || scenario === 'region-headers' || listFeedback
 const perception = scenario === 'perception' || scenario === 'perception-scale'
 const now = Date.now(), hostId = 'local', incarnation = 'fixture-collaboration-journal'
 const projects: WorkspaceRecord[] = [
@@ -214,7 +216,13 @@ const terrainSessions = terrainProjects.length ? ['fixture-terrain-tool', 'fixtu
     nativeHandle: { kind: 'provider' as const, providerId: original.providerId, sessionId: nativeSessionId },
     currentActivity: { ...original.currentActivity!, run, nativeSessionId, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, hookReceiptId: 'receipt-' + id } }
 }) : []
-const initialSessions = [...originalSessions, ...terrainSessions, ...extraSessions.slice(0, compact ? 4 : 88)]
+const listOtherHost = 'fixture-other-host'
+const otherHostSession: SessionSnapshot = { ...originalSessions[0]!, id: 'fixture-other-host-ui', hostId: listOtherHost,
+  control: { ...originalSessions[0]!.control, hostId: listOtherHost, run: { runId: 'fixture-other-host-run' } } }
+const listCostPeers = extraSessions.slice(0, 2).map((session, index) => ({ ...session, workspacePath: projects[index]!.path }))
+const listHeld = (total: number) => extraSessions.slice(2, total - 4).map(session => ({ ...session, workspacePath: background[7]!.path }))
+const initialSessions = listCost ? [...originalSessions, ...listCostPeers, ...listHeld(8)]
+  : [...originalSessions, ...terrainSessions, ...(listFeedback ? [otherHostSession] : []), ...extraSessions.slice(0, listFeedback ? 27 : compact ? 4 : 88)]
 sessions = initialSessions
 const retired: AgentSessionHistoryDescriptor[] = Array.from({ length: compact ? 0 : 4 }, (_, index) => ({ agentSessionId: 'fixture-retired-' + index, hostId, state: 'retired', retiredAt: now - (index + 1) * 86400000, history: { providerId: 'codex', executorId: 'codex', workspacePath: projects[0]!.path, createdAt: now - (index + 3) * 86400000 } }))
 if (scenario === 'endpoints') retired.push({ agentSessionId: 'fixture-endpoint-retired', hostId, state: 'retired', retiredAt: now - 10000 })
@@ -227,14 +235,14 @@ const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(iden
     stream: { epoch: 'fixture-stream-' + id, revision: 2, sequence: 2, origin: 'beginning', gaps: [],
       positions: items.map((item, at) => ({ id: item.id, firstSequence: at + 1, sequence: at + 1, revision: conversationRevision(item) })) } }]
 }))
-const config = { ...originalConfig, hosts: [...originalConfig.hosts.filter(host => host.id === hostId), ...(perception ? [{ id: 'fixture-remote', label: 'Research Lab', kind: 'ssh' as const, hostname: 'capture.invalid' }] : [])], workspaces: projects,
+const config = { ...originalConfig, hosts: [...originalConfig.hosts.filter(host => host.id === hostId), ...(perception || listFeedback ? [{ id: listFeedback ? listOtherHost : 'fixture-remote', label: 'Research Lab', kind: 'ssh' as const, hostname: 'capture.invalid' }] : [])], workspaces: projects,
   appearance: { ...originalConfig.appearance, appAppearance: 'dark' as const }, focus: { recentActivityHours: 48 as const, ...originalConfig.focus, previewTrigger: 'quick' as const } }
-const tabs = Object.fromEntries(originalSessions.map((session, at) => {
-  const workspace = projects[at < 2 ? at : 2]!, topic = at < 2 ? undefined : topics[at - 2]
+const tabs = Object.fromEntries([...originalSessions, ...(listCost ? listCostPeers : [])].map((session, at) => {
+  const workspace = projects[at < 2 ? at : at >= 4 ? at - 4 : 2]!, topic = at < 2 || at >= 4 ? undefined : topics[at - 2]
   const tab = { ...createWorkbenchTab('tab-' + session.id, { regionId: 'region-' + session.id, workspaceId: workspace.id, kind: 'agent', phase: 'attached', sessionId: session.id }, session.label),
     ...(topic ? { topicId: topic.id, space: { ...address(topic), spaceId: topic.kind === 'topic' ? category.spaceId : address(topic).spaceId } } : {}) }
   return [tab.id, tab] }))
-const layouts = Object.fromEntries(projects.map((project, area) => [project.id, createWorkspaceLayout('group-' + area, originalSessions.filter((_, at) => area === 2 ? at >= 2 : area < 2 && at === area).map(session => 'tab-' + session.id))]))
+const layouts = Object.fromEntries(projects.map((project, area) => [project.id, createWorkspaceLayout('group-' + area, Object.values(tabs).filter(tab => tab.workspaceId === project.id).map(tab => tab.id))]))
 // Feed the original spatial API before App's real initialize reads it. Execution
 // Host/cwd live in its region facts, rather than in a mocked resolver or action.
 const initialSpatial = await api.spatial.read()
@@ -244,7 +252,7 @@ await api.spatial.commit({ expectedRevision: initialSpatial?.revision ?? 0,
 // publication. Map and Settings save through the same original consumer boundary.
 await api.config.save(config, originalConfig)
 api.sessions.snapshot = async () => { reads.push({ kind: 'snapshot' }); return { sessions: structuredClone(sessions), timelines: structuredClone(timelines), recoveryCandidates: [] } }
-api.sessions.timeline = async control => structuredClone(originalTimeline(control.agentSessionId))
+api.sessions.timeline = async control => structuredClone(originalTimeline(control.agentSessionId, control.hostId))
 const relationOnly: AgentSessionHistoryDescriptor = { agentSessionId: 'fixture-relationship-only', hostId, state: 'retired', retiredAt: now - 86400000,
   history: { providerId: 'claude', executorId: 'claude', workspacePath: projects[0]!.path, createdAt: now - 2 * 86400000 } }
 function fixtureHistorySources(): Promise<AgentSessionHistoryDescriptor[]>
@@ -257,6 +265,7 @@ async function fixtureHistorySources(options?: { observation: true }): Promise<A
 api.sessions.historySources = fixtureHistorySources
 api.sessions.historySource = async reference => {
   reads.push({ kind: 'identity', participant: reference.agentSessionId, options: structuredClone(reference) })
+  if (listFeedback && 'hostId' in reference && reference.hostId === listOtherHost && reference.agentSessionId === 'fixture-ui') return { reference, source: { hostId: listOtherHost, agentSessionId: 'fixture-ui', state: 'active' as const }, issue: null }
   if (!('hostId' in reference) || reference.hostId !== hostId) return { reference, source: null,
     issue: { code: 'RUNTIME_UNAVAILABLE', message: 'This exact owner is outside the declared private scene.', recovery: 'Retain the original reference; no local identity is substituted.' } }
   const source = 'hostId' in reference && reference.hostId === hostId ? [...retired, relationOnly].find(source => source.agentSessionId === reference.agentSessionId)
@@ -268,24 +277,31 @@ api.workspaces.listBranches = async id => ({ kind: 'not-a-git-repository', hostI
 const listeners = new Set<(event: RuntimeEvent) => void>()
 api.sessions.onEvent = listener => { listeners.add(listener); return () => { listeners.delete(listener) } }
 const reads: Array<{ kind: string; participant?: string; options?: unknown }> = [], controls: string[] = []
+type DeferredStop = { control: Parameters<typeof api.sessions.stop>[0]; operationId: string; settled: boolean; reject: (error: Error) => void }
+const listStops: DeferredStop[] = []
+if (listFeedback) api.sessions.stop = (control, operationId) => {
+  if (control.kind !== 'agent' || !operationId || !sessions.some(session => session.kind === 'agent' && session.control.hostId === control.hostId && session.control.agentSessionId === control.agentSessionId && session.control.run.runId === control.run.runId)) throw Error('Exact private original Stop control and operation are required')
+  return new Promise((_resolve, reject) => { listStops.push({ control: structuredClone(control), operationId, settled: false, reject }) })
+}
 for (const name of ['launchAgent', 'stop', 'resume', 'write', 'interrupt', 'submitPrompt'] as const) {
   const original = api.sessions[name]
   Object.assign(api.sessions, { [name]: (...args: never[]) => { controls.push(name); return (original as (...args: never[]) => unknown)(...args) } })
 }
-function originalTimeline(id: string): AgentTimelineSnapshot {
+function originalTimeline(id: string, owner = hostId): AgentTimelineSnapshot {
   const value = timelines[id]
-  if (value) return value
+  if (value && owner === hostId) return value
+  if (listFeedback && owner === listOtherHost && id === 'fixture-ui') return { ...value!, sourceHostId: owner }
   if (!sessions.some(session => session.id === id) && !retired.some(source => source.agentSessionId === id) && id !== relationOnly.agentSessionId) throw Error('Unknown private conversation participant')
   return { agentSessionId: id, sourceHostId: hostId, revision: 0, items: [], stream: { epoch: 'fixture-empty-' + id, revision: 0, sequence: 0, origin: 'beginning', gaps: [], positions: [] } }
 }
 function conversation(input: ConversationTimelineReadInput) {
-  const timeline = originalTimeline(input.agentSessionId)
-  const projected = projectConversationTimeline({ agentSessionId: input.agentSessionId, executionHostId: hostId, timeline })
-  const checkpoint = { hostId, agentSessionId: input.agentSessionId, sourceHostId: hostId,
-    frontier: { hostId, agentSessionId: input.agentSessionId, scope: projected.scope,
+  const owner = input.hostId, timeline = originalTimeline(input.agentSessionId, owner)
+  const projected = projectConversationTimeline({ agentSessionId: input.agentSessionId, executionHostId: owner, timeline })
+  const checkpoint = { hostId: owner, agentSessionId: input.agentSessionId, sourceHostId: owner,
+    frontier: { hostId: owner, agentSessionId: input.agentSessionId, scope: projected.scope,
       cuts: [{ kind: 'captured' as const, epoch: timeline.stream!.epoch, sequence: timeline.stream!.sequence }] } }
   const units = [...projected.events].reverse().map(event => ({ kind: 'item' as const, item: { event, records: projected.records.filter(record => event.recordIds.includes(record.id)) } }))
-  return parseConversationReadPage({ hostId, agentSessionId: input.agentSessionId, sourceHostId: hostId, scope: projected.scope,
+  return parseConversationReadPage({ hostId: owner, agentSessionId: input.agentSessionId, sourceHostId: owner, scope: projected.scope,
     coverage: projected.coverage, order: { ...projected.order, direction: 'newest-first' }, items: units, nextCursor: null,
     budgetBytes: input.maxBytes ?? 65536, window: { id: 'fixture-window-' + input.agentSessionId, revision: 1, itemCount: units.length,
       complete: true, view: 'fixture-view-' + input.agentSessionId, replay: 'fixture-replay', checkpoint,
@@ -295,9 +311,9 @@ api.conversation.readAgentConversation = async input => { reads.push({ kind: 'co
 api.conversation.readConversationChanges = async input => { const page = conversation(input); return { ...page, checkpoint: page.window.checkpoint, more: false } }
 api.conversation.observeConversation = async input => {
   const page = conversation(input), closed = new AbortController()
-  return { hostId, agentSessionId: input.agentSessionId, sourceHostId: hostId, scope: page.scope, coverage: page.coverage, closed: closed.signal, dispose() { closed.abort() } }
+  return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: input.hostId, scope: page.scope, coverage: page.coverage, closed: closed.signal, dispose() { closed.abort() } }
 }
-api.conversation.releaseConversationView = async input => ({ hostId, agentSessionId: input.agentSessionId, sourceHostId: hostId, viewId: input.view, released: true })
+api.conversation.releaseConversationView = async input => ({ hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: input.hostId, viewId: input.view, released: true })
 const reference = (messageId: string, senderSessionId: string, recipientSessionId: string) => ({ messageId, senderSessionId, recipientSessionId, threadId: messageId, replyTo: null })
 const refs = [reference('fixture-request', 'fixture-ui', 'fixture-core'), reference('fixture-review-request', 'fixture-core', 'fixture-review'), reference('fixture-design-question', 'fixture-ui', 'fixture-design'), reference('fixture-return-report', 'fixture-core', 'fixture-ui'), ...terrainSessions.flatMap((session, index) => [reference('fixture-terrain-message-' + index, session.id, index === 0 ? 'fixture-terrain-a' : index === 1 ? 'fixture-terrain-b' : 'fixture-core')])]
 if (terrainSessions.length) refs.push(reference('fixture-terrain-followup-1', 'fixture-terrain-a', 'fixture-terrain-b'), reference('fixture-terrain-followup-2', 'fixture-terrain-a', 'fixture-terrain-b'))
@@ -309,6 +325,7 @@ const events: AgentMuxMessageEvent[] = [
   { sequence: 5, kind: 'dispatch-open', at: now - 5000, messages: [refs[0]!] },
   { sequence: 6, kind: 'message', at: now - 4000, messages: [refs[3]!] }
 ]
+const hostedEvents = new Map<string, AgentMuxMessageEvent[]>()
 const adaptiveSubjects = new Set<string>()
 for (const ref of refs.slice(4)) events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'message', at: now - 3500, messages: [ref] })
 if (terrainSessions.length) events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'delivery', state: 'delivered', at: now - 3200, messages: [refs.at(-1)!] })
@@ -326,9 +343,10 @@ let failEvents = false
 api.sessions.messageEvents = async (subject, options = {}) => {
   reads.push({ kind: 'events', participant: subject.agentSessionId, options: structuredClone(options) })
   if (failEvents && subject.agentSessionId === 'fixture-core') throw Error('The original fixture message source is temporarily unavailable. Existing work is retained.')
-  queueMicrotask(() => { for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-message-observation', state: 'available' } }) })
-  const throughSequence = options.throughSequence ?? events.at(-1)!.sequence
-  let selected = events.filter(event => event.sequence <= throughSequence && event.messages.some(message => (message.senderSessionId === subject.agentSessionId || message.recipientSessionId === subject.agentSessionId) && (!options.messageId || options.messageId === message.messageId)))
+  queueMicrotask(() => { for (const listener of listeners) listener({ type: 'core', hostId: subject.hostId, event: { type: 'agent-message-observation', state: 'available' } }) })
+  const journal = subject.hostId === hostId ? events : hostedEvents.get(subject.hostId) ?? []
+  const throughSequence = options.throughSequence ?? journal.at(-1)?.sequence ?? 0
+  let selected = journal.filter(event => event.sequence <= throughSequence && event.messages.some(message => (message.senderSessionId === subject.agentSessionId || message.recipientSessionId === subject.agentSessionId) && (!options.messageId || options.messageId === message.messageId)))
   if (options.beforeSequence !== undefined) selected = selected.filter(event => event.sequence < options.beforeSequence!)
   else if (options.afterSequence !== undefined) selected = selected.filter(event => event.sequence > options.afterSequence!)
   // The adaptive scene uses a normal bounded metadata page. Earlier pagination
@@ -358,19 +376,20 @@ if (scenario === 'endpoints') for (const phase of ['prepared', 'retired'] as con
 })
 api.sessions.spawns = async (subject, options) => {
   reads.push({ kind: 'spawns', participant: subject.agentSessionId, options: structuredClone(options) })
-  const matches = creations.filter(record => options.direction === 'created' ? record.creation?.createdBy?.agentSessionId === subject.agentSessionId : record.agentSessionId === subject.agentSessionId)
+  const matches = subject.hostId === hostId ? creations.filter(record => options.direction === 'created' ? record.creation?.createdBy?.agentSessionId === subject.agentSessionId : record.agentSessionId === subject.agentSessionId) : []
   return { hostId: subject.hostId, participantSessionId: subject.agentSessionId, direction: options.direction, creatorRuntimeId: null,
     records: matches, nextCursor: null, coverage: { scope: 'selected-owner', history: 'recorded-creations' } }
 }
 api.sessions.dispatches = async subject => ({ hostId: subject.hostId, participantSessionId: subject.agentSessionId, dispatches: [], nextSourceMessageId: null })
 api.sessions.readMessage = async (subject, mid) => {
   reads.push({ kind: 'body', participant: subject.agentSessionId, options: mid })
-  const ref = refs.find(ref => ref.messageId === mid)
+  const journal = subject.hostId === hostId ? events : hostedEvents.get(subject.hostId) ?? []
+  const ref = subject.hostId === hostId ? refs.find(ref => ref.messageId === mid) : journal.flatMap(event => event.messages).find(ref => ref.messageId === mid)
   if (!ref) throw Error('Unknown private source message')
-  return { hostId: subject.hostId, message: { sequence: events.find(event => event.kind === 'message' && event.messages[0]?.messageId === mid)!.sequence,
+  return { hostId: subject.hostId, message: { sequence: journal.find(event => event.kind === 'message' && event.messages[0]?.messageId === mid)!.sequence,
     envelope: { ...ref, schema: 'agentmux.a2a.v1', operationId: 'fixture-operation-' + mid, body: 'Inspect the original delivery boundary and report any concrete issue. Keep existing work and authorization.', createdAt: now - 9000,
       sender: { kind: 'agent-session', agentSessionId: ref.senderSessionId }, recipient: { kind: 'agent-session', agentSessionId: ref.recipientSessionId },
-      senderRunId: 'fixture-run-' + ref.senderSessionId, recipientRunId: null, workspaceId: null, correlationId: mid }, delivery: { state: 'delivered', at: now - 6000 } } }
+      senderRunId: subject.hostId === hostId ? 'fixture-run-' + ref.senderSessionId : otherHostSession.control.run.runId, recipientRunId: null, workspaceId: null, correlationId: mid }, delivery: { state: 'delivered', at: now - 6000 } } }
 }
 createClientUiRoot(document.getElementById('root')!).render(createElement(App))
 let originalState: ReturnType<typeof useAppStore.getState> | undefined, originalDraft: HTMLTextAreaElement | null = null, originalMap: Element | null = null, originalBody: HTMLElement | null = null
@@ -433,6 +452,39 @@ function adaptiveMessage(sender: string, recipient: string, id: string, notify =
 }
 Object.assign(window, { graphCapture: {
   ready: true, reads, controls, census, beginMeasurement, endMeasurement,
+  listSubjects() {
+    if (!listFeedback) throw Error('Only the declared private List scene owns these subjects')
+    return { sender: { hostId, agentSessionId: 'fixture-ui' }, recipient: { hostId, agentSessionId: 'fixture-core' },
+      otherHost: { hostId: listOtherHost, agentSessionId: 'fixture-ui' }, neighbor: { hostId, agentSessionId: 'fixture-review' } }
+  },
+  listStopStatus() { return { calls: listStops.map(({ reject: _reject, ...call }) => structuredClone(call)), operations: structuredClone(useAppStore.getState().agentOperations), originalRuns: originalSessions.map(session => structuredClone(session.control)), draft: useAppStore.getState().agentComposerDrafts['fixture-ui'] } },
+  listCostSubjects() {
+    if (!listCost) throw Error('Only the declared private List cost scene owns these subjects')
+    return { sender: { hostId, agentSessionId: 'fixture-ui' }, recipient: { hostId, agentSessionId: 'fixture-core' },
+      peerSender: { hostId, agentSessionId: listCostPeers[0]!.id }, peerRecipient: { hostId, agentSessionId: listCostPeers[1]!.id } }
+  },
+  listRetain(total: 8 | 128 | 384) {
+    if (!listCost || ![8, 128, 384].includes(total) || total < sessions.length) throw Error('Use one monotonic bounded private List cost catalog')
+    const before = useAppStore.getState(), nextTabs = { ...before.tabs }, workspace = background[7]!, held = listHeld(total)
+    if (Object.values(originalState!.tabs).some(tab => tab.workspaceId === workspace.id)) throw Error('The private retention workspace must own no original protected workface')
+    sessions = [...originalSessions, ...listCostPeers, ...held]
+    for (const session of held) {
+      const id = 'tab-' + session.id
+      if (!nextTabs[id]) nextTabs[id] = createWorkbenchTab(id, { regionId: 'region-' + session.id, workspaceId: workspace.id, kind: 'agent', phase: 'attached', sessionId: session.id }, session.label)
+    }
+    useAppStore.setState({ sessions, tabs: nextTabs, layouts: { ...before.layouts, [workspace.id]: createWorkspaceLayout('list-retained', held.map(session => 'tab-' + session.id)) } })
+    return { sessions: sessions.length, retainedTabs: held.length,
+      originalTabObjects: Object.entries(originalState!.tabs).every(([id, tab]) => nextTabs[id] === tab),
+      originalTabBytes: Object.entries(originalState!.tabs).every(([id, tab]) => structuralValue(nextTabs[id]) === structuralValue(tab)),
+      originalLayouts: Object.entries(originalState!.layouts).every(([id, layout]) => id === workspace.id || structuralValue(useAppStore.getState().layouts[id]) === structuralValue(layout)),
+      originalRetainedWorkfaces: Object.values(originalState!.tabs).filter(tab => tab.workspaceId === workspace.id).length,
+      boundary: 'Only typed private catalog and retained workface input grows. Original workfaces/layouts/draft/Run identities are protected from the first remember; no re-remember, hidden lifecycle, live PTY output or transport-cost claim.' }
+  },
+  listRejectStop(operationId: string, reason: { code: string; message: string }) {
+    const call = listStops.find(call => call.operationId === operationId)
+    if (!listFeedback || !call || call.settled) throw Error('Reject only one exact captured unresolved private Stop promise')
+    call.settled = true; call.reject(Object.assign(new Error(reason.message), { code: reason.code }))
+  },
   diagnosticPhase(value: string) { diagnosticPhase = value },
   rendererDiagnostics() { return { errors: rendererDiagnostics, resizeConstructors, resizeCallbackBatches, resizeObserverCount: resizeObserverSequence, resizeObservationMS,
     limits: { batches: 16, targetsPerBatch: 32, constructors: 256 }, boundary: 'Finite fixture-only native ResizeObserver payload/constructor observation; original callback, scheduling, observe/disconnect and window errors unchanged. No layout reads. Additional clock/attribute/stack costs are recorded, not calibrated or subtracted from product timings.' } },
@@ -607,12 +659,15 @@ Object.assign(window, { graphCapture: {
   },
   preferences() { return structuredClone(useAppStore.getState().config?.focus) },
   fail(value: boolean) { failEvents = value },
-  live(live = true, sender = 'fixture-core', recipient = 'fixture-ui', kind: 'message' | 'dispatch-open' = 'message') {
-    const sequence = events.at(-1)!.sequence + 1, mid = 'fixture-live-' + sequence, ref = reference(mid, sender, recipient)
-    refs.push(ref); events.push({ sequence, kind, at: Date.now(), messages: [ref] })
-    const at = performance.now()
-    for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-message-changed', messageId: mid, senderSessionId: ref.senderSessionId, recipientSessionId: ref.recipientSessionId, sequence, messageSequence: sequence, recordKind: kind, live } })
-    return { at, hostId, sender, recipient, sequence, messageId: mid, kind, live }
+  live(live = true, sender = 'fixture-core', recipient = 'fixture-ui', kind: 'message' | 'dispatch-open' = 'message', eventHostId = hostId) {
+    const journal = eventHostId === hostId ? events : hostedEvents.get(eventHostId) ?? []
+    if (eventHostId !== hostId) hostedEvents.set(eventHostId, journal)
+    const sequence = (journal.at(-1)?.sequence ?? 0) + 1, mid = 'fixture-live-' + sequence, ref = reference(mid, sender, recipient)
+    if (eventHostId === hostId) refs.push(ref)
+    journal.push({ sequence, kind, at: Date.now(), messages: [ref] })
+    const at = performance.now(), wallBefore = Date.now()
+    for (const listener of listeners) listener({ type: 'core', hostId: eventHostId, event: { type: 'agent-message-changed', messageId: mid, senderSessionId: ref.senderSessionId, recipientSessionId: ref.recipientSessionId, sequence, messageSequence: sequence, recordKind: kind, live } })
+    return { at, wallBefore, wallAfter: Date.now(), hostId: eventHostId, sender, recipient, sequence, messageId: mid, kind, recordKind: kind, live }
   },
   facts() { const state = useAppStore.getState(), tabProtection = originalTabProtection(state.tabs); return { loading: state.loading, ids: state.sessions.map(session => session.id),
     sameTabs: Object.values(tabProtection).every(Boolean), sameTabTable: state.tabs === originalState?.tabs, ...tabProtection, sameLayouts: state.layouts === originalState?.layouts,

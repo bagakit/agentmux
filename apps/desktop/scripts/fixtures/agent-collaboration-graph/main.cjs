@@ -8,6 +8,7 @@ const [url, privateRoot, evidence, scenario = 'readability'] = process.argv.slic
 for (const name of ['home', 'appData', 'userData', 'sessionData']) app.setPath(name, path.join(privateRoot, name))
 const result = { schema: 'agentmux.collaboration-map-actual.v1', scenario: 'focus-map-' + scenario, passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], checks: [], failures: [], rendererErrors: [], rendererMessages: [], performance: [],
   conditions: { nativeRenderer: true, electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, privateWindowShown: false, backgroundThrottling: false, focusEmulated: true, viewport: [1440, 900], physicalDisplayRefreshQualified: false,
+    concurrentCpuTest: process.env.COLLABORATION_CAPTURE_CONCURRENT_CPU_TEST ?? null,
     instrumentation: 'Transparent real Worker traffic observer; counter in original context function; LongTask and rAF during finite windows; DOM census at explicit boundaries, plus the declared finite adaptive neighborhood sampler with its own measured overhead. Callback, counter, Worker-observer and census costs are recorded. Clock-call, constructor-listener, O(1) actual presented-frame/camera reference publication and explicit-boundary camera polling overhead are uncalibrated; these are instrumented results, not an uninstrumented product claim.' },
   boundary: 'Original current source App/Space/Focus/Map/Worker/cards/sole Reader/Store. Only typed platform facts and unrelated PTY/Monaco paint are controlled. No Provider, real message, user Run, installed package, durability or aesthetic qualification.' }
 let win, controlHost, controlExit, pendingCli, phase = 'initialize'
@@ -48,8 +49,10 @@ app.whenReady().then(async () => {
     const move = async selector => { const point = await rect(selector); assert.ok(point.hit, 'Real pointer target ' + selector); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y }) }
     const click = async selector => { const point = await rect(selector); assert.ok(point.hit, 'Real click target ' + selector); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y }); for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 }); await settle() }
     const key = async (value, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code: value === 'a' ? 'KeyA' : value, modifiers, ...(value === 'Enter' ? { windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) } : {}), ...(type === 'keyDown' && value === 'a' && modifiers === 4 ? { commands: ['selectAll'] } : type === 'keyDown' && value === 'Backspace' ? { commands: ['deleteBackward'] } : {}) }) }
-    const frame = async (name, { motion = false, layoutOwner } = {}) => {
-      await settle()
+    const frame = async (name, { motion = false, layoutOwner, immediateObservation } = {}) => {
+      if (scenario === 'list-feedback' && name === 'workbench-entry') return
+      if (immediateObservation) assert.ok(scenario === 'list-feedback' && name === 'list-feedback-wide-dark-message-middle' && motion, 'Only the declared 120ms List middle observes immediately around real capturePage')
+      else await settle()
       if (layoutOwner) {
         assert.equal(scenario, 'region-headers', 'Only the declared settled-heading fold uses the delivered layout owner')
         const observed = await read(`(()=>{const layout=window.graphCapture.deliveredLayout(),camera=globalThis.__collaborationCaptureCamera;return{busy:layout?.busy,transitioning:layout?.transitioning,box:layout?.boxes.find(box=>box.id===${JSON.stringify(layoutOwner.areaId)}),initialized:camera?.initialized.current,applied:camera?.applied.current===camera?.locate?.token,active:Boolean(camera?.cameraAnimation.current),ready:camera?.ready}})()`)
@@ -57,7 +60,9 @@ app.whenReady().then(async () => {
         ;(result.frameSettlements ??= []).push({ label: name, owner: 'original-delivered-fold', requested: layoutOwner, observed })
       } else if (!motion && !name.endsWith('-live') && !name.startsWith('failure-') && await read(`(()=>{const canvas=document.querySelector('.collaboration-map .collaboration-canvas');return Boolean(canvas&&!canvas.closest('[hidden],[inert]')&&canvas.getClientRects().length)})()`)) await waitCamera('frame', name)
       if (!motion && !name.endsWith('-live')) await until('finite entrance settled', () => read(`![...document.getAnimations()].some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().iterations)&&a.effect?.target?.closest?.('.collaboration-map,.agent-information-reader,.collaboration-filter-menu'))`))
-      const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label: name, viewport: win.getContentSize() }); await checkpoint()
+      const nativeImage = await win.webContents.capturePage(), observed = immediateObservation ? await read(immediateObservation) : undefined
+      const file = name + '.png'; await fs.writeFile(path.join(evidence, file), nativeImage.toPNG()); result.frames.push({ file, label: name, viewport: win.getContentSize() }); await checkpoint()
+      return observed
     }
     const check = async (name, action) => { phase = name; await read(`window.graphCapture.diagnosticPhase(${JSON.stringify(name)})`); const startedAt = clock(); try { await action(); result.checks.push({ name, passed: true, startedAt, completedAt: clock() }) } catch (error) { result.checks.push({ name, passed: false, startedAt, completedAt: clock() }); result.failures.push({ name, ...clock(), message: error.message, stack: error.stack }); await frame('failure-' + name) } finally { await checkpoint() } }
     const facts = () => read('window.graphCapture.facts()')
@@ -250,7 +255,15 @@ app.whenReady().then(async () => {
     phase = 'load-original-app'; await checkpoint(); await win.loadURL(url); win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('original App initialize', () => read(`window.graphCapture?.ready&&!window.graphCapture.facts().loading&&window.graphCapture.facts().ids.includes('fixture-ui')`))
 await read('window.graphCapture.prepare();window.graphCapture.clearFocusForEntry()'); await until('original mounted workface', () => read(`Boolean(document.querySelector('[data-fixture-session="fixture-ui"] textarea'))`)); await read('window.graphCapture.remember()'); result.before = await facts(); result.entryBefore=result.before; result.distribution=await read('window.graphCapture.distribution()'); assert.deepEqual(result.before.controls, [], 'Initialization does not launch or operate a Run'); assert.equal(result.before.selectedSession,null); assert.equal(result.before.mapTarget,null); assert.ok(result.before.chrome.rail.length&&result.before.chrome.dock.length,'Original Space sidebar preferences are actually visible'); if (scenario !== 'region-headers') await frame('workbench-entry')
-    if (scenario === 'region-headers') {
+    if (scenario === 'list-feedback') {
+      const ctx = { win, result, read, click, key, move, frame, check, facts, intact, pause, until, settle, rect, evidence, closeReader }
+      if (process.env.COLLABORATION_CAPTURE_LIST_COST_ONLY === '1') await require('./list-feedback-cost.cjs')(ctx)
+      else if (process.env.COLLABORATION_CAPTURE_LIST_VISUAL_REFRESH === '1') await require('./list-feedback-visual-refresh.cjs')(ctx)
+      else {
+        await require('./list-feedback.cjs')(ctx)
+        await click('[aria-label="Map"]'); await mapReady(); await frame('list-feedback-integrated-map-static')
+      }
+    } else if (scenario === 'region-headers') {
       await require('./region-headers.cjs')({ win, result, read, click, key, move, frame, check, facts, intact, mapReady, closeDetails, locate, pause, until, settle, waitCamera })
     } else if (scenario === 'dispatch-motion') {
       await require('./dispatch-motion.cjs')({ win, result, read, click, key, move, frame, check, facts, intact, matrix, mapReady, closeReader, closeDetails, locate, pause, until, settle, fillSearch, waitCamera, rect, evidence })
@@ -639,7 +652,7 @@ await read('window.graphCapture.prepare();window.graphCapture.clearFocusForEntry
       result.nativeVisibility={status:samples.some(sample=>sample.document.hidden===true)?'observed':'unavailable',samples,boundary:'Separate native capability probe only; no replaced visibility properties and no proof that the source Map window was natively hidden.'}
     } finally {visibility.destroy()}
     }
-    result.nativeWorkers = await read('window.graphCapture.workerSamples()'); result.after=await facts(); assert.ok(result.frames.length >= (scenario === 'endpoints' ? 10 : 12)); assert.equal(result.rendererErrors.length,0,'Original Renderer errors remain visible'); result.passed=result.failures.length===0
+    result.nativeWorkers = await read('window.graphCapture.workerSamples()'); result.after=await facts(); assert.ok(process.env.COLLABORATION_CAPTURE_LIST_COST_ONLY === '1' && result.listFeedbackCost?.costs.length === 8 || process.env.COLLABORATION_CAPTURE_LIST_VISUAL_REFRESH === '1' && result.listFeedbackVisualRefresh?.passed && result.frames.length === 2 || result.frames.length >= (scenario === 'endpoints' ? 10 : 12)); assert.equal(result.rendererErrors.length,0,'Original Renderer errors remain visible'); result.passed=result.failures.length===0
   } catch(error) {
     result.failures.push({name:'scene',phase,at:new Date().toISOString(),mainMonotonicMS:Number(process.hrtime.bigint())/1e6,message:error.message,stack:error.stack})
     if(win&&!win.isDestroyed()){result.diagnostics=await win.webContents.executeJavaScript(`({facts:window.graphCapture?.facts(),workers:window.graphCapture?.workerSamples(),map:document.querySelector('.collaboration-map')?.outerHTML.slice(0,14000)})`);await fs.writeFile(path.join(evidence,'failure.png'),(await win.webContents.capturePage()).toPNG())}
