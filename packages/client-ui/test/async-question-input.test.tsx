@@ -46,6 +46,32 @@ it('preserves composition, independent draft and complete original unknown even 
   expect(JSON.parse(host.querySelector('.agent-question__original')!.textContent!)).toEqual(original)
   expect(original.phase).toBe('unknown'); expect(host.textContent).toContain('Original diagnostic remains')
 })
+it('applies the final IME input and releases the field for a subsequent answer choice', async () => {
+  const initial = '  Original answer\n'
+  const final = `${initial}最终答案  `
+  await render({ draftAnswers: [{ questionId: 'opaque-choice', answer: initial }] })
+  const question = host.querySelector('[data-question-id="opaque-choice"]')!
+  const node = question.querySelector('textarea')!
+  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+  node.focus()
+  await act(async () => node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })))
+  await act(async () => {
+    setValue.call(node, `${initial}候选`)
+    node.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: '候选' }))
+  })
+  await act(async () => {
+    node.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '最终答案' }))
+    setValue.call(node, final)
+    node.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '最终答案' }))
+  })
+  expect(node.value).toBe(final)
+  expect(changed.mock.lastCall?.[0]).toEqual([{ questionId: 'opaque-choice', answer: final }])
+
+  await act(async () => question.querySelector('button')!.click())
+  expect(question.querySelector('textarea')).toBe(node)
+  expect(node.value).toBe('')
+  expect(changed.mock.lastCall?.[0]).toEqual([{ questionId: 'opaque-choice', answer: 'Keep original' }])
+})
 it('reports clipboard false and ignores a late result after changing the original identity', async () => {
   copyText.mockResolvedValueOnce(false); await render(); await type('First plain answer')
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Copy answer: What should remain available?"]')!.click())
