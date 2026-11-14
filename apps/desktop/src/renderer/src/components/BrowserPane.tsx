@@ -637,6 +637,9 @@ function BrowserPaneContent({
     if (busy || released || restoring) return
     if (restoreError !== null) retryConnection(); else void run(() => api.browser.reload(tab.browserId))
   }
+  const pageZoom = tab.zoomFactor !== undefined && Math.abs(tab.zoomFactor - DEFAULT_BROWSER_ZOOM_FACTOR) > 0.001
+    ? `${Math.round(tab.zoomFactor * 100)}%` : null
+  const resetPageZoom = () => void api.browser.zoom(tab.browserId, 'reset').then(browser => applyBrowserEvent({ type: 'updated', browser })).catch(reportError)
   const runPageAction = (key: string, action: BrowserPageShortcutAction) => {
     if (action === 'find') openFind(key)
     else if (action === 'focus-address') addressInputs.current.get(key)?.current?.focus()
@@ -1406,11 +1409,11 @@ function BrowserPaneContent({
             onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }}
             onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })}
           />
-          {tab.zoomFactor !== undefined && Math.abs(tab.zoomFactor - DEFAULT_BROWSER_ZOOM_FACTOR) > 0.001 ? (
-            <button type="button" className="browser-zoom" aria-label={`Page zoom ${Math.round(tab.zoomFactor * 100)}%. Reset this site in this Profile to 90%`}
-              title={`Page zoom ${Math.round(tab.zoomFactor * 100)}% · This site in this Profile · Click to reset to 90%`}
-              onClick={() => void api.browser.zoom(tab.browserId, 'reset').then(browser => applyBrowserEvent({ type: 'updated', browser })).catch(reportError)}>
-              {Math.round(tab.zoomFactor * 100)}%
+          {pageZoom ? (
+            <button type="button" className="browser-zoom" aria-label={`Page zoom ${pageZoom}. Reset this site in this Profile to 90%`}
+              title={`Page zoom ${pageZoom} · This site in this Profile · Click to reset to 90%`}
+              onClick={resetPageZoom}>
+              {pageZoom}
             </button>
           ) : null}
         </label>
@@ -1443,7 +1446,7 @@ function BrowserPaneContent({
         {toolbar?.selectElement ? (
           <button
             type="button"
-            className="browser-toolbar__secondary"
+            className="browser-toolbar__secondary browser-toolbar__priority-tool"
             aria-label={selectionBusy ? 'Cancel element selection' : 'Select element'}
             title={selectionBusy ? 'Cancel element selection' : 'Select an element for context or annotation'}
             disabled={selectElementDisabled}
@@ -1455,7 +1458,7 @@ function BrowserPaneContent({
         {toolbar?.screenshot ? (
           <button
             type="button"
-            className="browser-toolbar__secondary"
+            className="browser-toolbar__secondary browser-toolbar__priority-tool"
             aria-label="Screenshot"
             title="Capture and mark up this viewport"
             disabled={screenshotDisabled}
@@ -1556,6 +1559,9 @@ function BrowserPaneContent({
                 <DropdownMenu.Item className="browser-menu__item" onSelect={() => openFind(key)}>
                   <ThemeActionSearchIcon size={12} /><span>Find in page…</span>
                 </DropdownMenu.Item>
+                {pageZoom ? <DropdownMenu.Item className="browser-menu__item" onSelect={resetPageZoom}>
+                  <ThemeActionAdjustIcon size={12} /><span>Reset page zoom</span><span>{pageZoom}</span>
+                </DropdownMenu.Item> : null}
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Open human demonstration draft" onSelect={() => openOperationTimeline(key)}>
                   <ThemeObjectHistoryIcon size={12} /><span>Demonstration</span>
                 </DropdownMenu.Item>
