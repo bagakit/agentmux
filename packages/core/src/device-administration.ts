@@ -1,16 +1,18 @@
-import { AgentMuxError, type AgentMuxRpcMobileLinkCandidate, type AgentMuxRpcDeviceAdministration, type AgentMuxRpcDeviceResult, type AgentMuxRpcDeviceMethod, type AgentMuxRpcMobileAccessState } from '@agentmux/core'
+import { AgentMuxError } from './errors.js'
+import type { AgentMuxRpcMobileLinkCandidate, AgentMuxRpcDeviceAdministration, AgentMuxRpcDeviceResult, AgentMuxRpcDeviceMethod, AgentMuxRpcMobileAccessState, AgentMuxRpcDeviceParams } from './public-rpc-device.js'
+import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import type { DeviceAuthority } from './device-authority.js'
 import { parseConnectionLinkUrl, parseConnectionOffer, type ConnectionOffer } from '@agentmux/relay/offer'
 
 export function createDeviceAdministration(authority: () => Promise<DeviceAuthority>, state: (url?: string) => AgentMuxRpcMobileAccessState,
   link: (address?: string, via?: 'local' | 'gateway') => Promise<{ url: string; offer: ConnectionOffer; candidates: readonly AgentMuxRpcMobileLinkCandidate[]; access?: AgentMuxRpcMobileAccessState }>): AgentMuxRpcDeviceAdministration {
-  return { async call<M extends AgentMuxRpcDeviceMethod>(method: M, params: import('@agentmux/core').AgentMuxRpcDeviceParams<M>, context: import('@agentmux/core').AgentMuxRpcCallContext): Promise<AgentMuxRpcDeviceResult<M>> {
+  return { async call<M extends AgentMuxRpcDeviceMethod>(method: M, params: AgentMuxRpcDeviceParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcDeviceResult<M>> {
     const owner = await authority()
     context.signal?.throwIfAborted()
     let result: unknown
     if (method === 'device.ls') result = { hostId: owner.hostId, devices: owner.devices(), mobileAccess: state() }
     else if (method === 'device.link') {
-      const { address, via } = params as import('@agentmux/core').AgentMuxRpcDeviceParams<'device.link'>
+      const { address, via } = params as AgentMuxRpcDeviceParams<'device.link'>
       const { url, candidates, access, offer: original } = await link(address, via), offer = parseConnectionOffer(original), encoded = parseConnectionLinkUrl(url)
       if (offer.serverId !== owner.hostId || !encoded || (encoded.kind === 'pin' ? encoded.pin.daemonPublicKeyB64 !== offer.daemonPublicKeyB64
         : encoded.offer.serverId !== offer.serverId || encoded.offer.daemonPublicKeyB64 !== offer.daemonPublicKeyB64 || encoded.offer.relay.endpoint !== offer.relay.endpoint || encoded.offer.relay.useTls !== offer.relay.useTls)) throw new AgentMuxError('The original Host connection offer is unavailable.', 'CONTROL_UNAVAILABLE')

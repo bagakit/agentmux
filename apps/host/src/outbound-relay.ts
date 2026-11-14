@@ -4,7 +4,7 @@ import { AgentMuxError, type AgentMuxHeadlessRuntime, type AgentMuxRpcMobileAcce
 import { startAgentMuxRpcRelayPublisher } from '@agentmux/core/relay-publisher'
 import { connectionOfferUrl, parseConnectionOffer, type ConnectionOffer } from '@agentmux/relay/offer'
 import { exportPublicKey, importPublicKey, type KeyPair } from '@agentmux/relay/e2ee'
-import type { DeviceAuthority } from './device-authority.js'
+import type { DeviceAuthority } from '@agentmux/core/device-access'
 
 type Configuration = { relay: { endpoint: string; useTls: boolean }; publisherToken: string; allowedClientKeys: readonly string[] }
 function configuration(value: unknown): Configuration {

@@ -534,6 +534,10 @@
       "types": "./dist/object-avatar.d.ts",
       "import": "./dist/object-avatar.js"
     },
+    "./device-access": {
+      "types": "./dist/device-access.d.ts",
+      "import": "./dist/device-access.js"
+    },
     "./relay-publisher": {
       "types": "./dist/rpc-relay-publisher.d.ts",
       "import": "./dist/rpc-relay-publisher.js"

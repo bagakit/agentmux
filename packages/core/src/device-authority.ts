@@ -1,9 +1,12 @@
 import { exportPublicKey, importPublicKey } from '@agentmux/relay/e2ee'
-import { mintObjectId } from '@agentmux/core/object-id'
+import { mintObjectId } from './object-id.js'
 import { createHash } from 'node:crypto'
 import { mkdir, open, readFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
-import { AgentMuxError, DEVICE_OPERATION_WINDOW, durableWriteFile, parseDeviceConnection, type TrustedDevice, type DeviceConnection, type DeviceOperation, type AgentOperationDevice } from '@agentmux/core'
+import { AgentMuxError } from './errors.js'
+import { durableWriteFile } from './durable-write.js'
+import { DEVICE_OPERATION_WINDOW, parseDeviceConnection, type TrustedDevice, type DeviceConnection, type DeviceOperation } from './public-rpc-device.js'
+import type { AgentOperationDevice } from './types.js'
 
 /** Devices that may hold live authorization at once. Revoked records stay to refuse their keys and do not count. */
 const MAX_DEVICES = 100
@@ -70,7 +73,7 @@ function stateFrom(value: unknown): AuthorityState {
   return { schema: state.schema, hostId: state.hostId, devices: state.devices, ...(state.daemonPublicKeyB64 === undefined ? {} : { daemonPublicKeyB64: state.daemonPublicKeyB64 }) }
 }
 
-/** Device admission belongs to the Host; it never owns a Session, Run or attachment. */
+/** Device admission belongs to this original endpoint; it never owns a Session, Run or attachment. */
 export class DeviceAuthority {
   private closed = false
   private daemonBindingConfirmed = false
@@ -222,7 +225,7 @@ export class DeviceAuthority {
   }
 
   operationSource(principal?: { kind: string; id: string }): AgentOperationDevice | undefined {
-    if (principal?.kind === 'user') return { hostId: this.hostId, deviceId: 'local', name: '本机 Mac' }
+    if (principal?.kind === 'user') return { hostId: this.hostId, deviceId: 'local', name: '本机用户' }
     if (principal?.kind !== 'device' || !principal.id.startsWith(this.hostId + ':')) return undefined
     const deviceId = principal.id.slice(this.hostId.length + 1)
     const device = this.state.devices.find(d => d.deviceId === deviceId && d.revokedAt === undefined)
