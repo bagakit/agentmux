@@ -1244,6 +1244,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.profile.folder.create': 'long',
   'browser.profile.folder.rename': 'long',
   'browser.profile.folder.delete': 'long',
+  'browser.profile.creation.inspect': 'short',
   'browser.profile.create': 'long',
   'browser.profile.copy': 'long',
   'browser.profile.update': 'long',
@@ -1359,3 +1360,5 @@ export * from './browser-proxy-library.js'
 export * from './browser-profile-cookie-files.js'
 export * from './browser-profile-bookmarks.js'
 export * from './browser-profile-extensions.js'
+
+export * from './browser-profile-creation.js'

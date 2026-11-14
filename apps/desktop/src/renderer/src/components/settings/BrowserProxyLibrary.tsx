@@ -1,3 +1,4 @@
+import { submitProfileCreation, profileCreationObservationNotice } from '../../lib/browser-profile-creations'
 import { normalizeBrowserProfileNetwork } from '../../../../shared/browser-profile-network'
 import { useEffect, useRef, useState } from 'react'
 import { parseBrowserProxyEdit, type BrowserProxyAsset } from '@agentmux/core/control'
@@ -68,7 +69,14 @@ export function BrowserProxyLibrary({ assets, active }: { assets: BrowserProxyAs
     interactions.current += 1
     const submitted = structuredClone(current.current); setBusy(true); setIssue(null)
     try {
-      const receipt = await api.browser.saveProxy(input, submitted.assetId ?? undefined, submitted.baseRevision ?? undefined)
+      const receipt = submitted.assetId === null ? await (async () => {
+        const result = await submitProfileCreation({ operation: 'browser.profile.proxy.create', edit: input! })
+        const observation = profileCreationObservationNotice(result.creation); if (observation) setIssue(observation)
+        const snapshot = await api.browser.readProfiles()
+        const proxy = snapshot.proxies?.find(value => value.id === result.creation.receipt!.createdId)
+        if (!proxy) throw new Error('The original created proxy is now unavailable. Its creation receipt is retained.')
+        return { proxy, revision: snapshot.revision }
+      })() : await api.browser.saveProxy(input, submitted.assetId, submitted.baseRevision!)
       if (loaded) { try { browserProxyDrafts.clearSubmitted(submitted); void browserProxyDrafts.checkpoint().catch(error => setDraftIssue(presentError(error))) } catch (error) { setDraftIssue(presentError(error)) } }
       if (pendingDrafts.current.get(proxyDraftId(submitted)) && proxyDraftKey(pendingDrafts.current.get(proxyDraftId(submitted))!) === proxyDraftKey(submitted)) pendingDrafts.current.delete(proxyDraftId(submitted))
       if (proxyDraftKey(current.current) === proxyDraftKey(submitted)) { changed.current = false; put(fromAsset(receipt.proxy)); setEarlier(loaded && Boolean(browserProxyDrafts.get(receipt.proxy.id)?.retained.length)) }

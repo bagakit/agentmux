@@ -1,3 +1,4 @@
+import { parseBrowserProfileControlPayload, browserProfileCreationActor, browserProfileCreationCanonical, browserProfileCreationOperationId, parseBrowserProfileCreationReceipt, type BrowserProfileCreationReceipt, type BrowserProfileCreationInspection, type BrowserProfileControlPayload, type AgentMuxNameActor } from '@agentmux/core/control'
 import { browserProfileCookieFileRecordSchema, type BrowserProfileCookieFileRecord } from './browser-profile-cookie-file-record.js'
 import { browserProfileBookmarksSchema, emptyBookmarks, type BrowserProfileBookmarksState } from './browser-profile-bookmark-record.js'
 import { browserProfileExtensionRecordSchema, browserProfileExtensionReceiptSchema, browserProfileExtensionPendingSchema, type BrowserProfileExtensionPending, type BrowserProfileExtensionRecord, type BrowserProfileExtensionReceipt } from './browser-profile-extension-record.js'
@@ -162,12 +163,21 @@ const metadataSchema = z
     trash: z.array(trashRecordSchema).optional(),
     /** Completed original purge receipts; they retain no Profile settings or filesystem paths. */
     purgeReceipts: z.array(purgeReceiptSchema.extend({ safetyCopy: safetyCopySchema.optional() }).strict()).optional(),
+    creationReceipts: z.array(z.unknown().transform((value, context): BrowserProfileCreationReceipt => {
+      try { return parseBrowserProfileCreationReceipt(value) }
+      catch { context.addIssue({ code: 'custom', message: 'Original Profile creation receipt is invalid' }); return z.NEVER }
+    })).optional(),
     pendingImports: z.array(pendingImportSchema),
     /** Profiles already removed from the list whose site data is not confirmed cleared yet. */
     pendingDeletes: z.array(profileIdSchema).optional()
   })
   .strict()
   .superRefine((metadata, context) => {
+    const creationIds = new Set<string>()
+    for (const [index, receipt] of (metadata.creationReceipts ?? []).entries()) {
+      if (creationIds.has(receipt.operationId)) context.addIssue({ code: 'custom', path: ['creationReceipts', index], message: 'Duplicate original Profile creation operation' })
+      creationIds.add(receipt.operationId)
+    }
     const proxyIds = new Set<string>()
     for (const [index, proxy] of (metadata.proxyAssets ?? []).entries()) {
       if (proxyIds.has(proxy.id)) context.addIssue({ code: 'custom', path: ['proxyAssets', index, 'id'], message: 'Duplicate proxy identity' })
@@ -556,57 +566,120 @@ export class BrowserProfileStore {
     })
   }
 
-  createProfile(label: string): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
+  /** All five new-identity actions commit their fixed producer receipt beside the identity. */
+  createIdentity(input: Extract<BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>, given: AgentMuxNameActor | undefined): Promise<{ snapshot: BrowserProfileSnapshot; creation: BrowserProfileCreationInspection }> {
+    const actor = browserProfileCreationActor(given), operationId = browserProfileCreationOperationId(input.operationId)
+    const normalized = parseBrowserProfileControlPayload(input as unknown as Record<string, unknown>, ['operation', 'schemaVersion', 'requestId']) as typeof input
+    if ('label' in normalized) normalized.label = validateBrowserProfileLabel(normalized.label)
+    if (normalized.operation === 'browser.profile.view.create') normalized.query = parseBrowserProfileQuery(normalized.query)
+    if (normalized.operation === 'browser.profile.proxy.create') normalized.edit = parseBrowserProxyEdit(normalized.edit)
+    const requestDigest = 'sha256:' + createHash('sha256').update(browserProfileCreationCanonical({ actor, input: normalized })).digest('hex')
     return this.enqueue(async () => {
-      const validatedLabel = validateBrowserProfileLabel(label)
-      const metadata = await this.readOrInitialize()
-      const profile: BrowserProfileRecord = {
-        id: this.createUnusedProfileId(metadata),
-        label: validatedLabel,
-        createdAt: Date.now(),
-        source: null
+      const metadata = normalized.operation === 'browser.profile.create' ? await this.readOrInitialize() : await this.readMetadata()
+      const previous = (metadata.creationReceipts ?? []).find(value => value.operationId === operationId)
+      if (previous) {
+        if (previous.requestDigest !== requestDigest || !isDeepStrictEqual(previous.actor, actor) || previous.action !== normalized.operation)
+          throw Object.assign(new Error('This Profile creation operation belongs to a different original actor or request. Keep the original identity and inspect its receipt.'), { code: 'BROWSER_PROFILE_CREATION_CONFLICT' })
+        return { snapshot: snapshotOf(metadata), creation: this.creationObservation(metadata, operationId, actor) }
       }
-      const next = metadataSchema.parse({
-        ...metadata,
-        profiles: [...metadata.profiles, profile]
-      })
-      const snapshot = await this.commit(next)
-      return { snapshot, profile: profileSummary(profile, snapshot.defaultProfileId) }
+      const id = this.createUnusedProfileId(metadata), committedAt = Date.now()
+      let next = metadata, kind: BrowserProfileCreationReceipt['createdKind']
+      switch (normalized.operation) {
+        case 'browser.profile.create': {
+          kind = 'profile'
+          const profile: BrowserProfileRecord = { id, label: normalized.label, createdAt: committedAt, source: null }
+          next = { ...metadata, profiles: [...metadata.profiles, profile] }; break
+        }
+        case 'browser.profile.copy': {
+          kind = 'profile'
+          const original = metadata.profiles.find(value => value.id === normalized.profileId)
+          if (!original) throw Object.assign(new Error('The exact source Profile is unavailable. Its original creation receipt remains queryable.'), { code: 'BROWSER_PROFILE_NOT_FOUND' })
+          this.assertProfileRevision(original, normalized.expectedRevision)
+          const profile: BrowserProfileRecord = { revision: mintObjectId(), id, label: normalized.label, createdAt: committedAt, source: null,
+            ...(original.hue === undefined ? {} : { hue: original.hue }), ...(original.notes === undefined ? {} : { notes: original.notes }),
+            ...(original.tags === undefined ? {} : { tags: [...original.tags] }), ...(original.folderId === undefined ? {} : { folderId: original.folderId }),
+            ...(original.network === undefined ? {} : { network: structuredClone(original.network) }),
+            ...(original.proxyBinding === undefined ? {} : { proxyBinding: { ...original.proxyBinding } }),
+            ...(original.environment === undefined ? {} : { environment: structuredClone(original.environment) }),
+            ...(original.agentAccess === false ? { agentAccess: false as const } : {}) }
+          next = { ...metadata, profiles: [...metadata.profiles, profile] }; break
+        }
+        case 'browser.profile.folder.create':
+          kind = 'folder'; this.assertRevision(metadata, normalized.expectedRevision)
+          next = { ...metadata, folders: [...(metadata.folders ?? []), { id, label: normalized.label }] }; break
+        case 'browser.profile.view.create':
+          kind = 'view'; this.assertRevision(metadata, normalized.expectedRevision)
+          next = { ...metadata, views: [...(metadata.views ?? []), { id, label: normalized.label, query: normalized.query }] }; break
+        case 'browser.profile.proxy.create': {
+          kind = 'proxy'
+          const edit = normalized.edit, route = normalizeBrowserProfileNetwork({ mode: 'proxy', server: edit.server, bypass: edit.bypass })
+          if (route.mode !== 'proxy') throw new Error('A proxy asset needs a proxy route')
+          const proxy = { id, revision: mintObjectId(), label: edit.label, server: formatBrowserProfileProxyServer(route.server), ...(route.bypass?.length ? { bypass: route.bypass } : {}), ...(edit.notes ? { notes: edit.notes } : {}) }
+          next = { ...metadata, proxyAssets: [...(metadata.proxyAssets ?? []), proxy] }; break
+        }
+      }
+      const receipt: BrowserProfileCreationReceipt = { operationId, actor, action: normalized.operation, requestDigest, createdId: id, createdKind: kind!, committedAt,
+        ...(normalized.operation === 'browser.profile.copy' ? { source: { profileId: normalized.profileId, expectedRevision: normalized.expectedRevision } } : {}),
+        ...(normalized.operation === 'browser.profile.folder.create' || normalized.operation === 'browser.profile.view.create' ? { expectedCollectionRevision: normalized.expectedRevision } : {}) }
+      next = { ...next, creationReceipts: [...(metadata.creationReceipts ?? []), receipt] }
+      const snapshot = await this.commit(next, true, undefined, true)
+      return { snapshot, creation: { ...this.creationObservation(next, operationId, actor), durability: 'confirmed' as const } }
     })
   }
 
-  /** Copy saved configuration into a new identity in the same atomic metadata write. */
-  copyProfile(profileId: string, label: string, expectedRevision: string): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
+  inspectCreation(operationId: string, given: AgentMuxNameActor | undefined): Promise<BrowserProfileCreationInspection> {
+    return this.readCreation(operationId, given).then(result => result.creation)
+  }
+
+  readCreation(operationId: string, given: AgentMuxNameActor | undefined): Promise<{ snapshot: BrowserProfileSnapshot; creation: BrowserProfileCreationInspection }> {
+    const actor = browserProfileCreationActor(given)
+    browserProfileCreationOperationId(operationId)
     return this.enqueue(async () => {
-      const validatedProfileId = profileIdSchema.parse(profileId), validatedLabel = validateBrowserProfileLabel(label)
-      // An exact-source copy must not initialize a substitute identity if its original file is missing.
       const metadata = await this.readMetadata()
-      const original = metadata.profiles.find(profile => profile.id === validatedProfileId)
-      if (!original) throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
-      // Deliberately list configuration fields; import history, approvals and native application
-      // observations do not become authority for the new Profile.
-      this.assertProfileRevision(original, expectedRevision)
-      const profile: BrowserProfileRecord = {
-        revision: mintObjectId(), id: this.createUnusedProfileId(metadata), label: validatedLabel, createdAt: Date.now(), source: null,
-        ...(original.hue === undefined ? {} : { hue: original.hue }),
-        ...(original.notes === undefined ? {} : { notes: original.notes }),
-        ...(original.tags === undefined ? {} : { tags: [...original.tags] }),
-        ...(original.folderId === undefined ? {} : { folderId: original.folderId }),
-        ...(original.network === undefined ? {} : { network: structuredClone(original.network) }),
-        ...(original.proxyBinding === undefined ? {} : { proxyBinding: { ...original.proxyBinding } }),
-        ...(original.environment === undefined ? {} : { environment: structuredClone(original.environment) }),
-        ...(original.agentAccess === false ? { agentAccess: false as const } : {}) }
-      const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile] })
-      return { snapshot, profile: profileSummary(profile, snapshot.defaultProfileId) }
+      return { snapshot: snapshotOf(metadata), creation: this.creationObservation(metadata, operationId, actor) }
     })
+  }
+
+  private creationObservation(metadata: BrowserProfileMetadata, operationId: string, actor: AgentMuxNameActor): BrowserProfileCreationInspection {
+    const receipt = (metadata.creationReceipts ?? []).find(value => value.operationId === operationId)
+    if (receipt && actor.kind === 'agent' && !isDeepStrictEqual(receipt.actor, actor))
+      throw Object.assign(new Error('A managed Agent may inspect only its own original Profile creation.'), { code: 'CONTROL_PERMISSION_DENIED' })
+    if (!receipt) return { operationId, receipt: null, current: { state: 'unknown' }, durability: 'unconfirmed' }
+    const id = receipt.createdId
+    const present = receipt.createdKind === 'profile' ? metadata.profiles.some(value => value.id === id)
+      : receipt.createdKind === 'folder' ? (metadata.folders ?? []).some(value => value.id === id)
+      : receipt.createdKind === 'view' ? (metadata.views ?? []).some(value => value.id === id)
+      : (metadata.proxyAssets ?? []).some(value => value.id === id)
+    const archived = receipt.createdKind === 'profile' && (metadata.trash ?? []).some(value => value.profile.id === id)
+    return { operationId, receipt: structuredClone(receipt), current: { createdId: id, state: present ? 'present' : archived ? 'archived' : 'removed' }, durability: 'unconfirmed' }
+  }
+
+  async createProfile(label: string, operationId: string, actor: AgentMuxNameActor): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
+    const result = await this.createIdentity({ operation: 'browser.profile.create', label, operationId }, actor)
+    const profile = result.snapshot.profiles.find(value => value.id === result.creation.receipt!.createdId)
+    if (!profile) throw new Error('The created Profile is now removed. Inspect the original creation operation.')
+    return { snapshot: result.snapshot, profile }
+  }
+
+  async copyProfile(profileId: string, label: string, expectedRevision: string, operationId: string, actor: AgentMuxNameActor): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
+    const result = await this.createIdentity({ operation: 'browser.profile.copy', profileId, label, expectedRevision, operationId }, actor)
+    const profile = result.snapshot.profiles.find(value => value.id === result.creation.receipt!.createdId)
+    if (!profile) throw new Error('The copied Profile is now removed. Inspect the original creation operation.')
+    return { snapshot: result.snapshot, profile }
   }
 
   inspectProxy(proxyId: string, expectedRevision: string): Promise<BrowserProxyAsset> {
     return this.enqueue(async () => structuredClone(this.exactProxy(await this.readMetadata(), proxyId, expectedRevision)))
   }
 
-  saveProxy(editInput: BrowserProxyEdit, proxyId?: string, expectedRevision?: string): Promise<{ snapshot: BrowserProfileSnapshot; proxy: BrowserProxyAsset }> {
+  saveProxy(editInput: BrowserProxyEdit, proxyId?: string, expectedRevision?: string, creation?: { operationId: string; actor: AgentMuxNameActor }): Promise<{ snapshot: BrowserProfileSnapshot; proxy: BrowserProxyAsset }> {
+    if (proxyId === undefined && creation) return this.createIdentity({ operation: 'browser.profile.proxy.create', operationId: creation.operationId, edit: editInput }, creation.actor).then(result => {
+      const proxy = result.snapshot.proxyAssets!.find(value => value.id === result.creation.receipt!.createdId)
+      if (!proxy) throw new Error('The original created proxy is removed. Inspect its creation receipt.')
+      return { snapshot: result.snapshot, proxy }
+    })
     return this.enqueue(async () => {
+      if (proxyId === undefined) throw new Error('New proxy identities require createIdentity with the original operation and actor.')
       if ((proxyId === undefined) !== (expectedRevision === undefined)) throw Object.assign(new Error('Proxy updates need both the original asset identity and its configuration token. Create supplies neither.'), { code: 'BROWSER_PROXY_ARGUMENT_INVALID' })
       const edit = parseBrowserProxyEdit(editInput), metadata = await this.readMetadata()
       if (proxyId !== undefined) this.exactProxy(metadata, proxyId, expectedRevision!)
@@ -635,9 +708,15 @@ export class BrowserProfileStore {
     return proxy
   }
 
-  saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<{ snapshot: BrowserProfileSnapshot; view: BrowserProfileView }> {
+  saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string, creation?: { operationId: string; actor: AgentMuxNameActor }): Promise<{ snapshot: BrowserProfileSnapshot; view: BrowserProfileView }> {
+    if (viewId === undefined && creation) return this.createIdentity({ operation: 'browser.profile.view.create', operationId: creation.operationId, label, query, expectedRevision }, creation.actor).then(result => {
+      const view = result.snapshot.views.find(value => value.id === result.creation.receipt!.createdId)
+      if (!view) throw new Error('The original created view is removed. Inspect its creation receipt.')
+      return { snapshot: result.snapshot, view }
+    })
     return this.enqueue(async () => {
       const name = validateBrowserProfileLabel(label), definition = parseBrowserProfileQuery(query), metadata = await this.readMetadata()
+      if (viewId === undefined) throw new Error('New view identities require createIdentity with the original operation and actor.')
       this.assertRevision(metadata, expectedRevision)
       if (viewId !== undefined && !(metadata.views ?? []).some(view => view.id === viewId)) throw new Error(`Unknown saved Profile view: ${viewId}`)
       const view = { id: viewId === undefined ? this.createUnusedProfileId(metadata) : folderIdSchema.parse(viewId), label: name, query: definition }
@@ -655,14 +734,11 @@ export class BrowserProfileStore {
     })
   }
 
-  createFolder(label: string, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; folder: BrowserProfileFolder }> {
-    return this.enqueue(async () => {
-      const name = validateBrowserProfileLabel(label), metadata = await this.readMetadata()
-      this.assertRevision(metadata, expectedRevision)
-      const folder = { id: this.createUnusedProfileId(metadata), label: name }
-      const snapshot = await this.commit({ ...metadata, folders: [...(metadata.folders ?? []), folder] })
-      return { snapshot, folder: { ...folder } }
-    })
+  async createFolder(label: string, expectedRevision: number, operationId: string, actor: AgentMuxNameActor): Promise<{ snapshot: BrowserProfileSnapshot; folder: BrowserProfileFolder }> {
+    const result = await this.createIdentity({ operation: 'browser.profile.folder.create', label, expectedRevision, operationId }, actor)
+    const folder = result.snapshot.folders.find(value => value.id === result.creation.receipt!.createdId)
+    if (!folder) throw new Error('The created folder is now removed. Inspect the original creation operation.')
+    return { snapshot: result.snapshot, folder }
   }
 
   renameFolder(folderId: string, label: string, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; folder: BrowserProfileFolder }> {
@@ -926,7 +1002,7 @@ export class BrowserProfileStore {
     do { id = mintObjectId() } while (
       metadata.profiles.some((profile) => profile.id === id) ||
       metadata.pendingImports.some((pending) => pending.profileId === id) ||
-      (metadata.proxyAssets ?? []).some(proxy => proxy.id === id) || (metadata.pendingDeletes ?? []).includes(id) || (metadata.trash ?? []).some(entry => entry.id === id || entry.profile.id === id) || (metadata.purgeReceipts ?? []).some(value => value.profileId === id || value.archiveId === id || value.purgeId === id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
+      (metadata.creationReceipts ?? []).some(receipt => receipt.createdId === id) || (metadata.proxyAssets ?? []).some(proxy => proxy.id === id) || (metadata.pendingDeletes ?? []).includes(id) || (metadata.trash ?? []).some(entry => entry.id === id || entry.profile.id === id) || (metadata.purgeReceipts ?? []).some(value => value.profileId === id || value.archiveId === id || value.purgeId === id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
     )
     return id
   }

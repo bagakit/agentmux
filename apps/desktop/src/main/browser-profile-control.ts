@@ -1,3 +1,4 @@
+import { isBrowserProfileCreationOperation, type BrowserProfileCreationOperation, type BrowserProfileControlPayload } from '@agentmux/core/control'
 import { queryBrowserProfiles, AgentMuxError, isBrowserProfileControlOperation, type AgentMuxControlRequest, type AgentMuxControlResult, type AgentMuxNameActor,
   type BrowserProfileControlOperation } from '@agentmux/core/control'
 import { ZodError } from 'zod'
@@ -15,7 +16,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { extensions?: BrowserProfileManager['extensions']; bookmarks?: BrowserProfileManager['bookmarks']; cookieFiles?:BrowserProfileManager['cookieFiles'] }
+  profiles: Pick<BrowserProfileManager, 'createIdentity' | 'inspectCreation' | 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence'  | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders'  | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { extensions?: BrowserProfileManager['extensions']; bookmarks?: BrowserProfileManager['bookmarks']; cookieFiles?:BrowserProfileManager['cookieFiles'] }
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile' | 'assertUnused'>
   openBookmark?: (request: BrowserProfileBookmarkOpen, url: string) => Promise<void>
   network: BrowserProfileNetworkControl
@@ -57,9 +58,13 @@ async function owned<T>(write: () => Promise<T>): Promise<T> {
  * trusted caller recorded by the Host, never from request fields.
  */
 export async function executeBrowserProfileControl(request: ProfileRequest, ports: BrowserProfileControlPorts,
-  actor: AgentMuxNameActor | undefined): Promise<ProfileResult> {
+  actor: AgentMuxNameActor | undefined, source?: { hostId?: string }): Promise<ProfileResult> {
   await ports.profiles.initialize()
   if (request.operation === 'browser.profile.proxy.ls' || request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.trash.ls') await ports.profiles.refresh()
+  const creationActor = actor && source?.hostId ? { ...actor, hostId: source.hostId } : actor
+  if (isBrowserProfileCreationOperation(request.operation)) return { operation: request.operation,
+    ...await owned(() => ports.profiles.createIdentity(request as Extract<BrowserProfileControlPayload, { operation: BrowserProfileCreationOperation }>, creationActor)) }
+  if (request.operation === 'browser.profile.creation.inspect') return { operation: request.operation, ...await ports.profiles.inspectCreation(request.operationId, creationActor) }
   switch (request.operation) {
     case 'browser.profile.cookie-file.prepare-import':return {operation:request.operation,review:await cookieFileOwner(ports).prepareImport(request.profileId,request.operationId,request.source,request.scope)}
     case 'browser.profile.cookie-file.import':return {operation:request.operation,receipt:await cookieFileOwner(ports).import(request.profileId,request.reviewId)}
@@ -81,7 +86,6 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
     case 'browser.profile.extension.remove': return { operation: request.operation, ...await extensionOwner(ports).remove(request.profileId, request.expectedRevision, request.extensionId, request.operationId) }
     case 'browser.profile.extension.load': return { operation: request.operation, ...await extensionOwner(ports).load(request.profileId, request.extensionId) }
     case 'browser.profile.proxy.ls': return { operation: request.operation, revision: ports.profiles.listRevision(), proxies: ports.profiles.listProxies() }
-    case 'browser.profile.proxy.create': return { operation: request.operation, ...await owned(() => ports.profiles.saveProxy(request.edit)) }
     case 'browser.profile.proxy.update': return { operation: request.operation, ...await owned(() => ports.profiles.saveProxy(request.edit, request.proxyId, request.expectedRevision)) }
     case 'browser.profile.proxy.delete': return { operation: request.operation, ...await owned(() => ports.profiles.deleteProxy(request.proxyId, request.expectedRevision)) }
     case 'browser.profile.proxy.assign': {
@@ -108,10 +112,6 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
     case 'browser.profile.network.check':
       existing(ports, request.profileId)
       return { operation: request.operation, profileId: request.profileId, check: await ports.network.checkExit(request.profileId) }
-    case 'browser.profile.folder.create': {
-      const folder = await owned(() => ports.profiles.createFolder(request.label, request.expectedRevision))
-      return { operation: request.operation, revision: ports.profiles.listRevision(), folder }
-    }
     case 'browser.profile.folder.rename': {
       const folder = await owned(() => ports.profiles.renameFolder(request.folderId, request.label, request.expectedRevision))
       return { operation: request.operation, revision: ports.profiles.listRevision(), folder }
@@ -120,8 +120,8 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
       const receipt = await owned(() => ports.profiles.deleteFolder(request.folderId, request.expectedRevision))
       return { operation: request.operation, revision: ports.profiles.listRevision(), deleted: true, ...receipt }
     }
-    case 'browser.profile.view.create': case 'browser.profile.view.update': {
-      const receipt = await owned(() => ports.profiles.saveView(request.label, request.query, request.expectedRevision, request.operation === 'browser.profile.view.update' ? request.viewId : undefined))
+    case 'browser.profile.view.update': {
+      const receipt = await owned(() => ports.profiles.saveView(request.label, request.query, request.expectedRevision, request.viewId))
       return { operation: request.operation, ...receipt }
     }
     case 'browser.profile.view.delete':
@@ -160,15 +160,6 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
         throw new AgentMuxError('Restoring a Browser Profile requires a person or device. Its original data is kept; ask the person to restore it.', 'BROWSER_PROFILE_RESTORE_REQUIRES_PERSON')
       }
       return { operation: request.operation, ...await owned(() => ports.profiles.restoreProfile(request.archiveId, request.expectedRevision, request.folderId)) }
-    }
-    case 'browser.profile.create': {
-      const profile = await owned(() => ports.profiles.createProfile(request.label))
-      return { operation: request.operation, revision: ports.profiles.listRevision(), profile }
-    }
-    case 'browser.profile.copy': {
-      existing(ports, request.profileId)
-      const profile = await owned(() => ports.profiles.copyProfile(request.profileId, request.label, request.expectedRevision))
-      return { operation: request.operation, revision: ports.profiles.listRevision(), sourceProfileId: request.profileId, profile }
     }
     case 'browser.profile.update': {
       existing(ports, request.profileId)

@@ -98,7 +98,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   }
   if ((isBrowserProfileExtensionOperation(operation) || (isBrowserProfileBookmarkOperation(operation) || isBrowserProfileCookieFileOperation(operation))) && operationId !== undefined) body.operationId = operationId
   if (operation !== 'browser.restore' && operation !== 'browser.release' &&
-    (!isBrowserProfileControlOperation(operation) || operation === 'browser.profile.network.probe' || operation === 'browser.profile.network.history') &&
+    (!isBrowserProfileControlOperation(operation) || operation === 'browser.profile.network.probe' || operation === 'browser.profile.network.history' || operation === 'browser.profile.creation.inspect' || ['browser.profile.create','browser.profile.copy','browser.profile.folder.create','browser.profile.view.create','browser.profile.proxy.create'].includes(operation)) &&
     operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
     'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'demand.start', 'demand.continuation-action', 'browser.run', 'browser.replay',

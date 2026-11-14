@@ -1,5 +1,6 @@
 /** Closed Desktop-private document members, never filesystem or public RPC keys. */
 export const DESKTOP_FRAGMENT_KEYS = {
+  browserProfileCreations: 'agentmux.browser-profile-creations.v1',
   browserProxyLibraryDrafts: 'agentmux.browser-proxy-library-drafts.v1',
   launcher: 'agentmux-launcher',
   agentBookmarks: 'agentmux.agent-bookmarks.v1',
@@ -9,6 +10,7 @@ export const DESKTOP_FRAGMENT_KEYS = {
   profileEnvironmentDrafts: 'agentmux.browser-profile-environment-drafts.v1'
 } as const
 export type DesktopFragmentValues = {
+  browserProfileCreations: string | null
   browserProxyLibraryDrafts: string | null
   launcher: string | null
   agentBookmarks: string | null

@@ -1462,6 +1462,8 @@ const mockApi: AgentMuxDesktopApi = {
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
       return structuredClone(browser)
     },
+    createProfileIdentity: async () => { throw new Error('Profile identity creation requires the connected Desktop owner.') },
+    inspectProfileCreation: async () => { throw new Error('Original Profile creation receipts require the connected Desktop owner.') },
     saveProxy: async () => { throw new Error('Proxy library editing needs the connected Desktop Profile owner.') },
     deleteProxy: async () => { throw new Error('Proxy library editing needs the connected Desktop Profile owner.') },
     assignProxy: async () => { throw new Error('Proxy assignment needs the connected Desktop Profile owner.') },
@@ -1521,23 +1523,8 @@ const mockApi: AgentMuxDesktopApi = {
     saveProfileView: async () => { throw new Error('Saved Profile views require the Desktop host.') },
     deleteProfileView: async () => { throw new Error('Saved Profile views require the Desktop host.') },
     bulkUpdateProfiles: async () => { throw new Error('Bulk Profile changes require the Desktop host.') },
-    createProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
     renameProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
     deleteProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
-    copyProfile: async () => { throw new Error('Copying Browser Profile settings requires the desktop app.') },
-    createProfile: async (label) => {
-      const profile: BrowserProfileSummary = {
-        revision: mintObjectId(),
-        id: mintObjectId(),
-        label,
-        createdAt: Date.now(),
-        isDefault: false,
-        source: null
-      }
-      mockBrowserProfiles = [...mockBrowserProfiles, profile]
-      publishMockBrowserProfiles()
-      return structuredClone(profile)
-    },
     readProfileTrash: async () => { throw new Error('Retained Profile data requires the Desktop Main owner.') },
     restoreProfile: async () => { throw new Error('Restoring original Profile data requires the Desktop Main owner.') },
     setProfileTrashRetention: async () => { throw new Error('Retention approval requires the Desktop Main Profile owner.') },

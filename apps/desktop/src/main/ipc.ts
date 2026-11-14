@@ -862,7 +862,7 @@ export async function registerIpc(args: {
     }
     if (isSettingsPreferenceMethod(request.operation)) return executeSettingsPreferencesControl(request as import('@agentmux/core').SettingsPreferenceRequest, configOwner)
     if (isBrowserProfileControlRequest(request)) return await executeBrowserProfileControl(request,
-      { profiles: browserProfiles, usage: profileUsage, network: profileNetworkControl, openBookmark: openProfileBookmark }, nameChangeRequests.getStore()?.context.actor)
+      { profiles: browserProfiles, usage: profileUsage, network: profileNetworkControl, openBookmark: openProfileBookmark }, nameChangeRequests.getStore()?.context.actor, { ...(nameChangeRequests.getStore()?.context.location.hostId ? { hostId: nameChangeRequests.getStore()!.context.location.hostId! } : {}) })
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
@@ -2269,12 +2269,20 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('browser:restoreProfile', (_event, archiveId: string, expectedRevision: string, folderId?: string | null) =>
     ipcResult(() => browserProfiles.restoreProfile(archiveId, expectedRevision, folderId)))
-  handleWithEvent('browser:createProfile', (event, label: string) => ipcResult(() => browserProfiles.createProfile(label)))
-  handleWithEvent('browser:copyProfile', (_event, profileId: string, label: string, expectedRevision: string) => ipcResult(() => browserProfiles.copyProfile(profileId, label, expectedRevision)))
+  handleWithEvent('browser:createProfileIdentity', (_event, raw: unknown) => ipcResult(async () => {
+    const { parseBrowserProfileControlPayload } = await import('@agentmux/core/control')
+    const input = parseBrowserProfileControlPayload(raw as Record<string, unknown>, ['operation'])
+    if (!['browser.profile.create','browser.profile.copy','browser.profile.folder.create','browser.profile.view.create','browser.profile.proxy.create'].includes(input.operation)) throw new Error('An exact Profile creation request is required.')
+    await browserProfiles.initialize()
+    return browserProfiles.createIdentity(input as Extract<import('@agentmux/core/control').BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>, nameChangeRequests.getStore()?.context.actor)
+  }))
+  handleWithEvent('browser:inspectProfileCreation', (_event, operationId: string) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    return browserProfiles.inspectCreation(operationId, nameChangeRequests.getStore()?.context.actor)
+  }))
   handleWithEvent('browser:saveProfileView', (_event, label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId?: string) => ipcResult(() => browserProfiles.saveView(label, query, expectedRevision, viewId)))
   handleWithEvent('browser:deleteProfileView', (_event, viewId: string, expectedRevision: number) => ipcResult(() => browserProfiles.deleteView(viewId, expectedRevision)))
   handleWithEvent('browser:bulkUpdateProfiles', (_event, items: import('@agentmux/core/control').BrowserProfileSelectionItem[], action: import('@agentmux/core/control').BrowserProfileBulkAction) => ipcResult(() => browserProfiles.bulkUpdate(items, action)))
-  handleWithEvent('browser:createProfileFolder', (_event, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.createFolder(label, expectedRevision)))
   handleWithEvent('browser:renameProfileFolder', (_event, folderId: string, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.renameFolder(folderId, label, expectedRevision)))
   handleWithEvent('browser:deleteProfileFolder', (_event, folderId: string, expectedRevision: number) => ipcResult(() => browserProfiles.deleteFolder(folderId, expectedRevision)))
   handleWithEvent('browser:setDefaultProfile', (event, profileId: string) => ipcResult(() => browserProfiles.setDefaultProfile(profileId)))

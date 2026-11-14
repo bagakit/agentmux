@@ -1,3 +1,4 @@
+import { isBrowserProfileCreationOperation, browserProfileCreationOperationId, parseBrowserProfileCreationInspection, type BrowserProfileCreationOperation, type BrowserProfileCreationInspection } from './browser-profile-creation.js'
 import { BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, isBrowserProfileCookieFileOperation, parseBrowserProfileCookieFilePayload, parseBrowserProfileCookieFileResult, assertBrowserProfileCookieFileTarget, type BrowserProfileCookieFileOperation, type BrowserProfileCookieFilePayload, type BrowserProfileCookieFileResult } from './browser-profile-cookie-files.js'
 import { BROWSER_PROFILE_BOOKMARK_OPERATIONS, isBrowserProfileBookmarkOperation, parseBrowserProfileBookmarkPayload, parseBrowserProfileBookmarkResult, assertBrowserProfileBookmarkTarget, type BrowserProfileBookmarkOperation, type BrowserProfileBookmarkPayload, type BrowserProfileBookmarkResult } from './browser-profile-bookmarks.js'
 import { parseBrowserProxyProbe, type BrowserProxyProbeReceipt, type BrowserProxyProbeHistory } from './browser-proxy-probe.js'
@@ -12,7 +13,7 @@ import { parseBrowserProfileQuery, parseBrowserProfileView, parseBrowserProfileS
  * typed requests and checks the shape of the owner's answers. No partition, cookie path or
  * credential is returned by this contract. A proxy sign-in write carries a password only to Main.
  */
-export const BROWSER_PROFILE_CONTROL_OPERATIONS = [...BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, ...BROWSER_PROFILE_BOOKMARK_OPERATIONS, ...BROWSER_PROFILE_EXTENSION_OPERATIONS, 'browser.profile.proxy.ls', 'browser.profile.proxy.create', 'browser.profile.proxy.update', 'browser.profile.proxy.delete', 'browser.profile.proxy.assign', 'browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
+export const BROWSER_PROFILE_CONTROL_OPERATIONS = [...BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, ...BROWSER_PROFILE_BOOKMARK_OPERATIONS, ...BROWSER_PROFILE_EXTENSION_OPERATIONS, 'browser.profile.creation.inspect', 'browser.profile.proxy.ls', 'browser.profile.proxy.create', 'browser.profile.proxy.update', 'browser.profile.proxy.delete', 'browser.profile.proxy.assign', 'browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
   'browser.profile.folder.create', 'browser.profile.folder.rename', 'browser.profile.folder.delete',
   'browser.profile.view.create', 'browser.profile.view.update', 'browser.profile.view.delete', 'browser.profile.bulk-update',
   'browser.profile.trash.ls', 'browser.profile.trash.restore', 'browser.profile.trash.retention', 'browser.profile.trash.purge', 'browser.profile.trash.inspect',
@@ -31,22 +32,23 @@ export type BrowserProfileControlEdit = { label?: string; hue?: number | null; n
   environment?: BrowserProfileEnvironment | null; tags?: string[]; folderId?: string | null; pinned?: boolean }
 
 export type BrowserProfileControlPayload = BrowserProfileCookieFilePayload | BrowserProfileBookmarkPayload | BrowserProfileExtensionPayload
+  | { operation: 'browser.profile.creation.inspect'; operationId: string }
   | { operation: 'browser.profile.proxy.ls' }
-  | { operation: 'browser.profile.proxy.create'; edit: BrowserProxyEdit }
+  | { operation: 'browser.profile.proxy.create'; operationId: string; edit: BrowserProxyEdit }
   | { operation: 'browser.profile.proxy.update'; proxyId: string; expectedRevision: string; edit: BrowserProxyEdit }
   | { operation: 'browser.profile.proxy.delete'; proxyId: string; expectedRevision: string }
   | { operation: 'browser.profile.proxy.assign'; proxyId: string; expectedRevision: string; items: BrowserProfileSelectionItem[] }
   | { operation: 'browser.profile.ls'; query?: BrowserProfileQuery; viewId?: string }
-  | { operation: 'browser.profile.view.create'; label: string; query: BrowserProfileQuery; expectedRevision: number }
+  | { operation: 'browser.profile.view.create'; operationId: string; label: string; query: BrowserProfileQuery; expectedRevision: number }
   | { operation: 'browser.profile.view.update'; viewId: string; label: string; query: BrowserProfileQuery; expectedRevision: number }
   | { operation: 'browser.profile.view.delete'; viewId: string; expectedRevision: number }
   | { operation: 'browser.profile.bulk-update'; items: BrowserProfileSelectionItem[]; action: BrowserProfileBulkAction }
-  | { operation: 'browser.profile.folder.create'; label: string; expectedRevision: number }
   | { operation: 'browser.profile.folder.rename'; folderId: string; label: string; expectedRevision: number }
   | { operation: 'browser.profile.folder.delete'; folderId: string; expectedRevision: number }
+  | { operation: 'browser.profile.folder.create'; operationId: string; label: string; expectedRevision: number }
+  | { operation: 'browser.profile.create'; operationId: string; label: string }
+  | { operation: 'browser.profile.copy'; operationId: string; profileId: string; expectedRevision: string; label: string }
   | { operation: 'browser.profile.inspect'; profileId: string }
-  | { operation: 'browser.profile.create'; label: string }
-  | { operation: 'browser.profile.copy'; profileId: string; expectedRevision: string; label: string }
   | { operation: 'browser.profile.update'; profileId: string; expectedRevision: string; edit: BrowserProfileControlEdit }
   | { operation: 'browser.profile.set-default'; profileId: string }
   | { operation: 'browser.profile.delete'; profileId: string; expectedRevision: string }
@@ -388,20 +390,18 @@ export type BrowserProfileControlUse = { browserId: string; workspaceId?: string
 export type BrowserProfileControlUsage = { browsers: BrowserProfileControlUse[]; complete: boolean; native?: BrowserProfileNativeUse }
 
 export type BrowserProfileControlResult = BrowserProfileCookieFileResult | BrowserProfileBookmarkResult | BrowserProfileExtensionResult
+  | { operation: BrowserProfileCreationOperation | 'browser.profile.creation.inspect'; revision: number; creation: BrowserProfileCreationInspection }
   | { operation: 'browser.profile.proxy.ls'; revision: number; proxies: BrowserProxyAsset[] }
-  | { operation: 'browser.profile.proxy.create' | 'browser.profile.proxy.update'; revision: number; proxy: BrowserProxyAsset }
+  | { operation: 'browser.profile.proxy.update'; revision: number; proxy: BrowserProxyAsset }
   | { operation: 'browser.profile.proxy.delete'; revision: number; proxyId: string; deleted: true }
   | { operation: 'browser.profile.proxy.assign'; revision: number; proxyId: string; proxyRevision: string; results: BrowserProfileBulkItemResult[] }
   | { operation: 'browser.profile.ls'; revision: number; sequence: number; profiles: BrowserProfileControlProfile[]; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; filter?: { query: BrowserProfileQuery; evaluatedAt: number; viewId?: string } }
-  | { operation: 'browser.profile.view.create' | 'browser.profile.view.update'; revision: number; view: BrowserProfileView }
+  | { operation: 'browser.profile.view.update'; revision: number; view: BrowserProfileView }
   | { operation: 'browser.profile.view.delete'; revision: number; viewId: string; deleted: true }
   | { operation: 'browser.profile.bulk-update'; revision: number; results: BrowserProfileBulkItemResult[] }
-  | { operation: 'browser.profile.folder.create'; revision: number; folder: BrowserProfileFolder }
   | { operation: 'browser.profile.folder.rename'; revision: number; folder: BrowserProfileFolder }
   | { operation: 'browser.profile.folder.delete'; revision: number; folderId: string; deleted: true; unassignedProfileIds: string[] }
   | { operation: 'browser.profile.inspect'; revision: number; sequence: number; profile: BrowserProfileControlProfile; usage: BrowserProfileControlUsage }
-  | { operation: 'browser.profile.create'; revision: number; profile: BrowserProfileControlProfile }
-  | { operation: 'browser.profile.copy'; revision: number; sourceProfileId: string; profile: BrowserProfileControlProfile }
   | { operation: 'browser.profile.update'; revision: number; profile: BrowserProfileControlProfile }
   | { operation: 'browser.profile.set-default'; revision: number; profileId: string }
   | ({ operation: 'browser.profile.delete' } & BrowserProfileRecycleReceipt)
@@ -479,24 +479,26 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
   if (!isBrowserProfileControlOperation(source.operation)) fail(code, 'Browser Profile operation is invalid.')
   const operation = source.operation as Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation>
   const fields: Record<Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation>, readonly string[]> = {
-    'browser.profile.proxy.ls': [], 'browser.profile.proxy.create': ['edit'], 'browser.profile.proxy.update': ['proxyId', 'expectedRevision', 'edit'],
+    'browser.profile.creation.inspect': ['operationId'], 'browser.profile.proxy.ls': [], 'browser.profile.proxy.create': ['operationId', 'edit'], 'browser.profile.proxy.update': ['proxyId', 'expectedRevision', 'edit'],
     'browser.profile.proxy.delete': ['proxyId', 'expectedRevision'], 'browser.profile.proxy.assign': ['proxyId', 'expectedRevision', 'items'],
     'browser.profile.ls': ['query', 'viewId'],
-    'browser.profile.view.create': ['label', 'query', 'expectedRevision'], 'browser.profile.view.update': ['viewId', 'label', 'query', 'expectedRevision'], 'browser.profile.view.delete': ['viewId', 'expectedRevision'], 'browser.profile.bulk-update': ['items', 'action'], 'browser.profile.folder.create': ['label', 'expectedRevision'],
-    'browser.profile.folder.rename': ['folderId', 'label', 'expectedRevision'], 'browser.profile.folder.delete': ['folderId', 'expectedRevision'], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['label'], 'browser.profile.copy': ['profileId', 'expectedRevision', 'label'],
+    'browser.profile.view.create': ['operationId', 'label', 'query', 'expectedRevision'], 'browser.profile.view.update': ['viewId', 'label', 'query', 'expectedRevision'], 'browser.profile.view.delete': ['viewId', 'expectedRevision'], 'browser.profile.bulk-update': ['items', 'action'], 'browser.profile.folder.create': ['operationId', 'label', 'expectedRevision'],
+    'browser.profile.folder.rename': ['folderId', 'label', 'expectedRevision'], 'browser.profile.folder.delete': ['folderId', 'expectedRevision'], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['operationId', 'label'], 'browser.profile.copy': ['operationId', 'profileId', 'expectedRevision', 'label'],
     'browser.profile.update': ['profileId', 'expectedRevision', 'edit'], 'browser.profile.set-default': ['profileId'], 'browser.profile.delete': ['profileId', 'expectedRevision'], 'browser.profile.trash.ls': [], 'browser.profile.trash.restore': ['archiveId', 'expectedRevision', 'folderId'],
     'browser.profile.trash.retention': ['archiveId', 'expectedRevision', 'purgeId', 'deleteAfter'], 'browser.profile.trash.purge': ['archiveId', 'expectedRevision', 'purgeId'], 'browser.profile.trash.inspect': ['purgeId'],
     'browser.profile.proxy-sign-in.set': ['profileId', 'signIn'], 'browser.profile.proxy-sign-in.clear': ['profileId'], 'browser.profile.network.check': ['profileId'], 'browser.profile.network.probe': ['profileId', 'operationId'], 'browser.profile.network.history': ['profileId', 'operationId', 'before']
   }
   record(source, [...envelope, ...fields[operation]], code, 'Browser Profile request')
   for (const key of fields[operation]) if (operation !== 'browser.profile.ls' && !(operation === 'browser.profile.trash.restore' && key === 'folderId') && !(operation === 'browser.profile.network.history' && key !== 'profileId') && !Object.hasOwn(source, key)) fail(code, `Browser Profile ${key} is required.`)
+  const creationOperationId = isBrowserProfileCreationOperation(operation) || operation === 'browser.profile.creation.inspect' ? browserProfileCreationOperationId(source.operationId) : undefined
   switch (operation) {
+    case 'browser.profile.creation.inspect': return { operation, operationId: creationOperationId! }
     case 'browser.profile.network.probe': return { operation, profileId: identity(source.profileId, code, 'Profile ID'), operationId: identity(source.operationId, code, 'Diagnostic operation ID') }
     case 'browser.profile.network.history':
       if (source.operationId !== undefined && source.before !== undefined) fail(code, 'Read an exact diagnostic or a history cursor, not both.')
       return { operation, profileId: identity(source.profileId, code, 'Profile ID'), ...(source.operationId === undefined ? {} : { operationId: identity(source.operationId, code, 'Diagnostic operation ID') }), ...(source.before === undefined ? {} : { before: identity(source.before, code, 'Diagnostic history cursor') }) }
     case 'browser.profile.proxy.ls': return { operation }
-    case 'browser.profile.proxy.create': return { operation, edit: parseBrowserProxyEdit(source.edit) }
+    case 'browser.profile.proxy.create': return { operation, operationId: creationOperationId!, edit: parseBrowserProxyEdit(source.edit) }
     case 'browser.profile.proxy.update': return { operation, proxyId: identity(source.proxyId, code, 'Proxy ID'), expectedRevision: identity(source.expectedRevision, code, 'Proxy configuration token'), edit: parseBrowserProxyEdit(source.edit) }
     case 'browser.profile.proxy.delete': return { operation, proxyId: identity(source.proxyId, code, 'Proxy ID'), expectedRevision: identity(source.expectedRevision, code, 'Proxy configuration token') }
     case 'browser.profile.proxy.assign': return { operation, proxyId: identity(source.proxyId, code, 'Proxy ID'), expectedRevision: identity(source.expectedRevision, code, 'Proxy configuration token'), items: parseBrowserProfileSelection(source.items) }
@@ -515,7 +517,7 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
       if (!label.trim()) fail(code, 'A folder name is required.')
       const expectedRevision = count(source.expectedRevision, code, 'Expected Browser Profile list revision')
       return operation === 'browser.profile.folder.rename' ? { operation, label, expectedRevision, folderId: identity(source.folderId, code, 'Folder ID') }
-        : { operation, label, expectedRevision }
+        : { operation, label, expectedRevision, operationId: creationOperationId! }
     }
     case 'browser.profile.folder.delete': return { operation, folderId: identity(source.folderId, code, 'Folder ID'), expectedRevision: count(source.expectedRevision, code, 'Expected Browser Profile list revision') }
     case 'browser.profile.ls':
@@ -525,6 +527,7 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
       const label = text(source.label, code, 'View name', 128)
       if (!label.trim() || label !== label.trim()) fail(code, 'A view needs a name without surrounding whitespace.')
       return { operation, label, query: parseBrowserProfileQuery(source.query), expectedRevision: count(source.expectedRevision, code, 'Expected configuration collection revision'),
+        ...(operation === 'browser.profile.view.create' ? { operationId: creationOperationId! } : {}),
         ...(operation === 'browser.profile.view.update' ? { viewId: identity(source.viewId, code, 'Saved view ID') } : {}) } as BrowserProfileControlPayload
     }
     case 'browser.profile.view.delete': return { operation, viewId: identity(source.viewId, code, 'Saved view ID'), expectedRevision: count(source.expectedRevision, code, 'Expected configuration collection revision') }
@@ -532,12 +535,12 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
     case 'browser.profile.copy': {
       const label = text(source.label, code, 'Browser Profile label', 512)
       if (!label.trim()) fail(code, 'Browser Profile label is required.')
-      return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: identity(source.expectedRevision, code, 'Expected Profile configuration revision'), label }
+      return { operation, operationId: creationOperationId!, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: identity(source.expectedRevision, code, 'Expected Profile configuration revision'), label }
     }
     case 'browser.profile.create': {
       const label = text(source.label, code, 'Browser Profile label', 512)
       if (!label.trim()) fail(code, 'Browser Profile label is required.')
-      return { operation, label }
+      return { operation, operationId: creationOperationId!, label }
     }
     case 'browser.profile.update': {
       const edit = record(source.edit, ['label', 'hue', 'notes', 'network', 'environment', 'tags', 'folderId', 'pinned'], code, 'Browser Profile edit')
@@ -678,8 +681,12 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
   if (isBrowserProfileBookmarkOperation(operation)) { const { operation: _operation, ...body } = parseBrowserProfileBookmarkResult(operation, value); return body }
   if (isBrowserProfileExtensionOperation(operation)) { const { operation: _operation, ...body } = parseBrowserProfileExtensionResult(operation, value); return body }
   const code = 'CONTROL_PROTOCOL_ERROR'
+  if (isBrowserProfileCreationOperation(operation) || operation === 'browser.profile.creation.inspect') {
+    const p = record(value, ['revision','creation'], code, 'Profile creation result')
+    return { revision: count(p.revision, code, 'Profile collection revision'), creation: parseBrowserProfileCreationInspection(p.creation, code) }
+  }
   const keys: Record<Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation>, readonly string[]> = {
-    'browser.profile.proxy.ls': ['revision', 'proxies'], 'browser.profile.proxy.create': ['revision', 'proxy'], 'browser.profile.proxy.update': ['revision', 'proxy'],
+    'browser.profile.creation.inspect': ['revision','creation'], 'browser.profile.proxy.ls': ['revision', 'proxies'], 'browser.profile.proxy.create': ['revision', 'proxy'], 'browser.profile.proxy.update': ['revision', 'proxy'],
     'browser.profile.proxy.delete': ['revision', 'proxyId', 'deleted'], 'browser.profile.proxy.assign': ['revision', 'proxyId', 'proxyRevision', 'results'],
     'browser.profile.ls': ['revision', 'sequence', 'profiles', 'folders', 'views', 'filter'],
     'browser.profile.view.create': ['revision', 'view'], 'browser.profile.view.update': ['revision', 'view'], 'browser.profile.view.delete': ['revision', 'viewId', 'deleted'], 'browser.profile.bulk-update': ['revision', 'results'],
@@ -737,7 +744,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
     if (new Set(proxies.map(proxy => proxy.id)).size !== proxies.length) fail(code, 'Proxy identities are duplicated.')
     return { revision, proxies }
   }
-  if (operation === 'browser.profile.proxy.create' || operation === 'browser.profile.proxy.update') return { revision, proxy: parseBrowserProxyAsset(row.proxy, code) }
+  if (operation === 'browser.profile.proxy.update') return { revision, proxy: parseBrowserProxyAsset(row.proxy, code) }
   if (operation === 'browser.profile.proxy.delete') {
     if (row.deleted !== true) fail(code, 'Proxy removal is unconfirmed.')
     return { revision, proxyId: identity(row.proxyId, code, 'Proxy ID'), deleted: true }
@@ -766,7 +773,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
       }
       return { revision, sequence: count(row.sequence, code, 'Profile snapshot sequence'), profiles, folders, views, ...(filter ? { filter } : {}) }
     }
-    case 'browser.profile.view.create': case 'browser.profile.view.update': return { revision, view: parseBrowserProfileView(row.view, code) }
+    case 'browser.profile.view.update': return { revision, view: parseBrowserProfileView(row.view, code) }
     case 'browser.profile.view.delete':
       if (row.deleted !== true) fail(code, 'Saved view deletion is unconfirmed.')
       return { revision, viewId: identity(row.viewId, code, 'Saved view ID'), deleted: true }
@@ -786,7 +793,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
       if (new Set(results.map(item => item.profileId)).size !== results.length) fail(code, 'Bulk Profile result identities are duplicated.')
       return { revision, results }
     }
-    case 'browser.profile.folder.create': case 'browser.profile.folder.rename': return { revision, folder: folder(row.folder, code) }
+    case 'browser.profile.folder.rename': return { revision, folder: folder(row.folder, code) }
     case 'browser.profile.folder.delete': {
       if (row.deleted !== true || !Array.isArray(row.unassignedProfileIds)) fail(code, 'Folder deletion receipt is invalid.')
       const ids = row.unassignedProfileIds.map(item => identity(item, code, 'Unassigned Profile ID'))
@@ -794,8 +801,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
       return { revision, folderId: identity(row.folderId, code, 'Folder ID'), deleted: true, unassignedProfileIds: ids }
     }
     case 'browser.profile.inspect': return { revision, sequence: count(row.sequence, code, 'Profile snapshot sequence'), profile: profile(row.profile, code), usage: usage(row.usage, code) }
-    case 'browser.profile.copy': return { revision, sourceProfileId: identity(row.sourceProfileId, code, 'Source Browser Profile ID'), profile: profile(row.profile, code) }
-    case 'browser.profile.create': case 'browser.profile.update': return { revision, profile: profile(row.profile, code) }
+    case 'browser.profile.update': return { revision, profile: profile(row.profile, code) }
     case 'browser.profile.set-default': return { revision, profileId: identity(row.profileId, code, 'Browser Profile ID') }
     case 'browser.profile.delete': return { revision, archive: archived(row.archive, code) }
     case 'browser.profile.trash.retention': return { revision, archive: archived(row.archive, code) }
@@ -816,6 +822,18 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
 
 /** The answer must be about the Profile this request named. */
 export function assertBrowserProfileControlTarget(request: BrowserProfileControlPayload, result: BrowserProfileControlResult): void {
+  if (isBrowserProfileCreationOperation(request.operation) || request.operation === 'browser.profile.creation.inspect') {
+    if (result.operation !== request.operation || !('creation' in result) || !('operationId' in request) || result.creation.operationId !== request.operationId ||
+      (isBrowserProfileCreationOperation(request.operation) && result.creation.receipt?.action !== request.operation))
+      fail('CONTROL_PROTOCOL_ERROR', 'Profile creation receipt belongs to another original operation.')
+    if (request.operation === 'browser.profile.copy' && 'creation' in result &&
+      (result.creation.receipt?.source?.profileId !== request.profileId || result.creation.receipt.source.expectedRevision !== request.expectedRevision || result.creation.receipt.createdId === request.profileId))
+      fail('CONTROL_PROTOCOL_ERROR', 'Profile copy receipt names another original source or configuration.')
+    if ((request.operation === 'browser.profile.folder.create' || request.operation === 'browser.profile.view.create') && 'creation' in result &&
+      result.creation.receipt?.expectedCollectionRevision !== request.expectedRevision)
+      fail('CONTROL_PROTOCOL_ERROR', 'Profile creation receipt names another original collection revision.')
+    return
+  }
   if (request.operation === 'browser.profile.network.probe') {
     if (result.operation !== request.operation || result.profileId !== request.profileId || result.diagnostic.id !== request.operationId || result.diagnostic.profileId !== request.profileId) fail('CONTROL_PROTOCOL_ERROR', 'Diagnostic receipt belongs to another original operation or Profile.')
     return
@@ -828,7 +846,7 @@ export function assertBrowserProfileControlTarget(request: BrowserProfileControl
   if (isBrowserProfileBookmarkOperation(request.operation)) { assertBrowserProfileBookmarkTarget(request as BrowserProfileBookmarkPayload, result as BrowserProfileBookmarkResult); return }
   if (isBrowserProfileExtensionOperation(request.operation)) { assertBrowserProfileExtensionTarget(request as BrowserProfileExtensionPayload, result as BrowserProfileExtensionResult); return }
   if (request.operation === 'browser.profile.proxy.ls') return
-  if (request.operation === 'browser.profile.proxy.create' || request.operation === 'browser.profile.proxy.update') {
+  if (request.operation === 'browser.profile.proxy.update') {
     if (result.operation !== request.operation || !('proxy' in result) || result.proxy.label !== request.edit.label || (request.operation === 'browser.profile.proxy.update' && result.proxy.id !== request.proxyId)) fail('CONTROL_PROTOCOL_ERROR', 'Proxy receipt belongs to another asset.')
     return
   }
@@ -860,7 +878,7 @@ export function assertBrowserProfileControlTarget(request: BrowserProfileControl
     if (result.operation !== request.operation || result.results.length !== request.items.length || result.results.some((item, index) => item.profileId !== request.items[index]!.profileId || item.expectedRevision !== request.items[index]!.expectedRevision)) fail('CONTROL_PROTOCOL_ERROR', 'Bulk result does not preserve the exact requested selection and tokens.')
     return
   }
-  if (request.operation === 'browser.profile.view.create' || request.operation === 'browser.profile.view.update') {
+  if (request.operation === 'browser.profile.view.update') {
     if (result.operation !== request.operation || !('view' in result) || result.view.label !== request.label || JSON.stringify(result.view.query) !== JSON.stringify(request.query) || (request.operation === 'browser.profile.view.update' && result.view.id !== request.viewId)) fail('CONTROL_PROTOCOL_ERROR', 'Saved view receipt belongs to another view or query.')
     return
   }
@@ -872,7 +890,7 @@ export function assertBrowserProfileControlTarget(request: BrowserProfileControl
     if (result.operation !== request.operation || (request.query !== undefined && JSON.stringify(result.filter?.query) !== JSON.stringify(request.query)) || (request.viewId !== undefined && result.filter?.viewId !== request.viewId) || (request.query === undefined && request.viewId === undefined && result.filter !== undefined)) fail('CONTROL_PROTOCOL_ERROR', 'Profile list scope differs from the requested query.')
     return
   }
-  if (request.operation === 'browser.profile.folder.create' || request.operation === 'browser.profile.folder.rename') {
+  if (request.operation === 'browser.profile.folder.rename') {
     if (result.operation !== request.operation || !('folder' in result) || result.folder.label !== request.label ||
       (request.operation === 'browser.profile.folder.rename' && result.folder.id !== request.folderId)) fail('CONTROL_PROTOCOL_ERROR', 'Folder result belongs to another folder or name.')
     return
@@ -881,17 +899,7 @@ export function assertBrowserProfileControlTarget(request: BrowserProfileControl
     if (result.operation !== request.operation || result.folderId !== request.folderId) fail('CONTROL_PROTOCOL_ERROR', 'Folder deletion belongs to another folder.')
     return
   }
-  if (request.operation === 'browser.profile.copy') {
-    if (result.operation !== 'browser.profile.copy' || result.sourceProfileId !== request.profileId || result.profile.id === request.profileId ||
-      result.profile.label !== request.label || result.profile.source !== null || result.profile.isDefault || result.profile.pinned === true) {
-      fail('CONTROL_PROTOCOL_ERROR', 'Copied Browser Profile result does not identify the original source and a new settings-only Profile.')
-    }
-    return
-  }
   const named = 'profileId' in request ? request.profileId : null
   const answered = 'profile' in result ? result.profile.id : 'profileId' in result ? result.profileId : null
   if (named !== null && answered !== named) fail('CONTROL_PROTOCOL_ERROR', 'Browser Profile result belongs to another Profile.')
-  if (request.operation === 'browser.profile.create' && result.operation === 'browser.profile.create' && result.profile.label !== request.label) {
-    fail('CONTROL_PROTOCOL_ERROR', 'Created Browser Profile has another label.')
-  }
 }

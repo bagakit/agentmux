@@ -1,3 +1,4 @@
+import { submitProfileCreation, profileCreationObservationNotice } from '../../lib/browser-profile-creations'
 import { BrowserProfileCookieFiles } from './BrowserProfileCookieFiles'
 import { BrowserProfileBookmarks } from './BrowserProfileBookmarks'
 import { BrowserProfileExtensions } from './BrowserProfileExtensions'
@@ -150,9 +151,9 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     let n = 1
     while (taken.has(`Profile ${n}`)) n += 1
     const label = `Profile ${n}`
-    let created: BrowserProfileSummary | null = null
-    if (await run('create', async () => { created = await api.browser.createProfile(label) })) {
-      setSelectedId(created!.id); setView('editor'); setRenameRequest(created!.id)
+    let created: string | null = null
+    if (await run('create', async () => { const result = await submitProfileCreation({ operation: 'browser.profile.create', label }); created = result.creation.receipt!.createdId; const observation = profileCreationObservationNotice(result.creation); if (observation) setNotice(observation); if (result.creation.current.state !== 'present') throw new Error('The original created Profile is now ' + result.creation.current.state + '. Its creation receipt is retained.') })) {
+      setSelectedId(created!); setView('editor'); setRenameRequest(created!)
     }
   }
 
@@ -161,11 +162,11 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     const taken = new Set(profiles.map(value => value.label))
     let n = 1, label: string
     do { const suffix = n === 1 ? ' copy' : ` copy ${n}`; label = profile.label.slice(0, 128 - suffix.length).trimEnd() + suffix; n += 1 } while (taken.has(label))
-    let copied: BrowserProfileSummary | null = null
-    if (await run('copy', async () => { copied = await api.browser.copyProfile(profile.id, label, revision) })) {
+    let copied: string | null = null, observation: string | null = null
+    if (await run('copy', async () => { const result = await submitProfileCreation({ operation: 'browser.profile.copy', profileId: profile.id, label, expectedRevision: revision }); copied = result.creation.receipt!.createdId; observation = profileCreationObservationNotice(result.creation); if (result.creation.current.state !== 'present') throw new Error('The original copied Profile is now ' + result.creation.current.state + '. Its creation receipt is retained.') })) {
       // Keep the source editor mounted: its unsaved route/sign-in inputs belong to the person.
-      setCopyTarget({ id: copied!.id, label: copied!.label })
-      setNotice(`Copied saved settings to “${copied!.label}”. Sign-ins, site data and approvals stay with the original Profile.`)
+      setCopyTarget({ id: copied!, label })
+      setNotice(observation ?? `Copied saved settings to “${label}”. Sign-ins, site data and approvals stay with the original Profile.`)
     }
   }
 

@@ -1,3 +1,4 @@
+import type { AgentMuxNameActor, BrowserProfileCreationOperation, BrowserProfileControlPayload } from '@agentmux/core/control'
 import { BrowserProfileCookieFiles } from './browser-profile-cookie-files.js'
 import { openProfileCookieFileNative } from './browser-profile-cookie-file-native.js'
 import { BrowserProfileBookmarks } from './browser-profile-bookmarks.js'
@@ -263,10 +264,10 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   listViews(): BrowserProfileView[] { this.assertInitialized(); return structuredClone(this.views) }
 
-  async saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<BrowserProfileViewSaveReceipt> {
+  async saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string, creation?: { operationId: string; actor: AgentMuxNameActor }): Promise<BrowserProfileViewSaveReceipt> {
     this.assertInitialized()
     return this.trackMutation((async () => {
-      const { snapshot, view } = await this.store.saveView(label, parseBrowserProfileQuery(query), expectedRevision, viewId)
+      const { snapshot, view } = await this.store.saveView(label, parseBrowserProfileQuery(query), expectedRevision, viewId, creation)
       this.adopt(snapshot)
       return { view, revision: snapshot.revision }
     })())
@@ -373,11 +374,11 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   listProxies(): BrowserProxyAsset[] { this.assertInitialized(); return structuredClone(this.proxyAssets) }
 
-  async saveProxy(edit: BrowserProxyEdit, proxyId?: string, expectedRevision?: string): Promise<{ proxy: BrowserProxyAsset; revision: number }> {
+  async saveProxy(edit: BrowserProxyEdit, proxyId?: string, expectedRevision?: string, creation?: { operationId: string; actor: AgentMuxNameActor }): Promise<{ proxy: BrowserProxyAsset; revision: number }> {
     this.assertInitialized()
     return this.trackMutation((async () => {
       let saved: Awaited<ReturnType<BrowserProfileStore['saveProxy']>>
-      try { saved = await this.store.saveProxy(edit, proxyId, expectedRevision) }
+      try { saved = await this.store.saveProxy(edit, proxyId, expectedRevision, creation) }
       catch (error) { await this.observeUnconfirmedWrite(error); throw error }
       this.adopt(saved.snapshot)
       return { proxy: saved.proxy, revision: saved.snapshot.revision }
@@ -438,29 +439,44 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     })())
   }
 
-  async createProfile(label: string): Promise<BrowserProfileSummary> {
+  async createIdentity(input: Extract<BrowserProfileControlPayload, { operation: BrowserProfileCreationOperation }>, actor: AgentMuxNameActor | undefined) {
+    this.assertInitialized()
+    return this.trackMutation((async () => {
+      const { snapshot, creation } = await this.store.createIdentity(input, actor)
+      if (snapshot.sequence > this.sequence) this.adopt(snapshot)
+      return { revision: snapshot.revision, creation }
+    })())
+  }
+  async inspectCreation(operationId: string, actor: AgentMuxNameActor | undefined) {
+    this.assertInitialized()
+    const { snapshot, creation } = await this.store.readCreation(operationId, actor)
+    if (snapshot.sequence > this.sequence) this.adopt(snapshot)
+    return { revision: snapshot.revision, creation }
+  }
+
+  async createProfile(label: string, operationId: string, actor: AgentMuxNameActor): Promise<BrowserProfileSummary> {
     this.assertInitialized()
     const validatedLabel = validateBrowserProfileLabel(label)
     return await this.trackMutation((async () => {
-      const { snapshot, profile } = await this.store.createProfile(validatedLabel)
+      const { snapshot, profile } = await this.store.createProfile(validatedLabel, operationId, actor)
       this.adopt(snapshot)
       return cloneProfile(profile)
     })())
   }
 
   /** Copy only saved settings. A new native session is prepared when a Browser actually opens it. */
-  async copyProfile(profileId: string, label: string, expectedRevision: string): Promise<BrowserProfileSummary> {
+  async copyProfile(profileId: string, label: string, expectedRevision: string, operationId: string, actor: AgentMuxNameActor): Promise<BrowserProfileSummary> {
     this.resolvePartition(profileId)
     return this.configuration(profileId, async () => {
-      const { snapshot, profile } = await this.store.copyProfile(profileId, label, expectedRevision)
+      const { snapshot, profile } = await this.store.copyProfile(profileId, label, expectedRevision, operationId, actor)
       this.adopt(snapshot)
       return cloneProfile(profile)
     })
   }
 
-  async createFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder> {
+  async createFolder(label: string, expectedRevision: number, operationId: string, actor: AgentMuxNameActor): Promise<BrowserProfileFolder> {
     this.assertInitialized()
-    return this.trackMutation((async () => { const { snapshot, folder } = await this.store.createFolder(label, expectedRevision); this.adopt(snapshot); return folder })())
+    return this.trackMutation((async () => { const { snapshot, folder } = await this.store.createFolder(label, expectedRevision, operationId, actor); this.adopt(snapshot); return folder })())
   }
   async renameFolder(folderId: string, label: string, expectedRevision: number): Promise<BrowserProfileFolder> {
     this.assertInitialized()

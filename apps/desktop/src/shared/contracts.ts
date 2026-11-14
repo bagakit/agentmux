@@ -2140,7 +2140,9 @@ export type AgentMuxDesktopApi = {
     removeProfileExtension(profileId: string, expectedRevision: string, extensionId: string, operationId: string): Promise<{ profileId: string; profileRevision: string; outcome: 'applied' | 'cancelled'; receipt: import('@agentmux/core/control').BrowserProfileExtensionReceipt | null; application?: import('@agentmux/core/control').BrowserProfileExtensionApplication }>
     loadProfileExtension(profileId: string, extensionId: string): Promise<{ profileId: string; extensionId: string; application: import('@agentmux/core/control').BrowserProfileExtensionApplication }>
 
-    saveProxy(edit: import('@agentmux/core/control').BrowserProxyEdit, proxyId?: string, expectedRevision?: string): Promise<{ proxy: import('@agentmux/core/control').BrowserProxyAsset; revision: number }>
+    createProfileIdentity(input: Extract<import('@agentmux/core/control').BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>): Promise<{ revision: number; creation: import('@agentmux/core/control').BrowserProfileCreationInspection }>
+    inspectProfileCreation(operationId: string): Promise<{ revision: number; creation: import('@agentmux/core/control').BrowserProfileCreationInspection }>
+    saveProxy(edit: import('@agentmux/core/control').BrowserProxyEdit, proxyId: string, expectedRevision: string): Promise<{ proxy: import('@agentmux/core/control').BrowserProxyAsset; revision: number }>
     deleteProxy(proxyId: string, expectedRevision: string): Promise<{ proxyId: string; revision: number; deleted: true }>
     assignProxy(proxyId: string, expectedRevision: string, items: import('@agentmux/core/control').BrowserProfileSelectionItem[]): Promise<import('@agentmux/core/control').BrowserProfileBulkItemResult[]>
     readProfileTrash(): Promise<BrowserProfileTrashList>
@@ -2153,12 +2155,9 @@ export type AgentMuxDesktopApi = {
     updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string): Promise<BrowserProfileSummary>
     /** Moves only which Profile new Browsers use; it edits no Profile, so it names no revision. */
     setDefaultProfile(profileId: string): Promise<void>
-    createProfile(label: string): Promise<BrowserProfileSummary>
-    copyProfile(profileId: string, label: string, expectedRevision: string): Promise<BrowserProfileSummary>
-    saveProfileView(label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<import('@agentmux/core/control').BrowserProfileViewSaveReceipt>
+    saveProfileView(label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId: string): Promise<import('@agentmux/core/control').BrowserProfileViewSaveReceipt>
     deleteProfileView(viewId: string, expectedRevision: number): Promise<void>
     bulkUpdateProfiles(items: import('@agentmux/core/control').BrowserProfileSelectionItem[], action: import('@agentmux/core/control').BrowserProfileBulkAction): Promise<import('@agentmux/core/control').BrowserProfileBulkItemResult[]>
-    createProfileFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     renameProfileFolder(folderId: string, label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     deleteProfileFolder(folderId: string, expectedRevision: number): Promise<{ folderId: string; unassignedProfileIds: string[] }>
     deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string): Promise<import('@agentmux/core/control').BrowserProfileRecycleReceipt>
