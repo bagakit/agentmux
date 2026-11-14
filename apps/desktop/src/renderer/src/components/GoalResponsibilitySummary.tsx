@@ -1,4 +1,5 @@
 import { compactReferenceId } from '@agentmux/client-ui/display-name'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { demandAgentReferenceLabel, type DemandAgentReference } from '@agentmux/demand/relations'
 import { useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -10,6 +11,8 @@ import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { GoalPatrolControl } from './GoalPatrolControl'
 import { GoalContinuationAgent } from './GoalContinuationControl'
+
+const DisclosureIcon = semanticIconComponent('navigation.disclosure')
 
 export const GOAL_RESPONSIBILITY_LABELS: Record<GoalResponsibilityPhase, string> = {
   executing: 'Executing', 'idle-grace': 'Awaiting report', stalled: 'Execution stalled', 'needs-input': 'Needs a response', blocked: 'Blocked',
@@ -45,7 +48,7 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
   // or a retained issue still needs this block.
   const patrolPresent = Boolean(current.patrols?.some(item => item.purpose !== 'plan'))
   if (!observed && !hasExecutionRecords && !patrolPresent && !retained && !issue && !current.delegationObservationIssue) return null
-  return <div className={`goal-responsibility${compact ? ' goal-responsibility--compact' : ''}`} aria-label="Execution responsibility" data-goal-responsibility={current.id}>
+  const body = <div className={`goal-responsibility${compact ? ' goal-responsibility--compact' : ''}`} aria-label="Execution responsibility" data-goal-responsibility={current.id}>
     {!compact && !embedded ? <strong className="goal-responsibility__heading">Execution responsibility</strong> : null}
     {observed && !embedded ? <div className="goal-responsibility__manager"><span>Supervisor</span>{observed.supervisor.agentReference ? identity(observed.supervisor.agentReference) : observed.supervisor.agentSessionId ? identity(observed.supervisor.agentSessionId, observed.supervisor.hostId) : <span>Unassigned</span>}
       {observed.supervisor.state === 'ended' ? <span className="goal-responsibility__notice">Supervisor Run ended · Restore original Session</span>
@@ -79,6 +82,17 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
     <GoalPatrolControl demand={current} compact={compact} embedded={embedded} primary={primary} />
     {retained || issue || !embedded && current.delegationObservationIssue ? <p className="goal-responsibility__reason" role="status">{issue ?? (!embedded ? current.delegationObservationIssue : undefined) ?? 'Refreshing responsibility; last confirmed facts remain visible.'}</p> : null}
   </div>
+  if (!compact) return body
+  const summary = current.delegationObservationIssue || retained || !observed && hasExecutionRecords ? 'Observation unconfirmed'
+    : attention.length ? `${attention.length} ${attention.length === 1 ? 'execution needs' : 'executions need'} attention`
+      : observed && ['unknown', 'missing', 'ended', 'blocked'].includes(observed.supervisor.state)
+        ? observed.supervisor.state === 'unknown' ? 'Supervisor unconfirmed' : observed.supervisor.state === 'missing' ? 'Supervisor unassigned' : observed.supervisor.state === 'ended' ? 'Supervisor Run ended' : 'Supervisor needs attention'
+        : rows.length ? `${rows.length} ${rows.length === 1 ? 'execution' : 'executions'}` : 'Inspection and recovery'
+  return <details className="goal-responsibility-preview" data-goal-responsibility-preview={current.id} onClick={event => event.stopPropagation()}
+    onKeyDown={event => { if (event.key === 'Escape' && event.currentTarget.open) { event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() } }}>
+    <summary><span className="goal-responsibility-preview__state" data-attention={attention.length > 0 || Boolean(current.delegationObservationIssue) || observed?.supervisor.state === 'unknown' || undefined}>{summary}</span><span className="goal-responsibility-preview__more">Details & recovery<DisclosureIcon size={12} aria-hidden="true" /></span></summary>
+    {body}
+  </details>
 }
 
 /** The exact execution's owner facts, embedded in its one original work record. */
