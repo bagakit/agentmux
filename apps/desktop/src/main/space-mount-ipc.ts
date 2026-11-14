@@ -31,7 +31,14 @@ export function registerSpaceMountIpc(ports: {
 }) {
   const reads = new SessionHistoryReadOwners()
   const members = new Map<string, SpaceMountMemberSurface>()
-  ports.handle('spaceMounts:call', (event, token: string, method: unknown, value: unknown) => sessionInputOperationResult(() => reads.read(event.sender, token, async signal => {
+  ports.handle('spaceMounts:call', (event, token: string, method: unknown, value: unknown) => sessionInputOperationResult(async () => {
+    if (method === 'register') {
+      const p = fields(value, ['hostId', 'registration']), originalHost = host(p.hostId), packet = structuredClone(parseFolderSpaceRegisterInput(p.registration))
+      let obtained: Awaited<ReturnType<RuntimeController['registerFolderSpace']>> | undefined
+      try { return await reads.read(event.sender, token, async signal => obtained = await ports.runtime.registerFolderSpace(originalHost, packet, signal)) }
+      catch (cause) { if (obtained) return obtained; throw cause }
+    }
+    return await reads.read(event.sender, token, async signal => {
     if (method === 'resources') { const p = fields(value, ['hostId']); return await ports.runtime.spaceMountResources(host(p.hostId), signal) }
     if (method === 'memberNameInspect' || method === 'memberNameChange') {
       const p = fields(value, ['hostId', 'reference', 'name']), target = { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
@@ -51,7 +58,6 @@ export function registerSpaceMountIpc(ports: {
       return method === 'routeChoices' ? await ports.runtime.mountedSpaceRouteChoices(target, signal)
         : await ports.runtime.mountedSpaceRouteExecutors(target, parseHostRouteAgentTarget(p.agentTarget), signal, p.executorId === undefined ? undefined : host(p.executorId))
     }
-    if (method === 'register') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.registerFolderSpace(host(p.hostId), parseFolderSpaceRegisterInput(p.registration), signal) }
     if (method === 'inspectRegistration') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.inspectFolderSpace(host(p.hostId), parseFolderSpaceRegistration(p.registration), signal) }
     if (method === 'snapshot' || method === 'apply') {
       const p = fields(value, method === 'snapshot' ? ['hostId', 'reference'] : ['hostId', 'reference', 'edit'])
@@ -71,7 +77,8 @@ export function registerSpaceMountIpc(ports: {
         focus: parsed.focus, ...(parsed.moteMain ? { moteMain: parsed.moteMain } : {}) }, signal)
     }
     throw new Error('Unknown fixed Space mount operation.')
-  })))
+    })
+  }))
   ports.handle('spaceMounts:cancel', (event, token: string) => reads.cancel(event.sender.id, token))
   function reader<I, E extends { type: string }>(event: IpcMainInvokeEvent, token: string, eventChannel: string,
     open: (signal: AbortSignal, listener: (observation: E) => void) => Promise<{ initial: I; dispose(): unknown | Promise<unknown> }>) {

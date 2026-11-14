@@ -14,7 +14,8 @@ export function createRendererSpaceMount(preload: SpaceMountPreloadApi): SpaceMo
     },
     call: async (method, input, signal) => {
       signal?.throwIfAborted()
-      const result = await preload.call(method, input, cancellation(signal)); signal?.throwIfAborted()
+      const result = await preload.call(method, input, cancellation(signal))
+      if (method !== 'register') signal?.throwIfAborted() // Preserve the original registration effect receipt.
       return unwrapSessionInputOperationResult(result)
     },
     sessions: async (input, listener, signal) => {
