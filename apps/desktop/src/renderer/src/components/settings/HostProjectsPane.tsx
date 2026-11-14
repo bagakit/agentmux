@@ -12,6 +12,7 @@ import { projectRailNavigation } from '../../lib/workspace-projects'
 import { useAppStore } from '../../store'
 import type { WorkspaceRecord } from '../../../../shared/contracts'
 import './host-projects.css'
+import { HostOriginalSpaces } from './HostOriginalSpaces'
 
 const ThemeActionCreateFolderIcon = semanticIconComponent('action.create-folder')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -135,6 +136,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
 
   return <section className="host-projects" hidden={hidden} data-host-projects={hostId}
     aria-label={`Projects on ${host?.label ?? 'unsaved environment'}`}>
+    {host ? <HostOriginalSpaces key={host.id} host={host} active={active && !hidden} onClose={onClose} /> : null}
     <header className="host-projects__heading">
       <div><strong>Projects</strong><small>{projects.length} {projects.length === 1 ? 'project' : 'projects'} on this environment</small></div>
       <button type="button" className="small-button" disabled={!host} onClick={() => setAdding(current => !current)}>

@@ -33,6 +33,7 @@ import {
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { agentActivityCounts } from '../lib/project-board'
 import { useAppStore } from '../store'
+import { MountedSpaceNavigation } from './MountedSpaceNavigation'
 import { SpaceTopicsTree } from './SpaceTopicsTree'
 import { SpaceCreateMenu } from './SpaceCreateMenu'
 import { SpaceDisclosure, SpaceSectionHeader } from './SpaceSectionHeader'
@@ -65,6 +66,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const displayPath = usePathDisplay()
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
+  const selectedSpaceMount = useAppStore(state => state.selectedSpaceMount)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const openHostHome = useAppStore(state => state.openHostHome)
@@ -182,7 +184,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       reportError(error)
     }
   }
-  const activeProjectId = activeWorkspace && activeWorkspace.id !== scratch?.id
+  const activeProjectId = selectedSpaceMount === null && activeWorkspace && activeWorkspace.id !== scratch?.id
     ? workspaceProjectId(activeWorkspace)
     : null
 
@@ -399,6 +401,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         >{railDensity === 'default' ? <ThemeLayoutRows2Icon size={15} /> : railDensity === 'compact' ? <ThemeLayoutRows3Icon size={15} /> : <ThemeLayoutRows4Icon size={15} />}</button>
       </div>
       <div className="space-tree" ref={treeRef} onKeyDown={navigateSpaceTree}>
+        <MountedSpaceNavigation query={query} />
         {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={changeIcon} visible={visible} /> : null}
         <ProjectGroupsTree projects={projects} query={query} activeProjectId={activeProjectId}
           visible={visible}
@@ -438,7 +441,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
             )
           })}
           {section.projects.length === 0 && !filtering && !foldersCollapsed ? (
-            <div className="workspace-list__empty"><span>{section.hostId === 'local' ? 'Open a folder to get started.' : `No folders on ${section.label}.`}</span></div>
+            <div className="workspace-list__empty"><span>{section.hostId === 'local' ? 'Open a folder to get started.' : 'No folders registered in this window.'}</span></div>
           ) : null}
         </nav>)
         })}

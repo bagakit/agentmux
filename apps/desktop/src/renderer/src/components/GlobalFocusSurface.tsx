@@ -1,4 +1,5 @@
 import { LocalRetainedInputsPanel } from './LocalRetainedInputs'
+import { MountedSpaceFocus } from './MountedSpaceFocus'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -468,6 +469,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     </FocusToolbar>
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main" data-agent-reveal={agentReveal ? true : undefined}>
+      <MountedSpaceFocus visible={visible} query={query} />
       {agentReveal ? <div className="focus-agent-reveal" role="status" aria-label="Focus Agent reveal">
         <span>{revealedContext ? revealOutsideFilters ? 'Showing ' + revealedContext.context.name + ' outside current filters.' : 'Located ' + revealedContext.context.name + '.'
           : 'Original Context is unconfirmed · ' + agentReveal.hostId + ' · ' + agentReveal.agentSessionId + '. The current filters and work are kept.'}</span>{' '}
