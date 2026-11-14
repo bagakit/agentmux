@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeImage, screen } from 'electron'
@@ -60,10 +61,14 @@ async function run() {
     backgroundColor: '#ff00c8', title: `Native host exclusion ${process.pid}`,
     webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } })
   await host.loadURL('data:text/html,<html><body style="margin:0;width:100vw;height:100vh;overflow:hidden;background:%23ff00c8"></body></html>')
-  host.show(); host.focus()
+  host.show(); app.focus({ steal: true }); host.focus()
   await host.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+  for (const deadline = Date.now() + 5000; Date.now() < deadline && (!app.isActive() || !host.isFocused());) {
+    app.focus({ steal: true }); host.focus()
+    await wait(50)
+  }
   await wait(150)
-  check('the uniquely colored host window is visible', host.isVisible())
+  check('the uniquely colored host window is visible and frontmost', host.isVisible() && app.isActive() && host.isFocused())
   const content = host.getContentBounds(), display = screen.getDisplayMatching(content)
   const own = colorPixels((await host.webContents.capturePage()).toPNG().toString('base64'),
     { x: 20, y: 20, width: content.width - 40, height: content.height - 40 })
@@ -83,22 +88,32 @@ async function run() {
   }
   check('actual window discovery binds the exact visible host geometry', discovered?.id > 0)
   await wait(250)
+  app.focus({ steal: true }); host.focus()
+  for (const deadline = Date.now() + 5000; Date.now() < deadline && (!app.isActive() || !host.isFocused());) {
+    app.focus({ steal: true }); host.focus()
+    await wait(50)
+  }
+  await wait(100)
+  check('the host is frontmost immediately before included capture', app.isActive() && host.isFocused())
 
   const included = await native.captureDisplays({ includeHostWindows: true })
   const includedFrame = frameFor(included, display.id), includedRegion = hostRegion(includedFrame, content)
   const includedPixels = colorPixels(includedFrame.png, includedRegion)
   const includedWholeDisplay = colorPixels(includedFrame.png, { x: 0, y: 0, width: includedFrame.width, height: includedFrame.height })
   receipt.included = { colorPixels: includedPixels.matches, regionArea: includedPixels.area, fullDisplayColorPixels: includedWholeDisplay.matches,
-    region: includedRegion, timing: included.timing }
+    region: includedRegion, capturedAt: included.capturedAt, engine: includedFrame.engine, timing: included.timing }
   check('included window list contains the discovered host', includedFrame.windows.some((window: any) => window.windowId === discovered.id))
   check('included isolated-region unique color is present', includedPixels.area > 100 && includedPixels.matches > includedPixels.area * 0.9)
 
   // The host stays fully visible. Exclusion is native filtering, not opacity or hiding.
-  check('the host remains visible for the excluded capture', host.isVisible() && host.getOpacity() === 1)
+  execFileSync('open', ['-a', 'Finder'])
+  for (const deadline = Date.now() + 5000; Date.now() < deadline && app.isActive();) await wait(50)
+  check('the host remains visible while another app is frontmost', host.isVisible() && host.getOpacity() === 1 && !app.isActive() && !host.isFocused())
   const excluded = await native.captureDisplays({ includeHostWindows: false })
   const excludedFrame = frameFor(excluded, display.id), excludedRegion = hostRegion(excludedFrame, content)
   const excludedPixels = colorPixels(excludedFrame.png, excludedRegion)
-  receipt.excluded = { colorPixels: excludedPixels.matches, regionArea: excludedPixels.area, timing: excluded.timing }
+  receipt.excluded = { colorPixels: excludedPixels.matches, regionArea: excludedPixels.area, capturedAt: excluded.capturedAt,
+    engine: excludedFrame.engine, hostListed: excludedFrame.windows.some((window: any) => window.windowId === discovered.id), timing: excluded.timing }
   check('excluded isolated-region unique color is absent', excludedPixels.area > 100 && excludedPixels.matches === 0)
   check('excluded window list omits the discovered host', excludedFrame.windows.every((window: any) => window.windowId !== discovered.id))
   check('included native and Node timing are bounded', boundedTiming(included.timing, ['contentMs', 'windowListMs', 'totalMs', 'requestMs', 'validationMs'])
