@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { chooseField } from './helpers/selection-field'
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
@@ -37,7 +38,11 @@ beforeEach(() => {
 })
 async function show(props = {}) { await dom.render(<View {...props} />); await dom.click('.host-projects__heading button') }
 async function choose(id = 'shared') {
-  await act(async () => { const select = dom.container.querySelector('select')!; select.value = id; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  await chooseField(dom.container.querySelector<HTMLButtonElement>('[aria-label="Prepare an Agent"]')!, id)
+}
+async function options() {
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Prepare an Agent"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  return [...document.querySelectorAll('.selection-field__menu [role="menuitemradio"]')]
 }
 async function open() {
   await act(async () => {
@@ -49,10 +54,10 @@ async function open() {
 }
 it('projects target-only choices and prepares the selected target in its returned folder without starting', async () => {
   await show()
-  const options = [...dom.container.querySelectorAll('option')]
-  expect(options.map(item => item.value)).toEqual(['', 'shared', 'remote-only'])
-  expect(options[1]!.textContent).toContain('Remote Agent')
-  expect(options[1]!.textContent).toContain('Available')
+  const optionItems = await options()
+  expect(optionItems.map(item => item.dataset.value)).toEqual(['', 'shared', 'remote-only'])
+  expect(optionItems[1]!.textContent).toContain('Remote Agent')
+  expect(optionItems[1]!.textContent).toContain('Available')
   await choose('remote-only'); await open()
   expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
   const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'launcher' && region.workspaceId === 'new-folder'))!
@@ -65,7 +70,7 @@ it('retains unknown connection facts without blocking registration or treating c
   useAppStore.setState({ hostExecutorInventories: { remote: retained } })
   await show()
   expect(dom.container.textContent).toContain('SSH observation unavailable')
-  expect(dom.container.querySelector('option[value="shared"]')!.textContent).toContain('Check failed')
+  expect((await options()).find(item => item.dataset.value === 'shared')!.textContent).toContain('Check failed')
   expect(useAppStore.getState().discoverHostExecutors).not.toHaveBeenCalled()
   await open()
   expect(api.workspaces.add).toHaveBeenCalledOnce()
@@ -113,10 +118,10 @@ it('discovers only a visible active form and rejects stale inventory from anothe
   expect(useAppStore.getState().discoverHostExecutors).not.toHaveBeenCalled()
   await dom.render(<View />)
   expect(useAppStore.getState().discoverHostExecutors).toHaveBeenCalledExactlyOnceWith('remote')
-  expect([...dom.container.querySelectorAll('option')].map(item => item.value)).toEqual([''])
+  expect((await options()).map(item => item.dataset.value)).toEqual([''])
 })
 it('keeps local template choices without a remote discovery', async () => {
   await show({ hostId: 'local' })
-  expect([...dom.container.querySelectorAll('option')].map(item => item.value)).toEqual(['', 'codex', 'shared'])
+  expect((await options()).map(item => item.dataset.value)).toEqual(['', 'codex', 'shared'])
   expect(useAppStore.getState().discoverHostExecutors).not.toHaveBeenCalled()
 })

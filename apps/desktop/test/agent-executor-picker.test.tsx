@@ -43,6 +43,16 @@ it('retains an unavailable saved configuration by exact ID and permits clearing 
   await chooseField(trigger, '')
   expect(changed).toHaveBeenCalledExactlyOnceWith(''); expect(trigger.textContent).toContain('Use normal Launcher choice'); expect(submitted).not.toHaveBeenCalled()
 })
+it('does not re-enable an unavailable saved Executor when connection configuration changes', async () => {
+  const { changed } = await mount('saved-remote-executor')
+  const trigger = container.querySelector<HTMLButtonElement>('button')!
+  await key(trigger, 'ArrowDown')
+  const missing = document.querySelector<HTMLElement>('[role="menuitemradio"][data-value="saved-remote-executor"]')!
+  expect(missing.getAttribute('aria-disabled')).toBe('true')
+  await act(async () => missing.click())
+  expect(changed).not.toHaveBeenCalled()
+})
+
 it('can save an installed-later preference without pretending that a missing command can run', async () => {
   const { trigger, changed } = await mount()
   await chooseField(trigger, 'missing'); expect(changed).toHaveBeenCalledExactlyOnceWith('missing')
