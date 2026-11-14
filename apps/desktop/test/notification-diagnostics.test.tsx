@@ -67,7 +67,8 @@ import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
 import type { AgentMuxClientEvent } from '../../../packages/core/src/types'
 import { parseDiagnosticEvidenceResult } from '../../../packages/core/src/diagnostic-evidence-codec'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
-import { toggleNotificationCenter } from './helpers/notification-center'
+import { toggleNotificationCenter, selectNotificationView } from './helpers/notification-center'
+import { notificationDeliveryNotice } from '../src/renderer/src/lib/notification-delivery-notice'
 import { sourceMoteDiagnosticsCli, stageMoteSourceListener } from './helpers/mote-diagnostics-cli'
 
 const dom = composerDOM(), cleanup: Array<() => void | Promise<void>> = []
@@ -413,3 +414,75 @@ it('preserves every selected source and reports incomplete source coverage indep
   await act(async () => useAppStore.setState({ environmentWarning: '', runtimeOwnershipWarnings: [] }))
   expect((await rpc.call('system.diagnostics.inspect', { target: unknown })).reads[0]).toMatchObject({ availability: 'not-found', data: null })
 })
+
+it.each(['legal-display', 'agent-alias', 'terminal-alias'] as const)(
+  '%s retains the original canonical subject through the actual center, registered diagnostics and source CLI', async shape => {
+    const canonical = 'notification-canonical', presentationId = 'notification-view'
+    const original = { ...composerSession(canonical), id: presentationId, label: 'Exact original notification task',
+      status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 },
+      nativeSourceObservation: { state: 'unknown' as const, run: { runId: `run-${canonical}` }, observedAt: 1, reason: 'current-main-unconfirmed' as const } }
+    const otherHost = { ...composerSession(canonical), id: 'foreign-host-view', hostId: 'foreign-host', label: 'Wrong Host task',
+      control: { ...composerSession(canonical).control, hostId: 'foreign-host' } }
+    const collision = shape === 'agent-alias' ? { ...composerSession('foreign-canonical'), id: canonical, label: 'Wrong alias task' }
+      : shape === 'terminal-alias' ? { ...composerSession(canonical), kind: 'terminal', label: 'Wrong terminal task',
+        control: { kind: 'terminal', hostId: 'local', run: { runId: 'wrong-terminal-run' } } } : null
+    useAppStore.setState({ sessions: [original, otherHost, ...(collision ? [collision] : [])],
+      agentComposerDrafts: { [presentationId]: 'Keep the exact aliased draft' } } as never)
+    const notice = notificationDeliveryNotice({ status: 'failed', reason: 'Original native notification failure' },
+      { requestId: 'original-native-request', subject: original.control })!
+    useAppStore.getState().reportError(notice.message, notice.context)
+    const event = useAppStore.getState().notificationEvents.at(-1)!
+    const select = vi.fn(async () => {})
+    useAppStore.setState({ selectSession: select })
+    await mount(); const rpc = await main()
+    const before = useAppStore.getState(), focused = document.activeElement
+    const observed = data(await rpc.call('system.diagnostics.inspect', { target, includeRaw: true }))
+    const activity = observed.items.find((item: any) => item.section === 'activity' && item.source === 'events')!
+    expect(activity, JSON.stringify(observed.items)).toBeDefined()
+    expect(activity).toMatchObject({ subject: { kind: 'agent', hostId: 'local', agentSessionId: canonical, runId: original.control.run.runId },
+      original: { subjectLabel: original.label }, unread: true })
+    const current = observed.items.find((item: any) => item.source === 'sessions' && item.subject.runId === original.control.run.runId)!
+    expect(current, JSON.stringify(observed.items)).toBeDefined()
+    expect(current.subject).toMatchObject({ kind: 'agent', hostId: 'local', agentSessionId: canonical })
+    const cli = await sourceMoteDiagnosticsCli(fixture.root, {
+      mutations: process.env.AGENTMUX_NOTIFICATION_DIAGNOSTICS_SOURCES, loaded: process.env.AGENTMUX_NOTIFICATION_DIAGNOSTICS_LOADED, ssr: true
+    })
+    expect(cli.inputs.some(path => path.endsWith('packages/core/src/agentmux-cli-commands.ts'))).toBe(true)
+    const exact = await cli.run(['--endpoint', `unix://${fixture.socket}`, 'system', 'diagnostics', 'inspect', '--domain', 'client.notifications',
+      '--host-id', 'local', '--notification-id', activity.notificationId, '--include-raw'])
+    expect(exact.code, exact.stderr).toBe(0)
+    expect(data(JSON.parse(exact.stdout).result).items).toEqual([activity])
+    const currentRead = await cli.run(['--endpoint', `unix://${fixture.socket}`, 'system', 'diagnostics', 'inspect', '--domain', 'client.notifications',
+      '--host-id', 'local', '--notification-id', current.notificationId])
+    expect(currentRead.code, currentRead.stderr).toBe(0)
+    expect(data(JSON.parse(currentRead.stdout).result).items).toEqual([expect.objectContaining({ notificationId: current.notificationId, subject: current.subject })])
+    expect(useAppStore.getState()).toBe(before); expect(document.activeElement).toBe(focused)
+    expect(select).not.toHaveBeenCalled()
+    expect(before.noticeReadReceipts).toEqual({})
+    expect(dom.container.querySelector('textarea')!.value).toBe('Keep exact original DOM input')
+    expect(dom.container.querySelector('.global-system-notices__details')?.getAttribute('data-state')).toBe('closed')
+
+    // UI navigation consumes the same original record, with presentation identity kept for selection.
+    await toggleNotificationCenter(dom.container, 'open'); await selectNotificationView(dom.container, 'history')
+    const row = dom.container.querySelector<HTMLElement>(`[data-event-id="${event.id}"]`)!
+    expect(row).not.toBeNull()
+    expect(row.querySelector('strong')?.textContent).toBe(original.label)
+    expect(row.textContent).not.toMatch(/Wrong (Host|alias|terminal) task/)
+    const view = row.querySelector<HTMLButtonElement>('.notification-item__action')!
+    expect(view.textContent).toBe('View Session')
+    await act(async () => view.click())
+    expect(select).toHaveBeenCalledExactlyOnceWith(presentationId)
+    expect(useAppStore.getState().noticeReadReceipts).toBe(before.noticeReadReceipts)
+    await act(async () => row.querySelector<HTMLButtonElement>('.notification-item__read')!.click())
+    const read = useAppStore.getState().noticeReadReceipts
+    expect(read['global:events']?.[event.id]).toBe('read')
+    await toggleNotificationCenter(dom.container, 'closed')
+    await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions].reverse() })))
+    const after = useAppStore.getState()
+    const reread = data(await rpc.call('system.diagnostics.inspect', { target: { domain: 'client.notifications', hostId: 'local', notificationId: activity.notificationId }, includeRaw: true })).items
+    expect(reread).toEqual([{ ...activity, unread: false }])
+    expect(useAppStore.getState()).toBe(after)
+    expect(after.noticeReadReceipts).toBe(read)
+    expect(after.notificationEvents).toBe(before.notificationEvents)
+    expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  })
