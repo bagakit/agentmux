@@ -1798,3 +1798,88 @@ it.each(['none', 'save', 'launch'] as const)('[survey-agent-placement] the actua
     expect(originalFile.value).toBe('Original sibling input survives Agent creation')
   }
 }, 20_000)
+
+async function pageContext(reference: { regionId: string; browserId: string }, gesture: 'pointer' | 'key' | 'shift-f10' = 'pointer') {
+  const button = document.querySelector<HTMLElement>(`[data-survey-page-region-id="${reference.regionId}"] .survey-item`)!
+  expect(button).not.toBeNull()
+  await act(async () => {
+    button.focus()
+    if (gesture === 'pointer') expect(button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 60, clientY: 100 }))).toBe(false)
+    else button.dispatchEvent(new KeyboardEvent('keydown', { key: gesture === 'key' ? 'ContextMenu' : 'F10', shiftKey: gesture === 'shift-f10', bubbles: true, cancelable: true }))
+  })
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-context-page-region-id]')?.getAttribute('data-survey-context-page-region-id')).toBe(reference.regionId))
+  return button
+}
+async function pageContextAction(label: string) {
+  const menu = document.querySelector('[data-survey-context-page-region-id]')!
+  const item = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label)
+  expect(item, label).toBeDefined()
+  await click(item!)
+}
+async function pageMenuFile() {
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Original file input"]')).toBeInstanceOf(HTMLTextAreaElement))
+  return document.querySelector<HTMLTextAreaElement>('[aria-label="Original file input"]')!
+}
+async function otherContextPage() {
+  const native = await api.browser.create('page-menu-other-browser', 'https://other.example.test/', resource.id)
+  const page = { regionId: 'page-menu-other-region', browserId: native.id }
+  const tab = createWorkbenchTab('page-menu-other-tab', { ...native, kind: 'browser', ...page, workspaceId: resource.id, title: 'Other exact page' })
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [tab.id]: tab }, layouts: { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', tab.id)! } }))
+  return page
+}
+
+it.each(['pointer', 'key', 'shift-f10'] as const)('[survey-page-menu] exact page opens its application menu and Escape restores the invoker (%s)', async gesture => {
+  const page = await horizontalPages(), before = useAppStore.getState(), file = await pageMenuFile()
+  file.value = 'Keep the context-menu draft'
+  const button = await pageContext(page, gesture)
+  const menu = document.querySelector('[data-survey-context-page-region-id]')!
+  expect(menu.textContent).toContain('Close page'); expect(menu.textContent).toContain('Remove page from Survey')
+  expect(menu.textContent).not.toContain('Rename exploration'); expect(menu.textContent).not.toContain('Keep in Survey')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-context-page-region-id]')).toBeNull())
+  await vi.waitFor(() => expect(document.activeElement).toBe(button))
+  expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().layouts).toEqual(before.layouts)
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(file)
+  expect(file.value).toBe('Keep the context-menu draft')
+})
+
+it('[survey-page-menu] consecutive page right-clicks remove only the last exact reference without selecting or closing content', async () => {
+  const other = await otherContextPage(), page = await horizontalPages([other]), before = useAppStore.getState()
+  const file = await pageMenuFile()
+  file.value = 'Keep the original draft when removing only a page reference'
+  const close = vi.spyOn(api.browser, 'close')
+  await pageContext(page); await pageContext(other); await pageContextAction('Remove page from Survey')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([page]))
+  expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().layouts).toEqual(before.layouts)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection); expect(close).not.toHaveBeenCalled()
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(file)
+  expect(file.value).toBe('Keep the original draft when removing only a page reference')
+})
+
+it('[survey-page-menu] exact page context Close uses the original Main plan and preserves mixed siblings and input', async () => {
+  headerCloseOwner = await connectWorkbenchCloseApiOwner()
+  const page = await horizontalPages(), before = useAppStore.getState(), original = source()
+  const file = await pageMenuFile()
+  file.value = 'Keep the original page-menu sibling input'
+  const close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  await pageContext(page); await pageContextAction('Close page'); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(source().regions[page.regionId]).toBeUndefined())
+  expect(close).toHaveBeenCalledExactlyOnceWith(page.browserId)
+  expect(source().regions['composition-file']).toBe(original.regions['composition-file'])
+  expect(source().regions['composition-agent-region']).toBe(original.regions['composition-agent-region'])
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(file); expect(file.value).toBe('Keep the original page-menu sibling input')
+})
+
+it('[survey-page-menu] background sole page closes its own Browser through Main without closing the first reference', async () => {
+  headerCloseOwner = await connectWorkbenchCloseApiOwner()
+  const other = await otherContextPage(), page = await horizontalPages([other]), original = source()
+  const close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  await pageContext(other); await pageContextAction('Close page'); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(useAppStore.getState().tabs['page-menu-other-tab']).toBeUndefined())
+  expect(close).toHaveBeenCalledExactlyOnceWith(other.browserId)
+  expect(source().regions[page.regionId]).toBe(original.regions[page.regionId])
+  expect(useAppStore.getState().surveyPageReferences).toEqual([page])
+})
