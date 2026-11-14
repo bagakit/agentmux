@@ -6,10 +6,13 @@ many small Goals. Read goal plan --goal ID first; it returns nodes, dependencies
 executors, reviews, the plan revision and every node delegation. Node state is derived
 from those facts: waiting, ready, working, review, changes, done, cancelled or unknown.
 planState carries that derivation as the Goals page shows it, with each node's current
-attempt (delegation operation, source MID and thread) and every unknown reason; use it
-instead of deriving state yourself. Goal records carry the same planState with their plan.
-Without planState the owner gave no derivation: node states are unknown to you, while the
-plan and delegations still read as returned.
+attempt ({delegationOperationId, reported}) and every unknown reason; use it instead of
+deriving state yourself. Read that operation's source, thread and worker from the original
+delegation in the same response. Goal records carry the same planState with their plan.
+Without a valid planState, node states are unknown to you. planStateIssue explains a missing
+or invalid derivation and how to read this Goal again or update its Host. The plan,
+delegations and saved write receipt remain available; never repeat a saved write to fix a
+reading issue. Older strict readers must upgrade with the Host.
 goal discuss --goal ID --mode plan --operation-id OP explicitly asks the current Supervisor
 to save a plan through the original Host request owner. With no Supervisor, choose one
 explicitly before sending; selection itself sends nothing. As the Supervisor, read and
