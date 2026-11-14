@@ -226,8 +226,20 @@ it('maps a collapsed Workflow header to all original record references and obser
  expect(spanText()).toBe(expectedSpan(records, visible))
  expect(container.querySelector('.activity-ruler__band')).not.toBeNull()
  await act(async () => head.click()); await flush(); expect(head.getAttribute('aria-expanded')).toBe('true')
- const step = group.querySelector<HTMLElement>('[data-native-step-id="ruler-4"]')!
- expect(step).not.toBeNull(); await act(async () => observer().show([step])); await flush()
+ const deferred = group.querySelector<HTMLElement>('[data-deferred-process-id="ruler-4"]')!
+ expect(deferred).not.toBeNull()
+ const reveal = deferred.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!
+ expect(reveal).not.toBeNull()
+ await act(async () => reveal.click())
+ // The exact detail read completes after the original shell opens.
+ const step = await vi.waitFor(async () => {
+  await flush()
+  const record = group.querySelector<HTMLElement>('[data-native-step-id="ruler-4"]')
+  expect(record).not.toBeNull()
+  return record!
+ }, { timeout: 3000 })
+ acceptedReadCount = readCount()
+ await act(async () => observer().show([step])); await flush()
  expect(group.isConnected).toBe(true); expect(head.isConnected).toBe(true)
  expect(spanText()).toBe(expectedSpan(records, new Set([records.find(record => record.record.id === 'ruler-4')!.id])))
 })
@@ -308,6 +320,10 @@ it('retains visible records, body node and Range while a new native reply arrive
  await render(view()); const user = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
  await act(async () => observer().show([user])); await flush()
  const before = spanText(), band = container.querySelector('.activity-ruler__band')
+ const action = user.querySelector<HTMLButtonElement>('button[aria-label="Copy message"]')!
+ expect(action).not.toBeNull()
+ await act(async () => action.focus())
+ expect(document.activeElement).toBe(action)
  const walker = document.createTreeWalker(user, NodeFilter.SHOW_TEXT); let text: Text | null = null
  while (walker.nextNode()) if (walker.currentNode.textContent?.includes('User 0')) { text = walker.currentNode as Text; break }
  expect(text).not.toBeNull(); const range = document.createRange(); range.setStart(text!, 0); range.setEnd(text!, 4); window.getSelection()!.addRange(range)
@@ -317,6 +333,7 @@ it('retains visible records, body node and Range while a new native reply arrive
  expect(spanText()).toBe(before); expect(container.querySelector('.activity-ruler__band')).toBe(band)
  expect(container.querySelector('[data-native-record-id="ruler-0"]')).toBe(user)
  expect(text!.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('User')
+ expect(document.activeElement).toBe(action)
  await act(async () => observer().show([container.querySelector<HTMLElement>('[data-native-record-id="ruler-22"]')!])); await flush()
  expect(spanText()).toBe(expectedSpan(rulerRecords(sid, updated, [])))
 })
