@@ -60,7 +60,7 @@ describe('Tailcat help retains the exact Mac without forwarding its credentials'
     expect(task).toContain('check that service before any CLI installation')
     expect(task).not.toContain('tcPrivateDestinationCanary')
     const receiver = tailcatSetupContext(local, 'server', { step: 'prepare-key', code: null })
-    expect(receiver.settingsTarget).toEqual({ section: 'network-node', hostId: 'local', item: 'incoming' })
+    expect(receiver.settingsTarget).toEqual({ section: 'hosts', hostId: 'local', item: 'incoming' })
     expect(receiver.failure?.code).toBeNull()
   })
 

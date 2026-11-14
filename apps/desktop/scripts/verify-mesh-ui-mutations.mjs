@@ -16,6 +16,10 @@ const definitions = [
   ['readActive-removal', 'saved clean listener stops helper I/O while hidden'],
   ['static-preserve', 'uses distinct original Mote assets'],
   ['rejected-entry-retained', 'a rejected static avatar read is retried'],
+  ['legacy-redirect', 'reveals the exact local Connection'],
+  ['wrong-view', 'reveals the exact local Connection'],
+  ['first-Host-substitution', 'reveals the exact local Connection'],
+  ['focus-before-reveal', 'search reveals and focuses'],
 ]
 const runId = String(Date.now()), results = []
 const config = resolve(root, 'apps/desktop/test/vitest.mesh-settings.config.mts')

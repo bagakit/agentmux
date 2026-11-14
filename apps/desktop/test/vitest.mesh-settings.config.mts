@@ -25,6 +25,10 @@ const edits: Record<string, [string, string, string]> = {
   'readActive-removal': ['renderer/src/components/MoteActionChooser.tsx', 'visible={active} readActive={active}', 'visible={active}'],
   'static-preserve': ['renderer/src/components/SpaceObjectIcon.tsx', 'active={readActive}', 'active={visible !== false}'],
   'rejected-entry-retained': ['renderer/src/components/SpaceObjectIcon.tsx', 'void entry.promise.catch(() => { if (activeMoteAvatarReads.get(key) === entry) activeMoteAvatarReads.delete(key) })', 'void entry.promise.catch(() => { if (entry.consumers === 0 && activeMoteAvatarReads.get(key) === entry) activeMoteAvatarReads.delete(key) })'],
+  'legacy-redirect': ['renderer/src/components/SettingsNavigation.tsx', "return request.section === 'hosts' && request.hostId === local.id ? request : { ...request, section: 'hosts', hostId: local.id }", "return { ...request, section: request.section, hostId: local.id }"],
+  'wrong-view': ['renderer/src/components/settings/MeshSettingsPane.tsx', "return request?.field === 'mesh-machines' ? 'machines'", "return request?.field === 'incoming' ? 'network' : request?.field === 'mesh-machines' ? 'machines'"],
+  'first-Host-substitution': ['renderer/src/components/SettingsNavigation.tsx', 'const local = requested ?? (locals.length === 1 ? locals[0] : undefined)', 'const local = requested ?? hosts[0]'],
+  'focus-before-reveal': ['renderer/src/components/settings/MeshSettingsPane.tsx', 'const view = pendingNavigation && props.navigationRequest ? requestedView(props.navigationRequest) : chosenView', 'const view = chosenView'],
 }
 if (mutant && !edits[mutant]) throw Error('Unknown Mesh UI mutant')
 const targetedIncludes: Record<string, string[]> = {
@@ -38,6 +42,10 @@ const targetedIncludes: Record<string, string[]> = {
   'readActive-removal': ['apps/desktop/test/tailcat-connection-draft.test.tsx'],
   'static-preserve': ['apps/desktop/test/focus-timeline-identity.test.tsx'],
   'rejected-entry-retained': ['apps/desktop/test/mote-avatar-read-retry.test.tsx'],
+  'legacy-redirect': ['apps/desktop/test/settings-section-routing.test.tsx'],
+  'wrong-view': ['apps/desktop/test/settings-section-routing.test.tsx'],
+  'first-Host-substitution': ['apps/desktop/test/settings-section-routing.test.tsx'],
+  'focus-before-reveal': ['apps/desktop/test/settings-section-routing.test.tsx'],
 }
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases }, plugins: [{ name: 'mesh-ui-consumed', enforce: 'pre', resolveId: installedDependency,
   transform(input, id) {
@@ -50,4 +58,4 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
     const output = input.replace(from, to)
     appendFileSync(resolve(evidence, 'mutation.jsonl'), JSON.stringify({ mutant, path, before: sha(input), after: sha(output) }) + '\n')
     return { code: output, map: null }
-  } }], test: { include: mutant ? targetedIncludes[mutant]! : ['apps/desktop/test/mesh-settings.test.tsx', 'apps/desktop/test/mesh-network-ipc.test.ts', 'apps/desktop/test/host-settings-navigation.test.tsx', 'apps/desktop/test/settings-host-disclosure.test.tsx', 'apps/desktop/test/settings-section-routing.test.tsx', 'apps/desktop/test/host-tailcat-settings.test.tsx', 'apps/desktop/test/host-tailcat-pairing.test.tsx', 'apps/desktop/test/tailcat-connection-draft.test.tsx', 'apps/desktop/test/settings-save-feedback.test.tsx', 'apps/desktop/test/settings-connections.test.tsx', 'apps/desktop/test/settings-resource-library.test.tsx', 'apps/desktop/test/node-owner-target.test.tsx', 'apps/desktop/test/tailcat-mote-assistance.test.tsx', 'apps/desktop/test/settings-close-continuity.test.tsx', 'apps/desktop/test/network-node-settings.test.tsx', 'apps/desktop/test/node-publication-navigation.test.tsx', 'apps/desktop/test/host-tailcat-settings-product.test.tsx', 'apps/desktop/test/settings-tailcat-listener-cli.test.ts', 'packages/core/test/tailcat-key-rpc.test.ts', 'apps/desktop/test/focus-timeline-identity.test.tsx', 'apps/desktop/test/mote-avatar-read-retry.test.tsx'], environment: 'node', pool: 'forks', maxWorkers: 1, fileParallelism: false, testTimeout: 90000, hookTimeout: 90000 } })
+  } }], test: { include: mutant ? targetedIncludes[mutant]! : ['apps/desktop/test/mesh-settings.test.tsx', 'apps/desktop/test/mesh-network-ipc.test.ts', 'apps/desktop/test/host-settings-navigation.test.tsx', 'apps/desktop/test/settings-host-disclosure.test.tsx', 'apps/desktop/test/settings-section-routing.test.tsx', 'apps/desktop/test/host-tailcat-settings.test.tsx', 'apps/desktop/test/host-tailcat-pairing.test.tsx', 'apps/desktop/test/tailcat-connection-draft.test.tsx', 'apps/desktop/test/settings-save-feedback.test.tsx', 'apps/desktop/test/settings-connections.test.tsx', 'apps/desktop/test/settings-resource-library.test.tsx', 'apps/desktop/test/node-owner-target.test.tsx', 'apps/desktop/test/tailcat-mote-assistance.test.tsx', 'apps/desktop/test/tailcat-setup-context.test.ts', 'apps/desktop/test/settings-close-continuity.test.tsx', 'apps/desktop/test/network-node-settings.test.tsx', 'apps/desktop/test/node-publication-navigation.test.tsx', 'apps/desktop/test/host-tailcat-settings-product.test.tsx', 'apps/desktop/test/settings-tailcat-listener-cli.test.ts', 'packages/core/test/tailcat-key-rpc.test.ts', 'apps/desktop/test/focus-timeline-identity.test.tsx', 'apps/desktop/test/mote-avatar-read-retry.test.tsx'], environment: 'node', pool: 'forks', maxWorkers: 1, fileParallelism: false, testTimeout: 90000, hookTimeout: 90000 } })

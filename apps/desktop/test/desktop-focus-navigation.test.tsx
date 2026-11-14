@@ -37,6 +37,12 @@ import { installCollaborationLayoutLoopback } from './helpers/collaboration-layo
 import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
 import { workbenchDisplayReferenceMatches } from '../src/renderer/src/lib/workbench-resource-display'
 import { moteWorkbenchProjection } from '../src/renderer/src/lib/mote-workbench-projection'
+import type { SettingsNavigationRequest } from '../src/renderer/src/components/SettingsNavigation'
+
+const incomingAppFixture = vi.hoisted(() => ({
+  open: undefined as undefined | ((section: 'hosts' | 'network-node', executorId?: string, field?: string, hostId?: string) => void),
+  request: undefined as SettingsNavigationRequest | undefined
+}))
 
 // Actual App/Store/Workbench/SessionPane/TerminalView focus owners run. The Run API,
 // terminal DOM paint/addons and geometry are isolated leaves; native proof covers real I/O.
@@ -71,6 +77,24 @@ vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({ TerminalViewp
   async startLiveSynchronization() {} dispose() {}
 } }))
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({ TerminalContextMenu: ({ children }: { children: ReactNode }) => children }))
+// Observe the real App provider and route props without replacing either owner or the rendered Panel.
+vi.mock('../src/renderer/src/components/ProjectRail', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/components/ProjectRail')>()
+  const { createElement, useContext } = await import('react')
+  const { SettingsNavigation } = await import('../src/renderer/src/components/SettingsNavigation')
+  return { ProjectRail: (props: Parameters<typeof actual.ProjectRail>[0]) => {
+    incomingAppFixture.open = useContext(SettingsNavigation)?.open
+    return createElement(actual.ProjectRail, props)
+  } }
+})
+vi.mock('../src/renderer/src/components/SettingsPanel', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/components/SettingsPanel')>()
+  const { createElement } = await import('react')
+  return { ...actual, SettingsPanel: (props: Parameters<typeof actual.SettingsPanel>[0]) => {
+    incomingAppFixture.request = props.navigationRequest
+    return createElement(actual.SettingsPanel, props)
+  } }
+})
 
 const initial = useAppStore.getState()
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }],
@@ -1175,6 +1199,40 @@ it('keeps both original Mote regions after human Focus navigation cancels a pend
 })
 
 describe('Settings semantic navigation', () => {
+  it('normalizes canonical and legacy incoming through the real App provider without replacing invalid targets', async () => {
+    const before = useAppStore.getState()
+    await act(async () => useAppStore.setState({ config: { ...before.config!, hosts: [
+      { id: 'remote-first', kind: 'ssh', label: 'Remote first', hostname: 'remote.invalid', runtimeId: 'remote-runtime' },
+      { id: 'local', kind: 'local', label: 'This device' }
+    ] } }))
+    expect(incomingAppFixture.open).toBeTypeOf('function')
+    for (const [section, hostId] of [['network-node', 'local'], ['hosts', undefined]] as const) {
+      await act(async () => incomingAppFixture.open!(section, undefined, 'incoming', hostId))
+      await settle()
+      expect(incomingAppFixture.request).toMatchObject({ section: 'hosts', hostId: 'local', field: 'incoming' })
+      expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'hosts', hostId: 'local', visible: true })
+      const connections = container.querySelector<HTMLElement>('[data-settings-pane="hosts"] [data-mesh-view="connections"]')!
+      expect(connections.hidden).toBe(false)
+      const visible = [...connections.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
+        .filter(target => target.isConnected && !target.closest('[hidden], [inert]'))
+      expect(visible).toHaveLength(1)
+      expect(document.activeElement).toBe(visible[0])
+      expect(container.querySelector('[data-settings-target-issue]')).toBeNull()
+    }
+    await act(async () => incomingAppFixture.open!('network-node', undefined, 'incoming', 'remote-first'))
+    await settle()
+    expect(incomingAppFixture.request).toMatchObject({ section: 'network-node', hostId: 'remote-first', field: 'incoming' })
+    expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'network-node', hostId: 'remote-first', visible: true })
+    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-field="incoming"]')).toBeNull()
+    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-target-issue]')).not.toBeNull()
+    await act(async () => incomingAppFixture.open!('hosts', undefined, 'incoming', 'missing-host'))
+    await settle()
+    expect(incomingAppFixture.request).toMatchObject({ section: 'hosts', hostId: 'missing-host', field: 'incoming' })
+    expect(container.querySelector('[data-settings-pane="hosts"] [data-settings-host="local"]')).toBeNull()
+    expect(container.querySelector('[data-settings-pane="hosts"] [data-settings-target-issue]')).not.toBeNull()
+    expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
+    await control({ kind: 'settings', sectionId: null })
+  })
   it('Host-qualified links select the actual Host resources and retain original work and drafts', async () => {
     await control({ kind: 'space', regionId: 'source-region' })
     const before = useAppStore.getState(), originalTabs = before.tabs
@@ -1194,7 +1252,7 @@ describe('Settings semantic navigation', () => {
     expect((await readSettings()).overlays.settingsPage).toMatchObject({ hostId: 'second-host' })
     await control({ kind: 'settings', sectionId: null })
   })
-  it('CLI-qualified Node navigation selects the actual saved owner, and the local Incoming link restores the local Node', async () => {
+  it('CLI-qualified Node navigation selects the actual saved owner, and the local publishing link retains Node publication', async () => {
     const { parseAgentMuxCliInvocation } = await import('../../../packages/core/src/agentmux-cli-commands')
     const { rpcControlRequest } = await import('../../../packages/core/src/rpc-business-codec')
     await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, hosts: [...state.config!.hosts,
@@ -1214,10 +1272,11 @@ describe('Settings semantic navigation', () => {
     expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-field="incoming"]')).toBeNull()
     await control({ kind: 'settings', sectionId: 'hosts', hostId: 'local' })
     await act(async () => container.querySelector<HTMLButtonElement>('[data-resource-editor="local"] [data-host-panel="connection"]')!.click())
-    const open = [...container.querySelectorAll<HTMLButtonElement>('[data-resource-editor="local"] button')].find(button => button.textContent === 'Open Node')!
+    const open = [...container.querySelectorAll<HTMLButtonElement>('[data-resource-editor="local"] button')].find(button => button.textContent === 'Open Node publishing')!
     expect(open).not.toBeNull(); await act(async () => open.click()); await settle()
     expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'network-node', hostId: 'local', visible: true })
-    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-field="incoming"]')).not.toBeNull()
+    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-field="incoming"]')).toBeNull()
+    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-field="publishing"]')).not.toBeNull()
     await control({ kind: 'settings', sectionId: null })
   })
   it('Host-qualified Agent focus checks the original Host before navigation and keeps a healthy same-SID workface', async () => {

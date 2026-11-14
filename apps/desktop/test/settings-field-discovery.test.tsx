@@ -254,12 +254,28 @@ it('every production static target reaches its connected original Pane location 
   })
   const capsuleConfig: CapsuleConfig = { revision: 1, contentRoot: fixturePath('settings-targets/content'),
     defaultStorageMode: 'managed', defaultMode: 'isolated', defaultTheme: 'follow' }
+  const node = { runtimeId: 'local-runtime', ownerInstanceId: 'local-instance', alias: 'local' }
+  vi.spyOn(api.nodePublishing, 'call').mockResolvedValue({ node, policyRevision: 'revision', resourcesShared: false, roots: [], landing: null } as never)
+  vi.spyOn(api.nodePublishing, 'owner').mockResolvedValue({ node, policyRevision: 'revision', operation: null,
+    policy: { alias: 'local', shareResources: false, allowedPaths: [], deniedPaths: [], defaultPath: null } } as never)
+  const meshConfiguration = { role: 'participant', networkId: 'settings-targets', members: [], peers: [], advertisedIngress: [], publishers: [], endpointAccess: { allowedClientKeys: [] } }
+  const meshSettings = { owner: { runtimeId: 'local-runtime', ownerInstanceId: 'local-instance' }, identity: null, revision: 'r1', configuration: meshConfiguration, operation: null }
+  const meshObservation = { ...meshSettings, source: 'managed', activeRevision: 'r1', desiredRevision: 'r1', apply: { state: 'active' }, gateway: { state: 'disabled' }, network: null, endpoint: { state: 'not-provided' }, observedAt: 1, coverage: { configuredOrigins: 0, observedOrigins: 0, complete: true } }
+  vi.spyOn(api.mesh, 'call').mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? meshObservation : meshSettings) as never)
   const capsuleReads = vi.spyOn(api.capsules, 'call').mockImplementation((async (method: CapsuleMethod) => {
     if (method === 'capsule.config.inspect') return { config: capsuleConfig }
     if (method === 'capsule.ls') return { capsules: [], issues: [] }
     throw new Error(`Unexpected Capsule mutation: ${method}`)
   }) as CapsulePort['call'])
   await dom.render(<SettingsPanel onClose={() => {}} />)
+  // Only service-owned identity reads are prepared here. Effect-owned navigation, including
+  // Remote Prepare and local incoming, must still reveal and focus on its first explicit selection.
+  await dom.click('[data-settings-target="network-node"]')
+  await vi.waitFor(() => expect(connected('[data-settings-pane="network-node"] [data-settings-field="publishing"]')).toBeTruthy())
+  await dom.click('[data-settings-target="hosts"]')
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.mesh-view-tabs button')].find(button => button.textContent === 'Gateway')!.click())
+  await vi.waitFor(() => expect(connected('[data-settings-pane="hosts"] [data-settings-field="mesh-configuration"]')).toBeTruthy())
+  await dom.click('[data-settings-target="overview"]')
   const contributions = settingsModules.filter(module => (module as SettingsModule).id !== 'fixture')
     .flatMap(module => (module as SettingsModule).searchTargets?.map(target => ({ module, target })) ?? [])
   expect(contributions.length).toBeGreaterThan(40)

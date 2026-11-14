@@ -74,6 +74,124 @@ it('lands the Host executors request on its real anchor without an issue', async
   expect(pane('agents')!.querySelector('[data-settings-target-issue]')).toBeNull()
 })
 
+it.each([
+  { name: 'canonical incoming without a Host ID', request: { section: 'hosts', field: 'incoming' } },
+  { name: 'legacy local Node incoming', request: { section: 'network-node', hostId: 'local', field: 'incoming' } }
+] as const)('reveals the exact local Connection before focusing $name', async ({ request }) => {
+  const configured = useAppStore.getState().config!
+  useAppStore.setState({ config: { ...configured, hosts: [
+    { id: 'remote-first', kind: 'ssh', label: 'Remote first', hostname: 'remote.invalid' },
+    { id: 'local', kind: 'local', label: 'This device' }
+  ] } })
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection={request.section} navigationRequest={request} />)
+  await settle()
+  const mesh = pane('hosts')
+  expect(mesh, 'the request must normalize to the real Mesh module').not.toBeNull()
+  expect(mesh!.hidden).toBe(false)
+  const connections = mesh!.querySelector<HTMLElement>('[data-mesh-view="connections"]')
+  expect(connections, 'incoming must select Connections, not Paths or Gateway').not.toBeNull()
+  expect(connections!.hidden).toBe(false)
+  expect(connections!.querySelector('[data-resource-editor="local"][data-host-view="connection"]')).not.toBeNull()
+  const visible = [...connections!.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
+    .filter(target => target.isConnected && !target.closest('[hidden], [inert]'))
+  expect(visible, 'exactly one revealed local incoming editor').toHaveLength(1)
+  expect(connections!.querySelector('[data-resource-editor="remote-first"] [data-settings-field="incoming"]')).toBeNull()
+  expect(document.activeElement).toBe(visible[0])
+  expect(visible[0]!.hasAttribute('data-settings-search-highlight')).toBe(true)
+  expect(mesh!.querySelector('[data-settings-target-issue]')).toBeNull()
+})
+
+it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and focuses the only local incoming editor from a $start SettingsPanel without clearing its draft', async ({ start }) => {
+  const configured = useAppStore.getState().config!
+  useAppStore.setState({ config: { ...configured, hosts: [
+    { id: 'remote-first', kind: 'ssh', label: 'Remote first', hostname: 'remote.invalid' },
+    { id: 'local', kind: 'local', label: 'This device' }
+  ] } })
+  const initial = start === 'gateway' ? { section: 'hosts', field: 'mesh-configuration' } as const : undefined
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection={initial?.section ?? 'overview'} navigationRequest={initial} />)
+  await settle()
+  if (start === 'gateway') expect(dom.container.querySelector('.mesh-view-tabs [aria-current="page"]')?.textContent).toBe('Gateway')
+  await act(async () => {
+    const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Incoming connections and client keys')
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(dom.container.querySelector('[data-settings-search-result="hosts:incoming"]'), 'the canonical search contribution must exist').not.toBeNull()
+  expect(dom.container.querySelector('[data-settings-search-result="network-node:incoming"]')).toBeNull()
+  await dom.click('[data-settings-search-result="hosts:incoming"]')
+  await settle()
+  const mesh = pane('hosts')!
+  expect(mesh.hidden).toBe(false)
+  const connections = mesh.querySelector<HTMLElement>('[data-mesh-view="connections"]')!
+  expect(connections.hidden).toBe(false)
+  expect(connections.querySelector('[data-resource-editor="local"][data-host-view="connection"]')).not.toBeNull()
+  const visible = [...connections.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
+    .filter(target => target.isConnected && !target.closest('[hidden], [inert]'))
+  expect(visible).toHaveLength(1)
+  expect(document.activeElement).toBe(visible[0])
+  expect(visible[0]!.hasAttribute('data-settings-search-highlight')).toBe(true)
+  expect(mesh.querySelector('[data-settings-target-issue]')).toBeNull()
+  const allowed = visible[0]!.querySelector<HTMLTextAreaElement>('[aria-label="Tailcat allowed clients"]')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(allowed, 'nodekey:authored-draft\n  ')
+    allowed.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const gateway = [...mesh.querySelectorAll<HTMLButtonElement>('.mesh-view-tabs button')].find(button => button.textContent === 'Gateway')!
+  await act(async () => gateway.click())
+  expect(connections.hidden).toBe(true)
+  const reconnect = [...mesh.querySelectorAll<HTMLButtonElement>('.mesh-view-tabs button')].find(button => button.textContent === 'Connections')!
+  await act(async () => reconnect.click())
+  expect(connections.querySelector('[data-settings-field="incoming"]')).toBe(visible[0])
+  expect(allowed.value).toBe('nodekey:authored-draft\n  ')
+})
+
+it('keeps query, manual section and external focus stable when saved Hosts are refreshed with the same local identity', async () => {
+  const configured = useAppStore.getState().config!
+  useAppStore.setState({ config: { ...configured, hosts: [
+    { id: 'remote-first', kind: 'ssh', label: 'Remote first', hostname: 'remote.invalid' },
+    { id: 'local', kind: 'local', label: 'This device' }
+  ] } })
+  const request = { section: 'hosts', field: 'incoming' } as const
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="hosts" navigationRequest={request} />)
+  await settle()
+  expect(document.activeElement).toBe(pane('hosts')!.querySelector('[data-settings-field="incoming"]'))
+  await act(async () => {
+    const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Appearance')
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await dom.click('.settings-sidebar [data-settings-target="appearance"]')
+  const outside = document.createElement('textarea')
+  document.body.append(outside)
+  try {
+    outside.focus()
+    expect(document.activeElement).toBe(outside)
+    const previousHosts = useAppStore.getState().config!.hosts
+    await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, hosts: state.config!.hosts.map(host => ({ ...host })) } })))
+    expect(useAppStore.getState().config!.hosts).not.toBe(previousHosts)
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!.value).toBe('Appearance')
+    expect(pane('appearance')!.hidden).toBe(false)
+    expect(pane('hosts')!.hidden).toBe(true)
+    expect(document.activeElement).toBe(outside)
+  } finally { outside.remove() }
+})
+
+it('reveals a requested Remote task when Settings becomes visible before focusing it', async () => {
+  const routes = { section: 'remote-execution', field: 'routes' } as const
+  const prepare = { section: 'remote-execution', field: 'prepare' } as const
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="remote-execution" navigationRequest={routes} />)
+  await settle()
+  await dom.render(<SettingsPanel onClose={() => {}} visible={false} initialSection="remote-execution" navigationRequest={prepare} />)
+  await settle()
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="remote-execution" navigationRequest={prepare} />)
+  await settle()
+  const target = pane('remote-execution')!.querySelector<HTMLElement>('[data-settings-field="prepare"]')!
+  expect(target.hidden).toBe(false)
+  expect(target.closest('[hidden], [inert]')).toBeNull()
+  expect(document.activeElement).toBe(target)
+  expect(pane('remote-execution')!.querySelector('[data-settings-target-issue]')).toBeNull()
+})
+
 it('says on Overview that no section manages an unrecognized channel application', async () => {
   const channelOrigin = { sessionId: 's', hostId: 'local', agentSessionId: 'a', connection: { connectionId: 'c', adapterId: 'matrix', application: { domain: 'matrix.example', appId: 'app' } } }
   await dom.render(<SettingsPanel onClose={() => {}} initialSection="overview" navigationRequest={{ section: 'overview', channelOrigin }} />)
