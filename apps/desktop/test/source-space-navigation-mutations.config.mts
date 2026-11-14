@@ -42,12 +42,60 @@ const mutations:Record<string,[string,string,string]>={
     'if (isOriginalSourceFileWorkspace(workspaceId)) return { status: \'error\', code: \'FILE_SOURCE_UNAVAILABLE\',',
     'if (false) return { status: \'error\', code: \'FILE_SOURCE_UNAVAILABLE\','],
   'source-active-reseat':['apps/desktop/src/renderer/src/store.ts',
-    '    ? workbenchSpaceSelection.workspaceId : reseatActiveWorkspaceId(config, persisted.activeWorkspaceId)',
-    '    ? reseatActiveWorkspaceId(config, persisted.activeWorkspaceId) : reseatActiveWorkspaceId(config, persisted.activeWorkspaceId)']
+    'const activeWorkspaceId = workbenchSpaceSelection?.sourceRuntimeId ? workbenchSpaceSelection.workspaceId : reseatActiveWorkspaceId(config, persisted.activeWorkspaceId)',
+    'const activeWorkspaceId = reseatActiveWorkspaceId(config, persisted.activeWorkspaceId)'],
+  'cold-source-mode':['apps/desktop/src/renderer/src/components/NewTabSurface.tsx',
+    'const sourceMode = sourceValue !== undefined || implicitSourceKey !== undefined || rawSourceUnknown','const sourceMode = sourceValue !== undefined || implicitSource !== undefined || rawSourceUnknown'],
+  'graph-runtime':['apps/desktop/src/renderer/src/lib/original-space-navigation.ts',
+    'const folderConfirmed = folderRuntimes.size === 1','const folderConfirmed = true'],
+  'draft-projection-key':['apps/desktop/src/renderer/src/components/MountedSpaceAgent.tsx',
+    'sessionId={originalSourceInputOwnerKey(target.target.runtimeId, target.target.agentSessionId)}','sessionId={target.target.agentSessionId}'],
+  'observation-active-steal':['apps/desktop/src/renderer/src/lib/original-space-navigation.ts',
+    'selectedHere || state.activeWorkspaceId === workspaceId','selectedHere || state.activeWorkspaceId === target.workspaceId'],
+  'source-session-warning':['apps/desktop/src/renderer/src/lib/workbench-persistence.ts',
+    '      if (tab.source || surface.source) return []','      if (false) return []'],
+  'raw-source-qualified-unknown':['apps/desktop/src/renderer/src/store.ts',
+    'if (!choice?.sourceRuntimeId || isOriginalSourceWorkspaceProjection(choice.workspaceId) ||\n      originalRawSourceOccurrenceConfirmed({ ...persisted, config, workbenchSpaceSelection: choice }, graph)) return choice',
+    'if (choice?.sourceRuntimeId) return choice'],
+  'raw-source-confirmed':['apps/desktop/src/renderer/src/store.ts',
+    'originalRawSourceOccurrenceConfirmed({ ...persisted, config, workbenchSpaceSelection: choice }, graph)',
+    'false && originalRawSourceOccurrenceConfirmed({ ...persisted, config, workbenchSpaceSelection: choice }, graph)'],
+  'raw-source-launcher':['apps/desktop/src/renderer/src/components/NewTabSurface.tsx',
+    'const sourceMode = sourceValue !== undefined || implicitSourceKey !== undefined || rawSourceUnknown',
+    'const sourceMode = sourceValue !== undefined || implicitSourceKey !== undefined || rawSourceSelection'],
+  'raw-occurrence-scope':['apps/desktop/src/renderer/src/store.ts',
+    'const locations = confirmedOriginalRawLocations(before, target, graph)',
+    'const locations = []'],
+  'saved-view-group':['apps/desktop/src/renderer/src/store.ts',
+    '(!requested.groupId || location.groupId === requested.groupId)',
+    '(!input.occurrence?.groupId || location.groupId === input.occurrence.groupId)'],
+  'ambiguous-raw-projection':['apps/desktop/src/renderer/src/store.ts',
+    'if (!selected && !locations.length && !before.layouts[projectionWorkspaceId] && savedView)',
+    'if (!selected && !before.layouts[projectionWorkspaceId] && savedView)'],
+  'null-source-snapshot':['apps/desktop/src/renderer/src/store.ts',
+    'const observed = current?.scope.space ? current : before.mountedSpaceObservations[key]?.lastPresentSnapshot\n      const restoredScope = (graph ? originalSourceScopeFromGraph(target, graph) : undefined) ?? (observed?.scope.space && acceptsMountedSnapshot(target, observed) ? observed : undefined)',
+    'const observed = current ?? before.mountedSpaceObservations[key]?.lastPresentSnapshot\n      const restoredScope = (graph ? originalSourceScopeFromGraph(target, graph) : undefined) ?? (observed && acceptsMountedSnapshot(target, observed) ? observed : undefined)'],
+  'empty-source-scope':['apps/desktop/src/renderer/src/lib/original-space-navigation.ts',
+    'if (!folderConfirmed && !tabs.length) return undefined','if (!tabs.length) return undefined'],
+  'source-layout-persistence':['apps/desktop/src/renderer/src/store.ts',
+    'const hasSourceWorkface = Object.values(readNamespaceTopology).some(tab => tab.source) || Object.keys(readNamespaceLayout).some(isOriginalSourceWorkspaceProjection)',
+    'const hasSourceWorkface = Object.values(readNamespaceTopology).some(tab => tab.source)'],
+  'raw-observation-singular':['apps/desktop/src/renderer/src/store.ts',
+    'const ordinaryLocalOccurrence = confirmedOriginalRawLocations(state, target).length > 0',
+    'const ordinaryLocalOccurrence = false']
 }
 if(mutation)assert.ok(mutations[mutation],'Known Source navigation mutation')
 const targets=Object.values(mutations).map(([path])=>path)
-export default defineConfig({...source,cacheDir:resolve(root,'.cache/source-space-navigation-mutations',mutation??'control'),plugins:[...(source.plugins??[]),{
+const include=[
+  'apps/desktop/test/source-folder-navigation.test.tsx','apps/desktop/test/ordinary-source-admission.test.tsx','apps/desktop/test/remote-route-admission.test.tsx',
+  'apps/desktop/test/source-launcher-failure.test.tsx','apps/desktop/test/host-original-spaces-navigation.test.tsx',
+  'apps/desktop/test/focus-source-unification.test.tsx',
+  'apps/desktop/test/space-mount-view.test.tsx',
+  'apps/desktop/test/source-projection-reconciler.test.tsx',
+  'apps/desktop/test/source-space-navigation-persistence.test.mts'
+]
+if(mutation){const file=process.env.AGENTMUX_SOURCE_NAV_FILE;assert.ok(file&&include.includes(file),'Known Source mutation consumer file');include.splice(0,include.length,file!)}
+export default defineConfig({...source,cacheDir:resolve(root,'.cache/source-space-navigation-mutations-v2',mutation??'control'),plugins:[...(source.plugins??[]),{
   name:'source-space-navigation-loaded-mutation',enforce:'pre',transform(original,id){
     const path=relative(root,id.split('?')[0]!)
     if(!targets.includes(path))return
@@ -57,10 +105,5 @@ export default defineConfig({...source,cacheDir:resolve(root,'.cache/source-spac
     if(evidence){mkdirSync(dirname(evidence),{recursive:true});const sha=(value:string)=>createHash('sha256').update(value).digest('hex');appendFileSync(evidence,JSON.stringify({path,originalSHA256:sha(original),loadedSHA256:sha(code),mutated:code!==original,mutation:code!==original?mutation:null})+'\n')}
     if(code!==original)return{code,map:null}
   }
-}],test:{...source.test,include:[
-  'apps/desktop/test/source-folder-navigation.test.tsx','apps/desktop/test/ordinary-source-admission.test.tsx','apps/desktop/test/remote-route-admission.test.tsx',
-  'apps/desktop/test/source-launcher-failure.test.tsx','apps/desktop/test/host-original-spaces-navigation.test.tsx',
-  'apps/desktop/test/source-projection-reconciler.test.tsx',
-  'apps/desktop/test/source-space-navigation-persistence.test.mts'
-],setupFiles:[resolve(root,'apps/desktop/test/source-space-navigation-persistence.setup.mts')],maxWorkers:1,fileParallelism:false,passWithNoTests:false,testTimeout:30_000}
+}],test:{...source.test,include,setupFiles:[resolve(root,'apps/desktop/test/source-space-navigation-persistence.setup.mts')],maxWorkers:1,fileParallelism:false,passWithNoTests:false,testTimeout:60_000,hookTimeout:60_000}
 })

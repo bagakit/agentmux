@@ -129,7 +129,7 @@ it('a Folder with several original Regions selects its Zone without guessing the
 })
 
 it('Source ownership never accepts a different carrier merely because both resources use the Core-local host alias',async()=>{
-  const f=await source(),workspace={id:f.saved.workspaceId,hostId:'local',path:f.directory,repoPath:undefined}
+  const f=await source(),workspace={id:f.saved.workspaceId,hostId:'local',path:f.directory}
   const fact={runtimeId:f.target.reference.runtimeId,spaceId:f.target.reference.spaceId,zoneId:f.target.zoneId,
     resource:{id:f.saved.workspaceId,hostId:'local',path:f.directory,name:'Original Source',kind:'folder' as const},carrierHostId:'another-carrier'}
   expect(sourceFolderMatchesWorkspace(fact,workspace)).toBe(false)

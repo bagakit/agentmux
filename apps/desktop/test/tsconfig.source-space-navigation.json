@@ -52,7 +52,12 @@
     "./space-mount-view.test.tsx",
     "./terminal-checkpoint-continuation.test.tsx",
     "./vitest.focus-source-unification.config.mts",
-    "./source-space-navigation-mutations.config.mts"
+    "./source-space-navigation-mutations.config.mts",
+    "./source-composer-handoff.test.ts",
+    "./source-composer-control-scope.test.tsx",
+    "./space-member-composer.test.tsx",
+    "./source-member-workface.test.tsx",
+    "./pending-delivery-owner-wiring.test.tsx"
   ],
   "references": [
     {

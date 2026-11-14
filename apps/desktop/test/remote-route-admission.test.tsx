@@ -113,7 +113,7 @@ test('a saved source route reaches original Host admission from the real Launche
     if (method === 'resources') return { hostId: target.hostId, runtimeId: owner.runtimeId,
       workspaces: [{ workspaceId: project.id, hostId: 'local', path: project.path, name: project.name }] } as never
     if (method === 'register') return { reference: target.reference, zoneId: target.zoneId, workspaceId: target.workspaceId } as never
-    return await transport.api.call(method, input, signal)
+    return await transport.api.call(method, input as never, signal)
   })
   const originalProject = { ...project, kind: 'folder' as const, hostId: target.hostId }
   const tab = createWorkbenchTab('ordinary-source-route-launcher', { kind: 'launcher', regionId: 'ordinary-source-route-region', workspaceId: project.id })
