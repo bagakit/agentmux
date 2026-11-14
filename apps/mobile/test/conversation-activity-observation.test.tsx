@@ -90,12 +90,12 @@ it('a late status reply from the old Run cannot relight the current Session', as
   expect(view.element.querySelector('output')?.getAttribute('data-current')).toBe('unknown')
   expect(f.submit).not.toHaveBeenCalled()
 })
-it('keeps the original reader and editable draft when its Session getter becomes unavailable during a process event', async () => {
+it('keeps the original reader and editable draft when its exact Session read becomes unavailable during a process event', async () => {
   const f = prepared(), view = await mount(<MobileConversationSurface {...props(f)} />)
   expect(view.element.querySelector('.mobile-active-state')?.textContent).toBe('正在执行')
   await paste(view.element, 'Keep this original draft')
   const input = editor(view.element), send = button(view.element, 'Send')
-  vi.spyOn(f.client, 'agentSession').mockImplementation(() => { throw new Error('Original metadata observation unavailable') })
+  vi.spyOn(f.client, 'readAgentSession').mockRejectedValue(new Error('Original metadata observation unavailable'))
   await act(async () => {
     expect(() => f.emit({ type: 'process-state', agentSessionId: f.original.agentSessionId, run: f.original.run,
       state: 'exited', pid: null, evidence: { source: 'run-process', observedAt: Date.now() } })).not.toThrow()
@@ -103,6 +103,19 @@ it('keeps the original reader and editable draft when its Session getter becomes
   expect(view.element.querySelector('.mobile-active-state')?.textContent).toBe('最近观察：执行中')
   expect(editor(view.element)).toBe(input); expect(input.textContent).toContain('Keep this original draft')
   expect(send.disabled).toBe(false); expect(f.submit).not.toHaveBeenCalled()
+})
+it('refreshes the selected Session for its exact removed Run without an optional Session id and ignores unrelated Runs', async () => {
+  const f = prepared(), read = vi.spyOn(f.client, 'readAgentSession'), view = await mount(<MobileConversationSurface {...props(f)} />)
+  await paste(view.element, 'Keep the selected Run draft')
+  const input = editor(view.element)
+  read.mockClear()
+  await act(async () => f.emit({ type: 'run-removed', run: { runId: 'unrelated-run' }, evidence: { source: 'run-process', observedAt: Date.now() } }))
+  expect(read).not.toHaveBeenCalled()
+  await act(async () => f.emit({ type: 'run-removed', run: f.original.run, evidence: { source: 'run-process', observedAt: Date.now() } }))
+  expect(read).toHaveBeenCalled()
+  expect(read.mock.calls.every(([id]) => id === f.original.agentSessionId)).toBe(true)
+  expect(editor(view.element)).toBe(input); expect(input.textContent).toBe('Keep the selected Run draft')
+  expect(f.submit).not.toHaveBeenCalled()
 })
 it('uses Core aggregate activity and its exact evidence time without rewriting the retained completion', async () => {
   const f = prepared(), at = Date.now()

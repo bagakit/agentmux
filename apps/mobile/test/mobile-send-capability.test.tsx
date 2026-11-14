@@ -146,7 +146,7 @@ async function settle(view: Awaited<ReturnType<typeof mount>>, phase: 'confirmed
   await act(async () => { await f.submit.mock.results.at(-1)?.value?.catch(() => {}); await Promise.resolve() })
   await vi.waitFor(() => {
     const record = getDeviceWorkface().snapshot().record.conversation.attempts[0]?.[1]
-    expect(record?.phase).toBe(phase)
+    expect(record?.phase, JSON.stringify({ message: record?.message, inputReceipt: record?.inputReceipt, writes: f.writes })).toBe(phase)
   })
   if (phase === 'confirmed') expect(view.element.querySelector('.message-delivery-failure')).toBeNull()
 }

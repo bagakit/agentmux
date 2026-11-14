@@ -154,8 +154,8 @@ it('keeps the real Composer text when an oversized draft cannot be encoded to th
   expect(fetch).not.toHaveBeenCalled()
 })
 
-it('keeps an accepted retry protected after its conversation unmounts, without replaying it for update', async () => {
-  const key = JSON.stringify(['draft', 'session-original']), gate = deferred<any>(), f = fixture()
+it('protects an accepted retry until dispatch and retains it after its conversation unmounts without replaying it for update', async () => {
+  const key = JSON.stringify(['draft', 'session-original']), gate = deferred<any>(), reply = deferred<any>(), f = fixture()
   await getDeviceWorkface().updateConversation({ version: 1, drafts: [[key, '原正文']], responses: [], attempts: [[key, {
     operationId: 'original-prompt', runId: 'run-original', draft: '原正文', phase: 'unknown', inputRequested: true,
     originalRuntimeId: 'original-runtime', originalHostId: 'host-original', explicit: true,
@@ -166,13 +166,20 @@ it('keeps an accepted retry protected after its conversation unmounts, without r
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action />{surface}</MobileWebUpdateSafetyProvider>)
   await vi.waitFor(() => expect(f.inspectInput).toHaveBeenCalled())
   f.inspectInput.mockClear().mockImplementation(() => gate.promise)
+  f.submit.mockImplementation(() => reply.promise)
   await click(button(view.element, '重试发送'))
   expect(f.inspectInput).toHaveBeenCalledOnce()
-  await view.render(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /></MobileWebUpdateSafetyProvider>)
   expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('重试操作') })
   expect(f.submit).not.toHaveBeenCalled()
   await act(async () => { gate.resolve(null); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
-  expect(f.submit.mock.calls[0]![0].operationId).toBe('original-prompt')
+  const original = f.submit.mock.calls[0]![0]
+  expect(original.operationId).toBe('original-prompt')
+  await view.render(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /></MobileWebUpdateSafetyProvider>)
+  expect(await apply()).toEqual({ status: 'navigating' })
+  expect(createLocalDrafts().attempts.get(key)).toMatchObject({ operationId: original.operationId, inputRequested: true })
+  expect(f.submit).toHaveBeenCalledOnce()
+  await act(async () => reply.resolve(await acceptedPrompt(original)))
+  expect(f.submit).toHaveBeenCalledOnce()
 })
 
 it('explicitly cancels a retry while the original observation is pending, without submitting later', async () => {
