@@ -28,6 +28,24 @@ function config(command: string, overrides: Partial<AgentExecutorConfig> = {}): 
 }
 
 describe('target Host Executor owner', () => {
+  it('reads and probes only the exact selected descriptor while ordinary discovery remains complete', async () => {
+    const f = await fixture()
+    await executable(join(f.bin, 'selected-command'))
+    await writeFile(f.path, JSON.stringify({ schema: 'agentmux.host-executors.v1', runtimeId: 'target-runtime', executors: {
+      selected: config('selected-command'), unrelated: config('unrelated-command', { env: { PRIVATE_VALUE: 'never-published' } })
+    } }))
+    let observations = 0
+    const owner = new AgentMuxHostExecutorOwner({ path: f.path, runtimeId: 'target-runtime', catalog: () => catalog,
+      environment: () => { observations++; return { PATH: f.bin } } })
+    const selected = await owner.list({ executorId: 'selected', refresh: true })
+    expect(selected.executors.map(value => value.executorId)).toEqual(['selected'])
+    expect(selected.executors[0]?.availability).toBe('available')
+    expect(observations).toBe(1)
+    expect(JSON.stringify(selected)).not.toContain('PRIVATE_VALUE')
+    expect((await owner.list({ executorId: 'missing' })).executors).toEqual([])
+    expect((await owner.list()).executors.map(value => value.executorId)).toEqual(['codex', 'claude', 'selected', 'unrelated'])
+  })
+
   it('discovers only target Provider defaults and distinguishes unchecked, available and missing without writing configuration', async () => {
     const f = await fixture()
     const bin = await executable(join(f.bin, 'codex'))
