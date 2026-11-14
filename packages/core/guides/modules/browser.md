@@ -152,6 +152,17 @@ Read only the matching local help:
   `browser task parallel-list --browser SOURCE [--before OPERATION] [--limit N]` pages retained
   operations. Both reads work without native pages. Reader cancellation only stops reading;
   unknown replies and restart never authorize automatic replay of an original operation.
+  `browser task parallel-stop --browser SOURCE --operation-id ID` stops that original
+  target set in preparation, while running, or at a human checkpoint. It keeps completed
+  steps, original Run/cursor/operation IDs and uncertain effects; it does not undo page work.
+  Read an eligible target's `continuationRevision` with parallel-inspect before an explicit
+  `parallel-continue --browser SOURCE --operation-id ID --target TARGET --input FILE|-`.
+  Input is `{continuationId,expectedRevision,parameters,calls?}`. Retain this new ID before
+  dispatch and supply fresh values for unfinished work; the original version and Run stay fixed.
+  Public control cannot approve a human checkpoint; that requires the person's trusted Client action.
+  Inspect with the original operation and `--continuation-id ID` after an unknown reply.
+  A confirmed admission is not completed work; a null observation is not a refusal or permission
+  to replay. Only an explicit refusal before admission lets a corrected new intent be submitted.
   `browser task source --browser ID` reads exact recording metadata without its body.
   `browser task draft --browser ID --asset ID` reads a current definition without cumulative history.
   Create with one retained Core-minted intent via `browser task create --browser ID --input FILE|-`;
