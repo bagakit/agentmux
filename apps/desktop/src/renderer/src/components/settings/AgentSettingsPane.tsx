@@ -38,6 +38,7 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeStatusUnrestrictedIcon = semanticIconComponent('status.unrestricted')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeObjectSkillIcon = semanticIconComponent('object.skill')
 
 
 const NO_DETECTIONS: ReturnType<typeof useAppStore.getState>['executorDetections'] = {}
@@ -390,7 +391,13 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
           setHostDestination({ hostId, providerId })
           setHookNavigation(undefined)
           setScope('host')
-        }} />
+        }}
+        maintenance={() => <details className="provider-skill-versions">
+          <summary className="small-button" data-provider-skill-versions><ThemeObjectSkillIcon size={14} /> Skill versions <ThemeNavigationDownIcon size={12} /></summary>
+          <div className="provider-skill-versions__detail" data-provider-skill-help>
+            In the original Session, open <strong>Skills</strong> in the message composer to see each file’s declared version and source. Update the Skill through its original source.
+          </div>
+        </details>} />
       <div className="settings-pane-toolbar settings-agent-toolbar" data-settings-field="executors" hidden={scope === 'providers'}>
         {scopeControl}
         <span className="settings-resource-count">{scope === 'templates' ? `${executors.length} global templates` : null}</span>
