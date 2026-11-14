@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
 import { readFile } from 'node:fs/promises'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { getSemanticIconCatalog } from '../../../packages/client-ui/src/theme/icon-catalog-metadata.js'
 import { ICON_GLYPHS, AUTHORED_ICON_GLYPH_IDS } from '../../../packages/client-ui/src/theme/icon-catalog.js'
 import { removeIconSprite, semanticIconHref } from '../../../packages/client-ui/src/theme/icon-sprite.js'
 import { createReviewCatalog, sourceRoots } from '../scripts/icon-review/catalog.mjs'
 import { TOOLKIT_ICON_OPTIONS } from '../src/shared/toolkit-preferences.js'
 
+beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }))
 afterEach(() => {
+  vi.clearAllTimers()
+  vi.useRealTimers()
   window.dispatchEvent(new Event('pagehide'))
   removeIconSprite(document)
   document.body.replaceChildren()
@@ -70,6 +73,8 @@ it('the actual workbench finds shared Toolkit mappings and current drawings, com
   filter.checked = true; filter.dispatchEvent(new Event('change', { bubbles: true }))
   click('#view-mote')
   expect(document.querySelectorAll('[data-mote-family]')).toHaveLength(5)
+  expect(document.querySelector('[aria-label="Goal 角色造型参照"] img')?.getAttribute('src')).toContain('goal-next')
+  expect(document.querySelector('[data-mote-family="mote-main-session"] h3')?.textContent).toBe('Mote 主对话')
   expect(document.querySelector('[data-mote-family="agent"] use')?.getAttribute('href')).toBe(semanticIconHref('object.agent'))
   expect(document.querySelector('[data-mote-family="mote"] use')?.getAttribute('href')).toBe(semanticIconHref('object.mote'))
   expect(document.querySelector('[data-mote-family="mote-main-session"]')?.textContent).toContain('待采用候选')
