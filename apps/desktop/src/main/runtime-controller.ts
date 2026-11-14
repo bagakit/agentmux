@@ -1,6 +1,8 @@
 import { createSpaceMemberSurface } from './space-member-surface.js'
 import { readSpaceSnapshot, observeSpace, type AgentMuxRpcClient } from '@agentmux/core'
 import type { SpaceMountSourceTarget, SpaceMountTarget, SpaceMountResources, SpaceMountWatch, SpaceMountEvent } from '../shared/space-mount.js'
+import { SOURCE_FILES_METHODS, type SourceFilesMethod, type SourceFilesResult, type SourceFilesSelection } from '../shared/source-files.js'
+import { resolveSourceFiles } from './source-files.js'
 import { originalExecutionBindingId } from './execution-binding-reference'
 import { callDesktopHostRoute } from './host-routes-client'
 import type { DesktopHostRouteMethod, DesktopHostRouteTarget } from '../shared/host-routes'
@@ -2675,9 +2677,21 @@ export class RuntimeController {
     }
     const rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'> = {
       call: async (method, params, context = {}) => { assertCurrent(); const result = await callOriginalDesktopHost(client, method, params, context.signal ? { signal: context.signal } : {}, context.runtimeFence); assertCurrent(); return result },
-      subscribe: async (method, params, handlers) => { assertCurrent(); return await subscribeOriginalDesktopHost(client, method, params, handlers) }
+      subscribe: async (method, params, handlers) => { assertCurrent(); return await subscribeOriginalDesktopHost(client, method, params, handlers, handlers.runtimeFence) }
     }
-    return { rpc, assertCurrent }
+    // Files may have an authoritative effect ACK when the carrier changes while
+    // awaiting it. Preserve that receipt; its original client decides adoption.
+    const retainedRpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'> = {
+      call: async (method, params, context = {}) => {
+        assertCurrent()
+        return await callOriginalDesktopHost(client, method, params, context, context.runtimeFence)
+      },
+      subscribe: async (method, params, handlers) => {
+        assertCurrent()
+        return await subscribeOriginalDesktopHost(client, method, params, handlers, handlers.runtimeFence)
+      }
+    }
+    return { rpc, retainedRpc, assertCurrent, isCurrent: () => this.hosts.get(hostId)?.client === client && !this.hostReconfigurationReservations.has(hostId) }
   }
   async spaceMountResources(hostId: string, signal?: AbortSignal): Promise<SpaceMountResources> {
     const { rpc } = this.spaceMountHost(hostId)
@@ -2706,8 +2720,67 @@ export class RuntimeController {
       runtimeId: host.kind === 'local' ? runtimeId : host.runtimeId ?? null })) }
   }
 
-  async registerFolderSpace(hostId: string, registration: import('@agentmux/core/space-folder').FolderSpaceRegistration, signal?: AbortSignal) {
-    return await this.spaceMountHost(hostId).rpc.call('space.folder.register', registration, signal ? { signal } : {})
+  async registerFolderSpace(hostId: string, registration: import('@agentmux/core/space-folder').FolderSpaceRegisterInput, signal?: AbortSignal) {
+    const packet = structuredClone(registration)
+    const { rpc } = await this.sourceFilesControl({ hostId, expectedRuntimeId: packet.runtimeId }, signal)
+    return await rpc.call('space.folder.register', packet)
+  }
+  /** Source identity, not the observer's Workspace ID, selects every original Files request. */
+  private async sourceFilesControl(target: SpaceMountSourceTarget, signal?: AbortSignal) {
+    const original = structuredClone(target), carrier = this.spaceMountHost(original.hostId)
+    const expectedRuntimeId = 'expectedRuntimeId' in original ? original.expectedRuntimeId : original.reference.runtimeId
+    const { owner } = await carrier.retainedRpc.call('runtime.owner.identity', { expectedRuntimeId }, signal ? { signal } : {})
+    if (owner.runtimeId !== expectedRuntimeId) throw new AgentMuxError('The original Source Runtime changed. No Files operation was rerouted.', 'RUNTIME_OWNER_MISMATCH')
+    carrier.assertCurrent()
+    const fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+    const rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'> = {
+      call: (method, params, context = {}) => {
+        if (context.runtimeFence && (context.runtimeFence.runtimeId !== fence.runtimeId || context.runtimeFence.ownerInstanceId !== fence.ownerInstanceId)) throw new AgentMuxError('Keep the original Source Runtime fence.', 'RUNTIME_OWNER_MISMATCH')
+        return carrier.retainedRpc.call(method, params, { ...(signal ? { signal } : {}), ...context, runtimeFence: fence })
+      },
+      subscribe: (method, params, handlers) => {
+        if (handlers.runtimeFence && (handlers.runtimeFence.runtimeId !== fence.runtimeId || handlers.runtimeFence.ownerInstanceId !== fence.ownerInstanceId)) throw new AgentMuxError('Keep the original Source reader Runtime fence.', 'RUNTIME_OWNER_MISMATCH')
+        return carrier.retainedRpc.subscribe(method, params, { ...(signal ? { signal } : {}), ...handlers, runtimeFence: fence })
+      }
+    }
+    return { ...carrier, rpc, target: { hostId: original.hostId, expectedRuntimeId } }
+  }
+  async resolveSourceFiles(target: SpaceMountSourceTarget, selection: SourceFilesSelection, signal?: AbortSignal) {
+    const original = structuredClone(selection), source = await this.sourceFilesControl(target, signal)
+    const result = await resolveSourceFiles(source.rpc, source.target, original, signal)
+    source.assertCurrent()
+    return result
+  }
+  async sourceFilesCall<M extends SourceFilesMethod>(target: SpaceMountSourceTarget, method: M,
+    params: AgentMuxRpcParams<M>, signal?: AbortSignal): Promise<SourceFilesResult<M>> {
+    if (!(SOURCE_FILES_METHODS as readonly string[]).includes(method)) throw new AgentMuxError('Use an original supported Files operation.', 'INVALID_CONTROL_REQUEST')
+    const original = structuredClone(params), source = await this.sourceFilesControl(target, signal)
+    const result = await source.rpc.call(method, original)
+    return { result, carrierCurrent: source.isCurrent() }
+  }
+  async watchSourceFiles(target: SpaceMountSourceTarget, params: import('@agentmux/core').AgentMuxRpcStreamParams<'file.mutation.watch'>,
+    handlers: AgentMuxRpcSubscriptionOptions<'file.mutation.watch'>): Promise<AgentMuxRpcSubscription> {
+    const original = structuredClone(params), source = await this.sourceFilesControl(target, handlers.signal)
+    let reader: AgentMuxRpcSubscription | undefined, ended = false
+    const end = (error?: Error) => {
+      if (ended) return
+      ended = true
+      void reader?.dispose().catch(() => {})
+      handlers.onEnd?.(error)
+    }
+    const current = () => {
+      if (ended) return false
+      try { handlers.signal?.throwIfAborted(); source.assertCurrent(); return true }
+      catch (error) { end(error as Error); return false }
+    }
+    try {
+      reader = await source.rpc.subscribe('file.mutation.watch', original, { ...handlers,
+        onInitial: value => { if (current()) handlers.onInitial(value) },
+        onEvent: value => { if (current()) handlers.onEvent(value) },
+        ...(handlers.onFrame ? { onFrame: frame => { if (current()) handlers.onFrame!(frame) } } : {}), onEnd: end })
+      if (!current()) { await reader.dispose(); throw new AgentMuxError('The original Source reader ended before opening completed.', 'RUNTIME_OWNER_MISMATCH') }
+      return { subscriptionId: reader.subscriptionId, dispose: async () => { ended = true; await reader!.dispose() } }
+    } catch (error) { end(error as Error); throw error }
   }
   async inspectFolderSpace(hostId: string, registration: import('@agentmux/core/space-folder').FolderSpaceRegistration, signal?: AbortSignal) {
     const { inspectFolderSpaceRegistration } = await import('@agentmux/core/space-folder-client')

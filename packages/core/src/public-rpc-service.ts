@@ -645,8 +645,20 @@ export class AgentMuxRpcService {
 
   private async assertRuntimeFence(context: AgentMuxRpcCallContext): Promise<void> {
     if (!context.runtimeFence) return
-    if (!this.ports.hostedRuntime) throw new AgentMuxError('The original semantic Runtime owner is unavailable. No operation was rerouted.', 'CONTROL_UNAVAILABLE')
-    ;(await this.ports.hostedRuntime()).assertFence(context.runtimeFence)
+    if (this.ports.hostedRuntime) {
+      ;(await this.ports.hostedRuntime()).assertFence(context.runtimeFence)
+      return
+    }
+    // A client host borrows the original Core; it never owns a second semantic
+    // Runtime. Preserve the request's caller and fence on that original channel.
+    if (this.ports.callOriginalCore) {
+      const { source } = await this.ports.callOriginalCore('local', 'agent.open.describe',
+        { expectedRuntimeId: context.runtimeFence.runtimeId }, context)
+      if (source.runtimeId !== context.runtimeFence.runtimeId || source.ownerInstanceId !== context.runtimeFence.ownerInstanceId) throw new AgentMuxError(
+        'The original semantic Runtime changed. No operation was rerouted.', 'RUNTIME_OWNER_MISMATCH')
+      return
+    }
+    throw new AgentMuxError('The original semantic Runtime owner is unavailable. No operation was rerouted.', 'CONTROL_UNAVAILABLE')
   }
 
   private folderDirectoryContext(source: import('./space-authority.js').SpaceAuthoritySource, context: AgentMuxRpcCallContext): AgentMuxRpcCallContext {

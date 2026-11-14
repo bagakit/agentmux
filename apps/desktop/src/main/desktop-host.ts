@@ -124,18 +124,18 @@ async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAge
     call: async (method, params, context, expectedOwner) => {
       if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
         'The original device forwarding authority is unavailable. Its saved input and Sessions are retained.', 'CONTROL_UNAVAILABLE')
-      // Provider declarations use only the original transport. Other calls retain
-      // the original Core Runtime/instance fence, confirmed through the control-only
-      // owner read above without requiring Session inventory.
-      const confirmed = method === 'agent.provider.ls' ? undefined : await originalOwner(context.signal)
+      // Explicit targets and identity/declaration reads use the original transport.
+      // Other calls retain the existing control-only owner confirmation above.
+      const confirmed = expectedOwner || method === 'agent.provider.ls' || method === 'runtime.owner.identity'
+        ? undefined : await originalOwner(context.signal)
       const fence = expectedOwner ?? confirmed
       return await rpc.call(method, params, { ...(context.signal ? { signal: context.signal } : {}),
         ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}),
         ...(context.caller ? { credentials: context.caller } : {}), ...(fence ? { runtimeFence: fence } : {}) })
     },
     subscribe: async (method, params, handlers, expectedOwner) => {
-      const confirmed = await originalOwner(handlers.signal)
-      return await client.subscribeRpc!(method, params, { ...handlers, runtimeFence: expectedOwner ?? confirmed })
+      const fence = expectedOwner ?? await originalOwner(handlers.signal)
+      return await client.subscribeRpc!(method, params, { ...handlers, runtimeFence: fence })
     }
   })
   const dispose = client.dispose.bind(client)
