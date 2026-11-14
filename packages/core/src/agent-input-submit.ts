@@ -1,3 +1,6 @@
+import { parseFocusTaskReference, type AgentMuxFocusTaskReference } from './focus-control.js'
+import { focusTaskHandoffNote } from './focus-task-guidance.js'
+import { MOTE_INPUT_GUIDANCE } from './mote/input-source.js'
 import { parseAgentInputImageReference, type AgentInputImageReference } from './agent-input-resource.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote/input-source.js'
@@ -15,6 +18,8 @@ export type AgentInputSubmit = {
   inputImages?: AgentInputImageReference[]
   /** Selects fixed app-owned guidance only; author and role authority remain transport/Host-owned. */
   moteGuidance?: true
+  /** Fixed Focus read guidance, not caller-authored platform text or author authority. */
+  focusTask?: AgentMuxFocusTaskReference
   /** Original capture packet only. The execution owner verifies its original target/body/note digest. */
   capturedContext?: { reference: AgentInputContextCaptureReference; agentMuxNote?: string }
   moteSource?: AgentInputMoteSource
@@ -29,7 +34,7 @@ export type AgentInputSubmitResult = {
   record: AgentPromptSubmissionRecord | null
   input?: AgentInputSubmissionReceipt | null
 }
-export const AGENT_INPUT_SUBMIT_FIELDS = ['agentSessionId', 'operationId', 'prompt', 'inputImages', 'inputContext', 'capturedContext', 'moteSource', 'moteGuidance', 'sourceChannel', 'preparationRetry', 'expectedRun', 'afterSubmissionId', 'admissionIntent', 'execution', 'allowUncertainTurn'] as const
+export const AGENT_INPUT_SUBMIT_FIELDS = ['agentSessionId', 'operationId', 'prompt', 'inputImages', 'inputContext', 'capturedContext', 'moteSource', 'moteGuidance', 'focusTask', 'sourceChannel', 'preparationRetry', 'expectedRun', 'afterSubmissionId', 'admissionIntent', 'execution', 'allowUncertainTurn'] as const
 export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
   const p = rpcRecord(value, AGENT_INPUT_SUBMIT_FIELDS)
   const key = validateAgentPromptInputKey({ kind: 'prompt', agentSessionId: p.agentSessionId, expectedRun: p.expectedRun, submissionId: p.operationId })
@@ -40,7 +45,7 @@ export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
   let capturedContext: AgentInputSubmit['capturedContext']
   if (p.capturedContext !== undefined) {
     const packet = rpcRecord(p.capturedContext, ['reference', 'agentMuxNote'], 'INVALID_INPUT_CONTEXT_CAPTURE')
-    if (p.inputContext !== undefined || p.moteGuidance !== undefined || packet.agentMuxNote !== undefined &&
+    if (p.inputContext !== undefined || p.moteGuidance !== undefined || p.focusTask !== undefined || packet.agentMuxNote !== undefined &&
       (typeof packet.agentMuxNote !== 'string' || packet.agentMuxNote.includes('\0'))) throw new AgentMuxError('A captured input retains its original packet; a second context or platform note cannot replace it.', 'INVALID_INPUT_CONTEXT_CAPTURE')
     capturedContext = { reference: parseAgentInputContextCaptureReference(packet.reference), ...(packet.agentMuxNote === undefined ? {} : { agentMuxNote: packet.agentMuxNote as string }) }
   }
@@ -54,6 +59,7 @@ export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
   const common = { agentSessionId: key.agentSessionId, operationId: p.operationId as string, prompt: p.prompt,
     ...(p.sourceChannel === undefined ? {} : {sourceChannel:normalizeMessageChannel(p.sourceChannel)}),
     ...(p.moteGuidance === true ? {moteGuidance:true as const} : {}),
+    ...(p.focusTask === undefined ? {} : { focusTask: parseFocusTaskReference(p.focusTask) }),
     ...(capturedContext === undefined ? {} : { capturedContext }),
     ...(p.moteSource === undefined ? {} : {moteSource:parseAgentInputMoteSource(p.moteSource)}),
     ...(p.inputImages === undefined ? {} : { inputImages: (() => { if (!Array.isArray(p.inputImages)) throw new AgentMuxError('Selected input images must be a list.', 'INVALID_AGENT_INPUT_RESOURCE'); return p.inputImages.map(parseAgentInputImageReference) })() }),
@@ -66,4 +72,10 @@ export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
   return { ...common, ...validateAgentPromptCondition({ expectedRun: key.expectedRun, ...(Object.hasOwn(p, 'afterSubmissionId') ? { afterSubmissionId: p.afterSubmissionId } : {}) }),
     ...(preparationRetry === undefined ? {} : { preparationRetry }),
     ...(p.execution === undefined ? {} : { execution: p.execution as AgentPromptExecution }) }
+}
+
+/** Only the original input producer selects these fixed guides; wire composition stays in its existing owner. */
+export function agentInputGuidance(input: Pick<AgentInputSubmit, 'moteGuidance' | 'focusTask'>): string {
+  const note = [input.moteGuidance ? MOTE_INPUT_GUIDANCE : undefined, input.focusTask ? focusTaskHandoffNote(input.focusTask) : undefined].filter(Boolean).join('\n\n')
+  return note
 }

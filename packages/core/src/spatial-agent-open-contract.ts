@@ -33,7 +33,7 @@ export type MoteMainBindingObservation = {kind:'preferences';source:MoteMainBase
   {kind:'source';operationId:string;file:{resource:FileReadResource;revision:string};reference:MoteDefaultConversation;roleRevision:string}
 export type MoteMainBindingReceipt = { operationId: string; status: MoteQuickPreferencesSaveResult['status']; source: MoteMainBaseline | null; message: string | null }
 export type MoteMainFollowUpInput = { requestId: string; step: 'source' | 'binding'; receipt?: MoteQuickPreferencesSaveResult; baselineChanged?: MoteMainBaseline }
-export type MoteMainDeferredInput = Pick<import('./agent-input-submit.js').AgentInputSubmit,'operationId'|'prompt'|'sourceChannel'|'inputImages'>
+export type MoteMainDeferredInput = Pick<import('./agent-input-submit.js').AgentInputSubmit,'operationId'|'prompt'|'sourceChannel'|'inputImages'|'focusTask'>
 export type MoteMainCreationIntent = { target: MotePreferencesTarget; baseline: MoteMainBaseline;
   expectedRoleRevision: string | null; sourceOperationId: string; bindOperationId: string; deferredInput?: MoteMainDeferredInput; handover?: true; rollover?:MoteMainRolloverDecision }
 export function parseMoteMainCreationIntent(value: unknown, code: 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR' | 'INVALID_CLI_ARGUMENT' = 'INVALID_CONTROL_REQUEST'): MoteMainCreationIntent {
@@ -47,10 +47,10 @@ export function parseMoteMainCreationIntent(value: unknown, code: 'INVALID_CONTR
     throw new AgentMuxError('Main creation requires the original configured default and role generation.', code)
   let deferredInput: MoteMainDeferredInput | undefined
   if (p.deferredInput !== undefined) {
-    const d=rpcRecord(p.deferredInput,['operationId','prompt','sourceChannel','inputImages'],code)
+    const d=rpcRecord(p.deferredInput,['operationId','prompt','sourceChannel','inputImages','focusTask'],code)
     const parsed=parseAgentInputSubmit({...d,agentSessionId:'deferred-main',expectedRun:{runId:'deferred-main'},afterSubmissionId:null})
     safeId(parsed.operationId,'Agent prompt operation id')
-    deferredInput={operationId:parsed.operationId,prompt:parsed.prompt,...(parsed.sourceChannel ? {sourceChannel:parsed.sourceChannel} : {}),...(parsed.inputImages ? {inputImages:parsed.inputImages} : {})}
+    deferredInput={operationId:parsed.operationId,prompt:parsed.prompt,...(parsed.sourceChannel ? {sourceChannel:parsed.sourceChannel} : {}),...(parsed.inputImages ? {inputImages:parsed.inputImages} : {}),...(parsed.focusTask ? {focusTask:parsed.focusTask} : {})}
     if ([p.sourceOperationId,p.bindOperationId].includes(deferredInput.operationId)) throw new AgentMuxError('The deferred input keeps a distinct original operation.',code)
   }
   if(p.handover !== undefined && (p.handover !== true || !baseline.defaults.conversation)) throw new AgentMuxError('Main handover requires the original predecessor role.',code)

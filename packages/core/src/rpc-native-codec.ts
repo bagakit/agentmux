@@ -1,3 +1,4 @@
+import { FOCUS_METHODS, parseFocusParams, parseFocusResult, type FocusMethod } from './focus-control.js'
 import { parseAgentTakeoverPage, type AgentTakeoverQuery } from './agent-takeover.js'
 import { SPACE_LINK_METHODS, parseSpaceLinkParams, parseSpaceLinkResult, type SpaceLinkMethod } from './space-link.js'
 import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult } from './agent-promotion.js'
@@ -55,7 +56,7 @@ import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-
 import { parseBroadcastReceipt, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseMessageEventsPage } from './agent-message-events.js'
 import { createAgentInputContextCaptureRecord, parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead } from './agent-input-context-capture.js'
-import { parseAgentInputSubmit } from './agent-input-submit.js'
+import { agentInputGuidance, parseAgentInputSubmit } from './agent-input-submit.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
 import { isMessageNotificationInput, validateMessageNotification } from './agent-message-notification.js'
 import { agentDiscoveryActivity } from './agent-discovery.js'
@@ -425,6 +426,7 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (Object.hasOwn(FOCUS_METHODS, method)) return parseFocusResult(method as FocusMethod, value, parseFocusParams(method as FocusMethod, params)) as unknown as Record<string, unknown>
     if (isNameControlMethod(method)) return parseNameControlResult(method, value, parseNameControlParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'space.member.call') {
       const input = parseSpaceMemberParams(method, params)
@@ -862,7 +864,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record), message = original.admission?.intent?.message ?? original.launch?.message
           const expectedContext = packet ? message?.inputContext : submitted.inputContext
-          const expectedNote = composeAgentPrompt(undefined, packet ? packet.agentMuxNote : submitted.moteGuidance === true ? MOTE_INPUT_GUIDANCE : undefined).systemContext
+          const expectedNote = composeAgentPrompt(undefined, packet ? packet.agentMuxNote : agentInputGuidance(submitted)).systemContext
           if (packet) {
             if (!expectedContext) fail()
             const {schema:_schema,inputContext:_context,...proof} = createAgentInputContextCaptureRecord({reference:packet.reference,

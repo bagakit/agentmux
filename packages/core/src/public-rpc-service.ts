@@ -1,3 +1,4 @@
+import { FOCUS_METHODS, parseFocusParams, parseFocusResult, type FocusMethod } from './focus-control.js'
 import { spatialDestination } from './spatial-destination.js'
 import { parseAgentTakeoverProvenance, parseAgentTakeoverQuery, parseAgentTakeoverPage, takeoverDestinationOrganization, qualifyTakeoverOrganization, agentTakeoverNature, type AgentTakeoverPreparation, type AgentTakeoverRecord, type AgentTakeoverPage } from './agent-takeover.js'
 import { SPACE_LINK_METHODS, formatSpaceLink, parseSpaceLinkParams, parseSpaceLinkResult, type SpaceLinkMethod } from './space-link.js'
@@ -44,7 +45,6 @@ import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecor
 import { agentTakeoverPrompt } from './agent-takeover-context.js'
 import { agentDerivedActionPrompt, isAgentBuiltInDerivedActionId, parseAgentDerivedActionFields } from './agent-derived-actions.js'
 import { reconcileMoteMainSetup } from './mote/main-setup.js'
-import { MOTE_INPUT_GUIDANCE } from './mote/input-source.js'
 import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote/dialogue.js'
 import { moteInputObservationId } from './mote/input.js'
 import { parseCreationContinueParams, parseCreationContinueReceipt, parseCreationContinueResult } from './agent-creation-continue.js'
@@ -165,7 +165,7 @@ import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessag
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
 import { assertAgentMessageRouteIntent, type AgentMessageRoute } from './agent-message-route.js'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
-import { AGENT_INPUT_SUBMIT_FIELDS, parseAgentInputSubmit } from './agent-input-submit.js'
+import { AGENT_INPUT_SUBMIT_FIELDS, agentInputGuidance, parseAgentInputSubmit } from './agent-input-submit.js'
 import { parseAgentInputChangesRead, parseAgentInputChangesPage } from './agent-input-changes.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { agentInputDeliveryKey, validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
@@ -553,7 +553,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [], 'system.relay.inspect': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, FocusMethod | MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -987,6 +987,16 @@ export class AgentMuxRpcService {
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
     this.assertExposed(method)
     await assertHostRouteDispatch(context, method, params, false)
+    if (Object.hasOwn(FOCUS_METHODS, method)) {
+      const selected = method as FocusMethod, input = parseFocusParams(selected, params)
+      await this.authenticated(context)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (this.ports.forwardControl) return parseFocusResult(selected,
+        await this.ports.forwardControl(selected, input, context), input) as AgentMuxRpcResult<M>
+      const result = await this.execute(this.request(selected, { input }), undefined, context)
+      if (result.operation !== selected || !('page' in result)) throw new AgentMuxError('The original Focus owner returned another observation.', 'CONTROL_PROTOCOL_ERROR')
+      return parseFocusResult(selected, result.page, input) as AgentMuxRpcResult<M>
+    }
     if (Object.hasOwn(HOST_ROUTE_METHODS, method)) {
       const routes = this.ports.hostRoutes
       if (!routes) throw new AgentMuxError('This Core has no composed route owner; original capabilities remain available.', 'CONTROL_UNAVAILABLE')
@@ -4116,10 +4126,10 @@ export class AgentMuxRpcService {
     if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.input.submit',input,await this.inputForwardContext(context))
     if (scope.hostId === 'local' && this.ports.callOriginalCore) return await this.ports.callOriginalCore(scope.hostId,'agent.input.submit',input,await this.inputForwardContext(context))
     const device = this.ports.operationSource?.(context)
-    const {moteGuidance,capturedContext,...prompt} = input
+    const {moteGuidance,focusTask,capturedContext,...prompt} = input
     const receipt = await scope.client.submitAgentPrompt({ ...prompt,
       ...(capturedContext ? {inputContextCapture:capturedContext.reference, ...(capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:capturedContext.agentMuxNote}),authorHuman:true} : {}),
-      ...(moteGuidance ? {agentMuxNote:MOTE_INPUT_GUIDANCE,authorHuman:true} : {}), sourceChannel: input.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
+      ...((moteGuidance || focusTask) ? {agentMuxNote:agentInputGuidance(input),...(moteGuidance ? {authorHuman:true} : {})} : {}), sourceChannel: input.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
       ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}) },{...this.inputCallContext(context), ...(this.ports.inputContextCaptures ? {captureReader:this.ports.inputContextCaptures} : {})})
     const key = {kind:'prompt' as const,agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}
     const observed = await scope.client.inspectAgentInput({key}) ?? (receipt && 'key' in receipt ? receipt : undefined)
@@ -4170,7 +4180,7 @@ export class AgentMuxRpcService {
     }
     if(!record||!intent||!intent.deferredInput&&!intent.handover) return result
     const advance=method==='space.mote.dialogue.setup.advance'
-    const stage=async (field:'deferredInputKey'|'handoverInputKey',body:{operationId:string;prompt:string;sourceChannel?:import('./types.js').AgentMessageChannel;inputImages?:import('./agent-input-resource.js').AgentInputImageReference[]}) => {
+    const stage=async (field:'deferredInputKey'|'handoverInputKey',body:import('./spatial-agent-open-contract.js').MoteMainDeferredInput) => {
       const prior=await this.moteMainInput('space.mote.dialogue.input.inspect',{target:intent.target,operationId:body.operationId},context)
       if(prior.route||!advance||result.binding!=='confirmed') return prior
       const owners=(await this.clients()).filter(scope=>scope.hostId===record.execution.hostId)
@@ -4351,7 +4361,7 @@ export class AgentMuxRpcService {
           input:{submissionId:route.operationId,prompt:submit.prompt,authorHuman:true,sourceChannel:submit.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
             ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}),
             ...(submit.capturedContext ? {inputContextCapture:submit.capturedContext.reference,
-              ...(submit.capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:submit.capturedContext.agentMuxNote})} : {agentMuxNote:MOTE_INPUT_GUIDANCE}),
+              ...(submit.capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:submit.capturedContext.agentMuxNote})} : {agentMuxNote:agentInputGuidance(submit)}),
             ...(submit.inputContext ? {inputContext:submit.inputContext} : {})}},
           {...this.inputCallContext(context),...(this.ports.inputContextCaptures ? {captureReader:this.ports.inputContextCaptures} : {})})
       }
