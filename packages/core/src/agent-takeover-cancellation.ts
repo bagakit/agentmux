@@ -14,6 +14,8 @@ export type AgentTakeoverCancellationResult = {
   owner: { runtimeId: string; ownerInstanceId: string }
   operationId: string
   createOperationId: string
+  /** Exact cancellation admission at the original spatial owner. Omitted by older owners means unknown. */
+  cancellationAdmission?: 'observed' | 'not-observed'
   outcome: 'cancelled' | 'created' | 'unconfirmed'
   /** hostId belongs to the original spatial owner's namespace, not the observing client. */
   agent: { agentSessionId: string; run: AgentMuxRunRef | null; hostId: string; runtimeId: string } | null
@@ -35,12 +37,15 @@ export function parseAgentTakeoverCancellation(value: unknown): AgentTakeoverCan
     request: structuredClone(p.request) as AgentMuxRpcParams<'agent.open'> & { operationId: string } }
 }
 export function parseAgentTakeoverCancellationResult(value: unknown, input: AgentTakeoverCancellationInput): AgentTakeoverCancellationResult {
-  const p = rpcRecord(value, ['owner','operationId','createOperationId','outcome','agent','to','initialInput','diskDurability','issue'], 'CONTROL_PROTOCOL_ERROR')
+  const p = rpcRecord(value, ['owner','operationId','createOperationId','cancellationAdmission','outcome','agent','to','initialInput','diskDurability','issue'], 'CONTROL_PROTOCOL_ERROR')
   const owner = rpcRecord(p.owner, ['runtimeId','ownerInstanceId'], 'CONTROL_PROTOCOL_ERROR')
   if (owner.runtimeId !== input.expectedRuntimeId || p.operationId !== input.operationId || p.createOperationId !== input.request.operationId ||
     !['cancelled','created','unconfirmed'].includes(String(p.outcome)) || !['held','already-dispatched','unknown'].includes(String(p.initialInput)) ||
     !['confirmed','unconfirmed'].includes(String(p.diskDurability)) || p.issue !== null && typeof p.issue !== 'string') throw new AgentMuxError('The cancellation result belongs to another original intent or owner.', 'CONTROL_PROTOCOL_ERROR')
   rpcString(owner.ownerInstanceId, 'Original owner instance')
+  if (p.cancellationAdmission !== undefined && p.cancellationAdmission !== 'observed' && p.cancellationAdmission !== 'not-observed' ||
+    p.cancellationAdmission === 'not-observed' && p.outcome !== 'unconfirmed')
+    throw new AgentMuxError('The cancellation admission observation is inconsistent with its result.', 'CONTROL_PROTOCOL_ERROR')
   if (p.agent !== null) {
     const a = rpcRecord(p.agent, ['agentSessionId','run','hostId','runtimeId'], 'CONTROL_PROTOCOL_ERROR')
     for (const key of ['agentSessionId','hostId','runtimeId']) rpcString(a[key], 'Original created Agent')

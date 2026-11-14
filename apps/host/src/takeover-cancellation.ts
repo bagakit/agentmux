@@ -27,8 +27,9 @@ export async function cancelOriginalTakeover(options: { spatial: AgentMuxSpatial
     record = spatialAgentOpenRecord(state.graph, request.requestId)
   }
   const base = { owner: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, operationId: input.operationId, createOperationId: request.requestId,
+    cancellationAdmission: 'observed' as const,
     to: record?.address ?? null, diskDurability: acknowledged ? 'confirmed' as const : 'unconfirmed' as const }
-  if (!previous && inspectOnly) return { ...base, outcome: 'unconfirmed', agent: null, initialInput: 'unknown', issue: 'The original cancellation has not been observed.' }
+  if (!previous && inspectOnly) return { ...base, cancellationAdmission: 'not-observed', outcome: 'unconfirmed', agent: null, initialInput: 'unknown', issue: 'The original cancellation has not been observed.' }
   if (!record) return { ...base, outcome: 'cancelled', agent: null, initialInput: 'held', issue: null }
   const control = { createOperationId: record.requestId, agentSessionId: record.agentSessionId, operationId: input.operationId }
   try {
