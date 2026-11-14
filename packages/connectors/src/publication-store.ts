@@ -610,7 +610,7 @@ export class PublicationStore {
     })
   }
   pendingMoteReplies(): PublicationOperation[] {
-    return this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation INDEXED BY connector_publication_mote_reply WHERE ${moteReplyOpen} AND ordinal IN (SELECT MIN(ordinal) FROM connector_publication_operation WHERE ${moteReplyOpen} GROUP BY projection_id) ORDER BY ordinal`).all().map(row => this.read(row)!)
+    return this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation INDEXED BY connector_publication_mote_reply WHERE ${moteReplyOpen} AND ordinal IN (SELECT MIN(ordinal) FROM connector_publication_operation INDEXED BY connector_publication_mote_reply WHERE ${moteReplyOpen} GROUP BY projection_id) ORDER BY ordinal`).all().map(row => this.read(row)!)
   }
   list(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, limit = 30, after?: string, order: 'oldest' | 'newest' = 'oldest'): PublicationOperation[] {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError('Publication pages require a limit from 1 to 100.', 'INVALID_PUBLICATION_REQUEST')
