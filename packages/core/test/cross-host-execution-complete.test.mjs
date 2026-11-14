@@ -21,7 +21,7 @@ test('an explicit harness correction cannot replace product sources or lose the 
 })
 test('the same Core cannot certify a UI built from different or unrecorded workspace sources', () => {
   const inputs = Object.fromEntries(['apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/renderer/src/lib/control-api.ts',
-    'apps/host/src/configured-host-clients.ts', 'packages/client-ui/src/index.ts'].map(file => [file, sha]))
+    'apps/host/src/configured-host-clients.ts', 'packages/client-ui/package.json'].map(file => [file, sha]))
   const receipt = { inputs, inputsAfter: structuredClone(inputs), builtInputs: { 'renderer/index.js': sha },
     tools: { electron: { path: '/private/qualified-electron', sha256: sha } }, toolsAfter: { electron: { path: '/private/qualified-electron', sha256: sha } } }
   validateUiInputs(receipt, inputs)
