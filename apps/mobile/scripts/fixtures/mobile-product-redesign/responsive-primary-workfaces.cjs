@@ -77,15 +77,26 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     await resize(390, 844); await flush()
     await read(`(()=>{const editor=document.querySelector(${JSON.stringify(goalEditor)}),frame=document.querySelector(${JSON.stringify(frame)});editor.focus();editor.setSelectionRange(4,12);editor.scrollTop=24;window.responsiveRotation={stopped:false,frames:[],editor,frame,before:{scrollTop:editor.scrollTop,focused:document.activeElement===editor}};const tick=time=>{const s=window.responsiveRotation;if(s.stopped)return;const css=getComputedStyle(s.frame),r=s.frame.getBoundingClientRect();s.frames.push({time,width:innerWidth,height:innerHeight,column:parseFloat(css.gridTemplateColumns),columns:css.gridTemplateColumns,frameWidth:r.width,focused:document.activeElement===s.editor,start:s.editor.selectionStart,end:s.editor.selectionEnd,scrollTop:s.editor.scrollTop});requestAnimationFrame(tick)};tick(performance.now());return true})()`)
     await resize(width, height)
-    await read('new Promise(resolve=>setTimeout(resolve,220))')
+    let motionImage
+    if (!reduced) {
+      await until('parseFloat(getComputedStyle(window.responsiveRotation.frame).gridTemplateColumns)>1&&parseFloat(getComputedStyle(window.responsiveRotation.frame).gridTemplateColumns)<199')
+      const geometry = `(()=>{const s=window.responsiveRotation;return {time:performance.now(),column:parseFloat(getComputedStyle(s.frame).gridTemplateColumns),width:innerWidth,height:innerHeight,focused:document.activeElement===s.editor,start:s.editor.selectionStart,end:s.editor.selectionEnd,scrollTop:s.editor.scrollTop}})()`
+      const before=await read(geometry), image=await win.webContents.capturePage(), after=await read(geometry)
+      const name='responsive-goal-rotation-mid-667-light'
+      await fs.writeFile(path.join(evidence,name+'.png'),image.toPNG())
+      result.images.push(name+'.png'); motionImage={name,before,after}
+      result.operations.push({action:'capture',name,motion:true,geometry:motionImage})
+    }
+    await read('new Promise(resolve=>setTimeout(resolve,Math.max(0,220-(performance.now()-window.responsiveRotation.frames[0].time))))')
     const actual = await read(`(()=>{const s=window.responsiveRotation;s.stopped=true;return {before:s.before,reduced:matchMedia('(prefers-reduced-motion:reduce)').matches,frames:s.frames,transition:getComputedStyle(s.frame).transitionDuration}})()`)
-    result.responsiveMotion.push({ width, height, ...actual })
+    result.responsiveMotion.push({ width, height, ...actual, ...(motionImage ? { image:motionImage } : {}) })
     const first = actual.frames[0].column, last = actual.frames.at(-1).column
     assert.equal(actual.reduced, reduced)
     assert.ok(last >= 200 && last <= 300)
     const intermediate = actual.frames.filter(frame => frame.column > first + 1 && frame.column < last - 1)
     if (reduced) { assert.equal(actual.transition, '0s'); assert.equal(intermediate.length, 0, 'Reduced motion never interpolates the workface tracks') }
     else assert.ok(intermediate.length > 0, 'Real rotation paints intermediate grid track geometry')
+    if (motionImage) for(const boundary of [motionImage.before,motionImage.after]) assert.ok(boundary.column>first+1&&boundary.column<last-1,'The actual complete PNG is captured inside the original unmodified grid transition')
     for (const frame of actual.frames) { assert.equal(frame.focused, true); assert.equal(frame.start, 4); assert.equal(frame.end, 12); assert.equal(frame.scrollTop, actual.before.scrollTop) }
     await sameEditor(goalEditor, 'responsiveGoalEditor', goalDraft)
     await split(`Goal rotation ${width}×${height}${reduced ? ' reduced' : ''}`, '.mobile-goals-host:not([hidden]) .mobile-goals-directory', '.mobile-goals-host:not([hidden]) .mobile-goals-work')
@@ -95,6 +106,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     const h=chrome.header
     assert.equal(h.rect.height-h.borderTop-h.borderBottom-h.paddingTop-h.paddingBottom,44,'Short header keeps one 44px control row inside its observed stroke/insets')
     for (const control of [...chrome.buttons,...chrome.tabs]) assert.ok(control.rect.height>=44&&control.rect.width>=44)
+    if (reduced) await capture('responsive-goal-rotation-reduced-812-light')
   }
   // CDP changes the actual CSS env() values; no injected style or viewport mock.
   const safeArea = async (width, height, selector, expectedSplit) => {
