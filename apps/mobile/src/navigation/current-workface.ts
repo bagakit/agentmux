@@ -1,9 +1,10 @@
 import type { MobilePresentationRoute, MobileTopicSourceReference } from '../recovery/presentation-route'
+import type { MobilePanel } from '../recovery/device-workface'
 
 /** A view of the original navigation, not another route or persistent record. */
 export function currentMobileWorkface(input: {
   primary: MobilePresentationRoute['primary']; showSession: boolean; showGoalWork: boolean
-  panel: 'conversation' | 'terminal'; mote: boolean; section: 'discussion' | 'threads'; threadDetail: boolean
+  panel: MobilePanel; mote: boolean; section: 'discussion' | 'threads'; threadDetail: boolean
   sourceKind: MobileTopicSourceReference['kind'] | undefined
 }) {
   const { primary, showSession, showGoalWork, panel } = input
