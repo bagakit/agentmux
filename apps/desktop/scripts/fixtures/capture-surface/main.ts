@@ -10,6 +10,16 @@ import type { BrowserPng } from '../../../src/shared/contracts'
 const out = process.env.AGENTMUX_CAPTURE_SURFACE_OUT!
 app.setPath('userData', join(import.meta.dirname, 'user-data'))
 app.on('window-all-closed', () => {})
+const protectionAtShow = new WeakMap<BrowserWindow, boolean[]>()
+app.on('browser-window-created', (_event, window) => {
+  const showInactive = window.showInactive.bind(window)
+  window.showInactive = () => {
+    const states = protectionAtShow.get(window) ?? []
+    states.push(window.isContentProtected())
+    protectionAtShow.set(window, states)
+    showInactive()
+  }
+})
 const receipt: any = { passed: false, boundary: 'Production CaptureSurface, isolated preload, Renderer, shared editor and PNG composition in real Electron. Only native screen pixels/window geometry and clipboard/pin sinks are controlled; no OS screen recording, user clipboard, physical multi-monitor/TCC, packaging or installation proof.', cases: [], screenshots: [], timings: [], grabs: [], opacityChanges: [] }
 const displays = [{ id: 1, bounds: { x: 0, y: 0, width: 960, height: 640 }, scaleFactor: 1, displayFrequency: 60 },
   { id: 7, bounds: { x: 960, y: 0, width: 800, height: 600 }, scaleFactor: 1, displayFrequency: 60 }]
@@ -20,6 +30,7 @@ console.info = (...args) => {
   originalInfo(...args)
 }
 const sources = new Map<string, BrowserPng>(), deliveries: any[] = []
+let deliveryGate: Promise<void> | null = null
 async function waitFor<T>(label: string, read: () => Promise<T>): Promise<NonNullable<T>> {
   const started = performance.now()
   while (performance.now() - started < 10000) {
@@ -93,48 +104,64 @@ async function sourceImages() {
 async function open(background: CaptureBackground, expandable = true) {
   const before = new Set(BrowserWindow.getAllWindows()), start = performance.now(), firstGrab = receipt.grabs.length
   const outcome = surface.present({ background, attachToDraft: false, expandable, returnFocus: false,
-    complete: async (image, source, engine) => { deliveries.push({ image, source, engine }) } })
-  void outcome.catch(error => { receipt.captureError = String(error) })
+    complete: async (image, source, engine) => {
+      const delivery = { image, source, engine, settled: false }
+      deliveries.push(delivery)
+      const gate = deliveryGate
+      deliveryGate = null
+      if (gate) await gate
+      delivery.settled = true
+    } })
+  void outcome.catch(error => { receipt.captureError = String(error); process.stderr.write('Capture outcome failed: ' + String(error?.stack ?? error) + '\n') })
   const overlays = await waitFor('production overlays allocated', async () => {
+    if (receipt.captureError) throw new Error(receipt.captureError)
     const fresh = BrowserWindow.getAllWindows().filter(candidate => !before.has(candidate))
     return fresh.length === displays.length ? fresh : null
   })
   current = overlays.find(window => window.getBounds().x === 0)!
+  const infos: any[] = []
   for (const overlay of overlays) {
     await waitFor('every production overlay painted and shown', async () => {
+      if (receipt.captureError) throw new Error(receipt.captureError)
       try { return overlay.isVisible() && await overlay.webContents.executeJavaScript(`document.querySelector('img')?.naturalWidth>0&&document.querySelector('canvas')?.width>0`) } catch { return false }
     })
-    const info = await overlay.webContents.executeJavaScript(`window.captureSurface.load()`)
-    assert.equal(info.background, background)
-    assert.equal(await overlay.webContents.executeJavaScript(`document.querySelector('img').src`), sources.get(background + ':' + info.displayId)!.dataUrl, 'the actual editor image is the requested frozen source')
+    infos.push(await overlay.webContents.executeJavaScript(`window.captureSurface.load()`))
+  }
+  const grabs = receipt.grabs.slice(firstGrab)
+  // Record the real opened scene before any oracle can reject it; an empty executed set is never a mutation kill.
+  receipt.cases.push({ label: 'opened-' + background, elapsedMs: performance.now()-start, displays: overlays.length, grabs })
+  assert.deepEqual(overlays.map(window => protectionAtShow.get(window)), [[true], [true]], 'every real overlay is protected before showInactive')
+  assert.equal(host.getOpacity(), 0.65, 'the visible host keeps its exact prior opacity while editing')
+  assert.equal(receipt.opacityChanges.length, 0, 'CaptureSurface never writes host opacity')
+  assert.deepEqual(grabs.map((row: any) => row.includeHostWindows), [true, false], 'one included and one excluded exposure only')
+  assert.deepEqual(grabs.map((row: any) => row.opacity), [0.65, 0.65], 'both native exposures observe the unchanged host')
+  for (const [index, overlay] of overlays.entries()) {
+    assert.equal(infos[index].background, background)
+    const actualSource = await overlay.webContents.executeJavaScript(`document.querySelector('img').src`)
+    assert.ok(actualSource === sources.get(background + ':' + infos[index].displayId)!.dataUrl, 'the actual editor image is the requested frozen source')
   }
   current.webContents.debugger.attach('1.3')
   current.webContents.on('console-message', event => process.stdout.write('renderer: '+event.message+'\n'))
   await evaluate(`window.captureEvents=[];for(const type of ['pointerdown','pointerup','lostpointercapture'])document.addEventListener(type,event=>window.captureEvents.push({type,x:event.clientX,y:event.clientY,target:event.target.tagName,button:event.button}),true)`)
   await settle()
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'capture never receives the full application bridge')
-  assert.equal(host.getOpacity(), 0, 'the visible host remains faded while editing')
-  const grabs = receipt.grabs.slice(firstGrab)
-  assert.deepEqual(grabs.map((row: any) => row.includeHostWindows), [true, false], 'one included and one excluded exposure only')
-  assert.deepEqual(grabs.map((row: any) => row.opacity), [0.65, 0], 'included freezes before fading; excluded freezes after fading')
-  receipt.cases.push({ label: 'opened-' + background, elapsedMs: performance.now()-start, displays: overlays.length, grabs })
   return { outcome, overlays }
 }
 async function run() {
   await app.whenReady()
   screen.getAllDisplays = (() => displays) as typeof screen.getAllDisplays
-  screen.getDisplayNearestPoint = (() => displays[0]) as typeof screen.getDisplayNearestPoint
+  screen.getDisplayNearestPoint = (() => displays[0]) as unknown as typeof screen.getDisplayNearestPoint
   screen.getCursorScreenPoint = () => ({ x: 200, y: 150 })
   await sourceImages()
   host = new BrowserWindow({ width: 640, height: 460, show: true, webPreferences: { sandbox: true, contextIsolation: true } })
   await host.loadURL('data:text/html,<body style="font:18px -apple-system;padding:32px;background:%231b2630;color:%23e4edf3"><h2>AgentMux test workbench</h2><p>Original window opacity: 65%</p>')
+  host.setOpacity(0.65)
   const setHostOpacity = host.setOpacity.bind(host)
   host.setOpacity = value => { receipt.opacityChanges.push({ value, observedMs: performance.now() }); setHostOpacity(value) }
-  host.setOpacity(0.65)
   surface = new CaptureSurface({ native: () => ({ captureDisplays: async ({ includeHostWindows = false } = {}) => {
     const background: CaptureBackground = includeHostWindows ? 'included' : 'excluded', capturedAt = Date.now()
     receipt.grabs.push({ includeHostWindows, opacity: host.getOpacity(), capturedAt, observedMs: performance.now() })
-    return { state: 'captured' as const, capturedAt, timing: { contentMs: 1, windowListMs: 1, totalMs: 3, requestMs: 4, validationMs: 1 }, displays: displays.map(display => {
+    return { state: 'captured' as const, capturedAt, timing: { contentMs: 1, windowListMs: 1, responseSerializationMs: 1, totalMs: 3, lazyConnectionMs: 1, socketReadMs: 1, jsonParseMs: 1, requestMs: 4, validationMs: 1 }, displays: displays.map(display => {
       const image = sources.get(background + ':' + display.id)!
       return { displayId: display.id, frame: display.bounds, scale: 1, safeTop: 0, timing: { captureMs: 1, pngMs: 1, base64Ms: 0, totalMs: 2 },
         windows: includeHostWindows ? [{ windowId: 1, frame: { x: display.bounds.x + 460, y: 310, width: 350, height: 230 } }] : [],
@@ -165,7 +192,7 @@ async function run() {
       assert.equal(await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')`), null, 'the excluded background has no AgentMux window to select at that point')
       await switchedTo('included')
       assert.equal(receipt.grabs.length, grabs, 'geometry switches only consume the already frozen frames')
-      assert.equal(receipt.opacityChanges.length, opacities, 'geometry switches never move or refade the host')
+      assert.equal(receipt.opacityChanges.length, opacities, 'geometry switches never write host opacity')
       receipt.cases.push({ label: 'tab-switches-accurate-window-geometry-without-recapture', grabs, opacityChanges: opacities })
     }
     if (!await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')!==null`)) await drag(130, 178, 690, 380)
@@ -178,13 +205,13 @@ async function run() {
     const delivered = deliveries.at(-1), bitmap = nativeImage.createFromDataURL(delivered.image.dataUrl), pixels = bitmap.toBitmap()
     assert.deepEqual(bitmap.getSize(), { width: 690, height: 380 }, 'the shared composition actually crops the selected pixels')
     let marked = 0
-    for (let offset=0;offset<pixels.length;offset+=4) if (pixels[offset+2]>180&&pixels[offset+1]<130&&pixels[offset]<130&&pixels[offset+3]>245) marked++
+    for (let offset=0;offset<pixels.length;offset+=4) if (pixels[offset+2]! > 180 && pixels[offset+1]! < 130 && pixels[offset]! < 130 && pixels[offset+3]! > 245) marked++
     assert.ok(marked > 900, 'actual colored Rectangle stroke survives the final PNG: '+marked)
     assert.equal(delivered.engine, 'controlled-' + background)
     assert.equal(delivered.source.capturedAt, receipt.grabs.slice(-2).find((row: any) => row.includeHostWindows === (background === 'included')).capturedAt)
     assert.deepEqual(delivered.source.rect, { x: 130, y: 178, width: 690, height: 380 })
     assert.ok(overlays.every(window => window.isDestroyed()), 'a confirmed output destroys only this capture overlays')
-    assert.equal(host.getOpacity(), 0.65, 'Done restores the original host opacity')
+    assert.equal(host.getOpacity(), 0.65, 'Done leaves the original host opacity untouched')
     await writeFile(join(out, 'composed-' + background + '.png'), bitmap.toPNG())
     receipt.cases.push({ label: 'composed-' + background, size: bitmap.getSize(), markedPixels: marked, source: delivered.source, engine: delivered.engine })
   }
@@ -214,18 +241,30 @@ async function run() {
   assert.equal(switchedOutput.source.capturedAt, receipt.grabs.at(-1).capturedAt)
   assert.deepEqual(switchedOutput.source.rect, { x: 130, y: 178, width: 690, height: 380 })
   const sample = (322 * switchedBitmap.getSize().width + 470) * 4
-  assert.ok(switchedPixels[sample] > 245 && switchedPixels[sample + 1] > 245 && switchedPixels[sample + 2] > 245, 'the final PNG uses excluded pixels where the included image had the AgentMux panel')
+  assert.ok(switchedPixels[sample]! > 245 && switchedPixels[sample + 1]! > 245 && switchedPixels[sample + 2]! > 245, 'the final PNG uses excluded pixels where the included image had the AgentMux panel')
   assert.equal(host.getOpacity(), .65)
   receipt.cases.push({ label: 'actual-tab-keeps-crop-mark-undo-redo-and-copies-excluded-pixels', marksBefore, marksAfter, undone, redone, source: switchedOutput.source, engine: switchedOutput.engine })
 
   const cancelled = await open('excluded')
-  await key('Escape', 'Escape', 27)
+  await drag(150, 210, 520, 260)
+  let releaseLate!: () => void
+  deliveryGate = new Promise<void>(resolve => { releaseLate = resolve })
+  const lateDelivery = deliveries.length
+  await click('Done')
+  await waitFor('the cancellable delivery is in flight', async () => deliveries.length === lateDelivery + 1 && !deliveries.at(-1).settled ? true : null)
+  // Cancellation destroys this exact Renderer, so its JS response is not the operation receipt.
+  await Promise.race([cancelled.outcome, evaluate('window.captureSurface.load().then(i=>window.captureSurface.cancel(i.requestId))')])
   assert.deepEqual(await cancelled.outcome, { state: 'cancelled' })
   assert.ok(cancelled.overlays.every(window => window.isDestroyed()))
-  assert.equal(host.getOpacity(), 0.65, 'Cancel restores each original opacity')
-  receipt.cases.push({ label: 'cancel-restores-host' })
+  assert.equal(host.getOpacity(), 0.65, 'Cancel leaves the original host opacity untouched')
+  releaseLate()
+  await waitFor('the cancelled request late delivery returned', async () => deliveries.at(-1).settled ? true : null)
+  await new Promise(resolve => setImmediate(resolve))
+  receipt.cases.push({ label: 'cancel-isolates-late-delivery-and-keeps-host' })
 
   const expanded = await open('included')
+  const nextInput = await evaluate('window.captureSurface.load()')
+  assert.deepEqual(nextInput.initialCrop, { x: 130, y: 178, width: 690, height: 380 }, 'a cancelled request late result must not supply the next capture selection')
   if (!await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')!==null`)) await drag(130, 178, 690, 380)
   await click('Rectangle'); await drag(180, 300, 230, 40)
   const captureWindow = current
@@ -257,7 +296,7 @@ async function run() {
   receipt.passed = true
 }
 void run().catch(async error => {
-  receipt.failure = { message: error.message, stack: error.stack }
+  receipt.failure = { name: error.name, message: error.message, stack: error.stack }
   process.stderr.write(JSON.stringify(receipt.failure) + '\n')
   try { if (current && !current.isDestroyed()) { receipt.failure.dom = await evaluate('document.body.innerText'); await shot('failure') } } catch {}
 }).finally(async () => {

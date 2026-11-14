@@ -19,7 +19,7 @@ const sources = Object.fromEntries(await Promise.all([surface, ipc].map(async fi
 const mutations = [
   { id: 'serial-window-start', file: surface, from: 'this.prepareWindows(active)\n    const included = await includedPending', to: 'const included = await includedPending\n    this.prepareWindows(active)', expected: 'boots hidden overlay renderers while both current exposures are pending' },
   { id: 'load-skips-current-inputs', file: surface, from: 'await active.inputsReady', to: 'void active.inputsReady', expected: 'boots hidden overlay renderers while both current exposures are pending' },
-  { id: 'cancel-leaves-load-waiting', file: surface, from: 'this.active = null\n        active.releaseInputs()', to: 'this.active = null', expected: 'cancel releases an early load without waiting for native pixels' },
+  { id: 'cancel-leaves-load-waiting', file: surface, from: 'this.active = null\n        active.releaseInputs()', to: 'this.active = null', expected: 'cancel releases an early load' },
   { id: 'diagnostic-not-written', file: surface, from: 'this.ports.recordTiming?.(timing)', to: 'undefined', expected: 'logs one timing line from present()' },
   { id: 'diagnostic-failure-closes-capture', file: surface, from: ".catch(error => console.warn('Capture timing could not be recorded: ' + message(error)))", to: '.catch(error => active.end(error))', expected: 'a timing writer that will' },
   { id: 'latest-write-not-ordered', file: ipc, from: 'const write = captureTimingWrite.then(', to: 'const write = Promise.resolve().then(', expected: 'the production IPC timing port writes only the latest small diagnostic' }

@@ -15,7 +15,7 @@ app.setPath('userData', process.env.AGENTMUX_CAPTURE_STARTUP_USER_DATA!)
 app.on('window-all-closed', () => {})
 const displays = [{ id: 1, bounds: { x: 0, y: 0, width: 960, height: 640 }, scaleFactor: 1, displayFrequency: 60 },
   { id: 7, bounds: { x: 960, y: 0, width: 800, height: 640 }, scaleFactor: 1, displayFrequency: 60 }].slice(0, count)
-const receipt: any = { schema: 'agentmux.capture-startup-electron.v1', passed: false, variant, count, captures: [],
+const receipt: any = { schema: 'agentmux.capture-startup-electron.v1', passed: false, variant, count, captures: [], opacityChanges: [],
   boundary: 'Actual production CaptureSurface, isolated preload and shared Renderer in Electron; native pixels, display list and 200 ms producer delay are controlled. No OS pixels, clipboard, TCC or physical multi-monitor proof.',
   conditions: { loadavg: loadavg(), freeMemory: freemem(), totalMemory: totalmem(), electron: process.versions.electron },
   visibilityObservation: 'Native BrowserWindow.isVisible() sampled every 5 ms; show event offset retained separately because macOS panels shown inactive may omit it.' }
@@ -30,8 +30,10 @@ console.info = (...args) => {
 app.on('browser-window-created', (_event, window) => {
   // Only production present() constructs windows while this exact capture is active.
   if (active) {
-    const row = active, entry: any = { window, constructedMs: performance.now() - row.startedAt, shownMs: null, showEventMs: null }
+    const row = active, entry: any = { window, constructedMs: performance.now() - row.startedAt, shownMs: null, showEventMs: null, protectionAtShow: null }
     row.windows.push(entry)
+    const showInactive = window.showInactive.bind(window)
+    window.showInactive = () => { entry.protectionAtShow = window.isContentProtected(); showInactive() }
     window.on('show', () => { entry.showEventMs ??= performance.now() - row.startedAt })
     const observe = setInterval(() => {
       if (window.isDestroyed()) { clearInterval(observe); return }
@@ -59,6 +61,7 @@ function image(width: number, height: number, nonce: number) {
   return nativeImage.createFromBitmap(bitmap, { width, height, scaleFactor: 1 }).toPNG().toString('base64')
 }
 async function capture(iteration: number) {
+  const opacityStart = receipt.opacityChanges.length
   const row: any = { iteration, startedAt: performance.now(), windows: [], grabs: [], timing: null, diagnostic: null }
   active = row
   let captureError: unknown
@@ -85,8 +88,13 @@ async function capture(iteration: number) {
   const actualShownMs = Math.max(...row.windows.map((entry: any) => entry.shownMs))
   assert.equal(row.windows.length, count, 'exactly the current displays get overlays')
   assert.deepEqual(row.grabs.map((grab: any) => grab.includeHostWindows), [true, false])
-  assert.deepEqual(row.grabs.map((grab: any) => grab.opacity), [0.65, 0], 'exposures match the actual visible host state')
-  assert.equal(host.getOpacity(), 0)
+  assert.deepEqual(row.grabs.map((grab: any) => grab.opacity), variant === 'candidate' ? [0.65, 0.65] : [0.65, 0],
+    'the candidate keeps host opacity unchanged while the historical baseline exposes its old fade for comparison')
+  assert.equal(host.getOpacity(), variant === 'candidate' ? 0.65 : 0)
+  assert.deepEqual(receipt.opacityChanges.slice(opacityStart).map((row: any) => row.value), variant === 'candidate' ? [] : [0],
+    'only the historical baseline fades; the candidate never writes host opacity')
+  assert.ok(row.windows.every((entry: any) => entry.protectionAtShow === (variant === 'candidate') && entry.window.isContentProtected() === (variant === 'candidate')),
+    'content protection is required on the candidate and measured honestly on the old baseline')
   assert.ok(row.grabs.every((grab: any) => grab.returnedMs - grab.startedMs >= 200), 'native delay uses real elapsed time')
   assert.ok(row.timing.presentedMs.length === count && row.timing.presentedMs.every((value: unknown) => typeof value === 'number' && Number.isFinite(value)), 'every actual current frame reported presented')
   assert.ok(typeof row.timing.framesMs === 'number' && typeof row.timing.shownMs === 'number')
@@ -102,7 +110,7 @@ async function capture(iteration: number) {
         return record.recordedAt === row.timing.recordedAt ? record : null
       } catch { return null }
     })
-    const fields = ['schema', 'recordedAt', 'windowsStartedMs', 'windowsLoadedMs', 'includedMs', 'excludedMs', 'dataReadyMs', 'settleMs', 'framesMs', 'presentedMs', 'shownMs', 'displays']
+    const fields = ['schema', 'recordedAt', 'windowsStartedMs', 'windowsLoadedMs', 'includedMs', 'excludedMs', 'dataReadyMs', 'framesMs', 'presentedMs', 'shownMs', 'displays']
     assert.deepEqual(Object.keys(diagnostic).sort(), fields.sort(), 'only the declared phase fields are persisted')
     assert.equal(diagnostic.schema, 'agentmux.capture-timing.v1')
     assert.ok(Buffer.byteLength(JSON.stringify(diagnostic)) < 4096, 'diagnostic stays small without pixels, filenames or draft content')
@@ -116,13 +124,15 @@ async function capture(iteration: number) {
   if (iteration === 1) {
     overlays[0]!.webContents.debugger.attach('1.3')
     await overlays[0]!.webContents.executeJavaScript('document.querySelector("canvas").focus()')
-    await overlays[0]!.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(error => { if (!overlays[0]!.isDestroyed()) throw error })
+    await overlays[0]!.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch((error: unknown) => { if (!overlays[0]!.isDestroyed()) throw error })
   } else {
     // Cancellation destroys this exact Renderer, so its JS response is not the operation receipt.
     await Promise.race([outcome, overlays[0]!.webContents.executeJavaScript('window.captureSurface.load().then(i=>window.captureSurface.cancel(i.requestId))')])
   }
   assert.deepEqual(await outcome, { state: 'cancelled' })
-  assert.equal(host.getOpacity(), 0.65, 'both Esc and exact bridge cancellation restore original host opacity')
+  assert.equal(host.getOpacity(), 0.65, 'both Esc and exact bridge cancellation leave the host at its original opacity')
+  assert.deepEqual(receipt.opacityChanges.slice(opacityStart).map((row: any) => row.value), variant === 'candidate' ? [] : [0, 0.65],
+    'the candidate has no restore write; the baseline records its historical restore separately')
   assert.ok(overlays.every((window: BrowserWindow) => window.isDestroyed()), 'the capture releases all of its shells')
   const sourceHashes = row.grabs.map((grab: any) => Object.fromEntries(Object.entries(grab.sources).map(([id, png]) => [id, createHash('sha256').update(String(png)).digest('hex')])))
   if (receipt.captures.length) assert.notDeepEqual(sourceHashes, receipt.captures[0].sourceHashes, 'repeat capture actually freezes different pixels')
@@ -134,15 +144,17 @@ async function capture(iteration: number) {
 async function run() {
   await app.whenReady()
   screen.getAllDisplays = (() => displays) as typeof screen.getAllDisplays
-  screen.getDisplayNearestPoint = (() => displays[0]) as typeof screen.getDisplayNearestPoint
+  screen.getDisplayNearestPoint = (() => displays[0]) as unknown as typeof screen.getDisplayNearestPoint
   screen.getCursorScreenPoint = () => ({ x: 200, y: 150 })
   host = new BrowserWindow({ width: 320, height: 220, show: true, webPreferences: { sandbox: true, contextIsolation: true } })
   await host.loadURL('data:text/html,<body style="background:%231b2630;color:white;font:18px -apple-system;padding:24px">Startup proof host · 65% opacity</body>')
   host.setOpacity(0.65)
+  const setHostOpacity = host.setOpacity.bind(host)
+  host.setOpacity = value => { receipt.opacityChanges.push({ value, observedMs: performance.now() }); setHostOpacity(value) }
   surface = new CaptureSurface({ native: () => ({ captureDisplays: async ({ includeHostWindows = false } = {}) => {
     assert.ok(active, 'native pixels belong to one exact active capture')
     const grab: any = { includeHostWindows, opacity: host.getOpacity(), capturedAt: Date.now(), startedMs: performance.now() - active.startedAt, sources: {} }
-    assert.equal(grab.opacity, includeHostWindows ? 0.65 : 0)
+    assert.equal(grab.opacity, variant === 'baseline' && !includeHostWindows ? 0 : 0.65, 'only the historical baseline uses an opacity fade')
     active.grabs.push(grab)
     const frames = displays.map((display, index) => {
       const { width, height } = display.bounds
@@ -152,7 +164,7 @@ async function run() {
     })
     await wait(200)
     grab.returnedMs = performance.now() - active.startedAt
-    return { state: 'captured' as const, capturedAt: grab.capturedAt, timing: { contentMs: 1, windowListMs: 1, totalMs: 3, requestMs: 4, validationMs: 1 }, displays: frames }
+    return { state: 'captured' as const, capturedAt: grab.capturedAt, timing: { contentMs: 1, windowListMs: 1, responseSerializationMs: 1, totalMs: 3, lazyConnectionMs: 1, socketReadMs: 1, jsonParseMs: 1, requestMs: 4, validationMs: 1 }, displays: frames }
   } }), appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }),
     pin: async () => { throw new Error('No pin output in a startup proof.') }, copyText: async () => {}, returnFocus: () => {},
     recordTiming: async timing => {
@@ -160,6 +172,7 @@ async function run() {
       await writeFile(latestPath, JSON.stringify(timing))
     } })
   for (const iteration of [1, 2]) await capture(iteration)
+  assert.equal(receipt.opacityChanges.length, variant === 'candidate' ? 0 : 4, 'candidate capture and cancellation never write opacity; baseline evidence retains its two historical writes per capture')
   receipt.passed = true
 }
 // Electron's ESM entry must finish evaluation before app readiness can resolve.
