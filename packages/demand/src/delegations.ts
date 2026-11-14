@@ -145,7 +145,7 @@ export function parseDemandDelegationCollectionInput(value: unknown): DemandDele
 }
 const attentionKeys = ['inputEpoch', 'operationId', 'intentId', 'hostId', 'supervisorAgentSessionId', 'supervisorRunId', 'occurrenceAt', 'agentMuxNote']
 export function parseDemandDelegationAttentionInput(value: unknown): DemandDelegationAttentionInput {
-  const data = record(value, 'delegation.attention', attentionKeys)
+  const data = record(value, 'delegation.attention', attentionKeys, ['inputEpoch'])
   if (typeof data.agentMuxNote !== 'string' || !data.agentMuxNote.trim() || data.agentMuxNote.includes('\0')) throw new Error('attention.agentMuxNote must be a nonempty frozen platform note')
   return { ...optionalDemandInputEpoch(data.inputEpoch), operationId: identity(data.operationId, 'attention.operationId'), intentId: identity(data.intentId, 'attention.intentId'), hostId: identity(data.hostId, 'attention.hostId'),
     supervisorAgentSessionId: identity(data.supervisorAgentSessionId, 'attention.supervisorAgentSessionId'), supervisorRunId: identity(data.supervisorRunId, 'attention.supervisorRunId'),
@@ -191,7 +191,7 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
   }
   let attention: DemandDelegationAttention | undefined
   if (data.attention !== undefined) {
-    const item = record(data.attention, 'delegation.attention', [...attentionKeys, 'preparedAt', 'attemptedAt'], ['attemptedAt'])
+    const item = record(data.attention, 'delegation.attention', [...attentionKeys, 'preparedAt', 'attemptedAt'], ['inputEpoch', 'attemptedAt'])
     attention = { ...parseDemandDelegationAttentionInput(Object.fromEntries(attentionKeys.map(key => [key, item[key]]))), preparedAt: positive(item.preparedAt, 'attention.preparedAt'),
       ...(item.attemptedAt === undefined ? {} : { attemptedAt: positive(item.attemptedAt, 'attention.attemptedAt') }) }
     if (attention.hostId !== intent.hostId || data.linkedAt === undefined) throw new Error('delegation attention lacks its original linked Host')
