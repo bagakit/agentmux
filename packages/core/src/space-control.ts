@@ -235,7 +235,8 @@ export type AgentMuxSpaceMutationReport = {
   agent: AgentMuxSpaceAgentFact | null
   /** Original Source-owned execution observation, under the binding reader's existing authority. */
   execution?: { coordinatorRuntimeId: string; reference: import('./agent-execution-contract.js').AgentExecutionReference;
-    inspection: import('./agent-execution-coordinator.js').AgentExecutionInspection | null }
+    inspection: import('./agent-execution-coordinator.js').AgentExecutionInspection | null;
+    diagnostics?: import('./agent-execution-source-diagnostics.js').AgentExecutionSourceDiagnostics | null }
   /** A Source membership ACK, never an execution/Start or input receipt. */
   association?: { operationId: string; reference: import('./agent-open-contract.js').CoordinatorAgentReference; resource: import('./agent-open-contract.js').AgentAssociationResource }
   resource: { projectId: string | null; sourceWorkspaceId: string | null; hostId: string; path: string; workspaceId: string | null; kind: 'directory' | 'worktree'; branch: string | null } | null

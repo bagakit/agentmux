@@ -1,3 +1,4 @@
+import type { AgentExecutionSourceDiagnostics } from './agent-execution-source-diagnostics.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parseAdoptedHostRoute } from './host-route.js'
 import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyPageSelection, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
@@ -30,6 +31,36 @@ function string(value: unknown, name: string, code: Code, max = AGENTMUX_CONTROL
   if (typeof value !== 'string' || Buffer.byteLength(value) > max) return fail(`${name} is invalid.`, code)
   return value
 }
+/** Validate only the finite safe metadata exposed by the original Source. */
+function executionSourceDiagnostics(value: unknown, expected: { sourceRuntimeId: string; reference: ReturnType<typeof parseAgentExecutionReference> }, code: Code): AgentExecutionSourceDiagnostics {
+  const item = fields(value, ['sourceRuntimeId', 'reference', 'state', 'helpers', 'failure'], code)
+  const reference = parseAgentExecutionReference(item.reference)
+  if (item.sourceRuntimeId !== expected.sourceRuntimeId || reference.bindingId !== expected.reference.bindingId || reference.agentSessionId !== expected.reference.agentSessionId || reference.createOperationId !== expected.reference.createOperationId)
+    fail('Source diagnostics identify another original operation.', code)
+  const helpers = fields(item.helpers, ['frontend', 'executor'], code)
+  const helper = (value: unknown): AgentExecutionSourceDiagnostics['helpers']['executor'] => {
+    const h = fields(value, ['start', 'cursor', 'ownerInstanceId'], code), start = fields(h.start, ['outcome', 'runId'], code)
+    const outcome = member(start.outcome, ['confirmed', 'unknown', 'not-submitted'], 'Helper start', code)
+    if (outcome !== 'confirmed' && start.runId !== null) fail('An unconfirmed helper cannot claim a Run.', code)
+    return { start: { outcome, runId: outcome === 'confirmed' ? spaceControlId(start.runId, 'Helper Run', code) : null },
+      cursor: h.cursor === null ? null : nameRevision(h.cursor, code), ownerInstanceId: nullableId(h.ownerInstanceId, 'Native instance', code) }
+  }
+  const failure = item.failure === undefined ? undefined : (() => {
+    const f = fields(item.failure, ['hostId', 'role', 'stage', 'code', 'frame'], code)
+    const frame = (() => {
+      const b = fields(f.frame, ['startByte', 'endByte', 'bytes', 'sha256', 'syntax'], code)
+      const startByte = nameRevision(b.startByte, code), endByte = nameRevision(b.endByte, code), bytes = nameRevision(b.bytes, code)
+      if (endByte <= startByte || bytes !== endByte - startByte - 1 || typeof b.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(b.sha256)) fail('Protocol frame provenance is invalid.', code)
+      return { startByte, endByte, bytes, sha256: b.sha256 as string, syntax: member(b.syntax, ['invalid-json'], 'Frame syntax', code) }
+    })()
+    return { hostId: spaceControlId(f.hostId, 'Failure Host', code), role: member(f.role, ['frontend', 'executor'], 'Failure role', code),
+      stage: member(f.stage, ['attach'], 'Failure stage', code),
+      code: member(f.code, ['EXECUTION_PROTOCOL_INVALID_FRAME'], 'Failure code', code), frame }
+  })()
+  return { sourceRuntimeId: expected.sourceRuntimeId, reference, state: member(item.state, ['matched', 'unconfirmed'], 'Source diagnostic scope', code),
+    helpers: { frontend: helper(helpers.frontend), executor: helper(helpers.executor) }, ...(failure ? { failure } : {}) }
+}
+
 /** Spatial IDs may contain a directory or canonical File path; Session/Run IDs retain their smaller bound. */
 export function spaceControlId(value: unknown, name: string, code: Code, spatial = false): string {
   const result = string(value, name, code, spatial ? MAX_SPATIAL_ID_BYTES : 512)
@@ -541,14 +572,15 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
     return { operationId: spaceControlId(value.operationId, 'Association operation', code), reference: parseCoordinatorAgentReference(value.reference), resource: parseAgentAssociationResource(value.resource) }
   })()
   const execution = source.execution === undefined ? undefined : (() => {
-    const item = fields(source.execution, ['coordinatorRuntimeId', 'reference', 'inspection'], code)
+    const item = fields(source.execution, ['coordinatorRuntimeId', 'reference', 'inspection', 'diagnostics'], code)
     const reference = parseAgentExecutionReference(item.reference)
     if (reference.createOperationId !== source.requestId || agent && reference.agentSessionId !== agent.agentSessionId || association)
       fail('Execution observation identifies another original creation.', code)
     const inspection = item.inspection === null ? null : parseAgentExecutionInspection(item.inspection, { bindingId: reference.bindingId, agentSessionId: reference.agentSessionId })
     if (inspection?.continuation && (inspection.continuation.createOperationId !== reference.createOperationId || inspection.continuation.bindingId !== reference.bindingId || inspection.continuation.agentSessionId !== reference.agentSessionId))
       fail('Execution continuation identifies another original creation.', code)
-    return { coordinatorRuntimeId: spaceControlId(item.coordinatorRuntimeId, 'Original Coordinator Runtime', code), reference, inspection }
+    const coordinatorRuntimeId = spaceControlId(item.coordinatorRuntimeId, 'Original Coordinator Runtime', code)
+    return { coordinatorRuntimeId, reference, inspection, ...(item.diagnostics === undefined ? {} : { diagnostics: item.diagnostics === null ? null : executionSourceDiagnostics(item.diagnostics, { sourceRuntimeId: coordinatorRuntimeId, reference }, code) }) }
   })()
   return { ...(association ? { association } : {}), ...(execution ? { execution } : {}), requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown', 'retired'], 'Mutation outcome', code),
     from: source.from === null ? null : address(source.from, code), to: source.to === null ? null : address(source.to, code), agent, resource,

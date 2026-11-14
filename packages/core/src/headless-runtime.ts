@@ -218,7 +218,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       authorize: (input, context, retained, existing) => (options.service?.hostRoutes ?? hostRoutes!).retainExecution(input, context, retained, existing),
       resolveHost: async (hostId, route, access) => { const host = await executionHost(hostId, route, access); return { runtimeId: host.runtimeId, client: host.executionPort,
         ...(host.adoptedRoute ? { adoptedRoute: host.adoptedRoute } : {}), ...(host.dispose ? { dispose: host.dispose } : {}) } }
-    })
+    }, options.service?.spatialState ? { spatial: options.service.spatialState, runtimeId: () => runtimeId } : undefined)
     server = new AgentMuxControlServer({ ...options.service, socketPath, meshState: { directory: stateDirectory, owner: { runtimeId, ownerInstanceId } }, ...(options.http ? { http: options.http } : {}),
       ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
       ...(options.meshEndpoint ? { meshEndpoint: options.meshEndpoint } : {}),

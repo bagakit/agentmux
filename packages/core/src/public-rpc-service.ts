@@ -238,6 +238,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
   executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin' | 'continueOriginal'> & {
     inspect(bindingId: string, view?: 'association', context?: AgentMuxRpcCallContext): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
+    sourceDiagnostics?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['sourceDiagnostics']
     admit?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['admit']
     watch?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['watch']
   }
@@ -2626,6 +2627,13 @@ export class AgentMuxRpcService {
       const independentResume = originalResumeRequest?.operation === 'resume' && !originalResumeRequest.text.trim()
       let independentSpatial = originalSpatialRequest && (isHeadlessSpatialAgentOpen(originalSpatialRequest) || isSpatialAgentAssociation(originalSpatialRequest) ||
         originalSpatialRequest.operation === 'space.inspect' && 'requestId' in originalSpatialRequest.target)
+      if (independentSpatial && method === 'space.inspect') {
+        const originalContext = context
+        context = { ...originalContext, assertCurrent: async () => {
+          originalContext.signal?.throwIfAborted(); await originalContext.assertCurrent?.(); await this.assertRuntimeFence(originalContext)
+          if (caller) await this.authenticated(originalContext)
+        } }
+      }
       const originalSpatialState = independentSpatial && originalSpatialRequest?.operation === 'agent.open' ? await this.spatial.readForLayout() : null
       if (independentSpatial && originalSpatialRequest?.operation === 'agent.open') independentSpatial =
         isHeadlessSpatialAgentOpen(originalSpatialRequest, originalSpatialState?.graph) || isSpatialAgentAssociation(originalSpatialRequest)
@@ -2831,6 +2839,7 @@ export class AgentMuxRpcService {
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
         : request.operation === 'metrics.app-memory.inspect' ? { operation: 'metrics.app-memory.inspect', evidence: await this.inspectAppMemory() }
         : await this.execute(request, nameContext, context)
+      if (independentSpatial && method === 'space.inspect') { context.signal?.throwIfAborted(); await context.assertCurrent?.() }
       return rpcControlResult(method, result as AgentMuxControlResult) as AgentMuxRpcResult<M>
     }
     const fields = NATIVE_FIELDS[method as keyof typeof NATIVE_FIELDS]

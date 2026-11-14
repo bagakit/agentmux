@@ -38,19 +38,34 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       agent: null, resource: null, save: { layoutApplied: true, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'confirmed', reason: null }, issues: initialIssue ? [issue(initialIssue)] : [] }
     let borrowed: Awaited<ReturnType<AgentMuxHeadlessRuntime['executionHost']>> | null = null
-    // A reserved Source Region can precede Agent creation. The original public
-    // binding reader owns both the permission check and this independent read.
-    if (record.executionBinding) try {
-      if (record.placement?.runtimeId !== options.runtime().ownerIdentity().runtimeId)
-        throw new AgentMuxError('The original execution Coordinator belongs to another Source Runtime.', 'RUNTIME_OWNER_MISMATCH')
-      const binding = await options.runtime().server.callRpc('agent.execution.binding', { bindingId: record.executionBinding.bindingId }, context)
-      if (binding && (binding.bindingId !== record.executionBinding.bindingId || binding.agentSessionId !== record.agentSessionId ||
-        binding.agentHostId !== record.execution.hostId || binding.resourceHostId !== record.placement?.hostId ||
-        binding.resourceWorkspacePath !== record.placement?.workspacePath || binding.continuation &&
-          (binding.continuation.bindingId !== record.executionBinding.bindingId || binding.continuation.agentSessionId !== record.agentSessionId || binding.continuation.createOperationId !== record.requestId)))
-        throw new AgentMuxError('The original execution observation identifies another creation or resource.', 'EXECUTION_INTENT_UNCONFIRMED')
-      report.execution = { coordinatorRuntimeId: options.runtime().ownerIdentity().runtimeId, reference: record.executionBinding, inspection: binding }
-    } catch (error) { report.issues.push(issue(error, 'observation')) }
+    // Exact Source reads expose a safe original-operation projection to the
+    // already authenticated reader. The owner resolves its own admission; the
+    // caller cannot use a self-reported binding tuple as authority.
+    if (record.executionBinding) {
+      if (record.placement?.runtimeId !== options.runtime().ownerIdentity().runtimeId) {
+        report.issues.push(issue(new AgentMuxError('The original execution Coordinator belongs to another Source Runtime.', 'RUNTIME_OWNER_MISMATCH'), 'observation'))
+      } else {
+        report.execution = { coordinatorRuntimeId: record.placement.runtimeId, reference: record.executionBinding, inspection: null }
+        const bindings = options.runtime().executionBindings
+        if (bindings.sourceDiagnostics) try {
+          report.execution.diagnostics = await bindings.sourceDiagnostics(record.requestId, context)
+        } catch {
+          context.signal?.throwIfAborted(); await context.assertCurrent?.()
+          report.issues.push(issue(new AgentMuxError('The original Source diagnostic metadata is unconfirmed. Its request and helpers remain retained.', 'EXECUTION_DIAGNOSTIC_UNAVAILABLE'), 'observation'))
+        }
+        // Full binding and private details keep their original user/device
+        // boundary. Safe diagnostics are independent, never a denied-read fallback.
+        if (!context.caller) try {
+          const binding = await options.runtime().server.callRpc('agent.execution.binding', { bindingId: record.executionBinding.bindingId }, context)
+          if (binding && (binding.bindingId !== record.executionBinding.bindingId || binding.agentSessionId !== record.agentSessionId ||
+            binding.agentHostId !== record.execution.hostId || binding.resourceHostId !== record.placement.hostId ||
+            binding.resourceWorkspacePath !== record.placement.workspacePath || binding.continuation &&
+              (binding.continuation.bindingId !== record.executionBinding.bindingId || binding.continuation.agentSessionId !== record.agentSessionId || binding.continuation.createOperationId !== record.requestId)))
+            throw new AgentMuxError('The original execution observation identifies another creation or resource.', 'EXECUTION_INTENT_UNCONFIRMED')
+          report.execution.inspection = binding
+        } catch (error) { report.issues.push(issue(error, 'observation')) }
+      }
+    }
     try {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       if (record.execution.hostId !== 'local' && !record.execution.runtimeId) throw new AgentMuxError(
@@ -79,6 +94,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
           retirement: { source: session.source, observedAt: session.observedAt } }
         report.outcome = 'retired'; report.to = null
         report.issues.push(issue(new AgentMuxError('The original Agent was explicitly retired. Its exact Session and creation history remain available.', 'AGENT_SESSION_RETIRED')))
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
         return report
       }
       const creation = session.creation
@@ -93,7 +109,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       const settled = await options.spatial.settleAgentOpen(record.requestId, session, regionDescriptor(record, 'attached'))
       report.to = settled.attached ? record.address : null
       if (!settled.attached) report.issues.push(issue(new AgentMuxError('The original Agent exists, but its reserved Region binding changed. Existing contents were retained.', 'SPACE_PLACEMENT_UNKNOWN')))
-      if (record.executionBinding && report.execution) {
+      if (record.executionBinding && report.execution && !context.caller) {
         const binding = report.execution?.inspection
         const original = binding?.continuation
         if (!binding || binding.bindingId !== record.executionBinding.bindingId || binding.agentSessionId !== record.agentSessionId ||
@@ -112,6 +128,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       report.outcome = report.issues.length ? 'partial' : 'opened'
     } catch (error) { report.issues.push(issue(error, 'observation')); report.outcome = report.agent ? 'partial' : 'unknown' }
     finally { try { await borrowed?.dispose?.() } catch (error) { report.issues.push(issue(error, 'observation')); if (report.agent) report.outcome = 'partial' } }
+    context.signal?.throwIfAborted(); await context.assertCurrent?.()
     return report
   }
   return Object.assign(async (request: Parameters<NonNullable<AgentMuxRpcServiceOptions['spatialAgentControl']>>[0], context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined> => {

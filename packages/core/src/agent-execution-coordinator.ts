@@ -4,7 +4,8 @@ import { createRequire } from 'node:module'
 import { join, isAbsolute, dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
-import { AgentExecutionBridge, type AgentExecutionBridgeState, type AgentExecutionBridgePort, type AgentExecutionBridgeSide, type AgentExecutionBridgeConnection } from './agent-execution-bridge.js'
+import { AgentExecutionBridge, ExecutionProtocolFrameError, type AgentExecutionBridgeState, type AgentExecutionBridgePort, type AgentExecutionBridgeSide, type AgentExecutionBridgeConnection } from './agent-execution-bridge.js'
+import { inspectSourceExecutionDiagnostics, type ExecutionSourceDiagnosticsOwner, type ExecutionJournalDiagnostics, type AgentExecutionSourceDiagnostics } from './agent-execution-source-diagnostics.js'
 import type { AgentMuxClient } from './client.js';
 import type { AgentMuxHostAgentCreateInput } from "./client-contract.js";
 import type { AgentMuxAgentSession } from './types.js'
@@ -98,7 +99,7 @@ export class AgentExecutionCoordinator {
   private readonly lanes = new Map<string, Promise<unknown>>()
   private readonly bridges = new Map<string, { bridge: AgentExecutionBridge; dispose(): Promise<void> }>()
   private readonly observations = new Map<string, AgentExecutionInspection>()
-  private readonly connectionFailures = new Map<string, Diagnostic>()
+  private readonly connectionFailures = new Map<string, Diagnostic & { protocolFrame?: Pick<ExecutionProtocolFrameError, 'side' | 'frame'> }>()
   private readonly helperConnections = new Map<string, Map<AgentExecutionBridgeSide, AgentExecutionBridgeConnection>>()
   private disposed = false
   private constructor(private readonly db: DatabaseSync, private readonly lease: FileHandle, private readonly options: AgentExecutionCoordinatorOptions) {}
@@ -192,7 +193,7 @@ export class AgentExecutionCoordinator {
   }
   private connectionDiagnostic(bindingId: string): Diagnostic | undefined {
     const failed = this.connectionFailures.get(bindingId)
-    if (failed) return failed
+    if (failed) { const { protocolFrame: _privateFrame, ...diagnostic } = failed; return diagnostic }
     const connections = this.helperConnections.get(bindingId)
     for (const side of ['frontend', 'executor'] as const) {
       const value = connections?.get(side)
@@ -211,7 +212,7 @@ export class AgentExecutionCoordinator {
       : { outcome: record.attempts?.[role] ? 'unknown' : 'not-submitted', runId: null }
     return { continuation: reference(record.input), helperStarts: { executor: start('executor'), frontend: start('frontend') } }
   }
-  private observe(input: AgentExecutionOpenInput, failure?: Diagnostic, notices?: AgentExecutionNotice[]): void {
+  private observe(input: AgentExecutionOpenInput, failure?: Diagnostic & { protocolFrame?: Pick<ExecutionProtocolFrameError, 'side' | 'frame'> }, notices?: AgentExecutionNotice[]): void {
     if (failure) this.connectionFailures.set(input.bindingId, failure)
     const retained = this.read(input.bindingId)
     if (retained) notices = this.qualificationNotices(retained)
@@ -245,6 +246,18 @@ export class AgentExecutionCoordinator {
       ...(this.localDiagnostics(record).length ? { diagnostics: this.localDiagnostics(record) } : {}),
       diagnostic: { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } }), ...this.operationFacts(record), ...(association ? { association } : {}) })
   }
+  /** Safe metadata only; caller scope is established by the Source owner. */
+  diagnostics(original: AgentExecutionReference): ExecutionJournalDiagnostics | null {
+    const record = this.read(original.bindingId)
+    if (!record || !isDeepStrictEqual(reference(record.input), original)) return null
+    const helpers = Object.fromEntries((['frontend', 'executor'] as const).map(role => [role, {
+      start: this.operationFacts(record).helperStarts![role], cursor: record.bridge?.[role].outputByte ?? null,
+      ownerInstanceId: record.bridge?.[role].ownerInstanceId ?? null
+    }])) as ExecutionJournalDiagnostics['helpers']
+    const failure = this.connectionFailures.get(original.bindingId)?.protocolFrame
+    return structuredClone({ reference: original, helpers, ...(failure ? { failure: { code: 'EXECUTION_PROTOCOL_INVALID_FRAME' as const,
+      hostId: failure.side === 'executor' ? record.input.resourceHostId : record.input.agentHostId, role: failure.side, stage: 'attach' as const, frame: failure.frame } } : {}) })
+  }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
   async rejoin(bindingId: string, context?: AgentMuxRpcCallContext): Promise<AgentExecutionInspection> {
     return await this.serialize(bindingId, async () => {
@@ -258,8 +271,10 @@ export class AgentExecutionCoordinator {
     })
   }
   private observeFailure(input: AgentExecutionOpenInput, error: unknown): void {
+    const frame = error instanceof ExecutionProtocolFrameError ? error : error instanceof Error && error.cause instanceof ExecutionProtocolFrameError ? error.cause : undefined
     this.observe(input, { code: error instanceof AgentMuxError ? error.code : 'EXECUTION_OBSERVATION_UNCONFIRMED',
-      message: error instanceof Error ? error.message : String(error) }, this.read(input.bindingId)?.notices)
+      message: error instanceof Error ? error.message : String(error),
+      ...(frame ? { protocolFrame: { side: frame.side, frame: frame.frame } } : {}) }, this.read(input.bindingId)?.notices)
   }
   private async hosts(record: RecordValue): Promise<ResolvedHosts> {
     const input = record.input
@@ -516,7 +531,7 @@ export class AgentExecutionBindingService {
   private readonly readers = new Set<(error?: unknown) => void>()
   private owner: Promise<AgentExecutionCoordinator> | undefined
   private closed = false
-  constructor(private readonly directory: string, private readonly options: AgentExecutionCoordinatorOptions) {}
+  constructor(private readonly directory: string, private readonly options: AgentExecutionCoordinatorOptions, private readonly source?: ExecutionSourceDiagnosticsOwner) {}
   private async retained(): Promise<boolean> {
     try { await stat(join(this.directory, 'bindings.sqlite')); return true }
     catch (error) {
@@ -537,6 +552,12 @@ export class AgentExecutionBindingService {
       void pending.catch(() => { if (this.owner === pending) this.owner = undefined })
     }
     return this.owner
+  }
+  async sourceDiagnostics(operationId: string, context: AgentMuxRpcCallContext = {}): Promise<AgentExecutionSourceDiagnostics | null> {
+    if (!this.source) throw fail('The original Source diagnostic owner is unavailable.', 'CONTROL_UNAVAILABLE')
+    return await inspectSourceExecutionDiagnostics({ source: this.source, operationId, context,
+      inspect: bindingId => this.inspect(bindingId, 'association'),
+      journal: async original => !this.owner && !await this.retained() ? null : (await this.coordinator()).diagnostics(original) })
   }
   async admit(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): ReturnType<AgentExecutionCoordinator['admit']> {
     return await (await this.coordinator()).admit(input, context)

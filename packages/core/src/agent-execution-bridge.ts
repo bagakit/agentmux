@@ -3,6 +3,7 @@ import { inputChunkBytes, retainedInputFits } from './recoverable-input-frame.js
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperation, AgentMuxNativeService, AgentMuxRunState } from './types.js'
 import { AgentMuxError } from './errors.js'
+import type { ExecutionFrameFact } from './agent-execution-source-diagnostics.js'
 import { EXECUTION_FRAME_LIMIT } from './agent-execution-channel.js'
 
 export type AgentExecutionBridgeSide = 'frontend' | 'executor'
@@ -31,6 +32,14 @@ export interface AgentExecutionBridgeState {
 
 const chunkOperationId = (binding: string, side: Side, endByte: number, offset: number): string =>
   createHash('sha256').update(JSON.stringify([binding, side, endByte, offset])).digest('hex')
+
+/** The machine channel retains safe frame provenance, never raw exception text. */
+export class ExecutionProtocolFrameError extends AgentMuxError {
+  constructor(readonly side: AgentExecutionBridgeSide, readonly frame: ExecutionFrameFact, cause: unknown) {
+    super('The original helper emitted an invalid JSON protocol frame. Its Run and operations are retained.', 'EXECUTION_PROTOCOL_INVALID_FRAME')
+    Object.defineProperty(this, 'cause', { value: cause })
+  }
+}
 
 /**
  * A reader/forwarder over two existing ctxmux Runs. It owns no processes, byte
@@ -207,7 +216,7 @@ export class AgentExecutionBridge {
       partial.parts = []; partial.bytes = 0
       let frame: { type?: unknown }
       try { frame = JSON.parse(line.toString('utf8')) as { type?: unknown } }
-      catch (error) { throw this.fail(error, side) }
+      catch (error) { throw this.fail(new ExecutionProtocolFrameError(side, { startByte: this.state[side].outputByte, endByte: data.startByte + newline + 1, bytes: line.length, sha256: createHash('sha256').update(line).digest('hex'), syntax: 'invalid-json' }, error), side) }
       const sourceEndByte = data.startByte + newline + 1
       const forward = side === 'frontend' ? ['request', 'closed', 'agent-rpc-context', 'agent-rpc-response', 'agent-rpc-closed'].includes(String(frame.type)) : ['response', 'agent-rpc-request', 'agent-rpc-close'].includes(String(frame.type))
       if (forward) {
