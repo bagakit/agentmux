@@ -1,17 +1,12 @@
 import { mintCapabilityToken } from '@agentmux/core/object-id'
 import { Menu, webContents, type BrowserWindow, type ContextMenuParams, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
+import { browserPageMenu, type BrowserMenuAction, type BrowserMenuCommands } from './browser-page-context-menu.js'
 
-type EditAction = 'copy' | 'cut' | 'paste' | 'selectAll'
-type MenuOwner = { isCurrent(): boolean; origin?(): { x: number; y: number }; copyAddress?(address: string): Promise<void> }
-
-function pageAddresses(params: ContextMenuParams): Array<{ label: string; address: string }> {
-  const addresses = []
-  if (params.linkURL) addresses.push({ label: 'Copy Link Address', address: params.linkURL })
-  if (params.mediaType === 'image' && params.srcURL) addresses.push({ label: 'Copy Image Address', address: params.srcURL })
-  if (!params.linkURL && params.mediaType === 'none' && !params.isEditable && !params.selectionText && params.pageURL) {
-    addresses.push({ label: 'Copy Page Address', address: params.pageURL })
-  }
-  return addresses
+type MenuOwner = {
+  isCurrent(): boolean
+  origin?(): { x: number; y: number }
+  pageCommands?(hit: ContextMenuParams): BrowserMenuCommands
+  onPageActionError?(error: unknown): void
 }
 
 // Only a pending menu owns this closure. It retains node/selection identity, never text or values.
@@ -52,15 +47,25 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
     if (!focused(window) || !window.isFocused()) return
     const frame = params.frame
     if (!frame || frame.isDestroyed() || frame.detached || webContents.fromFrame(frame) !== contents) return
-    const actions: Array<{ action: EditAction; label: string; enabled: boolean }> = params.isEditable
-      ? [{ action: 'cut', label: 'Cut', enabled: params.editFlags.canCut },
-          { action: 'copy', label: 'Copy', enabled: params.editFlags.canCopy },
-          { action: 'paste', label: 'Paste', enabled: params.editFlags.canPaste },
-          { action: 'selectAll', label: 'Select All', enabled: params.editFlags.canSelectAll }]
-      : params.selectionText.length > 0 && params.editFlags.canCopy
-        ? [{ action: 'copy', label: 'Copy', enabled: true }] : []
-    const addresses = owner.copyAddress ? pageAddresses(params) : []
-    if (actions.length === 0 && addresses.length === 0) return
+    const commands = owner.pageCommands?.(params), flags = params.editFlags
+    const actions: Array<{ run: () => void; label: string; enabled: boolean }> = params.isEditable
+      ? [...(commands && (flags.canUndo || flags.canRedo) ? [
+          { run: () => contents.undo(), label: 'Undo', enabled: flags.canUndo },
+          { run: () => contents.redo(), label: 'Redo', enabled: flags.canRedo }] : []),
+          { run: () => contents.cut(), label: 'Cut', enabled: flags.canCut },
+          { run: () => contents.copy(), label: 'Copy', enabled: flags.canCopy },
+          { run: () => contents.paste(), label: 'Paste', enabled: flags.canPaste },
+          ...(commands && flags.canEditRichly ? [{ run: () => contents.pasteAndMatchStyle(), label: 'Paste and Match Style', enabled: flags.canPaste }] : []),
+          ...(commands && flags.canDelete ? [{ run: () => contents.delete(), label: 'Delete', enabled: true }] : []),
+          { run: () => contents.selectAll(), label: 'Select All', enabled: flags.canSelectAll },
+          ...(commands && params.misspelledWord && params.spellcheckEnabled && params.formControlType !== 'input-password'
+            ? [...(params.dictionarySuggestions ?? []).map(suggestion => ({ run: () => contents.replaceMisspelling(suggestion), label: suggestion, enabled: true })),
+                { run: () => contents.session.addWordToSpellCheckerDictionary(params.misspelledWord), label: 'Add to Dictionary', enabled: true }] : [])]
+      : params.selectionText.length > 0 && flags.canCopy
+        ? [{ run: () => contents.copy(), label: 'Copy', enabled: true },
+            ...(commands && process.platform === 'darwin' && params.selectionText.trim()
+              ? [{ run: () => contents.showDefinitionForSelection(), label: 'Look Up', enabled: true }] : [])] : []
+    if (actions.length === 0 && !commands) return
     const ancestors: Array<{ frame: WebFrameMain; token: string }> = []
     for (let current: WebFrameMain | null = frame; current; current = current.parent) ancestors.push({ frame: current, token: current.frameToken })
     const key = `__agentmuxTextEdit_${mintCapabilityToken()}`
@@ -111,12 +116,14 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
       } catch { console.warn('Text editing menu is unavailable; the original input and native keyboard editing remain available.') }
     }
     try {
-      const items: MenuItemConstructorOptions[] = addresses.map(({ label, address }) => ({ label, click: () => {
-        if (chosen || ended || !currentFrame()) { finish(); return }
+      const runPageAction = (action: BrowserMenuAction) => {
+        if (chosen || ended || !currentFrame() || !commands?.isCurrent()) { finish(); return }
         chosen = true
         finish()
-        void owner.copyAddress?.(address).catch(() => console.warn('The Browser address copy result could not be reported.'))
-      } }))
+        try { void Promise.resolve(action()).catch(error => owner.onPageActionError?.(error)) }
+        catch (error) { owner.onPageActionError?.(error) }
+      }
+      const items = commands ? browserPageMenu(contents, params, commands, runPageAction) : []
       if (actions.length > 0) {
         captureStarted = true
         let captured = false
@@ -130,8 +137,8 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
             void (async () => {
               try {
                 const sameTarget = await evaluate(`globalThis[${JSON.stringify(key)}]?.check() === true`)
-                if (!sameTarget || ended || !current()) { finish(); notice(); return }
-                contents[item.action]()
+                if (!sameTarget || ended || !current() || commands && !commands.isCurrent()) { finish(); notice(); return }
+                item.run()
                 finish()
               } catch { finish(); notice() }
             })()
@@ -140,6 +147,12 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
         else items.push({ type: 'separator' }, { label: 'Text target changed or unavailable. Open its menu again.', enabled: false })
       }
       if (!currentFrame()) { finish(); return }
+      if (commands) {
+        const selection = params.formControlType !== 'input-password' && params.selectionText.trim()
+        if (selection) items.push({ label: 'Search for Selected Text', click: () => runPageAction(commands.search(selection)) })
+        if (items.length) items.push({ type: 'separator' })
+        items.push({ label: 'Inspect', click: () => runPageAction(commands.inspect) })
+      }
       menu = Menu.buildFromTemplate(items)
       const origin = owner.origin?.() ?? { x: 0, y: 0 }
       menu.popup({ window, frame, x: Math.round(origin.x + params.x), y: Math.round(origin.y + params.y),

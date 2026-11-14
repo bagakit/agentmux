@@ -2305,13 +2305,15 @@ export async function registerIpc(args: {
   handle('browser:navigate', async (id: string, url: string) => { await ensureBrowser(id); return await browsers.navigate(id, url) })
   handle('browser:back', async (id: string) => { await ensureBrowser(id); return await browsers.back(id) })
   handle('browser:forward', async (id: string) => { await ensureBrowser(id); return await browsers.forward(id) })
-  handle('browser:reload', async (id: string) => {
+  const reloadBrowser = async (id: string) => {
     await ensureBrowser(id)
     const capsuleId = browsers.capsuleId(id)
     const remote = browsers.capsuleRemote(id)
     return capsuleId ? await browsers.reloadCapsule(id, remote ? await remoteCapsules.inspect(remote, capsuleId) : await capsuleClient.call('capsule.inspect', { capsuleId }))
       : await browsers.reload(id)
-  })
+  }
+  browsers.contextMenuReload = reloadBrowser
+  handle('browser:reload', reloadBrowser)
   handle('browser:zoom', (id: unknown, step: unknown) => {
     if (typeof id !== 'string' || !id) throw new TypeError('Browser zoom needs one Browser id.')
     return browsers.zoom(id, step as BrowserZoomStep)

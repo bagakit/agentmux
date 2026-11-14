@@ -31,7 +31,7 @@ import { parseBrowserStructuredOutputRequest } from '@agentmux/browser/browser-s
 import { resolveBrowserStructuredTarget } from '@agentmux/browser/browser-structured-target'
 import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '@agentmux/browser/model/browser-outcome-criteria'
 
-import { BaseWindow, dialog, nativeImage, session, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type WebContents, type WebFrameMain, type Session } from 'electron'
+import { BaseWindow, dialog, nativeImage, session, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type ContextMenuParams, type Referrer, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, parseAmuxObjectLink, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
 import {
@@ -67,7 +67,7 @@ import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '@agentmux/browser/model/browser-operation'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '../shared/browser-viewport.js'
-import { resolveBrowserAddress } from '../shared/browser-address.js'
+import { browserSearchUrl, resolveBrowserAddress } from '../shared/browser-address.js'
 import { browserObjectLink } from '../shared/browser-object-link.js'
 import type { BrowserInputHistoryAppearance, BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, BROWSER_OPERATION_FEEDBACK_WORLD_ID, type BrowserOperationFeedback } from './browser-operation-feedback.js'
@@ -75,6 +75,7 @@ import { BrowserControlFeedback } from './browser-control-feedback.js'
 import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
+import type { BrowserMenuCommands, BrowserMenuDestination } from './browser-page-context-menu.js'
 import { getDesktopNativeUiOwner } from './native-desktop-owner.js'
 import { BrowserCdpSession, DESKTOP_BROWSER_DIALOG_TYPES } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
@@ -154,6 +155,7 @@ type BrowserEntry = {
   nativeChild?: {
     opening?: import('../shared/contracts').BrowserNativeOpening
     window: { width: number; height: number }
+    ownsPrivateStorage?: true
     /** Only an unposted original display projection; no native page request is repeated. */
     projectionPending?: true
     projectionWarning?: string
@@ -1982,14 +1984,14 @@ export class BrowserViewManager {
     workspaceId: string | null = null,
     retiredInputShield?: BrowserNativeInputShield,
     saved?: BrowserCreationFacts,
-    native?: ReleasedBrowser['nativeChild']
+    native?: ReleasedBrowser['nativeChild'], referrer?: Referrer
   ): Promise<BrowserSnapshot> {
     const view = this.createView(storage.partition, 'capsule' in storage ? storage.capsule.record : undefined)
     const entry = this.registerEntry(id, url, storage, view, viewport, workspaceId, retiredInputShield, saved, native)
     try {
       await this.prepareProfilePageEnvironment(entry, view)
       if (!this.owns(entry, view)) throw new Error('The original Browser changed during environment preparation. No navigation was sent to its replacement.')
-      void this.startNavigation(entry, url, true, saved?.history).catch(() => {})
+      void this.startNavigation(entry, url, true, saved?.history, referrer).catch(() => {})
       return this.snapshot(entry)
     } catch (error) {
       // The ordinary creation transaction has not delivered its resource yet.
@@ -2000,10 +2002,7 @@ export class BrowserViewManager {
     }
   }
 
-  private createNativeChild(parent: BrowserEntry, sourceView: WebContentsView, options: BrowserWindowConstructorOptions, request: import('./browser-native-windows').NativeBrowserOpenRequest): WebContents {
-    // Only the original page may contribute this request. This rejects a stale
-    // source incarnation, without closing its independent healthy replacement.
-    if (!this.owns(parent, sourceView)) throw new Error('The original native Browser page is no longer current; its child was not created.')
+  private openingSource(parent: BrowserEntry): { source: NonNullable<BrowserEntry['source']>; returnContext: WorkbenchReturnContext | null } {
     const lease = parent.inputLeaseId ? this.presentationLeases.get(parent.inputLeaseId) : undefined
     let location: import('@agentmux/core').AgentMuxBrowserSource['location']
     let returnContext: WorkbenchReturnContext | null = null
@@ -2015,7 +2014,13 @@ export class BrowserViewManager {
         }
       } catch { /* Source Browser identity is still known; an unconfirmed placement is omitted. */ }
     }
-    const source = { browserId: parent.id, navigationId: parent.navigationId, ...(location ? { location } : {}) }
+    return { source: { browserId: parent.id, navigationId: parent.navigationId, ...(location ? { location } : {}) }, returnContext }
+  }
+
+  private createNativeChild(parent: BrowserEntry, sourceView: WebContentsView, options: BrowserWindowConstructorOptions, request: import('./browser-native-windows').NativeBrowserOpenRequest): WebContents {
+    // Chromium must continue its own exact guest request.
+    if (!this.owns(parent, sourceView)) throw new Error('The original native Browser page is no longer current; its child was not created.')
+    const { source, returnContext } = this.openingSource(parent)
     const { webContents: guest, webPreferences } = options as BrowserWindowConstructorOptions & { webContents?: WebContents }
     const view = new WebContentsView({ ...(webPreferences ? { webPreferences } : {}), ...(guest ? { webContents: guest } : {}) })
     const window = { width: options.width ?? 1024, height: options.height ?? 768 }
@@ -2032,6 +2037,41 @@ export class BrowserViewManager {
     this.publishNativeChildOpening(child)
     // Chromium, not startNavigation/loadURL, continues the original guest request.
     return view.webContents
+  }
+
+  private async openContextPage(parent: BrowserEntry, address: string, destination: BrowserMenuDestination,
+    stillCurrent: () => boolean, referrer?: Referrer): Promise<void> {
+    const url = assertAllowedBrowserUrl(address)
+    const { source, returnContext } = this.openingSource(parent)
+    const window = { width: 1024, height: 768 }
+    let storage = parent.storage
+    if (destination.profileId !== undefined) {
+      const profileId = destination.profileId
+      await this.profiles.prepareSession?.(profileId)
+      if (!stillCurrent()) throw new Error('The original link changed before its Profile was ready.')
+      storage = { mode: 'normal', profileId, partition: this.resolvePartition(profileId) }
+    } else if (destination.private) {
+      const partition = `agentmux-browser-private:${mintObjectId()}`
+      storage = { mode: 'private', profileId: null, partition, session: session.fromPartition(partition) }
+    }
+    const changedEnvironment = storage !== parent.storage, id = mintObjectId()
+    const ownsPrivateStorage = changedEnvironment && storage.mode === 'private'
+    try {
+      await this.createEntry(id, url, storage, 'responsive', parent.workspaceId, undefined,
+        { source, agent: null }, { window }, changedEnvironment ? undefined : referrer)
+    } catch (error) {
+      if (ownsPrivateStorage && storage.mode === 'private') {
+        try { await this.clearPrivateStorage(storage) }
+        catch (cleanup) { throw new AggregateError([error, cleanup], 'The new private Browser could not be opened or cleaned up.') }
+      }
+      throw error
+    }
+    const child = this.require(id), opening = child.nativeChild!
+    if (ownsPrivateStorage) opening.ownsPrivateStorage = true
+    opening.opening = { context: returnContext, destination: destination.destination,
+      foreground: destination.destination !== 'tab' || destination.profileId !== undefined }
+    opening.projectionPending = true
+    this.publishNativeChildOpening(child)
   }
 
   /** A projection observation cannot roll back Chromium's already-created original guest. */
@@ -2299,7 +2339,7 @@ export class BrowserViewManager {
   }
 
   /** Keep full navigation completion separate from first-document consumption. */
-  private startNavigation(entry: BrowserEntry, rawUrl: string, initial = false, history?: BrowserHistory): Promise<void> {
+  private startNavigation(entry: BrowserEntry, rawUrl: string, initial = false, history?: BrowserHistory, referrer?: Referrer): Promise<void> {
     const url = normalizeBrowserUrl(rawUrl)
     const restored = restorableHistory(history, url)
     entry.nativeChild?.closing?.settle(false)
@@ -2325,7 +2365,7 @@ export class BrowserViewManager {
     }
     const navigation = restored
       ? view.webContents.navigationHistory.restore({ entries: restored.entries, index: restored.index })
-      : view.webContents.loadURL(url)
+      : referrer ? view.webContents.loadURL(url, { httpReferrer: referrer }) : view.webContents.loadURL(url)
     const promise = navigation.catch((error) => {
       if (this.owns(entry, view) && !document?.superseded.signal.aborted &&
         (!document || document.navigationId === document.loadNavigationId)) {
@@ -5059,16 +5099,22 @@ export class BrowserViewManager {
     installTextEditContextMenu(contents, () => this.windowForView(view), {
       isCurrent: () => this.nativeOwner(entry.id)?.view === view && !this.agentOwnsInput(entry),
       origin: () => view.getBounds(),
-      copyAddress: async address => {
+      pageCommands: hit => this.contextMenuCommands(entry, view, hit, address => {
         const revision = ++addressCopyRevision, navigationId = entry.navigationId
-        let copied = false
-        try { await getDesktopNativeUiOwner().writeClipboardText(address); copied = true }
-        catch { /* Show uncertainty without including the address or touching the page. */ }
-        if (revision !== addressCopyRevision || !this.owns(entry, view) || entry.navigationId !== navigationId) return
-        const { warning, ...activity } = entry.activity
-        const next = copied ? removeWarning(warning, ADDRESS_COPY_WARNING) : appendWarning(warning, ADDRESS_COPY_WARNING)
-        if (next === warning) return
-        entry.activity = { ...activity, ...(next ? { warning: next } : {}) }
+        const update = (copied: boolean) => {
+          if (revision !== addressCopyRevision || !this.owns(entry, view) || contents.isDestroyed() || entry.navigationId !== navigationId) return
+          const { warning, ...activity } = entry.activity
+          const next = copied ? removeWarning(warning, ADDRESS_COPY_WARNING) : appendWarning(warning, ADDRESS_COPY_WARNING)
+          if (next === warning) return
+          entry.activity = { ...activity, ...(next ? { warning: next } : {}) }
+          this.emit(entry)
+        }
+        return getDesktopNativeUiOwner().writeClipboardText(address).then(() => update(true), () => update(false))
+      }),
+      onPageActionError: error => {
+        if (!this.owns(entry, view) || contents.isDestroyed()) return
+        const detail = error instanceof Error ? error.message : 'The native action could not be confirmed.'
+        entry.activity = { ...entry.activity, warning: appendWarning(entry.activity.warning, `Browser menu action: ${detail}`) }
         this.emit(entry)
       }
     })
@@ -5399,6 +5445,9 @@ export class BrowserViewManager {
         if (!released.inputShield && !released.pendingSwitch && !released.detachedView && !cleanupErrors.length) this.releasedEntries.delete(entry.id)
         entry.nativeChild?.closing?.settle(true)
         this.send({ type: 'closed', id: entry.id })
+        if (entry.nativeChild?.ownsPrivateStorage && entry.storage.mode === 'private') {
+          void this.clearPrivateStorage(entry.storage).catch(error => console.warn('The closed private Browser environment could not be fully cleared:', error))
+        }
         if (nativeWindow && nativeWindow !== this.window && !nativeWindow.isDestroyed()) nativeWindow.close()
         return
       }
@@ -5407,6 +5456,58 @@ export class BrowserViewManager {
       this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' + (reason ? ` Cleanup failed: ${reason}` : '') })
     })
     return controlFeedback
+  }
+
+  contextMenuReload?: (browserId: string) => Promise<BrowserSnapshot>
+
+  private contextMenuCommands(entry: BrowserEntry, view: WebContentsView, hit: ContextMenuParams,
+    copyAddress: (address: string) => Promise<void>): BrowserMenuCommands {
+    const contents = view.webContents, navigationId = entry.navigationId, frame = hit.frame!, frameToken = frame.frameToken
+    const frameUrl = frame.url, controlRevision = entry.controlRevision, host = this.windowForView(view)
+    const bounds = view.getBounds(), zoom = contents.getZoomFactor()
+    const current = () => this.nativeOwner(entry.id, host)?.view === view && entry.navigationId === navigationId &&
+      entry.controlRevision === controlRevision && !this.agentOwnsInput(entry) && !frame.isDestroyed() && !frame.detached &&
+      frame.frameToken === frameToken && frame.url === frameUrl
+    const atHit: BrowserMenuCommands['atHit'] = action => () => {
+      const next = view.getBounds()
+      if (next.width !== bounds.width || next.height !== bounds.height || contents.getZoomFactor() !== zoom) {
+        throw new Error('The page size changed. Right-click the original target again.')
+      }
+      action(hit.x, hit.y)
+    }
+    return {
+      isCurrent: current,
+      profiles: () => {
+        try { return this.profiles.listProfiles?.().filter(profile => profile.id !== entry.storage.profileId) ?? [] }
+        catch { return [] }
+      },
+      copyAddress: address => () => copyAddress(address),
+      open: (address, destination) => () => this.openContextPage(entry, address, destination, current, hit.referrerPolicy?.url ? hit.referrerPolicy : undefined),
+      follow: address => () => this.navigate(entry.id, address),
+      download: address => () => contents.downloadURL(address),
+      atHit,
+      search: text => () => this.openContextPage(entry, browserSearchUrl(text), { destination: 'tab' }, current),
+      back: () => this.back(entry.id),
+      forward: () => this.forward(entry.id),
+      reload: () => this.contextMenuReload ? this.contextMenuReload(entry.id) : this.reload(entry.id),
+      savePage: async () => {
+        const title = contents.getTitle().replace(/[\\/:*?"<>|\u0000-\u001f]/gu, '_').trim().slice(0, 96) || 'Page'
+        const result = await dialog.showSaveDialog(host, { defaultPath: `${title}.mhtml`, filters: [{ name: 'Web archive', extensions: ['mhtml'] }] })
+        if (result.canceled || !result.filePath) return
+        if (!current()) throw new Error('The original page changed before it was saved.')
+        await contents.savePage(result.filePath, 'MHTML')
+      },
+      print: () => new Promise<void>((resolve, reject) => {
+        contents.print({}, (success, reason) => {
+          if (success || reason === 'Print job canceled') resolve()
+          else reject(new Error('Printing could not be confirmed.'))
+        })
+      }),
+      inspect: atHit((x, y) => {
+        if (!contents.isDevToolsOpened()) this.openDevTools(entry.id)
+        contents.inspectElement(x, y)
+      })
+    }
   }
 
   private require(id: string): BrowserEntry {

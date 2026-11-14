@@ -3,6 +3,10 @@ export function resolveBrowserAddress(value: string): string {
   return resolveBrowserInput(value).url
 }
 
+export function browserSearchUrl(text: string): string {
+  return `https://www.google.com/search?q=${encodeURIComponent(text.trim())}`
+}
+
 /** Input classification shares the exact address resolver, independent of search-engine URLs. */
 export function resolveBrowserInput(value: string): { kind: 'address' | 'search'; url: string } {
   const input = value.trim()
@@ -24,5 +28,5 @@ export function resolveBrowserInput(value: string): { kind: 'address' | 'search'
   const ipv4 = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(authority)
   const hostHint = (authority.includes('.') && (!numericText || ipv4)) || /^\[[^\]]+\](?::\d+)?$/.test(authority)
   if (hostHint && !/[@\s]/.test(authority)) return { kind: 'address', url: new URL(`https://${input}`).toString() }
-  return { kind: 'search', url: `https://www.google.com/search?q=${encodeURIComponent(input)}` }
+  return { kind: 'search', url: browserSearchUrl(input) }
 }
