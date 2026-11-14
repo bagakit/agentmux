@@ -165,6 +165,12 @@ export function ItemActions({ canRename, onRename, onDuplicate }: {
 }
 ```
 
+## Choose a control for the task
+
+Use `components/HoverDropdownMenu` for commands that run when a menu item is activated. Use `components/SelectionField` for an existing value selected from a list of options. Supply the value, labels and disabled facts. Import `styles/selection-field.css` and the shared input styles when the field needs a query. The current value stays separate from keyboard focus.
+
+Use `components/SearchChoiceDialog` when someone needs to read or type a query before explicitly choosing an action. The dialog takes a named trigger, an editable query and a render function for the currently visible results. Render result buttons with `data-choice`, and call the supplied `choose` callback for explicit activation. The host owns filtering, pending or failed reads and the action. Import `styles/search-choice.css`. The existing overlay host provides the original document and Portal container.
+
 ## Inputs
 
 ### Compact editors
