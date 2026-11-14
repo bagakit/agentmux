@@ -6,7 +6,10 @@ import base from './mote-object-navigation.config.mts'
 const variants = {
   'drop-private-entry': ['apps/desktop/src/renderer/src/components/MoteThreadsPanel.tsx', 'privateChats={visible => <MotePrivateConversations scope={scope} active={visible} />}', ''],
   'wrong-hosting-owner': ['apps/desktop/src/renderer/src/components/MotePrivateConversations.tsx', "{ target }, owner)", "{ target }, undefined)"],
-  'wrong-conversation': ['apps/desktop/src/renderer/src/components/MoteChatHistory.tsx', 'agentSessionId: generation.agentSessionId }),', "agentSessionId: 'default-agent' }),"]
+  'wrong-conversation': ['apps/desktop/src/renderer/src/components/MoteSessionConversation.tsx', '({ hostId, agentSessionId }),', "({ hostId, agentSessionId: 'default-agent' }),"],
+  'drop-retained-auto': ['apps/desktop/src/renderer/src/components/MoteConversationBrowser.tsx', 'selected.explicit || !fallback ||', 'selected.explicit ||'],
+  'hidden-readers-active': ['apps/desktop/src/renderer/src/components/MoteConversationBrowser.tsx', 'active && showDetail && choice.id === current', 'active'],
+  'wrong-member-target': ['apps/desktop/src/renderer/src/components/MoteCooperation.tsx', 'agentSessionId={observed?.control.agentSessionId ?? member.agentSessionId}', "agentSessionId={'default-agent'}"],
 } as const
 const mutation = process.env.MOTE_PRIVATE_THREADS_MUTATION as keyof typeof variants | undefined
 if (mutation && !variants[mutation]) throw Error('Unknown private Threads mutation')

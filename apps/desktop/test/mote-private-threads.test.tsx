@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { addTab } from '@agentmux/layout'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
@@ -10,7 +12,7 @@ import { MoteChatStore } from '../../../packages/connectors/src/mote-chat-store'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 import { createMoteApp, settleMoteApp } from './fixtures/mote-app'
-import { defaultAgent, defaultTab, moteTopics, scratchWorkspace } from './fixtures/mote-workface'
+import { defaultAgent, defaultTab, neighborAgent, moteAgent, moteTopics, scratchWorkspace } from './fixtures/mote-workface'
 import { moteConnectionTarget } from '../src/renderer/src/lib/mote-connection-default'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -69,7 +71,7 @@ beforeEach(async () => {
   const current = { hostId: 'local', sessionId: defaultAgent.id, displayWorkspaceId: scratchWorkspace.id, groupId: 'mote-group', tabId: defaultTab.id, regionId: defaultTab.layout.activeRegionId }
   vi.spyOn(api.moteDialogue, 'read').mockImplementation(async input => ({ main: { target: input.target, identity: { hostId: 'local', moteId: moteTopics[0]!.id }, status: 'ready', current,
     resource: null, documentRevision: 'original-document', roleRevision: 'original-role', issue: null }, links: [], incarnation: 'original-work-links', throughSequence: 0, next: null,
-    coverage: 'linked-sources-only', sourceStatus: 'unconfirmed', sourceIssue: 'Original work provenance unavailable' }) as MoteDialoguePage)
+    coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null }) as MoteDialoguePage)
   vi.spyOn(api.moteDialogue, 'inspectRecovery').mockResolvedValue({ operation: null })
   vi.spyOn(api.moteDialogue, 'ensureRecovery').mockRejectedValue(Error('No recovery from reading'))
   await app.mount()
@@ -90,18 +92,19 @@ it('opens old private conversations from actual Threads and renders both origina
   expect(chat.mock.calls.some(([method, input]) => method === 'space.mote.chat.history' && 'target' in input && JSON.stringify(input.target) === JSON.stringify(target) && !Object.hasOwn(input, 'actor'))).toBe(true)
   const row = app.container.querySelector('[data-mote-chat-generation="original-generation"]')!
   expect(row.textContent).toContain('飞书里的原来用户')
-  await click('View messages', row)
-  await wait(() => expect(row.textContent).toContain('小脏手的原完整回复'))
-  expect(row.textContent).toContain('我在飞书里的原问题')
+  // Wide entry already reads the first original: no View messages step.
+  await wait(() => expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('小脏手的原完整回复'))
+  expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('我在飞书里的原问题')
+  await wait(() => expect(vi.mocked(api.conversation.readAgentConversation).mock.calls.some(([input]) => input.agentSessionId !== defaultAgent.id)).toBe(true))
   const privateReads = vi.mocked(api.conversation.readAgentConversation).mock.calls.filter(([input]) => input.agentSessionId !== defaultAgent.id)
   expect(privateReads.length).toBeGreaterThan(0)
   expect(privateReads.every(([input]) => input.hostId === 'local' && input.agentSessionId === core.session.agentSessionId)).toBe(true)
   const reader = vi.mocked(api.conversation.readAgentConversation)
   const originalIndex = reader.mock.calls.findIndex(([input]) => input.agentSessionId === core.session.agentSessionId)
-  await writeFile('.local/state/mote-private-thread-review/private-conversation-sample.json', JSON.stringify({ page: await reader.mock.results[originalIndex]!.value, generation: generation('original-generation'), target, hosting, actor }))
+  await writeFile('.local/state/mote-conversation-pane-review/private-conversation-sample.json', JSON.stringify({ page: await reader.mock.results[originalIndex]!.value, generation: generation('original-generation'), target, hosting, actor }))
   const privatePanel = app.container.querySelector('[role="tabpanel"][aria-label="私聊"]')!
   expect(privatePanel.textContent).not.toContain('Original work provenance unavailable')
-  await click('工作'); await click('私聊'); await wait(() => expect(row.textContent).toContain('小脏手的原完整回复'))
+  await click('工作'); await click('私聊'); await wait(() => expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('小脏手的原完整回复'))
   expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(useAppStore.getState().sessions).toBe(sessions)
   expect((await core.bytes()).native).toEqual(core.before.native)
   expect(await core.store.readMetadata(core.session.agentSessionId)).toEqual(originalMetadata); unchanged()
@@ -109,10 +112,10 @@ it('opens old private conversations from actual Threads and renders both origina
 
 it('keeps read originals when the hosting owner fails, refuses an unknown owner without borrowing local and keeps reading passive', async () => {
   await openPrivate(); const row = app.container.querySelector('[data-mote-chat-generation="original-generation"]')!
-  await click('View messages', row); await wait(() => expect(row.textContent).toContain('小脏手的原完整回复'))
+  await act(async () => row.closest<HTMLButtonElement>('button')!.click()); await wait(() => expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('小脏手的原完整回复'))
   failRead = true; await click('刷新私聊')
   await wait(() => expect(app.container.textContent).toContain('Original hosting read unavailable'))
-  expect(row.textContent).toContain('小脏手的原完整回复')
+  expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('小脏手的原完整回复')
   const count = chat.mock.calls.length
   const defaultOwnerReads = vi.mocked(api.connections.hostingTarget).mock.calls.length
   await act(async () => useAppStore.setState({ manualConnectionSelections: { ...useAppStore.getState().manualConnectionSelections, lark: null } }))
@@ -124,7 +127,11 @@ it('paginates only the original Mote history and does not read unopened Agent co
   seed(generation('older-a', 'unopened-a')); seed(generation('older-b', 'unopened-b')); seed(generation('older-c', 'unopened-c'))
   await click('Threads'); await click('私聊')
   await wait(() => expect(app.container.querySelectorAll('[data-mote-chat-generation]')).toHaveLength(3))
-  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls.filter(([input]) => input.agentSessionId !== defaultAgent.id)).toHaveLength(0)
+  const selected = app.container.querySelector('.mote-conversation-browser__choice[aria-current="page"] [data-mote-chat-generation]')!.getAttribute('data-mote-chat-generation')
+  await wait(() => expect(vi.mocked(api.conversation.readAgentConversation).mock.calls.some(([input]) => input.agentSessionId !== defaultAgent.id)).toBe(true))
+  const privateReads = vi.mocked(api.conversation.readAgentConversation).mock.calls.filter(([input]) => input.agentSessionId !== defaultAgent.id)
+  expect(privateReads.length).toBeGreaterThan(0)
+  expect(privateReads.every(([input]) => input.agentSessionId === (selected === 'original-generation' ? core.session.agentSessionId : 'unopened-' + selected!.slice(-1)))).toBe(true)
   await click('Earlier conversations')
   await wait(() => expect(app.container.querySelectorAll('[data-mote-chat-generation]')).toHaveLength(4))
   expect(chat.mock.calls.filter(([m]) => m === 'space.mote.chat.history').map(([,p]) => 'target' in p ? p.target : undefined)).toEqual([target,target])
@@ -136,7 +143,67 @@ it('reads retained original history even when the current chat configuration is 
   history.database.prepare('DELETE FROM mote_chat_configuration').run()
   await openPrivate()
   const row = app.container.querySelector('[data-mote-chat-generation="original-generation"]')!
-  await click('View messages', row)
-  await wait(() => expect(row.textContent).toContain('小脏手的原完整回复'))
-  expect(row.textContent).toContain('我在飞书里的原问题'); unchanged()
+  await act(async () => row.closest<HTMLButtonElement>('button')!.click())
+  await wait(() => expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('小脏手的原完整回复'))
+  expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('我在飞书里的原问题'); unchanged()
+})
+
+
+it('members directly read their exact original Sessions without navigating and only the selected Reader observes', async () => {
+  const otherId = 'second-member-agent', other = moteAgent(otherId, moteTopics[0]!.id)
+  for (const id of [defaultAgent.id, neighborAgent.id, otherId]) {
+    const transcriptPath = join(core.root, id + '.jsonl'), nativeId = 'native-' + id
+    await writeFile(transcriptPath, jsonl([
+      { type: 'user', uuid: id + '-input', sessionId: nativeId, message: { role: 'user', content: '我在飞书里的原问题' } },
+      { type: 'assistant', uuid: id + '-answer', sessionId: nativeId, message: { role: 'assistant', content: '小脏手的原完整回复' } }
+    ]))
+    await core.store.compareAndSwap(null, { ...core.session, agentSessionId: id, run: { runId: 'original-run-' + id }, nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: nativeId, transcriptPath } })
+  }
+  const otherTab = { ...createWorkbenchTab('second-member-tab', { kind: 'agent', phase: 'attached', workspaceId: scratchWorkspace.id, regionId: 'second-member-region', sessionId: otherId }, 'Other goal'), topicId: moteTopics[0]!.id }
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, other], tabs: { ...state.tabs, [otherTab.id]: otherTab }, layouts: { ...state.layouts, [scratchWorkspace.id]: addTab(state.layouts[scratchWorkspace.id]!, 'mote-group', otherTab.id) } })))
+  const tabs = useAppStore.getState().tabs, drafts = useAppStore.getState().agentComposerDrafts
+  await click('Threads')
+  const readsBefore = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await settleMoteApp()
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(readsBefore).some(([input]) => input.agentSessionId === neighborAgent.id)).toBe(false)
+  await click('成员')
+  await wait(() => expect(app.container.querySelector('.mote-cooperation--threads .mote-session-conversation')?.textContent).toContain('小脏手的原完整回复'))
+  expect(useAppStore.getState().tabs).toBe(tabs)
+  const originalReader = app.container.querySelector('.mote-cooperation--threads .mote-session-conversation')
+  await act(async () => useAppStore.setState({ tabs: Object.fromEntries(Object.entries(tabs).filter(([id]) => id !== 'second-member-tab' && id !== 'neighbor-tab')) }))
+  await wait(() => expect(app.container.querySelectorAll('.mote-cooperation--threads [data-mote-member]')).toHaveLength(0))
+  expect(app.container.querySelector('.mote-cooperation--threads .mote-session-conversation')).toBe(originalReader)
+  expect(originalReader?.textContent).toContain('小脏手的原完整回复')
+  expect(app.container.querySelector('.mote-cooperation--threads')?.textContent).toContain('原列表来源暂未确认')
+  await act(async () => useAppStore.setState({ tabs }))
+  const selected = app.container.querySelector('.mote-cooperation--threads .mote-conversation-browser__choice[aria-current="page"] [data-mote-member]')!
+  expect(selected.getAttribute('data-mote-member')).toBe(neighborAgent.id)
+  const next = app.container.querySelector(`[data-mote-member="${otherId}"]`)!
+  await act(async () => next.closest<HTMLButtonElement>('button')!.click())
+  await wait(() => expect(app.container.querySelector('.mote-cooperation--threads .mote-conversation-browser__pane:not([hidden]) [data-mote-session-conversation]')?.getAttribute('data-mote-session-conversation')).toBe(JSON.stringify({ hostId: 'local', agentSessionId: otherId })))
+  await wait(() => expect(app.container.querySelector('.mote-cooperation--threads .mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('小脏手的原完整回复'))
+  const observe = vi.mocked(api.conversation.observeConversation), observations = await Promise.all(observe.mock.results.filter(result => result.type === 'return').map(result => result.value).map(promise => Promise.resolve(promise).catch(() => null)))
+  expect(observations.filter(handle => handle?.agentSessionId === neighborAgent.id).length).toBeGreaterThan(0)
+  expect(observations.filter(handle => handle?.agentSessionId === neighborAgent.id).every(handle => handle!.closed.aborted)).toBe(true)
+  expect(observations.some(handle => handle?.agentSessionId === otherId && !handle.closed.aborted)).toBe(true)
+  await click('工作')
+  expect(observations.filter(handle => handle?.agentSessionId === otherId).every(handle => handle!.closed.aborted)).toBe(true)
+  expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); unchanged()
+})
+
+it('narrow private reading takes one row click and returns directly to its original selected list', async () => {
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue(new DOMRect(0, 0, 400, 700))
+  await openPrivate()
+  const reads = vi.mocked(api.conversation.readAgentConversation)
+  expect(reads.mock.calls.some(([input]) => input.agentSessionId === core.session.agentSessionId)).toBe(false)
+  const row = app.container.querySelector('[data-mote-chat-generation="original-generation"]')!
+  await act(async () => row.closest<HTMLButtonElement>('button')!.click())
+  await wait(() => expect(app.container.querySelector('.mote-conversation-browser__pane:not([hidden])')?.textContent).toContain('小脏手的原完整回复'))
+  expect(app.container.querySelector('.mote-conversation-browser__list')?.hasAttribute('hidden')).toBe(true)
+  const scroll = app.container.querySelector<HTMLElement>('.mote-conversation-browser__reading')!;scroll.scrollTop=73
+  await act(async () => app.container.querySelector<HTMLButtonElement>('[aria-label="返回对话列表"]')!.click())
+  expect(app.container.querySelector('.mote-conversation-browser__list')?.hasAttribute('hidden')).toBe(false)
+  expect(app.container.querySelector('.mote-conversation-browser__detail')?.hasAttribute('hidden')).toBe(true)
+  await act(async () => row.closest<HTMLButtonElement>('button')!.click())
+  expect(scroll.scrollTop).toBe(73); unchanged()
 })

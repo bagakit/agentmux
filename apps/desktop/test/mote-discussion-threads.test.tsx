@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { createMoteApp, moteClick, moteType, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultAgent, defaultTab, neighborAgent, neighborTab, moteTopics, scratchWorkspace } from './fixtures/mote-workface'
 import { useAppStore } from '../src/renderer/src/store'
@@ -12,7 +12,7 @@ import type { MoteDialoguePage } from '@agentmux/core/mote-dialogue'
 const main = { hostId: 'local', sessionId: defaultAgent.id, displayWorkspaceId: scratchWorkspace.id, groupId: 'mote-group', tabId: defaultTab.id, regionId: defaultTab.layout.activeRegionId }
 const actualSend = useAppStore.getState().send
 let currentMain = main
-let app: MoteAppFixture, reading: ReturnType<typeof vi.spyOn>, failRead = false, typedUnconfirmed = false
+let app: MoteAppFixture, reading: MockInstance<typeof api.moteDialogue.read>, failRead = false, typedUnconfirmed = false
 const page = (target: any): MoteDialoguePage => ({ main: { target, identity: { hostId: 'local', moteId: moteTopics[0]!.id }, status: 'ready', resource: null, documentRevision: 'original-doc', roleRevision: 'role-' + currentMain.sessionId, current: currentMain, issue: null }, links: [], incarnation: 'original-links', throughSequence: 0, next: null, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null })
 const button = (root: ParentNode, label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label)!
 const visibleBody = () => app.panel().querySelector<HTMLElement>('[data-mote-workface] .mote-workface__original:not([hidden])')
@@ -28,7 +28,15 @@ beforeEach(() => {
  vi.spyOn(api.files, 'readDirectory').mockResolvedValue([])
 })
 afterEach(async () => { await app.dispose() })
-async function open() { await app.mount(); await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: moteTopics[0]!.id })); await settleMoteApp(); await vi.waitFor(() => expect(visibleBody()).not.toBeNull()) }
+async function open() { await app.mount(); await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: moteTopics[0]!.id })); await settleMoteApp(); await vi.waitFor(() => expect(visibleBody()?.querySelector('[data-activity-session="' + defaultAgent.id + '"]')).not.toBeNull()) }
+async function openMemberWorkspace() {
+ await moteClick(button(app.panel(), '成员'))
+ const row = app.panel().querySelector<HTMLElement>('[data-mote-member="' + neighborAgent.id + '"]')!
+ expect(row).not.toBeNull()
+ await moteClick(row.closest<HTMLButtonElement>('button')!)
+ const pane = app.panel().querySelector('.mote-cooperation--threads .mote-conversation-browser__pane:not([hidden])')!
+ await moteClick(button(pane, '在工作区打开'))
+}
 it('real compact entry opens exact Main, Threads selects a worker and Discussion returns with original DOM and drafts', async () => {
  await open(); const original = useAppStore.getState(), mainBody = app.panel().querySelector('[data-activity-session="' + defaultAgent.id + '"]')
  expect(visibleBody()!.querySelector('[data-activity-session="' + defaultAgent.id + '"]')).not.toBeNull()
@@ -36,15 +44,15 @@ it('real compact entry opens exact Main, Threads selects a worker and Discussion
  expect(button(app.panel(), '原工作面')).toBeUndefined()
  await moteClick(button(app.panel(), 'Threads'))
  expect(app.panel().querySelector('.mote-threads-panel:not([hidden])')).not.toBeNull(); expect(visibleBody()).toBeNull()
- const worker = app.panel().querySelector<HTMLElement>('[data-mote-member="' + neighborAgent.id + '"]')!
- expect(worker).not.toBeNull(); await moteClick(worker.querySelector('button')!)
+ await openMemberWorkspace()
  expect(app.panel().querySelector('[data-mote-workface]')?.getAttribute('data-mote-section')).toBe('threads')
  expect(visibleBody()).not.toBeNull()
  expect(visibleBody()!.querySelector('[data-activity-session="' + neighborAgent.id + '"]')).not.toBeNull()
- await moteClick(button(app.panel(), '在工作区打开 ↗'))
+ await moteClick(button(app.panel(), '切换对话'))
+ await moteClick(button(document.querySelector('.mote-cooperation__popover')!, '原工作区'))
  expect(app.panel().querySelector('[data-mote-workface-presentation="workface"]')).not.toBeNull()
  expect(visibleBody()!.querySelector('.pane-tabbar')?.hasAttribute('hidden')).toBe(false)
- await moteClick(button(app.panel(), 'Discussion'))
+ await moteClick(button(app.panel(), '返回主对话'))
  await vi.waitFor(() => expect(visibleBody()!.querySelector('[data-activity-session="' + defaultAgent.id + '"]')).not.toBeNull())
  expect(app.panel().querySelector('[data-activity-session="' + defaultAgent.id + '"]')).toBe(mainBody)
  expect(useAppStore.getState().agentComposerDrafts).toEqual(original.agentComposerDrafts)
@@ -53,7 +61,7 @@ it('real compact entry opens exact Main, Threads selects a worker and Discussion
 it('unknown role refresh retains the exact readable Main and Composer DOM', async () => {
  await open(); const body = visibleBody(), composer = body!.querySelector('[aria-label="Message Agent"]')
  failRead = true
- await moteClick(button(app.panel(), 'Threads')); await moteClick(button(app.panel(), 'Discussion'))
+ await moteClick(button(app.panel(), 'Threads')); await moteClick(button(app.panel(), '返回主对话'))
  await vi.waitFor(() => expect(reading.mock.calls.length).toBeGreaterThan(1))
  expect(visibleBody()).toBe(body); expect(visibleBody()!.querySelector('[aria-label="Message Agent"]')).toBe(composer)
  expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
@@ -65,10 +73,10 @@ it('explicit worker input remains generic after that worker becomes Main in the 
  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (control, _body, id) => promptCarrierWaiting(control.agentSessionId, control.run.runId, id))
  await open(); await moteClick(button(app.panel(), 'Threads'))
- await moteClick(app.panel().querySelector<HTMLElement>('[data-mote-member="' + neighborAgent.id + '"] button')!)
+ await openMemberWorkspace()
  currentMain = { ...main, sessionId: neighborAgent.id, tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId }
  await act(async () => useAppStore.setState(state => ({ scratchTopicSnapshots: Object.fromEntries(Object.entries(state.scratchTopicSnapshots).map(([id, value]) => [id, { ...value,
-   topics: value.topics?.map(topic => topic.id === moteTopics[0]!.id ? { ...topic, quickMode: { status: 'saved', version: 'role-B', defaults: { conversation: currentMain } } } : topic) }])) })))
+   topics: value.topics === null ? null : value.topics.map(topic => topic.id === moteTopics[0]!.id ? { ...topic, quickMode: { status: 'saved', version: 'role-B', defaults: { conversation: currentMain } } } : topic) }])) })))
  await vi.waitFor(() => expect(reading.mock.calls.length).toBeGreaterThan(1))
  const surface = visibleBody()!.querySelector('[data-activity-session="' + neighborAgent.id + '"]')!.closest('.agent-surface')!
  await moteType(surface.querySelector<HTMLElement>('[aria-label="Message Agent"]')!, '继续原成员工作')
@@ -80,7 +88,7 @@ it('explicit worker input remains generic after that worker becomes Main in the 
 
 it('explicitly reopening the same Mote returns from a worker to Main through one new entry', async () => {
  await open(); await moteClick(button(app.panel(), 'Threads'))
- await moteClick(app.panel().querySelector<HTMLElement>('[data-mote-member="' + neighborAgent.id + '"] button')!)
+ await openMemberWorkspace()
  await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: moteTopics[0]!.id }))
  await settleMoteApp()
  expect(app.panel().querySelector('[data-mote-workface]')?.getAttribute('data-mote-section')).toBe('discussion')
@@ -98,12 +106,12 @@ it('known Main B cannot silently downgrade a newly authored logical Main input t
  await moteType(editor, '原主对话的新问题，保留原稿')
  currentMain = { ...main, sessionId: neighborAgent.id, tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId }
  await act(async () => useAppStore.setState(state => ({ scratchTopicSnapshots: Object.fromEntries(Object.entries(state.scratchTopicSnapshots).map(([id, value]) => [id, { ...value,
-  topics: value.topics?.map(topic => topic.id === moteTopics[0]!.id ? { ...topic, quickMode: { status: 'saved', version: 'confirmed-role-B', defaults: { conversation: currentMain } } } : topic) }])) })))
- await vi.waitFor(() => expect(app.panel().textContent).toContain('主 Agent 已更换'))
+  topics: value.topics === null ? null : value.topics.map(topic => topic.id === moteTopics[0]!.id ? { ...topic, quickMode: { status: 'saved', version: 'confirmed-role-B', defaults: { conversation: currentMain } } } : topic) }])) })))
+ await vi.waitFor(async () => expect((await reading.mock.results.at(-1)!.value).main.current).toEqual(currentMain))
  await moteClick(button(surface, 'Send'))
  expect(submit).not.toHaveBeenCalled()
  expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toContain('原主对话的新问题，保留原稿')
- expect(app.panel().textContent).toContain('原输入尚未发送')
+ expect(document.body.textContent).toContain('主 Agent 已更换')
  expect(app.stop).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
 })
 it('a missing Session observation does not bring back the IDE tabbar or remove original work', async () => {
@@ -122,7 +130,7 @@ it('typed unconfirmed Main source never silently sends a new logical Main input 
  const body = visibleBody(), editor = body!.querySelector<HTMLElement>('[aria-label="Message Agent"]')!
  await moteType(editor, '主角色暂未确认时保留原稿')
  typedUnconfirmed = true
- await moteClick(button(app.panel(), 'Threads')); await moteClick(button(app.panel(), 'Discussion'))
+ await moteClick(button(app.panel(), 'Threads')); await moteClick(button(app.panel(), '返回主对话'))
  await vi.waitFor(() => expect(app.panel().textContent).toContain('原文件读取暂不可用'))
  expect(visibleBody()).toBe(body)
  await moteClick(button(body!, 'Send'))
@@ -138,12 +146,12 @@ it('explicit Discussion restores Main input intent when the already selected mem
  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (control, _body, id) => promptCarrierWaiting(control.agentSessionId, control.run.runId, id))
  await open(); await moteClick(button(app.panel(), 'Threads'))
- await moteClick(app.panel().querySelector<HTMLElement>('[data-mote-member="' + neighborAgent.id + '"] button')!)
+ await openMemberWorkspace()
  currentMain = { ...main, sessionId: neighborAgent.id, tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId }
  await act(async () => useAppStore.setState(state => ({ scratchTopicSnapshots: Object.fromEntries(Object.entries(state.scratchTopicSnapshots).map(([id, value]) => [id, { ...value,
-  topics: value.topics?.map(topic => topic.id === moteTopics[0]!.id ? { ...topic, quickMode: { status: 'saved', version: 'main-was-member', defaults: { conversation: currentMain } } } : topic) }])) })))
+  topics: value.topics === null ? null : value.topics.map(topic => topic.id === moteTopics[0]!.id ? { ...topic, quickMode: { status: 'saved', version: 'main-was-member', defaults: { conversation: currentMain } } } : topic) }])) })))
  await settleMoteApp()
- await moteClick(button(app.panel(), 'Discussion')); await settleMoteApp()
+ await moteClick(button(app.panel(), '返回主对话')); await settleMoteApp()
  await vi.waitFor(() => expect(readPmoTeamsTopicFloatingState()).toMatchObject({ conversationIntent: 'main', reference: { tabId: neighborTab.id } }))
  const surface = visibleBody()!.querySelector('[data-activity-session="' + neighborAgent.id + '"]')!.closest('.agent-surface')!
  await moteType(surface.querySelector<HTMLElement>('[aria-label="Message Agent"]')!, '明确回到现在的主对话')
