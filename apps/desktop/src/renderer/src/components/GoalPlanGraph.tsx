@@ -302,8 +302,8 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
 }
 
 /** A compact ring for the Goal row: done over live nodes, from the owner's derivation. */
-export function GoalPlanRing({ demand }: { demand: Pick<DemandProjection, 'plan' | 'planState' | 'delegations'> }) {
-  const progress = useMemo(() => goalPlanProjection(demand)?.progress, [demand.plan, demand.planState, demand.delegations])
+export function GoalPlanRing({ demand }: { demand: Pick<DemandProjection, 'plan' | 'planState'> }) {
+  const progress = demand.plan ? demand.planState : undefined
   if (!progress?.total) return null
   const circumference = 2 * Math.PI * 6, done = progress.done / progress.total
   return <span className="goal-plan-ring" data-goal-plan-ring={`${progress.done}/${progress.total}`} aria-label={`Plan ${progress.done} of ${progress.total} done`}>
