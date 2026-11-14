@@ -9,6 +9,8 @@ import{questionReplyKey}from'@agentmux/client-ui/conversation-question-reply'
 import{useAppStore,type AgentSteerQueueEntry}from'../src/renderer/src/store'
 import{createWorkbenchTab}from'../src/renderer/src/lib/workbench-tabs'
 import{composerConfig,composerSession}from'./helpers/composer-dom-fixture'
+import{questionRefusalEvent}from'./helpers/question-refusal-fixture'
+import * as questionIntents from '../src/renderer/src/lib/conversation-question-intent'
 import{createClientUiRoot}from'./helpers/client-ui-render'
 import{WorkspaceWorkbench}from'../src/renderer/src/components/WorkspaceWorkbench'
 import{AgentComposerTools}from'../src/renderer/src/components/AgentComposerTools'
@@ -35,7 +37,6 @@ it('actual Workspace Pane Composer editor and Mailbox stay live while only never
  const host=document.body.appendChild(document.createElement('div')),root=createClientUiRoot(host)
  const sessions=['a','b','c'].map(id=>composerSession(id)),b=sessions[1]!
  b.turnUsage={inputTokens:20,outputTokens:0,totalTokens:20,observedAt:1,context:{usedTokens:20,capacityTokens:100}}
- b.promptInputNotApplied={submissionId:'original-question-op',run:b.control.run}
  const input={source:{providerId:'codex',nativeSessionId:'original-native'},turnId:'original-turn',recordId:'original-question',operationId:'original-question-op',
   expectedRun:b.control.run,afterSubmissionId:null,answers:[{questionId:'q',answer:'Original frozen answer'}]}
  const key=questionReplyKey(b.id,input)
@@ -55,6 +56,7 @@ it('actual Workspace Pane Composer editor and Mailbox stay live while only never
  const click=(node:HTMLElement|null)=>{expect(node).not.toBeNull();return act(async()=>node!.click())}
  try{
   await act(async()=>root.render(<WorkspaceWorkbench workspaceId="workspace" visible/>))
+  await act(async()=>useAppStore.getState().applyEvent(questionRefusalEvent(b,'original-question-op')))
   const initialCosts={allTools:host.querySelectorAll('.composer-tools').length,agentTools:['a','b','c'].filter(id=>region(id).querySelector('.composer-tools')).length,
    launcherTools:region('launcher').querySelectorAll('.composer-tools').length,svg:host.querySelectorAll('svg').length,dom:host.querySelectorAll('*').length,
    agentBodies:host.querySelectorAll('.agent-surface').length,richEditors:host.querySelectorAll('[contenteditable="true"]').length,
@@ -116,7 +118,7 @@ it('actual Workspace Pane Composer editor and Mailbox stay live while only never
   expect(useAppStore.getState().agentComposerDrafts.b).toBe(editedDraft)
   expect(useAppStore.getState().agentSteerQueues.b?.[0]).toBe(queueEntry)
   expect(queueEntry).toMatchObject({text:'Original explicitly deferred queue 中',status:'deferred',awaitingExplicitSend:true})
-  expect(useAppStore.getState().sessions).toBe(sessions);expect(useAppStore.getState().sessions[1]).toBe(b)
+  expect(useAppStore.getState().sessions[0]).toBe(sessions[0]);expect(useAppStore.getState().sessions[1]?.control).toEqual(b.control)
   expect(region('b').querySelector('[data-native-port="b"]')?.getAttribute('data-run')).toBe(b.control.run.runId)
   expect(port.mounts.b).toBe(1);expect(send).not.toHaveBeenCalled()
   expect(port.retires).toEqual({})
@@ -195,4 +197,42 @@ it('the actual Tools runs hooks while initially inactive, shows on the first tru
   record({case:'actual-tools-default-hooks-first-true',inactiveHooksRetainedPhase:true,firstTrueSynchronous:true,
    visitedHiddenSameDOM:true,omittedActiveEager:true,nonemptyControlAction:true,noAutomaticSkillOrCapture:true})
  }finally{await act(async()=>root.unmount());host.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();vi.unstubAllGlobals()}
+})
+
+it('question owner settles once with two actual Workspace Regions and still settles after both unmount',async()=>{
+ const initial=useAppStore.getState()
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
+ vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){},addListener(){},removeListener(){}}))
+ const host=document.body.appendChild(document.createElement('div')),root=createClientUiRoot(host),session=composerSession('question-owner-session')
+ const input={source:{providerId:'codex',nativeSessionId:'original-native'},turnId:'original-turn',recordId:'original-question',operationId:'question-owner-operation',
+  expectedRun:session.control.run,afterSubmissionId:null,answers:[{questionId:'q',answer:'Original retained answer'}]}
+ const key=questionReplyKey(session.id,input),attempt={hostId:'local',phase:'unknown' as const,input,diagnostic:{code:'ORIGINAL_UNKNOWN',message:'Original uncertainty'}}
+ const tabs=Object.fromEntries(['first','second'].map(id=>[id,createWorkbenchTab(id,{kind:'agent',phase:'attached',regionId:'question-owner-'+id,workspaceId:'workspace',sessionId:session.id})]))
+ const queue:AgentSteerQueueEntry={operationId:'question-owner-deferred',runId:session.control.run.runId,text:'Original deferred input',status:'deferred',awaitingExplicitSend:true,enqueuedAt:1}
+ useAppStore.setState({config:composerConfig,loading:false,sessions:[session],tabs,layouts:{workspace:createWorkspaceLayout('group',['first','second'])},timelines:{},agentNames:{},
+  activeWorkspaceId:'workspace',mainSurface:'workbench',providerCatalog:[],agentComposerDrafts:{[session.id]:'Original unsent draft'},agentSteerQueues:{[session.id]:[queue]},
+  questionReplies:{[session.id]:{[key]:attempt}},viewModes:{[session.id]:'terminal'},pendingAgentLaunches:{},recoveryCandidates:[],runtimeEndpointWarnings:[]})
+ const matching=vi.spyOn(questionIntents,'rejectedQuestionReply'),send=vi.spyOn(useAppStore.getState(),'send')
+ let mounted=true
+ try{
+  await act(async()=>root.render(<WorkspaceWorkbench workspaceId="workspace" visible/>))
+  expect(host.querySelectorAll('.agent-surface')).toHaveLength(2)
+  expect(host.querySelectorAll('.composer-mailbox')).toHaveLength(2)
+  const editor=host.querySelector<HTMLElement & {editor:Editor}>('[contenteditable="true"]')!
+  await act(async()=>editor.editor.commands.setTextSelection({from:2,to:5}))
+  await act(async()=>useAppStore.getState().applyEvent(questionRefusalEvent(session,input.operationId)))
+  expect(useAppStore.getState().questionReplies[session.id]![key]?.phase).toBe('rejected')
+  expect(matching,'Two original Regions must not duplicate the original refusal coordinator').toHaveBeenCalledTimes(1)
+  expect(host.querySelector('[contenteditable="true"]')).toBe(editor)
+  expect({from:editor.editor.state.selection.from,to:editor.editor.state.selection.to}).toEqual({from:2,to:5})
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Original unsent draft')
+  expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]).toBe(queue)
+  await act(async()=>root.unmount());mounted=false
+  useAppStore.setState({questionReplies:{[session.id]:{[key]:attempt}}})
+  useAppStore.getState().applyEvent(questionRefusalEvent(session,input.operationId,3))
+  expect(useAppStore.getState().questionReplies[session.id]![key]?.phase,'Unmounted original Regions do not own background settlement').toBe('rejected')
+  expect(useAppStore.getState().sessions[0]?.control).toEqual(session.control)
+  expect(send).not.toHaveBeenCalled()
+  record({case:'question-owner-two-regions-and-unmounted',actualRegions:2,actualMailbox:true,singleCoordinator:true,unmountedSettlement:true,originalDraftQueueSelectionRun:true,noSend:true})
+ }finally{if(mounted)await act(async()=>root.unmount());host.remove();document.getElementById('agentmux-window-overlay-host')?.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();vi.unstubAllGlobals()}
 })
