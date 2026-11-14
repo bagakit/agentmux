@@ -376,6 +376,7 @@ export async function registerIpc(args: {
   appMemory?: import('./app-memory-evidence.js').AppMemoryEvidenceOwner
   performanceHeap?: RendererHeapSnapshotOwner
   clientIncidents?: ClientIncidentArchive
+  loadedAppVersion?: string
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
@@ -996,7 +997,7 @@ export async function registerIpc(args: {
   handleWithEvent('clientIncidents:report', (event, token: string, report: unknown) => {
     return incidentIpc?.report(event, token, report) ?? { accepted: false }
   })
-  registerLoadedIdentityIpc({ handleWithEvent, package: args.loadedPackage ?? null,
+  registerLoadedIdentityIpc({ handleWithEvent, ...(args.loadedAppVersion === undefined ? {} : { appVersion: args.loadedAppVersion }), package: args.loadedPackage ?? null,
     renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null })
   registerBrowserInputContextIpc({ handle: handleWithEvent, ...browserInputContextPorts })
 

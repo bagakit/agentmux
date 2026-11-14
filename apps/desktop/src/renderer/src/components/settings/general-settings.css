@@ -18,6 +18,15 @@
 .general-settings__data dt { display: flex; align-items: flex-start; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
 .general-settings__data dt > svg { flex: none; margin-top: 2px; color: var(--text-3); }
 .general-settings__data dd { display: grid; justify-items: start; gap: var(--sp-3); margin: 0; max-width: 68ch; color: var(--text-3); font-size: var(--fs-body); line-height: 1.65; }
+.general-settings__versions dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4) var(--sp-6); margin: 0; }
+.general-settings__versions dl > div { display: grid; grid-template-columns: minmax(102px, auto) minmax(0, 1fr); gap: var(--sp-4); align-items: baseline; padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.general-settings__versions dt { color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
+.general-settings__versions dd { min-width: 0; margin: 0; color: var(--text-2); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.general-settings__versions dd > small { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+.general-settings__versions code { color: var(--text); font-family: var(--font-mono); user-select: text; }
+.general-settings__versions .general-settings__version-digest { display: block; color: var(--text-2); font-size: var(--fs-meta); }
+.general-settings__versions .general-settings__version-refresh:not(:disabled) { color: var(--text-2); background: var(--surface-1); border-color: var(--line-soft); }
+.general-settings__versions .general-settings__version-refresh:hover:not(:disabled) { background: var(--surface-2); }
 .general-settings__diagnostics-title { display: block; margin-bottom: var(--sp-1); color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
 .general-settings .settings-diagnostics { margin: 0; padding: var(--sp-4) 0; border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
 .general-settings .settings-diagnostics > button { flex: none; }
@@ -25,6 +34,7 @@
 @container (max-width: 620px) {
   .general-settings__path-choice { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
   .general-settings__data dl { grid-template-columns: minmax(0, 1fr); }
+  .general-settings__versions dl { grid-template-columns: minmax(0, 1fr); }
   .general-settings__data dl > div { gap: var(--sp-2); }
   .general-settings .settings-diagnostics { flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
   .general-settings .settings-diagnostics > span { flex: 0 1 auto; }

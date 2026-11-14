@@ -24,12 +24,14 @@ export async function readLoadedPackageIdentity(path: string): Promise<DesktopPa
 /** The same loaded owners as app.inspect, without scanning the workbench or current disk package. */
 export function registerLoadedIdentityIpc(owner: {
   handleWithEvent(channel: string, handler: (event: IpcMainInvokeEvent) => DesktopLoadedIdentity): void
+  appVersion?: string
   package: DesktopPackageIdentity | null
   renderer(): DesktopLoadedRenderer | null
 }): void {
   owner.handleWithEvent('ui:readLoadedIdentity', event => {
     const p = owner.package, r = owner.renderer()
     return {
+      ...(owner.appVersion ? { appVersion: owner.appVersion } : {}),
       package: p ? { schema: p.schema, sourceCommit: p.sourceCommit, sourceTree: p.sourceTree, appVersion: p.appVersion, platform: p.platform, arch: p.arch } : null,
       renderer: r ? { kind: r.kind, id: r.id, identity: { shell: r.identity.shell, ctxmux: r.identity.ctxmux } } : null
     }

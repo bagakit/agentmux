@@ -16,7 +16,7 @@ export const generalSettingsModule = {
   id: 'general', archetype: 'preference',
   group: 'preferences',
   title: 'General',
-  description: 'Project paths, local data, and diagnostics.',
+  description: 'Project paths, local data, running versions, and diagnostics.',
   icon: ThemeObjectSettingsIcon,
   keywords: 'copy path clipboard home directory ~ tilde abbreviate absolute full shorten core runtime terminal tmux ssh show crash log session recovery',
   searchTargets: [
@@ -24,10 +24,11 @@ export const generalSettingsModule = {
     { id: 'local-data', title: 'Local data', keywords: 'configuration machine storage', kind: 'info' },
     { id: 'session-recovery', title: 'Session recovery', keywords: 'restore tabs layouts running agents', kind: 'info' },
     { id: 'system-ssh', title: 'System SSH', keywords: 'remote private keys', kind: 'info' },
+    { id: 'runtime-versions', title: 'App and kernel versions', keywords: 'about version build source commit Renderer Core protocol ctxmux 应用版本 内核版本 关于', kind: 'info' },
     { id: 'crash-log', title: 'Show crash log', keywords: 'crash log diagnostics local file', kind: 'action' },
   ],
   savedSummary: (config) => config.copyPathsAsAbsolute === true ? 'Absolute paths' : 'Home paths (~)',
-  Pane({ config, onNavigate }) {
-    return <GeneralSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveGeneralSettings} onOpenRecovery={() => onNavigate('continuity')} onOpenHosts={() => onNavigate('hosts')} />
+  Pane({ config, onNavigate, active }) {
+    return <GeneralSettingsPane active={active} copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveGeneralSettings} onOpenRecovery={() => onNavigate('continuity')} onOpenHosts={() => onNavigate('hosts')} />
   }
 } as const satisfies SettingsModule

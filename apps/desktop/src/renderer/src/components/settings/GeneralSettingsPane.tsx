@@ -7,11 +7,13 @@ import { crashLogRevealNotice } from '../../lib/crash-log-reveal'
 import type { CrashLogRevealResult } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
+import { SettingsRuntimeVersions } from './SettingsRuntimeVersions'
 import './general-settings.css'
 
 export type GeneralSettingsValues = { copyPathsAsAbsolute: boolean }
 
-export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecovery, onOpenHosts }: {
+export function GeneralSettingsPane({ active = false, copyPathsAsAbsolute, onSave, onOpenRecovery, onOpenHosts }: {
+  active?: boolean
   onOpenRecovery?: () => void
   onOpenHosts?: () => void
   copyPathsAsAbsolute: boolean | undefined
@@ -78,6 +80,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecover
           </div>
         </dl>
       </section>
+      <SettingsRuntimeVersions active={active} />
       <div className="settings-diagnostics" data-settings-field="crash-log">
         {/* 「不上传」这句要和按钮同框。用户第一次意识到崩溃证据存在，就是点这个按钮的时候——
             那一刻他会想「这些东西被发到哪去了」，而答案（哪也没发）必须当场在场，不能在别的页面。 */}

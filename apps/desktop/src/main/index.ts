@@ -301,7 +301,7 @@ function startPrimaryInstance(): void {
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
     disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, workbenchCloseOwner, storageRecoveryExports, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
-      performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
+      performanceScene, appMemory, performanceHeap, clientIncidents, loadedAppVersion: app.getVersion(), loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })
     reportStartupStage('after-ipc')
