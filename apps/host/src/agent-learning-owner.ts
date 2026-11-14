@@ -76,9 +76,13 @@ export class AgentLearningOwner implements AgentLearningPort {
       if (!worker || worker.state === 'prepared' || worker.state === 'not-applied') continue
       try {
         const original = await this.options.core().inspectAgentCreation(worker.agentSessionId)
-        const creation = original.kind === 'agent' ? original.creation : original.history?.creation
+        const creation = original.kind === 'retired-agent' ? original.history?.creation : original.creation
         if (!creation || original.agentSessionId !== worker.agentSessionId || creation.createOperationId !== worker.createOperationId)
           fail('LEARNING_CREATION_CONFLICT', 'The original Core creation belongs to another exact intent. No replacement Agent was used.')
+        if (original.kind !== 'agent' && original.kind !== 'retired-agent') {
+          worker.state = 'unknown'
+          fail('LEARNING_CREATION_UNCONFIRMED', 'The original creation has no confirmed Session or Run. Its exact operation is retained; inspect that creation without starting another Agent.')
+        }
         worker.state = original.kind === 'agent' ? 'created' : 'retired'
         worker.runId = original.run.runId
         worker.initialPrompt = creation.initialPrompt
@@ -145,7 +149,7 @@ export class AgentLearningOwner implements AgentLearningPort {
           return fail('LEARNING_OPERATION_CONFLICT', 'This original operation has another source or Executor. Inspect it without replacing its identity.')
         if (!value) {
           const original = await this.options.core().inspectAgentCreation(p.source.agentSessionId)
-          const workspacePath = original.kind === 'agent' ? original.workspacePath : original.history?.workspacePath
+          const workspacePath = original.kind === 'agent' ? original.workspacePath : original.kind === 'retired-agent' ? original.history?.workspacePath : undefined
           if (original.agentSessionId !== p.source.agentSessionId || original.hostId !== 'local' || !workspacePath)
             return fail('LEARNING_SOURCE_UNCONFIRMED', 'The exact original execution source is unconfirmed. Its Session and work are kept; refresh this source.')
           const executor = await this.options.executor(p.executorId), agentSessionId = mintObjectId(), createOperationId = mintObjectId()
