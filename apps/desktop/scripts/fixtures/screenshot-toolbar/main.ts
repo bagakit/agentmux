@@ -25,6 +25,7 @@ async function run() {
     const closed = editor.edit(image, false, async () => {})
     window = await until('production editor window', () => BrowserWindow.getAllWindows()[0])
     await until('production editor rendered', async () => { try { return await window.webContents.executeJavaScript("Boolean(document.querySelector('.image-annotation-toolbar') && document.querySelector('canvas')?.width)") } catch { return false } })
+    window.webContents.debugger.attach('1.3')
     for (const width of [420, 640, 740, 741]) {
       window.setContentSize(width, width === 640 ? 340 : 570)
       await window.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
@@ -38,6 +39,18 @@ async function run() {
       }
       if (width <= 740) assert.ok(state.buttons.some((button: any) => button.name === 'Markup tool'), 'the compact tool menu remains available')
       else assert.ok(state.buttons.some((button: any) => button.name === 'Erase'), 'the full tool row remains available when it fits')
+      if (width === 640) {
+        const trigger = state.buttons.find((button: any) => button.name === 'Markup tool')
+        const x = (trigger.left + trigger.right) / 2, y = (trigger.top + trigger.bottom) / 2
+        await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 })
+        await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 })
+        const menu = await until('actual tool menu opened', async () => await window.webContents.executeJavaScript(`(()=>{const m=document.querySelector('.image-annotation-tools-menu');if(!m)return null;const r=m.getBoundingClientRect();return {x:r.left+20,y:r.top+20}})()`))
+        await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: menu.x, y: menu.y, deltaX: 0, deltaY: 1200 })
+        await window.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        const last = await window.webContents.executeJavaScript(`(()=>{const b=document.querySelector('[role=menuitemradio][aria-label="Erase"]'),r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {top:r.top,bottom:r.bottom,height:innerHeight,hit:hit?.closest('[role=menuitemradio]')===b}})()`)
+        assert.ok(last.top >= 0 && last.bottom <= last.height && last.hit, 'the last tool remains within the viewport and hittable after scrolling')
+        await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+      }
       if (width === 640 || width === 420) {
         const file = (width === 640 ? 'short-' : 'narrow-') + theme + '.png'
         await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); receipt.screenshots.push(file)

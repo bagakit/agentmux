@@ -11,6 +11,9 @@ const { build } = createRequire(require.resolve('vite'))('esbuild')
 const source = 'apps/desktop/src/renderer/src/components/image-annotation/image-annotation.css'
 const original = await readFile(source, 'utf8'), from = '@container screenshot-editor (max-width: 740px)', to = '@container screenshot-editor (max-width: 580px)'
 assert.equal(original.split(from).length, 2, 'the medium-width production breakpoint must be unique')
+const menuFrom = 'max-height: min(70vh, 480px, var(--radix-dropdown-menu-content-available-height, 70vh)); overflow-y: auto;'
+assert.equal(original.split(menuFrom).length, 2, 'the tool menu viewport limit must be unique')
+const variants = [null, { id: 'narrow-breakpoint', from, to }, { id: 'unbounded-menu', from: menuFrom, to: 'max-height: none; overflow-y: visible;' }]
 const hash = value => createHash('sha256').update(value).digest('hex')
 await mkdir(resolve('.local/screenshot-toolbar'), { recursive: true })
 const out = await mkdtemp(resolve('.local/screenshot-toolbar/run-')), work = await mkdtemp(join(tmpdir(), 'agentmux-screenshot-toolbar-'))
@@ -28,16 +31,17 @@ try {
   builds.push(await build({ entryPoints: ['apps/desktop/src/preload/screenshot-editor.ts'], outfile: join(preload, 'screenshot-editor.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], metafile: true, logLevel: 'silent' }))
   const htmlFile = 'apps/desktop/src/renderer/screenshot-editor/index.html', html = await readFile(htmlFile, 'utf8')
   await writeFile(join(renderer, 'index.html'), html.replace('./entry.tsx', './entry.js').replace('</head>', '<link rel="stylesheet" href="./entry.css" /></head>'))
-  for (const label of ['baseline', 'narrow-breakpoint']) {
+  for (const mutation of variants) {
+    const label = mutation?.id ?? 'baseline'
     const scene = join(out, label); await mkdir(scene)
     const consumed = []
     const result = await build({ entryPoints: ['apps/desktop/src/renderer/screenshot-editor/entry.tsx'], outfile: join(renderer, 'entry.js'), bundle: true, platform: 'browser', format: 'esm', jsx: 'automatic', alias, conditions: ['browser'], metafile: true, logLevel: 'silent',
       plugins: [{ name: 'exact-toolbar-css', setup(builder) { builder.onLoad({ filter: /\/image-annotation\.css$/ }, async args => {
         assert.equal(args.path, resolve(source)); const value = await readFile(args.path, 'utf8'); assert.equal(value, original)
-        const css = label === 'baseline' ? value : value.replace(from, to)
+        const css = mutation ? value.replace(mutation.from, mutation.to) : value
         consumed.push({ original: hash(value), consumed: hash(css) }); return { contents: css, loader: 'css', resolveDir: dirname(args.path) }
       }) } }] })
-    assert.equal(consumed.length, 1); assert.equal(consumed[0].consumed, hash(label === 'baseline' ? original : original.replace(from, to)))
+    assert.equal(consumed.length, 1); assert.equal(consumed[0].consumed, hash(mutation ? original.replace(mutation.from, mutation.to) : original))
     builds.push(result)
     const env = { ...process.env, AGENTMUX_SCREENSHOT_TOOLBAR_OUT: scene, ELECTRON_RENDERER_URL: '' }; delete env.ELECTRON_RUN_AS_NODE
     const resultProcess = await new Promise((done, reject) => {
@@ -57,7 +61,7 @@ try {
     } else {
       assert.notEqual(resultProcess.code, 0, 'the old breakpoint must fail actual toolbar geometry')
       assert.equal(native.failure?.name, 'AssertionError'); assert.ok(native.cases.some(row => row.width === 640))
-      assert.match(native.failure.message, /toolbar controls remain independently hittable|toolbar controls never overlap|compact tool menu remains available/)
+      assert.match(native.failure.message, mutation.id === 'unbounded-menu' ? /the last tool remains within the viewport and hittable after scrolling/ : /toolbar controls remain independently hittable|toolbar controls never overlap|compact tool menu remains available/)
     }
     process.stdout.write(label + ': ' + (label === 'baseline' ? 'GREEN' : 'AssertionRED') + '\n')
   }
