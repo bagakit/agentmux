@@ -106,7 +106,7 @@ captured 历史由 Session Store 持有，当前或近期窗口只是查询，�
 | Pi | [`pi.ts`](../../packages/core/src/providers/pi.ts)／[`pi-native-history.ts`](../../packages/core/src/providers/pi-native-history.ts)：`session_file` 的分支 JSONL；身份来自原生 session header 与受信 Hook binding | 同一份 JSONL | session file |
 | Antigravity | [`antigravity-native-session.ts`](../../packages/providers/src/antigravity/native-session.ts)：主 CLI 持有的 `presence/<UUID>.lock`；[`antigravity-native-history.ts`](../../packages/providers/src/antigravity/native-history.ts) 读 compact `transcript.jsonl` 与同目录 `transcript_full.jsonl` | 两份 transcript，一起清理 | Conversation UUID |
 | Cursor | [`cursor-native-history.ts`](../../packages/core/src/providers/cursor-native-history.ts)：当前 Run 打开的 `store.db` 与原生 metadata／conversation protobuf | DB／WAL／journal 原生提交的实际 revision（`observeNativeSqliteHistory`） | Conversation UUID |
-| TraeX | [`traex.ts`](../../packages/core/src/providers/traex.ts) 经 [`app-server-native-session.ts`](../../packages/core/src/providers/app-server-native-session.ts)／[`app-server-native-history.ts`](../../packages/core/src/providers/app-server-native-history.ts)：当前 Run 打开的 `rollout-*.jsonl` 与 `session_meta`；页读取由原生 app-server 解释 indexed history | 同一份 rollout（`observeNativeJsonlHistory`） | Session ID |
+| TraeX | [`traex.ts`](../../packages/providers/src/traex/provider.ts) 经 [`app-server-native-session.ts`](../../packages/providers/src/app-server/native-session.ts)／[`app-server-native-history.ts`](../../packages/providers/src/app-server/native-history.ts)：当前 Run 打开的 `rollout-*.jsonl` 与 `session_meta`；页读取由原生 app-server 解释 indexed history | 同一份 rollout（`observeNativeJsonlHistory`） | Session ID |
 
 Hook、Permission、Usage 与问题回答各自单独声明；history reader 可用不代表它们已接入。
 
@@ -122,7 +122,7 @@ Codex 保存的 rollout 由首条 `session_meta` 中的 `history_mode` 声明格
 
 - `history_mode` 为 `paginated` 时，canonical 用户发言是同一 thread、带 turn 的 `event_msg`／`item_completed` 中的 `UserMessage` TurnItem；`response_item` 中 role 为 user 的消息只作为「Model context」过程记录保留原文，内容资格为 private。typed MCP 工具结果中的文件 part 也只在这种格式下提取。
 - 其他格式保留各自原有的合同：`response_item` 的用户消息仍是用户发言。
-- 有界的 app-server indexed history（[app-server-native-history.ts](../../packages/core/src/providers/app-server-native-history.ts)）要求 `thread/read` 返回的 `historyMode` 为 `paginated`，否则页读取报告 `AGENT_SESSION_HISTORY_UNSUPPORTED`，精确记录读取报告记录不受支持；保存的 JSONL 读取不依赖这个 helper。
+- 有界的 app-server indexed history（[app-server-native-history.ts](../../packages/providers/src/app-server/native-history.ts)）要求 `thread/read` 返回的 `historyMode` 为 `paginated`，否则页读取报告 `AGENT_SESSION_HISTORY_UNSUPPORTED`，精确记录读取报告记录不受支持；保存的 JSONL 读取不依赖这个 helper。
 
 原生协作回报由 Provider 的历史适配解释，沿 `collaboration.kind = message` 保留 source、发送者、接收者、记录与回合；[`session-history`](../../packages/core/src/session-history.ts) 核对其原生命名空间，[Core 语义流](../../packages/core/src/conversation-stream.ts) 把它当作真实的消息边界，不借用父 Session 的作者。共同的 `ConversationView` 显示原生参与者与正文，不以 actor 字符串查询 AgentMux 身份或补头像。没有消息关联的 Hook 快照仍是独立的观察；[`conversation-reply-preview`](../../packages/client-ui/src/lib/conversation-reply-preview.ts) 只生成有界的阅读摘要，不持有关联或正文事实。
 

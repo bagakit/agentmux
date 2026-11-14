@@ -64,6 +64,6 @@ Provider 的 [`observeCodexSessionStatus`](../../packages/core/src/providers/cod
 
 ## 当前源码入口与交付边界
 
-[Codex Provider](../../packages/core/src/providers/codex.ts) 的 `createCodexProvider` 持有原生协议接缝；[原生历史 reader](../../packages/core/src/providers/app-server-native-history.ts) 的 `readAppServerSessionHistoryPage` 持有对话记录投影，[原生只读 helper](../../packages/core/src/providers/app-server-native-read.ts) 的 `withAppServerNativeRead` 不执行模型请求。通用 [AgentProvider](../../packages/core/src/agent-provider.ts) 与 [Core Client](../../packages/core/src/client.ts) 的 `statusAgent` 是公共能力和当前状态出口，`probeCapabilities` 的 executable 检查不能证明模型服务有容量。
+[Codex Provider](../../packages/core/src/providers/codex.ts) 的 `createCodexProvider` 持有原生协议接缝；[原生历史 reader](../../packages/providers/src/app-server/native-history.ts) 的 `readAppServerSessionHistoryPage` 持有对话记录投影，[原生只读 helper](../../packages/providers/src/app-server/native-read.ts) 的 `withAppServerNativeRead` 不执行模型请求。通用 [AgentProvider](../../packages/core/src/agent-provider.ts) 与 [Core Client](../../packages/core/src/client.ts) 的 `statusAgent` 是公共能力和当前状态出口，`probeCapabilities` 的 executable 检查不能证明模型服务有容量。
 
 上面的适配表描述当前源码机制，具体构建与安装的支持范围仍需核对实际版本。核对时记录实际读取的原生载体、可暴露字段、未知边界、对应公共消费及验证来源；源码、构建与当前安装实例分别核对。不存在原生错误码时仍可准确显示失败和带来源的分类，不用 HTTP 状态猜补完整性，也不为预先检查容量另发模型请求。

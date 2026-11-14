@@ -86,7 +86,7 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 | [Pi](../../../packages/core/src/providers/pi.ts) | 进程内生成扩展，位于其 agent 配置根的 `extensions/agentmux.js`；工厂确认受管 Pi 后快照原 Run ingress。 | 无权限能力声明。 | 复用宿主进程，不额外启动 Node；非受管或其他 Provider 的宿主不读取凭证和注册投递处理器，后续环境变化不改投原绑定。`agent_settled` 才消费最终结果，`message_end` 不代签收口。当前工具关联与完整结果仍有未接线范围。 |
 | [OpenCode](../../../packages/core/src/providers/opencode.ts) | 进程内生成插件，位于原生配置根的 `plugin/agentmux.js`；事件总线与权限观察。 | 当前仅观察。 | 共享插件不保存凭证；普通 TUI 的本地 Server Worker 沿原生继承的 Run 环境快照原绑定。同一 Server 的其他 native Session 仍须按已确认主体隔离，目录不提供会话身份。`attach`／`run --attach` 不把新 Run 的环境交给既有 Server，保留原终端并明确 Hook 未绑定。`session.idle` 不代签成功。 |
 | [Kimi](../../../packages/providers/src/kimi/provider.ts) | 已有原生 Hook 解析，策略为 `unmanaged`；不自动写配置。 | 当前仅观察。 | 原生 TOML loader／merge 尚未完整确认；保持不受管，不猜配置。正常主轮完成没有对应 Hook；原生记录读取不自动补成已确认的完成观察，不从可 veto 的 Stop 补造结束。 |
-| [TraeX](../../../packages/core/src/providers/traex.ts) | 不使用 Hook；启动／恢复沿现有原生入口。 | 无权限能力声明。 | 保持 `none`，不为能力表对齐而安装 Hook；当前 timeline 声明仍为 unavailable。 |
+| [TraeX](../../../packages/providers/src/traex/provider.ts) | 不使用 Hook；启动／恢复沿现有原生入口。 | 无权限能力声明。 | 保持 `none`，不为能力表对齐而安装 Hook；当前 timeline 声明仍为 unavailable。 |
 
 当前命令型 Provider 经稳定入口使用 AgentMux 状态目录内按内容保留的完整运行器，长期声明不含 App／worktree 安装路径。Pi、OpenCode 复用原生宿主进程并保持工厂确认的原 Run 绑定。各家仍保留不同的配置根、事件容器、argv、被动响应与信任合同；共享入口不代签原生加载成功。[安装器](../../../packages/core/src/managed-hook-installer.ts)只处理有原回执归属的声明，不能替它认领其他副本的旧配置。既有健康 Run 的环境不会被新安装追改；它们在用的旧回调继续保留，清理另按准确归属和终局事实执行。
 
