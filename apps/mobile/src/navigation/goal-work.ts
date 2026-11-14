@@ -67,7 +67,7 @@ export async function sendGoalOperation(client: AgentMuxHostedClient, owner: Dev
     if (!admitsGoalWorkTarget(operation, goalWorkTarget(client, owner, operation.sessionId, operation.goalId))) throw unavailable('确认到达时 Mac 已改变。')
     assertGoalAssociation(result.goal, operation.goalId, operation.sessionId)
     const loop = result.continuation
-    if (result.receipt.goalId !== operation.goalId || result.receipt.sessionId !== operation.sessionId || !loop
+    if (result.receipt.goalId !== operation.goalId || !('sessionId' in result.receipt) || result.receipt.sessionId !== operation.sessionId || !loop
       || loop.creationOperationId !== operation.operationId || loop.intervalMs !== operation.intervalMs
       || loop.initialDelivery?.operationId !== operation.operationId || loop.taskSource?.kind !== 'goal'
       || loop.taskSource.alignmentRevision !== operation.alignmentRevision) throw unavailable('开始还没确认。')
