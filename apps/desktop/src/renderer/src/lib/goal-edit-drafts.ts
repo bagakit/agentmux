@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { useAppStore } from '../store'
+import { useAppStore, setAuthoredWorkbench } from '../store'
 
 export type GoalEditField = 'title' | 'description' | 'tags'
 export type GoalEditDraft = { value: string; revision: string; issue?: string }
@@ -8,7 +8,7 @@ const fields: readonly GoalEditField[] = ['title', 'description', 'tags']
 
 /** Unsent text belongs to the existing Desktop user document, separately from owner facts. */
 export function editGoalDraft(goalId: string, field: GoalEditField, value: string): void {
-  useAppStore.setState(state => {
+  setAuthoredWorkbench(state => {
     const original = state.goalEditDrafts[goalId] ?? {}
     if (original[field]?.value === value) return state
     return { goalEditDrafts: { ...state.goalEditDrafts, [goalId]: { ...original, [field]: { value, revision: mintObjectId() } } } }

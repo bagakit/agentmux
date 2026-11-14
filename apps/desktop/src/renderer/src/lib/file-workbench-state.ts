@@ -386,7 +386,7 @@ export function reduceDocumentContent(
 export function reduceFileDocumentContent(state: FileWorkbenchState, workspaceId: string, path: string, content: string): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   const current = state.documents[key]
-  if (!current) return state
+  if (!current || current.content === content) return state
   const noteEditing = path.endsWith('.note.md') && !state.dirtyDocuments[key]
     ? { ...current.noteEditing, baseline: { content: current.content, revision: current.revision } } : current.noteEditing
   return {

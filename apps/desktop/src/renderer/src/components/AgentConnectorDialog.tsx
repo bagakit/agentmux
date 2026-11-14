@@ -10,7 +10,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { sameConnectionApplication, channelMetadataSubjectKey, parseConnectionParams, type ConnectionActor, type ConnectionGrant, type ConnectionMemberAccess, type ConnectionRecord, type RoomBinding, type RoomBindingInspection, type RoomBindingOperation, type RoomBindingTarget, type RoomLinkOperation, type RoomProvisioningOperation } from '@agentmux/core/connections'
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
-import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore } from '../store'
+import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore, setAuthoredWorkbench } from '../store'
 import { connectorRoomDraftKey, invalidateConnectorTarget, sameConnectorTarget, type ConnectorRoomIntent as StoredConnectorIntent } from '../lib/connector-room-intent'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { SettingsNavigation } from './SettingsNavigation'
@@ -215,7 +215,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   useEffect(() => {
     if (!loaded) return
     const draft = { connectionId, bindingId: binding?.bindingId ?? null, bindingRevision: binding?.revision ?? null, mode, name, group, members, memberType, scope, actorId, actorType, memberDrafts }
-    useAppStore.setState(state => ({ connectorRoomDrafts: { ...state.connectorRoomDrafts, [draftKey]: draft } }))
+    setAuthoredWorkbench(state => ({ connectorRoomDrafts: { ...state.connectorRoomDrafts, [draftKey]: draft } }))
   }, [loaded, connectionId, binding?.bindingId, binding?.revision, mode, name, group, members, memberType, scope, actorId, actorType, memberDrafts, draftKey])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
   const creatorInvitation = useConnectorCreatorInvitation(connection, !!connection, hostingTarget)

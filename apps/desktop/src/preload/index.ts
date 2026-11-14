@@ -16,6 +16,7 @@ import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
+let workbenchWriteRevision = 0
 import { THEME_BOOTSTRAP_CHANNEL, type ThemeBootstrap } from '../shared/theme-bootstrap'
 import { projectInitialTheme } from './theme-bootstrap'
 import { NATIVE_OVERLAY_FOCUS_CHANNEL, sameNativeOverlayDocument } from '../shared/native-overlay'
@@ -509,7 +510,13 @@ const api: AgentMuxPreloadApi = {
     writeFileViewReading: record => ipcRenderer.invoke('ui:writeFileViewReading', record).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingReceipt | null>),
     readWorkbenchState: () => ipcRenderer.invoke('ui:readWorkbenchState'),
     importWorkbenchState: value => ipcRenderer.invoke('ui:importWorkbenchState', value),
-    writeWorkbenchState: value => ipcRenderer.invoke('ui:writeWorkbenchState', value),
+    writeWorkbenchState: async value => {
+      const writeRevision = ++workbenchWriteRevision
+      const receipt = await ipcRenderer.invoke('ui:writeWorkbenchState', { value, writeRevision }) as import('../shared/workbench-user-state').WorkbenchUserStateWriteReceipt
+      if (!receipt || receipt.writeRevision !== writeRevision) throw new Error('The original Desktop save acknowledgement answered another input. Current input is retained.')
+      const { writeRevision: _admission, ...confirmed } = receipt
+      return confirmed
+    },
     requestStorageFlush: options => options ? ipcRenderer.invoke('ui:requestStorageFlush', options) : ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     recordStartupFailure: input => ipcRenderer.invoke('ui:recordStartupFailure', input),

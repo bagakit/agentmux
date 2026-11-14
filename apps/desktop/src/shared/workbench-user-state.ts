@@ -13,6 +13,10 @@ export type WorkbenchUserStateReceipt = {
   confirmedAt: number
 }
 
+/** Private Desktop IPC admission, scoped by Main to the original native document. */
+export type WorkbenchUserStateWrite = { value: string; writeRevision: number }
+export type WorkbenchUserStateWriteReceipt = WorkbenchUserStateReceipt & { writeRevision: number }
+
 export type WorkbenchUserStateObservation = {
   path: string
   availability: 'present' | 'missing' | 'unconfirmed'

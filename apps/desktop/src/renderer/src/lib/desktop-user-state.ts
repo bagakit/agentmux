@@ -4,7 +4,9 @@ import { DESKTOP_FRAGMENT_KEYS, type DesktopFragmentName, type DesktopFragmentVa
 
 const preview = __AGENTMUX_WEB_PREVIEW__
 export const desktopUserDocument = createWorkbenchUserDocument(api.ui, () => window.localStorage, error => {
-  window.dispatchEvent(new CustomEvent('agentmux-workbench-save-error', { detail: error }))
+  window.dispatchEvent(new CustomEvent('agentmux-user-document-save-error', { detail: error }))
+}, error => {
+  window.dispatchEvent(new CustomEvent('agentmux-user-document-save-recovered', { detail: error }))
 })
 const browserValue = <N extends DesktopFragmentName>(name: N): DesktopFragmentValues[N] => {
   if (typeof window === 'undefined') return (name === 'moteAvatarSaveDrafts' ? {} : null) as DesktopFragmentValues[N]

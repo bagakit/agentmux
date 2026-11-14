@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { HostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
-import { useAppStore } from '../../store'
+import { useAppStore, setAuthoredWorkbench } from '../../store'
 import { tailcatDraftRecord, tailcatConnectionDraft, tailcatDraftMatchesSaved, isTailcatDraftHost, hostConnectionSelection, type TailcatDraftScope } from '../../lib/tailcat-connection-draft'
 import { useResourceDrafts } from './use-resource-drafts'
 
@@ -15,7 +15,7 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
     const all: Record<string, unknown> = tailcatDraftRecord(original) ?? { retainedUnparsed: [original] }
     const existing = all.hostSelection, record = tailcatDraftRecord(existing)
     const next = { ...(record ?? (existing === undefined ? {} : { retained: [existing] })), hostId }
-    if (!configValuesEqual(existing, next)) useAppStore.setState({ tailcatConnectionDrafts: { ...all, hostSelection: next } })
+    if (!configValuesEqual(existing, next)) setAuthoredWorkbench({ tailcatConnectionDrafts: { ...all, hostSelection: next } })
   }, [scope])
   const retainsHost = (host: HostConfig | undefined) => isTailcatDraftHost(host) || scope === 'hosts' && host?.kind === 'ssh'
   const [restored] = useState(() => {
@@ -72,7 +72,7 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
         next[id] = { value, ...(expected ? { expected } : {}), ...(allowedText[id] === undefined ? {} : { allowedText: allowedText[id] }), ...(rows.length ? { retained: rows } : {}) }
       }
     }
-    if (!readable || !scopeRecord || !configValuesEqual(previous, next)) useAppStore.setState({ tailcatConnectionDrafts: { ...all, [scope]: next } })
+    if (!readable || !scopeRecord || !configValuesEqual(previous, next)) (authored ? setAuthoredWorkbench : useAppStore.setState)({ tailcatConnectionDrafts: { ...all, [scope]: next } })
   }, [resource.value, resource.expected, allowedText, raw, scope, restored])
   const retained = <>{issue ? <div role="status" className="host-check-detail"><p>{issue}</p>
     {entries ? retainedEntries.map(({id,index,entry:original}) => {
@@ -88,7 +88,7 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
           const next={...current},holder=tailcatDraftRecord(current[id]),rows=Array.isArray(holder?.retained)?holder.retained:[]
           if(index<rows.length){const remaining=rows.filter((_,i)=>i!==index),active=tailcatConnectionDraft(current[id]);next[id]=active?{...active,retained:remaining}:{retained:remaining};if(!active&&!remaining.length)delete next[id]}
           else delete next[id]
-          useAppStore.setState({tailcatConnectionDrafts:{...all,[scope]:next}})
+          setAuthoredWorkbench({tailcatConnectionDrafts:{...all,[scope]:next}})
         }}>Discard this retained edit</button></details>
     }) : null}</div> : null}</>
   return { ...resource, retained, selectedHostId, selectHost, allowedText, setAllowedText: (id: string, value: string) => setAllowedText(current => ({ ...current, [id]: value })) }

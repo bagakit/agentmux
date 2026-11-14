@@ -4,7 +4,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { DesktopHostRouteTarget } from '../../../../shared/host-routes'
 import { api } from '../../lib/api'
 import { acknowledgeHostRouteSave, hostRouteDraft, hostRouteSaveRefusal, putHostRouteDraft, readHostRouteDraft, type HostRouteDraft } from '../../lib/host-route-draft'
-import { checkpointHostRouteDrafts, useAppStore } from '../../store'
+import { checkpointHostRouteDrafts, useAppStore, setAuthoredWorkbench } from '../../store'
 
 /** One policy owner and its private edit. There is no automatic write or retry. */
 export function useHostRoutePolicy(target: DesktopHostRouteTarget & { expectedRuntimeId: string }, active: boolean) {
@@ -17,7 +17,7 @@ export function useHostRoutePolicy(target: DesktopHostRouteTarget & { expectedRu
   function change(update: (current: HostRouteDraft) => HostRouteDraft) {
     const current = readHostRouteDraft(useAppStore.getState().hostRouteDrafts, target.expectedRuntimeId) ?? (observed ? hostRouteDraft(observed) : undefined)
     if (!current) throw Error('Read this original route policy before editing it.')
-    useAppStore.setState(state => ({ hostRouteDrafts: putHostRouteDraft(state.hostRouteDrafts, target.expectedRuntimeId, update(current)) }))
+    setAuthoredWorkbench(state => ({ hostRouteDrafts: putHostRouteDraft(state.hostRouteDrafts, target.expectedRuntimeId, update(current)) }))
   }
   async function inspect() {
     reader.current?.abort(); const controller = new AbortController(); reader.current = controller

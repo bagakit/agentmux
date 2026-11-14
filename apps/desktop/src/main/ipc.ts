@@ -1641,7 +1641,8 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('ui:readWorkbenchState', () => workbenchUserState.read())
   handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))
-  handleWithEvent('ui:writeWorkbenchState', (_event, value: string) => workbenchUserState.write(value))
+  handleWithEvent('ui:writeWorkbenchState', (event, request: import('../shared/workbench-user-state').WorkbenchUserStateWrite) =>
+    workbenchUserState.writeFromRenderer(event.senderFrame!, request, () => isAppDocumentSender(event, contents, args.appDocumentSources())))
   handleWithEvent('ui:requestStorageFlush', async (_event, options?: { includeFileViewReading?: true }) => {
     if (options?.includeFileViewReading === true) await workbenchUserState.flushFileViewReadings()
     // All Renderer batches await the real writer before this checkpoint. Reads

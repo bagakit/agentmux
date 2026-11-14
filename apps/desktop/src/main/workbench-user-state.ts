@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { durableWriteFile, DurableWriteError } from '@agentmux/core'
 
 import type { WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
+import type { WorkbenchUserStateWrite, WorkbenchUserStateWriteReceipt } from '../shared/workbench-user-state.js'
 export type { WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
 import { captureFileViewReadingOwner, encodeFileViewReading, fileViewReadingOwnerKey, isFileViewReadingPosition, type FileViewReadingOwner, type FileViewReadingRecord, type FileViewReadingReceipt } from '../shared/workbench-user-state.js'
 
@@ -45,6 +46,13 @@ async function syncDirectory(path: string): Promise<void> {
  */
 export class WorkbenchUserStateStore {
   private tail: Promise<void> = Promise.resolve()
+  private rendererWriter: object | null = null
+  private rendererRevision = 0
+  private rendererValue: string | null = null
+  private rendererFlight: Promise<WorkbenchUserStateWriteReceipt> | null = null
+  private rendererDrain: Promise<void> | null = null
+  private rendererPending: { writer: object; request: WorkbenchUserStateWrite; current(): boolean;
+    resolve(receipt: WorkbenchUserStateWriteReceipt): void; reject(error: unknown): void } | null = null
   private readonly avatarRequestTails = new Map<string, Promise<void>>()
   private readonly readingTails = new Map<string, Promise<void>>()
   private readonly readingReady = new Set<string>()
@@ -299,6 +307,54 @@ export class WorkbenchUserStateStore {
       try { await this.readCurrent() }
       catch (error) { await this.failed('read', error); throw error }
       return this.writeCurrent(value)
+    })
+  }
+
+  /** Admit before joining IO. A delayed old IPC cannot overwrite a newer admitted document.
+   * One physical writer and one latest pending image remain bounded even when IO is stuck. */
+  writeFromRenderer(writer: object, request: WorkbenchUserStateWrite, current: () => boolean): Promise<WorkbenchUserStateWriteReceipt> {
+    const superseded = () => Object.assign(new Error('A newer original Desktop input replaced this save request. Current input is retained.'),
+      { code: 'WORKBENCH_USER_STATE_SUPERSEDED' })
+    if (!current() || !request || !Number.isSafeInteger(request.writeRevision) || request.writeRevision < 1) return Promise.reject(superseded())
+    try { validate(request.value) } catch (error) { return Promise.reject(error) }
+    if (this.rendererWriter !== writer) {
+      this.rendererWriter = writer; this.rendererRevision = 0; this.rendererValue = null; this.rendererFlight = null
+    }
+    if (request.writeRevision < this.rendererRevision) return Promise.reject(superseded())
+    if (request.writeRevision === this.rendererRevision) {
+      if (request.value !== this.rendererValue) return Promise.reject(superseded())
+      return this.rendererFlight!
+    }
+    const captured = { value: request.value, writeRevision: request.writeRevision }
+    this.rendererRevision = captured.writeRevision; this.rendererValue = captured.value
+    this.rendererPending?.reject(superseded())
+    const flight = new Promise<WorkbenchUserStateWriteReceipt>((resolve, reject) => {
+      this.rendererPending = { writer, request: captured, current, resolve, reject }
+    })
+    // The IPC consumer observes its own rejection; retaining custody must not create an unhandled promise.
+    void flight.catch(() => {})
+    this.rendererFlight = flight
+    this.drainRendererWrites()
+    return flight
+  }
+
+  private drainRendererWrites(): void {
+    if (this.rendererDrain) return
+    this.rendererDrain = this.queue(async () => {
+      while (this.rendererPending) {
+        const input = this.rendererPending; this.rendererPending = null
+        try {
+          if (input.writer !== this.rendererWriter || !input.current()) throw new Error('The original Desktop writer changed. Its newer input is retained.')
+          try { await this.readCurrent() }
+          catch (error) { this.failed('read', error); throw error }
+          // Never cancel an admitted filesystem effect or let another rename pass it.
+          const receipt = await this.writeCurrent(input.request.value)
+          input.resolve({ ...receipt, writeRevision: input.request.writeRevision })
+        } catch (error) { input.reject(error) }
+      }
+    }).finally(() => {
+      this.rendererDrain = null
+      if (this.rendererPending) this.drainRendererWrites()
     })
   }
 }

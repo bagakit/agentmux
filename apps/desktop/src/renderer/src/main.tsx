@@ -4,7 +4,7 @@ import { App } from './App'
 import { DesktopClientUiProvider } from './components/DesktopClientUiProvider'
 import { installUnobservedFailureReporter } from './lib/unobserved-failure'
 import { installFileDropGuard } from './lib/file-drop-guard'
-import { prepareRendererUpdate, useAppStore } from './store'
+import { prepareRendererUpdate, reportUserDocumentSaveFailure, settleUserDocumentSaveFailure, useAppStore } from './store'
 import { agentBookmarks } from './lib/agent-bookmarks'
 import { installScreenshotAttachmentReceiver } from './lib/screenshot-attachment'
 import { api } from './lib/api'
@@ -42,3 +42,5 @@ Object.assign(window, { agentmuxPrepareRendererUpdate: async (intent: 'reload' |
 
 window.addEventListener('agentmux-renderer-update-error', (event) => useAppStore.getState().reportError((event as CustomEvent).detail))
 window.addEventListener('agentmux-workbench-save-error', (event) => useAppStore.getState().reportWorkbenchSaveFailure((event as CustomEvent).detail))
+window.addEventListener('agentmux-user-document-save-error', (event) => reportUserDocumentSaveFailure((event as CustomEvent).detail))
+window.addEventListener('agentmux-user-document-save-recovered', (event) => settleUserDocumentSaveFailure((event as CustomEvent).detail))

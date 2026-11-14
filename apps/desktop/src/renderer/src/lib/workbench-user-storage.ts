@@ -16,7 +16,8 @@ const fragmentKey = (name: DesktopFragmentName) => 'desktop-fragment:' + name
 const names = Object.keys(DESKTOP_FRAGMENT_KEYS) as DesktopFragmentName[]
 
 /** One original Renderer owns this cache and writer, including borrowed native windows. */
-export function createWorkbenchUserDocument(port: UserStatePort, original: () => Storage, onError?: (error: unknown) => void) {
+export function createWorkbenchUserDocument(port: UserStatePort, original: () => Storage, onError?: (error: unknown) => void,
+  onRecovered?: (error: unknown) => void) {
   const root = createWorkbenchUserStorage(port, original)
   let document: Document | undefined, hydration: Promise<void> | undefined
   const ready = new Set<DesktopFragmentName>(), loading = new Map<DesktopFragmentName, Promise<unknown>>()
@@ -74,7 +75,7 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
       const current = requireDocument()
       await root.setItem(WORKBENCH_USER_STATE_KEY, JSON.stringify({ ...current, state: {}, version: 1 }))
     }
-  }, 400, onError)
+  }, 400, onError, onRecovered)
   const checkpoint = async (name: DesktopFragmentName) => {
     const value = read(name)
     await batch.checkpoint(fragmentKey(name), { state: value, version: 1 })
@@ -164,7 +165,9 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
           // Clear is an admitted input. A later root edit stays in the cache
           // while the old write and this clear obtain their own ordered ACKs.
           document = { ...requireDocument(), state: {}, version: 1 }
-          return batch.storage.removeItem(name)
+          // Native clear is an explicit empty document in the same revisioned
+          // writer, not a second delete effect behind an unresponsive old ACK.
+          return batch.checkpoint(name, { state: {}, version: 1 })
         }
       },
       async checkpoint(name: string, value: { state: unknown; version?: number }) {

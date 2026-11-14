@@ -2338,8 +2338,8 @@ function updateNoteFileInput(surface: { workspaceId: string; path: string }, con
   const state = useAppStore.getState(), key = documentKey(surface.workspaceId, surface.path), document = state.documents[key]
   if (!document || content === document.content) return
   const pending = document.noteEditing?.input, workspace = state.config?.workspaces.find(item => item.id === surface.workspaceId)
-  if (!pending && editorBeforeContent === document.content) { useAppStore.setState(current => reduceFileDocumentContent(current, surface.workspaceId, surface.path, content)); return }
-  if (!workspace) { useAppStore.setState(current => reduceFileDocumentContent(current, surface.workspaceId, surface.path, content)); return }
+  if (!pending && editorBeforeContent === document.content) { setAuthoredWorkbench(current => reduceFileDocumentContent(current, surface.workspaceId, surface.path, content)); return }
+  if (!workspace) { setAuthoredWorkbench(current => reduceFileDocumentContent(current, surface.workspaceId, surface.path, content)); return }
   let input: NoteFileInput
   if (!pending) {
     input = { baseContent: editorBeforeContent, observedContent: document.content, proposedContent: content, phase: 'mapping',
@@ -2357,7 +2357,7 @@ function updateNoteFileInput(surface: { workspaceId: string; path: string }, con
       input = { ...pending, phase: 'mapping', queued: [{ baseContent: editorBeforeContent, proposedContent: content }] }
     }
   }
-  useAppStore.setState(current => {
+  setAuthoredWorkbench(current => {
     const next = reduceFileDocumentContent(current, surface.workspaceId, surface.path, content)
     return { ...next, documents: { ...next.documents, [key]: { ...next.documents[key]!, noteEditing: { ...next.documents[key]!.noteEditing, input } } } }
   })
@@ -5060,6 +5060,16 @@ async function handoffSpaceIcons(config: AppConfig): Promise<{ config: AppConfig
 }
 let workbenchSaveRequest = 0
 let workbenchSaveFailureRevision = 0
+let userDocumentWarning: { error: unknown; revision: number } | null = null
+export function reportUserDocumentSaveFailure(error: unknown): void {
+  useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage')
+  userDocumentWarning = { error, revision: workbenchSaveFailureRevision }
+}
+export function settleUserDocumentSaveFailure(error: unknown): void {
+  if (!userDocumentWarning || userDocumentWarning.error !== error || userDocumentWarning.revision !== workbenchSaveFailureRevision) return
+  if (useAppStore.getState().workbenchSaveWarningOwner === 'local-storage') useAppStore.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
+  userDocumentWarning = null
+}
 let spatialSaveRequest = 0
 let localSaveRequest = 0
 async function requestWorkbenchStorageFlush(includeSpatial = true, includeFileViewReading = false): Promise<void> {
@@ -5068,11 +5078,25 @@ async function requestWorkbenchStorageFlush(includeSpatial = true, includeFileVi
   const request = includeSpatial ? ++spatialSaveRequest : ++localSaveRequest
   const current = () => request === (includeSpatial ? spatialSaveRequest : localSaveRequest)
   try {
-    await runIndependentCheckpoints([
-      ...(includeSpatial ? [checkpointSpatialWorkbench, checkpointWorkbenchUserState]
-        : __AGENTMUX_WEB_PREVIEW__ ? [] : [() => persistentWorkbenchStorage.flush()]),
-      () => includeFileViewReading ? api.ui.requestStorageFlush({ includeFileViewReading: true }) : api.ui.requestStorageFlush()
-    ])
+    const flushMain = () => includeFileViewReading ? api.ui.requestStorageFlush({ includeFileViewReading: true }) : api.ui.requestStorageFlush()
+    let failure: { error: unknown } | undefined
+    try {
+      await runIndependentCheckpoints([
+        ...(includeSpatial ? [checkpointSpatialWorkbench, checkpointWorkbenchUserState]
+          : __AGENTMUX_WEB_PREVIEW__ ? [] : [() => persistentWorkbenchStorage.flush()]),
+        // This independent observation may precede the captured document's writer.
+        // Only the final frontier below is a durability checkpoint.
+        ...(__AGENTMUX_WEB_PREVIEW__ ? [] : [() => flushMain().catch(() => {})])
+      ])
+    } catch (error) { failure = { error } }
+    // Spatial ACK projection or edits during the independent waits may produce
+    // newer user data. Confirm that frontier before Main checks its exact ACK.
+    try {
+      if (includeSpatial) await checkpointWorkbenchUserDocument()
+      else if (!__AGENTMUX_WEB_PREVIEW__) await persistentWorkbenchStorage.flush()
+      await flushMain()
+    } catch (error) { failure ??= { error } }
+    if (failure) throw failure.error
     if (current() && failureRevision === workbenchSaveFailureRevision &&
         (__AGENTMUX_WEB_PREVIEW__ || desktopUserDocument.unreadFragments().length === 0) &&
         (includeSpatial || useAppStore.getState().workbenchSaveWarningOwner === 'local-storage')) {
@@ -5137,14 +5161,14 @@ export async function saveToolkitPalette(toolId: string, theme: import('../../sh
 export async function retainAgentLearningReviewDraft(draft: AgentLearningReviewDraft, flush = false): Promise<void> {
   const key = learningReviewKey(draft.source), retained = restoredLearningReviewDrafts({ [key]: draft })[key]
   if (!retained) throw new Error('The original review draft reference is invalid. Its input is kept without dispatch.')
-  useAppStore.setState(state => ({ agentLearningReviewDrafts: { ...state.agentLearningReviewDrafts, [key]: retained } }))
+  setAuthoredWorkbench(state => ({ agentLearningReviewDrafts: { ...state.agentLearningReviewDrafts, [key]: retained } }))
   if (flush) await flushMessageWorkbench(false)
 }
 
 /** Only local editable bytes and exact original operation handles use the existing Workbench writer. */
 export function compareAndSwapCapsuleQuestionEditor(key: string, expected: CapsuleQuestionEditor | undefined, value: CapsuleQuestionEditor | undefined): boolean {
   let changed = false
-  useAppStore.setState(state => {
+  setAuthoredWorkbench(state => {
     if (state.capsuleQuestionEditors[key] !== expected) return state
     changed = true
     const editors = { ...state.capsuleQuestionEditors }
@@ -5159,14 +5183,14 @@ export async function flushCapsuleQuestionEditors(): Promise<void> { await flush
 /** Editing an answer draft never replaces its original submitted intent. */
 export function retainConversationQuestionDraft(sessionId: string, key: string, answers: DesktopQuestionReplyAttempt['input']['answers']): void {
   const captured = structuredClone(answers)
-  useAppStore.setState(state => ({ questionReplyDrafts: { ...state.questionReplyDrafts, [sessionId]: { ...state.questionReplyDrafts?.[sessionId], [key]: captured } } }))
+  setAuthoredWorkbench(state => ({ questionReplyDrafts: { ...state.questionReplyDrafts, [sessionId]: { ...state.questionReplyDrafts?.[sessionId], [key]: captured } } }))
   void flushMessageWorkbench(true)
 }
 /** The existing workbench writer retains one exact native-question intent before explicit input. */
 export async function retainConversationQuestionReply(sessionId: string, key: string, attempt: DesktopQuestionReplyAttempt,
   expected: DesktopQuestionReplyAttempt | undefined): Promise<void> {
   let admitted = false
-  useAppStore.setState(state => {
+  setAuthoredWorkbench(state => {
     if (state.questionReplies?.[sessionId]?.[key] !== expected) return state
     admitted = true
     return { questionReplies: { ...state.questionReplies, [sessionId]: { ...state.questionReplies?.[sessionId], [key]: attempt } } }
@@ -5425,7 +5449,7 @@ export async function updateNodePublicationDraft(runtimeId: string,
     const values = { ...entries }
     if (next) values[runtimeId] = next
     else delete values[runtimeId]
-    useAppStore.setState({ nodePublicationDrafts: values })
+    setAuthoredWorkbench({ nodePublicationDrafts: values })
   }
   if (!flush) return
   try {
@@ -5443,7 +5467,7 @@ export async function updateMeshSettingsDraft(runtimeId: string, update: (curren
     const values = { ...entries }
     if (next) values[runtimeId] = next
     else delete values[runtimeId]
-    useAppStore.setState({ meshSettingsDrafts: values })
+    setAuthoredWorkbench({ meshSettingsDrafts: values })
   }
   if (!flush) return
   try {
@@ -5470,6 +5494,38 @@ export async function clearGoalAgentCreationDraft(goalId: string, role: 'assigne
 function agentDisplayOverride(names: Record<string, string>, sessionId: string): string | null {
   return Object.hasOwn(names, sessionId) ? names[sessionId] ?? null : null
 }
+// Authored entry points alone advance this frontier. Hydration/defaults/Runtime projections never do.
+let rootAuthoredRevision = 0
+let rootConfirmedAuthoredRevision = 0
+const fencedRootEdits = new Map<string, { before: unknown; after: unknown }>()
+export function setAuthoredWorkbench(update: Partial<AppState> | ((state: AppState) => Partial<AppState> | AppState)): void {
+  const before = partializeAppState(useAppStore.getState())
+  useAppStore.setState(update)
+  const after = partializeAppState(useAppStore.getState())
+  if (after === before) return
+  ++rootAuthoredRevision
+  if (!workbenchWriteFence.isOpen()) for (const key of Object.keys(after) as (keyof PersistedAppState)[]) {
+    if (configValuesEqual(after[key], before[key])) continue
+    fencedRootEdits.set(key, { before: fencedRootEdits.has(key) ? fencedRootEdits.get(key)!.before : before[key], after: after[key] })
+  }
+}
+function mergeFencedRootEdit(original: unknown, before: unknown, after: unknown): unknown {
+  if (configValuesEqual(before, after) || configValuesEqual(original, after)) return original
+  if (original === undefined || configValuesEqual(original, before)) return after
+  const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+  if (record(original) && record(after) && (before === undefined || record(before))) {
+    const baseline = before ?? {}, result = { ...original }
+    for (const key of new Set([...Object.keys(baseline), ...Object.keys(after)])) {
+      if (configValuesEqual(baseline[key], after[key])) continue
+      const value = mergeFencedRootEdit(original[key], baseline[key], after[key])
+      if (value === undefined) delete result[key]
+      else result[key] = value
+    }
+    return result
+  }
+  // Exact authored-vs-original conflict, not an Agent health gate. Neither copy may be overwritten.
+  throw new Error('The original saved input differs from an edit made while storage was unreadable. Original bytes and current input are retained; reconcile that input before saving or Quit.')
+}
 let workbenchStorageCommit: Promise<void> = Promise.resolve()
 async function checkpointWorkbenchUserState(): Promise<void> {
   if (launcherUnreadEditsPending()) await checkpointLauncherState()
@@ -5480,9 +5536,12 @@ async function checkpointWorkbenchUserState(): Promise<void> {
 }
 /** The original shared document writer; unrelated fragment owners retain their own pending edits. */
 async function checkpointWorkbenchUserDocument(): Promise<void> {
+  const authored = rootAuthoredRevision
   await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, {
     state: partializeAppState(useAppStore.getState()), version: 1
   })
+  rootConfirmedAuthoredRevision = Math.max(rootConfirmedAuthoredRevision, authored)
+  if (rootAuthoredRevision === authored) fencedRootEdits.clear()
 }
 /** Survey preferences do not make unrelated bookmark or Launcher writes a prerequisite. */
 async function saveSurveyPreferences(): Promise<AgentMuxSpatialSave> {
@@ -5708,7 +5767,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ...(origin === 'manual' && !options?.goalContinuation && !options?.goalPmo && !options?.goalDispatch ? { freshComposerIntent: true as const } : {})
   }
   if (!options?.originalMember) void api.continuousProgress.pauseForInput(session.control).catch(error => useAppStore.getState().reportError(error))
-  useAppStore.setState((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
+  setAuthoredWorkbench((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
   return entry.operationId
 }
 
@@ -6162,7 +6221,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set(state => ({ mountedSpaceInputs: editMountedAgentOpen(state.mountedSpaceInputs, key, update) }))
   },
   retainSourceCoordinatorInput(key, update) {
-    set(state => ({ mountedSpaceInputs: editSourceCoordinatorInput(state.mountedSpaceInputs, key, update) }))
+    setAuthoredWorkbench(state => ({ mountedSpaceInputs: editSourceCoordinatorInput(state.mountedSpaceInputs, key, update) }))
   },
   editSpaceMountLauncher(key, slot, selection) {
     set(state => ({ mountedSpaceInputs: editMountedLauncherSelection(state.mountedSpaceInputs, key, slot, selection) }))
@@ -9679,7 +9738,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ workspaceGitView })
   },
   setGitCommitDraft(scope, message) {
-    set(state => {
+    setAuthoredWorkbench(state => {
       const gitCommitDrafts = { ...state.gitCommitDrafts }
       if (message) gitCommitDrafts[scope] = message
       else delete gitCommitDrafts[scope]
@@ -11192,7 +11251,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } finally { resource.release() }
   },
   retainNoteEditorDraft(tabId, regionId, displayed, incoming, expected, action) {
-    set(state => {
+    setAuthoredWorkbench(state => {
       const surface = fileSurface(state.tabs[tabId], regionId)
       if (!surface) return state
       const key = documentKey(surface.workspaceId, surface.path), document = state.documents[key]
@@ -11311,7 +11370,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } catch (error) { await applyNoteShareUndoResult(key, original.params, unconfirmedNoteShareUndo(original.params, error)) }
   },
   updateDocument(tabId, content, regionId) {
-    set(state => {
+    setAuthoredWorkbench(state => {
       const source = originalSourceFileSurface(state, tabId, regionId)
       if (source) {
         if (source.workspaceId === undefined || source.path === undefined) return state
@@ -11336,7 +11395,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   useRetainedDocumentDraft(tabId, regionId, requested) {
     // Read both buffers at the user's click, so a later edit is kept rather than overwritten.
-    set(state => {
+    setAuthoredWorkbench(state => {
       const surface = fileSurface(state.tabs[tabId], regionId)
       if (!surface) return state
       const key = documentKey(surface.workspaceId, surface.path)
@@ -12527,7 +12586,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       stash: browsing ? navigation.stash : null }, direction, draft)
     if (!result) return null
     if (moteDraftKey) useLauncherState.getState().setDraft(moteDraftKey, 'prompt', result.value)
-    set({ ...(!moteDraftKey ? { agentComposerDrafts: state.agentComposerDrafts[sessionId] === result.value ? state.agentComposerDrafts
+    setAuthoredWorkbench({ ...(!moteDraftKey ? { agentComposerDrafts: state.agentComposerDrafts[sessionId] === result.value ? state.agentComposerDrafts
         : { ...state.agentComposerDrafts, [sessionId]: result.value } } : {}),
       agentComposerHistoryNavigation: { ...state.agentComposerHistoryNavigation,
         [owner]: { cursor: result.state.cursor, stash: result.state.stash,
@@ -12536,7 +12595,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setAgentComposerTask(regionId, prompt, focusTask) {
     const note = focusTask ? focusTaskHandoffNote(parseFocusTaskReference(focusTask)) : undefined
-    set(state => ({ agentComposerDrafts: { ...state.agentComposerDrafts, [regionId]: prompt },
+    if (get().agentComposerDrafts[regionId] === prompt && (note === undefined || get().agentComposerNotes[regionId] === note)) return
+    setAuthoredWorkbench(state => ({ agentComposerDrafts: { ...state.agentComposerDrafts, [regionId]: prompt },
       ...(note === undefined ? {} : { agentComposerNotes: { ...state.agentComposerNotes, [regionId]: note } }) }))
   },
   setAgentComposerDraft(sessionId, text, moteDraftKey) {
@@ -12544,6 +12604,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const owner = moteDraftKey ?? sessionId
     if (!owner) return
     const previous = moteDraftKey ? useLauncherState.getState().drafts[moteDraftKey]?.prompt : state.agentComposerDrafts[owner]
+    if (previous === text && !state.agentComposerHistoryNavigation[owner]) return
     if (!previous?.trim() && text.trim() && session?.kind === 'agent') {
       void api.continuousProgress.pauseForInput(session.control).catch(error => get().reportError(error))
     }
@@ -12552,7 +12613,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!state.agentComposerHistoryNavigation[owner]) return
     }
     const { [owner]: _navigation, ...navigation } = state.agentComposerHistoryNavigation
-    set({ ...(!moteDraftKey ? { agentComposerDrafts: { ...state.agentComposerDrafts, [owner]: text } } : {}),
+    setAuthoredWorkbench({ ...(!moteDraftKey ? { agentComposerDrafts: { ...state.agentComposerDrafts, [owner]: text } } : {}),
       agentComposerHistoryNavigation: navigation })
   },
   async prepareAgentHostWorkspace(hostId, context) {
@@ -12698,7 +12759,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ tabs: { ...state.tabs, [tab.id]: replaceWorkbenchRegion(tab, launcher.regionId, { ...surface, agentExecutor }) } })
   },
   setLauncherNameDraft(regionId, field, value) {
-    set((state) => {
+    setAuthoredWorkbench((state) => {
       const current = state.launcherNameDrafts[regionId] ?? EMPTY_LAUNCHER_NAMES
       if (current[field] === value) return state
       return {
@@ -12707,7 +12768,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setLauncherOptionDraft(regionId, providerId, optionId, choiceId) {
-    set(state => {
+    setAuthoredWorkbench(state => {
       const current = state.launcherOptionDrafts[regionId] ?? EMPTY_LAUNCHER_OPTIONS
       const next = updateLauncherOption(current, providerId, optionId, choiceId)
       if (next === current) return state
@@ -12718,7 +12779,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   async saveBrowserOpinionDraft(browserId, draft, flush = false) {
-    set(state => ({ browserOpinionDrafts: { ...state.browserOpinionDrafts, [browserId]: structuredClone(draft) } }))
+    setAuthoredWorkbench(state => ({ browserOpinionDrafts: { ...state.browserOpinionDrafts, [browserId]: structuredClone(draft) } }))
     // Reuse the original workbench writer. Saving observations never grants an input retry.
     if (flush) await flushMessageWorkbench(true)
   },
@@ -12727,7 +12788,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (next && next.browserId !== browserId || !next && !expectedOperationId) throw new Error('The original Browser task creation input is required.')
     let applied = false
     const expected = new Map<string, BrowserTaskCreateInput[]>()
-    set(state => {
+    setAuthoredWorkbench(state => {
       let tabs = state.tabs
       for (const [tabId, tab] of Object.entries(state.tabs)) {
         let regions = tab.regions
@@ -12768,7 +12829,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     get().setAgentComposerDraft(sessionId, `${current}${current.trim() ? '\n\n' : ''}${text}`)
   },
   clearAgentComposerDraftIfUnchanged(sessionId, expectedText) {
-    set((state) => {
+    setAuthoredWorkbench((state) => {
       if ((state.agentComposerDrafts[sessionId] ?? '') !== expectedText) return state
       const agentComposerDrafts = { ...state.agentComposerDrafts }
       delete agentComposerDrafts[sessionId]
@@ -12813,7 +12874,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // The destination owns this body before its original queue can archive it. The exact OP receipt makes a lost ACK retry idempotent.
       await checkpointLauncherState()
     }
-    set(state => {
+    setAuthoredWorkbench(state => {
       const { entry, session } = readOriginal(state)
       if (entry.archived) return state
       const draft = moteDraftKey ? useLauncherState.getState().drafts[moteDraftKey]?.prompt ?? '' : state.agentComposerDrafts[sessionId] ?? ''
@@ -12846,7 +12907,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     let changed = false
     let result!: AgentSteerQueueEntry
-    set(state => {
+    setAuthoredWorkbench(state => {
       const queue = state.agentSteerQueues[sessionId]
       const entry = queue?.find(item => item.operationId === operationId)
       if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message is no longer available. No replacement was created.')
@@ -12882,7 +12943,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!nextText.trim() || nextText.includes('\0')) {
       throw controlFailure('INVALID_AGENT_PROMPT', 'The edited message is empty or contains a null character. Your original message is kept.')
     }
-    set(state => {
+    setAuthoredWorkbench(state => {
       const queue = state.agentSteerQueues[sessionId]
       const entry = queue?.find(item => item.operationId === operationId)
       if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This pending message is no longer available. No replacement was created.')
@@ -12904,7 +12965,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Saving changes only the original intent. It never grants execution or wakes its consumer.
   },
   moveAgentSteer(sessionId, operationId, direction) {
-    set((state) => {
+    setAuthoredWorkbench((state) => {
       // The mailbox hides confirmed delivery too. Resolve adjacency from the same pending facts.
       const current = reconcileDeliveredSteers(state, sessionId)
       const queue = current.agentSteerQueues[sessionId]
@@ -14445,7 +14506,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (error) persistHydrationError = error
   },
   merge: (persisted, current) => {
-    const local = (persisted ?? {}) as Partial<PersistedAppState>
+    let local = (persisted ?? {}) as Partial<PersistedAppState>
+    if (fencedRootEdits.size) {
+      local = { ...local }
+      for (const [key, edit] of fencedRootEdits) (local as Record<string, unknown>)[key] = mergeFencedRootEdit((local as Record<string, unknown>)[key], edit.before, edit.after)
+      persisted = local
+    }
     if (!Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons') && Object.hasOwn(local, 'spaceObjectIcons')) retainedSpaceIconHandoff = local.spaceObjectIcons
     const state = { ...current, ...persisted as Partial<AppState> }
     state.pendingAgentLaunches = { ...restoredPendingAgentLaunches(local.pendingAgentLaunches), ...current.pendingAgentLaunches }
@@ -14583,7 +14649,7 @@ export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'
   // No writes have been admitted during cold hydration. Quitting must preserve that durable record,
   // without qualifying an empty loading projection as an original workbench.
   if (intent === 'quit' && !workbenchWriteFence.isOpen()) {
-    if (auxiliaryUserDataPending()) throw new Error('Current Desktop input is not yet saved because original storage is unreadable. Original work and healthy Runs remain available; retry saving before Quit.')
+    if (rootAuthoredRevision > rootConfirmedAuthoredRevision || auxiliaryUserDataPending()) throw new Error('Current Desktop input is not yet saved because original storage is unreadable. Original work and healthy Runs remain available; retry saving before Quit.')
     return
   }
   if (useAppStore.getState().loading) throw new Error('The interface is still loading; retry the update when ready.')

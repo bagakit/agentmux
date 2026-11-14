@@ -3,6 +3,7 @@ import { createJSONStorage, type PersistStorage, type StorageValue } from 'zusta
 // Bound both encoding and browser storage work to one batch. Continuous input
 // replaces the immutable pending projection without postponing its save deadline.
 const DEFAULT_BATCH_MS = 400
+export const USER_SAVE_REPLY_MS = 15_000
 
 type StateStorage = {
   getItem(name: string): string | null | Promise<string | null>
@@ -26,7 +27,8 @@ type FlushablePersistentStorage<State> = {
 export function createBatchedPersistentStorage<State>(
   base: StateStorage,
   delayMs: number = DEFAULT_BATCH_MS,
-  onError?: (error: unknown) => void
+  onError?: (error: unknown) => void,
+  onRecovered?: (error: unknown) => void
 ): FlushablePersistentStorage<State> {
   const pending = new Map<string, StorageValue<State>>()
   // Input identity does not imply that its pending write has reached storage.
@@ -34,17 +36,22 @@ export function createBatchedPersistentStorage<State>(
   const removals = new Map<string, number>()
   const jsonStorage = createJSONStorage<State>(() => base)!
   let timer: ReturnType<typeof setTimeout> | null = null
+  let timerDue = 0
   let flushing: Promise<void> | null = null
+  let attempt = 0, failures = 0
+  let reportedFailure: unknown
 
-  const writePending = (): void | Promise<void> => {
+  const writePending = (generation = attempt): void | Promise<void> => {
+    if (generation !== attempt) return
     for (const [name, value] of pending) {
       if (removals.has(name)) continue
       const encoded = JSON.stringify(value)
       const finish = () => {
         // An ACK belongs to its captured input; newer edits remain pending.
-        if (pending.get(name) === value) pending.delete(name)
+        if (generation === attempt && pending.get(name) === value) pending.delete(name)
       }
       const save = (current: string | null, confirm = false): void | Promise<void> => {
+        if (generation !== attempt) return
         // A native read may observe an earlier replacement whose directory ACK
         // failed. Let that owner reconfirm equal bytes through its write API.
         if (current === encoded && !confirm) { finish(); return }
@@ -56,31 +63,60 @@ export function createBatchedPersistentStorage<State>(
       const result = asynchronous(current) ? current.then(value => save(value, true)) : save(current)
       // Serial drain protects ordering across native IPC waits. Encoding, read,
       // or durable write failure keeps the exact latest input available.
-      if (asynchronous(result)) return result.then(writePending)
+      if (asynchronous(result)) return result.then(() => writePending(generation))
     }
   }
   const track = (result: Promise<void>): Promise<void> => {
-    const active = result.finally(() => { if (flushing === active) flushing = null })
+    const generation = attempt
+    let deadline: ReturnType<typeof setTimeout>
+    const observed = new Promise<void>((resolve, reject) => {
+      deadline = setTimeout(() => reject(Object.assign(new Error('Desktop saving is still unconfirmed. Current input is retained; the original writer is retrying without replaying input.'),
+        { code: 'WORKBENCH_USER_STATE_REPLY_OVERDUE' })), USER_SAVE_REPLY_MS)
+      result.then(resolve, reject)
+    })
+    const active = observed.then(() => {
+      failures = 0
+      if (!pending.size && reportedFailure !== undefined) { const error = reportedFailure; reportedFailure = undefined; onRecovered?.(error) }
+    }, error => {
+      if (attempt === generation) attempt++ // retire observation only; Main owns every admitted effect
+      failures++
+      schedule(Math.min(120_000, 1000 * 2 ** Math.min(failures - 1, 7)))
+      throw error
+    }).finally(() => { clearTimeout(deadline); if (flushing === active) flushing = null })
     flushing = active
     return active
   }
   const flush = (): void | Promise<void> => {
-    if (timer !== null) { clearTimeout(timer); timer = null }
+    if (timer !== null) { clearTimeout(timer); timer = null; timerDue = 0 }
     if (flushing) return flushing.then(() => flush())
-    const result = writePending()
-    return asynchronous(result) ? track(result) : result
+    try {
+      const result = writePending()
+      return asynchronous(result) ? track(result) : result
+    } catch (error) { failures++; schedule(Math.min(120_000, 1000 * 2 ** Math.min(failures - 1, 7))); throw error }
   }
-  const schedule = (): void => {
-    if (timer === null) timer = setTimeout(() => {
-      timer = null
+  const report = (error: unknown) => {
+    if (reportedFailure === error) return
+    reportedFailure = error
+    if (onError) onError(error)
+    else throw error
+  }
+  const schedule = (delay = delayMs): void => {
+    if (!pending.size) return
+    const due = Date.now() + delay
+    if (timer !== null) {
+      if (due >= timerDue) return
+      clearTimeout(timer)
+    }
+    timerDue = due
+    timer = setTimeout(() => {
+      timer = null; timerDue = 0
       try {
         const result = flush()
         if (asynchronous(result)) void result.catch(error => {
-          if (onError) onError(error)
-          else queueMicrotask(() => { throw error })
+          report(error)
         })
-      } catch (error) { if (onError) onError(error); else throw error }
-    }, delayMs)
+      } catch (error) { report(error) }
+    }, delay)
   }
   const storage: PersistStorage<State> = {
     getItem: name => {
