@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config'
 import { relative } from 'node:path'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import shared from './vitest.collaboration-space-product.config.mts'
+import shared from '../scripts/fixtures/agent-information-card/vitest.owning.config.mts'
 export const collaborationContextMutation = {
   name: 'unscoped-context', file: 'components/AgentCollaborationMap.tsx',
   before: 'const refresh = new Set([...contextDemand, ...contextCache.current.keys()])', after: 'const refresh = new Set(catalog.sessions.keys())',
