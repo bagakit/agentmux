@@ -3,7 +3,10 @@ import source from '../../../apps/desktop/scripts/fixtures/agent-schedules/vites
 import { relative, resolve } from 'node:path'
 import { instrumentGrokStatus } from './helpers/grok-status-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../..')
-export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'actual-grok-native-status', enforce: 'pre', transform(code, id) {
+export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'actual-grok-native-status', enforce: 'pre',
+  resolveId(specifier) {
+    if (specifier === '@agentmux/providers/grok/session-status') return resolve(root, 'packages/providers/src/grok/session-status.ts')
+  }, transform(code, id) {
   const loaded = instrumentGrokStatus(code, relative(root, id.split('?')[0]!))
   return loaded === code ? undefined : { code: loaded, map: null }
 } }], test: { ...source.test, include: process.env.MOTE_GROK_STATUS_MUTATION ? ['packages/core/test/grok-heartbeat-status.test.ts'] : [

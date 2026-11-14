@@ -7,7 +7,7 @@ import { ObjectCliProbe } from '../../../packages/core/test/helpers/object-cli-r
 import { runSourceObjectCli } from '../../../packages/core/test/helpers/source-object-cli.js'
 import { decodePreparedRun } from '../../../packages/core/src/prepared-run.js'
 import { AgentMuxError } from '../../../packages/core/src/errors.js'
-import { readGrokPromptExecutionEvidence, observeGrokSessionStatus } from '../../../packages/core/src/providers/grok-session-status.js'
+import { readGrokPromptExecutionEvidence, observeGrokSessionStatus } from '../../../packages/core/src/providers/grok-history.js'
 import { encodeCwdDirname } from '../../../packages/providers/src/grok/native-history.js'
 import { grokUser, grokDone } from '../../../packages/core/test/fixtures/grok-updates.js'
 import { createGoalRuntime } from '../src/goal-runtime.js'

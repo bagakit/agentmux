@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-const status = 'packages/core/src/providers/grok-session-status.ts', source = 'packages/core/src/providers/grok-native-source.ts'
+const status = 'packages/providers/src/grok/session-status.ts', source = 'packages/providers/src/grok/native-source.ts'
 export const mutations = {
   'omit-live-locator': [status, [['await grokProcessSource(context, signal)', 'undefined']], '^the exact private OS Run'],
   'omit-native-prompt-binding': [status, [['submittedTurn ?? meta?.promptId', 'meta?.promptId']], '^the original prompt-submit'],

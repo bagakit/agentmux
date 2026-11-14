@@ -12,7 +12,7 @@ import { AgentMuxFileAgentSessionStore } from '../../../packages/core/src/agent-
 import { AgentProviderRegistry, type AgentProviderPromptExecutionContext } from '../../../packages/core/src/agent-provider.js'
 import { readCodexPromptExecutionEvidence } from '../../../packages/core/src/providers/codex-prompt-execution-evidence.js'
 import { observeCodexSessionStatus } from '../../../packages/core/src/providers/codex-session-status.js'
-import { readGrokPromptExecutionEvidence } from '../../../packages/core/src/providers/grok-session-status.js'
+import { readGrokPromptExecutionEvidence } from '../../../packages/core/src/providers/grok-history.js'
 import { encodeCwdDirname } from '../../../packages/providers/src/grok/native-history.js'
 import { grokUser } from '../../../packages/core/test/fixtures/grok-updates.js'
 import { captureExecutorInvocation } from '../../../packages/core/src/agent-executor-invocation.js'

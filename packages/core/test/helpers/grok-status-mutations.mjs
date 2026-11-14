@@ -1,7 +1,7 @@
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 
-const leaf = 'packages/core/src/providers/grok-session-status.ts', client = 'packages/core/src/client.ts'
+const leaf = 'packages/providers/src/grok/session-status.ts', client = 'packages/core/src/client.ts'
 export const grokStatusMutations = {
   'reject-current-resumed-turn': [client, [['if (!currentTurnEnded) { unattributedInitialSnapshot = true; return saved }', 'if (true) { unattributedInitialSnapshot = true; return saved }']]],
   'accept-foreign-resumed-turn': [client, [['mainHook?.nativeTurnId === observation.nativeTurnId && observation.nativeObservedAt !== undefined', 'observation.nativeObservedAt !== undefined']]],

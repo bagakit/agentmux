@@ -4,7 +4,10 @@ import { relative, resolve } from 'node:path'
 import { instrument } from './helpers/grok-original-source-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../..')
 export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'original-grok-source', enforce: 'pre',
-  resolveId(specifier) { if (specifier === '@agentmux/providers/grok/native-history') return resolve(root, 'packages/providers/src/grok/native-history.ts') },
+  resolveId(specifier) {
+    if (specifier === '@agentmux/providers/grok/native-history') return resolve(root, 'packages/providers/src/grok/native-history.ts')
+    if (specifier === '@agentmux/providers/grok/session-status') return resolve(root, 'packages/providers/src/grok/session-status.ts')
+  },
   transform(code, id) {
   const changed = instrument(code, relative(root, id.split('?')[0]!)); return changed === code ? undefined : { code: changed, map: null }
 } }], test: { ...source.test,
