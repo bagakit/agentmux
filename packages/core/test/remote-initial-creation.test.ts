@@ -18,6 +18,7 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 import { executionCreationId } from '../src/host-route-execution.js'
 import { AgentMuxError } from '../src/errors.js'
+import * as claudePolicy from '../src/providers/claude-execution-policy.js'
 
 const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_REMOTE_CLIENT
   ? (await import(process.env.AGENTMUX_TEST_REMOTE_CLIENT)).AgentMuxClient : DefaultClient
@@ -99,6 +100,26 @@ async function createSplit(f: Awaited<ReturnType<typeof fixture>>, request: Agen
   return await f.target.createHostAgentWithDelivery({ ...request, initialMessageAdmission: await f.attest(request) })
 }
 
+async function holdProviderPreparation(f: Awaited<ReturnType<typeof fixture>>, stage: 'probe' | 'policy') {
+  let release!: () => void, entered!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const admission = new Promise<void>(resolve => { entered = resolve })
+  if (stage === 'probe') {
+    const original = f.probe.getMockImplementation()!
+    f.probe.mockImplementation(async (...args: any[]) => { entered(); await held; return await original(...args) })
+  } else {
+    const original = claudePolicy.prepareClaudeExecutionPolicy
+    vi.spyOn(claudePolicy, 'prepareClaudeExecutionPolicy').mockImplementation(async input => { entered(); await held; return await original(input) })
+  }
+  return { admission, release }
+}
+
+async function replaceLeafDuringProviderPreparation(path: string, fault: 'deleted' | 'replaced' | 'symlink', external: string) {
+  await rm(path, { recursive: true })
+  if (fault === 'replaced') await mkdir(path)
+  if (fault === 'symlink') { await mkdir(external); await symlink(external, path) }
+}
+
 describe('remote initial creation admission', () => {
   it('rejects a changed launch cwd before Provider probe even when every other frontend binding field matches', async () => {
     const f = await fixture(), split = await splitFrontend(f)
@@ -135,6 +156,27 @@ describe('remote initial creation admission', () => {
     expect(await readFile(split.markerPath)).toEqual(before)
     if (fault === 'deleted') await expect(stat(split.locator.workspacePath)).rejects.toMatchObject({ code: 'ENOENT' })
     else expect((await stat(split.locator.workspacePath)).ino).not.toBe(originalLeaf)
+  })
+
+  it.each([
+    ['probe', 'deleted'], ['probe', 'replaced'], ['probe', 'symlink'],
+    ['policy', 'deleted'], ['policy', 'replaced'], ['policy', 'symlink']
+  ] as const)('rejects a %s leaf during held %s preparation without any Provider write or rebuild', async (stage, fault) => {
+    const f = await fixture(), split = await splitFrontend(f)
+    allowSplitLaunch(f, split.locator.workspacePath)
+    const hold = await holdProviderPreparation(f, stage)
+    const pending = createSplit(f, split.request)
+    void pending.catch(() => {})
+    await hold.admission
+    const external = join(f.root, 'provider-race-external')
+    await replaceLeafDuringProviderPreparation(split.locator.workspacePath, fault, external)
+    hold.release()
+    await expect(pending).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+    expect(f.start).not.toHaveBeenCalled()
+    expect(f.stop).not.toHaveBeenCalled()
+    if (fault === 'deleted') await expect(stat(split.locator.workspacePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    if (fault === 'replaced') await expect(stat(join(split.locator.workspacePath, '.claude'))).rejects.toMatchObject({ code: 'ENOENT' })
+    if (fault === 'symlink') await expect(stat(join(external, '.claude'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('adopts an existing split Session before any physical fence after its leaf disappears', async () => {
