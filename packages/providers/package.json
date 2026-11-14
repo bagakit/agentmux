@@ -223,6 +223,14 @@
     "./cursor/native-history": {
       "types": "./dist/cursor/native-history.d.ts",
       "import": "./dist/cursor/native-history.js"
+    },
+    "./claude/execution-protocol": {
+      "types": "./dist/claude/execution-protocol.d.ts",
+      "import": "./dist/claude/execution-protocol.js"
+    },
+    "./claude/tool-edit": {
+      "types": "./dist/claude/tool-edit.d.ts",
+      "import": "./dist/claude/tool-edit.js"
     }
   },
   "files": [

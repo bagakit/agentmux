@@ -3,7 +3,7 @@ import { createClaudeExecutionOperations } from './claude-execution-operations.j
 import { pathToFileURL } from 'node:url'
 import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
 import { runAgentExecutionHelper, runAgentExecutionHelperCli, type AgentExecutionHelperIo } from '../agent-execution-helper-run.js'
-import { parseClaudeExecutionMessage, parseClaudeExecutionServerMessage, projectClaudeExecutionResponse, buildClaudeNativeExecutorLaunchSpec } from './claude-execution-protocol.js'
+import { parseClaudeExecutionMessage, parseClaudeExecutionServerMessage, projectClaudeExecutionResponse, buildClaudeNativeExecutorLaunchSpec } from '@agentmux/providers/claude/execution-protocol'
 
 export function parseClaudeExecutionRunArguments(args: readonly string[]): AgentExecutionHelperContext {
   if (args.length !== 2 || args[0] !== '--agentmux-execution-helper') throw new Error('Claude execution requires the original packaged helper arguments')

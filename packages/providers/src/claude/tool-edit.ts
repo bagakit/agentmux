@@ -1,7 +1,5 @@
-import type { ConversationToolEdit } from '../conversation-tool-edit.js'
-
 /** Claude's original edit parameters. Missing or partial input does not describe a complete edit. */
-export function claudeToolEdit(name: string, raw: string): ConversationToolEdit | null {
+export function claudeToolEdit(name: string, raw: string) {
   let input: Record<string, unknown>
   try {
     const value: unknown = JSON.parse(raw)

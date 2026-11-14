@@ -1,5 +1,18 @@
 import { isAbsolute, win32 } from 'node:path'
-import type { AgentExecutionIntent, AgentExecutionMessage } from '../agent-execution-protocol.js'
+
+type ObjectValue = Record<string, unknown>
+type RequestId = string | number
+type ClaudeExecutionIntent = {
+  kind: 'read' | 'write' | 'process' | 'control'
+  paths: { path: string; access: 'read' | 'write' }[]
+  initialize?: true
+  processId?: string
+}
+type ClaudeExecutionMessage =
+  | { kind: 'request'; requestId: RequestId; method: string; params: ObjectValue | null; payload: ObjectValue; intent: ClaudeExecutionIntent }
+  | { kind: 'notification'; method: string; payload: ObjectValue }
+  | { kind: 'response'; requestId: RequestId; payload: ObjectValue }
+  | { kind: 'rejected'; requestId?: RequestId; code: number; reason: string; payload: unknown }
 
 /** Resource tools qualified from the native `claude mcp serve` tool catalog. */
 export const CLAUDE_EXECUTION_TOOL_NAMES = ['Bash', 'Read', 'Write', 'Edit', 'NotebookEdit', 'TaskStop'] as const
@@ -7,17 +20,16 @@ export const CLAUDE_EXECUTION_TOOL_NAMES = ['Bash', 'Read', 'Write', 'Edit', 'No
 export const CLAUDE_EXECUTION_SHELL_TASK_PREFIX = 'amux-shell-'
 export const isClaudeExecutionShellTaskId = (value: unknown): value is string => typeof value === 'string' && value.startsWith(CLAUDE_EXECUTION_SHELL_TASK_PREFIX)
 const tools = new Set<string>(CLAUDE_EXECUTION_TOOL_NAMES)
-type ObjectValue = Record<string, unknown>
-type Request = Extract<AgentExecutionMessage, { kind: 'request' }>
+type Request = Extract<ClaudeExecutionMessage, { kind: 'request' }>
 const object = (value: unknown): value is ObjectValue => value !== null && typeof value === 'object' && !Array.isArray(value)
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !value.includes('\0')
 const id = (value: unknown): value is string | number => typeof value === 'string' || typeof value === 'number' && Number.isSafeInteger(value)
 const absolute = (value: unknown): value is string => text(value) && (isAbsolute(value) || win32.isAbsolute(value))
 
 /** Native MCP facts only. Host-user authorization remains with the resource Core. */
-export function parseClaudeExecutionMessage(payload: unknown): AgentExecutionMessage {
+export function parseClaudeExecutionMessage(payload: unknown): ClaudeExecutionMessage {
   const requestId = object(payload) && id(payload.id) ? payload.id : undefined
-  const reject = (code: number, reason: string): AgentExecutionMessage => ({ kind: 'rejected', ...(requestId === undefined ? {} : { requestId }), code, reason, payload })
+  const reject = (code: number, reason: string): ClaudeExecutionMessage => ({ kind: 'rejected', ...(requestId === undefined ? {} : { requestId }), code, reason, payload })
   if (!object(payload) || payload.jsonrpc !== '2.0') return reject(-32600, 'Expected a native MCP JSON-RPC 2.0 object')
   if (!Object.hasOwn(payload, 'method')) {
     if (requestId === undefined || Object.hasOwn(payload, 'result') === Object.hasOwn(payload, 'error')) return reject(-32600, 'Invalid native MCP response')
@@ -32,7 +44,7 @@ export function parseClaudeExecutionMessage(payload: unknown): AgentExecutionMes
     return { kind: 'notification', method: payload.method, payload }
   }
   if (requestId === undefined) return reject(-32600, 'Invalid native MCP request identity')
-  const intent: AgentExecutionIntent = { kind: 'control', paths: [] }
+  const intent: ClaudeExecutionIntent = { kind: 'control', paths: [] }
   switch (payload.method) {
     case 'initialize':
       if (!text(p.protocolVersion) || !object(p.capabilities) || !object(p.clientInfo) || !text(p.clientInfo.name) || !text(p.clientInfo.version)) return reject(-32602, 'Invalid native MCP initialization')
@@ -70,7 +82,7 @@ export function parseClaudeExecutionMessage(payload: unknown): AgentExecutionMes
 }
 
 /** The selected native server advertises tools only; it does not require client-side roots or sampling. */
-export function parseClaudeExecutionServerMessage(payload: unknown): AgentExecutionMessage {
+export function parseClaudeExecutionServerMessage(payload: unknown): ClaudeExecutionMessage {
   if (object(payload) && !Object.hasOwn(payload, 'method')) return parseClaudeExecutionMessage(payload)
   if (object(payload) && payload.jsonrpc === '2.0' && !Object.hasOwn(payload, 'id') && !Object.hasOwn(payload, 'result') && !Object.hasOwn(payload, 'error') &&
       ['notifications/progress', 'notifications/message', 'notifications/tools/list_changed'].includes(String(payload.method)) && (payload.params === undefined || object(payload.params))) {

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join } from 'node:path'
-import { CLAUDE_EXECUTION_SHELL_TASK_PREFIX } from './claude-execution-protocol.js'
+import { CLAUDE_EXECUTION_SHELL_TASK_PREFIX } from '@agentmux/providers/claude/execution-protocol'
 
 export interface ClaudeExecutionBashInput {
   command: string

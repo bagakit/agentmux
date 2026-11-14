@@ -1,5 +1,5 @@
 import type { AgentTimelineItem } from './types.js'
-import { claudeToolEdit } from './providers/claude-tool-edit.js'
+import { claudeToolEdit } from '@agentmux/providers/claude/tool-edit'
 
 /** Original requested edits, not proof that the tool applied them. */
 export type ConversationToolEdit = {

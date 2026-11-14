@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { durableWriteFile } from '../durable-write.js'
 import { directoryMkdirAt, openDirectoryWriteParent, readDirectoryFile } from '../directory-write.js'
 import { AgentMuxError } from '../errors.js'
-import { CLAUDE_EXECUTION_TOOL_NAMES, CLAUDE_EXECUTION_SHELL_TASK_PREFIX } from './claude-execution-protocol.js'
+import { CLAUDE_EXECUTION_TOOL_NAMES, CLAUDE_EXECUTION_SHELL_TASK_PREFIX } from '@agentmux/providers/claude/execution-protocol'
 
 /** Provider-owned native middleware. Native Claude still owns its tool pool and permission engine. */
 export function claudeExecutionPolicySource(serverName: string, pluginName: string): string {
