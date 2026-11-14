@@ -62,7 +62,10 @@ export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
       if (fileNavigationSelection(state) !== original ||
           state.sourceFilesInputs.selections[resource.id] !== selected || state.sourceFilesInputs.readSources !== pointers ||
           current?.hostId !== resource.hostId || current.path !== resource.path) return
-      void state.openFileAndReveal(path, undefined, parsed.location, resource.id).catch(state.reportError)
+      const open = listed && selected?.locator
+        ? state.openFileAndReveal(path, undefined, parsed.location, resource.id, undefined, selected)
+        : state.openFileAndReveal(path, undefined, parsed.location, resource.id)
+      void open.catch(state.reportError)
     })
   }
   return <div className="quick-file-picker">

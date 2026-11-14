@@ -427,7 +427,9 @@ export function FileExplorer({
     fileRevealRef.current?.abort()
     const intent = new AbortController()
     fileRevealRef.current = intent
-    return originalOpenFile(path, groupId, location, resourceId ?? undefined, intent.signal)
+    const selected = !objectDirectory && resourceId ? useAppStore.getState().sourceFilesInputs.selections[resourceId] : undefined
+    return selected?.locator ? originalOpenFile(path, groupId, location, resourceId ?? undefined, intent.signal, selected)
+      : originalOpenFile(path, groupId, location, resourceId ?? undefined, intent.signal)
   }
   const createPath = useAppStore((state) => state.createPath)
   const renamePath = useAppStore((state) => state.renamePath)

@@ -117,6 +117,8 @@ export type FileOpenPlacement = {
   focus?: boolean
   inputPolicy?: 'preserve' | 'target'
   fileOnly?: boolean
+  /** The Files result the user chose, carried independently of its display placement. */
+  candidateSource?: import('./source-files-workbench').SourceFilesInput | undefined
   /** Intended object/occurrence, including background creation; only focus grants navigation. */
   selection?: import('@agentmux/core').AgentMuxDesktopSpaceSelection
   onResult?: (result: FileOpenResult) => void

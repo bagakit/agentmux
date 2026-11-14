@@ -12,7 +12,7 @@ import type { GoalRelationAccess } from '@agentmux/core/control'
 import type { WorkbenchWindowDocument } from '../../shared/workbench-windows'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { noteHistoryCoreTarget, readNoteFileHistory } from './lib/note-history-source'
-import { createSourceFilesWorkbench, emptySourceFilesInputs, mutationQuery, selectedMutationLocation, type FileMutationLocation, sourceFilesQuery, sourceFilesMappingMatches, sourceFilesWorkspaceMatches, type SourceFilesInputs } from './lib/source-files-workbench'
+import { createSourceFilesWorkbench, emptySourceFilesInputs, mutationQuery, sameFilesRuntime, selectedMutationLocation, type FileMutationLocation, sourceFilesQuery, sourceFilesMappingMatches, sourceFilesWorkspaceMatches, type SourceFilesInputs } from './lib/source-files-workbench'
 import { captureFileEffect, applyFileEffect } from './lib/file-mutation-projection'
 import type { SourceFilesLocator, SourceFilesResolution } from '../../shared/source-files'
 import type { FolderDirectoryRegistration } from '@agentmux/core/space-folder'
@@ -294,7 +294,7 @@ import {
   workspaceOwnsSessionPath
 } from '@agentmux/host/mote-model'
 import { CONNECTION_OBSERVATION_SOURCE_STEP, isScratchWorkspaceId } from '../../shared/contracts'
-import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
+import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc, parseBookmarkUrl } from '../../shared/bookmark-file'
 import { reconcileNotesStorageResources, reconcileNotesLauncherDrafts, reobserveNotesStorageResources } from './lib/notes-storage-reconciliation'
 import type { NotesStorageInspection } from '@agentmux/core/notebook-store'
 import { api } from './lib/api'
@@ -1665,7 +1665,7 @@ export type AppState = GitReadingActions & {
    */
   openFileDiff(path: string, workspaceId?: string): Promise<void>
   /** Explicit file navigation from an external control, through the original document owner. */
-  openFileAndReveal(path: string, tabGroupId?: string, location?: { line: number; column?: number }, workspaceId?: string, navigationSignal?: AbortSignal): Promise<boolean>
+  openFileAndReveal(path: string, tabGroupId?: string, location?: { line: number; column?: number }, workspaceId?: string, navigationSignal?: AbortSignal, candidateSource?: SourceFilesInputs['selections'][string]): Promise<boolean>
   loadBranchDiff(regionId: string): Promise<void>
   /** Release a budgeted Git Diff payload; its durable Region and fixed descriptor stay intact. */
   releaseBranchDiff(regionId: string): void
@@ -2589,6 +2589,19 @@ async function reconcileNoteRead(workspaceId: string, path: string, lifetime: nu
   return true
 }
 
+/** The native watcher and byte preview accept Workspace-relative paths only. */
+function mainFileReaderMatches(workspaceId: string, workspace: { hostId: string; path: string } | undefined, path: string,
+  source: Pick<NonNullable<FileDocument['readSource']>, 'target' | 'resource'> | undefined): boolean {
+  if (!source) return true
+  const { resource, target } = source
+  return workspace?.hostId === target.hostId && workspace.hostId === resource.hostId && workspace.path === resource.workspacePath &&
+    workspaceId === resource.workspaceId && path === (resource.path === '.' ? '' : resource.path)
+}
+
+function candidateMatchesReadSource(candidate: SourceFilesInputs['selections'][string], source: NonNullable<FileDocument['readSource']>, path: string): boolean {
+  return Boolean(candidate.locator && sameFilesRuntime(source.target, candidate.target) && sourceFilesMappingMatches(candidate.locator, source.resource, path))
+}
+
 /** Prefer an actual complete Source read when mapped; legacy unbudgeted reading remains usable. */
 /** Warm documents own the binding. Cold clean Views retain only its original UserState pointer. */
 function originalFileReadSource(state: AppState, workspaceId: string, path: string): FileDocument['readSource'] {
@@ -2604,8 +2617,12 @@ function originalFileReadSource(state: AppState, workspaceId: string, path: stri
   if (bindings.size > 1) throw new Error('These original File Views retain different Source bindings. Their workfaces are kept; choose the exact original View before reading.')
   return bindings.values().next().value
 }
-async function readWorkspaceFileDocument(workspaceId: string, path: string, originalSource?: FileDocument['readSource']): Promise<import('../../shared/contracts').WorkspaceFileReadResult> {
-  originalSource ??= originalFileReadSource(useAppStore.getState(), workspaceId, path)
+async function readWorkspaceFileDocument(workspaceId: string, path: string, originalSource?: FileDocument['readSource'],
+  candidateSource?: SourceFilesInputs['selections'][string]): Promise<import('../../shared/contracts').WorkspaceFileReadResult> {
+  const state = useAppStore.getState()
+  originalSource ??= originalFileReadSource(state, workspaceId, path)
+  if (candidateSource && (state.sourceFilesInputs.selections[workspaceId] !== candidateSource ||
+      originalSource && !candidateMatchesReadSource(candidateSource, originalSource, path))) throw new Error('The selected file Source changed before its file could be read.')
   if (originalSource) {
     const observed = await api.sourceFiles.call(originalSource.target, 'file.read', originalSource.query)
     if (!observed.result.resource || ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => observed.result.resource![key as keyof typeof originalSource.resource] !== originalSource.resource[key as keyof typeof originalSource.resource])) return {
@@ -2616,7 +2633,7 @@ async function readWorkspaceFileDocument(workspaceId: string, path: string, orig
     return observed.result.result.status === 'read' ? { status: 'read', document: { ...observed.result.result.document, path, readSource: originalSource,
       ...(originalMain ? { legacyMainNote: originalMain } : {}) } } : observed.result.result
   }
-  const input = topicFileDirectory(workspaceId, path) ? undefined : useAppStore.getState().sourceFilesInputs.selections[workspaceId]
+  const input = candidateSource ?? (topicFileDirectory(workspaceId, path) ? undefined : useAppStore.getState().sourceFilesInputs.selections[workspaceId])
   if (input?.locator && sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph()))) {
     const read = await api.sourceFiles.call(input.target, 'file.read', sourceFilesQuery(input.locator, path))
     const current = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
@@ -2638,7 +2655,7 @@ async function readWorkspaceFileDocument(workspaceId: string, path: string, orig
       ? { status: 'error', code: read.result.result.code, message: read.result.result.message }
       : read.result.result
   }
-  if (isOriginalSourceFileWorkspace(workspaceId)) return { status: 'error', code: 'FILE_SOURCE_UNAVAILABLE',
+  if (candidateSource || isOriginalSourceFileWorkspace(workspaceId)) return { status: 'error', code: 'FILE_SOURCE_UNAVAILABLE',
     message: 'The original Source file locator is unconfirmed. No local substitute was read.' }
   const legacy = await api.files.read(workspaceId, path)
   if (originalFileReadSource(useAppStore.getState(), workspaceId, path)) return { status: 'error', code: 'FILE_SOURCE_BINDING_CHANGED',
@@ -2781,7 +2798,8 @@ async function loadPersistedFileDocument(workspaceId: string, path: string, reso
       // Invalidation during this read must refresh the attached revision once it has an owner.
       const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
       if (!admitted()) return false
-      observationRequested = !isOriginalSourceFileWorkspace(workspaceId)
+      const retainedSource = originalFileReadSource(useAppStore.getState(), workspaceId, path)
+      observationRequested = !isOriginalSourceFileWorkspace(workspaceId) && mainFileReaderMatches(workspaceId, originalResource, path, retainedSource)
       if (observationRequested) await api.files.observe(workspaceId, path)
       if (!admitted()) { await releaseObservation(); return false }
       const result = await readWorkspaceFileDocument(workspaceId, path)
@@ -7389,8 +7407,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const separator = key.indexOf('\0')
         if (separator < 0) continue
         const workspaceId = key.slice(0, separator), path = key.slice(separator + 1)
-        if (!config.workspaces.some((workspace) => workspace.id === workspaceId)) continue
-        void api.files.observe(workspaceId, path).then(() => get().refreshDocument(workspaceId, path)).catch((error) => get().reportError(error))
+        const workspace = config.workspaces.find(item => item.id === workspaceId)
+        if (!workspace) continue
+        const observation = mainFileReaderMatches(workspaceId, workspace, path, get().documents[key]?.readSource)
+          ? api.files.observe(workspaceId, path) : Promise.resolve()
+        void observation.then(() => get().refreshDocument(workspaceId, path)).catch((error) => get().reportError(error))
       }
       for (const sessionId of Object.keys(get().agentSteerQueues)) void get().flushAgentSteerQueue(sessionId)
       for (const event of pendingBrowserEvents.drain()) get().applyBrowserEvent(event)
@@ -9615,7 +9636,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async reloadRegionDiff(regionId, workspaceId, path) {
     await loadRegionDiff(regionId, (bridge) => bridge.diff(workspaceId, path))
   },
-  async openFileAndReveal(path, tabGroupId, location, requestedWorkspaceId, navigationSignal) {
+  async openFileAndReveal(path, tabGroupId, location, requestedWorkspaceId, navigationSignal, candidateSource) {
     const navigation = get(), workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
     if (!workspaceId || !navigation.config?.workspaces.some(workspace => workspace.id === workspaceId)) return false
     if (!navigation.layouts[workspaceId]) set(state => ({ layouts: {
@@ -9626,7 +9647,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch (error) { get().reportError(error, { kind: 'indeterminate' }); return false }
     let receipt: FileOpenResult | undefined
     const revealed = await get().openFile(path, target.address.groupId, location, workspaceId, undefined,
-      { ...target.placement, onResult: result => { receipt = result } }, navigationSignal)
+      { ...target.placement, candidateSource, onResult: result => { receipt = result } }, navigationSignal)
     const placed = receipt?.placement
     if (!revealed || navigationSignal?.aborted || !placed?.tabId || !placed.regionId ||
       placed.status !== 'created' && placed.status !== 'reused') return false
@@ -10272,6 +10293,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const currentLayout = displayId ? get().layouts[displayId] : undefined
       const currentTab = canonicalTabId ? get().tabs[destinationTabId!] : undefined
       return !resourceRebound && (!originalResource || workspace?.hostId === originalResource.hostId && workspace.path === originalResource.path) &&
+        (!placement?.candidateSource || get().sourceFilesInputs.selections[workspaceId] === placement.candidateSource) &&
         (!placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path &&
         currentLayout && tabGroupId && groupIds(currentLayout.root).includes(tabGroupId) && currentLayout.groups.some(group => group.id === tabGroupId) &&
         fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement) &&
@@ -10381,6 +10403,26 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         requestDesktopFocusWorkfaceReveal(get().workbenchSpaceSelection!)
     }
     const key = documentKey(workspaceId, path)
+    const candidate = placement?.candidateSource
+    const differentMainResource = candidate?.locator && !mainFileReaderMatches(workspaceId, originalResource, '',
+      { resource: candidate.locator.resource, target: candidate.target })
+    const objectFile = !candidate && topicId && topicFileDirectory(workspaceId, path) === scratchTopicDirectoryName(topicId)
+    const acceptsCandidate = () => {
+      if (!candidate && !objectFile) return true
+      const state = get(), document = state.documents[key]
+      const held = document ? document.readSource : originalFileReadSource(state, workspaceId, path)
+      if (candidate && (state.sourceFilesInputs.selections[workspaceId] !== candidate || !candidate.locator ||
+          !sourceFilesWorkspaceMatches(candidate.workspace, originalSpaceWorkspace(state, workspaceId, currentCoreSpatialGraph())))) return false
+      if (!document && !held) return true
+      let matches = true
+      if (candidate?.locator) {
+        matches = held ? candidateMatchesReadSource(candidate, held, path)
+          : !differentMainResource
+      } else if (held) matches = mainFileReaderMatches(workspaceId, originalResource, path, held)
+      if (!matches) get().reportError(new Error('An editor for this path belongs to another folder. Its contents and draft are kept. Open the original folder to continue there.'))
+      return matches
+    }
+    if (!acceptsCandidate()) { releaseNavigation(); return false }
     // 书签文件（`.webloc`/`.url`）默认开进 Browser，不进 Monaco——用户原话「应该是默认 browser」。
     // 与下面目录分支同一个「不进 Monaco」的形状，但判据是纯字符串（扩展名），所以在读之前就分叉：
     // 二进制 `.webloc` 走 `files.read` 的 `toString('utf8')` 会被破坏，取 URL 必须走 main 侧字节 +
@@ -10389,7 +10431,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const bookmarkKind = openAsText ? null : bookmarkKindForPath(path)
     if (bookmarkKind) {
       try {
-        const bookmark = await api.files.readBookmark(workspaceId, path)
+        const bookmark = differentMainResource
+          ? await readWorkspaceFileDocument(workspaceId, path, undefined, candidate).then(read => ({ url: read.status === 'read' ? parseBookmarkUrl(bookmarkKind, read.document.content) : null, binary: read.status === 'binary' }))
+          : await api.files.readBookmark(workspaceId, path)
         if (bookmark?.url) {
           if (!mayReveal()) return false
           const object = /^amux:/iu.test(bookmark.url) ? parseAmuxObjectLink(bookmark.url) : undefined
@@ -10467,6 +10511,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Media has a File identity, but never a UTF-8 buffer. Only its visible pane reads bytes.
       const format = previewFormat
       if (format && (!format.sourceEditable || format.kind === 'book' && !explicitBookSource) || get().documentIssues[key]?.kind === 'binary') {
+        if (differentMainResource) throw new Error('The preview reader points to another folder. Open this file at its original Source to preview it.')
         if (!mayReveal()) return false
         releaseNavigation()
 
@@ -10482,15 +10527,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!request) {
           const openedLifetime = advanceDocumentLifetime(key)
           const ownsRead = () => documentLifetime(key) === openedLifetime && fileOpenRequests.get(key) === request
-          const releaseObservation = async () => { if (ownsRead()) await api.files.unobserve(workspaceId, path) }
+          const releaseObservation = async () => { if (ownsRead() && !differentMainResource) await api.files.unobserve(workspaceId, path) }
           request = Promise.resolve().then(async () => {
             try {
               if (!ownsRead() || !resourceCurrent()) return false
               const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
-              await api.files.observe(workspaceId, path)
+              if (!differentMainResource) await api.files.observe(workspaceId, path)
               if (!ownsRead() || !resourceCurrent()) return false
-              const result = await readWorkspaceFileDocument(workspaceId, path)
+              const result = await readWorkspaceFileDocument(workspaceId, path, undefined, candidate)
               if (!ownsRead() || !resourceCurrent()) return false
+              if (result.status === 'binary' && differentMainResource) throw new Error('The original Source confirmed a binary file. Open it at that Source to preview the bytes.')
               if (result.status === 'directory') {
                 // The shared producer owns the verdict, not any caller's navigation.
                 await releaseObservation()
@@ -10571,7 +10617,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
           return false
         }
-        if (!opened) return false
+        if (!opened || !acceptsCandidate()) return false
         const state = get(), currentLayout = state.layouts[displayId!]
         result.data = { kind: format && !format.sourceEditable ? 'media-preview' : state.documentIssues[key]?.kind === 'binary' ? 'binary-preview' : 'text', reason: null }
         if ((state.documents[key] || state.documentIssues[key]?.kind === 'binary' || format && !format.sourceEditable) && currentLayout) {
