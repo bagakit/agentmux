@@ -1,5 +1,5 @@
 @import './focus-context.css';/* One scroll canvas keeps ruler, clip lanes and fixed identity gutters aligned. */
-.recent-focus { container: recent-focus / inline-size; position: relative; flex: none; height: 96px; min-width: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--surface-1); }
+.recent-focus { --focus-ruler-height: 18px; container: recent-focus / inline-size; position: relative; flex: none; height: 96px; min-width: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--surface-1); }
 .recent-focus[data-mode='collapsed'] { height: 28px; }
 .recent-focus__header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 0 var(--sp-2); min-height: 28px; padding: 0 var(--sp-2); }
 .recent-focus__title, .recent-focus__controls { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
@@ -35,7 +35,7 @@
 .recent-focus__controls .recent-focus__date { width: 158px; }
 .recent-focus__now { cursor: pointer; }
 .recent-focus__now[aria-pressed='true'] { color: var(--green); }
-.recent-focus__viewport { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.recent-focus__viewport { flex: 1; min-height: 0; overflow: auto; scroll-padding-block-start: var(--focus-ruler-height); overscroll-behavior: contain; }
 .recent-focus__name-column-resize { position: absolute; left: 0; bottom: 0; z-index: 4; pointer-events: none; }
 .recent-focus__name-separator { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; touch-action: none; pointer-events: auto; }
 .recent-focus__name-separator::after { position: absolute; inset: 0 2px; content: ''; background: transparent; }
@@ -43,7 +43,7 @@
 .recent-focus__name-separator:focus-visible { outline: none; }
 .recent-focus__canvas { min-width: 100%; padding-right: 8px; container: focus-time-ruler / inline-size; }
 .recent-focus__ruler, .recent-focus__track { display: grid; grid-template-columns: var(--focus-name-width, 112px) minmax(0, 1fr); min-width: 0; }
-.recent-focus__ruler { position: sticky; top: 0; z-index: 3; height: 18px; color: var(--text-3); background: var(--surface-1); font-size: 9px; font-variant-numeric: tabular-nums; }
+.recent-focus__ruler { position: sticky; top: 0; z-index: 3; height: var(--focus-ruler-height); color: var(--text-3); background: var(--surface-1); font-size: 9px; font-variant-numeric: tabular-nums; }
 .recent-focus__gutter { position: sticky; left: 0; z-index: 2; display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); min-width: 0; border-right: 1px solid var(--line); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-micro); }
 .recent-focus__gutter span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-focus__gutter .agent-avatar, .recent-focus__gutter svg { flex: none; }
@@ -426,14 +426,23 @@ button.recent-focus__scope:focus-visible { color: var(--text); background: var(-
 
 .recent-focus__track .recent-focus__gutter .agent-avatar--inline {
   flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
-  padding: 0;
+  max-width: none;
+  min-height: 20px;
+  justify-content: flex-start;
+  padding: 0 2px;
   border: 0;
   border-radius: 2px;
+  background: transparent;
+  box-shadow: none;
   font: inherit;
   color: inherit;
 }
-.recent-focus__track .recent-focus__gutter .agent-avatar--inline .agent-avatar__face { flex: none; }
+.recent-focus__track .recent-focus__gutter .agent-avatar--inline:is(:hover, :focus-visible) { background: var(--surface-2); }
+.recent-focus__track .recent-focus__gutter .agent-avatar--inline:focus-visible { outline-offset: -1px; }
+.recent-focus__track .recent-focus__gutter .agent-avatar--inline .agent-avatar__face { flex: none; overflow: visible; }
 .recent-focus__track .recent-focus__gutter .agent-avatar--inline .agent-avatar__label { min-width: 0; }
 
-.recent-focus__identity { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.recent-focus__identity { display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-inline-start: 12px; }
+.recent-focus__identity > small { padding-inline-start: 22px; }
