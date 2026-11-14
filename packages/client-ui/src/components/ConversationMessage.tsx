@@ -498,8 +498,8 @@ export function ConversationMessage({
               /></div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? directToolPart ? (
               <div key={key} className="conversation-tool-trace__payload conversation-tool-trace__payload--direct" data-trace-kind={part.kind}
                 {...(part.kind === 'tool-result' && part.failed ? { 'data-status': 'failed' } : {})} data-call-id={part.callId}>
-                {!sourceLabelsInDetails || sources?.parts[index]?.unread ? <ConversationSourceLabels sources={sources?.parts[index]} /> : null}
                 <ConversationToolPayload text={part.kind === 'tool-call' ? part.input : part.output} identity={readingIdentity} sourceIdentity={readingIdentity}
+                  leading={!sourceLabelsInDetails || sources?.parts[index]?.unread ? <ConversationSourceLabels sources={sources?.parts[index]} /> : null}
                   direction={part.kind === 'tool-call' ? 'input' : 'output'}
                   {...(part.callId ? { callId: part.callId } : {})} copyLabel={part.kind === 'tool-call' ? 'Copy tool input' : 'Copy tool output'} />
               </div>

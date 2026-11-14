@@ -1,8 +1,11 @@
 import { applyEdits, format } from 'jsonc-parser'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useConversationToolLabels } from '../platform.js'
 import { ContentCopyButton } from './ContentCopyButton.js'
 import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
+import { MarkdownCodeBlock } from './MarkdownCodeBlock.js'
+import { SemanticIcon } from '../theme/icons.js'
+import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
 
 type PayloadProps = {
   text: string
@@ -11,6 +14,7 @@ type PayloadProps = {
   callId?: string
   direction?: 'input' | 'output'
   copyLabel: string
+  leading?: ReactNode
 }
 
 /** Only whitespace changes for reading. The host's exact payload remains the copy source. */
@@ -21,7 +25,7 @@ export function ConversationToolPayload(props: PayloadProps) {
   </ConversationProgressiveBody>
 }
 
-function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, copyLabel, direction }: PayloadProps) {
+function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, copyLabel, direction, leading }: PayloadProps) {
   const labels = useConversationToolLabels()
   const [view, setView] = useState({ text, sourceIdentity, formatted: false })
   if (view.text !== text || view.sourceIdentity !== sourceIdentity) setView({ text, sourceIdentity, formatted: false })
@@ -36,17 +40,20 @@ function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, c
   const readable = useMemo(() => formatted && validJson ? applyEdits(text, format(text, undefined, { tabSize: 2, insertSpaces: true, eol: '\n' })) : text, [text, formatted, validJson])
   return <>
     <div className="conversation-detail-actions conversation-tool-payload__actions">
-      {direction || callId ? <span className="conversation-tool-payload__identity">
+      {leading || direction || callId ? <div className="conversation-tool-payload__identity">
+        {leading}
         {direction ? <span className="conversation-tool-trace__kind">{labels[direction]}</span> : null}
-        {callId ? <span className="conversation-tool-trace__identity">Call <code>{callId}</code></span> : null}
-      </span> : null}
+        {callId ? <ConversationRetainedDetails className="conversation-tool-payload__call" summary={<span title={callId}>Call <code>{callId}</code><SemanticIcon name="navigation.disclosure" size={10} /></span>}>
+          {() => <code className="conversation-tool-payload__call-original">{callId}</code>}
+        </ConversationRetainedDetails> : null}
+      </div> : null}
       <span className="conversation-tool-payload__tools">
       {validJson ? <button type="button" className="conversation-tool-trace__format" aria-label={labels.formatJson}
         aria-pressed={formatted} title={labels.formatJsonHint}
-        onClick={() => setView({ text, sourceIdentity, formatted: !formatted })}>{labels.formatJson}</button> : null}
+        onClick={() => setView({ text, sourceIdentity, formatted: !formatted })}><SemanticIcon name={formatted ? 'action.confirm' : 'file.structured-data'} size={12} />{labels.formatJson}</button> : null}
       {text.length > 0 ? <ContentCopyButton text={text} identity={identity} label={copyLabel} /> : null}
       </span>
     </div>
-    <pre>{formatted ? readable : text}</pre>
+    <div className="conversation-tool-payload__code"><MarkdownCodeBlock code={formatted ? readable : text} language={validJson ? 'json' : null} readOnly /></div>
   </>
 }

@@ -59,7 +59,9 @@ function CapturedProcessBody({ record, item, project }: { record: ConversationRe
       {diff ? <ConversationToolDiff diff={diff} /> : null}
       {fields.some(value => value !== undefined && value.length > 0) ? fields.map((text, index) => {
         if (text === undefined || text.length === 0) return null
-        const payload = <><ConversationSourceLabels sources={record.sources?.fields[index === 1 ? 'toolInput' : index === 2 ? 'toolOutput' : 'content']} /><ConversationToolPayload text={text} identity={sourceIdentity} sourceIdentity={sourceIdentity} copyLabel={index === 1 ? 'Copy tool input' : index === 2 ? 'Copy tool output' : 'Copy recorded content'} /></>
+        const payload = <ConversationToolPayload text={text} identity={sourceIdentity} sourceIdentity={sourceIdentity}
+          leading={<ConversationSourceLabels sources={record.sources?.fields[index === 1 ? 'toolInput' : index === 2 ? 'toolOutput' : 'content']} />}
+          copyLabel={index === 1 ? 'Copy tool input' : index === 2 ? 'Copy tool output' : 'Copy recorded content'} />
         return diff && (index === 1 || index === 0 && item.toolInput === undefined)
           ? <ConversationRetainedDetails key={index} summary={index === 1 ? 'Original tool input' : 'Original recorded content'}>{() => payload}</ConversationRetainedDetails>
           : <div key={index} className="conversation-tool-trace__payload conversation-tool-trace__payload--direct">{payload}</div>
