@@ -2069,6 +2069,12 @@ export type AgentMuxDesktopApi = {
     listProfiles(): Promise<BrowserProfileSummary[]>
     /** The same list with the revision Main committed; edits must name this revision. */
     readProfiles(): Promise<BrowserProfileList>
+    prepareProfileCookieImport(profileId: string, operationId: string, source: import('@agentmux/core/control').BrowserProfileCookieFileLocation, scope: import('@agentmux/core/control').BrowserProfileCookieScope): Promise<import('@agentmux/core/control').BrowserProfileCookieImportReview>
+    importProfileCookies(profileId: string, reviewId: string): Promise<import('@agentmux/core/control').BrowserProfileCookieFileReceipt>
+    exportProfileCookies(profileId: string, operationId: string, destination: import('@agentmux/core/control').BrowserProfileCookieFileLocation, scope: import('@agentmux/core/control').BrowserProfileCookieScope): Promise<import('@agentmux/core/control').BrowserProfileCookieFileReceipt>
+    inspectProfileCookieFiles(profileId: string, operationId?: string, offset?: number, limit?: number): Promise<import('@agentmux/core/control').BrowserProfileCookieFileInspection>
+    discardProfileCookieImport(profileId: string, reviewId: string): Promise<{ profileId: string; reviewId: string; discarded: true }>
+    revealProfileCookieFile(profileId: string, operationId: string): Promise<{ profileId: string; operationId: string; revealed: boolean }>
     listProfileBookmarks(profileId: string, folderId: string | null, operationId?: string): Promise<import('@agentmux/core/control').BrowserProfileBookmarkList>
     editProfileBookmark(profileId: string, expectedRevision: string, operationId: string, change: import('@agentmux/core/control').BrowserProfileBookmarkChange): Promise<import('@agentmux/core/control').BrowserProfileBookmarkMutation>
     importProfileBookmarks(profileId: string, folderId: string | null, expectedRevision: string, operationId: string, sourcePath: string): Promise<import('@agentmux/core/control').BrowserProfileBookmarkMutation>
