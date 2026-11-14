@@ -5,7 +5,7 @@
   border-top: 1px solid var(--line-soft);
   min-width: 0;
 }
-.goal-node-assignment h4 { margin: 0; font: inherit; font-weight: 600; }
+.goal-node-assignment h4 { margin: 0; color: var(--text-2); font: 550 var(--fs-meta)/1.45 var(--font-sans); }
 .goal-node-assignment__actions, .goal-node-assignment__choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .goal-node-assignment__choice .selection-field { min-width: min(180px, 100%); }
 .goal-node-assignment p { margin: 0; overflow-wrap: anywhere; }

@@ -205,7 +205,10 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const currentWork = !acknowledgementFeedback.failure && (fact.source.kind === 'start' || fact.source.kind === 'delegation' || fact.source.kind === 'patrol') ? fact.source : null
   const plan = <div ref={planRef} tabIndex={-1} className="goals-detail__plan" data-goal-reading-section="plan" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
     <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined}
-      planLink={demand.address ? <Button type="button" onClick={() => void copyLink('plan')}>{copied === 'plan' ? 'Plan link copied' : 'Copy plan link'}</Button> : null}
+      planLink={demand.address ? <button type="button" className="icon-button goal-plan__copy" title={copied === 'plan' ? 'Plan link copied' : 'Copy plan link'} onClick={() => void copyLink('plan')}>
+        {copied === 'plan' ? <ThemeDoneIcon size={15} aria-hidden="true" /> : <CopyLinkIcon size={15} aria-hidden="true" />}
+        <span className="goals-visually-hidden">{copied === 'plan' ? 'Plan link copied' : 'Copy plan link'}</span>
+      </button> : null}
       {...(finished ? {} : { onRequestPlan: onPlan })} pending={motePending === 'plan'} busy={Boolean(motePending)} />
   </div>
   const stage = acknowledgementFeedback.failure ? 'you' : fact.stage

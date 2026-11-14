@@ -10,6 +10,8 @@ import { demandAgentReferenceLabel, type DemandAgentReference } from '@agentmux/
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { goalAgentPresentation } from '../lib/goal-agent-selection'
 import { useGoalPlanPath } from './useGoalPlanPath'
+import { goalPlanEdges, type GoalPlanBox, type GoalPlanEdge } from '../lib/goal-plan-routing'
+export { goalPlanEdgePath } from '../lib/goal-plan-routing'
 import { GoalPlanAssignment } from './GoalPlanAssignment'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { useAppStore } from '../store'
@@ -100,51 +102,34 @@ export function goalPlanProjection(demand: DemandRecord, nextStep?: GoalNextStep
     }) }
 }
 
-/** A smooth left-to-right connector between two node anchors, in the graph's own coordinates. */
-export function goalPlanEdgePath(from: { x: number; y: number }, to: { x: number; y: number }): string {
-  const bend = Math.max(24, (to.x - from.x) / 2)
-  return `M ${from.x} ${from.y} C ${from.x + bend} ${from.y}, ${to.x - bend} ${to.y}, ${to.x} ${to.y}`
-}
-
-type Edge = { from: string; to: string; d: string; live: boolean; boundary?: 'start' | 'finish' }
-
 /**
  * Edges are measured from the rendered cards, so they follow wrapping titles and opened details.
  * Only this graph's own layout changes trigger a re-measure; no global listener is installed.
  */
-function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPlanView): { edges: Edge[]; width: number; height: number; scrollable: boolean } {
-  const [state, setState] = useState<{ edges: Edge[]; width: number; height: number; scrollable: boolean }>({ edges: [], width: 0, height: 0, scrollable: false })
+function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPlanView): { edges: GoalPlanEdge[]; width: number; height: number; scrollable: boolean } {
+  const [state, setState] = useState<{ edges: GoalPlanEdge[]; width: number; height: number; scrollable: boolean }>({ edges: [], width: 0, height: 0, scrollable: false })
   useLayoutEffect(() => {
     const element = root.current
     if (!element) return
     const cards = element.querySelectorAll<HTMLElement>('[data-goal-plan-node]')
     const start = element.querySelector<HTMLElement>('[data-goal-plan-boundary="start"]')!
     const finish = element.querySelector<HTMLElement>('[data-goal-plan-boundary="finish"]')!
-    const upstream = new Set(projection.nodes.flatMap(item => item.node.dependsOn))
     const measure = () => {
       const box = element.getBoundingClientRect()
       const content = element.querySelector<HTMLOListElement>('.goal-plan__columns')!
-      const anchor = (card: HTMLElement) => {
+      // Absolute SVG coordinates begin at the canvas padding edge, just inside its border.
+      const offsetX = element.scrollLeft - box.left - element.clientLeft
+      const offsetY = element.scrollTop - box.top - element.clientTop
+      const anchor = (card: HTMLElement, column: number): GoalPlanBox => {
         const rect = card.getBoundingClientRect()
-        const left = rect.left - box.left + element.scrollLeft, right = rect.right - box.left + element.scrollLeft
-        return { left, right, y: rect.top + rect.height / 2 - box.top + element.scrollTop }
+        return { left: rect.left + offsetX, right: rect.right + offsetX, top: rect.top + offsetY, bottom: rect.bottom + offsetY, column }
       }
-      const anchors = new Map([...cards].map(card => [card.dataset.goalPlanNode!, anchor(card)]))
-      const startAnchor = anchor(start), finishAnchor = anchor(finish)
-      const edges: Edge[] = []
-      const add = (source: typeof startAnchor | undefined, destination: typeof startAnchor, from: string, to: string, live = false, boundary?: Edge['boundary']) => {
-        if (!source || destination.left <= source.right) return
-        edges.push({ from, to, d: goalPlanEdgePath({ x: source.right, y: source.y }, { x: destination.left, y: destination.y }), live,
-          ...(boundary ? { boundary } : {}) })
-      }
-      for (const item of projection.nodes) {
-        const { id, dependsOn } = item.node
-        const target = anchors.get(id)!
-        const live = item.state === 'ready' || item.state === 'changes'
-        if (!dependsOn.length) add(startAnchor, target, '', id, false, 'start')
-        for (const dependency of dependsOn) add(anchors.get(dependency), target, dependency, id, live)
-        if (!upstream.has(id)) add(target, finishAnchor, id, '', false, 'finish')
-      }
+      const byId = new Map([...cards].map(card => [card.dataset.goalPlanNode!, card]))
+      const tasks = projection.nodes.map(({ node, column, state }) => ({
+        id: node.id, dependsOn: node.dependsOn, live: state === 'ready' || state === 'changes', box: anchor(byId.get(node.id)!, column)
+      }))
+      const lastColumn = tasks.reduce((last, task) => Math.max(last, task.box.column), 0)
+      const edges = goalPlanEdges(tasks, anchor(start, -1), anchor(finish, lastColumn + 1))
       // Measure content, not scrollHeight: the previous absolute SVG also contributes to scrolling.
       const width = Math.max(element.clientWidth, content.scrollWidth), height = content.offsetTop + content.offsetHeight
       const scrollable = width > element.clientWidth + 1 || height > element.clientHeight + 1
@@ -308,8 +293,11 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
   }, [open, selection?.trigger])
   useLayoutEffect(() => {
     if (!selection?.trigger) return
-    readingHeading.current?.scrollIntoView?.({ block: 'nearest' })
-    readingHeading.current?.focus({ preventScroll: true })
+    const heading = readingHeading.current
+    const card = heading?.closest('.goal-plan-node__reader-slot')?.previousElementSibling
+    if (card) card.scrollIntoView?.({ block: 'start' })
+    else heading?.scrollIntoView?.({ block: 'nearest' })
+    heading?.focus({ preventScroll: true })
   }, [selection])
   function select(target: GoalPlanReadingTarget, trigger: HTMLButtonElement) { setSelection({ target, trigger }) }
   function toggleNode(item: GoalPlanNodeView, trigger: HTMLButtonElement) {
@@ -357,9 +345,11 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
     : !accepted ? 'Unverified' : demand.grounding?.checks.some(check => check.outcome === 'gap') ? 'Closed with gaps' : 'Succeeded'
   return <section className={`goal-plan${wholeGoal || progress ? '' : ' goal-plan--unavailable'}`} aria-label="Goal plan" data-goal-plan-revision={projection.revision ?? undefined}>
     <div className="goals-section-heading">
-      <h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2>
-      <div className="goal-plan__tools">
+      <div className="goal-plan__heading">
+        <h2><ThemeObjectWorkflowIcon size={15} aria-hidden="true" /> Execution plan</h2>
         {!wholeGoal ? <span className="goals-caption" data-goal-plan-progress>Revision {projection.revision}</span> : null}
+      </div>
+      <div className="goal-plan__tools">
         {planLink}
         {requestAction ? <div className="goal-plan__revise">{requestAction}</div> : null}
       </div>
@@ -370,14 +360,18 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
     <div className="goal-plan__stage">
     <div className="goal-plan__canvas" ref={canvas} tabIndex={0} aria-label="Execution graph">
       <svg className="goal-plan__edges" width={width} height={height} aria-hidden="true">
-        <defs><marker id={arrowId} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto" viewBox="0 0 6 6"><path d="M0 0 L6 3 L0 6 Z" fill="context-stroke" /></marker></defs>
+        <defs><marker id={arrowId} markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto" viewBox="0 0 6 6"><path d="M0 0 L6 3 L0 6 Z" fill="context-stroke" /></marker></defs>
         {edges.map(edge => <path key={JSON.stringify([edge.boundary, edge.from, edge.to])} d={edge.d} markerEnd={`url(#${arrowId})`}
+          data-goal-edge-from={edge.from} data-goal-edge-to={edge.to}
           data-goal-plan-edge={edge.boundary ? undefined : `${edge.from}>${edge.to}`} data-goal-boundary-edge={edge.boundary}
           className={edge.live ? 'goal-plan__edge goal-plan__edge--live' : 'goal-plan__edge'} />)}
       </svg>
       <ol className="goal-plan__columns" style={{ '--goal-plan-columns': columns.length } as CSSProperties} data-single-column={columns.length === 1 || undefined}>
         <li className="goal-plan__boundary" data-goal-plan-boundary="start"><StartIcon size={13} aria-hidden="true" /><strong>Start</strong></li>
         {columns.map((column, index) => <li key={index} className="goal-plan__column" data-goal-plan-column={index}>
+          {progress && !wholeGoal && (columns.length > 1 || column.length > 1) ? <div className="goal-plan__depth">
+            <span>Level {index + 1}</span>{column.length > 1 ? <span>{column.length} tasks</span> : null}
+          </div> : null}
           <ol className="goal-plan__nodes">
             {column.map(item => {
               const state = item.wholeGoal ? 'goal' : item.state ?? 'unavailable', expanded = open === item.node.id
