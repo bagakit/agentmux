@@ -104,12 +104,12 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
             <span className="topic-promotion__halo" />
             {Array.from({ length: 6 }, (_, index) => <span key={index} className="topic-promotion__particle" />)}
           </div> : null}
-          <span className="topic-promotion__journey"><span>TOPIC</span><span className="topic-promotion__line" /><MoteIcon size={15} /><span>MOTE</span></span>
+          <span className="topic-promotion__journey"><span>TOPIC</span><span className="topic-promotion__line" /><MoteIcon size={15} /><span>MOTE CLUB</span></span>
         </div>
         <div className="topic-promotion__body">
           <span className="topic-promotion__eyebrow">从一起做事，到长期相伴</span>
           <Dialog.Title className="topic-promotion__title">{target.title}</Dialog.Title>
-          <p className="topic-promotion__invitation">让这个方向，成为有自己人格的伙伴。</p>
+          <p className="topic-promotion__invitation">让这个方向，成为长期合作的 Mote Club。</p>
           <Dialog.Description className="topic-promotion__continuity">原来的 Agent、对话和资料都会保留。</Dialog.Description>
           {blocked && !reading && phase !== 'unknown' ? <div className="topic-promotion__recovery" role="status">
             <strong>{allowed === false ? 'Promotion 已关闭' : '晋升设置待确认'}</strong>
@@ -125,7 +125,7 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
             <button type="button" className="small-button topic-promotion__cancel" onClick={onClose}>{busy || partial || phase === 'unknown' ? '稍后查看' : '暂时不用'}</button>
             {phase === 'unknown' ? <button type="button" className="primary-button topic-promotion__submit" onClick={() => void observe()}>查看结果</button>
               : <button type="button" className="primary-button topic-promotion__submit" disabled={busy || reading || blocked} onClick={() => void promote()}>
-                {busy ? <LoadingIcon size={15} animation="spin" aria-hidden="true" /> : <MoteIcon size={17} />}{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote'}
+                {busy ? <LoadingIcon size={15} animation="spin" aria-hidden="true" /> : <MoteIcon size={17} />}{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote Club'}
               </button>}
           </footer>
           {busy ? <p className="topic-promotion__progress" role="status">正在延续原来的工作。关闭后也可回来查看。</p> : null}

@@ -190,7 +190,7 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
     returnFocus: () => {
       const panel = container(), resource = useAppStore.getState().config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
       if (!panel?.matches(':popover-open') || panel.dataset.moteTargetTopic !== currentTopicId || resource?.hostId !== workspace?.hostId || resource?.path !== workspace?.path) return null
-      return panel.querySelector<HTMLButtonElement>(`[data-mote-archived="${topic.id}"] button`) ?? panel.querySelector<HTMLButtonElement>('[aria-label="Show archived Motes"]')
+      return panel.querySelector<HTMLButtonElement>(`[data-mote-archived="${topic.id}"] button`) ?? panel.querySelector<HTMLButtonElement>('[aria-label="Show archived Clubs"]')
     }
   }}>{choice}</SpaceObjectContextMenu> : choice
 })
@@ -232,11 +232,11 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
     setIdentityAnchor(anchor && (railMode === 'avatars' || name && name.scrollWidth > name.clientWidth) ? anchor : null)
   }, [railMode])
   return <div className="mote-chooser">
-    <div className="mote-chooser__choices" role="group" aria-label="Motes">
+    <div className="mote-chooser__choices" role="group" aria-label="Clubs">
       {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} onRename={onRename} onAvatar={onAvatar} onOpenSpace={onOpenMoteSpace} catalog={catalog} reference={reference} targetAgent={targetAgent} onReferenceSelect={onReferenceSelect} />)}
     </div>
     <div className="mote-chooser__actions">
-      <button type="button" className="mote-chooser__archive" aria-label="Show archived Motes" aria-pressed={showArchived} title={showArchived ? 'Hide archived Motes' : 'Show archived Motes'} onClick={() => setShowArchived(value => !value)}><ThemeActionArchiveIcon size={13} /><span>{topics.filter(topic => topic.moteArchive?.state === 'archived').length}</span></button>
+      <button type="button" className="mote-chooser__archive" aria-label="Show archived Clubs" aria-pressed={showArchived} title={showArchived ? 'Hide archived Clubs' : 'Show archived Clubs'} onClick={() => setShowArchived(value => !value)}><ThemeActionArchiveIcon size={13} /><span>{topics.filter(topic => topic.moteArchive?.state === 'archived').length}</span></button>
       <button type="button" aria-label="Show Mote avatars only" aria-pressed={railMode === 'avatars'} title={railMode === 'cards' ? 'Show avatars only' : 'Show Mote cards'} onClick={onToggleMode}>
         {railMode === 'cards' ? <ThemeLayoutCloseLeftIcon size={14} /> : <ThemeLayoutOpenLeftIcon size={14} />}
       </button>

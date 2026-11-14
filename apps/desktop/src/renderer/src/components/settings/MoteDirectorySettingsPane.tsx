@@ -39,7 +39,7 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
             {value === 'collaborators' ? <ThemeObjectTeamIcon size={14} /> : <ThemeObjectListIcon size={14} />}{moteDirectoryViewLabel(value)}</span>
         </label>)}
       </fieldset>
-      <p className="settings-workflows__note">View examples. Choose how collaborators appear in Mote Club.</p>
+      <p className="settings-workflows__note">Choose how your Clubs appear in the directory.</p>
     </section>
     <section className="settings-group">
       <header><span>Avatar size</span><small>Saved: {avatarSize ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT} px</small></header>
@@ -57,8 +57,8 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
     <section className="settings-group">
       <header><span>Your collaborators</span></header>
       <div className="settings-workflows__inline-action">
-        <p className="settings-workflows__note">Profiles, avatars and behavior belong to each Mote.</p>
-        <button type="button" className="small-button" onClick={onOpen}>Open Mote Club</button>
+        <p className="settings-workflows__note">Profiles, avatars and behavior belong to each Club.</p>
+        <button type="button" className="small-button" onClick={onOpen}>Open Clubs</button>
       </div>
     </section>
     <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} onSave={() => void commit()} />

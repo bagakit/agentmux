@@ -129,7 +129,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   }
 
   function moteSection(objects: typeof motes) {
-    const label = 'Motes', key = 'space:motes', heading = label
+    const label = 'Clubs', key = 'space:motes', heading = label
     const expanded = filtering || collapsedGroups[key] !== true
     const byId = new Map(objects.map((topic) => [topic.id, topic]))
     const filtered = objects.filter((topic) => matchesSpaceQuery(query, heading, label, topic.title, topic.summary, scratchTopicPhysicalPath(workspace, topic), workspace.hostId))
@@ -138,9 +138,9 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
     return <nav className="space-section space-motes-section" aria-label={heading}>
       <div className="space-category-heading"><SpaceSectionHeader label={heading} count={objects.length} icon={<MoteIcon size={14} />}
         expanded={expanded} filtering={filtering} onToggle={() => toggleGroup(key)}
-        navigationId={key} createLabel="Create Mote" onCreate={() => createTopic('mote')}
-        actions={<button type="button" className="icon-button mote-directory-archive" aria-label="Show archived Motes in Space"
-          aria-pressed={showArchived} title={`${showArchived ? 'Hide' : 'Show'} archived Motes · ${archivedMotes.length}`}
+        navigationId={key} createLabel="Create Club" onCreate={() => createTopic('mote')}
+        actions={<button type="button" className="icon-button mote-directory-archive" aria-label="Show archived Clubs in Space"
+          aria-pressed={showArchived} title={`${showArchived ? 'Hide' : 'Show'} archived Clubs · ${archivedMotes.length}`}
           onClick={() => setShowArchived(value => !value)}><ThemeActionArchiveIcon size={13} /><span>{archivedMotes.length}</span></button>}
         activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sectionSessions} /> : undefined} /></div>
       {filtering && ids.length === 0 ? <p className="space-tree-empty" role="status">No matching {label}</p> : null}

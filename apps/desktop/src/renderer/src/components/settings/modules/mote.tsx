@@ -9,7 +9,7 @@ const ClubIcon = semanticIconComponent('object.club')
 
 
 export const moteSettingsModule = {
-  id: 'mote', archetype: 'preference', group: 'mote', title: 'Club', icon: ClubIcon,
+  id: 'mote', archetype: 'preference', group: 'mote', title: 'Clubs', icon: ClubIcon,
   description: 'Directory view and your collaborators’ profiles.',
   keywords: 'mote club collaborator collaborators profile roles soul avatar directory list view size',
   savedSummary: config => `${moteDirectoryViewLabel(config.moteDirectoryView)} · ${config.moteDirectoryAvatarSize ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT}px · Profiles and SOUL`,

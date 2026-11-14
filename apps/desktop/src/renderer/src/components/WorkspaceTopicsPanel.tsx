@@ -424,7 +424,7 @@ export function WorkspaceTopicsPanel({
                     <SelectorRow
                       leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><ThemeStatusLoadingIcon animation="spin" size={14} /></span>
                         : <SpaceObjectIcon kind={target?.kind ?? 'topic'} name={target?.name ?? topic.title} manualIcon={target ? manualIcons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />}
-                      title={<><span title={topic.title}>{topic.title}</span>{isPromoted ? <span className="workspace-topic-entry__promoted">Mote</span> : null}{pinned ? <ThemeActionPinIcon className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
+                      title={<><span title={topic.title}>{topic.title}</span>{isPromoted ? <span className="workspace-topic-entry__promoted">Mote Club</span> : null}{pinned ? <ThemeActionPinIcon className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || displayPath(physicalPath, workspace.hostId)}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
@@ -443,7 +443,7 @@ export function WorkspaceTopicsPanel({
               {promoted?.topicId === topic.id && promoted.categorySpaceId === categorySpaceId ?
                 <div className="topic-promotion-notice" role="status" data-topic-id={topic.id} data-category-space-id={categorySpaceId}>
                   <span className="topic-promotion-notice__seal" aria-hidden="true"><MoteIcon size={22} /></span>
-                  <div><strong>已晋升为 Mote</strong><p>熟悉的 Agent，继续一起做事。</p></div>
+                  <div><strong>已晋升为 Mote Club</strong><p>原来的 Agent、对话和资料继续保留。</p></div>
                   <button type="button" className="icon-button" aria-label="关闭晋升提示" onClick={() => setPromoted(null)}>×</button>
                 </div> : null}
               </Fragment>
