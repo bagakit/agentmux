@@ -29,7 +29,7 @@ beforeEach(async () => {
 const ids = () => [...dom.container.querySelectorAll<HTMLElement>('[data-prompt-id]')].map(node => node.dataset.promptId)
 const editor = () => dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!
 const field = (name: string) => [...editor().querySelectorAll<HTMLLabelElement>('label')]
-  .find(label => label.querySelector('span')?.textContent === name)!.querySelector<HTMLInputElement | HTMLTextAreaElement>('input,textarea')!
+  .find(label => label.querySelector('span')?.textContent === name)!.control as HTMLInputElement | HTMLTextAreaElement
 const provider = () => dom.container.querySelector<HTMLSelectElement>('[aria-label="Prompt Provider scope"]')!
 const currentScope = () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Prompt authoring scope"] [aria-pressed="true"]')!
 async function mount() { await dom.render(<SettingsPanel initialSection="prompts" onClose={() => {}} />) }

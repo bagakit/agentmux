@@ -57,13 +57,13 @@ it.each([
 it('saved input preferences refresh hints without replacing the original Prompt draft, expectation or explicit save', async () => {
   await fixture.owner.update(current => ({ ...current, messageToolCompletion: input('!', true) }))
   await mount()
-  const instruction = field('Prompt').querySelector<HTMLTextAreaElement>('textarea')!
+  const instruction = field('Prompt').control as HTMLTextAreaElement
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(instruction, 'Keep this exact local draft.')
     instruction.dispatchEvent(new Event('input', { bubbles: true }))
   })
   await act(async () => { await fixture.owner.update(current => ({ ...current, messageToolCompletion: input(null, false) })) })
-  expect(field('Prompt').querySelector('textarea')).toBe(instruction)
+  expect(field('Prompt').control).toBe(instruction)
   expect(instruction.value).toBe('Keep this exact local draft.')
   expect(preview().querySelector('code')?.textContent).toBe('Input toolbar')
   expect(api.config.save).not.toHaveBeenCalled()

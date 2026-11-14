@@ -49,6 +49,15 @@ async function run({ win, read, q, button, until, settle, click, type, scene, ca
   await read(`window.proofPromptTextarea = ${prompt}`)
   await capture('prompt-two-lines-dark.png', 'Full Prompt workbench, long list and short focused text')
 
+  await read(`(${prompt}).setSelectionRange(2, 8)`)
+  await click(button('More space'))
+  assert.ok(await read(`${prompt} === window.proofPromptTextarea && (${prompt}).dataset.expanded === 'true'`))
+  assert.ok((await measure(prompt)).height > result.editors.wide.height * 2, 'More space expands the same short input')
+  assert.ok(await read(`document.activeElement === (${prompt}) && (${prompt}).selectionStart === 2 && (${prompt}).selectionEnd === 8`), 'Pointer expansion keeps the authored selection')
+  await capture('prompt-expanded-dark.png', 'More writing space while keeping focus and selection in the same editor')
+  await click(button('Less space'))
+  assert.equal((await measure(prompt)).height, result.editors.wide.height, 'Less space restores the compact editor')
+
   await type(prompt, long)
   result.editors.long = await measure(prompt)
   assert.ok(result.editors.long.height > result.editors.wide.height * 2, 'Long Prompt expands past the short field')
@@ -74,8 +83,16 @@ async function run({ win, read, q, button, until, settle, click, type, scene, ca
   assert.notEqual(result.editors.invalid.outlineColor, result.editors.narrow.outlineColor, 'The same boundary reflects the actual field error')
   assert.ok(await read(`document.getElementById((${prompt}).getAttribute('aria-describedby')).textContent.includes('Write the instruction')`))
   await capture('prompt-invalid-light.png', 'Error stays attached to the focused field without a second border')
+  const saveShortcut = async (modifiers) => {
+    await reduce.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers })
+    await reduce.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers })
+    await settle()
+  }
+  const pendingSaves = result.saves.length
+  await saveShortcut(2)
+  assert.equal(result.saves.length, pendingSaves, 'The shortcut cannot bypass the disabled Save button')
   await type(prompt, short)
-  await click(button('Save prompts'))
+  await saveShortcut(4)
   await until(`window.promptsProbe.config().then(config=>config.composerShortcuts.find(item=>item.id==='explain').body===${JSON.stringify(short)})`)
   assert.equal(result.commits.at(-1).composerShortcuts.find(item => item.id === 'explain').body, short)
 
@@ -118,8 +135,9 @@ async function run({ win, read, q, button, until, settle, click, type, scene, ca
 
   async function singleNativeFocus(field, name) {
     await read(`(${field}).scrollIntoView({block:'center'})`)
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
-    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
+    await reduce.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await reduce.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await settle()
     await read(`(${field}).focus({preventScroll:true})`)
     await settle()
     const facts = await read(`(() => { const field=${field}, row=field.closest('label');return {

@@ -25,7 +25,7 @@ beforeEach(async () => {
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => await f.owner.edit(expected!, next))
 })
 const field = (name: string) => [...dom.container.querySelectorAll<HTMLLabelElement>('[data-prompt-editor] label')]
-  .find((label) => label.querySelector('span')?.textContent === name)!.querySelector<HTMLInputElement | HTMLTextAreaElement>('input,textarea')!
+  .find((label) => label.querySelector('span')?.textContent === name)!.control as HTMLInputElement | HTMLTextAreaElement
 const search = () => dom.container.querySelector<HTMLInputElement>('[aria-label="Search prompts"]')!
 const editor = () => dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!
 const ids = () => [...dom.container.querySelectorAll<HTMLElement>('[data-prompt-id]')].map((node) => node.dataset.promptId)

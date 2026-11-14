@@ -291,7 +291,7 @@ async function settingsScene() {
     const card = 'document.querySelector(".prompt-settings-card")';
     await waitFor(`Boolean(${card})`);
     for (const [field, value] of [['Keyword', 'plainwords'], ['Name', '大白话说说做了什么'], ['Prompt', '大白话说明实际改动与验证，然后继续。']]) {
-        const target = `Array.from(${card}.querySelectorAll('label')).find(label=>label.querySelector('span')?.textContent===${JSON.stringify(field)}).querySelector('input,textarea,[role="textbox"]')`;
+        const target = `Array.from(${card}.querySelectorAll('label')).find(label=>label.querySelector('span')?.textContent===${JSON.stringify(field)}).control`;
         await click(target);
         await win.webContents.debugger.sendCommand('Input.insertText', { text: value });
     }

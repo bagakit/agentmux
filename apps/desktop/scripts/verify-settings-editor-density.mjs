@@ -25,12 +25,12 @@ async function run(stage, sourceOverrides) {
 
 const original = await readFile(join(root, editor), 'utf8')
 if (!process.argv.includes('--capture-only')) {
-  const label = '<label className="prompt-editor__instruction">'
-  const input = '<ComposerTextarea variant="compact" aria-invalid='
+  const label = '<div className="prompt-editor__instruction">'
+  const input = '<ComposerTextarea variant="compact" expanded='
   assert.equal(original.split(label).length, 2)
   assert.equal(original.split(input).length, 2)
-  const mutated = original.replace(label, '<label className="prompt-editor__instruction" style={{ border: \'1px solid var(--focus-line)\' }}>')
-    .replace(input, '<ComposerTextarea variant="compact" style={{ minHeight: 144 }} aria-invalid=')
+  const mutated = original.replace(label, '<div className="prompt-editor__instruction" style={{ border: \'1px solid var(--focus-line)\' }}>')
+    .replace(input, '<ComposerTextarea variant="compact" style={{ minHeight: 144 }} expanded=')
   const file = join(directory, 'mutated-editor.tsx')
   await writeFile(file, mutated)
   const { receipt, scenario } = await run('oversized-double-focus', { [editor]: { file, originalSha256: hash(original), sha256: hash(mutated) } })

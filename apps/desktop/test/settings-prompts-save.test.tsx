@@ -27,7 +27,7 @@ beforeEach(async () => {
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => await f.owner.edit(expected!, next))
 })
 const field = (name: string) => [...dom.container.querySelectorAll<HTMLLabelElement>('[data-prompt-editor] label')]
-  .find((label) => label.querySelector('span')?.textContent === name)!.querySelector<HTMLInputElement | HTMLTextAreaElement>('input,textarea')!
+  .find((label) => label.querySelector('span')?.textContent === name)!.control as HTMLInputElement | HTMLTextAreaElement
 const ids = () => [...dom.container.querySelectorAll<HTMLElement>('[data-prompt-id]')].map((node) => node.dataset.promptId)
 const summary = () => dom.container.querySelector('.prompt-save-summary')!.textContent
 const undo = () => dom.container.querySelector<HTMLButtonElement>('.prompt-pending-delete button')
@@ -56,6 +56,23 @@ async function external(id: string, changes: Record<string, string>) {
 }
 
 describe('whole-library Prompt saves and the most recent local deletion', () => {
+  it('commits the original Prompt draft via the Save shortcut and leaves IME Enter to the input', async () => {
+    await mount()
+    const instruction = field('Prompt')
+    await fill(instruction, 'Unsaved instruction sent to the original owner')
+    await act(async () => instruction.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true
+    })))
+    expect(api.config.save).not.toHaveBeenCalled()
+    expect(instruction.value).toBe('Unsaved instruction sent to the original owner')
+    await act(async () => instruction.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true
+    })))
+    await settled()
+    expect(api.config.save).toHaveBeenCalledOnce()
+    expect((await f.disk()).composerShortcuts?.[0]?.body).toBe('Unsaved instruction sent to the original owner')
+  })
+
   it('derives changed and pending-deletion facts from the entire library and undoes the exact authored object', async () => {
     await mount()
     expect(ids()).toEqual(['a', 'b', 'c'])
