@@ -42,6 +42,7 @@ export async function contextMenuCase({ phase, directory, window, observation, e
   const created = await result(['browser', 'profile', 'create', '--label', label, '--operation-id', 'context-menu-profile'])
   const profile = (await result(['browser', 'profile', 'ls'])).profiles.find((profile: { id: string }) => profile.id === created.creation.receipt.createdId)
   assert.equal(profile?.label, label)
+  await result(['browser', 'profile', 'create', '--label', 'Personal research and saved sources', '--operation-id', 'context-alternate-profile'])
   const profileSession = session.fromPartition(browserProfilePartition(profile.id))
   await profileSession.cookies.set({ url: origin, name: 'amux-survey-login', value: 'selected-profile', httpOnly: true })
   const prepared = await evaluate(`profileSurveyNative.prepareTask(${JSON.stringify(workspaceId)})`)
@@ -85,15 +86,23 @@ export async function contextMenuCase({ phase, directory, window, observation, e
   webContents.getFocusedWebContents = () => contents
   const chrome = nativeInput(window.webContents, display.input)
   const menu = '[role="menu"][aria-label="Browser page menu"][data-state="open"]'
+  const openMenus = '[data-browser-page-menu-id][role="menu"][data-state="open"]'
   const capture = async (name: string) => {
-    const measured = await evaluate(`(() => {
-      const menu = document.querySelector(${JSON.stringify(menu)}), r = menu.getBoundingClientRect();
-      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: innerWidth, height: innerHeight };
-    })()`)
-    assert.ok(measured.left >= 0 && measured.top >= 0 && measured.right <= measured.width && measured.bottom <= measured.height)
+    const measured = await nativeUntil(async () => {
+      const boxes: { left: number; top: number; right: number; bottom: number; width: number; height: number }[] = await evaluate(`
+        [...document.querySelectorAll(${JSON.stringify(openMenus)})].map(menu => {
+          const r = menu.getBoundingClientRect();
+          return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: innerWidth, height: innerHeight };
+        })`)
+      return boxes.length && boxes.every(r => r.left >= 0 && r.top >= 0 && r.right <= r.width && r.bottom <= r.height) ? boxes : null
+    }, `both levels of the ${name} menu fit the actual window`)
+    // DOM focus and Popper geometry can be ready before the window paints the new submenu.
+    await evaluate(`Promise.allSettled([...document.querySelectorAll(${JSON.stringify(openMenus)})]
+      .flatMap(menu => menu.getAnimations({ subtree: true }).map(animation => animation.finished)))
+      .then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))))`)
     const file = `first-context-menu-${name}.png`
     await writeFile(join(directory, file), (await window.capturePage()).toPNG())
-    receipt.frames.push({ file, measured })
+    receipt.frames.push({ file, measured: measured[0], submenu: measured[1] })
   }
   const openHit = async (embedded: boolean, id: string) => {
     hit = undefined
@@ -111,6 +120,7 @@ export async function contextMenuCase({ phase, directory, window, observation, e
       const owner = frame ? frame.contentDocument : document;
       const target = owner?.getElementById(${JSON.stringify(id)});
       if (!target) return null;
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       const offset = frame?.getBoundingClientRect();
       for (const rect of target.getClientRects()) {
         const x = (Math.max(0, rect.left) + Math.min(owner.defaultView.innerWidth, rect.right)) / 2;
@@ -118,7 +128,7 @@ export async function contextMenuCase({ phase, directory, window, observation, e
         if (target.contains(owner.elementFromPoint(x, y))) return { x: x + (offset?.x ?? 0), y: y + (offset?.y ?? 0) };
       }
       return null;
-    })()`) as Promise<{ x: number; y: number } | null>, 'visible link inside the original Chromium document')
+    })()`) as Promise<{ x: number; y: number } | null>, 'visible target inside the original Chromium document')
     const zoom = contents.getZoomFactor(), at = { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) }
     contents.focus()
     contents.sendInputEvent({ type: 'mouseMove', ...at })
@@ -139,6 +149,10 @@ export async function contextMenuCase({ phase, directory, window, observation, e
     return nativeHit
   }
   const menuLabels = () => evaluate(`[...document.querySelectorAll(${JSON.stringify(menu + ' [role="menuitem"]')})].map(item=>item.getAttribute('aria-label') || item.textContent.trim())`)
+  const escape = async () => {
+    await chrome.key('Escape', 'Escape', 27)
+    await nativeUntil(async () => !(await evaluate(`document.querySelector(${JSON.stringify(menu)})?.checkVisibility()`)), 'Escape dismisses the exact menu')
+  }
   const selectLink = async (embedded: boolean, address: string, itemLabel: string, submenu?: string) => {
     const existing = new Set(observation.childrenOf(source.region.browserId).map(event => event.browser.id))
     const nativeHit = await openHit(embedded, embedded ? 'frame-link' : 'main-link')
@@ -146,7 +160,13 @@ export async function contextMenuCase({ phase, directory, window, observation, e
     display.hits.push({ frame: nativeHit.frame.url, url: nativeHit.linkURL, menu: await menuLabels(), selection: itemLabel })
     if (submenu) {
       await chrome.click(menu + ' [aria-haspopup="menu"]', submenu)
-      await nativeUntil(() => evaluate(`[...document.querySelectorAll('[role="menu"][data-state="open"]')].length === 2`), 'the original Profile submenu')
+      await nativeUntil(() => evaluate(`[...document.querySelectorAll(${JSON.stringify(openMenus)})].length === 2`), 'the original Profile submenu')
+      const note = await evaluate(`(() => {
+        const submenu = document.querySelector('.browser-page-menu__submenu[data-state=open]');
+        const description = document.getElementById(submenu?.getAttribute('aria-describedby'));
+        return { note: description?.textContent, role: description?.getAttribute('role'), profiles: submenu?.querySelectorAll('[role=menuitem]').length };
+      })()`)
+      assert.deepEqual(note, { note: 'Opens in a new tab and adds the page to Survey.', role: null, profiles: 2 })
       await capture('profiles')
       await evaluate(`(() => {
         window.profileMenuInput = [];
@@ -172,6 +192,8 @@ export async function contextMenuCase({ phase, directory, window, observation, e
   try {
     const nativeHit = await openHit(true, 'frame-background')
     assert.equal(nativeHit.linkURL, '')
+    assert.deepEqual((await menuLabels()).slice(0, 3), ['Reload Frame', 'Open Frame in New Tab', 'Reload Page'])
+    await capture('frame')
     await contents.executeJavaScript(`document.querySelector('iframe').contentDocument.body.dataset.beforeReload = 'original-frame'`)
     await chrome.click(menu + ' [role="menuitem"]', 'Reload Frame')
     await nativeUntil(() => contents.executeJavaScript(`(() => {
@@ -184,11 +206,73 @@ export async function contextMenuCase({ phase, directory, window, observation, e
       await evaluate(`profileSurveyNative.appearance(${JSON.stringify(theme)})`)
       window.setContentSize(width, 820)
       await openHit(false, 'main-link')
-      assert.ok((await menuLabels()).includes('Split Left') && (await menuLabels()).includes('Split Down'))
+      assert.deepEqual((await menuLabels()).slice(0, 8), ['Open Link in New Tab', 'Split Left', 'Split Right', 'Split Up', 'Split Down',
+        'Copy Link Address', 'Open in Profile', 'More Link Actions'])
       await capture(theme)
-      await chrome.key('Escape', 'Escape', 27)
-      await nativeUntil(async () => !(await evaluate(`document.querySelector(${JSON.stringify(menu)})?.checkVisibility()`)), 'Escape dismisses the exact menu')
+      await escape()
     }
+    window.setContentSize(1280, 900)
+    const image = await openHit(false, 'linked-image')
+    assert.equal(image.mediaType, 'image')
+    assert.equal(image.hasImageContents, true)
+    assert.equal(image.linkURL, pageUrl + '?context=image#image-target')
+    const labels = await menuLabels()
+    assert.ok(labels.indexOf('Copy Link Address') >= 0 && labels.indexOf('Copy Link Address') < labels.indexOf('Copy Image'))
+    assert.deepEqual(labels.slice(-5), ['Copy Image', 'Copy Image Address', 'Open Image in New Tab', 'Save Image As…', 'Inspect'])
+    await capture('linked-image'); await escape()
+    await nativeUntil(() => contents.executeJavaScript('document.querySelector("video").readyState >= 2'), 'original synthetic video has a decoded frame')
+    const video = await openHit(false, 'context-video')
+    assert.equal(video.mediaType, 'video')
+    assert.deepEqual((await menuLabels()).slice(0, 3), ['Copy Video Address', 'Copy Video Frame', 'Open Video in New Tab'])
+    await capture('video'); await escape()
+    await contents.executeJavaScript(`window.getSelection().selectAllChildren(document.getElementById('selected-text'))`)
+    assert.ok((await openHit(false, 'selected-text')).selectionText.trim())
+    const selection = await menuLabels()
+    assert.equal(selection[0], 'Copy Text')
+    assert.ok(selection.includes('Search for Selected Text'))
+    await capture('selection'); await escape()
+    await contents.executeJavaScript('window.getSelection().removeAllRanges()')
+    await openHit(false, 'page-background')
+    assert.deepEqual((await menuLabels()).slice(0, 4), ['Reload Page', 'Copy Page Address', 'Back', 'Forward'])
+    await capture('page'); await escape()
+    receipt.cases.push({ kind: 'context-menu-object-hierarchy', passed: true })
+
+    window.setContentSize(1000, 432)
+    await openHit(false, 'main-link')
+    const focusedLabel = () => evaluate(`(() => {
+      const item = document.activeElement;
+      return item?.getAttribute('role') === 'menuitem' ? item.getAttribute('aria-label') || item.textContent.trim() : '';
+    })()`)
+    const keyboard: string[] = []
+    receipt.contextMenuKeyboard = keyboard
+    const ordered = (await menuLabels()).slice(0, 8)
+    await chrome.key('Home', 'Home', 36)
+    await nativeUntil(async () => await focusedLabel() === ordered[0], 'Home reaches the first original menu action')
+    keyboard.push(ordered[0])
+    for (const expected of ordered.slice(1)) {
+      await chrome.key('ArrowDown', 'ArrowDown', 40)
+      await nativeUntil(async () => await focusedLabel() === expected, `Arrow Down reaches ${expected} before the next key`)
+      keyboard.push(expected)
+    }
+    assert.equal(keyboard.at(-1), 'More Link Actions')
+    await chrome.key('ArrowRight', 'ArrowRight', 39)
+    receipt.contextMenuKeyboardFocus = await nativeUntil(async () => {
+      if (await focusedLabel() !== 'Open Link Here') return null
+      return evaluate(`(() => {
+        const item = document.activeElement, style = getComputedStyle(item);
+        return item.matches(':focus-visible') && style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0
+          ? { label: item.textContent.trim(), color: style.outlineColor, width: style.outlineWidth } : null;
+      })()`)
+    }, 'keyboard enters the original secondary menu and paints the focused item')
+    await capture('short-keyboard')
+    assert.equal(await focusedLabel(), 'Open Link Here')
+    await chrome.key('ArrowLeft', 'ArrowLeft', 37)
+    await nativeUntil(async () => await focusedLabel() === 'More Link Actions' && await evaluate(`document.querySelectorAll(${JSON.stringify(openMenus)}).length === 1`),
+      'keyboard returns to its parent menu row')
+    await chrome.key('ArrowRight', 'ArrowRight', 39)
+    await nativeUntil(async () => await focusedLabel() === 'Open Link Here', 'keyboard re-enters the same submenu')
+    await escape()
+    receipt.cases.push({ kind: 'context-menu-short-keyboard', passed: true })
     window.setContentSize(1280, 900)
     for (const [direction, label] of [['left', 'Split Left'], ['down', 'Split Down'], ['up', 'Split Up'], ['right', 'Split Right']] as const) {
       const split = await selectLink(false, pageUrl + '?context=main#main-target', label)
@@ -208,7 +292,7 @@ export async function contextMenuCase({ phase, directory, window, observation, e
     const ordinary = await selectLink(false, pageUrl + '?context=main#main-target', 'Open Link in New Tab')
     assert.equal(ordinary.view.webContents.session, contents.session)
     assert.equal(await ordinary.view.webContents.executeJavaScript('document.querySelector("#identity").textContent'), 'source-profile')
-    const explicit = await selectLink(true, pageUrl + '?context=frame&exact=1#frame-target', profile.label, 'Open Link as')
+    const explicit = await selectLink(true, pageUrl + '?context=frame&exact=1#frame-target', profile.label, 'Open in Profile')
     assert.equal(explicit.child.browser.profileId, profile.id)
     assert.equal(explicit.view.webContents.session, profileSession)
     assert.equal(await explicit.view.webContents.executeJavaScript('document.querySelector("#identity").textContent'), 'selected-profile')

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 
 /** Real HTTP form sign-in and two origins, shared by the same native producer. */
 export async function startProfileSurveyOrigins() {
@@ -37,7 +38,18 @@ export async function startProfileSurveyOrigins() {
       response.end(artifact.bytes); return
     }
     if (url.pathname === '/context-menu') {
-      html(response, 'Context actions', '<label>Page draft<input aria-label="Page draft"></label><p><a id="main-link" href="/work?context=main#main-target">Open from main document</a></p><iframe id="context-frame" src="/context-frame" title="Embedded document" style="width:400px;height:160px;border:0"></iframe>'); return
+      html(response, 'Context actions', '<label>Page draft<input aria-label="Page draft"></label><p><a id="main-link" href="/work?context=main#main-target">Open from main document</a></p><iframe id="context-frame" src="/context-frame" title="Embedded document" style="width:400px;height:160px;border:0"></iframe>' +
+        '<div><a href="/work?context=image#image-target"><img id="linked-image" width="88" height="36" src="/context-image.png" alt="Linked image"></a></div>' +
+        '<p id="selected-text">Selected original text</p><video id="context-video" width="128" height="80" preload="auto" muted src="/context-video.webm"></video>' +
+        '<p id="page-background" style="user-select:none">Plain page background</p>'); return
+    }
+    if (url.pathname === '/context-image.png') {
+      response.writeHead(200, { 'content-type': 'image/png' })
+      response.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGPQSA7/DwADewHiU1yAfAAAAABJRU5ErkJggg==', 'base64')); return
+    }
+    if (url.pathname === '/context-video.webm') {
+      response.writeHead(200, { 'content-type': 'video/webm' })
+      response.end(await readFile(new URL('./context-video.webm', import.meta.url))); return
     }
     if (url.pathname === '/context-frame') {
       html(response, 'Embedded actions', '<a id="frame-link" href="/work?context=frame&amp;exact=1#frame-target">Open from embedded document</a><p id="frame-background" style="user-select:none">Embedded document background</p>'); return

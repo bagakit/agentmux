@@ -170,6 +170,7 @@ async function execute(phase) {
 try {
   receipt.executables = {node:{path:process.execPath,sha256:hash(await readFile(process.execPath)),version:process.version},electron:{path:require('electron'),sha256:hash(await readFile(require('electron'))),version:require('electron/package.json').version}}
   await bind(import.meta.filename)
+  if (selectedCase === 'context-menu') await bind(join(fixtures, 'context-video.webm'))
   for (const input of ['apps/host/native/workspace-move.c','apps/host/scripts/build-workspace-move-helper.mjs','apps/desktop/scripts/build-workspace-move-helper.mjs','apps/desktop/scripts/fixtures/browser-profile-survey-workface/origin-server.mjs']) await bind(join(root,input))
   execFileSync(process.execPath,[join(root,'apps/desktop/scripts/build-workspace-move-helper.mjs')],{cwd:root,stdio:'inherit'})
   await bind(join(root,'apps/desktop/resources/bin/agentmux-workspace-move'))
@@ -240,7 +241,7 @@ try {
   if (selectedCase === 'address-selection') {
     assert.ok(first.cases.some(item => item.kind === 'address-selection-exact-navigation' && item.passed))
   } else if (selectedCase === 'context-menu') {
-    for (const kind of ['context-menu-profile-admission', 'context-menu-original-frame-reload', 'context-menu-directional-split'])
+    for (const kind of ['context-menu-profile-admission', 'context-menu-original-frame-reload', 'context-menu-directional-split', 'context-menu-object-hierarchy', 'context-menu-short-keyboard'])
       assert.ok(first.cases.some(item => item.kind === kind && item.passed), 'The original workbench menu must complete ' + kind)
     const restart = await execute('restart')
     assert.notEqual(first.pid, restart.pid)

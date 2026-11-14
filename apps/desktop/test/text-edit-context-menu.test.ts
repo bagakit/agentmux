@@ -259,7 +259,7 @@ describe('actual definition-external consumers', () => {
     range.selectNodeContents(page.getElementById('text')!)
     page.getSelection()!.addRange(range)
     const selected = await openLink('Selected plain text')
-    const copy = selected.event.items.find(row => row.kind === 'action' && row.label === 'Copy')
+    const copy = selected.event.items.find(row => row.kind === 'action' && row.label === 'Copy Text')
     if (copy?.kind !== 'action') throw new Error('The original link menu lost Copy for its selected text')
     expect(native.menus).toHaveLength(0)
     expect(presentation.choose(selected.event.id, { kind: 'select', itemId: copy.id })).toBe(true)
@@ -315,7 +315,10 @@ describe('actual definition-external consumers', () => {
     expect(link.items.map((item: any) => item.label)).toContain('Copy Link Address')
     await click(link, 'Copy Link Address')
     const image = await openAddress({ linkURL, mediaType: 'image', srcURL })
-    expect(image.items.map((item: any) => item.label)).toEqual(expect.arrayContaining(['Copy Link Address', 'Copy Image Address']))
+    expect(image.items.map((item: any) => item.type === 'separator' ? 'group boundary' : item.label)).toEqual([
+      'Open Link in New Tab', 'Open Link in Split', 'Copy Link Address', 'More Link Actions', 'group boundary',
+      'Copy Image', 'Copy Image Address', 'Open Image in New Tab', 'Save Image As…', 'group boundary', 'Inspect'
+    ])
     await click(image, 'Copy Image Address')
     await click(await openAddress(), 'Copy Page Address')
     expect(native.writeClipboardText.mock.calls).toEqual([[linkURL], [srcURL], [pageURL]])
@@ -355,13 +358,18 @@ describe('actual definition-external consumers', () => {
     expect(projections()[0].opening.collectInSurvey).toBeUndefined()
 
     const profileMenu = await openHit({ linkURL })
-    const submenu = profileMenu.items.find((item: any) => item.label === 'Open Link as').submenu
+    const profile = profileMenu.items.find((item: any) => item.label === 'Open in Profile')
+    expect(profile.submenuNote).toBe('Opens in a new tab and adds the page to Survey.')
+    const submenu = profile.submenu
     expect(submenu.map((item: any) => item.label)).toEqual(['Work'])
     submenu[0].click(); await flush()
     expect(projections()).toHaveLength(2)
     expect(projections()[1]).toMatchObject({ opening: { destination: 'tab', foreground: true, collectInSurvey: true }, browser: { profileId: 'work', url: linkURL } })
     expect(resolvePartition).toHaveBeenCalledWith('work')
     expect(contents.getURL()).toBe(pageURL)
+    expect(profileMenu.items.find((item: any) => item.label === 'More Link Actions').submenu.map((item: any) => item.label)).toEqual([
+      'Open Link Here', 'Open Link in New Window', 'Open Link in Private Window', 'Save Link As…'
+    ])
 
     const srcURL = 'https://generic.invalid/picture.png'
     await click(await openHit({ mediaType: 'image', srcURL, hasImageContents: true }), 'Copy Image')
@@ -369,11 +377,15 @@ describe('actual definition-external consumers', () => {
     await click(await openHit({ mediaType: 'image', srcURL, hasImageContents: true }), 'Save Image As…')
     expect(contents.downloadURL).toHaveBeenCalledWith(srcURL)
     const video = { mediaType: 'video', srcURL: 'https://generic.invalid/video.mp4', mediaFlags: { canSave: true, inError: false } }
+    const videoMenu = await openHit(video)
+    expect(videoMenu.items.filter((item: any) => item.label).map((item: any) => item.label)).toEqual([
+      'Copy Video Address', 'Copy Video Frame', 'Open Video in New Tab', 'Save Video As…', 'Save Video Frame As…', 'Inspect'
+    ])
     await click(await openHit(video), 'Copy Video Frame')
     await click(await openHit(video), 'Save Video Frame As…')
     expect(contents.copyVideoFrameAt).toHaveBeenCalledWith(21, 34)
     expect(contents.saveVideoFrameAs).toHaveBeenCalledWith(21, 34)
-    await click(await openHit(), 'Reload')
+    await click(await openHit(), 'Reload Page')
     expect(contents.reload).toHaveBeenCalledTimes(1)
     await click(await openHit(), 'Inspect')
     expect(contents.inspectElement).toHaveBeenCalledWith(21, 34)
@@ -407,8 +419,11 @@ describe('actual definition-external consumers', () => {
     const fixture = { contents, window, owner: { current: true }, frame: top }
     const topMenu = await open(fixture, hit)
     expect(topMenu.items.map((item: { label: string }) => item.label)).not.toContain('Reload Frame')
+    expect(topMenu.items.slice(0, 2).map((item: { label: string }) => item.label)).toEqual(['Reload Page', 'Copy Page Address'])
     const embedded = await open({ ...fixture, frame: child }, hit)
-    expect(embedded.items.map((item: { label: string }) => item.label)).toContain('Open Frame in New Tab')
+    expect(embedded.items.slice(0, 4).map((item: any) => item.type === 'separator' ? 'group boundary' : item.label)).toEqual([
+      'Reload Frame', 'Open Frame in New Tab', 'group boundary', 'Reload Page'
+    ])
     await click(embedded, 'Reload Frame')
     expect(child.reload).toHaveBeenCalledTimes(1)
     expect(top.reload).not.toHaveBeenCalled()
