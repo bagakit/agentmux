@@ -363,8 +363,9 @@
 /* Composition is a whole target; organization sorting keeps its original separate handle. */
 .survey-list-item { position: relative; }
 .survey-list-item[data-compose-over="true"], .survey-item-row[data-compose-over="true"] { border-radius: var(--radius-sm); background: color-mix(in srgb, var(--focus-line) 9%, transparent); box-shadow: inset 0 0 0 1px var(--focus-line); }
-.survey-compose-cue { position: absolute; z-index: 5; left: 32px; right: 34px; top: 18px; overflow: hidden; color: var(--text-2); font-size: 10px; line-height: 12px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
-.survey-item-row[data-compose-over="true"] > .survey-item > strong, .survey-list-item[data-compose-over="true"] > .survey-item-row > .survey-item > strong, .survey-list-item[data-compose-over="true"] > .survey-item-row[data-headerless="true"] .survey-tab-cell:first-child .survey-tab-label { transform: translateY(-5px); }
+.survey-compose-cue { position: absolute; z-index: 5; left: 32px; right: 34px; top: 18px; overflow: hidden; padding: 0 5px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); font-size: 10px; line-height: 12px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.survey-list-item[data-compose-over="true"]:has(> .survey-item-row[data-headerless="true"]) > .survey-compose-cue { left: 8px; top: 2px; }
+.survey-item-row[data-compose-over="true"] > .survey-item > strong, .survey-list-item[data-compose-over="true"] > .survey-item-row > .survey-item > strong { transform: translateY(-5px); }
 
 [data-content-dragging="true"] { opacity: .55; }
 

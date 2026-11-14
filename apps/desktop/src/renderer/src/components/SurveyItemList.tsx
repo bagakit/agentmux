@@ -1,5 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type KeyboardCoordinateGetter } from '@dnd-kit/core'
+import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type KeyboardCoordinateGetter, type Modifier } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { getEventCoordinates, CSS } from '@dnd-kit/utilities'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -21,6 +21,8 @@ const CancelIcon = semanticIconComponent('action.cancel')
 const itemKey = (id: string) => `survey-item:${id}`
 const groupKey = (id: string) => `survey-group:${id}`
 const ungroupedKey = 'survey-ungrouped'
+const listSortingAxis: Modifier = ({ active, transform }) => active?.data.current?.kind === 'item' || active?.data.current?.kind === 'group'
+  ? { ...transform, x: 0 } : transform
 
 type Target = { kind: 'item'; zoneId: string; groupId: string | null; index: number } | { kind: 'group'; groupId: string } | { kind: 'ungrouped' }
 type Composition = { start(reference: SurveyContentReference): string | null; canDrop(target: SurveyCompositionDropTarget): boolean; drop(target: SurveyCompositionDropTarget | null): void }
@@ -131,7 +133,7 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
     {ids(values).map((zoneId, index) => <SortableItem index={index} key={zoneId} zoneId={zoneId} groupId={groupId} title={titles.get(zoneId)!} visible={enabled} render={renderItem} />)}
   </SortableContext>
   return <div className="survey-page-list" data-dragging={dragging || undefined}>
-    <DndContext sensors={sensors} onDragStart={start} onDragEnd={end} onDragCancel={() => { held.current = null; setDragging(false); composition?.drop(null) }}
+    <DndContext sensors={sensors} modifiers={[listSortingAxis]} onDragStart={start} onDragEnd={end} onDragCancel={() => { held.current = null; setDragging(false); composition?.drop(null) }}
       accessibility={{ screenReaderInstructions: { draggable: 'Press Space to pick up. Use arrow keys to choose a destination. Press Space to drop, or Escape to cancel.' },
         announcements: {
           onDragStart: ({ active }) => active.data.current?.kind === 'content' ? `Picked up ${contentLabel.current ?? 'original content'}. Choose a research, a list group, or Make independent research.` : 'Picked up for reordering.',
@@ -202,7 +204,7 @@ function SortableItem({ zoneId, groupId, title, visible, render, index }: { inde
   const sortingOver = from?.kind === 'item' && over?.id === itemKey(zoneId)
   const edge = sortingOver ? from.groupId === groupId ? from.index < index ? 'after' : 'before'
     : active?.rect.current.translated && active.rect.current.translated.top > over.rect.top + over.rect.height / 2 ? 'after' : 'before' : undefined
-  return <div ref={setNodeRef} data-sort-edge={edge} data-compose-over={content && isOver || undefined} className="survey-list-item" data-dragging={isDragging || undefined} style={{ transform: CSS.Transform.toString(transform), transition }}>
+  return <div ref={setNodeRef} data-sort-edge={edge} data-compose-over={content && isOver || undefined} className="survey-list-item" data-dragging={isDragging || undefined} style={{ transform: CSS.Translate.toString(transform), transition }}>
     {render(zoneId, <button type="button" className="survey-drag-handle" {...attributes} {...listeners} aria-label={`Move survey item: ${title}`} title="Drag to reorder"><DragIcon size={12} /></button>, visible)}
     {content && isOver ? <span className="survey-compose-cue" aria-hidden="true">Move into research</span> : null}
   </div>
@@ -223,7 +225,7 @@ function SurveyListGroup({ group, model, children, visible, selected, compositio
   }, [model.renamingGroupId, group.groupId, group.name, model.stored, model.editable, edit])
   useEffect(() => { if (!visible) setMenuOpen(false) }, [visible])
   const cancel = () => { ++generation.current; setEdit(null); model.setRenamingGroupId(null) }
-  return <section ref={setNodeRef} className="survey-list-group" data-survey-list-group={group.groupId} data-collapsed={group.collapsed} data-selected={selected || undefined} data-dragging={isDragging || undefined} data-drop-over={isOver && acceptsContainer(active?.data.current as Target | undefined, group.groupId) || undefined} style={{ transform: CSS.Transform.toString(transform), transition }}>
+  return <section ref={setNodeRef} className="survey-list-group" data-survey-list-group={group.groupId} data-collapsed={group.collapsed} data-selected={selected || undefined} data-dragging={isDragging || undefined} data-drop-over={isOver && acceptsContainer(active?.data.current as Target | undefined, group.groupId) || undefined} style={{ transform: CSS.Translate.toString(transform), transition }}>
     <CompositionDestination target={{ kind: 'list-group', groupId: group.groupId }} composition={composition} visible={visible && !edit} label={group.name || 'Unnamed group'}><div className="survey-list-group-heading" data-survey-group-header={group.groupId}>
       <button type="button" className="survey-drag-handle" {...attributes} {...listeners} aria-label={`Move survey group: ${group.name}`} title="Drag group"><DragIcon size={12} /></button>
       {edit ? <form className="survey-group-name" onSubmit={async event => {
