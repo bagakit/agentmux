@@ -99,6 +99,16 @@ returns only a safe scene phase summary and reference; frames, traces and profil
 system metrics scene inspect, even with --include-raw. A pending heap publication keeps the prior
 file plus one candidate and refuses further native heap captures.
 
+system metrics trace capture --memory-allocators selects one explicit allocator trace instead
+of the default timeline. It requests exactly one deterministic:false, levelOfDetail:light
+native dump, with fixed memory-infra categories and no periodic triggers. It does not request forced GC.
+memoryDump records the request and valid ACK separately from the original native events.
+ACK dumpGuid and trace-point id/ts/name/PID are independent identities, even when tokens match.
+Keep original event occurrences, attributes, units and ownership edges; do not join points by
+order, sum parent/child or shared nodes, or turn them into an RSS/reclaim bill. Missing providers
+remain unknown. The original gzip material/export can contain private URLs and paths; no upload,
+automatic retry, full object heap or background capture is performed.
+
 system metrics profile analyze --input FILE analyses one already-exported local cpuprofile
 without resolving or connecting to an endpoint, opening an App, sampling or uploading.
 It preserves the original byte hash and generated positions, reports original duration,
