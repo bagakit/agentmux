@@ -50,6 +50,30 @@ async function fixture(records: ContinuousProgressLoop[], options: { goals?: Goa
   }
 }
 
+it('skips copying an in-flight due schedule and still checks another target', async () => {
+  const f = await fixture([
+    record('held', { afterMs: 20, nextCheckAt: 100 }),
+    record('another', { nextCheckAt: 200 }),
+  ])
+  const gate = f.hold('held')
+  const checking = f.manager.check(100)
+  await gate.entered.promise
+  const copies = vi.spyOn(globalThis, 'structuredClone')
+  try {
+    for (let i = 0; i < 100; i++) await f.manager.check(101)
+    const heldCopies = copies.mock.calls.filter(([value]) =>
+      typeof value === 'object' && value !== null && 'loopId' in value && value.loopId === 'held')
+    expect(heldCopies).toHaveLength(0)
+    expect(f.observed.map(item => item.loopId)).toEqual(['held'])
+    await f.manager.check(200)
+    expect(f.observed.map(item => item.loopId)).toEqual(['held', 'another'])
+  } finally {
+    copies.mockRestore()
+    gate.release.resolve()
+    await checking
+  }
+})
+
 it.each([1, 100, 1000])('public list copies only the exact target with %i unrelated saved prompts', async count => {
   const original = record('selected'), target = { hostId: original.hostId, agentSessionId: original.agentSessionId,
     providerId: original.providerId, workspacePath: original.workspacePath }
