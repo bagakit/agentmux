@@ -1,8 +1,8 @@
-import type { MountedSessionFact } from '../lib/space-mount-sessions'
+import { confirmedMountedSessionState, type MountedSessionFact } from '../lib/space-mount-sessions'
 
 /** Original Source metadata only; this never grants a local Session or Run. */
 export function OriginalSourceMemberMetadata({ current, last, stale, error }: { current?: MountedSessionFact | undefined; last?: MountedSessionFact | undefined; stale?: boolean | undefined; error?: string | undefined }) {
-  const state = current?.state, confirmed = state?.status === 'observed' && !stale ? state : last?.state.status === 'observed' ? last.state : undefined
+  const state = current?.state, confirmed = confirmedMountedSessionState(current, last, stale)
   const currentObserved = state?.status === 'observed' && !stale
   const issue = error ?? (state?.status === 'unknown' || state?.status === 'unavailable' ? state.issue.message : undefined)
   return <div className="mounted-session-metadata" role="status">

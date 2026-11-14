@@ -1,4 +1,5 @@
 import { encodeSelectedImageReference } from '@agentmux/client-ui/composer-semantic-reference'
+import type { FileUploadIdentity } from '@agentmux/core/files'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { useEffect, useMemo, useRef, type RefObject } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
@@ -10,9 +11,18 @@ import type { useComposerFeedback } from '../components/ComposerFeedback'
 import { api } from './api'
 import { selectScreenshotTarget, releaseScreenshotTarget } from './screenshot-attachment'
 
+export type ComposerImageRetentionResult = {
+  upload: FileUploadIdentity
+  observation: 'confirmed' | 'unavailable'
+  issue?: { code?: string; message: string }
+}
+/** The original upload owner retains its identity even when its acknowledgement is unavailable. */
+export type ComposerImageRetention = (bytes: Uint8Array, mimeType: string) => Promise<ComposerImageRetentionResult>
+
 /** Host resource IO only. The maintained editor owns insertion, selection, Undo and the draft. */
-export function useComposerAttachments({ scope, sessionControl, hostId, workspacePath, fileResource, disabled, insertion, feedback, document, onRemoteFiles, shortcutActive = true }: {
+export function useComposerAttachments({ scope, sessionControl, retainImage, hostId, workspacePath, fileResource, disabled, insertion, feedback, document, onRemoteFiles, shortcutActive = true }: {
   sessionControl?: AgentSessionControl | undefined
+  retainImage?: ComposerImageRetention
   scope: string; hostId: string | undefined; workspacePath: string | undefined; disabled: boolean
   /** Omitted for a single-context Launcher; null preserves an unconfirmed original resource. */
   fileResource?: { hostId: string; workspacePath: string } | null
@@ -42,7 +52,19 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
       return isCurrent() && insertion.current === editor ? value : null
     }, { separate: true })
   }
-  async function selectedImage(text: string, bytes: Uint8Array, mimeType: string): Promise<string> {
+  async function selectedImage(text: string, bytes: Uint8Array, mimeType: string, savedPath: string): Promise<string> {
+    if (retainImage) {
+      const selected = await retainImage(bytes, mimeType)
+      if (selected.observation === 'unavailable' || selected.issue) {
+        const issue = Object.assign(new Error(`The original image is saved on this device at ${savedPath}. ${selected.issue?.message ??
+          'Its upload to the original Agent is unconfirmed; inspect the original upload before sharing it.'}`),
+        selected.issue?.code ? { code: selected.issue.code } : {})
+        feedback.report(issue)
+      }
+      // Only the original typed upload can resolve this resource at the receiving Agent.
+      // A local preview path must never become a claimed remote filesystem reference.
+      return encodeSelectedImageReference('[Selected image]', selected.upload)
+    }
     if (!sessionControl) return text
     try {
       const selected = await api.ui.retainInputImage({ session: sessionControl, bytes, mimeType })
@@ -52,12 +74,13 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
     catch (error) { feedback.report(error); return text }
   }
   async function imageReference(file: File): Promise<string> {
-    requireLocal()
+    if (!retainImage) requireLocal()
     const extension = Object.entries(PASTED_IMAGE_MIME_TYPES).find(([, mime]) => mime === file.type)?.[0]
     if (!extension) throw new Error(`Image format ${file.type || 'unknown'} is not supported by the image saver.`)
     const bytes = new Uint8Array(await file.arrayBuffer())
     const path = await api.ui.savePastedImage({ bytes, extension })
-    return selectedImage(appendFileReferences('', [path]), bytes, file.type)
+    try { return await selectedImage(appendFileReferences('', [path]), bytes, file.type, path) }
+    catch (cause) { throw new Error(`The image is saved at ${path}. ${presentError(cause)}`, { cause }) }
   }
   const pasteImage = (file: File, insert: ComposerInsert) => {
     void feedback.run(() => insertResolved(() => imageReference(file), insert))
@@ -107,17 +130,18 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
     let savedPath: string | null = null
     try {
       await insertResolved(async () => {
-        requireLocal()
+        if (!retainImage) requireLocal()
         savedPath = await resolve()
         if (savedPath && (!isCurrent() || insertion.current !== originalEditor || documentKey !== undefined && shortcut.current.key !== documentKey)) {
           throw new Error('The original message editor changed; your drafts were not replaced.')
         }
         if (!savedPath) return null
         const text = appendFileReferences('', [savedPath])
-        if (!sessionControl) return text
+        if (!sessionControl && !retainImage) return text
         const data = await api.ui.readPastedImage(savedPath)
         const match = data?.dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/u)
-        return match ? await selectedImage(text, Uint8Array.from(atob(match[2]!), char => char.charCodeAt(0)), match[1]!) : text
+        if (!match && retainImage) throw new Error('The original captured image bytes are unavailable for upload. No remote reference was inserted.')
+        return match ? await selectedImage(text, Uint8Array.from(atob(match[2]!), char => char.charCodeAt(0)), match[1]!, savedPath) : text
       })
     } catch (cause) {
       if (savedPath) throw new Error(`Screenshot insertion into the original draft was not confirmed. The image is saved at ${savedPath}. ${presentError(cause)} Check the original draft and reference this image there if needed.`, { cause })
@@ -127,7 +151,7 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
   const capture = (mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode, options?: import('../../../shared/screenshot-source').ScreenshotCaptureOptions) =>
     attachCapture(() => api.ui.captureScreenshot(mode, options), shortcutKey)
   const shortcut = useRef({ key: shortcutKey, enabled: false, document, attachCapture })
-  shortcut.current = { key: shortcutKey, enabled: shortcutActive && !disabled && hostId === 'local' && Boolean(document), document, attachCapture }
+  shortcut.current = { key: shortcutKey, enabled: shortcutActive && !disabled && (hostId === 'local' || Boolean(retainImage)) && Boolean(document), document, attachCapture }
   const shortcutTarget = useMemo(() => ({ prepare() {
     const current = shortcut.current, focus = shortcutFocus.current
     if (current.key !== shortcutKey || !current.enabled || !current.document || !focus || focus.key !== shortcutKey ||
@@ -141,7 +165,7 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
     return { document: current.document, complete(path: string | null) { deliver(path); return inserted } }
   } }), [shortcutKey])
   useEffect(() => () => releaseScreenshotTarget(shortcutTarget), [shortcutTarget])
-  useEffect(() => { if (!shortcut.current.enabled) releaseScreenshotTarget(shortcutTarget) }, [shortcutTarget, shortcutActive, disabled, hostId])
+  useEffect(() => { if (!shortcut.current.enabled) releaseScreenshotTarget(shortcutTarget) }, [shortcutTarget, shortcutActive, disabled, hostId, retainImage])
   const claimScreenshotTarget = (event?: { target: EventTarget | null }) => {
     const element = event?.target as HTMLElement | null | undefined
     if (element?.nodeType !== 1) return

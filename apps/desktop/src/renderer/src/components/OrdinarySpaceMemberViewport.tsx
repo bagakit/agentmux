@@ -9,7 +9,7 @@ import { SpaceSourceReaders, useSpaceSourceReader } from './SpaceSourceReaders'
 import { MountedCreationRecovery } from './MountedCreationRecovery'
 import { OriginalSourceMemberMetadata } from './OriginalSourceMemberMetadata'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
-import { mountedSessionFacts } from '../lib/space-mount-sessions'
+import { mountedSessionFacts, confirmedMountedSessionState } from '../lib/space-mount-sessions'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import './mounted-space.css'
 import './ordinary-space-member.css'
@@ -36,6 +36,7 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
   const sourceProjection = sessionId?.startsWith('original-source-member:') ?? false
   const relationFact = useMemo(() => occurrence.kind === 'foreign' && snapshot ? mountedSessionFacts(snapshot, metadata).get(occurrence.presentation.key) : undefined,
     [occurrence, snapshot, metadata])
+  const confirmedSession = confirmedMountedSessionState(relationFact?.current, relationFact?.last, relationFact?.stale)
   const sourceError = useAppStore(state => occurrence.kind === 'foreign' ? state.mountedSpaceSessions[mountKey]?.error ?? state.mountedSpaceObservations[mountKey]?.error : undefined)
   if (occurrence.kind === 'existing') return children
   if (occurrence.kind === 'unconfirmed') return <SurfaceState title="Original Agent reference unconfirmed" description={occurrence.issue}
@@ -81,8 +82,9 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
   return <section className="agent-surface ordinary-space-member" aria-label="Original Space member">
     <header className="ordinary-space-member__header"><MountedExecutionRelation member={occurrence.presentation} target={occurrence.source} occurrence={relation} />
     <details className="ordinary-space-member__reference"><summary>Original Agent</summary>{reference}
-      {sourceProjection ? <OriginalSourceMemberMetadata current={relationFact?.current} last={relationFact?.last} error={sourceError} /> : null}</details></header>
+      {sourceProjection ? <OriginalSourceMemberMetadata current={relationFact?.current} last={relationFact?.last} stale={relationFact?.stale} error={sourceError} /> : null}</details></header>
     <SpaceMemberWorkface key={witness} target={currentTarget} privateInput={occurrence.source} sourceTabId={occurrence.presentation.tab.tabId} onRefreshSource={refreshSource} runtimeRecovery={runtimeRecovery}
+      sessionMetadata={confirmedSession ? { providerId: confirmedSession.session.providerId, workspacePath: confirmedSession.session.workspacePath, run: confirmedSession.session.run } : undefined}
       visible={visible} active={active && activeRegion} interactiveResize={interactiveResize} />
   </section>
 }

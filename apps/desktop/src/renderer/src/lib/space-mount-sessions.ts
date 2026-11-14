@@ -7,6 +7,11 @@ export type MountedSessionFact = { member: SpaceSessionMember; state: SpaceSessi
 export type MountedSessionObservation = { opening?: SpaceSessionsOpening; members: Record<string, MountedSessionFact>; lastConfirmed: Record<string, MountedSessionFact>; reading: boolean; error?: string | undefined }
 export type MountedSessionUpdate = { begin?: boolean; opening?: SpaceSessionsOpening; observation?: SpaceSessionsObservation; error?: string }
 export type MountedRegionSessionFact = { current: MountedSessionFact | undefined; last: MountedSessionFact | undefined; stale: boolean; occurrence?: SpaceSessionOccurrence }
+/** Last confirmed metadata remains a descriptor, never current Native readiness. */
+export function confirmedMountedSessionState(current?: MountedSessionFact, last?: MountedSessionFact, stale = false): Extract<SpaceSessionState, { status: 'observed' }> | undefined {
+  const state = current?.state
+  return state?.status === 'observed' && !stale ? state : last?.state.status === 'observed' ? last.state : undefined
+}
 const empty = (): MountedSessionObservation => ({ members: {}, lastConfirmed: {}, reading: false })
 /** A display projection of original Core receipts, never an Agent lifecycle reducer. */
 export function observeMountedSessions(target: SpaceMountRecord, previous: MountedSessionObservation | undefined, update: MountedSessionUpdate): MountedSessionObservation {

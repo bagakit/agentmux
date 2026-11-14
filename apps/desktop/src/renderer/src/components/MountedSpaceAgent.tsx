@@ -17,9 +17,10 @@ import { SourceComposerRecovery } from './SourceComposerRecovery'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { ConversationReadFailure } from './ConversationReadFailure'
+import { sourceMemberProgress, sourceMemberImageRetention } from '../lib/source-member-tools'
 
 /** One exact member reader. Full Session facts stay here, never in the observer's Session map. */
-export function SpaceMemberWorkface({ target, visible, active, interactiveResize = false, privateInput, sourceTabId, onRefreshSource, runtimeRecovery }: { target: SpaceMountMemberTarget; visible: boolean; active: boolean; interactiveResize?: boolean; privateInput?: SpaceMountRecord | undefined; sourceTabId?: string | undefined; onRefreshSource?: (() => void) | undefined; runtimeRecovery?: ((layout: 'inline' | 'surface') => ReactNode) | undefined }) {
+export function SpaceMemberWorkface({ target, visible, active, interactiveResize = false, privateInput, sourceTabId, onRefreshSource, runtimeRecovery, sessionMetadata }: { target: SpaceMountMemberTarget; visible: boolean; active: boolean; interactiveResize?: boolean; privateInput?: SpaceMountRecord | undefined; sourceTabId?: string | undefined; onRefreshSource?: (() => void) | undefined; runtimeRecovery?: ((layout: 'inline' | 'surface') => ReactNode) | undefined; sessionMetadata?: Pick<import('@agentmux/core/hosted').AgentMuxHostedAgentSessionSummary, 'providerId' | 'workspacePath' | 'run'> | undefined }) {
   const key = JSON.stringify(target)
   const ownerKey = originalSourceInputOwnerKey(target.target.runtimeId, target.target.agentSessionId)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(ownerKey), [ownerKey])
@@ -31,6 +32,9 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
     return expectedAdmission ? { hostId: target.hostId, target: { ...identity, kind: 'conversation', expectedAdmission } } : undefined
   }, [target.hostId, target.target.reference.runtimeId, target.target.reference.spaceId, target.target.regionId, target.target.runtimeId, target.target.agentSessionId, target.target.expectedAdmission?.kind, target.target.expectedAdmission?.operationId])
   const readingKey = JSON.stringify(readingTarget ?? null)
+  const originalProgress = useMemo(() => readingTarget && sessionMetadata ? sourceMemberProgress(api.spaceMounts,
+    { ...readingTarget, target: { ...readingTarget.target, kind: 'session' } }, { providerId: sessionMetadata.providerId, workspacePath: sessionMetadata.workspacePath }) : undefined,
+    [readingKey, sessionMetadata?.providerId, sessionMetadata?.workspacePath])
   const surfaceRef = useRef<HTMLDivElement>(null)
   const recoveryRef = useRef<HTMLDetailsElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -149,6 +153,9 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
     ? sourceComposerInputReading(originalReading.surface, originalReading.port, target.target.agentSessionId, readingKey)
     : original ? sourceComposerInputReading(original.surface, original.conversation, target.target.agentSessionId, key) : undefined,
   [originalReading, originalReading ? undefined : original])
+  const retainImage = useMemo(() => readingTarget && sessionMetadata?.run.runId && sessionMetadata.run.runId === target.target.expectedRun.runId
+    ? sourceMemberImageRetention(api.spaceMounts, target, original?.surface) : undefined,
+    [readingKey, sessionMetadata?.run.runId, target.target.expectedRun.runId, original?.surface])
   const conversationIssue = readingIssue?.key === readingKey ? readingIssue.message : undefined
   return <div ref={surfaceRef} className="agent-surface mounted-space-agent" aria-label="Original member workface" data-agent-surface-mode={mode}>
     {hasIssue || (session?.kind === 'agent' && !session.semanticStatus) ? <ServiceWindowNotice
@@ -199,7 +206,7 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
     </div></div>
     <SourceComposerRecovery target={target} tabId={sourceTabId} surfaceRef={recoveryRef} />
     <div className="agent-input-stack" data-input-surface={mode}><AgentSessionComposer sessionId={ownerKey}
-      source={{ target, ...(session ? { session } : {}), ...(inputReading ? { inputReading } : {}) }} resourceWorkspaceId={privateInput?.workspaceId} {...(session?.label === undefined ? {} : { tabName: session.label })} pendingLayout={pendingLayout} visible={visible} /></div>
+      source={{ target, ...(session ? { session } : {}), ...(inputReading ? { inputReading } : {}), ...(originalProgress ? { originalProgress } : {}), ...(retainImage ? { retainImage } : {}), onRefreshTools: onRefreshSource }} resourceWorkspaceId={privateInput?.workspaceId} {...(session?.label === undefined ? {} : { tabName: session.label })} pendingLayout={pendingLayout} visible={visible} /></div>
   </div>
 }
 export { SpaceMemberWorkface as MountedSpaceAgent }

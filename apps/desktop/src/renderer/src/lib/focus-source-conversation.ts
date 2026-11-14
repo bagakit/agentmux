@@ -8,6 +8,7 @@ import type { ComposerInputReading } from './use-composer-input-history'
 export function sourceComposerInputReading(surface: SpaceMountReadingSurface, port: ConversationReadApi, agentSessionId: string, identity: string): ComposerInputReading {
   return {
     skills: () => surface.call('skills', {}),
+    inputEpoch: () => surface.call('inputEpoch', {}),
     reference: { hostId: surface.initial.hostId, agentSessionId },
     conversation: { reference: { hostId: 'local', agentSessionId }, identity, port },
     readHistory: (input, signal) => surface.call('history', { input }, signal),

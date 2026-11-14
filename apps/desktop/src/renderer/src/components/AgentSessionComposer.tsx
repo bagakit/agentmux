@@ -19,7 +19,7 @@ import type { SpaceMountMemberTarget } from '../../../shared/space-mount'
 import { workspaceOwnsSessionPath } from '@agentmux/host/mote-model'
 import { sessionResourceContext } from '../lib/session-resource-context'
 import { api } from '../lib/api'
-import { useComposerAttachments } from '../lib/use-composer-attachments'
+import { useComposerAttachments, type ComposerImageRetention } from '../lib/use-composer-attachments'
 import { ComposerFileReferences } from './ComposerFileReferences'
 import { expandComposerInput, expandSemanticReferences, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { useComposerCandidates, skillComposerSuggestion } from '../lib/use-composer-candidates'
@@ -58,6 +58,7 @@ export type AgentComposerAvailability = {
 async function originalSkillsUnavailable(): Promise<import('@agentmux/core').AgentSkill[]> {
   throw new Error('The original Skills reader is unconfirmed. Refresh its original reading; your draft is kept.')
 }
+const originalImageRetentionUnavailable: ComposerImageRetention = async () => { throw new Error('The original Run and membership metadata for this image upload are unconfirmed. Refresh the original Session observation; your draft and saved local image are kept.') }
 
 /** One shared identity for "no queue", so the selector returns a stable reference when empty. */
 const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
@@ -141,7 +142,7 @@ export function AgentSessionComposer({
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   /** Foreign execution facts and locator; drafts and queues still use sessionId as their canonical owner. */
-  source?: { target: SpaceMountMemberTarget; session?: SessionSnapshot | undefined; inputReading?: ComposerInputReading | undefined } | undefined
+  source?: { target: SpaceMountMemberTarget; session?: SessionSnapshot | undefined; inputReading?: ComposerInputReading | undefined; originalProgress?: import('../../../shared/continuous-progress').OriginalContinuousProgressControl | undefined; retainImage?: ComposerImageRetention | undefined; onRefreshTools?: (() => void) | undefined } | undefined
   visible?: boolean
 }) {
   const moteWorkface = useContext(MoteWorkfaceContext)
@@ -362,9 +363,10 @@ export function AgentSessionComposer({
 
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
   const onRemoteFiles = useMemo(() => setFileReferencesOpen.bind(null, true), [setFileReferencesOpen])
-  const attachmentScope = JSON.stringify([draftOwner, sessionId, session?.hostId, session?.workspacePath, resource.address, workspace?.id])
+  const attachmentScope = JSON.stringify([draftOwner, sessionId, session?.hostId, session?.workspacePath, resource.address, workspace?.id, ...(source ? [source.target] : [])])
   useEffect(() => { setFileReferencesOpen(false) }, [attachmentScope, visible])
   const attachments = useComposerAttachments({ scope: attachmentScope, sessionControl: !source && session?.kind === 'agent' ? session.control : undefined, hostId: source ? undefined : session?.hostId,
+    ...(source ? { retainImage: source.retainImage ?? originalImageRetentionUnavailable } : {}),
     workspacePath: source ? undefined : session?.workspacePath,
     ...(source || session?.kind === 'agent' && session.toolExecution ? {
       fileResource: workspace ? { hostId: workspace.hostId, workspacePath: workspace.path } : null
@@ -385,8 +387,8 @@ export function AgentSessionComposer({
   if (source) notices.push({ id: 'source-message-tools', occurrence: JSON.stringify(source.target), notice: {
     kind: 'indeterminate', notice: {
       step: 'Some message tools are unavailable on this connection',
-      mode: `${source.inputReading ? 'Agent mail, automation and image transfer do not yet have an original route here.' : 'The original input history and Skills reader are not connected yet. Agent mail, automation and image transfer also need their original routes.'} Your draft and the existing message waiting controls are kept.`,
-      restore: 'Continue editing, referencing confirmed project files and using this message queue. Open the original Agent workface for its other tools; this connection will not use another local Agent.'
+      mode: `Agent mail is not connected through its original route yet.${source.inputReading ? '' : ' The original input history and Skills reader are unconfirmed.'}${source.originalProgress ? '' : ' Automation needs the original Session metadata.'}${source.retainImage ? '' : ' Image upload needs the original Run metadata.'} Your draft and the existing message waiting controls are kept.`,
+      restore: 'Refresh the original connection for its missing observations. Available tools keep their original targets; another local Agent is never substituted.'
     }
   } })
   const inbox = useServiceNotices(ownerKey, notices, session?.kind === 'agent')
@@ -399,6 +401,8 @@ export function AgentSessionComposer({
     <SessionMailbox pendingLayout={deliveryLayout} key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
         progressSession={!source && !readOnly && session?.kind === 'agent' ? session : undefined}
+        originalProgress={!readOnly ? source?.originalProgress : undefined}
+        progressUnavailable={source && !source.originalProgress ? { message: 'The original Session Provider and workspace metadata are unconfirmed. Its exact automation target cannot be formed yet. Existing arrangements and your draft are kept.', onRefresh: source.onRefreshTools } : undefined}
         control={source ? null : session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
@@ -488,7 +492,7 @@ export function AgentSessionComposer({
         viewMode={viewMode} onViewModeChange={(mode) => source ? setViewMode(sessionId, mode, { focus: false }) : setViewMode(sessionId, mode)}
         loadSkills={completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
         onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
-        {...(!source && session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
+        {...(source || session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
       value={text}
       disabled={!submitMode.canType}
       placeholder={nativeQueuePending ? 'Message the Agent; the request stays open…' : moteWorkface?.mainService && session?.kind === 'agent' &&

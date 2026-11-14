@@ -168,7 +168,7 @@ function MessageHistory({ hostId, mailboxOrigin, items, selectedKey, onOpen, onC
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ pendingLayout, system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading: baseReading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
+export function SessionMailbox({ pendingLayout, system, queued, timeline, progressSession, originalProgress, progressUnavailable, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading: baseReading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
   pendingLayout?: PendingDeliveryLayout | undefined
   children?: (mailbox: ReactNode, pending: ReactNode, composerRef: import('react').RefObject<HTMLDivElement | null>) => ReactNode
   /** Presentation of an existing notice, shared by this mailbox and its right dock. */
@@ -184,6 +184,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   queued: readonly ComposerQueuedMessage[]
   timeline?: AgentTimelineSnapshot | undefined
   progressSession?: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
+  originalProgress?: import('../../../shared/continuous-progress').OriginalContinuousProgressControl | undefined
+  progressUnavailable?: { message: string; onRefresh?: (() => void) | undefined } | undefined
   visible?: boolean
   /** null retains an explicitly unavailable configured route without borrowing a timeline lookalike. */
   control?: AgentSessionControl | null | undefined
@@ -258,7 +260,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   useEffect(() => { onHistoryVisible?.(open && visible && folder === 'user'); return () => onHistoryVisible?.(false) },
     [open, visible, folder, onHistoryVisible])
   const folderLabels = { inbox: 'Received', outbox: 'Sent', user: 'Inputs', system: 'Notices', progress: 'Automation', collaboration: 'Collaboration' }
-  const progressTarget = progressSession ? JSON.stringify([progressSession.hostId, progressSession.id, progressSession.providerId, progressSession.workspacePath]) : ''
+  const hasProgress = Boolean(progressSession || originalProgress || progressUnavailable)
+  const progressTarget = originalProgress?.identity ?? (progressSession ? JSON.stringify([progressSession.hostId, progressSession.id, progressSession.providerId, progressSession.workspacePath]) : '')
   const [progress, setProgress] = useState<{ target: string; status: ContinuousProgressStatus }>()
   const onProgressStatus = useCallback((status: ContinuousProgressStatus) => setProgress({ target: progressTarget, status }), [progressTarget])
   const progressStatus = progress?.target === progressTarget ? progress.status : 'unconfirmed'
@@ -600,7 +603,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       .find(node => node.dataset.recordKey === `queue:${intent.operationId}`)
     row?.closest<HTMLElement>('li[data-operation-id]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [open, folder, scope, selection])
-  const mailboxLabel = `Mailbox: Agent messages ${unread} unread in loaded messages, Inputs ${pendingCount} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
+  const mailboxLabel = `Mailbox: Agent messages ${unread} unread in loaded messages, Inputs ${pendingCount} pending, Notices ${system.unread.length} need attention${hasProgress ? `. ${progressLabel}` : ''}`
   function showUserMessages(operationId: string) {
     motion.captureSource(Array.from(dock.current?.querySelectorAll<HTMLElement>('[data-operation-id]') ?? []).find(node => node.dataset.operationId === operationId))
     explicitUserReveal.current = { scope, operationId }
@@ -613,13 +616,13 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       .call(popover.current, { source: trigger.current! })
   }
   const mailbox = <>
-    <button ref={trigger} type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={progressSession ? progressStatus : undefined}
+    <button ref={trigger} type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={hasProgress ? progressStatus : undefined}
       aria-label={mailboxLabel}
       title={mailboxLabel} popoverTarget={id} popoverTargetAction="toggle"
       onPointerEnter={enter} onPointerLeave={leave}
       onClick={(event) => { if (preview.current && popover.current!.matches(':popover-open')) { event.preventDefault(); pin() } }}>
       <ThemeObjectMailIcon size={14} aria-hidden="true" />
-      {progressSession && progressStatus !== 'inactive' ? <ProgressIcon size={10} className="composer-mailbox__progress" aria-hidden="true" /> : null}
+      {hasProgress && progressStatus !== 'inactive' ? <ProgressIcon size={10} className="composer-mailbox__progress" aria-hidden="true" /> : null}
       {system.unread.length ? <ThemeObjectNotificationsIcon size={10} className="composer-mailbox__attention" aria-hidden="true" /> : null}
       {unread ? <span className="composer-mailbox__inbox-count" aria-hidden="true">
         <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span>
@@ -731,11 +734,16 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
             onOpen={selectRecord} /></li>)}
         </ol> : <MailboxEmpty title={system.available ? 'No current notices' : 'Waiting for Session status'} /> : null}
       </div>
-      {progressSession ? <div id={`${id}-progress`} role="region" aria-label="Automation settings" hidden={folder !== 'progress'}>
-        <ContinuousProgressControl session={progressSession} targetName={reading?.describeSpeaker?.({ role: 'agent', id: progressSession.control.agentSessionId }, 18)?.name} onStatusChange={onProgressStatus} presented={progressVisible || progressPresented} visible={progressVisible} />
+      {hasProgress ? <div id={`${id}-progress`} role="region" aria-label="Automation settings" hidden={folder !== 'progress'}>
+        {originalProgress || progressSession ? <ContinuousProgressControl {...(originalProgress ? { original: originalProgress } : { session: progressSession! })} targetName={originalProgress?.label ?? (progressSession ? reading?.describeSpeaker?.({ role: 'agent', id: progressSession.control.agentSessionId }, 18)?.name : undefined)} onStatusChange={onProgressStatus} presented={progressVisible || progressPresented} visible={progressVisible} />
+          : progressUnavailable ? <ServiceWindowNotice title="Automation details unconfirmed"
+            disclosure={{ scope, id: 'original-automation-target', occurrence: progressUnavailable.message, visible: progressVisible }}
+            notice={{ kind: 'indeterminate', notice: { step: 'Original automation target unconfirmed', mode: progressUnavailable.message,
+            restore: 'Refresh the original Session observation to read its metadata. No other Agent is substituted.' } }}
+            inlineActions={progressUnavailable.onRefresh ? <button type="button" className="small-button" aria-label="Refresh original Session" title="Refresh original Session" onClick={progressUnavailable.onRefresh}>Refresh</button> : undefined} /> : null}
       </div> : null}
       </div>
-      {progressSession && folder !== 'progress' ? <button ref={automationEntry} type="button" className="composer-mailbox__automation" aria-label="Automation"
+      {hasProgress && folder !== 'progress' ? <button ref={automationEntry} type="button" className="composer-mailbox__automation" aria-label="Automation"
         aria-describedby={`${id}-automation-status`} onClick={openAutomation}>
         <ThemeObjectAutomationIcon size={14} aria-hidden="true" /><span>Automation</span>
         <span id={`${id}-automation-status`} className="composer-mailbox__automation-status" data-status={progressStatus}>

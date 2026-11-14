@@ -25,7 +25,7 @@ export type ServiceNoticeDisclosureIdentity = Pick<ServiceNoticeItem, 'id' | 'oc
  * 拿到 null 就渲染 null（healthy 与 agent-broken 都不由服务窗承载）——调用方把判定结果直接传进来。
  */
 export function ServiceWindowNotice({
-  notice, summary, disclosure, actions, title, layout = 'inline'
+  notice, summary, disclosure, actions, inlineActions, title, layout = 'inline'
 }: {
   notice: RenderableServiceNotice | null
   /** Concise three facts supplied by the same projection owner; original text stays in details. */
@@ -33,6 +33,8 @@ export function ServiceWindowNotice({
   /** Local passive notices opt in; inbox/popover consumers keep the full content. */
   disclosure?: ServiceNoticeDisclosureIdentity
   actions?: ReactNode
+  /** Existing recovery actions that stay reachable beside a collapsed notice. */
+  inlineActions?: ReactNode
   title?: string
   layout?: 'inline' | 'surface'
 }) {
@@ -40,7 +42,7 @@ export function ServiceWindowNotice({
     const { scope, available, visible, ...identity } = disclosure
     return <ServiceNoticeDisclosure scope={scope} notices={notice ? [{ ...identity, notice }] : []}
       {...(available === undefined ? {} : { available })} {...(visible === undefined ? {} : { visible })}
-      {...(title ?? summary?.step ? { title: title ?? summary!.step } : {})} actions={actions}>
+      {...(title ?? summary?.step ? { title: title ?? summary!.step } : {})} actions={actions} inlineActions={inlineActions}>
       <ServiceWindowNotice notice={notice} />
     </ServiceNoticeDisclosure>
   }
