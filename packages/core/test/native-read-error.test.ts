@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
+import { withCodexLaunchHooks } from '../src/providers/codex-launch-hooks.js'
 import { AgentMuxError } from '../src/errors.js'
 
 const cleanup: Array<() => Promise<void>> = []
@@ -37,17 +37,20 @@ createInterface({ input: process.stdin }).on('line', line => {
   await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'original-session', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: root,
     run: { runId: 'original-run' }, retiredRuns: [], hookBindingId: 'original-hook', hookToken: 'original-hook-token', createdAt: 1, updatedAt: 1,
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native' } })
-  const installer = new AgentManagedHookInstaller(join(root, 'receipts'))
-  const client = new AgentMuxClient({ store, hookInstaller: installer }); cleanup.push(() => client.dispose())
+  const client = new AgentMuxClient({ store }); cleanup.push(() => client.dispose())
   const env = { CODEX_HOME: root, READ_TRACE: trace, READ_RESPONSE: response, LOCAL_READ_SECRET: 'private environment value' }
   const context = { command: process.execPath, args: [script], env, workspacePath: root }
   const calls = async () => (await readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-  return { root, store, client, installer, context, response, calls,
+  return { root, store, client, context, response, calls,
     read: () => client.sessionHistoryPage('original-session', { commandOverride: context.command, args: context.args, env }),
-    async assertOwnedReads() {
+    async assertOwnedReads(prefixes: readonly (readonly string[])[] = []) {
       const rows = await calls()
-      expect(rows.filter(row => row.pid).length).toBeGreaterThan(0)
-      for (const row of rows.filter(row => row.pid)) { expect(row.args).toEqual(['-s', 'read-only', '-a', 'never', 'app-server', '--stdio']); expect(() => process.kill(row.pid, 0)).toThrow(/ESRCH/u) }
+      const nativeProcesses = rows.filter(row => row.pid)
+      expect(nativeProcesses.length).toBeGreaterThan(0)
+      for (const [index, row] of nativeProcesses.entries()) {
+        expect(row.args).toEqual([...(prefixes[index] ?? []), '-s', 'read-only', '-a', 'never', 'app-server', '--stdio'])
+        expect(() => process.kill(row.pid, 0)).toThrow(/ESRCH/u)
+      }
       expect(rows.filter(row => row.method).every(row => ['initialize', 'initialized', 'thread/read', 'thread/items/list', 'hooks/list'].includes(row.method))).toBe(true)
       expect((await loadAgentSessions(store)).map(value => [value.agentSessionId, value.run])).toEqual([['original-session', { runId: 'original-run' }]])
     }
@@ -65,6 +68,7 @@ it('preserves native read error fields through the public history consumer witho
   const f = await fixture(native, 'thread/items/list', 1), stop = vi.spyOn(f.client, 'stopAgent'), create = vi.spyOn(f.client, 'createAgent')
   const error = await rejected(f.read())
   expect(error.code).toBe('AGENT_SESSION_HISTORY_UNAVAILABLE'); expect(error.message).toBe('Native read request failed.')
+  expect(error.detail).toEqual(expect.any(String))
   expect(JSON.parse(error.detail!)).toEqual({ kind: 'native-read', purpose: 'history', method: 'thread/items/list', requestId: 3, error: native })
   expect(error).not.toHaveProperty('turnOutcome'); expect(error).not.toHaveProperty('failure')
   for (const privateValue of ['private stderr diagnostic', 'private environment value', f.context.args[0]!]) expect(error.detail).not.toContain(privateValue)
@@ -76,8 +80,7 @@ it('preserves native read error fields through the public history consumer witho
 it('keeps hook read errors separate from activation status and preserves native unsupported code', async () => {
   const native = { code: -32601, message: 'Original native read method unavailable', data: { method: 'hooks/list', nativeRevision: 'original' } }
   const f = await fixture(native, 'hooks/list'), provider = new AgentProviderRegistry().get('codex')
-  const plan = provider.planManagedHooks!({ workspacePath: f.root, env: f.context.env })!
-  await f.installer.ensure(plan)
+  const plan = { providerId: 'codex', mutations: [] }
   const error = await rejected(provider.inspectHookActivation!({ ...f.context, plan, signal: new AbortController().signal }))
   expect(error.code).toBe('AGENT_HOOK_READ_UNSUPPORTED')
   expect(JSON.parse(error.detail!)).toEqual({ kind: 'native-read', purpose: 'hooks', method: 'hooks/list', requestId: 2, error: native })
@@ -85,7 +88,9 @@ it('keeps hook read errors separate from activation status and preserves native 
   expect(result).toMatchObject({ status: 'error', code: 'HOOK_ACTIVATION_CHECK_FAILED' })
   expect(JSON.stringify(result)).not.toContain(native.message)
   expect(JSON.stringify(result)).not.toContain('private stderr diagnostic')
-  await f.assertOwnedReads()
+  const directRead = withCodexLaunchHooks(f.context.args).args
+  const originalLaunch = provider.buildLaunch({ ...f.context, prompt: '', commandOverride: f.context.command })
+  await f.assertOwnedReads([directRead.slice(1), withCodexLaunchHooks(originalLaunch.args).args.slice(1)])
 })
 
 it('omits oversized native error data explicitly without losing the original read code or message', async () => {

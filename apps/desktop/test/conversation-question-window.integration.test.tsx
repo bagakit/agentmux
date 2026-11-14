@@ -7,7 +7,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentSessionHistoryPage } from '@agentmux/core';
-import { codexQuestionRequest } from '../../../packages/core/src/providers/codex-question.js';
+import { codexQuestionRequest } from '../../../packages/core/src/providers/app-server.js';
 import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform';
 import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture';
 import { api } from '../src/renderer/src/lib/api';

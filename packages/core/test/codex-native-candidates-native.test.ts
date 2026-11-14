@@ -7,7 +7,7 @@ import { JSONRPCClient } from 'json-rpc-2.0'
 import { expect, it } from 'vitest'
 import { runProcess } from '../src/process-runner.js'
 import { nativeProcessFiles } from '../src/agent-native-process.js'
-import { discoverAppServerNativeSession } from '../src/providers/app-server-native-session.js'
+import { discoverAppServerNativeSession } from '../src/providers/app-server.js'
 import { codexMainNativeRecord } from '../src/providers/codex-native-record-role.js'
 import { offlineEndpoint } from './helpers/codex-offline-endpoint.js'
 import { privateCodexConfigArgs } from './helpers/private-codex-config.js'
@@ -96,7 +96,7 @@ it.runIf(process.platform === 'darwin')('real native main candidates survive ano
     const evidence = process.env.AGENTMUX_NATIVE_CANDIDATE_PROOF
     if (evidence) {
       await mkdir(evidence, { recursive: true })
-      const names = ['packages/core/src/providers/app-server-native-session.ts', 'packages/core/src/providers/codex-native-record-role.ts', 'packages/core/src/agent-native-process.ts', 'packages/core/test/codex-native-candidates-native.test.ts', 'packages/core/test/helpers/codex-offline-endpoint.ts']
+      const names = ['packages/providers/src/app-server/native-session.ts', 'packages/core/src/providers/codex-native-record-role.ts', 'packages/core/src/agent-native-process.ts', 'packages/core/test/codex-native-candidates-native.test.ts', 'packages/core/test/helpers/codex-offline-endpoint.ts']
       const sources = Object.fromEntries(await Promise.all(names.map(async name => [name, createHash('sha256').update(await readFile(name)).digest('hex')])))
       await writeFile(join(evidence, 'receipt.json'), JSON.stringify({ passed, failure, version, boundary: 'actual native app-server and OS files; deterministic loopback model only; plugin startup disabled; no user actor or credentials', sources, wire, phases, inputs, modelRequests: requests, diagnostic, cleanup: { exited: ended } }, (_, value) => typeof value === 'bigint' ? String(value) : value, 2) + '\n')
     }

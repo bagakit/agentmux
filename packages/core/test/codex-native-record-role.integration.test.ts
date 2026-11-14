@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { nativeProcessFiles } from '../src/agent-native-process.js'
-import { locateAppServerNativeSession } from '../src/providers/app-server-native-session.js'
+import { locateAppServerNativeSession } from '../src/providers/app-server.js'
 import { codexMainNativeRecord } from '../src/providers/codex-native-record-role.js'
 
 it.each([

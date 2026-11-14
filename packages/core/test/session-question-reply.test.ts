@@ -16,7 +16,7 @@ import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { NativeJsonlHistoryReader } from '../src/native-jsonl-history-reader.js'
 import { confirmNativeInputAdoption } from '../src/native-input-adoption.js'
 import type { AgentSessionHistoryItem } from '../src/types.js'
-import { codexQuestionAnswers } from '../src/providers/codex-question.js'
+import { codexQuestionAnswers } from '../src/providers/app-server.js'
 import { createNativeInputCorrelation, nativeInputSourceId } from '../src/native-input-correlation.js'
 import type { AgentNativePromptInputPlan } from '../src/types.js'
 

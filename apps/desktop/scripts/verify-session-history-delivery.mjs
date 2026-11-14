@@ -241,9 +241,10 @@ async function readSurface(processProbe) {
 }
 
 async function compiledCandidate() {
-  const coreFiles = ['client.js', 'agent-provider.js', 'session-history.js', 'providers/app-server-native-history.js']
+  const coreFiles = ['core/dist/client.js', 'core/dist/agent-provider.js', 'core/dist/session-history.js',
+    'core/dist/providers/app-server.js', 'providers/dist/app-server/native-history.js']
   const core = Object.fromEntries(await Promise.all(coreFiles.map(async (file) => [file,
-    hash(await readFile(resolve(desktopRoot, '../../packages/core/dist', file)))])))
+    hash(await readFile(resolve(desktopRoot, '../../packages', file)))])))
   const assetRoot = join(desktopRoot, 'out/renderer/assets')
   const scripts = (await readdir(assetRoot)).filter((file) => file.endsWith('.js')).sort()
   assert.ok(scripts.length > 0, 'Bind the actual nonempty compiled Renderer assets')

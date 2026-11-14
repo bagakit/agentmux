@@ -6,7 +6,7 @@ import { AgentMuxClient } from '../../../../packages/core/dist/client.js';
 import type { AgentMuxSessionQuestionReplyInput } from "@agentmux/core";
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../../../../packages/core/dist/agent-session-store.js';
 import { agentPromptCondition } from '../../../../packages/core/dist/agent-prompt-condition.js';
-import { codexQuestionRequest } from '../../../../packages/core/dist/providers/codex-question.js';
+import { codexQuestionRequest } from '../../../../packages/core/dist/providers/app-server.js';
 import { AgentTerminalScreen } from '../../../../packages/core/dist/agent-terminal-screen.js';
 import type { AgentMuxAgentSessionRegistry } from '../../../../packages/core/dist/agent-session-registry.js';
 import type { CtxmuxAdapterRun } from '../../../../packages/core/dist/ctxmux-run-adapter.js';

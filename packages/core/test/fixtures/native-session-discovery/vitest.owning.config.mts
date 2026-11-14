@@ -8,15 +8,16 @@ const changes: Record<string, [string, string, string]> = {
   'durable-needs-runtime': ['packages/core/src/client.ts', 'if (!transient) assertWitness = undefined', 'if (false) assertWitness = undefined'],
   'accept-truncated-frame': ['packages/core/src/agent-native-process.ts', " || !output.stdout.endsWith('\\0\\n')", ''],
   'skip-discovery': ['packages/core/src/client.ts', 'const discovered = await provider.discoverNativeSession({ processId: firstRun.pid,', 'const discovered = await (async () => null)({ processId: firstRun.pid,'],
-  'child-as-main': ['packages/core/src/providers/app-server-native-session.ts', "if (payload!.source === 'cli') main.push({ file, id })", 'if (payload!.source) main.push({ file, id })'],
+  'child-as-main': ['packages/providers/src/app-server/native-session.ts', "if (mainRole ? mainRole(payload!) : payload!.source === 'cli') main.push({ file, id })", 'if (payload!.source) main.push({ file, id })'],
   'ignore-pid-change': ['packages/core/src/client.ts', 'run.pid !== firstRun.pid', 'false'],
   'ignore-run-change': ['packages/core/src/client.ts', '!sameRun(current.run, expected.run)', 'false'],
   'fail-save-read': ['packages/core/src/client.ts', 'await assertWitness()\n            transient = latest.nativeHandle === undefined', 'throw error\n            transient = latest.nativeHandle === undefined'],
   'ignore-handle-change': ['packages/core/src/client.ts', '(current.nativeHandle !== undefined && !matchesHandle(current.nativeHandle))', 'false']
 }
-export default defineConfig({ root, cacheDir: resolve(root, '.local/cache/native-discovery-vite'), plugins: [{ name: 'native-discovery-loaded', enforce: 'pre', transform(code, id) {
+export default defineConfig({ root, cacheDir: resolve(root, '.local/cache/native-discovery-vite'), resolve: { alias: { '@agentmux/providers/app-server/native-session': resolve(root, 'packages/providers/src/app-server/native-session.ts') } },
+  plugins: [{ name: 'native-discovery-loaded', enforce: 'pre', transform(code, id) {
   const path = relative(root, id.split('?')[0]!)
-  if (!path.startsWith('packages/core/src/') || !/\.ts$/u.test(path)) return
+  if (!/^packages\/(?:core|providers)\/src\//u.test(path) || !/\.ts$/u.test(path)) return
   const before=code, mutation=process.env.AMX_NATIVE_DISCOVERY_MUTATION
   if (mutation) { const change=changes[mutation]; if (!change) throw new Error('Unknown mutation'); if (path===change[0]) {
     if (code.split(change[1]).length!==2) throw new Error('Mutation anchor is not unique: '+mutation)

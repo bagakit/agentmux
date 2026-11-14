@@ -7,7 +7,7 @@ import { JSONRPCClient } from 'json-rpc-2.0'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
-import { codexQuestionAnswers } from '../src/providers/codex-question.js'
+import { codexQuestionAnswers } from '../src/providers/app-server.js'
 import type { AgentMuxSessionQuestionReplyInput } from "../src/client-contract.js";
 import * as runner from '../src/process-runner.js'
 import * as nativeProcess from '../src/agent-native-process.js'

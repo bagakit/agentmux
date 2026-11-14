@@ -7,6 +7,6 @@
     "../../../src/renderer/src/**/*.d.ts",
     "../../../test/native-empty-reasoning-reading.test.tsx",
     "../../../../../packages/core/test/app-server-native-history.test.ts",
-    "../../../../../packages/core/src/providers/app-server-native-history.ts"
+    "../../../../../packages/providers/src/app-server/native-history.ts"
   ]
 }

@@ -16,7 +16,9 @@ const os = vi.hoisted(() => ({ original: undefined as any, binary: undefined as 
   ownerStateAbsent: false, helperStateAbsent: false, stateReadOnly: false,
   helperStateAfterReadMarker: undefined as string | undefined,
   sourceChanged: false, multi: false, queueChanged: false, helperChanged: false, helperStateChanged: false, birthChanged: false }))
-vi.mock('../src/providers/app-server-native-session.js', () => ({ locateAppServerNativeSession: async (_context: unknown, _role: unknown, _scope: unknown, target?: { id: string; path?: string }) => {
+vi.mock(import('../src/providers/app-server.js'), async importOriginal => ({
+  ...await importOriginal(),
+  locateAppServerNativeSession: async (_context: unknown, _role: unknown, _scope: unknown, target?: { id: string; path?: string }) => {
   if (os.multi && (!target || target.id !== os.original.id || target.path !== undefined && target.path !== os.original.file.path)) throw new Error('Multiple roots require the exact frozen target')
   return os.sourceChanged ? { ...os.original, id: 'foreign-thread' } : os.original
 } }))

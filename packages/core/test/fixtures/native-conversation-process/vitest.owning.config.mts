@@ -6,23 +6,24 @@ import original from '../../../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../../../..')
 const changes: Record<string, [string, string, string]> = {
-  'drop-provider-phase': ['packages/core/src/providers/app-server-native-history.ts',
+  'drop-provider-phase': ['packages/providers/src/app-server/native-history.ts',
     '...(messagePhase === undefined ? {} : { messagePhase }),', '...{},'],
   'drop-normalized-metadata': ['packages/core/src/session-history.ts',
     '...(item.collaboration === undefined ? {} : { collaboration: collaboration(item.collaboration) }),', '...{},'],
-  'receiver-as-host-session': ['packages/core/src/providers/app-server-native-history.ts',
-    'const target = reference(id)\n      return target ? [target] : []',
-    "const target = reference('private-main-session')\n      return target ? [target] : []"],
-  'target-completes-operation': ['packages/core/src/providers/app-server-native-history.ts',
+  'receiver-as-host-session': ['packages/providers/src/app-server/native-history.ts',
+    'const target = reference(id)\n        return target ? [target] : []',
+    "const target = reference('private-main-session')\n        return target ? [target] : []"],
+  'target-completes-operation': ['packages/providers/src/app-server/native-history.ts',
     '...(status === undefined ? {} : { status }),', "...{ status: 'completed' as const },"],
   'drop-normalized-phase': ['packages/core/src/session-history.ts',
     "...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),", '...{},']
 }
 
 export default defineConfig({ ...original, root, cacheDir: resolve(root, '.local/cache/native-process-vite'),
+  resolve: { ...original.resolve, alias: { '@agentmux/providers/app-server/native-history': resolve(root, 'packages/providers/src/app-server/native-history.ts') } },
   plugins: [...(original.plugins ?? []), { name: 'native-process-actual-loaded', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!path.startsWith('packages/core/src/') || !/\.ts$/u.test(path)) return
+    if (!/^packages\/(?:core|providers)\/src\//u.test(path) || !/\.ts$/u.test(path)) return
     const before = code, mutation = process.env.AGENTMUX_NATIVE_PROCESS_MUTATION
     if (mutation) {
       const change = changes[mutation]

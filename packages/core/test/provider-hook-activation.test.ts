@@ -7,7 +7,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, type AgentProviderHookActivationContext } from '../src/agent-provider.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
-import { withAppServerNativeRead } from '../src/providers/app-server-native-read.js'
+import { withAppServerNativeRead } from '../src/providers/app-server.js'
 import { CODEX_HOOK_SOURCE_PATH, codexManagedHooks } from '../src/providers/codex-launch-hooks.js'
 import { inspectCodexHookActivation } from '../src/providers/codex-hook-activation.js'
 

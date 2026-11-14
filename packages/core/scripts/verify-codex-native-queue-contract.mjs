@@ -13,7 +13,7 @@ const actor = 'packages/core/test/codex-idle-queue.test.ts'
 const native = 'packages/core/test/codex-durable-queue-native.test.ts'
 const sources = ['packages/core/src/providers/codex-native-queue.ts',
   'packages/core/src/providers/codex-native-input.ts', 'packages/core/src/providers/codex-native-rpc.ts',
-  'packages/core/src/providers/app-server-native-session.ts', 'packages/core/src/agent-native-process.ts',
+  'packages/providers/src/app-server/native-session.ts', 'packages/core/src/agent-native-process.ts',
   'packages/core/test/fixtures/codex-queue-rpc.mjs', config, unit, actor, native]
 const sha = value => createHash('sha256').update(value).digest('hex')
 const inputs = Object.fromEntries(await Promise.all(sources.map(async file => [file, sha(await readFile(resolve(root, file)))])))
