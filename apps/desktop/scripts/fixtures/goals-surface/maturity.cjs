@@ -150,7 +150,22 @@ app.whenReady().then(async()=>{
   await phase('loading-compiled-renderer');await win.loadFile(html);await phase('loaded-compiled-renderer');win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
   await phase('waiting-for-original-mounted-goals');await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===7');await phase('original-goals-mounted')
   const originalRuns=await evaluate('goalsVisual.facts().runs');assert.ok(originalRuns.length>0,'Original preview Runs exist')
-  if(scope==='plan-request-only'){
+  if(scope==='list-search-only'){
+   await evaluate('goalsVisual.seedMaturity()')
+   const search = '[aria-label="Search goals"]'
+   for (const [width, theme] of [[620, 'dark'], [420, 'light']]) {
+    await size(width); await evaluate(`goalsVisual.appearance(${JSON.stringify(theme)})`)
+    await evaluate(`window.originalGoalsSearch=document.querySelector(${JSON.stringify(search)})`)
+    await insert(search, 'No matching goal')
+    await waitFor('Boolean(document.querySelector(".goals-empty.surface-state h2"))')
+    assert.equal(await evaluate('document.querySelector(".goals-empty.surface-state h2").textContent'), 'No goals match this view.')
+    await capture(`${width}-${theme}-goals-search-empty`, width)
+    await click(button('Clear search'))
+    await waitFor('document.querySelectorAll("[data-demand-id]").length===6')
+    assert.ok(await evaluate('document.activeElement===window.originalGoalsSearch && !window.originalGoalsSearch.value'), 'Clear uses the original input node')
+    await capture(`${width}-${theme}-goals-search-cleared`, width)
+   }
+  }else if(scope==='plan-request-only'){
    result.mode='plan-request'
    await require('./plan-request.cjs')({evaluate,size,click,pointer,capture,waitFor,paint,result})
   }else if(hierarchy){
