@@ -38,6 +38,13 @@ or `{operationId}`. Pause/resume/cancel take `{scheduleId,expectedRevision,opera
 Read list/inspect for the current positive revision. The returned `schedule.loopId` is the
 `scheduleId` selector, not the original `creationOperationId` or mutation `operationId`.
 
+An authenticated user or device can use `amux schedule history --data <FILE|->` at the
+original schedule Host to read retained input receipts in one short window. Use
+`{scheduleId,from,to,limit?,cursor?}` with inclusive from and exclusive to in Unix
+milliseconds. Continue with the same window and returned nextCursor. Occurrence time,
+input delivery, and native outcome are distinct. Unconfirmed coverage leaves the
+original records available for a later read. History never starts or redelivers an input.
+
 Read amux schedule create --help for the complete current schema. The first creation of the original
 operation fixes nextCheckAt as its absolute deadline. Repeating the same operationId, restarting the owner
 or pausing and resuming keeps that deadline. Pause suspends delivery, not time; resuming an overdue
