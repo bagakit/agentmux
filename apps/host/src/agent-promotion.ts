@@ -52,7 +52,7 @@ export class HostAgentPromotions implements AgentPromotionPort {
   }
   private receipt(record: Record, stage: AgentPromotionReceipt['stage'], unavailable: AgentPromotionReceipt['unavailable'] = []): AgentPromotionReceipt {
     const { version: _version, workspace: _workspace, session: _session, ...original } = record
-    return { ...original, stage, state: stage === 'complete' && !unavailable.length ? 'complete' : 'partial', diskDurability: 'confirmed', unavailable }
+    return { ...original, stage, state: stage === 'complete' && !unavailable.length ? 'complete' : 'partial', diskDurability: unavailable.length ? 'unconfirmed' : 'confirmed', unavailable }
   }
   private graph(record: Record, graph: AgentMuxSpatialGraph): AgentMuxSpatialGraph {
     const next = structuredClone(graph), space = next.spaces.find(value => value.spaceId === record.moteSpaceId), zone = next.zones.find(value => value.zoneId === record.zoneId)
