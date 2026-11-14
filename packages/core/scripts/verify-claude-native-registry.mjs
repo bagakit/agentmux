@@ -51,7 +51,7 @@ for (const message of ['ENOSPC: no space left on device', 'Test timed out in 200
 
 const sources = ['packages/core/src/client.ts', 'packages/core/src/agent-native-process-linux.ts',
   'packages/core/src/agent-native-session-capture.ts', 'packages/core/src/types.ts',
-  'packages/core/src/providers/claude-native-session.ts', 'packages/core/src/providers/claude-native-registry.ts', test, config,
+  'packages/core/src/providers/claude-native-sources.ts', 'packages/providers/src/claude/native-session.ts', 'packages/providers/src/claude/native-registry.ts', test, config,
   'packages/core/scripts/verify-claude-native-registry.mjs']
 const fingerprint = async () => Object.fromEntries(await Promise.all(sources.map(async file =>
   [file, createHash('sha256').update(await readFile(join(root, file))).digest('hex')])))

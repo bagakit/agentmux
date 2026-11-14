@@ -29,18 +29,20 @@ const changes: Record<string, { file: string; edits: [string, string][] }> = {
   'weak-manifest-ack': { file: 'storage-recovery.ts', edits: [["JSON.stringify(manifest) + '\\n', { mode: 0o600, requireDirectorySync: true })\n      const verified", "JSON.stringify(manifest) + '\\n', { mode: 0o600, requireDirectorySync: false })\n      const verified"]] },
   'accept-corrupt-object': { file: 'storage-recovery.ts', edits: [['const path = this.blobPath(member.sha256), before =', 'return; const path = this.blobPath(member.sha256), before =']] },
   'format-rebind': { file: 'agent-session-store.ts', edits: [[" || member.kind !== (member.id === 'database' ? 'session-database' : 'file')", '']] },
-  'native-subject-rebind': { file: 'providers/claude-native-catalog.ts', edits: [['original.source.nativeHandle.sessionId !== context.source.nativeSessionId', 'false']] },
+  'native-subject-rebind': { file: '../../providers/src/claude/native-catalog.ts', edits: [['original.source.nativeHandle.sessionId !== context.source.nativeSessionId', 'false']] },
   'forget-cohort-frontier': { file: '../../providers/src/grok/native-history.ts', edits: [['if (await observe() !== before)', 'if (false)']] },
   'scan-application-data': { file: 'storage-recovery-sources.ts', edits: [['path !== directory && !selected', 'false']] }
 }
 if (mutation && !changes[mutation]) throw Error('Unknown backup causal mutation')
 export default defineConfig({
   cacheDir: resolve(core, '../../.local/cache/recovery-capture-vite'),
-  plugins: [{ name: 'actual-recovery-source', enforce: 'pre',
-    resolveId(specifier) { if (specifier === '@agentmux/providers/grok/native-history') return resolve(core, '../providers/src/grok/native-history.ts') },
-    transform(source, id) {
+  resolve: { alias: {
+    '@agentmux/providers/claude/native-catalog': resolve(core, '../providers/src/claude/native-catalog.ts'),
+    '@agentmux/providers/grok/native-history': resolve(core, '../providers/src/grok/native-history.ts')
+  } },
+  plugins: [{ name: 'actual-recovery-source', enforce: 'pre', transform(source, id) {
     const path = id.split('?')[0]!
-    if ((!path.startsWith(resolve(core, 'src') + '/') && path !== resolve(core, '../providers/src/grok/native-history.ts')) || !path.endsWith('.ts')) return
+    if (!(path.startsWith(resolve(core, 'src') + '/') || path.startsWith(resolve(core, '../providers/src') + '/')) || !path.endsWith('.ts')) return
     let code = source
     const change = changes[mutation]
     if (change && path === resolve(core, 'src', change.file)) for (const [before, after] of change.edits) {

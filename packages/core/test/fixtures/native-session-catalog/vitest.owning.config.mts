@@ -15,10 +15,12 @@ const mutants: Record<string, [string, string, string]> = {
   'skip-source-revalidation': ['packages/core/src/client.ts', 'await assertNativeSource?.()', 'void assertNativeSource'],
   'duplicate-prepared-native': ['packages/core/src/agent-session-store.ts', "if (source?.kind !== 'provider') return", 'if (true) return'],
   'accept-replaced-codex-file': ['packages/providers/src/codex/native-catalog.ts', 'actual.source.revision !== source.revision', 'false'],
-  'accept-claude-child': ['packages/core/src/providers/claude-native-catalog.ts', 'if (row?.isSidechain === true) return null\n  if (!row || !id || row.isSidechain !== false ||', 'if (!row || !id ||']
+  'accept-claude-child': ['packages/providers/src/claude/native-catalog.ts', 'if (row?.isSidechain === true) return null\n    if (!row || !id || row.isSidechain !== false ||', 'if (!row || !id ||']
 }
 export default defineConfig({ root,
-  resolve: { alias: { '@agentmux/providers/codex/native-catalog': resolve(root, 'packages/providers/src/codex/native-catalog.ts') } },
+  resolve: { alias: {
+    '@agentmux/providers/claude/native-catalog': resolve(root, 'packages/providers/src/claude/native-catalog.ts'),
+    '@agentmux/providers/codex/native-catalog': resolve(root, 'packages/providers/src/codex/native-catalog.ts') } },
   plugins: [{ name: 'native-resume-actual-source', enforce: 'pre', transform(source, id) {
   const path = relative(root, id.split('?')[0]!)
   if (!path.startsWith('packages/core/src/') && !path.startsWith('packages/providers/src/')) return

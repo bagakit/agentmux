@@ -85,10 +85,10 @@ try {
   for (const [mutation, pattern] of variants) await tests('mutation-' + mutation, mutation, pattern)
   await tests('restored')
   const paths = ['storage-recovery.ts', 'storage-recovery-sources.ts', 'agent-session-store.ts', 'agent-creation-authority.ts',
-    'headless-runtime.ts', 'client.ts', 'agent-provider.ts', 'native-creation-admission.ts', 'providers/claude-native-catalog.ts',
+    'headless-runtime.ts', 'client.ts', 'agent-provider.ts', 'native-creation-admission.ts',
     'providers/grok-history.ts']
   for (const path of paths) receipt.sourceHashes['packages/core/src/' + path] = sha(await readFile(join(root, 'packages/core/src', path)))
-  for (const path of ['packages/providers/src/codex/native-catalog.ts', 'packages/providers/src/grok/native-history.ts']) {
+  for (const path of ['packages/providers/src/claude/native-catalog.ts', 'packages/providers/src/codex/native-catalog.ts', 'packages/providers/src/grok/native-history.ts']) {
     receipt.sourceHashes[path] = sha(await readFile(join(root, path)))
   }
   const verificationPaths = ['packages/core/scripts/helpers/recovery-dependency-proof.mjs','packages/core/scripts/verify-recovery-backup.mjs', 'packages/core/test/storage-recovery-capture.config.mts', 'packages/core/test/storage-restore.config.mts', 'packages/core/test/storage-recovery-capture.test.ts', 'packages/core/test/storage-restore.test.ts', 'packages/core/test/helpers/prompt-receipt-source-loader.mjs', 'packages/core/test/helpers/storage-recovery-source-cli.ts', 'packages/core/test/helpers/prompt-receipt-reader.mjs', 'packages/core/test/helpers/prompt-receipt-process.ts', 'packages/core/test/helpers/storage-spatial-reader.mjs', process.execPath]

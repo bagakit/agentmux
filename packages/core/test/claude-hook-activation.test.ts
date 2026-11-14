@@ -9,7 +9,7 @@ const home = '/private/claude-hook-home'
 const files = new Map<string, string>()
 const inspect = (args: string[] = [], env: Record<string, string> = {}) => inspectClaudeHookSettings({
   workspacePath, args, env: { HOME: home, CLAUDE_CONFIG_DIR: '', CLAUDE_CODE_SAFE_MODE: '', ...env },
-  command: 'claude', plan: { providerId: 'claude', mutations: [] }, signal: new AbortController().signal
+  signal: new AbortController().signal
 })
 const put = (path: string, value: unknown) => files.set(path, JSON.stringify(value))
 
@@ -59,8 +59,8 @@ describe('Claude launch-carried Hook activation sources', () => {
     put('/private/custom-claude/settings.json', { disableAllHooks: true })
     expect(await inspect([], { CLAUDE_CONFIG_DIR: '/private/custom-claude' })).toMatchObject({ active: false })
     vi.stubEnv('CLAUDE_CONFIG_DIR', '/private/custom-claude')
-    expect(await inspectClaudeHookSettings({ workspacePath, args: [], env: { HOME: home }, command: 'claude',
-      plan: { providerId: 'claude', mutations: [] }, signal: new AbortController().signal })).toMatchObject({ active: false })
+    expect(await inspectClaudeHookSettings({ workspacePath, args: [], env: { HOME: home },
+      signal: new AbortController().signal })).toMatchObject({ active: false })
   })
 
   it('keeps an explicitly unset inherited user root and resolves HOME relative to the launch workspace', async () => {
@@ -70,7 +70,7 @@ describe('Claude launch-carried Hook activation sources', () => {
     put(target, { disableAllHooks: true })
     expect(await inspectClaudeHookSettings({ workspacePath, args: [], env: {
       HOME: 'private-home', CLAUDE_CONFIG_DIR: undefined, CLAUDE_CODE_SAFE_MODE: ''
-    }, command: 'claude', plan: { providerId: 'claude', mutations: [] }, signal: new AbortController().signal }))
+    }, signal: new AbortController().signal }))
       .toMatchObject({ active: false, code: 'HOOK_CONFIGURATION_DISABLED' })
     const reads = vi.mocked(readFile).mock.calls
     expect(reads.length).toBeGreaterThan(0)

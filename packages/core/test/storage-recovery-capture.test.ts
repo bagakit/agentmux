@@ -21,7 +21,7 @@ vi.mock('node:sqlite', async original => {
 import { AgentMuxStorageRecovery, snapshotRecoveryFile, type RecoverySource } from '../src/storage-recovery.js'
 import { sessionRecoverySource } from '../src/storage-recovery-sources.js'
 import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../src/agent-session-store.js'
-import { claudeRecoveryFiles } from '../src/providers/claude-native-catalog.js'
+import { claudeRecoveryFiles } from '../src/providers/claude-native-sources.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { grokRecoveryFiles } from '../src/providers/grok-history.js'
 import { recoveryDirectorySource, hashRecoveryFile } from '../src/storage-recovery.js'

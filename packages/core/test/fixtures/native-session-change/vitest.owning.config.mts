@@ -3,7 +3,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../../../..')
-const aliases = ['demand', 'relay'].flatMap(name => {
+const aliases = ['demand', 'relay', 'providers'].flatMap(name => {
   const manifest = JSON.parse(readFileSync(resolve(root, 'packages', name, 'package.json'), 'utf8'))
   return Object.entries(manifest.exports).map(([key, value]: [string, any]) => ({
     find: new RegExp('^' + (key === '.' ? '@agentmux/' + name : '@agentmux/' + name + '/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
@@ -20,7 +20,7 @@ const mutations: Record<string, [string, string, string]> = {
   'skip-candidate': ['packages/core/src/client.ts', "if (witnessTargetMismatch || witness.reason === 'native-witness-unavailable' || witness.reason === 'native-main-ambiguous') {", "if (witness.reason === 'native-witness-unavailable' || witness.reason === 'native-main-ambiguous') {"],
   'keep-old-interaction': ['packages/core/src/client.ts', 'delete result.pendingInteraction', 'void result.pendingInteraction'],
   'discard-confirmation-history': ['packages/core/src/client.ts', 'nativeConfirmationHistory: [...(stored.nativeConfirmationHistory ?? []), structuredClone(stored.nativeConfirmation)]', 'nativeConfirmationHistory: []'],
-  'promote-claude-sidechain': ['packages/core/src/providers/claude-native-session.ts', 'p.isSidechain === false', 'p.isSidechain !== undefined'],
+  'promote-claude-sidechain': ['packages/providers/src/claude/native-session.ts', 'p.isSidechain === false', 'p.isSidechain !== undefined'],
   'ignore-observation-version': ['packages/core/src/client.ts', 'stored.nativeSourceObservation.observedAt !== input.expectedObservationAt', 'false'],
   'keep-unknown-source': ['packages/core/src/client.ts', 'delete next.nativeSourceObservation\n              return next', 'return next'],
   'forget-historical-source': ['packages/core/src/prompt-submission.ts', '...(session.nativeConfirmationHistory ?? [])', '...[]'],
@@ -33,7 +33,7 @@ const mutations: Record<string, [string, string, string]> = {
 export default defineConfig({ root, cacheDir: resolve(root, '.local/cache/native-session-change-vite'), resolve: { alias: aliases }, plugins: [{
   name: 'loaded-current-native-source', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!/^packages\/(core|demand|relay)\/src\//u.test(path) || !/\.ts$/u.test(path)) return
+    if (!/^packages\/(core|demand|relay|providers)\/src\//u.test(path) || !/\.ts$/u.test(path)) return
     const before = code, mutation = process.env.AMX_SOURCE_CHANGE_MUTATION
     if (mutation) {
       const change = mutations[mutation]

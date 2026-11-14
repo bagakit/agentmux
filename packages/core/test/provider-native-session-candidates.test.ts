@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { discoverAppServerNativeSession } from '../src/providers/app-server.js'
-import { discoverClaudeNativeSession } from '../src/providers/claude-native-session.js'
+import { discoverClaudeNativeSession } from '../src/providers/claude-native-sources.js'
 import { codexMainNativeRecord } from '@agentmux/providers/codex/native-record-role'
 import type { AgentProviderNativeSessionDiscovery, AgentProviderNativeSessionDiscoveryContext } from '../src/types.js'
 
