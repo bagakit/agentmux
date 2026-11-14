@@ -70,9 +70,11 @@ let initial
 window.projectTimelineProof = {
   ready: true, recipient, other, alphaKey: JSON.stringify(['local', alpha.id]), betaKey: JSON.stringify(['local', beta.id]), emptyKey: JSON.stringify(['local', empty.id]),
   enter() { useAppStore.getState().focusRegion(checkout.id, 'timeline-tab-0', 'timeline-region-0', 'pointer', 'timeline-group-1'); initial = useAppStore.getState() },
+  identities(width, working = false) { useAppStore.setState(state => ({ agentNames: { [recipient]: 'Original task identity with a deliberately long readable name · 保留原任务与草稿', [other]: 'I' }, focusTimelineNameWidth: width,
+    ...(working ? { sessions: state.sessions.map(session => session.id === recipient ? { ...session, status: { state: 'working', source: 'native-hook', observedAt: now }, semanticStatus: { state: 'working', source: 'native-hook', observedAt: now, stateEnteredAt: now - 20000 } } : session) } : {}) })) },
   theme(mode) { useAppStore.setState(state => ({ config: { ...state.config, appearance: { ...state.config.appearance, appAppearance: mode } } })) },
   state() { const state = useAppStore.getState(), node = document.querySelector('.recent-focus'); return { activeWorkspaceId: state.activeWorkspaceId, focus: state.agentFocus, selection: state.workbenchSpaceSelection, calls: { ...calls }, drafts: state.agentComposerDrafts,
-    sameDrafts: state.agentComposerDrafts === initial?.agentComposerDrafts, sameRuns: sessions.every(session => state.sessions.find(item => item.id === session.id)?.control.run === session.control.run),
+    nameWidth: state.focusTimelineNameWidth, sameDrafts: state.agentComposerDrafts === initial?.agentComposerDrafts, sameRuns: sessions.every(session => state.sessions.find(item => item.id === session.id)?.control.run === session.control.run),
     scope: node ? JSON.parse(node.dataset.focusProjectScope) : null, projects: [...document.querySelectorAll('[data-timeline-project]')].filter(node => !node.hidden).map(node => node.dataset.timelineProject),
     markers: [...document.querySelectorAll('.recent-focus__message')].map(node => ({ id: node.dataset.messageId, count: node.dataset.recordCount })), events: [...inputEvents], mounts: window.presentationLeaves } }
 }

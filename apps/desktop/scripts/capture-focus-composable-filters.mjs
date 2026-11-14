@@ -10,20 +10,24 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { productInputs as filterProductInputs, captureInputs as filterCaptureInputs } from './fixtures/focus-composable-filters/inputs.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
-const projectTimeline = process.argv.includes('--project-timeline'), args = process.argv.slice(2).filter(arg => arg !== '--project-timeline')
-assert.ok(args[0] === '--evidence' && args[1] && args.length === 2, 'Use [--project-timeline] --evidence <private evidence directory>')
+const timelineIdentities = process.argv.includes('--timeline-identities'), projectTimeline = timelineIdentities || process.argv.includes('--project-timeline')
+const identityMutant = process.env.AGENTMUX_TIMELINE_IDENTITY_MUTANT
+assert.ok(!identityMutant || timelineIdentities && ['inline-pill', 'scroll-padding'].includes(identityMutant), 'Known timeline identity inverses require the bounded identity mode')
+const args = process.argv.slice(2).filter(arg => !['--project-timeline', '--timeline-identities'].includes(arg))
+assert.ok(args[0] === '--evidence' && args[1] && args.length === 2, 'Use [--project-timeline | --timeline-identities] --evidence <private evidence directory>')
 const entryFile = projectTimeline ? 'project-timeline-entry.mjs' : 'entry.mjs', mainFile = projectTimeline ? 'project-timeline-main.cjs' : 'main.cjs'
 const productInputs = projectTimeline ? [
+  ...(timelineIdentities ? ['styles/agent-avatar.css', 'lib/focus-timeline-name-width.ts'].map(name => 'apps/desktop/src/renderer/src/' + name) : []),
   ...['App.tsx', 'store.ts', 'styles/focus.css', 'components/ProjectRail.tsx', 'components/WorkspaceSidebar.tsx', 'components/GlobalFocusSurface.tsx', 'components/RecentFocusTimeline.tsx', 'components/AgentAvatar.tsx', 'components/FocusMessagePreview.tsx', 'components/FocusTimelineEventPreview.tsx', 'components/FocusFilters.tsx', 'components/WorkspaceWorkbench.tsx', 'components/StableWorkbenchView.tsx', 'lib/workspace-projects.ts', 'lib/focus-project-lanes.ts', 'lib/focus-history-timeline.ts', 'lib/focus-timeline-event-facts.ts', 'lib/focus-context.ts', 'lib/focus-filters.ts', 'lib/desktop-focus-navigation.ts', 'lib/conversation-read-api.ts'].map(name => 'apps/desktop/src/renderer/src/' + name),
   ...['client.ts', 'agent-session-store.ts', 'conversation.ts', 'conversation-reader.ts', 'public-rpc-service.ts', 'public-rpc-server.ts', 'public-rpc-client.ts'].map(name => 'packages/core/src/' + name),
   'apps/desktop/src/main/conversation-read-ipc.ts', 'apps/desktop/src/preload/conversation-read.ts', 'apps/desktop/src/shared/conversation-read.ts'
 ] : filterProductInputs
-const captureInputs = projectTimeline ? [filterCaptureInputs[0], filterCaptureInputs[3], 'apps/desktop/scripts/fixtures/focus-timeline-hover-inspection/public-producer.json', ...[entryFile, mainFile].map(name => 'apps/desktop/scripts/fixtures/focus-composable-filters/' + name)] : filterCaptureInputs
+const captureInputs = projectTimeline ? [filterCaptureInputs[0], filterCaptureInputs[3], 'apps/desktop/scripts/fixtures/focus-timeline-hover-inspection/public-producer.json', ...[entryFile, mainFile, ...(timelineIdentities ? ['timeline-identity-scene.cjs'] : [])].map(name => 'apps/desktop/scripts/fixtures/focus-composable-filters/' + name)] : filterCaptureInputs
 const evidence = resolve(args[1]); await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-composable-filters-')), fixture = join(desktop, 'scripts/fixtures/focus-composable-filters')
 const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], aliases = [], logs = []
-const receipt = { schema: projectTimeline ? 'agentmux.focus-project-timeline-capture.v1' : 'agentmux.focus-composable-filters-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', userAppRunRuntimeControlled: false,
+const receipt = { mode: timelineIdentities ? 'timeline-identities' : projectTimeline ? 'project-timeline' : 'composable-filters', identityMutant: identityMutant ?? null, schema: projectTimeline ? 'agentmux.focus-project-timeline-capture.v1' : 'agentmux.focus-composable-filters-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', userAppRunRuntimeControlled: false,
   boundary: projectTimeline ? 'Actual App, ProjectRail, GlobalFocusSurface, Timeline and shared Reader. Current-source private Core FileStore/public Unix RPC, original Main IPC/preload and strict Renderer conversation API; sealed captured producer records and typed native Provider leaves. PTY/unused Monaco painting isolated. No live Run, user Runtime, restart or installation.' : 'Private Electron Renderer with actual App, GlobalFocusSurface, FocusFilters, Store and Workbench; maintained typed preview API. Only PTY/Agent and unused Monaco painting leaves isolated. No live Runtime, native Run proof, installation, user navigation or restart.' }
 try {
   receipt.sourceResolution = { loadedDist: false, resolution: 'Current workspace public export source aliases; no Desktop build or unrelated dist scan.' }
@@ -74,7 +78,35 @@ try {
       }
       return { contents: source, loader: path.endsWith('tsx') ? 'tsx' : path.endsWith('ts') ? 'ts' : 'js' }
     })
-    builder.onLoad({ filter: /\.css$/ }, async ({ path }) => { if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return; const source = await readFile(path, 'utf8'); inputs.set(path, hash(source)); return { contents: source, loader: 'css' } })
+    builder.onLoad({ filter: /\.css$/ }, async ({ path }) => {
+      if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
+      const source = await readFile(path, 'utf8'); inputs.set(path, hash(source))
+      if (identityMutant === 'scroll-padding' && path === join(desktop, 'src/renderer/src/styles/focus.css')) {
+        const anchor = 'scroll-padding-block-start: var(--focus-ruler-height);'
+        assert.equal(source.split(anchor).length, 2, 'Unique actual viewport scroll safety owner')
+        const code = source.replace(anchor, '')
+        transformations.push({ path: relative(root, path), mutant: identityMutant, sourceSHA256: hash(source), loadedSHA256: hash(code), anchorCount: 1 })
+        return { contents: code, loader: 'css' }
+      }
+      if (identityMutant === 'inline-pill' && path === join(desktop, 'src/renderer/src/styles/focus.css')) {
+        const anchor = /\.recent-focus__track \.recent-focus__gutter \.agent-avatar--inline \{[^}]*\}/g
+        const matches = source.match(anchor); assert.equal(matches?.length, 1, 'Unique actual timeline identity CSS owner')
+        const previous = `.recent-focus__track .recent-focus__gutter .agent-avatar--inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  font: inherit;
+  color: inherit;
+}`
+        assert.notEqual(matches[0], previous, 'The candidate identity reset must be present before inverse')
+        const code = source.replace(anchor, previous)
+        transformations.push({ path: relative(root, path), mutant: identityMutant, sourceSHA256: hash(source), loadedSHA256: hash(code), anchorCount: matches.length })
+        return { contents: code, loader: 'css' }
+      }
+      return { contents: source, loader: 'css' }
+    })
   } }
   for (const input of captureInputs) { const path = join(root, input); inputs.set(path, hash(await readFile(path))) }
   const out = join(privateRoot, 'out'); await mkdir(out)
@@ -92,11 +124,10 @@ try {
   for (const suffix of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusFilters.tsx', 'WorkspaceWorkbench.tsx', 'StableWorkbenchView.tsx', 'store.ts', 'focus-lane-origin.ts']) assert.ok([...inputs.keys()].some(path => path.endsWith('/' + suffix)), 'Actual loaded ' + suffix)
   const html = join(out, 'index.html'); await writeFile(html, '<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script type="module" src="./app.js"></script></html>')
   receipt.compiled = { renderer: hash(await readFile(renderer)), css: hash(await readFile(join(out, 'app.css'))), ...(projectTimeline ? { conversationOwner: hash(await readFile(join(out, 'conversation-owner.mjs'))), preload: hash(await readFile(join(out, 'preload.cjs'))) } : {}) }
-  const env = { ...process.env, AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state') }; delete env.ELECTRON_RUN_AS_NODE
+  const env = { ...process.env, AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), ...(timelineIdentities ? { AGENTMUX_TIMELINE_IDENTITIES: '1' } : {}) }; delete env.ELECTRON_RUN_AS_NODE
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, mainFile), html, privateRoot, evidence], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
-  receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8')); assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
+  receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8'))
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
-  assert.ok(receipt.frames.length >= (projectTimeline ? 6 : 12), 'Nonempty mode-specific full App frame matrix')
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => {
     try { return [relative(root, path), hash(await readFile(path))] }
     catch (error) { if (error.code === 'ENOENT') return [relative(root, path), null]; throw error }
@@ -108,6 +139,8 @@ try {
   }
   receipt.peripheralCaptureDrift = Object.entries(receipt.inputs).filter(([path, sha]) => !receipt.affectedInputs.includes(path) && receipt.sourceAfter[path] !== sha)
     .map(([path, before]) => ({ path, before, after: receipt.sourceAfter[path], gate: 'Peripheral provenance; outside shared affected input scope.' }))
+  assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
+  assert.ok(receipt.frames.length >= (projectTimeline ? 6 : 12), 'Nonempty mode-specific full App frame matrix')
   receipt.capturedPass = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack, ...(error.errors ? { errors: error.errors } : {}) }; process.exitCode = 1 }
 finally {
