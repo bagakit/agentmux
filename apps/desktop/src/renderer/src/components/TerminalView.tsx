@@ -558,14 +558,18 @@ function TerminalViewOwner({
     return dispose
   }, [regionCaretFocus, visible, searchOpen, hydrating, hostDocument, linkOrigin?.regionId])
 
+  function focusUnclaimedTerminal(terminal: Terminal): void {
+    const element = terminal.element
+    if (!autoFocusRef.current || !visibleRef.current || !element?.isConnected || element.closest('[inert]')) return
+    const { activeElement, body, documentElement } = element.ownerDocument
+    if (activeElement === null || activeElement === body || activeElement === documentElement) terminal.focus()
+  }
+
   useLayoutEffect(() => {
     // reveal() schedules a commit. Before this commit, the actual xterm host is
     // still visibility:hidden and cannot receive the caret after a split remount.
     const terminal = terminalRef.current
-    const element = terminal?.element
-    if (!terminal || hydrating || !autoFocusRef.current || !visibleRef.current ||
-      !element?.isConnected || element.closest('[inert]')) return
-    terminal.focus()
+    if (terminal && !hydrating) focusUnclaimedTerminal(terminal)
   }, [hydrating])
 
   useLayoutEffect(() => {
@@ -2102,8 +2106,7 @@ function TerminalViewOwner({
     viewport.observeViewport()
     const focusWindow = root.ownerDocument.defaultView!
     const focusFrame = focusWindow.requestAnimationFrame(() => {
-      if (!disposed && autoFocusRef.current && visibleRef.current && terminal.element?.isConnected &&
-        !terminal.element.closest('[inert]')) terminal.focus()
+      if (!disposed) focusUnclaimedTerminal(terminal)
     })
     return () => {
       disposed = true
