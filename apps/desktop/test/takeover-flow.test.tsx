@@ -77,7 +77,7 @@ function retained(): Extract<Operation, { kind: 'takeover' }> {
 async function chooseDestination(spaceId: string) {
   const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Takeover destination"]')!
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
-  const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"][data-value]')].find(item => {
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"][data-value]')].find(item => {
     const value = item.dataset.value
     return value && JSON.parse(value).spaceId === spaceId && JSON.parse(value).displayWorkspaceId === 'project-a'
   })
@@ -145,8 +145,17 @@ it('takes over a saved source without a Region and follows the exact Core result
   const activate = vi.spyOn(useAppStore.getState(), 'activateTab').mockImplementation(() => {})
   const focus = vi.spyOn(useAppStore.getState(), 'focusRegion').mockImplementation(() => {})
   const saved: TakeoverSource = { kind: 'saved', agentSessionId: f.source.agentSessionId, hostId: 'local',
-    cwd: f.source.workspacePath, executorId: 'codex', label: 'Saved original work', diagnostic: '', origin: {}, destination: destination() }
+    cwd: f.source.workspacePath, executorId: 'codex', label: 'Saved original work', diagnostic: '', origin: {} }
   await dom.render(<SessionTakeoverSurface source={saved} active onClose={() => {}} />)
+  expect(document.querySelector('[aria-label="Takeover destination"]')).toBeNull()
+  const display = document.querySelector<HTMLButtonElement>('[aria-label="Takeover display location"]')!
+  await act(async () => display.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+  const group = [...document.querySelectorAll<HTMLElement>('[role="option"][data-value]')]
+    .find(item => item.dataset.value === JSON.stringify(['project-a', 'original-group']))
+  expect(group).toBeDefined()
+  await act(async () => group!.click())
+  await chooseDestination(f.b.spaceId)
+  expect(api.spatial.openAgent).not.toHaveBeenCalled()
   await act(async () => document.querySelector<HTMLButtonElement>('button.agent-pick[data-executor-id="codex"]')!.click())
   await vi.waitFor(() => expect(retained().phase).toBe('succeeded'))
   expect(api.spatial.openAgent).toHaveBeenCalledOnce()
@@ -341,7 +350,7 @@ it('destination menus grow by resource rather than unrelated display combination
   await dom.render(<SessionTakeoverSurface source={source} active onClose={() => {}} />)
   const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Takeover destination"]')!
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
-  const options = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"][data-value]')].filter(item => item.dataset.value)
+  const options = [...document.querySelectorAll<HTMLElement>('[role="option"][data-value]')].filter(item => item.dataset.value)
   expect(options.length).toBeGreaterThan(count)
   expect(options.length).toBeLessThan(count * 3)
   expect(new Set(options.map(item => JSON.parse(item.dataset.value!).groupId))).toEqual(new Set(['original-group']))
@@ -352,7 +361,7 @@ it('destination menus grow by resource rather than unrelated display combination
   expect(JSON.parse(trigger.dataset.value!).zoneId).toBe(f.b.zoneId)
   const display = document.querySelector<HTMLButtonElement>('[aria-label="Takeover display location"]')!
   await act(async () => display.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
-  const place = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"][data-value]')]
+  const place = [...document.querySelectorAll<HTMLElement>('[role="option"][data-value]')]
     .find(item => item.dataset.value === JSON.stringify(['unrelated-0', 'unrelated-0-group']))!
   expect(place).toBeDefined()
   await act(async () => place.click())
