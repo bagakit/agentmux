@@ -356,7 +356,9 @@ it('reveals the exact last original row only for an explicit floating More, with
   expect(originalContainer.contains(panel().querySelector('.composer-outbox__inline'))).toBe(true)
   await act(async()=>ownCopy.click())
   expect(copy).toHaveBeenCalledExactlyOnceWith('Original row 99')
-  expect(originalContainer.querySelector('.log-turn__actions')!.getAttribute('data-copy-state')).toBe('copied');expect(ownCopy.getAttribute('aria-label')).toBe('Message copied');expect(ownCopy.textContent).toContain('Copied')
+  expect(originalContainer.querySelector('.log-turn__actions')!.getAttribute('data-copy-state')).toBe('copied')
+  expect(ownCopy.getAttribute('aria-label')).toBe('Message copied')
+  expect(ownCopy.querySelector('[data-semantic-icon="action.confirm"]')).not.toBeNull()
   const focus=document.activeElement
   await show([...queued,{id:'later',text:'Later arrival',status:'queued',deliverable:true,editable:true}])
   expect(revealed.filter(key=>key.startsWith('queue:'))).toEqual(['queue:original-99'])
