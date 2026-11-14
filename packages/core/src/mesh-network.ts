@@ -16,7 +16,7 @@ export type MeshNetworkConfiguration = Pick<RelayMeshConfiguration, 'networkId' 
 }
 export type MeshPublicIdentity = { peerId: string; publicKey: string; epoch: number }
 export type MeshOwner = { runtimeId: string; ownerInstanceId: string }
-export type MeshOwnerTarget = { hostId: string; expectedRuntimeId: string }
+export type MeshOwnerTarget = { hostId: string; expectedRuntimeId: string; expectedOwnerInstanceId?: string }
 export type MeshSaveOperation = { operationId: string; expectedRevision: string; revision: string; status: 'confirmed' | 'unknown'; updatedAt: number; cause?: { code: string; message: string } }
 export type MeshNetworkSettings = { owner: MeshOwner; identity: MeshPublicIdentity | null; revision: string; configuration: MeshNetworkConfiguration; operation: MeshSaveOperation | null }
 export type MeshApplyObservation = { state: 'disabled' | 'starting' | 'active' | 'unavailable'; issue?: { code: string; message: string } }
@@ -92,8 +92,9 @@ export function parseMeshNetworkParams<M extends MeshNetworkMethod>(method: M, v
   const p = rpcRecord(value, ['target', ...(method === 'settings.mesh.configure' ? ['expectedRevision', 'operationId', 'configuration'] : method === 'settings.mesh.inspect' ? ['operationId'] : method === 'mesh.link' ? ['offer', 'ingress'] : [])])
   let target: MeshOwnerTarget | undefined
   if (p.target !== undefined) {
-    const route = rpcRecord(p.target, ['hostId', 'expectedRuntimeId'])
-    target = { hostId: rpcString(route.hostId, 'Exact saved Mesh Host'), expectedRuntimeId: rpcString(route.expectedRuntimeId, 'Expected original Mesh Runtime') }
+    const route = rpcRecord(p.target, ['hostId', 'expectedRuntimeId', 'expectedOwnerInstanceId'])
+    target = { hostId: rpcString(route.hostId, 'Exact saved Mesh Host'), expectedRuntimeId: rpcString(route.expectedRuntimeId, 'Expected original Mesh Runtime'),
+      ...(route.expectedOwnerInstanceId === undefined ? {} : { expectedOwnerInstanceId: rpcString(route.expectedOwnerInstanceId, 'Expected Mesh Core instance') }) }
   }
   const selected = target ? { target } : {}
   if (method === 'settings.mesh.configure') return { ...selected, expectedRevision: rpcString(p.expectedRevision, 'Original Mesh revision'), operationId: rpcString(p.operationId, 'Original Mesh save'), configuration: parseMeshNetworkConfiguration(p.configuration) } as MeshNetworkParams[M]
@@ -111,7 +112,7 @@ export function parseMeshNetworkResult<M extends MeshNetworkMethod>(method: M, v
   try {
     const originalOwner = (value: unknown): MeshOwner => {
       const result = owner(value)
-      if (input.target && result.runtimeId !== input.target.expectedRuntimeId || expectedOwner && (result.runtimeId !== expectedOwner.runtimeId || result.ownerInstanceId !== expectedOwner.ownerInstanceId)) invalid()
+      if (input.target && (result.runtimeId !== input.target.expectedRuntimeId || input.target.expectedOwnerInstanceId && result.ownerInstanceId !== input.target.expectedOwnerInstanceId) || expectedOwner && (result.runtimeId !== expectedOwner.runtimeId || result.ownerInstanceId !== expectedOwner.ownerInstanceId)) invalid()
       return result
     }
     if (method === 'settings.mesh.inspect' || method === 'settings.mesh.configure') {

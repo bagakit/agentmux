@@ -893,7 +893,7 @@ export class AgentMuxRpcService {
 
   /** Only these original operator methods borrow a saved carrier; no executor is exposed. */
   private async callSelectedOperator<M extends MeshNetworkMethod | 'settings.node.inspect' | 'settings.node.configure'>(
-    target: { hostId: string; expectedRuntimeId: string }, method: M, input: AgentMuxRpcParams<M>,
+    target: { hostId: string; expectedRuntimeId: string; expectedOwnerInstanceId?: string }, method: M, input: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext, reauthorize: () => Promise<unknown>,
     validate: (value: AgentMuxRpcResult<M>, owner: { runtimeId: string; ownerInstanceId: string }) => AgentMuxRpcResult<M>
   ): Promise<AgentMuxRpcResult<M>> {
@@ -926,7 +926,7 @@ export class AgentMuxRpcService {
       const readContext = context.signal ? { signal: context.signal } : {}
       const { owner } = await call('runtime.owner.identity', { expectedRuntimeId: target.expectedRuntimeId }, readContext)
       await assertCurrent()
-      if (owner.runtimeId !== target.expectedRuntimeId) throw new AgentMuxError('The original operator Runtime changed before dispatch.', 'RUNTIME_OWNER_MISMATCH')
+      if (owner.runtimeId !== target.expectedRuntimeId || target.expectedOwnerInstanceId && owner.ownerInstanceId !== target.expectedOwnerInstanceId) throw new AgentMuxError('The original operator Core changed before dispatch.', 'RUNTIME_OWNER_MISMATCH')
       dispatched = true
       const result = validate(await call(method, input, { ...readContext, runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } }), owner)
       // An obtained original save ACK remains evidence even if its observing route
@@ -1991,7 +1991,7 @@ export class AgentMuxRpcService {
       if (target) {
         try {
           const observed = await this.ports.meshNetwork!.call('mesh.inspect', {}, current)
-          if (observed.owner.runtimeId !== target.expectedRuntimeId) throw new AgentMuxError('The original local Mesh Runtime differs from this target.', 'RUNTIME_OWNER_MISMATCH')
+          if (observed.owner.runtimeId !== target.expectedRuntimeId || target.expectedOwnerInstanceId && observed.owner.ownerInstanceId !== target.expectedOwnerInstanceId) throw new AgentMuxError('The original local Mesh Core differs from this target.', 'RUNTIME_OWNER_MISMATCH')
         } catch (error) { if (meshMethod === 'settings.mesh.configure') throw meshConfigurationNotApplied(error); throw error }
       }
       return parseMeshNetworkResult(meshMethod, await this.ports.meshNetwork!.call(meshMethod, original, current), input) as AgentMuxRpcResult<M>

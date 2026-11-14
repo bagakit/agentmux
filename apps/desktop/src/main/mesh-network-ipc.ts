@@ -23,9 +23,15 @@ export function registerMeshNetworkIpc(ports: {
     try {
       if (!isMeshNetworkMethod(method)) throw new Error('Unknown Mesh network method.')
       params = parseMeshNetworkParams(method, value); original = fence(expectedOwner)
+      if (original && params.target && params.target.hostId !== 'local') {
+        if (original.runtimeId !== params.target.expectedRuntimeId || params.target.expectedOwnerInstanceId && original.ownerInstanceId !== params.target.expectedOwnerInstanceId) throw new Error('Read the selected Mesh Core again before applying its settings.')
+        params.target = { ...params.target, expectedOwnerInstanceId: original.ownerInstanceId }
+      }
       if (method === 'settings.mesh.configure' && !original) throw new Error('Read the original Core settings before saving this Mesh draft.')
     } catch (cause) { throw Object.assign(new Error(cause instanceof Error ? cause.message : String(cause)), { code: 'CONTROL_INVALID_REQUEST', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } }) }
     if (!isMeshNetworkMethod(method)) throw new Error('Unknown Mesh network method.')
+    // A selected Host checks its own fence at the destination. A local fence belongs to the entry Core.
+    if (params.target && params.target.hostId !== 'local') original = undefined
     const result = await reads.read(event.sender, token, signal => ports.call(method, params, { signal, ...(original ? { runtimeFence: original } : {}) }))
     return parseMeshNetworkResult(method, result, params)
   }))
