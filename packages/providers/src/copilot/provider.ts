@@ -1,13 +1,9 @@
-import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
 import { join } from 'node:path'
-import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
-import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
-import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
-import { normalizeNativeSessionId } from '../agent-native-locator.js'
+import type { ProviderExecutionEnvironment, ProviderHookEnvironment, ProviderHookServices, ProviderHookTarget } from '../hook-services.js'
 
-type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+type CopilotServices = ProviderHookServices<'copilot'> & ProviderHookEnvironment & {
+  normalizeNativeSessionId(value: unknown): string | undefined
+}
 
 /**
  * 写进 `<copilot-home>/hooks/agentmux.json` 的事件名。
@@ -71,73 +67,78 @@ export const COPILOT_HOOK_EVENTS = [
  * 决定，于是它会落到 Copilot 自己的 TUI 提示上等用户——那正是 waiting 的定义。判成 working 会让
  * 「等我点一下」和「正在干活」在界面上长得一模一样（与 Cursor 的两个授权门同一判断）。
  */
-export const COPILOT_HOOKS: AgentNativeHookSpecification = {
-  retainedRuntime: true,
-  toolFields(eventName, payload) {
-    if (!['preToolUse', 'postToolUse', 'postToolUseFailure'].includes(eventName)) return {}
-    return hookToolFields(payload.toolName, payload.toolArgs)
-  },
-  toolOutcome(eventName, payload) {
-    if (eventName === 'postToolUseFailure') {
-      const output = formatHookToolOutput(typeof payload.error === 'string' ? payload.error : undefined)
-      return { failed: true, ...(output === undefined ? {} : { output }) }
+function nativeHook(services: CopilotServices) {
+  const { formatHookToolOutput, hookToolFields, normalizeNativeSessionId } = services
+  return {
+    retainedRuntime: true,
+    toolFields(eventName: string, payload: Readonly<Record<string, unknown>>) {
+      if (!['preToolUse', 'postToolUse', 'postToolUseFailure'].includes(eventName)) return {}
+      return hookToolFields(payload.toolName, payload.toolArgs)
+    },
+    toolOutcome(eventName: string, payload: Readonly<Record<string, unknown>>) {
+      if (eventName === 'postToolUseFailure') {
+        const output = formatHookToolOutput(typeof payload.error === 'string' ? payload.error : undefined)
+        return { failed: true, ...(output === undefined ? {} : { output }) }
+      }
+      if (eventName !== 'postToolUse') return { failed: false }
+      const result = payload.toolResult && typeof payload.toolResult === 'object' && !Array.isArray(payload.toolResult)
+        ? payload.toolResult as Record<string, unknown> : undefined
+      const failed = result?.resultType === 'failure' || result?.resultType === 'rejected'
+        || result?.resultType === 'denied' || result?.resultType === 'timeout'
+      const output = formatHookToolOutput(typeof result?.textResultForLlm === 'string' ? result.textResultForLlm : undefined)
+        ?? (failed && typeof result?.error === 'string' ? formatHookToolOutput(result.error) : undefined)
+      return { failed, ...(output === undefined ? {} : { output }) }
+    },
+    lifecycle: {
+      sessionStart: 'session-start',
+      userPromptSubmitted: 'user-prompt-submit',
+      permissionRequest: 'permission-request',
+      preToolUse: 'tool-use-start',
+      postToolUse: 'tool-use-end',
+      postToolUseFailure: 'tool-use-end',
+      subagentStart: 'subagent-start',
+    },
+    // 事件名靠 `--event` 旗标送达（负载不带任何事件名键，见 planManagedHooks 的说明）。
+    eventNameSource: { kind: 'flag' },
+    resolveSubject(payload: Readonly<Record<string, unknown>>, context: { nativeHandle?: {
+      kind: string; providerId?: string; sessionId?: string
+    } | undefined }) {
+      const nativeId = normalizeNativeSessionId(payload.sessionId), main = context.nativeHandle
+      if (!nativeId) return { kind: 'unknown' as const, basis: 'provider-protocol' as const, reason: 'native-session-identity-unconfirmed' }
+      if (main && (main.kind !== 'provider' || main.providerId !== 'copilot' || main.sessionId !== nativeId))
+        return { kind: 'foreign' as const, basis: 'provider-protocol' as const, reason: 'native-session-mismatch', nativeSessionId: nativeId }
+      if (typeof payload.agentName === 'string' || typeof payload.agentId === 'string') {
+        const childId = normalizeNativeSessionId(payload.agentId)
+        return { kind: 'child' as const, basis: 'provider-protocol' as const, reason: childId ? 'copilot-child-agent' : 'child-native-identity-unconfirmed',
+          ...(childId ? { nativeSessionId: childId } : {}) }
+      }
+      return { kind: 'main' as const, basis: 'provider-protocol' as const, reason: 'run-bound-protocol', nativeSessionId: nativeId }
+    },
+    rules: [
+      // 授权门：Copilot 正等一个决定。
+      { events: ['permissionRequest'], state: 'waiting' },
+      { events: ['agentStop', 'subagentStop'], state: 'unknown', lifecycleEvent: null },
+      {
+        events: [
+          'sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
+          'postToolUseFailure', 'subagentStart', 'preCompact'
+        ],
+        state: 'working'
+      }
+    ],
+    // agentName is a label. The start callback has no unique ID; retain that gap, never merge names.
+    subagentTracking: {
+      startEvents: ['subagentStart'],
+      stopEvents: [],
+      idKeys: ['agentId']
+    },
+    // 负载键是 camelCase `sessionId`/`transcriptPath`（实测）。**不**声明 requireTranscriptPath：
+    // `transcriptPath` 只在 stop 一族事件上出现，`sessionStart` 那条没有它。
+    nativeHandle: {
+      sessionIdKeys: ['sessionId'],
+      transcriptPathKeys: ['transcriptPath']
     }
-    if (eventName !== 'postToolUse') return { failed: false }
-    const result = payload.toolResult && typeof payload.toolResult === 'object' && !Array.isArray(payload.toolResult)
-      ? payload.toolResult as Record<string, unknown> : undefined
-    const failed = result?.resultType === 'failure' || result?.resultType === 'rejected'
-      || result?.resultType === 'denied' || result?.resultType === 'timeout'
-    const output = formatHookToolOutput(typeof result?.textResultForLlm === 'string' ? result.textResultForLlm : undefined)
-      ?? (failed && typeof result?.error === 'string' ? formatHookToolOutput(result.error) : undefined)
-    return { failed, ...(output === undefined ? {} : { output }) }
-  },
-  lifecycle: {
-    sessionStart: 'session-start',
-    userPromptSubmitted: 'user-prompt-submit',
-    permissionRequest: 'permission-request',
-    preToolUse: 'tool-use-start',
-    postToolUse: 'tool-use-end',
-    postToolUseFailure: 'tool-use-end',
-    subagentStart: 'subagent-start',
-  },
-  // 事件名靠 `--event` 旗标送达（负载不带任何事件名键，见 createCopilotManagedHookPlan 的说明）。
-  eventNameSource: { kind: 'flag' },
-  resolveSubject(payload, context) {
-    const nativeId = normalizeNativeSessionId(payload.sessionId), main = context.nativeHandle
-    if (!nativeId) return { kind: 'unknown', basis: 'provider-protocol', reason: 'native-session-identity-unconfirmed' }
-    if (main && (main.kind !== 'provider' || main.providerId !== 'copilot' || main.sessionId !== nativeId))
-      return { kind: 'foreign', basis: 'provider-protocol', reason: 'native-session-mismatch', nativeSessionId: nativeId }
-    if (typeof payload.agentName === 'string' || typeof payload.agentId === 'string') {
-      const childId = normalizeNativeSessionId(payload.agentId)
-      return { kind: 'child', basis: 'provider-protocol', reason: childId ? 'copilot-child-agent' : 'child-native-identity-unconfirmed',
-        ...(childId ? { nativeSessionId: childId } : {}) }
-    }
-    return { kind: 'main', basis: 'provider-protocol', reason: 'run-bound-protocol', nativeSessionId: nativeId }
-  },
-  rules: [
-    // 授权门：Copilot 正等一个决定。
-    { events: ['permissionRequest'], state: 'waiting' },
-    { events: ['agentStop', 'subagentStop'], state: 'unknown', lifecycleEvent: null },
-    {
-      events: [
-        'sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
-        'postToolUseFailure', 'subagentStart', 'preCompact'
-      ],
-      state: 'working'
-    }
-  ],
-  // agentName is a label. The start callback has no unique ID; retain that gap, never merge names.
-  subagentTracking: {
-    startEvents: ['subagentStart'],
-    stopEvents: [],
-    idKeys: ['agentId']
-  },
-  // 负载键是 camelCase `sessionId`/`transcriptPath`（实测）。**不**声明 requireTranscriptPath：
-  // `transcriptPath` 只在 stop 一族事件上出现，`sessionStart` 那条没有它。
-  nativeHandle: {
-    sessionIdKeys: ['sessionId'],
-    transcriptPathKeys: ['transcriptPath']
-  }
+  } as const
 }
 
 /**
@@ -150,7 +151,8 @@ export const COPILOT_HOOKS: AgentNativeHookSpecification = {
  * `--config-dir` 那条旗标在它的 `--help` 里已标注 deprecated 并指向 `COPILOT_HOME`，所以这里只认
  * 环境变量，不去接一个正在被上游淘汰的旗标。
  */
-function copilotHome(env?: ProviderExecutionEnvironment, workspacePath?: string): string {
+function copilotHome(services: CopilotServices, env?: ProviderExecutionEnvironment, workspacePath?: string): string {
+  const { executionEnvironmentValue, executionHomeDirectory, executionPath } = services
   const override = executionEnvironmentValue(env, 'COPILOT_HOME')?.trim()
   return executionPath(override || join(executionHomeDirectory(env), '.copilot'), workspacePath)
 }
@@ -188,9 +190,10 @@ function copilotHome(env?: ProviderExecutionEnvironment, workspacePath?: string)
  * bundle 不在本机（只有 `config.json` 与日志，无 prebuilds/runtime），所以没法把「命令串尾部追加
  * `--event` 后仍被原样执行」这一步再跑一遍捕获。但它落在 antigravity 已经验证过的**同一个**
  * `{type:'command', command}` 形状上——antigravity 正是往这个形状的 command 尾部追加 `--event`（见
- * antigravity.ts），而 payload 通道对 Copilot 是明确关死的，故这是仅有且方向正确的修法。
+ * antigravity/provider.ts），而 payload 通道对 Copilot 是明确关死的，故这是仅有且方向正确的修法。
  */
-export function createCopilotManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
+function planManagedHooks(services: CopilotServices, { env, workspacePath }: ProviderHookTarget) {
+  const { runScopedHookCommand, hookCommandTimeout } = services
   const command = runScopedHookCommand('copilot')
   const hooks = Object.fromEntries(COPILOT_HOOK_EVENTS.map((eventName) => [eventName, [{
     ...(eventName === 'preToolUse' || eventName === 'postToolUse' ? { matcher: '.*' } : {}),
@@ -199,21 +202,21 @@ export function createCopilotManagedHookPlan(env?: ProviderExecutionEnvironment,
     hooks: [{ type: 'command', command: `${command} --event ${eventName}`, ...hookCommandTimeout('copilot') }]
   }]]))
   return {
-    providerId: 'copilot',
-    retainPreviousDeclarations: true,
+    providerId: 'copilot' as const,
+    retainPreviousDeclarations: true as const,
     mutations: [{
-      path: join(copilotHome(env, workspacePath), 'hooks', 'agentmux.json'),
+      path: join(copilotHome(services, env, workspacePath), 'hooks', 'agentmux.json'),
       content: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-managed-events' }
+      merge: { kind: 'json-managed-events' as const }
     }]
   }
 }
 
-export function createCopilotProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  return defineAgentProvider({
-    planManagedHooks: ({ env, workspacePath }) => createCopilotManagedHookPlan(env, workspacePath),
-    catalog: catalog({
+export function copilotProvider(services: CopilotServices) {
+  return {
+    planManagedHooks: (target: ProviderHookTarget) => planManagedHooks(services, target),
+    catalog: {
       id: 'copilot', label: 'Copilot', executable: 'copilot', expectedProcess: 'copilot',
       promptDelivery: 'positional-argv',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },
@@ -240,11 +243,11 @@ export function createCopilotProvider(defineAgentProvider: ProviderFactory): Age
         // token 字段**。它报 transcript 路径，但那份文件的格式未经核实，今天两个 reader
         // （claude-jsonl / codex-rollout）都不能假定适用。按「未核实就不声明」留空。
       }
-    }),
-    buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
-    hook: COPILOT_HOOKS,
-    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
+    } as const,
+    buildArgs: (prompt: string, args: readonly string[]) => [...args, ...(prompt ? [prompt] : [])],
+    hook: nativeHook(services),
+    buildResumeArgs: (sessionId: string, _transcriptPath: string | undefined, prompt: string | undefined, args: readonly string[]) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
-  })
+  }
 }

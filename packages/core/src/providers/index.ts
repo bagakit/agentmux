@@ -13,14 +13,15 @@ import { nativeTextBetween } from '../native-history-source.js'
 import { observeRead } from '../observation-read.js'
 import { AgentMuxRpcLines, isRpcId, rpcEncode } from '../public-rpc-frame.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryObservation, AgentProviderSessionHistoryObservationContext, AgentSessionHistoryItem } from '../types.js'
-import { executionHomeDirectory, executionPath } from './execution-environment.js'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, executionTemporaryDirectory } from './execution-environment.js'
 import { catalog, hookCommandTimeout, hookToolFields, runScopedHookCommand } from './shared.js'
 import { createClaudeProvider } from './claude.js'
 import { createCodexProvider } from './codex.js'
-import { createCopilotProvider } from './copilot.js'
+import { copilotProvider } from '@agentmux/providers/copilot/provider'
+import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { createCursorProvider } from './cursor.js'
 import { createDroidProvider } from './droid.js'
-import { createGeminiProvider } from './gemini.js'
+import { geminiProvider } from '@agentmux/providers/gemini/provider'
 import { createGrokProvider } from './grok.js'
 import { createHermesProvider } from './hermes.js'
 import { createKimiProvider } from './kimi.js'
@@ -53,8 +54,13 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
   })
 }
 
+const hookServices = { formatHookToolOutput, hookCommandTimeout, hookToolFields, runScopedHookCommand,
+  executionEnvironmentValue, executionHomeDirectory, executionPath }
+
 /** Composition-only list. Provider-specific definitions live in their own modules. */
 export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory): readonly AgentProvider[] {
+  const gemini = geminiProvider({ ...hookServices, executionTemporaryDirectory })
+  const copilot = copilotProvider({ ...hookServices, normalizeNativeSessionId })
   return [
     createCodexProvider(defineAgentProvider),
     createClaudeProvider(defineAgentProvider),
@@ -62,22 +68,20 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
     createHermesProvider(defineAgentProvider),
     createPiProvider(defineAgentProvider),
     createGrokProvider(defineAgentProvider),
-    createGeminiProvider(defineAgentProvider),
+    defineAgentProvider({ ...gemini, catalog: catalog(gemini.catalog) }),
     createAntigravityProvider(defineAgentProvider),
     createCursorProvider(defineAgentProvider),
     createKimiProvider(defineAgentProvider),
     createDroidProvider(defineAgentProvider),
-    createCopilotProvider(defineAgentProvider),
+    defineAgentProvider({ ...copilot, catalog: catalog(copilot.catalog) }),
     createOpenCodeProvider(defineAgentProvider)
   ]
 }
 
 export { createClaudeProvider } from './claude.js'
 export { createCodexProvider } from './codex.js'
-export { createCopilotProvider } from './copilot.js'
 export { createCursorProvider } from './cursor.js'
 export { createDroidProvider } from './droid.js'
-export { createGeminiProvider } from './gemini.js'
 export { createGrokProvider } from './grok.js'
 export { createHermesProvider } from './hermes.js'
 export { createKimiProvider } from './kimi.js'

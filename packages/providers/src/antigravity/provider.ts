@@ -1,18 +1,13 @@
 import { join } from 'node:path'
 import { ANTIGRAVITY_LAUNCH_OPTIONS } from './launch-options.js'
 
-type AntigravityHookServices = {
-  formatHookToolOutput(value: unknown): string | undefined
-  hookToolFields(name: unknown, input: unknown): { toolName?: string; toolInput?: unknown }
-  runScopedHookCommand(providerId: 'antigravity'): string
-  hookCommandTimeout(providerId: 'antigravity'): Record<string, number>
-}
+import type { ProviderHookServices } from '../hook-services.js'
 
 export const ANTIGRAVITY_HOOK_EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreInvocation', 'PostInvocation', 'PreToolUse', 'PostToolUse', 'Stop'
 ] as const
 
-function nativeHook(services: AntigravityHookServices) {
+function nativeHook(services: ProviderHookServices<'antigravity'>) {
   const { formatHookToolOutput, hookToolFields } = services
   return {
     retainedRuntime: true,
@@ -60,7 +55,7 @@ function nativeHook(services: AntigravityHookServices) {
   } as const
 }
 
-function managedHookPlan(services: AntigravityHookServices, targetRoot: string) {
+function managedHookPlan(services: ProviderHookServices<'antigravity'>, targetRoot: string) {
   const { runScopedHookCommand, hookCommandTimeout } = services
   const targetPath = targetRoot.endsWith('.json') ? targetRoot : join(targetRoot, '.gemini', 'config', 'hooks.json')
   const command = runScopedHookCommand('antigravity')
@@ -83,7 +78,7 @@ function managedHookPlan(services: AntigravityHookServices, targetRoot: string) 
   }
 }
 
-export function antigravityProvider(services: AntigravityHookServices) {
+export function antigravityProvider(services: ProviderHookServices<'antigravity'>) {
   return {
     planManagedHooks: (targetRoot: string) => managedHookPlan(services, targetRoot),
     catalog: {

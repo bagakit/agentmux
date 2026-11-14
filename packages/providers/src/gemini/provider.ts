@@ -1,13 +1,10 @@
-import { executionEnvironmentValue, executionHomeDirectory, executionPath, executionTemporaryDirectory, type ProviderExecutionEnvironment } from './execution-environment.js'
 import { join } from 'node:path'
 import { GEMINI_LAUNCH_OPTIONS } from './launch-options.js'
-import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
-import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
-import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
+import type { ProviderExecutionEnvironment, ProviderHookEnvironment, ProviderHookServices, ProviderHookTarget } from '../hook-services.js'
 
-type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+type GeminiServices = ProviderHookServices<'gemini'> & ProviderHookEnvironment & {
+  executionTemporaryDirectory(env?: ProviderExecutionEnvironment): string
+}
 
 function geminiToolText(value: unknown): unknown {
   const parts = Array.isArray(value) ? value : [value]
@@ -43,55 +40,60 @@ export const GEMINI_HOOK_EVENTS = [
  * `AfterAgent` 的输出可以拒绝结果并重试；它不是所有 Hook 已收口的最终成功回执。
  * `SessionEnd` 属于会话终结，Core 不拿它判轮次。
  */
-export const GEMINI_HOOKS: AgentNativeHookSpecification = {
-  retainedRuntime: true,
-  toolFields(eventName, payload) {
-    if (eventName !== 'BeforeTool' && eventName !== 'AfterTool') return {}
-    return hookToolFields(payload.tool_name, payload.tool_input)
-  },
-  toolOutcome(eventName, payload) {
-    if (eventName !== 'AfterTool') return { failed: false }
-    const response = payload.tool_response && typeof payload.tool_response === 'object' && !Array.isArray(payload.tool_response)
-      ? payload.tool_response as Record<string, unknown> : undefined
-    const error = response?.error && typeof response.error === 'object' && !Array.isArray(response.error)
-      ? response.error as Record<string, unknown> : undefined
-    // Native ToolResult error has a required message, including an explicitly empty one.
-    const failed = typeof error?.message === 'string'
-    const output = formatHookToolOutput(failed ? error.message : geminiToolText(response?.llmContent))
-    return { failed, ...(output === undefined ? {} : { output }) }
-  },
-  lifecycle: {
-    SessionStart: 'session-start',
-    BeforeAgent: 'user-prompt-submit',
-    BeforeTool: 'tool-use-start',
-    AfterTool: 'tool-use-end',
-  },
-  // 事件名随负载到达：负载是 Claude 同族的 snake_case，带 `hook_event_name`（见下方 rules 前的说明）。
-  eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
-  rules: [
-    { events: ['AfterAgent'], state: 'unknown', lifecycleEvent: null },
-    { events: ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterTool'], state: 'working' }
-  ],
-  // Gemini 每个事件都带 transcript_path（见 `createBaseInput`），所以 usage 能真的抽到 token。
-  nativeHandle: {
-    sessionIdKeys: ['session_id'],
-    transcriptPathKeys: ['transcript_path']
-  }
+function nativeHook(services: GeminiServices) {
+  const { formatHookToolOutput, hookToolFields } = services
+  return {
+    retainedRuntime: true,
+    toolFields(eventName: string, payload: Readonly<Record<string, unknown>>) {
+      if (eventName !== 'BeforeTool' && eventName !== 'AfterTool') return {}
+      return hookToolFields(payload.tool_name, payload.tool_input)
+    },
+    toolOutcome(eventName: string, payload: Readonly<Record<string, unknown>>) {
+      if (eventName !== 'AfterTool') return { failed: false }
+      const response = payload.tool_response && typeof payload.tool_response === 'object' && !Array.isArray(payload.tool_response)
+        ? payload.tool_response as Record<string, unknown> : undefined
+      const error = response?.error && typeof response.error === 'object' && !Array.isArray(response.error)
+        ? response.error as Record<string, unknown> : undefined
+      // Native ToolResult error has a required message, including an explicitly empty one.
+      const failed = typeof error?.message === 'string'
+      const output = formatHookToolOutput(failed ? error.message : geminiToolText(response?.llmContent))
+      return { failed, ...(output === undefined ? {} : { output }) }
+    },
+    lifecycle: {
+      SessionStart: 'session-start',
+      BeforeAgent: 'user-prompt-submit',
+      BeforeTool: 'tool-use-start',
+      AfterTool: 'tool-use-end',
+    },
+    // 事件名随负载到达：负载是 Claude 同族的 snake_case，带 `hook_event_name`（见下方 rules 前的说明）。
+    eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
+    rules: [
+      { events: ['AfterAgent'], state: 'unknown', lifecycleEvent: null },
+      { events: ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterTool'], state: 'working' }
+    ],
+    // Gemini 每个事件都带 transcript_path（见 `createBaseInput`），所以 usage 能真的抽到 token。
+    nativeHandle: {
+      sessionIdKeys: ['session_id'],
+      transcriptPathKeys: ['transcript_path']
+    }
+  } as const
 }
 
 /**
  * Gemini 的 managed hook 计划。
  *
  * 写 `~/.gemini/settings.json` 的 `hooks` 键。这里有一处**必须**看清的邻接风险：Antigravity 也住在
- * `~/.gemini` 下，但它的 hook 配置是 `~/.gemini/config/hooks.json`（见 createAntigravityManagedHookPlan）
+ * `~/.gemini` 下，但它的 hook 配置是 `~/.gemini/config/hooks.json`（见 Antigravity 的 Hook 配置）
  * ——两者是**不同文件**，互不覆盖。写错一个就会让装 Gemini 顺手改掉用户 Antigravity 的行为。
  *
  * settings.json 是用户的主配置（本机实测同时含 `security` 与 `mcpServers`），所以必须走
  * `json-managed-events` 合并：仅补当前准确声明，保留 foreign 顶层键与全部原 Hook 定义。
  */
-export function createGeminiManagedHookPlan(homeOverride?: string, env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
+function planManagedHooks(services: GeminiServices, { env, workspacePath }: ProviderHookTarget) {
+  const { executionEnvironmentValue, executionHomeDirectory, executionPath, executionTemporaryDirectory,
+    runScopedHookCommand, hookCommandTimeout } = services
   // Native Storage uses GEMINI_CLI_HOME as its home base, then appends .gemini.
-  const nativeHome = homeOverride ?? (executionEnvironmentValue(env, 'GEMINI_CLI_HOME') || executionHomeDirectory(env))
+  const nativeHome = executionEnvironmentValue(env, 'GEMINI_CLI_HOME') || executionHomeDirectory(env)
   const home = executionPath(nativeHome || executionTemporaryDirectory(env), workspacePath)
   const command = runScopedHookCommand('gemini')
   const hooks = Object.fromEntries(GEMINI_HOOK_EVENTS.map((eventName) => [eventName, [{
@@ -102,21 +104,21 @@ export function createGeminiManagedHookPlan(homeOverride?: string, env?: Provide
     hooks: [{ type: 'command', command, ...hookCommandTimeout('gemini', 'milliseconds') }]
   }]]))
   return {
-    providerId: 'gemini',
-    retainPreviousDeclarations: true,
+    providerId: 'gemini' as const,
+    retainPreviousDeclarations: true as const,
     mutations: [{
       path: join(home, '.gemini', 'settings.json'),
       content: `${JSON.stringify({ hooks }, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-managed-events' }
+      merge: { kind: 'json-managed-events' as const }
     }]
   }
 }
 
-export function createGeminiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  return defineAgentProvider({
-    planManagedHooks: ({ env, workspacePath }) => createGeminiManagedHookPlan(undefined, env, workspacePath),
-    catalog: catalog({
+export function geminiProvider(services: GeminiServices) {
+  return {
+    planManagedHooks: (target: ProviderHookTarget) => planManagedHooks(services, target),
+    catalog: {
       id: 'gemini', label: 'Gemini', executable: 'gemini', expectedProcess: 'gemini',
       promptDelivery: 'flag-prompt-interactive',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },
@@ -137,12 +139,12 @@ export function createGeminiProvider(defineAgentProvider: ProviderFactory): Agen
         // codex-rollout——今天两个 reader 都读不了它。声明 usage 就得先加第三种解析器，那超出本 task
         // 的验收面；按「能力未核实就不声明」如实留空，接 reader 时再单独记一个 task。
       }
-    }),
-    buildArgs: (prompt, args) => prompt ? ['--prompt-interactive', prompt, ...args] : [...args],
-    hook: GEMINI_HOOKS,
+    } as const,
+    buildArgs: (prompt: string, args: readonly string[]) => prompt ? ['--prompt-interactive', prompt, ...args] : [...args],
+    hook: nativeHook(services),
     launchOptions: GEMINI_LAUNCH_OPTIONS,
-    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
+    buildResumeArgs: (sessionId: string, _transcriptPath: string | undefined, prompt: string | undefined, args: readonly string[]) => [
       '--resume', sessionId, ...(prompt ? ['--prompt-interactive', prompt] : []), ...args
     ]
-  })
+  }
 }

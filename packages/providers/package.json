@@ -68,6 +68,14 @@
       "types": "./dist/codex/usage.d.ts",
       "import": "./dist/codex/usage.js"
     },
+    "./gemini/provider": {
+      "types": "./dist/gemini/provider.d.ts",
+      "import": "./dist/gemini/provider.js"
+    },
+    "./copilot/provider": {
+      "types": "./dist/copilot/provider.d.ts",
+      "import": "./dist/copilot/provider.js"
+    },
     "./antigravity/acp-probe": {
       "types": "./dist/antigravity/acp-probe.d.ts",
       "import": "./dist/antigravity/acp-probe.js"
