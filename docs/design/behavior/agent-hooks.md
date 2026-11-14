@@ -34,7 +34,7 @@ Provider 的配置根、home 与专属 override 必须从该次实际执行环�
 
 ### 在 Executor 范围检查和更新
 
-用户可从 Agent CLIs 中的 Provider 找到集成问题，并进入对应 Host Executor 的只读检查与显式更新。Core 根据原 Host 上已保存的 Executor 执行环境和 Provider 的原生配置规则确定实际范围。能据此确定用户级配置根时，可直接检查和更新；只有项目级配置、依赖工作目录的路径解析或原生加载检查才要求提供对应 Workspace。详情首次取得明确的检查目标时检查一次，也可手动复查。同一配置根可被多个 Executor 使用，回执报告实际受影响范围。检查报告现行声明是否齐全，以及配置中可确认的旧直接运行器声明。原生加载与原 Run 投递各自沿用实际观察，缺少观察时保持未知。
+用户可从 Agent CLIs 中的 Provider 找到集成问题，并进入对应 Host Executor 的只读检查与显式更新。Core 根据原 Host 上已保存的 Executor 执行环境和 Provider 的原生配置规则确定实际范围。能据此确定用户级配置根时，可直接检查和更新；只有项目级配置、依赖工作目录的路径解析或原生加载检查才要求提供对应 Workspace。详情首次取得明确的检查目标时检查一次，也可手动复查。同一配置根可被多个 Executor 使用，回执报告实际受影响范围。检查报告现行声明是否齐全，以及配置中可确认的旧直接运行器声明。对旧声明中的字面绝对入口，只读检查可确认执行程序或运行器是否缺失。入口存在时，加载、依赖健康与投递仍各自沿用实际观察，缺少观察时保持未知。
 
 显式更新复用 Core 的受管写入和回执，随后复查同一目标。只按原所有权和依赖事实处理旧声明，保留用户条目以及仍在使用或依赖未知的原回调。更新回执与复查结果分别说明配置写入及遗留问题，原 Run 保持其执行状态。公开 SDK、RPC 与 CLI 消费同一检查和更新结果。
 
@@ -79,7 +79,7 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 | [Grok](../../../packages/core/src/providers/grok.ts) | 工具、状态、子主体与轮末通知；原生配置根 `hooks/agentmux-status.json` 中的稳定声明，由原 Run 环境选择保留运行器。 | 当前仅观察。 | 原生记录与 Hook 各守事实范围；Stop 的通知反馈可让本轮继续，不是权限答复。不向兼容读取的 Claude／Cursor 配置写条目；headless 的 own-hook 加载证据不代签 TUI folder trust。[初始化 reader](../../../packages/core/src/providers/grok-input-initialization.ts) 仅用原环境的 `inspect --json` 读取目录信任前提。 |
 | [Gemini](../../../packages/core/src/providers/gemini.ts) | 精选 Agent／工具观察；用户 `settings.json` 内合并受管叶子。 | 当前仅观察。 | 不注册没有消费者的高频模型事件。`AfterAgent` 可被否决／重试，不能代签最终成功；与同根其他 Provider 分清配置文件。 |
 | [Antigravity](../../../packages/core/src/providers/antigravity.ts) | 生命周期与工具；`config/hooks.json` 的原生事件容器中合并受管声明。 | 当前仅观察。 | 与 Gemini 不共用配置合同；容器名参与准确归属，原有回调按叶子保全。其被动 PreToolUse 需要原生 `ask` 响应，Stop 使用空 decision；这不授予 AgentMux 代答权限。 |
-| [Cursor](../../../packages/core/src/providers/cursor.ts) | 工具与状态；数据根下 `hooks.json`。 | 当前仅观察。 | 不写项目／Claude 兼容配置；当前计划还含 workspace trust marker，信任是独立副作用，不能由发现或 Hook 路径推导授权。 |
+| [Cursor](../../../packages/core/src/providers/cursor.ts) | 工具与状态；数据根下 `hooks.json`。 | 当前仅观察。 | 受管定义仅写 Cursor 用户级 Hook 配置；Workspace 信任是独立动作。 |
 | [Copilot](../../../packages/core/src/providers/copilot.ts) | 工具、权限等待、子任务与压缩；配置根下独立 `hooks/agentmux.json`。 | 当前仅观察。 | 事件名经 `--event` 传入，超时等字段沿原生合同。原生可返回决定不证明产品已接通同步答复。 |
 | [Droid](../../../packages/core/src/providers/droid.ts) | 工具、状态与通知；Factory 配置根的 `hooks.json`，事件位于根层。 | 当前仅观察。 | 不套用 `hooks` 包装；Stop 是决策前观察，idle 通知也不能代签本轮成功。 |
 | [Hermes](../../../packages/core/src/providers/hermes.ts) | 模型／工具、授权等待与结果、原轮终局；`config.yaml` 加原生 shell Hook allowlist。 | 当前仅观察；现用授权事件为 observer。 | 原生按 `shlex.split`、`shell=False` 执行；稳定声明显式给出解释器与参数，批准项保留同一原生命令，不依赖父 shell 隐式展开。不注册会改写模型／工具行为的策略 Hook，不声明未证实的子代理追踪。 |
