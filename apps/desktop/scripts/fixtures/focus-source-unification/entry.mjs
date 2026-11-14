@@ -44,7 +44,7 @@ const opening={reference,source,revision:5},events=members.map(([sid,runtimeId,h
 api.spaceMounts.watch=async()=>({initial:snapshot,dispose(){}})
 let memberReadMode='missing',sourceChecks=0
 const sessionObservers=new Set(),memberCalls=[]
-const originalEvents=()=>events.filter((_,index)=>!unconfirmedMode||index!==4).map((event,index)=>memberStateMode&&index===3?{...event,state:memberReadMode==='observed'?event.state:memberReadMode==='pending'?{status:'pending'}:{status:'missing',authority:{runtimeId:event.member.runtimeId,ownerInstanceId:event.member.runtimeId+'-instance'}}}:event)
+const originalEvents=()=>events.filter((_,index)=>!unconfirmedMode||index!==4).map((event,index)=>memberStateMode&&index===3?{...event,state:memberReadMode==='observed'?event.state:memberReadMode==='pending'?{status:'pending'}:{status:'missing',authority:{runtimeId:event.member.runtimeId,ownerInstanceId:event.member.runtimeId+'-instance'}}}:event).concat(unconfirmedMode?[{...opening,type:'member',member:{hostId:null,runtimeId:null,agentSessionId:'4iSNA9U2sBCU'},occurrences:[{regionId:'R6A39kP2s4Bd'},{regionId:'B7C48mQ3t5Ce'}],state:{status:'unknown',issue:{code:'SPACE_SESSION_IDENTITY_UNCONFIRMED',message:'The original member has no confirmed execution Host or Runtime. Its membership and Run reference are retained.'}}}]:[])
 api.spaceMounts.sessions=async(_target,emit,signal)=>{sourceChecks++;sessionObservers.add(emit);signal?.addEventListener('abort',()=>sessionObservers.delete(emit),{once:true});queueMicrotask(()=>originalEvents().forEach(observation=>emit({type:'observation',observation})));return{initial:opening,dispose(){sessionObservers.delete(emit)}}}
 
 const name='另一原设备上的独立核查任务'

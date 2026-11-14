@@ -145,7 +145,7 @@ it.each(['reading', 'metadata', 'hidden'])('keeps the pinned original reading DO
  if(mode==='metadata') { expect(reading.inert).toBe(true);await act(async()=>panel.querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click()) }
  expect(document.getSelection()!.toString()).toBe(selected);expect(document.getSelection()!.anchorNode).toBe(text);expect(document.getSelection()!.focusNode).toBe(text);expect(document.getSelection()!.anchorOffset).toBe(2);expect(document.getSelection()!.focusOffset).toBe(10);expect(document.activeElement).toBe(reading)
  expect(agentInformationPreview.get()?.pinned).toBe(true)
- expect(panel.textContent).toContain('Original Run or source is no longer confirmed')
+ expect(panel.textContent).toContain('original Run observation is currently unavailable')
  // A closed source document cannot keep dismissing the returned reading.
  await act(async()=>child.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})))
  expect(document.querySelector('.agent-information-reader')).toBe(panel)

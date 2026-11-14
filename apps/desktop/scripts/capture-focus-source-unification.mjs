@@ -2,6 +2,7 @@ import { browserSourceBuild } from '../../../packages/browser/scripts/source-bui
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {createRequire} from 'node:module'
+import {existsSync} from 'node:fs'
 import {spawnSync} from 'node:child_process'
 import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
@@ -10,18 +11,26 @@ import {pathToFileURL} from 'node:url'
 import {runProbeProcess,listProbeProcesses} from './probe-process.mjs'
 
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop')
-assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===5&&['--primary-only','--member-state','--unconfirmed'].includes(process.argv[4])),'Use --evidence <private evidence directory> [--primary-only|--member-state|--unconfirmed]')
-const primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'
+assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===5&&['--primary-only','--member-state','--unconfirmed','--source-recovery'].includes(process.argv[4])),'Use --evidence <private evidence directory> [--primary-only|--member-state|--unconfirmed|--source-recovery]')
+const sourceRecovery=process.argv[4]==='--source-recovery',primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'||sourceRecovery
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
 const privateRoot=await mkdtemp(join(tmpdir(),'amux-focus-source-unification-')),fixture=join(desktop,'scripts/fixtures/focus-source-unification'),mainFixture=join(fixture,'main.cjs')
 const require=createRequire(join(desktop,'package.json')), {build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
-const receipt={schema:'agentmux.focus-source-unification-scene.v1',framePolicy:unconfirmed?'unconfirmed-source':memberState?'source-member-state':primaryOnly?'source-primary-only':'all-scenes',capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
+const receipt={schema:'agentmux.focus-source-unification-scene.v1',framePolicy:sourceRecovery?'source-recovery':unconfirmed?'unconfirmed-source':memberState?'source-member-state':primaryOnly?'source-primary-only':'all-scenes',capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
   boundary:'Light Renderer-only actual App/Focus/Workbench/Stable/Store and installed Panel browser primary. Maintained typed preview API; only SessionPane PTY/Agent paint and unused Monaco painting leaves isolated. No Runtime/native simultaneous presentation, Writer, ordinary restart or user installation.'}
 try{
-  const freshness=spawnSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',`const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root,'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`],{cwd:root,encoding:'utf8'})
-  await writeFile(join(evidence,'freshness.log'),freshness.stdout+freshness.stderr);assert.equal(freshness.status,0,'Original public freshness guard')
-  const { ConversationReaderState, readAgentConversation } = await import(pathToFileURL(join(root,'packages/core/dist/conversation-reader.js')))
+  let reader=join(root,'packages/core/dist/conversation-reader.js')
+  if(sourceRecovery){
+    reader=join(privateRoot,'conversation-reader.mjs')
+    const sourceReader=await build({absWorkingDir:root,entryPoints:[join(root,'packages/core/src/conversation-reader.ts')],outfile:reader,bundle:true,platform:'node',format:'esm',target:'node22',metafile:true,logLevel:'silent',banner:{js:"import{createRequire as recoveryRequire}from'node:module';const require=recoveryRequire(import.meta.url);"}})
+    for(const file of Object.keys(sourceReader.metafile.inputs)){const path=resolve(root,file);if(!path.includes('/node_modules/'))inputs.set(path,hash(await readFile(path)))}
+    receipt.readerPolicy='Current Core bounded reader and current Desktop product sources; unchanged installed dependencies are pinned by the loaded bundle.'
+  }else{
+    const freshness=spawnSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',`const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root,'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`],{cwd:root,encoding:'utf8'})
+    await writeFile(join(evidence,'freshness.log'),freshness.stdout+freshness.stderr);assert.equal(freshness.status,0,'Original public freshness guard')
+  }
+  const { ConversationReaderState, readAgentConversation } = await import(pathToFileURL(reader))
   const originalConversationState = new ConversationReaderState(), foreignBody='远端原始核查记录已返回，继续核对原设备上的分析结果。', foreignInput='请核对原设备上的分析数据，并保留这条原始输入。', sid='working', nativeSource={providerId:'codex',nativeSessionId:'original-foreign-native'}
   let originalConversationPage
   try { originalConversationPage=await readAgentConversation({hostId:'local',agentSessionId:sid,limit:3,maxBytes:65536,processDetails:'deferred'}, {
@@ -32,7 +41,18 @@ try{
   }) } finally { originalConversationState.dispose() }
   assert.equal(originalConversationPage.window.complete,true);assert.ok(originalConversationPage.items.length>0)
   receipt.previewConversation={owner:'Actual Core bounded reader with controlled native leaf',sha256:hash(JSON.stringify(originalConversationPage)),complete:true,items:originalConversationPage.items.length}
+  const coreExports=sourceRecovery?JSON.parse(await readFile(join(root,'packages/core/package.json'),'utf8')).exports:{}
   const observe={name:'actual-app-focus-source-and-paint-leaf',setup(builder){
+    if(sourceRecovery)builder.onResolve({filter:/^@agentmux\/core(?:\/|$)/},args=>{
+      const key=args.path==='@agentmux/core'?'.':'.'+args.path.slice('@agentmux/core'.length)
+      const match=Object.keys(coreExports).find(entry=>entry===key||entry.includes('*')&&key.startsWith(entry.split('*')[0])&&key.endsWith(entry.split('*')[1]))
+      assert.ok(match,'Declared original Core export '+key)
+      const declaration=coreExports[match],target=typeof declaration==='string'?declaration:declaration.browser??declaration.import
+      const suffix=match.includes('*')?key.slice(match.split('*')[0].length,key.length-match.split('*')[1].length):''
+      const path=join(root,'packages/core',target.replace('*',suffix).replace('./dist/','./src/').replace(/\.js$/,'.ts'))
+      assert.ok(existsSync(path),'Current original Core source '+key)
+      return{path}
+    })
     builder.onResolve({filter:/\?url$/},args=>({path:createRequire(args.importer).resolve(args.path.slice(0,-4)),namespace:'actual-url'}))
     builder.onLoad({filter:/.*/,namespace:'actual-url'},async args=>{const bytes=await readFile(args.path),name='asset-'+hash(bytes).slice(0,12)+'.mjs';await writeFile(join(privateRoot,'out',name),bytes);return{contents:`export default new URL('./${name}',import.meta.url).href`,loader:'js'}})
     builder.onResolve({filter:/\?worker$/},args=>({path:createRequire(args.importer).resolve(args.path.slice(0,-7)),namespace:'actual-worker'}))
@@ -70,14 +90,15 @@ try{
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.avif':'file','.gif':'file','.png':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
   receipt.metafile=buildResult.metafile;receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
   for(const suffix of ['App.tsx','GlobalFocusSurface.tsx','WorkspaceWorkbench.tsx','StableWorkbenchView.tsx','store.ts','focus-tab-projection.ts','agent-focus.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual loaded '+suffix)
+  if(sourceRecovery)for(const suffix of ['FocusContextMenu.tsx','AgentMenuContent.tsx','AgentInformationReader.tsx','use-focus-sources.tsx'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual recovery consumer loaded '+suffix)
   const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script>window.__unconfirmedScene='+JSON.stringify(unconfirmed)+';window.__memberStateScene='+JSON.stringify(memberState)+';window.__originalForeignConversation='+JSON.stringify(originalConversationPage)+';window.__originalForeignBody='+JSON.stringify(foreignBody)+';window.__originalForeignInput='+JSON.stringify(foreignInput)+'</script><script type="module" src="./app.js"></script></html>')
   receipt.compiled={renderer:hash(await readFile(renderer)),css:hash(await readFile(join(out,'app.css')))}
   const env={...process.env,AGENTMUX_DESKTOP_USER_DATA:join(privateRoot,'user-data'),AGENTMUX_RUNTIME_DIRECTORY:join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:join(privateRoot,'state')};delete env.ELECTRON_RUN_AS_NODE
-  receipt.process=await runProbeProcess(require('electron'),[mainFixture,html,privateRoot,evidence,...(unconfirmed?['--unconfirmed']:memberState?['--member-state']:primaryOnly?['--primary-only']:[])],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
+  receipt.process=await runProbeProcess(require('electron'),[mainFixture,html,privateRoot,evidence,...(sourceRecovery?['--source-recovery']:unconfirmed?['--unconfirmed']:memberState?['--member-state']:primaryOnly?['--primary-only']:[])],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
   receipt.actual=JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'))
   assert.equal(receipt.process.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true)
   receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})))
-  assert.ok(unconfirmed?receipt.frames.length===4:memberState?receipt.frames.length>=6:primaryOnly?receipt.frames.length===1&&receipt.frames[0].file==='unified-focus-source-primary.png':receipt.frames.length>=6,'Requested actual ordinary Focus scenes')
+  assert.ok(sourceRecovery?receipt.frames.length>=9:unconfirmed?receipt.frames.length===4:memberState?receipt.frames.length>=6:primaryOnly?receipt.frames.length===1&&receipt.frames[0].file==='unified-focus-source-primary.png':receipt.frames.length>=6,'Requested actual ordinary Focus scenes')
   receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])))
   assert.deepEqual(receipt.sourceAfter,receipt.inputs,'Nonempty current Source stable before/after')
   receipt.capturedPass=true
