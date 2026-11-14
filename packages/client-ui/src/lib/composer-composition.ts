@@ -35,8 +35,7 @@ export type ComposerCompositionEvent = {
  *   这不是外部写入队列：`end` 会把最终 DOM 值写回上游，调用方仍须协调组字期间的外部更新。
  * - `end` → 退出组字。调用方在同一个处理器里把 `domValue` 推给 store，所以这一帧渲染出来的
  *   `props.value` 已经是最终文本，React 那句赋值照旧不会发生。
- * - `input` → **只刷新已有的**组字镜像，绝不开启组字。没在组字时它把状态清成 `null`，让普通受控
- *   回路重新接管（也顺带把上面 `update` 那条的保守选择拉回来）。
+ * - `input` → **只刷新已有的**组字镜像，绝不开启组字。没在组字时继续使用普通受控取值。
  */
 export function nextComposerCompositionState(
   state: ComposerCompositionState,
@@ -91,8 +90,11 @@ export function composerCompositionHandlers(deps: ComposerCompositionDeps): {
   compositionUpdate: (domValue: string) => void
   compositionEnd: (domValue: string) => void
 } {
+  // Several native events can reach these handlers before React commits another render.
+  let state = deps.state
   const advance = (kind: ComposerCompositionEvent['kind'], domValue: string): void => {
-    deps.setState(nextComposerCompositionState(deps.state, { kind, domValue }))
+    state = nextComposerCompositionState(state, { kind, domValue })
+    deps.setState(state)
   }
   return {
     change: (domValue) => {
