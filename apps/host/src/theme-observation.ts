@@ -6,9 +6,10 @@ import type { AppAppearanceId, TerminalThemeId } from '@agentmux/client-ui/theme
 import { terminalPalette } from '@agentmux/client-ui/theme'
 import { DEFAULT_APP_ICON, isAppIconId } from '@agentmux/client-ui/app-icon-catalog'
 import { CONVERSATION_DETAIL_LEVEL_DEFAULT, isConversationDetailLevel } from '@agentmux/client-ui/conversation-detail-level'
+import { isConversationConfirmedSendReceipt, resolveConversationShowSendReceipts, resolveConversationConfirmedSendReceipt } from '@agentmux/client-ui/conversation-send-receipts'
 import { isDeepStrictEqual } from 'node:util'
 /** A brand choice may be newer than this client; it must not invalidate the independently readable theme. */
-export type ThemeConfiguration = { appearance: { themeId?: string; appAppearance?: AppAppearanceId; terminalTheme: TerminalThemeId; customThemes?: Record<string, unknown>; appIcon?: unknown; conversationDetailLevel?: unknown } }
+export type ThemeConfiguration = { appearance: { themeId?: string; appAppearance?: AppAppearanceId; terminalTheme: TerminalThemeId; customThemes?: Record<string, unknown>; appIcon?: unknown; conversationDetailLevel?: unknown; conversationShowSendReceipts?: unknown; conversationConfirmedSendReceipt?: unknown } }
 export type ThemeConfigurationReader = {
   inspect<T>(capture: (current: ThemeConfiguration) => T): Promise<T>
   subscribe(listener: (saved: ThemeConfiguration, previous: ThemeConfiguration) => void, onFailure?: (error: Error) => void): () => void
@@ -21,17 +22,25 @@ function projection(config: ThemeConfiguration) {
   const selected = catalog.items.find(item => item.id === requested) ?? catalog.items[0]!
   const appIcon = config.appearance.appIcon
   const detailLevel = config.appearance.conversationDetailLevel
+  const showSendReceipts = config.appearance.conversationShowSendReceipts
+  const confirmedSendReceipt = config.appearance.conversationConfirmedSendReceipt
   return {
     values: { themeId: selected.id, appAppearance: config.appearance.appAppearance ?? 'dark', theme: selected.value,
       // Keep unsupported string identities. Other malformed JSON becomes an explicit unsupported value, not a replacement default.
       appIcon: appIcon === undefined ? DEFAULT_APP_ICON : typeof appIcon === 'string' ? appIcon : null,
       conversationDetailLevel: detailLevel === undefined ? CONVERSATION_DETAIL_LEVEL_DEFAULT : typeof detailLevel === 'string' ? detailLevel : null,
+      conversationShowSendReceipts: showSendReceipts === undefined ? resolveConversationShowSendReceipts(undefined) : showSendReceipts,
+      conversationConfirmedSendReceipt: confirmedSendReceipt === undefined ? resolveConversationConfirmedSendReceipt(undefined) : confirmedSendReceipt,
       terminalTheme: config.appearance.terminalTheme,
       ...(config.appearance.terminalTheme === 'workspace' ? {} : { terminalPalette: terminalPalette(config.appearance.terminalTheme) }) } as AgentMuxControlSettingsResourceFields,
     issues: [...catalog.issues.filter(issue => issue.id === requested), ...(appIcon === undefined || isAppIconId(appIcon) ? [] : [
       { id: 'app-icon', message: 'The selected App icon is unsupported. Clients retain their last confirmed brand; choose an App icon in Appearance.' }
     ]), ...(detailLevel === undefined || isConversationDetailLevel(detailLevel) ? [] : [
       { id: 'conversation-detail-level', message: 'The saved reading detail level is unsupported. Original records remain available; choose a level in InApp.' }
+    ]), ...(showSendReceipts === undefined || typeof showSendReceipts === 'boolean' ? [] : [
+      { id: 'conversation-send-receipts', message: 'The saved send-receipt visibility is unsupported. Clients show receipts; choose a value in InApp.' }
+    ]), ...(confirmedSendReceipt === undefined || isConversationConfirmedSendReceipt(confirmedSendReceipt) ? [] : [
+      { id: 'conversation-confirmed-send-receipt', message: 'The saved confirmed-receipt style is unsupported. Clients use compact receipts; choose a value in InApp.' }
     ]), ...(selected.id === requested ? [] : [
       { id: requested, message: 'Selected theme is unavailable. Graphite remains usable; choose or import a valid theme in Appearance.' }
     ])]
@@ -40,7 +49,9 @@ function projection(config: ThemeConfiguration) {
 function relevantChanged(next: ThemeConfiguration, previous: ThemeConfiguration): boolean {
   const a = next.appearance, b = previous.appearance
   if (a.themeId !== b.themeId || a.appAppearance !== b.appAppearance || a.terminalTheme !== b.terminalTheme || !isDeepStrictEqual(a.appIcon, b.appIcon)
-    || !isDeepStrictEqual(a.conversationDetailLevel, b.conversationDetailLevel)) return true
+    || !isDeepStrictEqual(a.conversationDetailLevel, b.conversationDetailLevel)
+    || !isDeepStrictEqual(a.conversationShowSendReceipts, b.conversationShowSendReceipts)
+    || !isDeepStrictEqual(a.conversationConfirmedSendReceipt, b.conversationConfirmedSendReceipt)) return true
   const id = a.themeId ?? DEFAULT_THEME_ID
   return !isDeepStrictEqual(a.customThemes?.[id], b.customThemes?.[id])
 }

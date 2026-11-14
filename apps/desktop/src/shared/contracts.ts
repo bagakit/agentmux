@@ -339,6 +339,9 @@ export type AgentExecutorConfig = CoreAgentExecutorConfig & { avatar?: AgentAvat
 export type AppearanceConfig = {
   /** Reading-only preference. Unsupported saved JSON is retained and remains fully readable. */
   conversationDetailLevel?: unknown
+  /** Presentation only; unsupported authored JSON stays intact and resolves in the client. */
+  conversationShowSendReceipts?: unknown
+  conversationConfirmedSendReceipt?: unknown
   /** Application identity; independent of theme and object avatars. Absence uses the shared default. */
   appIcon?: import('@agentmux/client-ui/app-icon-catalog').AppIconId
   /** App header presentation only; absent platform entries are shown. */

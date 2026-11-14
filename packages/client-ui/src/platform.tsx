@@ -31,6 +31,8 @@ const defaultConversationToolLabels: ConversationToolLabels = {
 export type ClientUiPlatform = {
   /** Client-owned reading preference; never an input or Runtime capability. */
   conversationDetailLevel?: import('./lib/conversation-detail-level.js').ConversationDetailLevel
+  conversationShowSendReceipts?: boolean
+  conversationConfirmedSendReceipt?: import('./lib/conversation-send-receipts.js').ConversationConfirmedSendReceipt
   /** Current presentation document; moving a retained editor does not replace its state. */
   ownerDocument?: Document
   /** Host-owned wording for shared conversation copy and payload controls. */

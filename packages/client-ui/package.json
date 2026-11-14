@@ -29,6 +29,11 @@
       "browser": "./src/terminal/*.ts",
       "import": "./dist/terminal/*.js"
     },
+    "./conversation-send-receipts": {
+      "types": "./src/lib/conversation-send-receipts.ts",
+      "browser": "./src/lib/conversation-send-receipts.ts",
+      "import": "./dist/lib/conversation-send-receipts.js"
+    },
     "./*": {
       "types": "./src/lib/*.ts",
       "browser": "./src/lib/*.ts",

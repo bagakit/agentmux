@@ -124,7 +124,10 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   navigationRecord.current ??= { recordId: getDeviceWorkface().recordIdentity() }
   const [hasConnected, setHasConnected] = useState(connection.state === 'connected' || initial.current.workface.selectedSessionId !== null || initial.current.presentation !== undefined)
   const hostAppearance = useHostAppearance(client, connection.state)
-  const platform = useMemo(() => ({ ...basePlatform, conversationDetailLevel: hostAppearance.conversationDetailLevel }), [basePlatform, hostAppearance.conversationDetailLevel])
+  const platform = useMemo(() => ({ ...basePlatform, conversationDetailLevel: hostAppearance.conversationDetailLevel,
+    conversationShowSendReceipts: hostAppearance.conversationShowSendReceipts,
+    conversationConfirmedSendReceipt: hostAppearance.conversationConfirmedSendReceipt
+  }), [basePlatform, hostAppearance.conversationDetailLevel, hostAppearance.conversationShowSendReceipts, hostAppearance.conversationConfirmedSendReceipt])
   useEffect(() => { if (connection.state === 'connected') setHasConnected(true) }, [connection.state])
   const [workface, setWorkface] = useState<Workface>(() => restoreWorkface ? initial.current!.workface : { ...initial.current!.workface, panel: 'conversation' })
   const [canPersist, setCanPersist] = useState(initial.current.issue === null)

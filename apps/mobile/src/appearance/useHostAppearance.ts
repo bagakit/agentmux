@@ -4,6 +4,7 @@ import { parseAppearanceObservation, type AgentMuxAppearanceObservation, type Ag
 import type { ITheme } from '@xterm/xterm'
 import { DEFAULT_APP_ICON, isAppIconId, type AppIconId } from '@agentmux/client-ui/app-icon-catalog'
 import { CONVERSATION_DETAIL_LEVEL_DEFAULT, resolveConversationDetailLevel, type ConversationDetailLevel } from '@agentmux/client-ui/conversation-detail-level'
+import { resolveConversationShowSendReceipts, resolveConversationConfirmedSendReceipt, type ConversationConfirmedSendReceipt } from '@agentmux/client-ui/conversation-send-receipts'
 
 const retained = '暂用上次的主题和 App 图标，重新连接 Mac 后继续同步。'
 /** Colors are data, never CSS or xterm options. Core carries them as opaque JSON. */
@@ -26,6 +27,8 @@ export function useHostAppearance(client: AgentMuxHostedClient | null, connectio
   const [terminalPalette, setTerminalPalette] = useState<ITheme | undefined>()
   const [appIcon, setAppIcon] = useState<AppIconId>(DEFAULT_APP_ICON)
   const [conversationDetailLevel, setConversationDetailLevel] = useState<ConversationDetailLevel>(CONVERSATION_DETAIL_LEVEL_DEFAULT)
+  const [conversationShowSendReceipts, setConversationShowSendReceipts] = useState(true)
+  const [conversationConfirmedSendReceipt, setConversationConfirmedSendReceipt] = useState<ConversationConfirmedSendReceipt>('compact')
   const terminalChoice = useRef<ITheme | 'workspace' | undefined>(undefined)
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
@@ -55,6 +58,8 @@ export function useHostAppearance(client: AgentMuxHostedClient | null, connectio
         previous = snapshot
         const values = snapshot.values
         setConversationDetailLevel(resolveConversationDetailLevel(values.conversationDetailLevel))
+        setConversationShowSendReceipts(resolveConversationShowSendReceipts(values.conversationShowSendReceipts))
+        setConversationConfirmedSendReceipt(resolveConversationConfirmedSendReceipt(values.conversationConfirmedSendReceipt))
         if (values.appIcon === undefined) setAppIcon(DEFAULT_APP_ICON)
         else if (isAppIconId(values.appIcon)) setAppIcon(values.appIcon)
         else iconIssue = 'Mac 的 App 图标选择不受支持，保留最后确认的图标；请在 Mac 的 Appearance 中重新选择。'
@@ -92,5 +97,5 @@ export function useHostAppearance(client: AgentMuxHostedClient | null, connectio
     void open()
     return () => { controller.abort(); reader = undefined; if (retry) clearTimeout(retry); void subscription?.dispose() }
   }, [client, connectionState, mounted])
-  return { issue, terminalPalette, appIcon, conversationDetailLevel }
+  return { issue, terminalPalette, appIcon, conversationDetailLevel, conversationShowSendReceipts, conversationConfirmedSendReceipt }
 }

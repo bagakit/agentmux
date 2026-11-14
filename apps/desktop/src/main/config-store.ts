@@ -155,6 +155,8 @@ const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string
 // field (and the preference falls back to default) rather than being coerced.
 const appearanceSchema = z.object({
   conversationDetailLevel: z.unknown().optional(),
+  conversationShowSendReceipts: z.unknown().optional(),
+  conversationConfirmedSendReceipt: z.unknown().optional(),
   appIcon: z.enum(APP_ICON_IDS).optional(),
   channelHeaderVisibility: z.record(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u), z.boolean()).optional(),
   themeId: z.string().optional(),

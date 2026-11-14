@@ -2,6 +2,7 @@ import { resolveComposerInputConfig, type ComposerInputConfig } from '@agentmux/
 import { DEFAULT_THEME_ID } from '@agentmux/client-ui/theme'
 import { DEFAULT_APP_ICON } from '@agentmux/client-ui/app-icon-catalog'
 import { CONVERSATION_DETAIL_LEVEL_DEFAULT } from '@agentmux/client-ui/conversation-detail-level'
+import { resolveConversationShowSendReceipts, resolveConversationConfirmedSendReceipt } from '@agentmux/client-ui/conversation-send-receipts'
 import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
@@ -82,6 +83,8 @@ function effective(path: string, value: unknown): unknown {
   }
   if (path === 'browser.automaticMemoryRelease') return value ?? true
   if (path === 'appearance.conversationDetailLevel') return value === undefined ? CONVERSATION_DETAIL_LEVEL_DEFAULT : value
+  if (path === 'appearance.conversationShowSendReceipts') return value === undefined ? resolveConversationShowSendReceipts(undefined) : value
+  if (path === 'appearance.conversationConfirmedSendReceipt') return value === undefined ? resolveConversationConfirmedSendReceipt(undefined) : value
   if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
   if (path === 'gitHistoryShowTime') return value ?? true
   if (path === 'messageToolInitialLayout') return value ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT

@@ -36,7 +36,7 @@ import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.j
 import { ChannelProfileAvatar } from './ChannelProfileAvatar.js'
 import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
 
-import { ConversationSubmissionMetadata, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
+import { ConversationSubmissionMetadata } from './ConversationSubmissionMetadata.js'
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import type { ConversationSources } from '../lib/conversation-sources.js'
 
@@ -44,6 +44,8 @@ export type ConversationContentBoundary = 'wire' | 'body'
 
 export type ConversationMessageProps = {
   active?: boolean
+  /** A captured input receipt keeps this exact message reader with quieter chrome. */
+  sendReceipt?: boolean
   showInputSource?: boolean
   /** Original record title: system disclosure heading or compact Provider speech context. */
   recordTitle?: string
@@ -203,7 +205,7 @@ function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, processContent = false, continuation = false, expandedContent = false, bodyExpanded, onBodyExpandedChange, expandedOriginals, onOriginalExpandedChange, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration: explicitNativeCollaboration, messageDetails, messageStatus, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
+  active = true, sendReceipt = false, compact = false, processContent = false, continuation = false, expandedContent = false, bodyExpanded, onBodyExpandedChange, expandedOriginals, onOriginalExpandedChange, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration: explicitNativeCollaboration, messageDetails, messageStatus, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
   speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, notificationRecords, locatedSourceKey, messageTiming, contextInDetails, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
@@ -360,9 +362,6 @@ export function ConversationMessage({
               {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
             </span> : null
   const metadataInDetails = detailsOnlyMetadata || contextInDetails || continuation || Boolean(nativeCollaboration && !sources?.submissions?.length && !located)
-  const revealSubmission = detailsOnlyMetadata && locatedSourceKey && sources?.submissions?.some(record => record.original.kind === 'captured' &&
-    conversationMessageSourceKey(record.original.item.agentSessionId, { kind: 'captured', recordId: record.original.item.id }) === locatedSourceKey)
-    ? locatedSourceKey : undefined
   const submissionMetadata = sources?.submissions?.length ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} nativeReadable={inputSource?.kind === 'native' && hasContent}
           {...(expandedOriginals ? { expandedRecords: expandedOriginals } : {})} {...(onOriginalExpandedChange ? { onOpenChange: onOriginalExpandedChange } : {})}
           {...(locatedSourceKey ? { locatedSourceKey } : {})} {...(renderSubmissionOriginal ? { renderOriginal: renderSubmissionOriginal } : {})} /> : null
@@ -406,15 +405,12 @@ export function ConversationMessage({
     feedback: copyState === 'failed' ? <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'} · Retry Copy</span> : null,
     details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || sourceLabelsInDetails && sources || nativeCollaboration || processContent && recordedTime
       ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
-        revealSourceKey={revealSubmission}
         declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>
         {processContent && recordedTime ? <dl className="conversation-input-details__facts"><dt>原记录时间</dt><dd>{recordedTime}</dd></dl> : null}
         {sourceLabelsInDetails && directToolPart && sources?.parts[0] ? <dl className="conversation-input-details__facts"><dt>工具内容来源</dt><dd><ConversationSourceLabels sources={sources.parts[0]} /></dd></dl> : null}
-        {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{detailsOnlyMetadata ? submissionMetadata : null}{sourceLabelsInDetails && sources ? <ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /> : null}{messageDetails}{collaborationOriginal}
+        {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{sourceLabelsInDetails && sources ? <ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /> : null}{messageDetails}{collaborationOriginal}
       </ConversationInputDetails> : null,
-    metadata: <>{metadataInDetails && (messageStatus || submissionMetadata) ? <div className="log-turn__meta">{messageStatus}{detailsOnlyMetadata
-      ? sources?.submissions?.map(record => <ConversationSubmissionSummary key={record.id} record={record} renderClock={renderClock} attentionOnly />)
-      : submissionMetadata}</div> : null}{!metadataInDetails ? metadata : null}
+    metadata: <>{metadataInDetails && (messageStatus || submissionMetadata) ? <div className="log-turn__meta">{messageStatus}{submissionMetadata}</div> : null}{!metadataInDetails ? metadata : null}
       {sources && detailsOnlyMetadata && !nativeCollaboration && (!sourceLabelsInDetails || sources.main?.unread) ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
     </>,
     renderBody
@@ -424,6 +420,7 @@ export function ConversationMessage({
     <ContentCopyIntentContext.Provider value={messageCopy.cancelPreparation}><div
       className={primaryNotice || moteNotice ? "conversation-a2a-notice" : "log-turn"}
       data-compact={compact || undefined}
+      data-send-receipt={sendReceipt || undefined}
       data-process-content={processContent || undefined}
       data-native-collaboration={nativeCollaboration ? true : undefined}
       data-conversation-event-id={conversationEvent?.id}

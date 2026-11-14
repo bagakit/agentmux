@@ -9,7 +9,9 @@ import { conversationReplyPreview } from '../lib/conversation-reply-preview.js'
 import { formatClock } from '../lib/conversation-time.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
-import { ConversationSubmissionFacts, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
+import { ConversationSendReceipt, conversationSendReceiptState, ConversationSubmissionFacts, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
+import { useClientUiPlatform } from '../platform.js'
+import { resolveConversationShowSendReceipts } from '../lib/conversation-send-receipts.js'
 export type CapturedMessagePresentation = Pick<ConversationMessageProps, 'detailsOnlyMetadata' | 'sourceLabelsInDetails' | 'showInputSource'> & {
   expandedContent: boolean
   inputReadPending: boolean
@@ -28,16 +30,20 @@ export function CapturedConversationMessage({ item, record, replyObservation, in
   /** A read of the already-qualified exact source, never a delivery or adoption fact. */
   inputReadPending?: boolean
 }) {
+  const showSendReceipts = resolveConversationShowSendReceipts(useClientUiPlatform().conversationShowSendReceipts)
   const source = describeCapturedConversationSource(item.source)
   const itemRef = record ? conversationItemRef(record) : conversationItemRef({ agentSessionId: item.agentSessionId, ...(props.executionHostId ? { executionHostId: props.executionHostId } : {}), source: { kind: 'captured', recordId: item.id } })
   const submission = record?.original.kind === 'captured' && record.role === 'message' && item.kind === 'user_message' && item.source === 'user'
   const originalSubmission = submission ? record?.records?.find(source => source.original.item === item) : undefined
+  const sendReceipt = originalSubmission && item.inputRef ? originalSubmission : undefined
+  const nativeAccepted = Boolean(record?.event && record.records?.some(source => source.id === record.event?.anchorId && source.original.kind === 'native'))
+  const confirmed = sendReceipt && conversationSendReceiptState(sendReceipt, nativeAccepted).confirmed
   const a2aNotificationId = conversationA2ANotificationId({ original: { kind: 'captured', item } })
   const input = record?.input ?? item
-  const message = <ConversationMessage {...props} {...(record?.executionHostId ? { executionHostId: record.executionHostId } : {})} sources={record?.sources ?? props.sources} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={item.inputSubmission ? item.status : record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
+  const message = <ConversationMessage {...props} sendReceipt={Boolean(sendReceipt)} {...(record?.executionHostId ? { executionHostId: record.executionHostId } : {})} sources={record?.sources ?? props.sources} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={item.inputSubmission ? item.status : record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
     {...(input.inputContext ? { inputContext: input.inputContext, inputContextSource: input.inputContextSource } : {})}
     a2aNotificationId={a2aNotificationId} notificationRecords={record?.records} contentBoundary={a2aNotificationId ? 'wire' : item.kind === 'user_message' && input.publicContent === 'confirmed' ? 'body' : props.contentBoundary ?? 'wire'}
-    {...(originalSubmission ? { messageStatus: <><ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} showTime={false} attentionOnly={props.detailsOnlyMetadata} />{inputReadPending ? <span role="status" aria-label="正在读取对应来源"><SemanticIcon name="status.loading" animation="spin" size={12} aria-hidden="true" /></span> : null}{props.messageStatus}</> } : {})}
+    {...(originalSubmission ? { messageStatus: <><ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} showTime={false} attentionOnly={props.detailsOnlyMetadata} active={showSendReceipts && props.active !== false && !confirmed && !props.expandedContent} />{showSendReceipts && inputReadPending && props.active !== false && !confirmed && !props.expandedContent ? <span role="status" aria-label="正在读取对应来源"><SemanticIcon name="status.loading" animation="spin" size={12} aria-hidden="true" /></span> : null}{props.messageStatus}</> } : {})}
     messageDetails={<>{originalSubmission ? <ConversationSubmissionFacts record={originalSubmission} /> : <dl className="conversation-input-details__facts">
       <dt>记录方式</dt><dd>{source.label}</dd>
       <dt>来源说明</dt><dd>{source.description}</dd>
@@ -47,7 +53,11 @@ export function CapturedConversationMessage({ item, record, replyObservation, in
       <dt>Session</dt><dd><code>{item.agentSessionId}</code></dd>
       {item.eventName ? <><dt>原事件</dt><dd>{item.eventName}</dd></> : null}
     </dl>}{props.messageDetails}</>} />
-  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} active={props.active !== false} observation={record?.role === 'observation' || Boolean(replyObservation)} compact={replyObservation?.compact ?? record?.role === 'observation'} reveal={props.located === true} sources={record?.sources}>{message}</ReplyObservation>
+  const presented = sendReceipt && !props.expandedContent ? <ConversationSendReceipt record={sendReceipt} nativeAccepted={nativeAccepted}
+    active={props.active !== false} renderClock={props.timeFormatter ?? formatClock} reveal={props.located === true}
+    {...(props.bodyExpanded === undefined ? {} : { open: props.bodyExpanded })}
+    {...(props.onBodyExpandedChange ? { onOpenChange: props.onBodyExpandedChange } : {})}>{message}</ConversationSendReceipt> : message
+  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} active={props.active !== false} observation={record?.role === 'observation' || Boolean(replyObservation)} compact={replyObservation?.compact ?? record?.role === 'observation'} reveal={props.located === true} sources={record?.sources}>{presented}</ReplyObservation>
 }
 
 function ReplyObservation({ item, active, observation, compact, reveal, children, sources }: { item: AgentTimelineItem; active: boolean; observation: boolean; compact: boolean; reveal: boolean; children: ReactNode; sources?: import('../lib/conversation-sources.js').ConversationSources | undefined }) {

@@ -1,5 +1,6 @@
 import { ClientUiProvider, type ClientUiPlatform, type ConversationSenderDetails } from '@agentmux/client-ui'
 import { resolveConversationDetailLevel } from '@agentmux/client-ui/conversation-detail-level'
+import { resolveConversationShowSendReceipts, resolveConversationConfirmedSendReceipt } from '@agentmux/client-ui/conversation-send-receipts'
 import { lazy, Suspense, useMemo, type ReactNode } from 'react'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -99,10 +100,14 @@ const desktopPlatform: ClientUiPlatform = {
 /** Electron IO, the Desktop identity surface and its workface focus policy stay in this client. */
 export function DesktopClientUiProvider({ children, document: presentationDocument }: { children: ReactNode; document?: Document }) {
   const detailLevel = useAppStore(state => state.config?.appearance.conversationDetailLevel)
+  const showSendReceipts = useAppStore(state => state.config?.appearance.conversationShowSendReceipts)
+  const confirmedSendReceipt = useAppStore(state => state.config?.appearance.conversationConfirmedSendReceipt)
   const contextDocument = useWorkbenchDocument()
   const ownerDocument = presentationDocument ?? contextDocument
   const platform = useMemo<ClientUiPlatform>(() => ({ ...desktopPlatform, ownerDocument, conversationDetailLevel: resolveConversationDetailLevel(detailLevel),
+    conversationShowSendReceipts: resolveConversationShowSendReceipts(showSendReceipts),
+    conversationConfirmedSendReceipt: resolveConversationConfirmedSendReceipt(confirmedSendReceipt),
     overlayContainer: () => resolveOverlayContainer(undefined, ownerDocument)
-  }), [ownerDocument, detailLevel])
+  }), [ownerDocument, detailLevel, showSendReceipts, confirmedSendReceipt])
   return <CapsuleQuestionEditorsContext.Provider value={capsuleQuestionEditors}><ClientUiProvider platform={platform}>{children}</ClientUiProvider></CapsuleQuestionEditorsContext.Provider>
 }

@@ -13,6 +13,7 @@
 @import './inline-rename-field.css';
 @import './conversation-message.css';
 @import './conversation-message-disclosure.css';
+@import './conversation-send-receipt.css';
 @import './reading-find.css';
 @import './conversation-resource-text.css';
 @import './conversation-resource-file.css';

@@ -1,0 +1,51 @@
+/* Send receipts retain the original message body and actions with less visual weight. */
+.log-turn[data-send-receipt='true']:is([data-message-bubble], [data-compact], [data-speaker-role]) {
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  box-shadow: none;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+.log-turn[data-send-receipt='true'] > .log-turn__body { font-size: var(--fs-meta); color: var(--text-2); }
+.log-turn[data-send-receipt='true']:is([data-message-bubble], [data-compact], [data-speaker-role]) > .log-turn__node { --conversation-message-avatar-size: 16px; width: 16px; height: 16px; }
+.conversation-send-receipt { min-width: 0; }
+.conversation-send-receipt > .message-disclosure { margin: 0; min-width: 0; }
+.conversation-send-receipt[data-receipt-mode='keep'] > .message-disclosure > summary { display: none; }
+.conversation-send-receipt[data-receipt-mode='keep'] > .message-disclosure > .message-disclosure__body { margin: 0; }
+.conversation-send-receipt[data-receipt-mode='compact'] > .message-disclosure > summary {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--conversation-message-action-size, 24px);
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--text-3);
+}
+.conversation-send-receipt__summary { display: inline-flex; align-items: center; flex-shrink: 0; gap: var(--sp-2); font-size: var(--fs-micro); }
+.conversation-send-receipt__summary > time { font-variant-numeric: tabular-nums; }
+.conversation-send-receipt__summary > .conversation-submission-summary { color: var(--text-2); }
+.conversation-send-receipt[data-receipt-attention='true'] > .message-disclosure > summary { flex-wrap: wrap; }
+.conversation-send-receipt[data-receipt-attention='true'] .conversation-send-receipt__summary { flex-shrink: 1; flex-wrap: wrap; }
+.conversation-send-receipt[data-receipt-mode='compact'] > .message-disclosure > summary > .message-disclosure__preview {
+  display: block;
+  flex: 1 1 auto;
+  order: 0;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.conversation-send-receipt .message-disclosure[hidden] { display: none; }
+.conversation-send-receipt__activity { display: inline-flex; align-items: center; margin-inline-end: var(--sp-1); }
+/* Hidden original disclosures keep their DOM and stop their pending visual work. */
+[hidden] .conversation-send-receipt__activity .semantic-icon-motion,
+[inert] .conversation-send-receipt__activity .semantic-icon-motion,
+[data-receipt-active='false'] .conversation-send-receipt__activity .semantic-icon-motion { --icon-spin-animation: none; animation-play-state: paused; }
+@media (max-width: 620px) {
+  .conversation-send-receipt__summary > time { display: none; }
+  .conversation-send-receipt[data-receipt-mode='compact'] > .message-disclosure > summary > .message-disclosure__action { font-size: 0; gap: 0; }
+  .conversation-send-receipt[data-receipt-mode='compact'] > .message-disclosure > summary > .message-disclosure__action > svg { width: 12px; height: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .conversation-send-receipt__activity .semantic-icon-motion { --icon-spin-animation: none; animation-play-state: paused; }
+}
