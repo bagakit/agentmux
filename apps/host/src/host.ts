@@ -418,8 +418,14 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(configurationPath ? { executorConfigurations: (id?: string) => readConfiguredExecutors(configurationPath, id) } : {}),
       ...(configurationPath ? { ownedWorkspaceRoots: workspacePath => moteOwnedWorkspaceRoots(configurationPath, workspacePath) } : {}),
       ...(configurationPath && content?.files ? { moteInputResolver: createHostMoteInputSource({configurationPath,spatial:spatialState,files:content.files}) } : {}),
-      ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
-      routeEdge: edgeId => configuredRouteEdge(hostId => options.connections?.clients?.(hostId) ?? [], edgeId),
+      ...(options.connections?.clients ? { coreClients: async (hostId?: string) => {
+        if (hostId !== undefined && hostId !== 'local') await options.connections!.clientsReady?.()
+        return options.connections!.clients!(hostId)
+      } } : {}),
+      routeEdge: async edgeId => {
+        await options.connections?.clientsReady?.()
+        return configuredRouteEdge(hostId => options.connections?.clients?.(hostId) ?? [], edgeId)
+      },
       routeEdges: () => configuredRouteEdges(configurationPath),
       ...(options.providers ? { providers: options.providers } : {}), service,
       forwardingPeer: { authoritySocketPath: desktopPath, bindAuthority: async principal => principal.kind === 'device'

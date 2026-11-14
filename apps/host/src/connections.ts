@@ -39,6 +39,8 @@ export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServi
   moteConfigurationPath?: string
   /** Original remote execution clients, owned by this Host rather than a GUI window. */
   clients?(hostId?: string): readonly { hostId: string; client: ExecutionClient }[]
+  /** Join original cold configuration/handle assembly, never remote readiness. */
+  clientsReady?(): Promise<void>
   subscribeClients?(listener: () => void): () => void
 }
 

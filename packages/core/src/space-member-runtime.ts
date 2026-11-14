@@ -22,7 +22,7 @@ type RuntimePort = {
 /** Only the original authenticated user may borrow a direct transport. Routed
  * viewers always use their current exact parent and receiver-approved child. */
 export async function spaceMemberRuntime(ports: {
-  store: AgentMuxSpatialStateStore; local: RuntimePort; clients(): Promise<readonly AgentMuxRpcCoreClient[]>; gateway?: HostRouteGateway
+  store: AgentMuxSpatialStateStore; local: RuntimePort; clients(hostId: string): Promise<readonly AgentMuxRpcCoreClient[]>; gateway?: HostRouteGateway
 }, input: SpaceMemberParams[keyof SpaceMemberParams], original: AgentMuxRpcCallContext) {
   const initial = await resolveSpaceMember(ports.store, input.target)
   const assertPlacementCurrent = async () => {
@@ -77,7 +77,7 @@ export async function spaceMemberRuntime(ports: {
       subscribe: (method, params, emit) => ports.local.subscribe(method, scoped(params), emit, context) }
   } else {
     if (original.routeDelegation || original.caller || original.principal?.kind !== 'user') throw new AgentMuxError('This foreign member needs the current viewer’s original verified route and receiver grant.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED')
-    const matches = (await ports.clients()).filter(item => item.hostId === initial.hostId)
+    const matches = (await ports.clients(initial.hostId)).filter(item => item.hostId === initial.hostId)
     if (matches.length !== 1) throw new AgentMuxError('The original member carrier is unavailable or ambiguous.', 'UNKNOWN_HOST')
     const client = matches[0]!.client
     if (!client.forwardRpc || !client.subscribeRpc) throw new AgentMuxError('The original carrier has no public member interaction transport.', 'RUNTIME_UNAVAILABLE')

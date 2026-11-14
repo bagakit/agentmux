@@ -54,7 +54,7 @@ startup = startAgentMuxHost({ prepareExecutionEnvironment, store: agentMuxHostSt
   ...(relayGatewayConfigurationPath === undefined ? {} : { relayGateway: { configurationPath: relayGatewayConfigurationPath } }),
   hostConfiguration: hostId => configured.configuration(hostId),
   ...(configurationPath === undefined ? {} : { configurationPath }),
-  ...(connectionDirectory === undefined && moteConfigurationPath === undefined ? {} : { connections: { directory: connectionDirectory, clients: hostId => configured.clients(hostId), subscribeClients: listener => configured.subscribeClients(listener),
+  ...(connectionDirectory === undefined && moteConfigurationPath === undefined ? {} : { connections: { directory: connectionDirectory, clients: hostId => configured.clients(hostId), clientsReady: () => configured.ready(), subscribeClients: listener => configured.subscribeClients(listener),
     ...(moteConfigurationPath === undefined ? {} : { moteConfigurationPath }) } }) }).catch(async error => {
       try { await configured.close() } catch (cleanup) { throw new AggregateError([error, cleanup], 'Host startup and configured consumer cleanup failed.') }
       throw error

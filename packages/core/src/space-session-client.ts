@@ -14,7 +14,7 @@ import type { AgentMuxClientEvent } from './types.js'
  * delegated actor into the user authenticated by another saved SSH connection. */
 export function createSpaceSessionObserver(ports: {
   local: Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe'>
-  clients(): Promise<readonly AgentMuxRpcCoreClient[]>
+  clients(hostId: string): Promise<readonly AgentMuxRpcCoreClient[]>
   context: AgentMuxRpcCallContext
   reference: import('./space-authority.js').SpaceAuthorityRef
   gateway?: HostRouteGateway
@@ -41,7 +41,7 @@ export function createSpaceSessionObserver(ports: {
     else {
       if (context.routeDelegation || context.principal?.kind !== 'user' || context.caller) throw new AgentMuxError(
         'This foreign Session read needs its original verified route and receiver grant. The Space member and existing controls are retained.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED')
-      const matches = (await ports.clients()).filter(entry => entry.hostId === group.hostId)
+      const matches = (await ports.clients(group.hostId)).filter(entry => entry.hostId === group.hostId)
       if (matches.length !== 1) throw new AgentMuxError('The original Session carrier is unavailable or ambiguous.', 'UNKNOWN_HOST')
       const original = matches[0]!.client
       if (!original.forwardRpc || !original.subscribeRpc) throw new AgentMuxError('The original Session carrier has no public scoped observation transport.', 'RUNTIME_UNAVAILABLE')

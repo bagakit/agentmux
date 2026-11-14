@@ -16,8 +16,10 @@ export function configuredHostClients(path: string | undefined) {
   const configurationRead = new AbortController()
   const routes = new Map<string, { config: SshHostConfig; controller: AbortController }>()
   const work = new Set<Promise<void>>()
+  let initialReady: Promise<void> | undefined
+  let initialHandles: Set<Promise<void>> | undefined
   let watcher: FSWatcher | undefined, pending: Promise<void> | undefined, retry: NodeJS.Timeout | undefined
-  let dirty = false, closed = false, started = false, lastIssue: string | undefined
+  let dirty = false, closed = false, lastIssue: string | undefined
   let local: LocalHostConfig | undefined
   let retryDelay = 1000
   const issue = (step: string) => {
@@ -57,7 +59,7 @@ export function configuredHostClients(path: string | undefined) {
       const candidate = { config, controller: new AbortController() }
       routes.set(config.id, candidate)
       const accepted = () => !closed && routes.get(config.id) === candidate
-      track((async () => { try {
+      const task = (async () => { try {
         if (previous) {
           const { label: _previousLabel, ...original } = previous.config
           if (isDeepStrictEqual(original, route)) { previous.config = config; return }
@@ -86,7 +88,11 @@ export function configuredHostClients(path: string | undefined) {
         issue(`Host ${config.id} could not confirm its original Runtime on the configured route.`)
         if (previous && accepted()) retryObservation()
       }
-      finally { if (routes.get(config.id) === candidate) routes.delete(config.id) } })())
+      finally { if (routes.get(config.id) === candidate) routes.delete(config.id) } })()
+      // Only new handle construction belongs to cold assembly. Existing-route
+      // preparation can wait for network and must not hold this initial read.
+      if (!previous) initialHandles?.add(task)
+      track(task)
     }
   }
   const retryObservation = () => {
@@ -120,8 +126,25 @@ export function configuredHostClients(path: string | undefined) {
     pending = work.finally(() => { pending = undefined })
     return pending
   }
+  const ready = (): Promise<void> => {
+    if (initialReady) return initialReady
+    const handles = new Set<Promise<void>>()
+    initialHandles = handles
+    initialReady = (async () => {
+      await refresh()
+      // Factories use waitForReady:false and join refresh's configuration cut.
+      // Await them after that cut, never pending/work or remote connectivity.
+      while (handles.size) {
+        const wave = [...handles]; handles.clear()
+        await Promise.allSettled(wave)
+      }
+    })().finally(() => { initialHandles = undefined })
+    return initialReady
+  }
   return {
-    start() { if (!started && !closed) { started = true; void refresh() } },
+    start() { if (!initialReady && !closed) void ready().catch(() => issue('Initial Host configuration assembly failed.')) },
+    /** One original configuration/handle cut; no remote readiness requirement. */
+    ready,
     subscribeClients(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
     clients: (hostId?: string) => {
       if (hostId === undefined) return [...leases].map(([hostId, lease]) => ({ hostId, client: lease.client }))

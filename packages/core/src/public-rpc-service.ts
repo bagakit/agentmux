@@ -329,7 +329,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   nodePublishing?: NodePublishingPort
   /** Complete configured locator scope, including routes without a prepared client. Never starts a client. */
   nodeLocatorHosts?(): readonly string[] | Promise<readonly string[]>
-  coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
+  /** Omitted selector reads the existing cache; a qualified owner may join exact Host initialization. The selector grants no authority. */
+  coreClients?(hostId?: string): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** Borrow the configured Host's original public transport, preserving its caller and Runtime fence. */
   callOriginalCore?<M extends AgentMuxRpcMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
@@ -653,7 +654,7 @@ export class AgentMuxRpcService {
   private async spaceMemberRuntime(input: import('./space-member.js').SpaceMemberParams[keyof import('./space-member.js').SpaceMemberParams], context: AgentMuxRpcCallContext) {
     const source = await this.hosted('runtime.owner.identity', { expectedRuntimeId: input.target.reference.runtimeId }, context)
     await source.owner.call('runtime.owner.identity', source.params, context)
-    return await spaceMemberRuntime({ store: this.spatial, clients: () => this.clients(),
+    return await spaceMemberRuntime({ store: this.spatial, clients: hostId => this.clients(hostId),
       ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}), local: {
         call: async (method, params, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.call(method, endpoint.params, original) },
         subscribe: async (method, params, emit, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.subscribe(method, endpoint.params, emit, original) }
@@ -684,8 +685,8 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence({ ...context,runtimeFence })
     } }
   }
-  private async clients(): Promise<readonly AgentMuxRpcCoreClient[]> {
-    if (this.ports.coreClients) return await this.ports.coreClients()
+  private async clients(hostId?: string): Promise<readonly AgentMuxRpcCoreClient[]> {
+    if (this.ports.coreClients) return await this.ports.coreClients(hostId)
     this.local ??= import('./runtime-client.js').then(({ connectLocalAgentMux }) => connectLocalAgentMux())
     return [{ hostId: 'local', client: await this.local }]
   }
@@ -1968,7 +1969,7 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('Native request identity must be its original JSON string or safe integer.', 'INVALID_CONTROL_REQUEST')
       }
       const exactKey = { ...key, nativeRequestId: key.nativeRequestId as string | number }
-      const scopes = (await this.clients()).filter(scope => scope.hostId === hostId)
+      const scopes = (await this.clients(hostId)).filter(scope => scope.hostId === hostId)
       if (scopes.length !== 1) throw new AgentMuxError('Tool operation inspection requires one exact configured Host route.', 'UNKNOWN_HOST')
       const { client } = scopes[0]!
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
@@ -3130,7 +3131,7 @@ export class AgentMuxRpcService {
       }
       case 'agent.context': {
         const input = parseAgentContextParams(p)
-        const scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
+        const scopes = (await this.clients(input.hostId)).filter(scope => scope.hostId === input.hostId)
         if (scopes.length !== 1) throw new AgentMuxError(`Context route Host ${JSON.stringify(input.hostId)} is ${scopes.length ? 'ambiguous' : 'not configured'} in this service. Use settings hosts ls or agent ls on the same endpoint; local means the receiving Core service.`, scopes.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
         const scope = scopes[0]!
         if (scope.client.forwardRpc) {
@@ -4750,7 +4751,7 @@ export class AgentMuxRpcService {
         let queue: ReturnType<typeof createHostedTransferQueue>
         const reader = await observeSpaceSessions({ authority: this.spaceAuthority,
           sources: snapshot => readSpaceSessionSources(this.spatial, snapshot),
-          observe: createSpaceSessionObserver({ local: original.owner, clients: async () => await this.ports.coreClients?.() ?? [],
+          observe: createSpaceSessionObserver({ local: original.owner, clients: async hostId => await this.ports.coreClients?.(hostId) ?? [],
             context: { ...context, signal: controller.signal }, reference: input.reference, ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}) }) },
         input.reference, value => queue.write(hostedTransfer({ kind: 'event', event: value }, mintObjectId())), error => queue.fail(error), controller.signal)
         let admitted: string | undefined

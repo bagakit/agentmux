@@ -37,8 +37,8 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   forwardingPeer?: AgentMuxControlServerOptions['forwardingPeer']
   /** Existing client-owned business ports mounted on this one public endpoint. */
   service?: Omit<AgentMuxRpcServiceOptions, 'coreClients' | 'hostedRuntime' | 'endpoint'>
-  /** Borrow original remote Hosts; this Runtime owns only its local client's lifecycle. */
-  coreClients?: () => readonly AgentMuxRpcCoreClient[]
+  /** Borrow original remote Hosts. An exact selector may join their handle assembly; an omitted selector stays cached. */
+  coreClients?: (hostId?: string) => readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** The original Host composes only its exact configured public edge transports. */
   routeEdge?: HostRouteGatewayOptions['edge']
   routeEdges?: HostRouteGatewayOptions['edges']
@@ -165,7 +165,8 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
           // label. This read neither creates signing material nor connects Native.
           return { runtimeId, client: client!, executionPort: client! }
         }
-        const scopes = [{ hostId: 'local', client: client! }, ...(options.coreClients?.() ?? [])].filter(scope => scope.hostId === hostId)
+        const scopes = hostId === 'local' ? [{ hostId: 'local', client: client! }]
+          : (await options.coreClients?.(hostId) ?? []).filter(scope => scope.hostId === hostId)
         if (scopes.length !== 1) throw new AgentMuxError('Execution requires one exact configured Host route.', 'UNKNOWN_HOST')
         let original = scopes[0]!.client
         if (access && 'observation' in access) {
@@ -230,7 +231,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
       nodePublishing: new NodePublishingOwner({ stateDirectory, runtimeId, ownerInstanceId }),
-      coreClients: () => [{ hostId: 'local', client: client! }, ...(options.coreClients?.() ?? [])],
+      coreClients: async hostId => [{ hostId: 'local', client: client! }, ...(await options.coreClients?.(hostId) ?? [])],
       hostedRuntime: () => hosted!,
       onControlEndpointState: state => hosted?.publishControlEndpointState(state) })
     await server.start()
