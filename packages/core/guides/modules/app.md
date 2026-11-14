@@ -79,6 +79,12 @@ native App updates, Host restart or safe reload of drafts and selected images.
 
 ## Capture an exact workface
 
+To select an already-saved Survey page, use `app focus --surface survey --browser BROWSER
+--region REGION`; a research uses `--zone ZONE`. An optional exact occurrence requires
+`--display-workspace`, `--group`, `--tab` and `--region` together. This uses Survey's original
+choice, preserves eligible input and does not register missing members. `space --skill`
+describes creation and registration separately. Read `app focus --help` for valid combinations.
+
 Read app window ls for the original windowId and documentGeneration. app capture --input
 FILE|- [--output FILE] takes {target:{windowId,documentGeneration}}. To crop one presented
 Region, add target.region:{kind:"region",displayWorkspaceId,groupId,tabId,regionId} from

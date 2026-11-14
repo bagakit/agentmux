@@ -17,6 +17,14 @@ from the native document and its original navigation error; see browser targets 
 
 [Browser target choice](../shared/browser-target-choice.md "amux:include")
 
+`browser open --survey` explicitly registers only the returned Browser/Region in Survey,
+including the persistent default environment; it keeps the original destination and does
+not select or create a whole research. Registration/save failure retains the healthy page.
+Read `space --skill` for the creation → exact registration → `app focus --surface survey`
+selection workflow and its SDK calls. `browser create` belongs to standalone Browser hosts;
+Desktop uses the spatial `browser open` owner. Read `browser capture --help` and the capture
+section of `browser run --help` for the same page's PNG export and precise pixel scope.
+
 Before creating an Agent from an existing Browser, use browser agent-workspace prepare
 --browser ID. Read that leaf's help for --expected, which freezes the original
 {workspaceId,mode,profileId}. The original Browser and Host owners prepare or reuse its

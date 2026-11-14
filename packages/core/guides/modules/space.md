@@ -7,6 +7,52 @@ when: "Inspect a visible layout or move an exact presentation"
 # space
 
 <!-- amux:content -->
+## Saved Survey pages and research
+
+Survey references are client preferences over the original Browser/Region or Zone, not
+another kind of entity. `space survey-list` reads the exact saved members and organization;
+`space ls --presentation` supplies current original locations. Use leaf help before changing
+the complete member arrays and their paired expected values.
+
+Open beside an exact Region and explicitly save only the new page:
+
+```sh
+amux browser open --url URL --right-of REGION --survey --operation-id OPEN_ID
+```
+
+Without `--profile`, Main keeps the persistent default environment. `--private` retains its
+own temporary website session. The returned `region` confirms Browser/Tab/Region; `survey`
+separately reports registration and saving. This neither collects the project nor creates
+a research, and does not change current selection. After partial/unknown registration,
+inspect `space survey-list` and repair only that reference; never reopen the Browser.
+
+Select an already-saved page or research through the original App navigator:
+
+```sh
+amux app focus --surface survey --browser BROWSER --region REGION
+amux app focus --surface survey --zone ZONE
+```
+
+For an exact occurrence, additionally supply the complete `--display-workspace`, `--group`,
+`--tab`, `--region` tuple from discovery. Selection never collects an unsaved item, changes
+its environment or grants input. Actual Survey choice, presentation and saving are separate
+facts; an unavailable retained item may remain selected with pending/partial presentation.
+An accurate selected member or a research's single confirmed Profile selects its existing
+Survey environment view so the saved row remains visible; this never rebinds a page.
+Mixed or unknown Profile facts do not manufacture a default environment.
+`space focus` navigates Space; switching back to Survey does not select that item there.
+
+Read `browser capture --help` and the capture section of `browser run --help` for clean PNG
+export from this same Browser. `app capture --help` instead captures a presented App Region
+with its original workface chrome. These are different pixel scopes.
+
+SDK: `connectBrowserSdk().call('browser.open', {...,survey:true})` uses the same creation.
+Use `connectAgentMuxRpc().call('app.focus', {target:{kind:'survey',selection:
+{kind:'page',regionId,browserId}},inputPolicy:'preserve'})` for selection; whole research uses
+`selection:{kind:'zone',zoneId}`. Optional `target.reference` is the complete four-tuple.
+Discover `system.endpoint` methods first: Desktop does not expose standalone
+`browser.create`/`browser.close`. Capture the returned Browser ID, never one inferred from a URL.
+
 Core owns durable Space/Zone/Tab/Region identities, topology and bindings; the client
 owns presentation, navigation and input focus. Inspect exact locations and display
 Workspace/Group occurrences before changing a layout. A presentation move leaves execution
