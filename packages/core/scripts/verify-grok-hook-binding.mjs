@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { constants, createReadStream } from 'node:fs'
+import { access, copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -28,9 +28,8 @@ const owners = ['packages/core/src/providers/grok.ts', 'packages/core/src/provid
 const mutations = process.argv.includes('--mutations')
 const compiled = process.argv.includes('--compiled')
 assert(!(compiled && mutations), 'Run source mutations separately from compiled package consumption')
-const coreEntry = pathToFileURL(join(root, 'packages/core/dist/index.js')).href
 const fixtureInputs = ['packages/core/test/providers/grok-hook-binding.native.test.ts', 'packages/core/test/vitest.grok-hook-binding.config.mts',
-  'packages/core/scripts/verify-grok-hook-binding.mjs']
+  'packages/core/scripts/verify-grok-hook-binding.mjs', 'packages/core/test/fixtures/grok-hook-core-host.mjs']
 const fixtureHashes = Object.fromEntries(await Promise.all(fixtureInputs.map(async path => [path, await hashFile(join(root, path))])))
 async function qualifyCompiled() {
   const config = JSON.parse(await readFile(join(root, 'tsconfig.base.json'), 'utf8'))
@@ -55,6 +54,33 @@ async function qualifyCompiled() {
   return current
 }
 const compiledArtifacts = compiled ? await qualifyCompiled() : undefined
+async function stageCompiledDeployment(directory) {
+  const original = join(root, 'packages/core')
+  await mkdir(directory, { mode: 0o700 })
+  for (const part of ['dist', 'bin', `vendor/ctxmux/${process.platform}-${process.arch}`]) {
+    const target = join(directory, part)
+    await mkdir(dirname(target), { recursive: true })
+    if (process.platform === 'darwin') await exec('/bin/cp', ['-cR', join(original, part), target])
+    else await cp(join(original, part), target, { recursive: true, dereference: false,
+      verbatimSymlinks: true, mode: constants.COPYFILE_FICLONE })
+  }
+  await copyFile(join(original, 'package.json'), join(directory, 'package.json'), constants.COPYFILE_FICLONE)
+  await symlink(await realpath(join(original, 'node_modules')), join(directory, 'node_modules'), 'dir')
+  const qualified = {}
+  for (const [artifact, identity] of Object.entries(compiledArtifacts)) {
+    const local = artifact.slice('packages/core/'.length)
+    assert.equal(await hashFile(join(directory, local)), identity.artifactSHA256, 'Private compiled owner differs from the current candidate: ' + local)
+    assert.equal(await hashFile(join(directory, local + '.map')), identity.sourceMapSHA256)
+    qualified[local] = identity
+  }
+  for (const part of ['package.json', 'bin/amux', 'bin/agentmux-hook.js', 'dist/agentmux-hook.mjs',
+    `vendor/ctxmux/${process.platform}-${process.arch}/manifest.json`]) {
+    const originalSHA256 = await hashFile(join(original, part))
+    assert.equal(await hashFile(join(directory, part)), originalSHA256)
+    qualified[part] = { artifactSHA256: originalSHA256 }
+  }
+  return qualified
+}
 const results = []
 for (const mutation of mutations ? ['no-retained-runtime', 'no-native-tool-hooks', 'outside-scope-claimed'] : [undefined]) {
   const label = mutation ?? (compiled ? 'compiled-positive' : 'positive'), loadedPath = join(evidence, `${label}.loaded.jsonl`)
@@ -64,13 +90,17 @@ for (const mutation of mutations ? ['no-retained-runtime', 'no-native-tool-hooks
   if (!mutation) await rm(receiptPath, { force: true })
   const privateRunner = await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amgv-'))
   await mkdir(join(privateRunner, 'home')); await mkdir(join(privateRunner, 'tmp'))
+  const privateDeployment = compiled ? join(privateRunner, 'deployment') : undefined
+  const coreEntry = privateDeployment ? pathToFileURL(join(privateDeployment, 'dist/index.js')).href : undefined
   // The test and all native processes start without inherited native overrides or real auth.
   const env = { PATH: process.env.PATH, HOME: join(privateRunner, 'home'), TMPDIR: join(privateRunner, 'tmp'), LANG: 'en_US.UTF-8',
     AGENTMUX_GROK_NATIVE_BINARY: binary, AGENTMUX_GROK_NATIVE_RECEIPT: receiptPath, AGENTMUX_GROK_HOOK_LOADED: loadedPath,
-    ...(compiled ? { AGENTMUX_GROK_CORE_ENTRY: coreEntry } : {}),
+    ...(compiled ? { AGENTMUX_GROK_CORE_ENTRY: coreEntry, AGENTMUX_GROK_PRIVATE_DEPLOYMENT: privateDeployment,
+      AGENTMUX_GROK_RESTART_CORE_ENTRY: pathToFileURL(join(root, 'packages/core/dist/index.js')).href } : {}),
     ...(mutation ? { AGENTMUX_GROK_HOOK_MUTATION: mutation } : {}) }
   let outcome
   try {
+    const deployedArtifacts = compiled ? await stageCompiledDeployment(privateDeployment) : undefined
     try { outcome = { ...(await exec(process.execPath, [vitest, 'run', '--config', 'packages/core/test/vitest.grok-hook-binding.config.mts',
       '--reporter=json', `--outputFile=${reportPath}`], { cwd: root, env, timeout: 100_000, maxBuffer: 4 * 1024 * 1024 })), code: 0 } }
     catch (error) { outcome = { stdout: error.stdout ?? '', stderr: error.stderr ?? '', code: error.code } }
@@ -92,6 +122,14 @@ for (const mutation of mutations ? ['no-retained-runtime', 'no-native-tool-hooks
       assert.equal(receipt.binary, binary); assert.equal(receipt.scope, 'native-headless')
       assert.equal(receipt.compiledPackageConsumer, compiled)
       assert.equal(receipt.coreEntry, compiled ? coreEntry : 'current-source')
+      if (compiled) {
+        assert.equal(receipt.privateDeployment, privateDeployment)
+        assert.equal(receipt.compiledSourceRemovedAfterLaunch, true)
+        assert.equal(receipt.firstCoreExitedBeforeSourceRemoval, true)
+        assert(receipt.firstCorePid > 0 && receipt.secondCorePid > 0 && receipt.firstCorePid !== receipt.secondCorePid)
+        for (const pid of [receipt.firstCorePid, receipt.secondCorePid]) assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+        await assert.rejects(access(privateDeployment), { code: 'ENOENT' })
+      }
       for (const key of ['publicCreate', 'privateCtxmux', 'coreToolConsumed', 'retainedRuntime', 'coreRecreated', 'sameRunReattached',
         'oldLaunchBindingDeliveredStop', 'sharedDeclarationUnchanged', 'privateRootRemovedAfterTest']) assert.equal(receipt[key], true, key)
       assert.equal(receipt.outsideIngress, false)
@@ -100,7 +138,8 @@ for (const mutation of mutations ? ['no-retained-runtime', 'no-native-tool-hooks
       await assert.rejects(access(receipt.privateRoot), { code: 'ENOENT' })
       assert.throws(() => process.kill(receipt.originalPid, 0), { code: 'ESRCH' })
     }
-    results.push({ label, code: outcome.code, assertions: report.numTotalTests, loaded, baseline, fixtureHashes })
+    results.push({ label, code: outcome.code, assertions: report.numTotalTests, loaded, baseline, fixtureHashes,
+      ...(compiled ? { privateDeployment, deployedArtifacts } : {}) })
     process.stdout.write(`${label}: passed\n`)
   } finally { await rm(privateRunner, { recursive: true, force: true }) }
 }

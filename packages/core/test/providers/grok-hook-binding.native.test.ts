@@ -3,13 +3,16 @@ import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { basename, dirname, isAbsolute, join } from 'node:path'
+import { createInterface } from 'node:readline'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentMuxClientEvent } from '../../src/types.js'
 
 const selectedCoreEntry = process.env.AGENTMUX_GROK_CORE_ENTRY
+const privateDeployment = process.env.AGENTMUX_GROK_PRIVATE_DEPLOYMENT
+const restartCoreEntry = process.env.AGENTMUX_GROK_RESTART_CORE_ENTRY
 const { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentManagedHookInstaller, AgentProviderRegistry } =
   (selectedCoreEntry ? await import(/* @vite-ignore */ selectedCoreEntry) : await import('../../src/index.js')) as typeof import('../../src/index.js')
 
@@ -17,6 +20,42 @@ const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
 const profile = '(version 1)(allow default)(deny network-outbound)(allow network-outbound (remote ip "localhost:*"))'
 type Receipt = { input: Record<string, any>; cwd: string }
+const coreMethods = ['connect', 'createAgent', 'statusAgent', 'readAgentSession', 'sessionTimeline',
+  'reattachAgent', 'listRuns', 'inspectManagedHooks', 'stopAgent', 'dispose'] as const
+type CoreApi = Pick<InstanceType<typeof AgentMuxClient>, typeof coreMethods[number]>
+function privateCoreHost(entry: string, env: Record<string, string>, storePath: string, receipts: string,
+  publish: (event: AgentMuxClientEvent) => void) {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../fixtures/grok-hook-core-host.mjs', import.meta.url)), entry,
+    JSON.stringify({ storePath, receipts })], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+  let sequence = 0, stderr = ''
+  const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
+  const closed = once(child, 'close')
+  child.stderr.on('data', value => { stderr += value.toString() })
+  const lines = createInterface({ input: child.stdout })
+  lines.on('line', line => {
+    const message = JSON.parse(line)
+    if (message.event) { publish(message.event); return }
+    const request = pending.get(message.id)
+    if (request) { pending.delete(message.id); message.error ? request.reject(Object.assign(new Error(message.error.message), message.error)) : request.resolve(message.value) }
+  })
+  void closed.then(([code]) => {
+    lines.close()
+    for (const request of pending.values()) request.reject(new Error(`Private Core ${child.pid} exited ${code}: ${stderr}`))
+    pending.clear()
+  })
+  const call = (method: string, args: unknown[]) => new Promise<any>((resolve, reject) => {
+    if (child.exitCode !== null || child.signalCode !== null) { reject(new Error('Private Core has exited: ' + stderr)); return }
+    const id = ++sequence; pending.set(id, { resolve, reject })
+    child.stdin.write(JSON.stringify({ id, method, args }) + '\n')
+  })
+  const client = Object.fromEntries(coreMethods.map(method => [method, (...args: unknown[]) => call(method, args)])) as CoreApi
+  client.dispose = async () => {
+    if (child.exitCode !== null || child.signalCode !== null) { await closed; return }
+    const timer = setTimeout(() => child.kill('SIGKILL'), 5_000)
+    try { await call('dispose', []); expect((await closed)[0], stderr).toBe(0) } finally { clearTimeout(timer) }
+  }
+  return { client, pid: child.pid!, closed }
+}
 afterEach(() => vi.unstubAllEnvs())
 async function observedValue<T>(read: () => Promise<T>, accepts: (value: T) => boolean, timeout = 15_000): Promise<T> {
   const deadline = Date.now() + timeout
@@ -32,6 +71,15 @@ it.runIf(Boolean(process.env.AGENTMUX_GROK_NATIVE_BINARY))('routes actual Grok h
   const selected = process.env.AGENTMUX_GROK_NATIVE_BINARY
   expect(selected, 'Select an installed Grok artifact explicitly or with the verification script').toBeTruthy()
   const binary = await realpath(selected!)
+  if (selectedCoreEntry) {
+    expect(privateDeployment, 'Compiled source-removal proof requires its own explicit private deployment').toBeTruthy()
+    expect(isAbsolute(privateDeployment!)).toBe(true)
+    expect(basename(privateDeployment!)).toBe('deployment')
+    expect(basename(dirname(privateDeployment!))).toMatch(/^amgv-[A-Za-z0-9]+$/u)
+    expect(await realpath(privateDeployment!)).toBe(privateDeployment)
+    expect(selectedCoreEntry).toBe(pathToFileURL(join(privateDeployment!, 'dist/index.js')).href)
+    expect(restartCoreEntry).toBeTruthy(); expect(restartCoreEntry).not.toBe(selectedCoreEntry)
+  }
   const root = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amg-')))
   const workspace = join(root, 'workspace'), home = join(root, 'home'), grokHome = join(home, '.grok')
   const runtime = join(root, 'runtime'), storePath = join(root, 'sessions.json'), trace = join(root, 'native.jsonl')
@@ -101,8 +149,15 @@ it.runIf(Boolean(process.env.AGENTMUX_GROK_NATIVE_BINARY))('routes actual Grok h
     const value = new AgentMuxClient({ providers: [provider], store, hookInstaller: new AgentManagedHookInstaller(join(root, 'receipts')) })
     value.onEvent(event => { events.push(event) }); return value
   }
-  let client = core()
-  const daemon = spawn(fileURLToPath(new URL(`../../vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`, import.meta.url)), [
+  const coreHosts: ReturnType<typeof privateCoreHost>[] = []
+  const compiledCore = (entry: string) => {
+    const host = privateCoreHost(entry, privateEnv, storePath, join(root, 'receipts'), event => { events.push(event) })
+    coreHosts.push(host); return host.client
+  }
+  let client: CoreApi = selectedCoreEntry ? compiledCore(selectedCoreEntry) : core()
+  const daemonBinary = privateDeployment ? join(privateDeployment, `vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`)
+    : fileURLToPath(new URL(`../../vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`, import.meta.url))
+  const daemon = spawn(daemonBinary, [
     '--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(root, 'daemon'), '--readiness-fd', '3'
   ], { env: privateEnv, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   let daemonError = ''; daemon.stderr?.on('data', value => { daemonError += value.toString() })
@@ -146,7 +201,22 @@ it.runIf(Boolean(process.env.AGENTMUX_GROK_NATIVE_BINARY))('routes actual Grok h
     // restores the exact stored binding and the old launch URL/token, without creating a Run.
     await client.dispose()
     process.kill(launched.pid, 0)
-    store = new AgentMuxFileAgentSessionStore(storePath); client = core(); await client.connect()
+    if (selectedCoreEntry) {
+      // Only the runner-created deployment is removed. The original Run's retained interpreter,
+      // worker, state, Store, native config and workspace all belong to the separate test root.
+      expect(root.startsWith(privateDeployment! + '/')).toBe(false)
+      expect(runEnv.AGENTMUX_HOOK_RUNNER!.startsWith(privateDeployment! + '/')).toBe(false)
+      expect(() => process.kill(coreHosts[0]!.pid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }))
+      expect((await readFile(join(privateDeployment!, 'bin/agentmux-hook.js'))).length).toBeGreaterThan(0)
+      expect((await readFile(join(privateDeployment!, 'dist/agentmux-hook.mjs'))).length).toBeGreaterThan(0)
+      await rm(privateDeployment!, { recursive: true, force: true })
+      await expect(readFile(join(privateDeployment!, 'bin/agentmux-hook.js'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(join(privateDeployment!, 'dist/agentmux-hook.mjs'))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect((await readFile(runEnv.AGENTMUX_HOOK_RUNNER!)).length).toBeGreaterThan(0)
+      process.kill(launched.pid, 0)
+    }
+    store = new AgentMuxFileAgentSessionStore(storePath)
+    client = selectedCoreEntry ? compiledCore(restartCoreEntry!) : core(); await client.connect()
     const restored = await client.reattachAgent(sessionId)
     expect(restored.session.run).toEqual(run)
     expect(restored.session.nativeHandle).toEqual(current!.nativeHandle)
@@ -181,6 +251,9 @@ it.runIf(Boolean(process.env.AGENTMUX_GROK_NATIVE_BINARY))('routes actual Grok h
     expect(actualEvents).toEqual(expect.arrayContaining(['session_start', 'user_prompt_submit', 'pre_tool_use', 'post_tool_use', 'stop']))
     proof = { schema: 'agentmux.grok-native-hook-binding.v1', binary, coreEntry: selectedCoreEntry ?? 'current-source',
       compiledPackageConsumer: Boolean(selectedCoreEntry),
+      privateDeployment: privateDeployment ?? null, compiledSourceRemovedAfterLaunch: Boolean(selectedCoreEntry),
+      ...(selectedCoreEntry ? { firstCorePid: coreHosts[0]!.pid, secondCorePid: coreHosts[1]!.pid,
+        firstCoreExitedBeforeSourceRemoval: true } : {}),
       version: version.trim(), scope: 'native-headless', publicCreate: true, privateCtxmux: true, originalRun: run,
       nativeSessionId: nativeId, nativeEvents: actualEvents, coreToolConsumed: true, outsideIngress: false,
       originalPid: launched.pid, coreRecreated: true, sameRunReattached: true, oldLaunchBindingDeliveredStop: true,
@@ -191,6 +264,7 @@ it.runIf(Boolean(process.env.AGENTMUX_GROK_NATIVE_BINARY))('routes actual Grok h
     finish()
     if (sessionId) await client.stopAgent(sessionId, originalRun!).catch(() => {})
     await client.dispose()
+    for (const host of coreHosts) await host.client.dispose()
     daemon.kill('SIGTERM'); const timer = setTimeout(() => daemon.kill('SIGKILL'), 2_000)
     try { await daemonClosed } finally { clearTimeout(timer) }
     backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve()))

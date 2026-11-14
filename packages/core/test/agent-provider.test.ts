@@ -714,13 +714,13 @@ describe('built-in agent providers', () => {
     expect((new AgentProviderRegistry().get('traex').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)).toBeNull()
   })
 
-  it('bakes the packaged-Electron node runner and provider id into the managed hook command', () => {
-    // process.execPath is the Electron app binary when packaged; ELECTRON_RUN_AS_NODE=1 makes it run
-    // the .js as Node (and a real node binary ignores the var). AGENTMUX_HOOK_PROVIDER lets the shared
-    // hook binary emit the provider-correct decision schema without confusing antigravity with gemini.
+  it('keeps launch-carried commands independent of the installation and preserves remaining native carriers', () => {
     const codexCommand = codexManagedHooks().SessionStart[0]!.hooks[0]!.command
     expect(codexCommand).toContain('ELECTRON_RUN_AS_NODE=1')
-    expect(codexCommand).toContain("AGENTMUX_HOOK_PROVIDER='codex'")
+    expect(codexCommand).toContain('AGENTMUX_HOOK_PROVIDER=')
+    expect(codexCommand).toContain('codex')
+    expect(codexCommand).not.toContain(process.execPath)
+    expect(codexCommand).not.toContain('agentmux-hook.js')
     expect(codexCommand).toContain('"$AGENTMUX_HOOK_RUNNER" --launch-scoped')
 
     const antigravityCommand = (
