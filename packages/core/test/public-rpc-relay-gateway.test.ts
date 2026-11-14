@@ -29,7 +29,7 @@ vi.mock('node:child_process', async original => {
 const cleanup: Array<() => Promise<void> | void> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const source = { publishers: [{ serverId: 'original-publisher', tokenHash: hashPublisherToken('private-publisher-grant') }], listen: { host: '127.0.0.1', port: 0 } }
-const cli = resolve('.local/state/outbound-hub-access/t4-cli/agentmux.mjs')
+const cli = resolve('.local/state/mesh-network-access/legacy-cli/agentmux.mjs')
 beforeAll(async () => {
   await mkdir(dirname(cli), { recursive: true })
   await symlink(resolve('packages/core/node_modules'), join(dirname(cli), 'node_modules'), 'dir').catch(error => { if (error.code !== 'EEXIST') throw error })
