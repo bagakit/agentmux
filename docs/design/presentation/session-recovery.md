@@ -116,6 +116,7 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共享 Region �
 
 - Durable Runtime 的异常使用同一套紧凑服务窗语言。瞬态 WAL busy 的重试不占据 Terminal 内容区，也不显示永久 loading；只有重试耗尽、磁盘不足或完整性失败，才在原 Region 旁显示一条简短的分类告示与下一步。状态库达到容量上限时，标题说明“状态库已满／启动未完成”这一阶段，保留已恢复的工作面，不把 readiness 超时写成 Agent 故障。WAL 增长超出预算与真实数据损坏分开呈现。退出清理中的 attach 门禁只在原 Region 旁短暂告示，清理完成后自动收敛，不使用永久的全局遮罩。状态、Owner 边界与默认持久位置和实际绑定的区分归交互合同[《Durable Runtime 健康》](../behavior/session-recovery.md#durable-runtime-健康)；本层不复制错误码，不另造控件、常驻路径指示、常驻指标或诊断轮询，也不把候选地址显示为恢复成功。
 - 失败提醒沿交互合同[《我们的流程坏了，不等于 Agent 坏了》](../behavior/session-recovery.md#我们的流程坏了不等于-agent-坏了)。新建入口与 resume 所属 Session 使用既有局部反馈或服务窗，紧凑说明失败步骤、当前可用或未知的能力与可执行动作，原始原因可查看。未知与流程失败沿同一轻声提醒分类；一条底层错误不同时堆叠局部与全局告警，不抢焦点，不遮住仍能工作的 Terminal。Prompt 投递与 Store 读取未确认时沿用现有紧凑服务窗，不建立第二份错误码清单。
+- 本机身份恢复复用原入口的服务窗。首层说明本机后台受影响的功能与仍可继续的工作。需要原备份时，「从备份恢复」是主动作，仍可用的入口留在次级位置，技术原因收进详情。恢复后的变化在原位呈现，恢复记录可在诊断中核对。恢复条件见[原 Runtime 身份恢复](../behavior/persistence.md#原-runtime-身份恢复)。
 - 输出 Gap 与 Gap 复发沿交互合同[《完成与 error 判定可信度》](../behavior/session-recovery.md#完成与-error-判定可信度)。现有告示详情能定位原 Session；默认主文只保留范围与 Gap 说明，观察字段、可核游标与完整原文放进可展开的 Details，长范围或窄面不能让展开的诊断挤占原恢复控件。不新增监控栏、监控面板、常驻计数器、错误登记表、遮罩或重复告警，也不以告示推测进程死亡。
 
 ## 联邦 Runtime 的状态与身份密度
