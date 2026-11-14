@@ -200,18 +200,19 @@
   {
     "id": "mote-main-session",
     "group": "mote",
-    "label": "Mote 主会话 · 双角候选",
-    "proposedSemantic": "未注册：Mote 主会话角色",
-    "description": "从复古未来角色提炼一高一展的双角与安定面罩；区别于普通方头 Agent 和单侧抬起的 Mote 身份。仅表达主会话角色，不表示 Goal 权限、在线或产出。",
+    "label": "Mote 主对话 · Goal 角色候选",
+    "proposedSemantic": "Unregistered: Mote main-dialogue role",
+    "description": "沿 Goal 小人的一体流线头壳、上扬长角、向右延展的角与弧形眼缝提炼。脸部保持完整体量，角从主体向外延伸；不缩小脸部来容纳双角。",
     "definitions": [
-      "docs/ideas/editable-icon-inventory.md",
-      "docs/design/presentation/brand-identity.md"
+      "docs/design/presentation/brand-identity.md#ip-形象",
+      "packages/client-ui/brand/illustrations/goals/goal-next.png",
+      "packages/client-ui/brand/illustrations/goals/goal-understand.png"
     ],
     "shapes": [
       [
         "path",
         {
-          "d": "M5 2.5C7.1 3.3 8.8 4.8 9.8 6.1C11.3 5.5 12.7 5.4 14.1 5.8C16.1 6.3 18.7 5.8 21.5 4.7C21.1 7.3 20.1 9.2 18.8 10.7C19.7 12.1 20 13.7 19.6 15.5C18.8 19.1 15.6 21 11.8 21C7.1 21 3.9 18.4 3.9 14.3C3.9 11.8 4.7 10 5.7 8.5C4.8 6.7 4.6 4.6 5 2.5Z M8.6 11.2a1.25 1.8 0 1 0 0 3.6 1.25 1.8 0 1 0 0-3.6Z M14.8 10.8a1.25 1.8 0 1 0 0 3.6 1.25 1.8 0 1 0 0-3.6Z",
+          "d": "M8.4 1.1C8.8.8 9.2 1.1 8.9 1.7C8 3.6 8.1 4.6 9.4 5.2C12 6.4 13.3 8 16.4 8.1C18.5 8.2 20.8 7.2 22.7 5.8C23.2 5.4 23.5 5.7 23.2 6.4C22.5 9 21.5 10.8 20.1 12.5C19.9 16.7 16.9 20.1 12 20.9C7.1 21.7 2.4 19.5 1.4 15.5C.2 10.5 2.4 5.3 8.4 1.1Z M8.6 13.9C10.7 13.6 12.7 12.6 14.2 11.3C13.1 13.5 10.8 14.7 8.6 13.9Z",
           "fill": "currentColor",
           "stroke": "none",
           "fill-rule": "evenodd"
