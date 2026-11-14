@@ -163,6 +163,31 @@ including on failure), and `outcome`, which is one of four:
                  Look at the page before retrying — do not blind-retry.
 
 
+### Page PNG and visible-region export
+
+Use the page screenshot owner instead of raw CDP or an App-window screenshot:
+
+```sh
+amux browser capture --browser BROWSER_ID --operation-id CAPTURE_ID --within '#report' --pixel-ratio 2 --output report.png
+```
+
+This command runs one fixed `browser.run` program and writes its PNG to a **new caller-local file**. It never overwrites, uploads, selects a Browser, changes zoom/device emulation, scrolls or transfers control. Its result retains the original operation/report, Browser/navigation identity, `source`, actual image dimensions, byte count and local output hash. PNG bytes are omitted from CLI stdout after export; the original program result remains available through `browser inspect`/history. A failed output does not recapture. Keep the original operation after an unknown response.
+
+Inside a program, the same API is:
+
+```js
+await waitForLoad(); // Native document load only; wait for this app's content separately.
+return await captureScreenshot({within: '#report', pixelRatio: 2});
+```
+
+`captureScreenshot()` with no options captures the current viewport at its native density. The optional object accepts `within`, `clip` and `pixelRatio` only. `within` is one unique CSS selector in the main document. Alternatively, `clip:{x:12,y:20,width:640,height:360}` uses current viewport CSS pixels; `within` and `clip` are mutually exclusive. The whole requested region must already fit in the viewport; missing, ambiguous, hidden or outside regions fail explicitly. Current-frame refs, frame selectors and full-page/scrolling capture are unsupported. Use a scoped `snapshot({within:'#report'})` for observation; do not mistake a snapshot ref for a screenshot selector.
+
+`pixelRatio` is output pixels per CSS pixel, greater than zero and at most 4, within the PNG pixel budget. It changes exported sampling, not the original viewport/zoom or responsive layout. `source.region` records the requested CSS rectangle and density; `image.width/height` are the actual encoded pixels. A null viewport/viewportWarning is an observation gap, not a successful density guarantee. The first native document is awaited; capture does not certify asynchronous charts, images, fonts, network-idle or business success. Wait for the page's actual readiness with the available page APIs before capturing.
+
+Large PNG results follow the existing retained-result contract above. CLI export reads that original reference in bounded `readResult` continuations and never captures again; its metadata keeps `resultArtifact` alongside the decoded image metadata. The original Browser must have its verified Workspace for durable results. A missing/evicted result, human takeover or failed read preserves the original capture/report and fails export explicitly. PNGs whose JSON representation exceeds the existing 8 MiB result budget are unsupported; choose a smaller requested region or density explicitly.
+
+Desktop page screenshots exclude AgentMux-owned control glow, operation cursor and debug decoration during capture while preserving the exact original control and input isolation. The page's own borders, highlights and content remain. Check `source.hostOverlays`: `excluded` confirms this host's presentation exclusion, while `unconfirmed` on another host is not a clean-capture guarantee. Visible and background pages use the same page owner; capture does not navigate to a different page or require OS screen-recording permission. Raw `cdp('Page.captureScreenshot',...)` captures the engine as requested and is not the clean API. `app capture` instead observes the App's Renderer/native composition and intentionally retains its UI.
+
 To observe HTTP requests from the current main document, arm a reader before the action:
 
 ```js

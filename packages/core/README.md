@@ -372,3 +372,23 @@ amux notebook apply --revision CURRENT_REVISION --operation-id NEW_OPERATION_ID 
 丢回执时先查询原 `operationId`，再用同一个 ID、同一 payload 和同一操作者重试，成功不会重复。新的意图使用新 ID 和最新 revision；并发冲突时先重新读目录。读取损坏或未确认时保留原字节与页面，不用空知识库覆盖。与当前事实相同的改名、位置或资源操作不会产生虚假的变化事件。
 
 确认过的文件移动可以给 `relocate` 带上可选的 `from: NoteResource`：目录拒绝过时的原位置，不会用它覆盖之后的位置；同一个操作 ID 仍按原样重放。Desktop 只记录已确认的 File / Zone 结果，把未决的历史写入保留在既有的展示恢复回执里；这些回执不含 Note 正文，也不替代 Core 目录。
+
+## Browser PNG from the public SDK
+
+The SDK keeps the original Browser operation and page owner. Discover an exact Browser first, then call the existing program method:
+
+```ts
+import { connectBrowserSdk } from '@agentmux/core/browser-sdk'
+const browser = await connectBrowserSdk({ endpoint })
+try {
+  const report = await browser.call('browser.run', {
+    browserId, operationId,
+    code: "await waitForLoad(); return await captureScreenshot({within:'#report',pixelRatio:2})"
+  })
+  // Inspect report.outcome, result.source and the actual PNG before delivery.
+} finally {
+  await browser.dispose()
+}
+```
+
+For a caller-local new PNG without decoding the result manually, use `amux browser capture --browser ID --operation-id ID --within '#report' --pixel-ratio 2 --output report.png`. Parameters, readiness, host-overlay and recovery boundaries are defined once in the [page screenshot guide](guides/actions/browser-run.md#page-png-and-visible-region-export); the executable `browser capture --help` describes the installed version. SDK completion, PNG export and website business success remain separate results.
