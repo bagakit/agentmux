@@ -511,6 +511,12 @@ it.each(['same-entry', 'later-conversation'] as const)('an explicit first planni
   const send = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Send planning request')
   expect(send).toBeDefined(); expect(send!.disabled).toBe(false)
   expect(container.querySelector('.goal-plan__request')?.textContent).toContain('First send to')
+  const feedback = container.querySelector('.goal-plan__request > [role="status"]')!
+  expect(feedback.textContent).toBe('Planning request saved · Not sent yet')
+  expect(feedback.classList.contains('goals-service')).toBe(false)
+  const observation = container.querySelector('.goal-plan__request > details')!
+  expect(observation.querySelector('summary')?.textContent).toBe('Original request observation')
+  expect(observation.textContent).toContain(useAppStore.getState().demands.discovery!.patrolObservations!.find(item => item.operationId === request.requestId)!.reason)
   evidence.push({ phase: 'first-destination-candidate', goal: structuredClone(useAppStore.getState().demands.discovery),
     sessions: structuredClone(useAppStore.getState().sessions), config: structuredClone(useAppStore.getState().config),
     tabs: structuredClone(useAppStore.getState().tabs), layouts: structuredClone(useAppStore.getState().layouts) })
