@@ -1,4 +1,7 @@
 import { realpath } from 'node:fs/promises'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { createGzip } from 'node:zlib'
 import { AgentMuxError } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { MobileAssetRelease, MobileAssetsActivateParams, MobileAssetsActivationAuthority,
@@ -7,6 +10,14 @@ import type { MobileAssetRelease, MobileAssetsActivateParams, MobileAssetsActiva
 import { loadMobileSnapshot, mobileCandidateDirectory, mobileDigest, MobileAssetCapacityError, MOBILE_ASSET_LIMITS, type MobileAsset, type MobileSnapshot } from './mobile-assets.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { isMobilePageEntry, mobilePageUnavailable, mobileResourceUnavailable } from './mobile-page-response.js'
+
+function acceptsGzip(value: string | undefined): boolean {
+  const encodings = (value ?? '').toLowerCase().split(',').map(item => item.trim().split(';').map(part => part.trim()))
+  const selected = encodings.find(([name]) => name === 'gzip') ?? encodings.find(([name]) => name === '*')
+  if (!selected) return false
+  const quality = selected.slice(1).find(part => part.startsWith('q='))?.slice(2)
+  return quality === undefined || /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u.test(quality) && Number(quality) > 0
+}
 
 /** One original Host owns HTTP snapshots, activation results and bounded page observations. */
 export class MobileAssetsOwner implements MobileAssetsPort {
@@ -154,7 +165,9 @@ export class MobileAssetsOwner implements MobileAssetsPort {
       else mobileResourceUnavailable(request, response, 503)
       return
     }
-    response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+    const compress = file.bytes.length >= 1024 && (file.type.startsWith('text/') || file.type === 'image/svg+xml') && acceptsGzip(request.headers['accept-encoding'])
+    response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': entry ? 'no-store' : 'private, max-age=31536000, immutable',
+      Vary: 'Accept-Encoding', ...(compress ? { 'Content-Encoding': 'gzip' } : {}), 'X-Content-Type-Options': 'nosniff',
       'X-AgentMux-Mobile-Build': encodeURIComponent(snapshot.release.buildId), 'Referrer-Policy': 'no-referrer',
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" })
     if (request.method === 'HEAD') { response.end(); return }
@@ -166,12 +179,22 @@ export class MobileAssetsOwner implements MobileAssetsPort {
       if (left === 0) this.sending.delete(snapshot!); else this.sending.set(snapshot!, left)
     }
     response.once('finish', release); response.once('close', release)
-    void this.send(file.bytes, response).catch(() => response.destroy())
+    void this.send(file.bytes, response, compress).catch(() => response.destroy())
   }
   private namespace(snapshot: MobileSnapshot): string {
     return '/mobile/' + encodeURIComponent(snapshot.release.buildId) + '/' + snapshot.release.digest.slice('sha256:'.length) + '/'
   }
-  private async send(bytes: Buffer, response: ServerResponse): Promise<void> {
+  private *chunks(bytes: Buffer): Generator<Buffer> {
+    for (let offset = 0; offset < bytes.length; offset += MOBILE_ASSET_LIMITS.chunk) yield bytes.subarray(offset, offset + MOBILE_ASSET_LIMITS.chunk)
+  }
+  private async send(bytes: Buffer, response: ServerResponse, compress: boolean): Promise<void> {
+    if (compress) {
+      // Subarrays share the admitted snapshot. The pipeline bounds each stream's
+      // buffering and destroys both producers when this response is closed.
+      await pipeline(Readable.from(this.chunks(bytes), { objectMode: false, highWaterMark: MOBILE_ASSET_LIMITS.chunk }),
+        createGzip({ chunkSize: MOBILE_ASSET_LIMITS.chunk }), response)
+      return
+    }
     for (let offset = 0; offset < bytes.length && !response.destroyed; offset += MOBILE_ASSET_LIMITS.chunk) {
       if (!response.write(bytes.subarray(offset, offset + MOBILE_ASSET_LIMITS.chunk))) await new Promise<void>(resolve => {
         const done = () => { response.off('drain', done); response.off('close', done); resolve() }
