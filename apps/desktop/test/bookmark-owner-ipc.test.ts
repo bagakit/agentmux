@@ -18,7 +18,7 @@ const bridge = vi.hoisted(() => ({ root: '', api: null as AgentMuxPreloadApi | n
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => bridge.root, getAppPath: () => bridge.root, isPackaged: false, once: vi.fn() },
+  app: { getPath: () => bridge.root, getAppPath: () => bridge.root, isPackaged: false, once: vi.fn(), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   globalShortcut: { register: () => true, unregister: vi.fn(), isRegistered: () => false },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
@@ -26,11 +26,11 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(), AgentMuxControlServer: class { async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { readonly extensions = { setConfirmationHandler() {} }; onChange() { return () => {} } onEnvironmentApplicationChange() { return () => {} } async initialize() {} async dispose() {} } }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-preview.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class {
-  setPresentationWindowOwner() {} async release() {} dispose() {}
+  setPresentationWindowOwner() {} async release() {} dispose() {} async flushProfileActivity() {}
   ensure(...args: unknown[]) { return bridge.ensure(...args) }
   navigate(...args: unknown[]) { return bridge.navigate(...args) }
 } }))
@@ -67,7 +67,7 @@ it('forwards the exact current Capsule address through actual preload IPC after 
   try {
     dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
       window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
-      configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
+      configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: { setNameAudit() {} } as never, workbenchWindows: { setNativeOwner: () => () => {} } as never,
       workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) })
     bridge.invoke.mockClear().mockImplementation(async (channel: string, ...values: unknown[]) => {
