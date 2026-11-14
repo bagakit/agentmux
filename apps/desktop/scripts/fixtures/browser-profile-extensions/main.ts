@@ -12,6 +12,7 @@ import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
 import { registerBrowserProfileEditorIpc } from '../../../src/main/browser-profile-editor-ipc.js'
 import { THEME_BOOTSTRAP_CHANNEL } from '../../../src/shared/theme-bootstrap.js'
+import { onlineInstall } from './online-install.js'
 import { executeBrowserProfileControl } from '../../../src/main/browser-profile-control.js'
 
 const home = process.env.EXTENSIONS_HOME!, out = process.env.EXTENSIONS_OUT!, phase = process.env.EXTENSIONS_PHASE!, base = process.env.EXTENSIONS_BASE!, node = process.env.EXTENSIONS_NODE!
@@ -23,7 +24,7 @@ const originalBrowserId = 'extension-original-browser'
 const contents = (id = originalBrowserId) => browsers!.nativeOwner(id)!.view.webContents
 const token = (id: string) => profiles!.listProfiles().find(profile => profile.id === id)!.revision
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-async function cli(args: string[], success = true) {
+async function cli(args: string[], success: boolean | 'observe' = true) {
   const result = await new Promise<{ code: number; stdout: string; stderr: string }>((accept, reject) => {
     const child = spawn(node, [join(out, 'cli.mjs'), '--endpoint', 'unix:' + join(home, 'control.sock'), 'browser', 'profile', 'extension', ...args], {
       env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'ELECTRON_RUN_AS_NODE' && !/^(AGENTMUX_|CTXMUX_)/.test(key))), NODE_NO_WARNINGS: '1' }, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -32,8 +33,8 @@ async function cli(args: string[], success = true) {
     child.on('close', code => { clearTimeout(timer); accept({ code: code ?? -1, stdout, stderr }) }); child.stdin.end()
   })
   const body = JSON.parse(result.stdout || result.stderr); receipt.cli.push({ command: args[0], code: result.code, body })
-  assert.equal(result.code === 0, success, result.stderr + result.stdout)
-  return success ? body.result : body
+  if (success !== 'observe') assert.equal(result.code === 0, success, result.stderr + result.stdout)
+  return success === true ? body.result : body
 }
 async function freshPage(profileId: string) {
   const id = `extension-observation-${++fresh}`
@@ -68,20 +69,30 @@ async function main() {
   try {
     host = new BrowserWindow({ show: false, width: 760, height: 640, webPreferences: { sandbox: false, contextIsolation: true, nodeIntegration: false, preload: join(out, 'preload.cjs') } })
     const store = new BrowserProfileStore(join(home, 'profiles.json'))
-    profiles = new BrowserProfileManager(store); await profiles.initialize()
+    profiles = new BrowserProfileManager(store); console.error('extensions-proof: profile initialization'); await profiles.initialize(); console.error('extensions-proof: profile ready')
     registerBrowserProfileEditorIpc({ profiles, handle: (channel, listener) => ipcMain.handle(channel, (event, ...args) => {
       if (event.sender !== host!.webContents || event.senderFrame !== host!.webContents.mainFrame) throw Error('Private fixture requires its original trusted Workbench frame')
+      console.error('extensions-proof: profile IPC', channel)
       return listener(event, ...args)
     }) })
     ipcMain.on(THEME_BOOTSTRAP_CHANNEL, event => { event.returnValue = { status: 'unavailable', message: 'Private appearance input is unavailable; this fixture proves extension operations.' } })
     ipcMain.handle('ui:chooseFiles', () => [guiSource]) // Private file-selection input only, no approval authority.
-    await host.loadFile(join(out, 'renderer/index.html'))
+    host.webContents.on('preload-error', (_event, _path, error) => console.error('extensions-proof: preload failed', error.message))
+    host.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('extensions-proof: renderer error', event.message) })
+    if (process.env.EXTENSIONS_CASE?.startsWith('online-')) host.showInactive()
+    console.error('extensions-proof: renderer load')
+    await host.loadFile(join(out, 'renderer/index.html')); console.error('extensions-proof: renderer ready')
     const retained = phase === 'second' ? JSON.parse(await readFile(join(home, 'retained.json'), 'utf8')) : null
     const profileId = retained?.profileId ?? profiles.defaultProfileId()
     profiles.extensions.setConfirmationHandler(async request => { receipt.approvals.push({ ...request, actualHumanReviewFixture: true, confirmed: consent }); return consent })
     browsers = new BrowserViewManager(host, profiles, new BrowserRefLedgerStore(join(home, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: async () => {} })
     control = new AgentMuxControlServer({ socketPath: join(home, 'control.sock'), coreClients: () => [], execute: (request, context) => executeBrowserProfileControl(request as never,
       { profiles: profiles!, usage: {} as never, network: {} as never }, context?.actor) }); await control.start()
+    if (process.env.EXTENSIONS_CASE?.startsWith('online-')) {
+      await onlineInstall({ home, out, phase, base, profileId, retained, profiles, browsers, host, store, receipt, cli, token, contents, source, setConsent: (value: boolean) => { consent = value } })
+      receipt.passed = true
+      return
+    }
     if (retained) {
       assert.equal(profiles.sessions.observedSession?.(profileId), undefined)
       const cold = await cli(['ls', '--profile', profileId]); assert.equal(cold.extensions[0].application.state, 'unknown')

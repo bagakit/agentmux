@@ -55,7 +55,7 @@ async function fixture() {
     return path
   }
   let operation = 0
-  const prepare = async (path: string, extensionId?: string) => manager.extensions.review(profile.id, token(), `original-operation-${++operation}`, path, extensionId)
+  const prepare = async (path: string, extensionId?: string) => manager.extensions.review(profile.id, token(), `original-operation-${++operation}`, { kind: 'local', path }, extensionId)
   const install = async (path: string, extensionId?: string) => { const review = await prepare(path, extensionId); return manager.extensions.apply(profile.id, review.expectedRevision, review.reviewId) }
   return { root, store, manager, profile, other, targets, loadedCalls, reviews, token, source, prepare, install,
     setConsent: (value: boolean) => { consent = value }, failLoad: (value: typeof failLoad) => { failLoad = value }, native }
