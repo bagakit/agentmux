@@ -45,11 +45,14 @@ settings hosts ls/test/update and settings resource configuration use the same s
 codec. Read each leaf's --help for the exact input and expected-value save contract.
 
 Tailcat needs AgentMux and the official Tailcat CLI on both machines, and AgentMux must
-already run on the receiving machine. Persistent identities come from Tailcat's own CLI:
-  tailcat genkey --client --key=agentmux-client
-  tailcat genkey --key=agentmux-server --fixed-region
-The first prints the client public key; the second prints a secret address. Do not replace
-existing keys or publish the address. Saved server keys must include a PSK and fixed relay.
+already run on the receiving machine. The person can prepare a key in the App, or with
+settings hosts tailcat-key --role server on the receiving machine and --role client on
+the sending machine. Read its --help for an optional saved key name. Preparation belongs
+to the answering Host, requires its transport-approved user, and refuses managed Agent
+callers. It uses the official CLI, creates only a missing key and never replaces an
+existing one. The result's created flag distinguishes new from reused; only the client
+returns a public key as its connection code. Private keys stay in their original files.
+Saved server keys include a PSK and fixed relay. Never publish the listener's private address.
 The Desktop part is the person's: ask them to complete it at these locations. On the
 receiving machine, This Mac → Connection takes the saved server key, the client public key
 under Allowed clients and the Allow Tailcat connections switch; its refreshed status reads
