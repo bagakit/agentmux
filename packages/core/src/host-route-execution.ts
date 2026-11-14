@@ -1,3 +1,4 @@
+import { parseAgentCreationCancellation } from './agent-creation-cancellation.js'
 import { parseNameControlParams, memberAgentNameInput } from './name-control.js'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -197,6 +198,12 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
     return
   }
   if (method === 'listHostExecutors') { if (rpcRecord(value).executorId !== scope.executorId) deny(); return }
+  if (method === 'cancelAgentCreation' || method === 'inspectAgentCreationCancellation') {
+    const input = parseAgentCreationCancellation(value)
+    const expected = scope.kind === 'preparation' ? statement.preparationSessionId : scope.agentSessionId
+    if (!expected || input.agentSessionId !== expected || input.createOperationId !== scope.createOperationId || destination !== (scope.kind === 'preparation' ? scope.targetRuntimeId : scope.agentRuntimeId)) deny()
+    return
+  }
   if (method === 'resolveAgentCreationSessionId') { if (value !== scope.createOperationId) deny(); return }
   if (method === 'readAgentSession' || method === 'inspectAgentCreation') {
     // Before admission B signs one exact SID after the target's CID resolver. This

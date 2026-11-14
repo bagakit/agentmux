@@ -1,3 +1,4 @@
+import { parseAgentTakeoverCancellation, parseAgentTakeoverCancellationResult } from './agent-takeover-cancellation.js'
 import { parseRpcAgentSession, normalizeAgentInteractionRequest } from './agent-session-codec.js'
 import { agentInteractionRequestTarget } from './agent-interaction-state.js'
 import { parseGoalInputEpoch, parseGoalInputEpochInput } from './goal-input-epoch.js'
@@ -409,6 +410,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       return parseRpcNativeResult(input.call.method, value, input.call.params, credentials)
     }
     if (Object.hasOwn(HOST_ROUTE_METHODS, method)) return parseHostRouteResult(method as keyof typeof HOST_ROUTE_METHODS, value) as Record<string, unknown>
+    if (method === 'agent.takeover.cancel' || method === 'agent.takeover.cancel.inspect') return parseAgentTakeoverCancellationResult(value, parseAgentTakeoverCancellation(params)) as unknown as Record<string, unknown>
     if (method === 'agent.creation.inspect' || method === 'agent.creation.resolve') return parseCreationInspectionResult(value, method === 'agent.creation.resolve' ? parseCreationResolveParams(params) : parseCreationInspectParams(params)) as unknown as Record<string, unknown>
     if (method === 'agent.creation.continue') return parseCreationContinueResult(value, parseCreationContinueParams(params)) as unknown as Record<string, unknown>
     if (method === 'agent.execution.watch') return parseAgentExecutionBindingObservation(value, parseAgentExecutionBinding(params).bindingId) as unknown as Record<string, unknown>

@@ -1,3 +1,4 @@
+import { parseAgentCreationCancellation, type AgentCreationCancellationInput, type AgentCreationCancellationResult } from './agent-creation-cancellation.js'
 import { createHash } from 'node:crypto'
 import { mkdir, chmod, open, stat, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -17,7 +18,7 @@ import type { AgentExecutionReference, AgentExecutionFailure, AgentExecutionHelp
 import { parseAgentExecutionNotices, type AgentExecutionNotice } from './agent-execution-helper.js'
 
 export type AgentExecutionHostPort = AgentExecutionBridgePort & Pick<AgentMuxClient,
-  'prepareAgentExecutionHelper' | 'inspectPreparedTerminal' | 'createPreparedTerminal' | 'createHostAgentWithDelivery' | 'listHostExecutors' | 'readAgentSession'>
+  'prepareAgentExecutionHelper' | 'inspectPreparedTerminal' | 'createPreparedTerminal' | 'createHostAgentWithDelivery' | 'cancelAgentCreation' | 'inspectAgentCreationCancellation' | 'listHostExecutors' | 'readAgentSession'>
 export interface AgentExecutionOpenInput {
   bindingId: string
   agentHostId: string
@@ -45,7 +46,7 @@ const originalOperation = (value: unknown, bindingId: string, generation: unknow
   return Object.keys(key).length === 3 && key.bindingId === bindingId && typeof key.streamGeneration === 'string' && !!key.streamGeneration &&
     key.streamGeneration === generation && (typeof key.nativeRequestId === 'string' || Number.isSafeInteger(key.nativeRequestId))
 }
-type RecordValue = { input: AgentExecutionOpenInput; routeAuthorization?: HostRouteExecutionAuthorization;
+type RecordValue = { cancellation?: AgentCreationCancellationInput; input: AgentExecutionOpenInput; routeAuthorization?: HostRouteExecutionAuthorization;
   /** Actual target handler observation in this original journal; not caller input or Provider qualification. */
   creationContract?: { ordinaryLaunch: 1; runtimeId: string; executorRevision: string };
   agentControl?: { generation: string; state: 'unconfigured' | 'unverified' | 'available' | 'unavailable'; stage?: 'invocation-registration'; code?: string }; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; diagnostics?: AgentExecutionDiagnostic[]; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
@@ -146,6 +147,10 @@ export class AgentExecutionCoordinator {
   private save(record: RecordValue): void {
     // SQLite's acknowledged EXTRA transaction is the durability fence. No full
     // native payload is stored here; pending Input references existing Replay.
+    // This synchronous read/update is inside the existing exclusive coordinator writer lease.
+    const cancellation = this.read(record.input.bindingId)?.cancellation
+    if (cancellation && record.cancellation && !isDeepStrictEqual(cancellation, record.cancellation)) throw fail('The original binding has another cancellation control.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
+    if (cancellation) record.cancellation = cancellation
     const { input, ...state } = record
     const encoded = JSON.stringify(state)
     const changed = this.db.prepare('UPDATE bindings SET record=? WHERE id=?').run(encoded, input.bindingId)
@@ -404,6 +409,23 @@ export class AgentExecutionCoordinator {
     const input = this.creationInput(value)
     return await this.serialize(input.bindingId, async () => this.advance(await this.freeze(input, context)))
   }
+  async cancelOriginal(value: AgentExecutionReference, request: AgentCreationCancellationInput, context?: AgentMuxRpcCallContext, inspectOnly = false): Promise<AgentCreationCancellationResult> {
+    const original = parseAgentExecutionReference(value), input = parseAgentCreationCancellation(request), record = this.read(original.bindingId)
+    if (!record || !isDeepStrictEqual(reference(record.input), original) || input.agentSessionId !== original.agentSessionId || input.createOperationId !== original.createOperationId) throw fail('The cancellation names another original execution intent.', 'EXECUTION_INTENT_UNCONFIRMED')
+    await this.options.authorize?.(record.input, context, record.routeAuthorization, true)
+    if (!inspectOnly) {
+      if (record.cancellation && !isDeepStrictEqual(record.cancellation, input)) throw fail('The original binding has another cancellation.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
+      record.cancellation = input; this.save(record)
+    }
+    const host = await this.options.resolveHost(record.input.agentHostId, record.input.agentRoute, record.routeAuthorization ? { authorization: record.routeAuthorization } : undefined)
+    try {
+      if (host.runtimeId !== record.input.agentRuntimeId) throw fail('The cancellation route answers for another original Runtime.', 'RUNTIME_OWNER_MISMATCH')
+      return inspectOnly ? await host.client.inspectAgentCreationCancellation(input) : await host.client.cancelAgentCreation(input)
+    } finally { await host.dispose?.() }
+  }
+  private assertNotCancelled(bindingId: string) {
+    if (this.read(bindingId)?.cancellation) throw fail('This original execution intent was cancelled. Its existing helpers and Agent remain retained.', 'AGENT_CREATION_CANCELLED')
+  }
   async continueOriginal(value: AgentExecutionReference, context?: AgentMuxRpcCallContext): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {
     const original = parseAgentExecutionReference(value)
     return await this.serialize(original.bindingId, async () => {
@@ -416,6 +438,7 @@ export class AgentExecutionCoordinator {
   }
   private async advance(record: RecordValue): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {
     const input = record.input
+    this.assertNotCancelled(input.bindingId)
     let step: Omit<AgentExecutionFailure, 'reference'> = { hostId: input.agentHostId, role: 'agent', stage: 'resolve' }
     try {
       const hosts = await this.hosts(record)
@@ -427,6 +450,7 @@ export class AgentExecutionCoordinator {
         // The target Core validates the complete original creation digest and
         // retained receipt before consulting a possibly changed Executor.
         step = { hostId: input.agentHostId, role: 'agent', stage: 'create' }
+        this.assertNotCancelled(input.bindingId)
         const created = await hosts.agent.createHostAgentWithDelivery({ ...input.agent, toolExecution })
         if (record.bridge && !this.bridges.has(input.bindingId)) {
           try { await this.attach(record, hosts) } catch (error) { this.observeFailure(input, error) }
@@ -455,6 +479,7 @@ export class AgentExecutionCoordinator {
       for (const role of ['executor', 'frontend'] as const) {
         step = { hostId: role === 'executor' ? input.resourceHostId : input.agentHostId, role, stage: 'prepare' }
         const client = role === 'executor' ? hosts.resource : hosts.agent
+        this.assertNotCancelled(input.bindingId)
         const original = await client.prepareAgentExecutionHelper({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId,
           providerId: selected.providerId, role, workspacePath: role === 'executor' ? input.resourceWorkspacePath : input.agent.workspacePath,
           createOperationId: creationId(input.bindingId, role), ...(role === 'executor' ? { grant: input.resourceGrant } : { toolExecution }) })
@@ -481,6 +506,7 @@ export class AgentExecutionCoordinator {
           if (!run) {
             if (attempt) throw fail('The original helper Start has no confirmed receipt; it was not submitted again.', 'EXECUTION_HELPER_UNAVAILABLE')
             record.attempts = { ...record.attempts, [role]: { ownerInstanceId } }; this.save(record)
+            this.assertNotCancelled(input.bindingId)
             run = await client.createPreparedTerminal(original.prepared)
           }
           if (run.state !== 'running' || client.runtimeIdentity().instanceId !== ownerInstanceId)
@@ -500,6 +526,7 @@ export class AgentExecutionCoordinator {
       // Endpoint pinning reads the exact original frontend receipt. A not-yet
       // ready helper is returned as unavailable, never silently recreated.
       step = { hostId: input.agentHostId, role: 'agent', stage: 'create' }
+      this.assertNotCancelled(input.bindingId)
       const created = await hosts.agent.createHostAgentWithDelivery({ ...input.agent, toolExecution })
       return { session: created.session, execution: this.inspect(input.bindingId)! }
       } finally { if (!hosts.adopted) await hosts.dispose() }
@@ -564,6 +591,10 @@ export class AgentExecutionBindingService {
   }
   async create(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): ReturnType<AgentExecutionCoordinator['create']> {
     return await (await this.coordinator()).create(input, context)
+  }
+  async cancelOriginal(input: AgentExecutionReference, cancellation: AgentCreationCancellationInput, context?: AgentMuxRpcCallContext, inspectOnly = false): Promise<AgentCreationCancellationResult> {
+    if (!this.owner && !await this.retained()) throw fail('The original execution intent is unavailable.', 'EXECUTION_INTENT_UNCONFIRMED')
+    return await (await this.coordinator()).cancelOriginal(input, cancellation, context, inspectOnly)
   }
   async continueOriginal(input: AgentExecutionReference, context?: AgentMuxRpcCallContext): ReturnType<AgentExecutionCoordinator['continueOriginal']> {
     if (!this.owner && !await this.retained()) throw fail('The original frozen execution intent is unavailable.', 'EXECUTION_INTENT_UNCONFIRMED')

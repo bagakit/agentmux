@@ -288,7 +288,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
           onRunEvent: reader.onRunEvent.bind(reader), attachTerminal: reader.attachTerminal.bind(reader), releaseRunAttachment: reader.releaseRunAttachment.bind(reader),
           runtimeIdentity: original.runtimeIdentity.bind(original), readRunReplay: original.readRunReplay.bind(original), writeTerminal: original.writeTerminal.bind(original),
           prepareAgentExecutionHelper: original.prepareAgentExecutionHelper.bind(original), inspectPreparedTerminal: original.inspectPreparedTerminal.bind(original),
-          createPreparedTerminal: original.createPreparedTerminal.bind(original), createHostAgentWithDelivery: original.createHostAgentWithDelivery.bind(original),
+          createPreparedTerminal: original.createPreparedTerminal.bind(original), createHostAgentWithDelivery: original.createHostAgentWithDelivery.bind(original), cancelAgentCreation: original.cancelAgentCreation.bind(original), inspectAgentCreationCancellation: original.inspectAgentCreationCancellation.bind(original),
           listHostExecutors: original.listHostExecutors.bind(original), readAgentSession: original.readAgentSession.bind(original)
         }
         return { runtimeId: identity.runtimeId, client: original, executionPort: scoped }

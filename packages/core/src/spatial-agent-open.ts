@@ -1,3 +1,4 @@
+import { takeoverCancellationRecord } from './agent-takeover-cancellation-record.js'
 import { parseAgentTakeoverProvenance, takeoverDestinationOrganization, qualifyTakeoverOrganization, sameTakeoverOrganization, type AgentTakeoverPreparation } from './agent-takeover.js'
 import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
@@ -50,6 +51,14 @@ function spatialAgentOpenDestination(graph: AgentMuxSpatialGraph, request: Agent
 export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { request: AgentMuxSpatialAgentOpenRequest;
   agentSessionId: string; takeover?: { preparation: AgentTakeoverPreparation; requestDigest: string; sourceAgentMuxNote?: string; optionalContext?: AgentMuxSpatialAgentOpenRecord['takeoverOptionalContext'] }; execution: AgentMuxSpatialAgentOpenRecord['execution']; placement?: AgentMuxSpatialAgentOpenRecord['placement'];
   executionBinding?: AgentMuxSpatialAgentOpenRecord['executionBinding']; regionResource: SpatialJson }) {
+  const cancelled = takeoverCancellationRecord(graph, input.request.requestId)
+  if (cancelled) {
+    const { operationId, ...body } = cancelled.input.request
+    const digest = spatialAgentOpenDigest({ schemaVersion: 5, operation: 'agent.open', requestId: operationId, ...body })
+    if (digest !== (input.takeover?.requestDigest ?? spatialAgentOpenDigest(input.request))) throw new AgentMuxError('The cancellation belongs to another original request.', 'SPACE_REQUEST_CONFLICT')
+    if (input.takeover && cancelled.input.expectedRuntimeId !== input.takeover.preparation.destination.owner.runtimeId) throw new AgentMuxError('The original cancellation Runtime is unconfirmed.', 'AGENT_TAKEOVER_CANCELLATION_UNCONFIRMED')
+    throw new AgentMuxError('The original Takeover was cancelled. Its original work remains available.', 'AGENT_TAKEOVER_CANCELLED')
+  }
   if (spatialAgentAssociationRecord(graph, input.request.requestId)) throw new AgentMuxError('This operation already belongs to an external association, not an Agent creation.', 'SPACE_REQUEST_CONFLICT')
   if (input.request.moteMain) {
     const intent = parseMoteMainCreationIntent(input.request.moteMain)

@@ -1,3 +1,5 @@
+import { parseAgentTakeoverCancellation, parseAgentTakeoverCancellationResult } from './agent-takeover-cancellation.js'
+import { takeoverCancellationRecord } from './agent-takeover-cancellation-record.js'
 import { parseGoalInputEpochInput, parseGoalInputEpoch } from './goal-input-epoch.js'
 import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
 import { parseCreationInspection, parseCreationInspectionResult } from './agent-creation-inspection.js'
@@ -209,7 +211,7 @@ import { parseTerminalTarget, parseTerminalOutputParams, parseTerminalInspection
 
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentInputEpoch' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'inspectAgentSessionRecord' | 'deleteAgentSessionRecord' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
-  'resolveAgentCreationSessionId' | 'inspectAgentCreation' | 'resolveAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
+  'resolveAgentCreationSessionId' | 'inspectAgentCreation' | 'resolveAgentCreation' | 'cancelAgentCreation' | 'inspectAgentCreationCancellation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
@@ -247,6 +249,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   capsules?: { call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext,
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
   executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin' | 'continueOriginal'> & {
+    cancelOriginal?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['cancelOriginal']
     inspect(bindingId: string, view?: 'association', context?: AgentMuxRpcCallContext): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
     sourceDiagnostics?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['sourceDiagnostics']
     admit?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['admit']
@@ -314,6 +317,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   }
   /** Original Host policy over Core-owned spatial creation associations, without a screen. */
   spatialAgentControl?: ((request: AgentMuxControlRequest, context: AgentMuxRpcCallContext) => Promise<AgentMuxControlResult | undefined>) & {
+    cancelTakeover?(input: import('./agent-takeover-cancellation.js').AgentTakeoverCancellationInput, context: AgentMuxRpcCallContext, inspectOnly?: boolean, actor?: { kind: 'user'|'device'; id: string }): Promise<import('./agent-takeover-cancellation.js').AgentTakeoverCancellationResult>
     describe?(): import('./agent-open-contract.js').AgentOpenContracts
     describeExecution?(input: import('./agent-open-contract.js').AgentOpenExecutionSelector, context: AgentMuxRpcCallContext): Promise<import('./agent-open-contract.js').AgentOpenExecutionDescription>
   }
@@ -478,6 +482,8 @@ const NATIVE_FIELDS = {
   'agent.inspect': ['target'],
   'agent.creation.inspect': ['hostId', 'createOperationId', 'agentSessionId'],
   'agent.creation.resolve': ['hostId', 'createOperationId', 'agentSessionId', 'operationId'],
+  'agent.takeover.cancel': ['expectedRuntimeId', 'operationId', 'request'],
+  'agent.takeover.cancel.inspect': ['expectedRuntimeId', 'operationId', 'request'],
   'agent.creation.continue': ['hostId', 'createOperationId', 'agentSessionId'],
   'agent.execution.inspect': ['hostId', 'bindingId', 'streamGeneration', 'nativeRequestId'],
   'agent.execution.admit': AGENT_EXECUTION_CREATE_FIELDS,
@@ -656,7 +662,14 @@ export class AgentMuxRpcService {
     const state = await this.spatial.read()
     if (!state) throw new AgentMuxError('The original Takeover spatial owner is unavailable. Original work remains available.', 'SPATIAL_STATE_ABSENT')
     const { spatialAgentOpenDigest } = await import('./spatial-agent-open.js')
+    const cancelled = takeoverCancellationRecord(state.graph, request.requestId)
     const previous = spatialAgentOpenRecord(state.graph, request.requestId), requestDigest = spatialAgentOpenDigest(request)
+    if (cancelled) {
+      const originalOwner = await this.hosted('runtime.owner.identity', {}, context), source = (await originalOwner.owner.call('runtime.owner.identity', {}, context)).owner
+      if (cancelled.input.expectedRuntimeId !== source.runtimeId) throw new AgentMuxError('The original cancellation Runtime is unconfirmed.', 'AGENT_TAKEOVER_CANCELLATION_UNCONFIRMED')
+      if (spatialAgentOpenDigest(rpcControlRequest('agent.open', cancelled.input.request) as import('./spatial-agent-open-contract.js').AgentMuxSpatialAgentOpenRequest) !== requestDigest) throw new AgentMuxError('This cancellation belongs to another original Takeover.', 'SPACE_REQUEST_CONFLICT')
+      throw new AgentMuxError('This original Takeover was cancelled. Choose a new explicit intent for new work.', 'AGENT_TAKEOVER_CANCELLED')
+    }
     if (previous) {
       if (!previous.takeover || previous.takeoverRequestDigest !== requestDigest) throw new AgentMuxError('This operation belongs to another original Takeover intent.', 'SPACE_REQUEST_CONFLICT')
       return
@@ -1772,6 +1785,16 @@ export class AgentMuxRpcService {
       }) as AgentMuxRpcResult<M>
     }
     await this.assertRuntimeFence(context)
+    if (method === 'agent.takeover.cancel' || method === 'agent.takeover.cancel.inspect') {
+      if (context.caller || !context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('Takeover cancellation requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
+      const input = parseAgentTakeoverCancellation(params), control = this.ports.spatialAgentControl
+      rpcControlRequest('agent.open', input.request)
+      if (!control?.cancelTakeover) throw new AgentMuxError('The original Takeover cancellation owner is unavailable.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const actor = delegatedHostRouteActor(context) ?? context.principal
+      if (!['user','device'].includes(actor.kind)) throw new AgentMuxError('The original cancellation actor is unconfirmed.', 'CONTROL_PERMISSION_DENIED')
+      return parseAgentTakeoverCancellationResult(await control.cancelTakeover(input, context, method === 'agent.takeover.cancel.inspect', { kind: actor.kind as 'user'|'device', id: actor.id }), input) as AgentMuxRpcResult<M>
+    }
     if (method === 'agent.creation.inspect' || method === 'agent.creation.resolve') {
       const resolving = method === 'agent.creation.resolve'
       if (resolving && (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(

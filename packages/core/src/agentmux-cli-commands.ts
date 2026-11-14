@@ -1,3 +1,4 @@
+import { parseAgentTakeoverCancellation } from './agent-takeover-cancellation.js'
 import { parseGoalInputEpochInput } from './goal-input-epoch.js'
 import { parseBrowserProfileStoragePayload } from './browser-profile-storage.js'
 import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
@@ -703,6 +704,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.broadcast.inspect', '--operation-id ID [--host ID]', 'Read one original broadcast and its per-target receipts without sending again.',
     { '--operation-id': 'data', '--host': 'data' }, f => ({ operationId: value(f, '--operation-id', true), ...fields(f, { '--host': 'hostId' }) })),
   command('agent.discuss', '--agent EXECUTOR --text TEXT [--provider ID]', 'Start the original Discussion and deliver its first message as an authorized caller.', { '--agent': 'data', '--text': 'data', '--provider': 'data', ...OP }, f => ({ ...operation(f), executorId: id(f, '--agent'), text: value(f, '--text', true), ...fields(f, { '--provider': 'providerId' }) })),
+  command('agent.takeover.cancel', '--input FILE|-', 'Cancel future execution of the exact original Takeover without stopping an existing Agent.', { '--input': 'data' }, async f => parseAgentTakeoverCancellation(await readControlJsonInput(value(f, '--input', true)!, 'Original Takeover cancellation')),
+    'JSON: {expectedRuntimeId,operationId,request}. expectedRuntimeId names the original spatial admission Core. request is the complete original agent.open takeover-agent input. Use a distinct cancellation operationId. Retain all original IDs after a lost reply; read cancel inspect before an explicitly chosen continuation of the same cancellation. Created results preserve the exact new Agent; stopping it requires its existing explicit Stop operation. This never stops the source Agent or replays unknown input.'),
+  command('agent.takeover.cancel.inspect', '--input FILE|-', 'Read the exact original Takeover cancellation without dispatching cancellation, creation or input.', { '--input': 'data' }, async f => parseAgentTakeoverCancellation(await readControlJsonInput(value(f, '--input', true)!, 'Original Takeover cancellation')),
+    'Use the complete original cancel input and cancellation operationId. A current read preserves unknown effects and cannot acknowledge a lost disk-write response. Host names in created results belong to the original spatial owner. Reading never retries cancellation or resumes the original Takeover.'),
   command('agent.takeover.ls', '--input FILE|-', 'Read incoming or outgoing recorded Takeovers at one exact admission Core, without starting or sending input.',
     { '--input': 'data' }, async f => parseAgentTakeoverQuery(await readControlJsonInput(value(f, '--input', true)!, 'Original Takeover relation query')),
     'Input requires expectedRuntimeId, direction incoming|outgoing and subject {runtimeId,agentSessionId}; cursor and limit are optional. Coverage is this original admission owner and recorded facts only. Missing records never prove no other takeovers exist. Follow nextCursor with the same complete query.'),

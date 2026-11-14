@@ -25,7 +25,7 @@ export type HostRouteExecutors = { routeId: string; agentTarget: HostRouteAgentT
 /** Only the real split-execution/Space consumers, not the Hosted SDK as a whole. */
 export const HOST_ROUTE_INVOCATIONS = [
   'readAgentInputEpoch', 'agentCreationAuthority', 'listHostExecutors', 'hostEnvironment', 'readAgentSession',
-  'resolveAgentCreationSessionId', 'inspectAgentCreation', 'createHostAgentWithDelivery',
+  'resolveAgentCreationSessionId', 'inspectAgentCreation', 'createHostAgentWithDelivery', 'cancelAgentCreation', 'inspectAgentCreationCancellation',
   'prepareAgentExecutionHelper', 'inspectPreparedTerminal', 'createPreparedTerminal',
   'attachTerminal', 'readRunReplay', 'writeTerminal', 'releaseRunAttachment', 'runtimeIdentity', 'runtimeSubject',
   ...SPACE_MEMBER_INVOCATIONS.filter(method => !['readAgentSession', 'runtimeSubject', 'attachTerminal', 'readRunReplay', 'releaseRunAttachment'].includes(method)),

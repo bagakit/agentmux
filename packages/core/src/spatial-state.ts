@@ -1,3 +1,4 @@
+import { TAKEOVER_CANCELLATION_RESOURCE, takeoverCancellationRecord, type TakeoverCancellationAdmission } from './agent-takeover-cancellation-record.js';
 import { SPACE_LINK_RESOURCE, spaceLinkDocument, type SpaceLinkTarget, type SpaceLinkAddress } from './space-link.js';
 import { folderSpaceFacts, folderResourceIdentity, type FolderSpaceResource, type FolderDirectoryResource } from './space-folder.js';
 import { folderDirectoryResourceKey, retainFolderDirectoryIdentity } from './space-folder-resources.js';
@@ -15,7 +16,7 @@ import { defaultAgentMuxStateDirectory } from './runtime-paths.js';
 import type { AgentMuxSpaceBindingTarget } from './space-control.js';
 import { addTabOccurrence, removeTab } from './spatial-layout.js';
 import { parseAgentMuxSpatialGraph, retainAdmittedAgentIdentity, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from './spatial-graph.js';
-import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, admitSpatialAgentOpen, admitSpatialAgentAssociation, spatialAgentAssociationRecord, spatialAgentOpenRecord, retainedMoteMainBindingReceipt, parseMoteMainBaseline, sameMoteMainBaseline, type MoteMainFollowUpInput, spatialAgentOpenDocument, matchesMoteMainBindingInput, validateMoteMainBindingObservation, type MoteMainBindingObservation } from './spatial-agent-open.js';
+import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, spatialAgentOpenDigest, admitSpatialAgentOpen, admitSpatialAgentAssociation, spatialAgentAssociationRecord, spatialAgentOpenRecord, retainedMoteMainBindingReceipt, parseMoteMainBaseline, sameMoteMainBaseline, type MoteMainFollowUpInput, spatialAgentOpenDocument, matchesMoteMainBindingInput, validateMoteMainBindingObservation, type MoteMainBindingObservation } from './spatial-agent-open.js';
 export * from './spatial-agent-open.js';
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabelDocument, setDisplayLabelDocument, projectSpatialState, nameTargetKey, validateNameIntent,
   type AgentMuxNameTarget, type AgentMuxNameContext, type AgentMuxNameChangeIntent, type AgentMuxNameChangeRecord,
@@ -412,6 +413,22 @@ export class AgentMuxSpatialStateStore {
       return { state: projectSpatialState(state), spaceId: space.spaceId, zoneId: zone.zoneId, workspaceId: id, created: true };
     });
   }
+  async admitTakeoverCancellation(admission: TakeoverCancellationAdmission) {
+    return this.locked(async () => {
+      const current = await this.requiredState(), id = admission.input.request.operationId
+      const original = spatialAgentOpenRecord(current.graph, id)
+      const { operationId, ...body } = admission.input.request
+      const request = { schemaVersion: 5 as const, operation: 'agent.open' as const, requestId: operationId, ...body }
+      if (original && (!original.takeover || original.takeoverRequestDigest !== spatialAgentOpenDigest(request))) throw new AgentMuxError('The cancellation belongs to another original Takeover.', 'SPACE_REQUEST_CONFLICT')
+      const previous = takeoverCancellationRecord(current.graph, id)
+      if (previous && !isDeepStrictEqual(previous, admission)) throw new AgentMuxError('The original Takeover has another cancellation or actor. Keep its original control.', 'AGENT_TAKEOVER_CANCELLATION_CONFLICT')
+      const graph = structuredClone(current.graph)
+      const document = graph.resources[TAKEOVER_CANCELLATION_RESOURCE] ?? {}
+      graph.resources[TAKEOVER_CANCELLATION_RESOURCE] = { ...document as Record<string, SpatialJson>, [id]: structuredClone(admission) as unknown as SpatialJson }
+      return projectSpatialState(await this.writeLocked(current, graph))
+    })
+  }
+
   async admitAgentOpen(input: Parameters<typeof admitSpatialAgentOpen>[1], assertCurrent?: (admission: ReturnType<typeof admitSpatialAgentOpen>) => Promise<void>) {
     return this.locked(async () => {
       const current = await this.requiredState(), admission = admitSpatialAgentOpen(current.graph, input);

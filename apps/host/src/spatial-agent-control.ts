@@ -1,3 +1,5 @@
+import { cancelOriginalTakeover } from './takeover-cancellation.js'
+import { takeoverCancellationRecord } from '@agentmux/core/agent-takeover'
 import { assertAgentInputEpoch, optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { takeoverRequiresPromotion } from '@agentmux/core/agent-takeover'
 import { assertPromotionEnabled } from './promotion-policy.js'
@@ -161,6 +163,13 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         request: { requestId: request.target.requestId, known: Boolean(record), report: record ? await reconcile(record, context) : null } }
     }
     if (request.operation !== 'agent.open') return undefined
+    const cancelled = state && takeoverCancellationRecord(state.graph, request.requestId)
+    if (cancelled) {
+      if (cancelled.input.expectedRuntimeId !== options.runtime().ownerIdentity().runtimeId) throw new AgentMuxError('The retained cancellation belongs to another original Runtime.', 'AGENT_TAKEOVER_CANCELLATION_UNCONFIRMED')
+      const { operationId, ...body } = cancelled.input.request
+      if (spatialAgentOpenDigest({ schemaVersion: 5, operation: 'agent.open', requestId: operationId, ...body }) !== spatialAgentOpenDigest(request)) throw new AgentMuxError('This cancellation belongs to another original request.', 'SPACE_REQUEST_CONFLICT')
+      throw new AgentMuxError('This original Takeover was cancelled. Its original work is retained.', 'AGENT_TAKEOVER_CANCELLED')
+    }
     let takeover: AgentMuxRpcCallContext['agentTakeover']
     const assertTakeover = async (admission: Parameters<NonNullable<Parameters<AgentMuxSpatialStateStore['admitAgentOpen']>[1]>>[0]) => {
       if (!takeover) return
@@ -296,6 +305,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       return { operation: 'agent.open', ...observed }
     } catch (error) { return { operation: 'agent.open', ...await reconcile(admission.record, context, error) } }
   }, { describe: () => ({ ordinaryLaunch: { revision: 1 as const, destination: 'source-zone-background' as const }, externalAssociation: 1 as const, takeover: 1 as const }),
+    cancelTakeover: (input: import('@agentmux/core/agent-takeover').AgentTakeoverCancellationInput, context: AgentMuxRpcCallContext, inspectOnly?: boolean, actor?: {kind:'user'|'device';id:string}) => cancelOriginalTakeover(options, input, context, inspectOnly, actor),
     describeExecution: async (input: import('@agentmux/core/agent-open-contract').AgentOpenExecutionSelector, context: AgentMuxRpcCallContext) => {
       if (context.caller || !context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('Preparing a new input cut requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
       const runtime = options.runtime(), target = input.agentTarget

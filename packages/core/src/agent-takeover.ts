@@ -1,3 +1,5 @@
+export { takeoverCancellationRecord } from './agent-takeover-cancellation-record.js'
+export * from './agent-takeover-cancellation.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import type { AgentNativeResumeSource } from './types.js'
 import { AgentMuxError } from './errors.js'
