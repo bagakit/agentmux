@@ -25,7 +25,7 @@ export function useSessionUserMessages(control?: AgentSessionControlInput, optio
     if (!enabled || demand.settled || view.loading || !view.snapshot) return
     if (!seekEarlier) { demand.settled = true; return }
     demand.batches++
-    void view.earlier(undefined, { preserveCurrent: true })
+    void view.earlier(undefined, { preserveCurrent: true, background: true })
   }, [enabled, demand, seekEarlier, view.loading, view.snapshot, view.earlier])
   const loadEarlier = useCallback(() => {
     demand.settled = true

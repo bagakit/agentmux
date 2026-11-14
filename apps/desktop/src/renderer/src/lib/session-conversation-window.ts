@@ -109,7 +109,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     coverageDemand.current.remaining--
     // Background coverage only adds older context. It must never evict the newest
     // records the reader is watching, so a full window ends the batch instead.
-    intent.current = 'coverage'; void view.earlier(limit, { preserveCurrent: true })
+    intent.current = 'coverage'; void view.earlier(limit, { preserveCurrent: true, background: true })
   }, [page, nativeMetadata, view.loading, view.held, view.hasMore, view.error, reading?.enabled, bindingChanged, coverageDuration])
   const selectSource = (source?: AgentSessionHistorySource) => {
     intent.current = 'current'; boundary.current = null; coverageDemand.current.remaining = 0

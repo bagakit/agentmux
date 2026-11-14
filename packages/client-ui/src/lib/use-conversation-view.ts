@@ -14,11 +14,12 @@ export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes'
 type Operation = ConversationViewOperation
 export type ConversationSourceRead = { reference: ConversationRef; nativeSource: NonNullable<ConversationTimelineReadInput['nativeSource']> }
 type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'record' | 'anchor' | 'limit' | 'preserveCurrent'>
+type ViewReadOptions = ConversationReadOptions & { background?: boolean }
 type ObservedConversation = { view: ConversationWindowSnapshot['window']['view']; frame: ReturnType<typeof conversationDiagnosticFrame> }
 type PendingFrame = { snapshot: ConversationWindowSnapshot; historical: boolean; operation: Operation; selection: Selection;
   admission?: { accept(): void; cancel(): void } }
 type PreparedObservation = { install(): void; dispose(): void }
-type ReadAttempt = { id: string; operation: Operation; superseded: boolean; error: Error | null }
+type ReadAttempt = { id: string; operation: Operation; background: boolean; superseded: boolean; error: Error | null }
 type RetainedFrame = { client: ConversationViewClient; key: string; snapshot: ConversationWindowSnapshot; historical: boolean; pending: PendingFrame | null; releaseView(): void }
 type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; sourceRead: ConversationSourceRead | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
 const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
@@ -111,7 +112,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
   const beforeCommit = useRef(options.beforeCommit); beforeCommit.current = options.beforeCommit
   const heldReason = useRef(options.heldReason); heldReason.current = options.heldReason
   const diagnostics = useRef(options.diagnostics); diagnostics.current = options.diagnostics
-  const operation = useRef<(kind: Operation, selection?: Selection, recoverObservation?: boolean, readOptions?: ConversationReadOptions) => Promise<void>>(async () => {})
+  const operation = useRef<(kind: Operation, selection?: Selection, recoverObservation?: boolean, readOptions?: ViewReadOptions) => Promise<void>>(async () => {})
   const retryOperation = useRef<{ client: ConversationViewClient | null; key: string; kind: Operation; selection: Selection }>({ client, key, kind: 'latest', selection: {} })
 
   useEffect(() => {
@@ -153,9 +154,13 @@ export function useConversationView(client: ConversationViewClient | null, refer
         publishedDeferral = next; flush('progress')
       }
     }
+    const canYieldBackfill = () => Boolean(current.inFlight && current.attempt?.background &&
+      !current.historical && !current.held && !current.snapshot?.window.anchor &&
+      current.snapshot?.scope.sources.some(source => source.kind === 'native'))
     const schedule = () => {
       current.dirty = true
       if (!alive()) return
+      if (canYieldBackfill()) { void read('changes'); return }
       const reason = current.inFlight ? 'in-flight' : current.timer ? 'coalesced' : current.held ? 'held' : current.historical ? 'historical' : null
       if (reason) { deferred('changes', reason); return }
       current.timer = setTimeout(() => { current.timer = null; void read('changes') }, 50)
@@ -284,9 +289,12 @@ export function useConversationView(client: ConversationViewClient | null, refer
       if (deferInstallation) return prepared
       prepared.install()
     }
-    const read = (kind: Operation, selection: Selection = {}, recoverObservation = false, readOptions: ConversationReadOptions = {}): Promise<void> => {
+    const read = (kind: Operation, selection: Selection = {}, recoverObservation = false, readOptions: ViewReadOptions = {}): Promise<void> => {
       if (!alive() || readOptions.signal?.aborted) return Promise.resolve()
       if (current.inFlight && (kind === 'changes' || kind === 'resume')) {
+        // The cancelled page may already have advanced its Core view. A fresh
+        // window of the accepted native source avoids reusing that stale cut.
+        if (kind === 'changes' && canYieldBackfill()) return read('reopen')
         deferred(kind, 'in-flight'); return current.inFlight
       }
       if (kind !== 'latest' && !current.snapshot || kind === 'older' && !current.snapshot?.window.navigation.older || kind === 'newer' && !current.snapshot?.window.navigation.newer) return Promise.resolve()
@@ -301,7 +309,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       if (current.timer) { clearTimeout(current.timer); current.timer = null }
       const requestController = new AbortController(), requestSignal = requestController.signal
       current.request = requestController
-      const attempt: ReadAttempt = { id: String(++attempts), operation: kind, superseded: false, error: null }
+      const attempt: ReadAttempt = { id: String(++attempts), operation: kind, background: kind === 'older' && readOptions.background === true, superseded: false, error: null }
       current.attempt = attempt
       publishedDeferral = null
       const abortRead = () => requestController.abort(signal.reason)
@@ -549,8 +557,9 @@ export function useConversationView(client: ConversationViewClient | null, refer
     if (!client || !reference || anchor.frontier.hostId !== reference.hostId || anchor.frontier.agentSessionId !== reference.agentSessionId) return Promise.reject(new Error('The original process detail belongs to another reading scope.'))
     return readConversationProcessDetail(client, anchor, signal)
   }, [client, reference?.hostId, reference?.agentSessionId])
-  const earlier = useCallback(async (limit?: number, options: Pick<ConversationTimelineReadInput, 'preserveCurrent'> = {}) => {
-    await operation.current('older', { ...options, ...(limit === undefined ? {} : { limit }) }); return owner.current?.snapshot ?? null
+  const earlier = useCallback(async (limit?: number, options: Pick<ConversationTimelineReadInput, 'preserveCurrent'> & { background?: boolean } = {}) => {
+    const { background, ...selection } = options
+    await operation.current('older', { ...selection, ...(limit === undefined ? {} : { limit }) }, false, { ...(background === undefined ? {} : { background }) }); return owner.current?.snapshot ?? null
   }, [])
   const newer = useCallback(async () => { await operation.current('newer'); return owner.current?.snapshot ?? null }, [])
   const selectSource = useCallback((nativeSource: NonNullable<ConversationTimelineReadInput['nativeSource']>) => operation.current('latest', { nativeSource }), [])
