@@ -245,6 +245,12 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 - 已交付的优化须在并行集成与实际安装后仍可用。体验退化时，结论区分四种情况：实现被改回、实现还在但当前产物没包含、当前运行副本没用上、尚未确认。历史提交或当前源码还在，都不能证明用户正在用的界面保留了这项优化。
 
 
+## Survey 开页依赖回归
+
+`pnpm verify:survey-opening` 运行[固定验证入口](../../apps/desktop/scripts/verify-survey-opening.mjs)，从当前 checkout Source 消费原 Store／Core、系统 URL／网页文件入口和公共 CLI。`--checks=boundary` 只运行窄能力、模块依赖和必要保存边界；默认入口还改坏实际源码中的目录等待、无关片段保存、请求并发与提前呈现，要求对应业务断言失败，并恢复正常源码再验证。类型负例与运行时导入检查单独归类，不能代替业务消费；用例与实际加载集合必须非空。
+
+验证在私有临时目录构建 CLI；生成型 Identity runtime 复用原构建配方，类型检查、Renderer 与 CLI 的生成模块解析指向同一份结果，实际加载集合不得含工作区陈旧的 `dist`。临时状态、编译产物和原测试进程由同次验证清理。现有 Verify 工作流在 `pnpm check` 前独立执行该命令；本地通过不证明远端 CI 或分支保护通过。该入口验证因果依赖和原位置 ACK，不代签已安装 App、默认浏览器关联、Native 首帧或网络正文加载的实测。
+
 ## Provider 输入边界回归
 
 行为真值只归[输入环境判定与复用边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)；本节规定如何验证，不另定义输入许可或 Provider 能力。
