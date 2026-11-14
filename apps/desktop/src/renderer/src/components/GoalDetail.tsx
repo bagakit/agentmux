@@ -51,12 +51,41 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const planRef = useRef<HTMLDivElement>(null)
   const activityRef = useRef<HTMLDivElement>(null)
   const [readingSection, setReadingSection] = useState<GoalReadingSection>('overview')
+  const readingNavRef = useRef<HTMLElement>(null)
   const readingEntry = useAppStore(state => state.goalReadingEntry)
   const revealedEntry = useRef<string | null>(null)
   const [copied, setCopied] = useState<'goal' | 'plan' | null>(null)
   const [copyIssue, setCopyIssue] = useState<string | null>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
   const [intentEditing, setIntentEditing] = useState(descriptionDirty)
+  useLayoutEffect(() => {
+    const nav = readingNavRef.current
+    if (!nav) return
+    const detail = detailRef.current
+    const toolbar = detail?.querySelector<HTMLElement>('.goals-detail__toolbar')
+    let frame: number | null = null
+    function positionReadingSelection() {
+      const selected = nav!.querySelector<HTMLElement>('[aria-current="location"]')
+      if (!selected) return
+      nav!.style.setProperty('--goal-reading-x', `${selected.offsetLeft}px`)
+      nav!.style.setProperty('--goal-reading-y', `${selected.offsetTop}px`)
+      nav!.style.setProperty('--goal-reading-width', `${selected.offsetWidth}px`)
+      nav!.style.setProperty('--goal-reading-height', `${selected.offsetHeight}px`)
+      nav!.dataset.selectionPositioned = 'true'
+      if (detail && toolbar) {
+        detail.style.setProperty('--goal-detail-toolbar-height', `${toolbar.offsetHeight}px`)
+        detail.style.setProperty('--goal-detail-reading-offset', `${toolbar.offsetHeight + nav!.offsetHeight + 12}px`)
+      }
+      // The first layout is already selected; only later user reading changes travel.
+      if (!nav!.dataset.selectionAnimated && frame === null) frame = requestAnimationFrame(() => { nav!.dataset.selectionAnimated = 'true'; frame = null })
+    }
+    positionReadingSelection()
+    const observer = new ResizeObserver(positionReadingSelection)
+    observer.observe(nav)
+    if (toolbar) observer.observe(toolbar)
+    for (const button of nav.querySelectorAll('button')) observer.observe(button)
+    return () => { observer.disconnect(); if (frame !== null) cancelAnimationFrame(frame) }
+  }, [demand.id, readingSection])
   function revealSection(section: HTMLElement | null, focus = true) {
     const detail = detailRef.current
     if (!detail || !section) return
@@ -148,7 +177,8 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{GOAL_GROUP_LABELS[queue.stage]} · {queue.index} of {queue.total}</span>{queue.nextId ? <button type="button" className="small-button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></button> : null}</span> : null}</div>
         <div className="goals-detail__overview"><GoalMeta demand={demand} /><button type="button" className="goals-detail__team-link" onClick={() => revealSection(teamRef.current)}>Team<ThemeNavigationForwardIcon size={12} /></button></div>
         <p className="goals-detail__edit-status" aria-live="polite">{draft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
-        <nav className="goals-detail__reading-nav" aria-label="Goal reading sections">
+      </header>
+        <nav ref={readingNavRef} className="goals-detail__reading-nav" aria-label="Goal reading sections">
           <button type="button" aria-current={readingSection === 'overview' ? 'location' : undefined} onClick={() => revealSection(overviewRef.current)}>Overview</button>
           <button type="button" aria-current={readingSection === 'plan' ? 'location' : undefined} onClick={() => revealSection(planRef.current)}>Plan</button>
           <button type="button" aria-current={readingSection === 'activity' ? 'location' : undefined} onClick={() => revealSection(activityRef.current)}>Activity</button>
@@ -156,7 +186,6 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         </nav>
         {!demand.address ? <details className="goals-detail__address-issue"><summary>Goal address unconfirmed</summary><p className="goals-caption">{demand.addressIssue ?? 'The original Goal owner has not confirmed its address. You can keep reading and working with this goal.'}</p></details> : null}
         {copyIssue ? <p className="goals-service" role="status">Link could not be copied. {copyIssue}</p> : null}
-      </header>
       <div className="goals-detail__body">
         <div className="goals-detail__main">
           {reviewFirst ? review : null}
@@ -167,7 +196,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         </div>
         <aside ref={teamRef} tabIndex={-1} className="goals-detail__side" aria-label="Goal team and properties">
           <GoalExecution demand={demand} onUpdate={update} />
-          <details className="goals-detail__properties" aria-label="Goal properties"><summary>Properties<span>Status, priority, project</span></summary><GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} /><GoalProperties demand={demand} onUpdate={patch => void update(patch)} /></details>
+          <details className="goals-detail__properties" aria-label="Goal properties"><summary><ThemeNavigationForwardIcon className="goals-detail__properties-chevron" size={12} aria-hidden="true" />Properties<span>Status, priority, project</span></summary><GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} /><GoalProperties demand={demand} onUpdate={patch => void update(patch)} /></details>
         </aside>
       </div>
     </article>
