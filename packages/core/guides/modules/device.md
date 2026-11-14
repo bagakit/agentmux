@@ -11,7 +11,10 @@ Read `amux device link` once for the authenticated execution Host's complete pub
 connection URL, page URL, existing Relay endpoint and current connection state. A known
 address remains readable while disconnected; it does not prove network reachability.
 Reading never enrolls or revokes a device. Use the original returned URL including its
-fragment; do not invent a public endpoint or rewrite the offer.
+fragment; do not invent a public endpoint or rewrite the offer. Same-origin links carry
+the full Mac public-key pin; the mobile page obtains the public connection description
+from that original Host and verifies the pin and encrypted hello identity. This read
+does not enroll a device or replace saved device keys.
 
 The local device owner holds pairing and revocation; encrypted handshake facts identify
 one device, not a general user approval. Read device ls before administering an exact device.
