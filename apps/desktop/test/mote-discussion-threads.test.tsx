@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
-import { createMoteApp, moteClick, moteType, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
+import { createMoteApp, moteClick, motePointer, moteType, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultAgent, defaultTab, neighborAgent, neighborTab, moteTopics, scratchWorkspace } from './fixtures/mote-workface'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
+import { connectWorkbenchCloseApiOwner } from './helpers/workbench-close-api-owner'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import type { MoteDialoguePage } from '@agentmux/core/mote-dialogue'
 const main = { hostId: 'local', sessionId: defaultAgent.id, displayWorkspaceId: scratchWorkspace.id, groupId: 'mote-group', tabId: defaultTab.id, regionId: defaultTab.layout.activeRegionId }
 const actualSend = useAppStore.getState().send
@@ -43,6 +45,72 @@ const originalWork = (eventId: string, sequence: number, hostId = 'local'): Extr
  kind: 'work', identity: { hostId: 'local', moteId: moteTopics[0]!.id }, eventId, sequence, operationId: 'link-' + sequence, associatedAt: sequence,
  mainRoleRevision: 'previous-main-role', main: { hostId, agentSessionId: 'previous-main' },
  origin: { hostId, messageId: 'dispatch-' + sequence, threadId: 'thread-' + sequence, senderSessionId: 'previous-main', recipientSessionId: neighborAgent.id, createdAt: sequence }
+})
+it.each([false, true])('keeps the original Mote discussion while closing the exact Browser split (early native close: %s)', async earlyClose => {
+ if (earlyClose) {
+  currentMain = { ...main, displayWorkspaceId: 'project', groupId: 'project-group' }
+  const topics = moteTopics.map((topic, i) => i ? topic : { ...topic, quickMode: { status: 'saved' as const, version: 'original-doc', defaults: { conversation: currentMain } } })
+  useAppStore.setState(state => ({ layouts: { ...state.layouts, project: createWorkspaceLayout('project-group', [main.tabId]) },
+   scratchTopicSnapshots: { [scratchWorkspace.id]: { scope: scratchTopicsScope(scratchWorkspace), topics, revision: 0, error: null, reading: false } } }))
+  vi.mocked(api.scratch.listTopics).mockResolvedValue(topics)
+  vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(topic => topic.id === id) ?? null)
+ }
+ const original = currentMain
+ await open()
+ expect(readPmoTeamsTopicFloatingState()?.reference).toMatchObject({ displayWorkspaceId: original.displayWorkspaceId, groupId: original.groupId })
+ const owner = await connectWorkbenchCloseApiOwner()
+ try {
+  const body = visibleBody()!, panel = app.panel()
+  const composer = () => panel.querySelector<HTMLElement>('.mote-composer-surface [aria-label="Message Agent"]')
+  const editor = composer()!
+  await moteType(editor, '分栏关闭后保留这段草稿')
+  const selectionBefore = useAppStore.getState().workbenchSpaceSelection
+  const finishBrowserClose = api.browser.close.bind(api.browser)
+  const close = vi.spyOn(api.browser, 'close')
+  const stop = vi.spyOn(api.sessions, 'stop')
+  const create = api.browser.create.bind(api.browser)
+  vi.spyOn(api.browser, 'create').mockImplementationOnce(async (...args) => ({ ...await create(...args), agent: null }))
+  await act(async () => useAppStore.getState().openHttpLink({ workspaceId: original.displayWorkspaceId, tabGroupId: original.groupId,
+   tabId: main.tabId, regionId: main.regionId, sessionId: defaultAgent.id }, 'https://example.invalid/original', 'right', { surface: 'mote' }))
+  const tab = useAppStore.getState().tabs[main.tabId]!
+  const browser = Object.values(tab.regions).find(region => region.kind === 'browser')!
+  const split = body.querySelector<HTMLElement>(`[data-workbench-region-id="${browser.regionId}"]`)!
+  const closeSplit = button(split, 'Close split')
+  expect(closeSplit).toBeDefined()
+  await motePointer(split, 'down')
+  await vi.waitFor(() => expect(readPmoTeamsTopicFloatingState()?.reference?.regionId).toBe(browser.regionId))
+  expect(visibleBody()).toBe(body)
+  const ref = readPmoTeamsTopicFloatingState()?.reference
+  expect(ref).toEqual({ displayWorkspaceId: original.displayWorkspaceId, groupId: original.groupId, tabId: original.tabId, regionId: browser.regionId })
+  const request = vi.mocked(api.workbenchClose.call)
+  close.mockRejectedValueOnce(new Error('Controlled Browser close failure'))
+  await moteClick(closeSplit)
+  await act(() => owner.settle())
+  expect(request).toHaveBeenCalledWith('space.close.prepare', expect.objectContaining({ target: { kind: 'region', ...ref } }))
+  expect(useAppStore.getState().tabs[main.tabId]?.regions[browser.regionId]).toBe(browser)
+  expect(readPmoTeamsTopicFloatingState()?.reference).toEqual(ref)
+  expect(visibleBody()).toBe(body)
+  let earlySelection: ReturnType<typeof readPmoTeamsTopicFloatingState>
+  if (earlyClose) close.mockImplementationOnce(async id => {
+   await finishBrowserClose(id)
+   useAppStore.getState().applyBrowserEvent({ type: 'closed', id })
+   earlySelection = readPmoTeamsTopicFloatingState()
+  })
+  await moteClick(closeSplit)
+  await act(() => owner.settle())
+  expect(close.mock.calls).toEqual([[browser.browserId], [browser.browserId]])
+  await expect(close.mock.results[1]!.value).resolves.toBeUndefined()
+  if (earlyClose) expect(earlySelection!).toMatchObject({ open: true, reference: { ...ref, regionId: main.regionId } })
+  expect(Object.keys(useAppStore.getState().tabs[main.tabId]!.regions)).toEqual([main.regionId])
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, reference: { ...ref, regionId: main.regionId } })
+  expect(app.panel()).toBe(panel)
+  expect(visibleBody()).toBe(body)
+  expect(composer()).toBe(editor)
+  expect(editor.textContent).toContain('分栏关闭后保留这段草稿')
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(selectionBefore)
+  expect(useAppStore.getState().sessions.find(session => session.id === defaultAgent.id)?.control.run).toEqual(defaultAgent.control.run)
+  expect(stop).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
+ } finally { await owner.dispose() }
 })
 it('top navigation counts original deduplicated metadata and partial coverage without reading private bodies', async () => {
  links = [originalWork('one', 1), originalWork('one', 2), originalWork('two', 3)]; next = { identity: { hostId: 'local', moteId: moteTopics[0]!.id }, incarnation: 'original-links', selection: '[null,null,null]', throughSequence: 3, beforeSequence: 1 }

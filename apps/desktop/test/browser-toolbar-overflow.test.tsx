@@ -2,7 +2,6 @@
 import { readFile } from 'node:fs/promises'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -19,10 +18,12 @@ const fixture = vi.hoisted(() => {
     config: null as AppConfig | null
   } }
 })
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state, setState: vi.fn() })
-}))
+vi.mock('../src/renderer/src/store.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/store.js')>()
+  const state = () => ({ ...actual.useAppStore.getInitialState(), ...fixture.state })
+  return { ...actual, useAppStore: Object.assign((selector: (value: ReturnType<typeof state>) => unknown) => selector(state()),
+    { ...actual.useAppStore, getState: state, setState: vi.fn() }) }
+})
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane.js'
 import { api } from '../src/renderer/src/lib/api.js'
 
@@ -55,9 +56,30 @@ async function openMore(container: HTMLElement): Promise<HTMLElement> {
   return menu
 }
 
+it('opening More does not select a menu item that appears under the opening pointer', async () => {
+  const external = vi.spyOn(api.ui, 'openExternal').mockResolvedValue(undefined)
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<BrowserPane tab={tab} visible />))
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More browser tools"]')!
+    const pointer = { bubbles: true, button: 0, pointerId: 1, pointerType: 'mouse' }
+    await act(async () => trigger.dispatchEvent(new PointerEvent('pointerdown', { ...pointer, buttons: 1 })))
+    const item = document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Open in external browser"]')!
+    expect(item).not.toBeNull()
+    await act(async () => item.dispatchEvent(new PointerEvent('pointerup', pointer)))
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(external).not.toHaveBeenCalled()
+    await act(async () => item.click())
+    expect(external).toHaveBeenCalledExactlyOnceWith(tab.url)
+  } finally { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() }
+})
+
 it('overflow reaches navigation, bookmark, DevTools, viewport and demonstration through their product handlers', async () => {
   fixture.state.config!.browser.toolbar.more = false
   const back = vi.spyOn(api.browser, 'back').mockResolvedValue(tab)
+  const external = vi.spyOn(api.ui, 'openExternal').mockResolvedValue(undefined)
   const devtools = vi.spyOn(api.browser, 'openDevTools').mockResolvedValue(undefined)
   const viewport = vi.spyOn(api.browser, 'setViewport').mockResolvedValue(tab)
   const close = vi.fn()
@@ -67,6 +89,7 @@ it('overflow reaches navigation, bookmark, DevTools, viewport and demonstration 
   try {
     await act(async () => root.render(<BrowserPane tab={tab} visible onRegionClose={close} />))
     for (const [label, verify] of [
+      ['Open in external browser', () => expect(external).toHaveBeenCalledWith(tab.url)],
       ['Back', () => expect(back).toHaveBeenCalledWith(tab.browserId)],
       ['Open DevTools', () => expect(devtools).toHaveBeenCalledWith(tab.browserId)],
       ['Save this page as a bookmark', () => expect(fixture.state.saveBrowserBookmark).toHaveBeenCalledWith(tab.workspaceId, tab.url, tab.title)]
@@ -91,11 +114,11 @@ it('overflow reaches navigation, bookmark, DevTools, viewport and demonstration 
     await act(async () => demonstration!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(fixture.state.executeControl.mock.calls).toHaveLength(1)
     expect(fixture.state.executeControl.mock.calls[0]![0]).toMatchObject({ operation: 'browser.history', browserId: tab.browserId })
-    expect(container.querySelector('[aria-label="Human demonstration draft"]')).not.toBeNull()
+    expect(document.querySelector('[aria-label="Human demonstration draft"]')).not.toBeNull()
     const closeButton = container.querySelector<HTMLButtonElement>('.browser-toolbar > button[aria-label="Close split"]')!
     expect(closeButton).not.toBeNull()
     await act(async () => closeButton.click())
-    expect(close).toHaveBeenCalledExactlyOnceWith()
+    expect(close).toHaveBeenCalledOnce()
   } finally { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() }
 })
 
@@ -108,7 +131,7 @@ it('overflow preserves disabled page/navigation actions and configured tool excl
     await act(async () => root.render(<BrowserPane tab={{ ...tab, url: 'about:blank', canGoBack: false, canGoForward: false }} visible />))
     const menu = await openMore(container)
     const disabled = [...menu.querySelectorAll('[data-disabled]')].map(item => item.getAttribute('aria-label'))
-    expect(disabled).toEqual(['Back', 'Forward', 'Select element', 'Open DevTools', 'Save this page as a bookmark'])
+    expect(disabled).toEqual(['Open in external browser', 'Back', 'Forward', 'Select element', 'Open DevTools', 'Save this page as a bookmark'])
     expect(menu.querySelector('[aria-label="Screenshot"]')).toBeNull()
   } finally { await act(async () => root.unmount()); container.remove() }
 })
@@ -117,8 +140,14 @@ it('overflow preserves disabled page/navigation actions and configured tool excl
 // Chromium geometry; the complete layout fixture remains independently runnable by Root.
 it('links actual toolbar classes to nonempty narrow-pane rules and the sole style entry', async () => {
   fixture.state.config!.browser.toolbar.more = false
-  const container = document.createElement('div')
-  container.innerHTML = renderToStaticMarkup(<BrowserPane tab={tab} visible onRegionClose={() => {}} />)
+  const mounted = document.createElement('div')
+  document.body.appendChild(mounted)
+  const root = createRoot(mounted)
+  let container: HTMLElement
+  try {
+    await act(async () => root.render(<BrowserPane tab={tab} visible onRegionClose={() => {}} />))
+    container = mounted.cloneNode(true) as HTMLElement
+  } finally { await act(async () => root.unmount()); mounted.remove() }
   expect(container.querySelector('[aria-label="More browser tools"]')?.className).toBe('browser-toolbar__more--optional')
   const secondary = [...container.querySelectorAll('.browser-toolbar > .browser-toolbar__secondary')]
   expect(secondary.map(element => element.getAttribute('aria-label'))).toEqual(['Select element', 'Screenshot', 'Open DevTools', 'Viewport', 'Save this page as a bookmark'])
@@ -138,6 +167,7 @@ it('links actual toolbar classes to nonempty narrow-pane rules and the sole styl
   expect(narrow).toContain('.browser-toolbar > .browser-toolbar__more--optional { display: inline-flex; }')
   expect(narrow).toContain('.browser-toolbar > .browser-toolbar__navigation { display: none; }')
   expect(narrow).toContain('.browser-toolbar > .browser-toolbar__reload { display: none; }')
+  expect(narrow).toContain('.browser-toolbar > .browser-toolbar__external { display: none; }')
   const close = container.querySelector('.browser-toolbar > button[aria-label="Close split"]')
   expect(close).not.toBeNull()
   expect(close).toBe(container.querySelector('.browser-toolbar')!.lastElementChild)

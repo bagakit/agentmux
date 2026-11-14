@@ -970,6 +970,35 @@ it('treats only an exact declaration as the layout host', async () => {
   expect(size(f.source)).toEqual({ width: 900, height: 700 })
 })
 
+it('fits a sole responsive Mote preview without taking native input or resizing another visible occurrence', async () => {
+  const f = await fixture(), space = f.register('space')
+  const portrait = { visible: true as const, bounds: { x: 480, y: 60, width: 360, height: 620 } }
+  const mote = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser',
+    occurrence: { ...occurrence('mote'), layoutHost: 'sole' }, geometry: portrait }, f.identity())
+  expect(size(f.source)).toEqual({ width: 900, height: 700 })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, space.leaseId, { kind: 'select', focus: 'preserve' })
+  expect(f.manager.nativeOwner('browser')?.bounds).toEqual(geometry.bounds)
+  f.manager.updatePresentation(f.app as never, f.frame as never, space.leaseId, { visible: false })
+  expect(f.source.getBounds()).toEqual(portrait.bounds)
+  expect(f.manager.nativeOwner('browser')).toBeUndefined()
+  expect(f.events().filter(event => event.type === 'input-owner-changed').at(-1)).toMatchObject({ leaseId: null })
+  const moved = { visible: true as const, bounds: { ...portrait.bounds, width: 290, height: 580 } }
+  f.manager.updatePresentation(f.app as never, f.frame as never, mote.leaseId, moved)
+  expect(f.source.getBounds()).toEqual(moved.bounds)
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+  f.manager.updatePresentation(f.app as never, f.frame as never, mote.leaseId, { ...portrait, inputVisible: false })
+  expect(f.source.getBounds()).toEqual(moved.bounds)
+})
+
+it('does not resize a fixed viewport to fit a lone Mote preview', async () => {
+  const f = await fixture()
+  f.manager.setViewport('browser', 'mobile')
+  const initial = f.source.getBounds()
+  f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser',
+    occurrence: { ...occurrence('mote'), layoutHost: 'sole' }, geometry }, f.identity())
+  expect(f.source.getBounds()).toEqual(initial)
+})
+
 it("leaves a page that another owner shows or holds input for at that owner's size", async () => {
   const f = await fixture(), host = layoutHost(f)
   const shown = { x: 10, y: 10, width: 640, height: 400 }
