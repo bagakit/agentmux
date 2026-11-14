@@ -815,14 +815,17 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           <span>{recovery.message}</span>
           <div className="survey-error__actions"><button type="button" className="small-button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</button></div>
         </div>)}
-        {pageSelection ? <>{projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId}
+        {pageSelection ? <>{pageSelection.presentationReadRecovery ? <div className="survey-relation-notice" role="status">{pageSelection.presentationReadRecovery.issue}</div> : null}
+          {projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId}
           projection={projection} viewOwnership="projection" viewTargets={viewTargets} visible={visible && !controlsCoverPage}
           projectionHeader={pageHeaderOwner?.surface.kind === 'browser' ? <SurveyPageTabHeader tabId={pageHeaderOwner.tab.id} browser={pageHeaderOwner.surface}
             visible={visible && !controlsCoverPage} leadingChrome={windowControlsInset} creating={opening}
             onClose={() => closePage(pageSelection)} onCreate={() => void openBrowser('about:blank', true)} /> : null}
           leadingChrome={windowControlsInset} onCreateTab={groupId => void newBrowserTab(projection.displayWorkspaceId, groupId)} />
           : <div role="status" className="survey-relation-notice">
-            The original Browser Region is not confirmed. Its page reference is kept; inspect the same Region and Browser before choosing its original location.
+            {pageSelection.presentation ? <>The selected Tab location is not confirmed. The original Browser and saved selection are kept.
+              <button type="button" className="note-text-button" onClick={() => setSelection({ kind: 'page', regionId: pageSelection.regionId, browserId: pageSelection.browserId })}>Show original page</button></>
+              : 'The original Browser Region is not confirmed. Its page reference is kept; inspect the same Region and Browser before choosing its original location.'}
           </div>}</> : !selection ? <BrowserStartPage config={resolveBrowserStartPage(config?.browser.startPage)} visible={visible && !controlsCoverPage} historyRevision={historyRevision}
           historyTarget={workspace && !profileViewRecovery && (profileView.kind === 'default' || profileView.profileId === defaultProfileId) ? { kind: 'workspace', workspaceId: workspace.id } : null}
           onChooseHistory={value => { setQuery(value); browserInput.current?.submit(value) }}>

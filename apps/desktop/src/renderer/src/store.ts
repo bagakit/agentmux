@@ -191,7 +191,7 @@ import { compactNotificationIdentity, ownedNotificationIdentity, normalizeNotifi
 import { notificationDeliveryNotice } from './lib/notification-delivery-notice'
 import { persist } from 'zustand/middleware'
 import { learningReviewKey, restoredLearningReviewDrafts, type AgentLearningReviewDraft } from './lib/agent-learning-review-draft'
-import { isSurveyPage, surveyPageOwner, restoredSurveyPages, readSurveyPagePreferences, restoredSurveySelection, persistedSurveySelection, type SurveySelection } from './lib/survey-page-references'
+import { isSurveyPage, surveyPageOwner, restoredSurveyPages, readSurveyPagePreferences, restoredSurveySelection, persistedSurveySelection, surveySelectionPresentation, type SurveySelection, type PersistedSurveySelection } from './lib/survey-page-references'
 import { restoreSurveyPinPreferences, persistedSurveyPins, surveyPinnedReferences, type SurveyPinReadRecovery } from './lib/survey-pins'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, surveySelectReference, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
@@ -4006,7 +4006,7 @@ type PersistedAppState = {
   /** Previous persisted notebook context is transferred once into Recall. */
   surveyNotebookId?: string | null
   surveyNoteId?: string | null
-  surveyZoneSelection?: SurveySelection | null
+  surveyZoneSelection?: PersistedSurveySelection
   surveyProfileView?: unknown
   surveyPageReferences?: unknown
   surveyCompositionRecoveries?: unknown
@@ -5787,7 +5787,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   surveyToolsOpen: false,
   setSurveyZoneSelection(selection) {
-    const surveyZoneSelection = persistedSurveySelection(selection)
+    const surveyZoneSelection = restoredSurveySelection(persistedSurveySelection(selection))
     // Re-emitting the current member preference is a refresh, not later navigation.
     if (sameSpatialValue(get().surveyZoneSelection, surveyZoneSelection)) return
     // Local Survey selection never navigates Work; explicit focus owns that handoff.
@@ -6884,15 +6884,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // A local UI action keeps its original presentation. Public focus still
       // navigates Work; creation, execution and placement share the same owner.
       const localFocus = options?.localFocus
-      const localZoneId = localFocus ? get().surveyZoneSelection?.zoneId : undefined
+      const localSelection = localFocus ? get().surveyZoneSelection : null
+      const localZoneId = localSelection?.zoneId
       let expectedNavigation = localFocus ? fileNavigationSelection(get()) : '', navigationChanged = false, selecting = false
       const stopObserving = localFocus ? useAppStore.subscribe(state => {
         if (!selecting && fileNavigationSelection(state) !== expectedNavigation) navigationChanged = true
       }) : () => {}
-      const ownsLocalTarget = (address: AgentMuxSpaceAddress): boolean => Boolean(localFocus && !navigationChanged &&
-        get().mainSurface === localFocus.surface && get().surveyZoneSelection?.zoneId === localZoneId &&
-        address.zoneId === localZoneId && address.tabId === localFocus.reference.tabId &&
-        address.displayWorkspaceId === localFocus.reference.displayWorkspaceId && address.groupId === localFocus.reference.groupId)
+      const ownsLocalTarget = (address: AgentMuxSpaceAddress): boolean => {
+        if (!localFocus || navigationChanged) return false
+        const state = get(), selected = state.surveyZoneSelection
+        const sameSelection = isSurveyPage(localSelection)
+          ? isSurveyPage(selected) && selected.regionId === localSelection.regionId && selected.browserId === localSelection.browserId &&
+            surveyPageOwner(state.tabs, selected)?.tab.id === localFocus.reference.tabId && localFocus.reference.regionId === selected.regionId
+          : selected?.zoneId === localZoneId && address.zoneId === localZoneId
+        return sameSelection && state.mainSurface === localFocus.surface && address.tabId === localFocus.reference.tabId &&
+          address.displayWorkspaceId === localFocus.reference.displayWorkspaceId && address.groupId === localFocus.reference.groupId
+      }
       try { return await executeSpatialControl({
         get: () => ({ ...get(), originalSpatialGraph: coreSpatialPersistence?.current?.graph ?? null }),
         agentPresentation: catalog => readAgentPresentation(get(), { catalog, layouts: get().layouts,
@@ -6975,7 +6982,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (localFocus) {
             if (!ownsLocalTarget(address)) return
             selecting = true
-            try { const selected=get().surveyZoneSelection; if(selected&&!isSurveyPage(selected)) get().setSurveyZoneSelection(surveySelectReference(selected, address)) }
+            try {
+              const selected = get().surveyZoneSelection
+              if (isSurveyPage(selected)) {
+                get().setSurveyZoneSelection({ kind: 'page', regionId: selected.regionId, browserId: selected.browserId,
+                  presentation: { kind: 'tab', displayWorkspaceId: address.displayWorkspaceId,
+                  groupId: address.groupId, tabId: address.tabId, regionId: address.regionId } })
+                const surface = tab.regions[address.regionId]
+                if (surface && isSessionSurface(surface)) get().focusExecutionSession(surface.sessionId, address, { navigate: false })
+              } else if (selected) get().setSurveyZoneSelection(surveySelectReference(selected, address))
+            }
             finally { expectedNavigation = fileNavigationSelection(get()); selecting = false }
             return
           }
@@ -6985,8 +7001,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         },
         isFocused: address => {
           const state = get(), tab = state.tabs[address.tabId], layout = state.layouts[address.displayWorkspaceId]
-          if (localFocus) return ownsLocalTarget(address) && state.surveyZoneSelection?.active?.tabId === address.tabId &&
-            state.surveyZoneSelection.active.regionId === address.regionId
+          if (localFocus) {
+            const selected = state.surveyZoneSelection, active = isSurveyPage(selected) ? selected.presentation : selected?.active
+            return ownsLocalTarget(address) && active?.tabId === address.tabId && active.regionId === address.regionId
+          }
           const group = layout?.groups.find(group => group.id === address.groupId)
           return Boolean(tab && state.mainSurface === 'workbench' && state.retainedSpatialFocus === null &&
             state.activeWorkspaceId === address.displayWorkspaceId && layout?.activeGroupId === address.groupId &&
@@ -7098,7 +7116,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
         survey: { collectedZoneIds: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true),
-          organization: state.surveyOrganization, pageReferences: state.surveyPageReferences, pinnedReferences: surveyPinnedReferences(state), ...(state.surveyPinReadRecovery ? { pinIssue: state.surveyPinReadRecovery.issue } : {}), selection: persistedSurveySelection(state.surveyZoneSelection) },
+          organization: state.surveyOrganization, pageReferences: state.surveyPageReferences, pinnedReferences: surveyPinnedReferences(state), ...(state.surveyPinReadRecovery ? { pinIssue: state.surveyPinReadRecovery.issue } : {}), selection: surveySelectionPresentation(state.surveyZoneSelection) },
         persistence: { userStatePending: persistentWorkbenchStorage.pending() || desktopUserDocument.unreadFragments().length > 0 || auxiliaryUserDataPending(),
           userStateContentDigest: (() => {
             const encoded = desktopUserDocument.encodeProjection({ state: partializeAppState(state), version: 1 })

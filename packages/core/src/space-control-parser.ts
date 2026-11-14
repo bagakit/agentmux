@@ -1,6 +1,6 @@
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parseAdoptedHostRoute } from './host-route.js'
-import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
+import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyPageSelection, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -440,10 +440,9 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     }
     let selection: import('./space-control.js').AgentMuxSurveyPresentation['selection'] = null
     if (raw.selection !== null) {
-      const choice = fields(raw.selection, ['kind', 'regionId', 'browserId', 'zoneId', 'selection', 'active'], code)
+      const choice = fields(raw.selection, ['kind', 'regionId', 'browserId', 'presentation', 'zoneId', 'selection', 'active'], code)
       if (choice.kind === 'page') {
-        const { kind: _kind, ...page } = fields(choice, ['kind', 'regionId', 'browserId'], code)
-        selection = { kind: 'page', ...parseSurveyPageReferences([page], code)[0]! }
+        selection = parseSurveyPageSelection(choice, code)
       } else {
         const zone = fields(choice, ['zoneId', 'selection', 'active'], code)
         selection = { zoneId: spaceControlId(zone.zoneId, 'Survey selected Zone', code, true),

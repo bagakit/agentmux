@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { settingsResourceBudget, settingsResourceEnvelope } from './settings-resource-json.js'
-import type { AgentMuxSurveyCollectionChange, AgentMuxSurveyOrganization, AgentMuxSurveyPageReference, AgentMuxSurveyPinReference, AgentMuxSurveyPinChange } from './space-control.js'
+import type { AgentMuxSurveyCollectionChange, AgentMuxSurveyOrganization, AgentMuxSurveyPageReference, AgentMuxSurveyPageSelection, AgentMuxSurveyPinReference, AgentMuxSurveyPinChange } from './space-control.js'
 
 /** Machine references only; a display title never identifies a pinned item. */
 export function parseSurveyPinReference(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AgentMuxSurveyPinReference {
@@ -67,6 +67,18 @@ function surveyPageId(value: unknown, code: string): string {
     throw new AgentMuxError('Survey pages require exact original IDs.', code)
   }
   return value
+}
+
+/** One codec for saved client choice and public observation, independent of live topology. */
+export function parseSurveyPageSelection(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): AgentMuxSurveyPageSelection {
+  const raw = settingsResourceEnvelope(value, ['kind', 'regionId', 'browserId', 'presentation'], code)
+  if (raw.kind !== 'page') throw new AgentMuxError('Choose the original Survey Browser page.', code)
+  const page = parseSurveyPageReferences([{ regionId: raw.regionId, browserId: raw.browserId }], code)[0]!
+  if (!Object.hasOwn(raw, 'presentation')) return { kind: 'page', ...page }
+  const view = settingsResourceEnvelope(raw.presentation, ['kind', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'], code)
+  if (view.kind !== 'tab') throw new AgentMuxError('A Survey page presentation requires its exact original Tab occurrence.', code)
+  return { kind: 'page', ...page, presentation: { kind: 'tab', displayWorkspaceId: surveyPageId(view.displayWorkspaceId, code),
+    groupId: surveyPageId(view.groupId, code), tabId: surveyPageId(view.tabId, code), regionId: surveyPageId(view.regionId, code) } }
 }
 
 /** One portable codec for public wire and the original client preference owner. */

@@ -2121,6 +2121,7 @@ export function WorkspaceWorkbench({
       !projectionContext?.unsupportedTabIds.has(tab.id)
     return <WorkbenchProjectionContext.Provider value={projectionContext}>
       <div ref={workbenchRef} className="workspace-workbench">
+        {projectionHeader}
         <div className="pane-body">{confirmed ? projectionNotice : projectionState}
         {confirmed ? <div key={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)} id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={tab.id} data-workbench-group-id={reference.groupId} className="workbench-tab-slot" />

@@ -133,6 +133,9 @@ export type AgentMuxSurveyOrganization = {
 }
 /** Explicit client membership, independent of organization order and Core topology. */
 export type AgentMuxSurveyPageReference = { regionId: string; browserId: string }
+/** The Browser remains the page identity; its optional view is one exact original Tab occurrence. */
+export type AgentMuxSurveyPageSelection = { kind: 'page'; presentation?: { kind: 'tab' } &
+  Pick<AgentMuxSpaceAddress, 'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'> } & AgentMuxSurveyPageReference
 /** Explicit presentation preference; neither pinning nor unpinning changes membership or resources. */
 export type AgentMuxSurveyPinReference = { kind: 'zone'; zoneId: string } | ({ kind: 'page' } & AgentMuxSurveyPageReference)
 export type AgentMuxSurveyPinChange = { reference: AgentMuxSurveyPinReference; pinned: boolean; expectedPinned: boolean }
@@ -163,7 +166,7 @@ export type AgentMuxSurveyPresentation = {
     zoneId: string
     selection: { tabId: string; regionId: string }[]
     active: { tabId: string; regionId: string } | null
-  } | ({ kind:'page' } & AgentMuxSurveyPageReference) | null
+  } | AgentMuxSurveyPageSelection | null
   issue?: string
 }
 export type AgentMuxSpaceCatalog = {

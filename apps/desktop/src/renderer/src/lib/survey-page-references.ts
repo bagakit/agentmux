@@ -1,11 +1,13 @@
-import { parseSurveyPageReferences, type AgentMuxSurveyPageReference as Page, type AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import { parseSurveyPageReferences, parseSurveyPageSelection, type AgentMuxSurveyPageReference as Page, type AgentMuxSurveyPageSelection, type AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { selectSpatialCatalog } from '@agentmux/core/spatial-graph'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { findWorkbenchRegion, type WorkbenchTab } from './workbench-tabs'
 import { persistedSurveyZoneSelection, restoredSurveyZoneSelection, type SurveyZoneSelection } from './survey-workface'
 
-export type SurveyPageSelection = { kind: 'page'; zoneId?: never; selection?: never; active?: never } & Page
+export type SurveyPageSelection = AgentMuxSurveyPageSelection & { zoneId?: never; selection?: never; active?: never;
+  presentationReadRecovery?: { source: unknown; issue: string } }
 export type SurveySelection = SurveyZoneSelection | SurveyPageSelection
+export type PersistedSurveySelection = SurveyZoneSelection | ({ kind: 'page'; presentation?: unknown } & Page) | null
 export type SurveyPageReadRecovery = { source: unknown; issue: string }
 export const isSurveyPage = (value: SurveySelection | null | undefined): value is SurveyPageSelection =>
   !!value && 'kind' in value && value.kind === 'page'
@@ -30,13 +32,26 @@ export function readSurveyPagePreferences(value: unknown): { references: Page[];
 }
 
 export function restoredSurveyPages(value: unknown): Page[] { return readSurveyPagePreferences(value).references }
-export function persistedSurveySelection(value: SurveySelection | null) {
-  return isSurveyPage(value) ? { kind: 'page' as const, regionId: value.regionId, browserId: value.browserId } : persistedSurveyZoneSelection(value)
+export function persistedSurveySelection(value: SurveySelection | null): PersistedSurveySelection {
+  return isSurveyPage(value) ? { kind: 'page', regionId: value.regionId, browserId: value.browserId,
+    ...(value.presentationReadRecovery ? { presentation: value.presentationReadRecovery.source }
+      : value.presentation ? { presentation: value.presentation } : {}) } : persistedSurveyZoneSelection(value)
+}
+/** Observation reports only the decoded choice; an unread saved source stays with its data owner. */
+export function surveySelectionPresentation(value: SurveySelection | null): import('@agentmux/core/control').AgentMuxSurveyPresentation['selection'] {
+  return isSurveyPage(value) ? { kind: 'page', regionId: value.regionId, browserId: value.browserId,
+    ...(value.presentation ? { presentation: value.presentation } : {}) } : persistedSurveyZoneSelection(value)
 }
 export function restoredSurveySelection(value: unknown): SurveySelection | null {
   if (value && typeof value === 'object' && 'kind' in value && value.kind === 'page') {
     const raw = value as Record<string, unknown>
-    try { return { kind: 'page', ...parseSurveyPageReferences([{ regionId: raw.regionId, browserId: raw.browserId }])[0]! } }
+    try {
+      const page = { kind: 'page' as const, ...parseSurveyPageReferences([{ regionId: raw.regionId, browserId: raw.browserId }])[0]! }
+      if (!Object.hasOwn(raw, 'presentation')) return page
+      try { return parseSurveyPageSelection({ ...page, presentation: raw.presentation }) }
+      catch { return { ...page, presentationReadRecovery: { source: raw.presentation,
+        issue: 'The saved Tab presentation is unreadable. Its original preference and Browser are kept; select this page again to replace only its presentation choice.' } } }
+    }
     catch { return null }
   }
   return restoredSurveyZoneSelection(value)
@@ -98,7 +113,7 @@ export function surveyPageOwner(tabs: Readonly<Record<string, WorkbenchTab>>, pa
   return owner?.surface.kind === 'browser' && owner.surface.browserId === page.browserId ? owner : null
 }
 
-export function surveyPageProjection(page: Page, catalog: AgentMuxSpaceCatalog | null, tabs: Readonly<Record<string, WorkbenchTab>>,
+export function surveyPageProjection(page: Page & Pick<SurveyPageSelection, 'presentation'>, catalog: AgentMuxSpaceCatalog | null, tabs: Readonly<Record<string, WorkbenchTab>>,
   onSelect: WorkbenchProjection['onSelect'], preferred: WorkbenchProjectionSelection | null = null): WorkbenchProjection | null {
   if (!catalog) return null
   const owner = surveyPageOwner(tabs, page, catalog)
@@ -106,6 +121,17 @@ export function surveyPageProjection(page: Page, catalog: AgentMuxSpaceCatalog |
   const scope = surveyCatalogScope(catalog)
   const facts = (scope.regionsById.get(page.regionId) ?? []).filter(region => region.tabId === owner.tab.id && region.kind === 'browser')
   if (facts.length !== 1) return null
+  if (page.presentation) {
+    const { kind: _kind, ...reference } = page.presentation
+    if (reference.tabId !== owner.tab.id || !owner.tab.regions[reference.regionId] ||
+      !scope.occurrencesByRegion.get(page.regionId)?.some(location => location.tabId === reference.tabId &&
+        location.groupId === reference.groupId && location.displayWorkspaceId === reference.displayWorkspaceId) ||
+      !scope.occurrencesByRegion.get(reference.regionId)?.some(location => sameWorkbenchProjectionSelection(location, reference))) return null
+    return { entity: { kind: 'tab', tabId: reference.tabId }, presentationId: 'survey-workbench',
+      displayWorkspaceId: reference.displayWorkspaceId,
+      catalog: selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }),
+      selection: [reference], onSelect }
+  }
   const choices = (scope.occurrencesByRegion.get(page.regionId) ?? []).filter(reference => reference.tabId === owner.tab.id)
   const original = choices.filter(reference => reference.displayWorkspaceId === owner.tab.workspaceId)
   // Composition changes the Tab, not this confirmed display Group. Prefer the same original

@@ -153,7 +153,8 @@ export function readSurveyPresentation(state: {
     organization,
     ...(state.pinnedItems ? { pinnedReferences: surveyPinnedReferences({ pinnedItems: state.pinnedItems, surveyPinReadRecovery: state.surveyPinReadRecovery ?? null }) } : {}),
     profileView: state.surveyProfileViewReadRecovery ? null : state.surveyProfileView ?? { kind: 'default' },
-    ...((state.surveyPageReadRecovery || state.surveyProfileViewReadRecovery || state.surveyPinReadRecovery) ? { issue: [state.surveyPageReadRecovery?.issue, state.surveyProfileViewReadRecovery?.issue, state.surveyPinReadRecovery?.issue].filter(Boolean).join(' ') } : {}),
+    ...((state.surveyPageReadRecovery || state.surveyProfileViewReadRecovery || state.surveyPinReadRecovery || isSurveyPage(state.surveyZoneSelection) && state.surveyZoneSelection.presentationReadRecovery) ? { issue: [state.surveyPageReadRecovery?.issue, state.surveyProfileViewReadRecovery?.issue, state.surveyPinReadRecovery?.issue,
+      isSurveyPage(state.surveyZoneSelection) ? state.surveyZoneSelection.presentationReadRecovery?.issue : undefined].filter(Boolean).join(' ') } : {}),
     pages: state.surveyPageReferences.map(page => {
       const owner = surveyPageOwner(state.tabs, page)
       const browser = owner?.surface.kind === 'browser' ? owner.surface : null
@@ -172,7 +173,8 @@ export function readSurveyPresentation(state: {
     selection: isSurveyPage(state.surveyZoneSelection) ? {
       kind: 'page',
       regionId: state.surveyZoneSelection.regionId,
-      browserId: state.surveyZoneSelection.browserId
+      browserId: state.surveyZoneSelection.browserId,
+      ...(state.surveyZoneSelection.presentation ? { presentation: state.surveyZoneSelection.presentation } : {})
     } : state.surveyZoneSelection ? {
       zoneId: state.surveyZoneSelection.zoneId,
       selection: state.surveyZoneSelection.selection.map(({ tabId, regionId }) => ({ tabId, regionId })),

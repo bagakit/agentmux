@@ -347,8 +347,16 @@ function DesktopApp() {
     const currentCatalog = spatialCatalog(state, currentTopics)
     if (isSurveyPage(state.surveyZoneSelection)) {
       const scope = surveyPageProjection(state.surveyZoneSelection, currentCatalog, state.tabs, () => {}, reference)
-      if (!scope?.selection.some(member => sameWorkbenchProjectionSelection(member, reference))) return
+      if (!scope || !(scope.entity.kind === 'tab'
+        ? scope.catalog.locations.some(member => sameWorkbenchProjectionSelection(member, reference))
+        : scope.selection.some(member => sameWorkbenchProjectionSelection(member, reference)))) return
       surveyOccurrence.current = reference
+      if (state.surveyZoneSelection.presentation) {
+        state.setSurveyZoneSelection({ kind: 'page', regionId: state.surveyZoneSelection.regionId, browserId: state.surveyZoneSelection.browserId,
+          presentation: { kind: 'tab', ...reference } })
+        const surface = state.tabs[reference.tabId]?.regions[reference.regionId]
+        if (surface && isSessionSurface(surface)) state.focusExecutionSession(surface.sessionId, reference, { navigate: false })
+      }
       return
     }
     const tab = state.tabs[reference.tabId]
