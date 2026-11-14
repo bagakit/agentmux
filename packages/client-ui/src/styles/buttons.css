@@ -25,7 +25,13 @@
 .small-button { padding:var(--sp-2) var(--sp-4); border: 0; color: var(--text-2); background: var(--surface-2); font-size: var(--fs-meta); box-shadow: var(--hl), 0 1px 2px var(--scrim-1); }
 .small-button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); box-shadow: var(--hl-strong), var(--elev-1); }
 .small-button:active:not(:disabled) { background: var(--surface-1); box-shadow: var(--hl), inset 0 1px 2px var(--scrim-1); }
-.agent-button[aria-busy="true"] { cursor: progress; box-shadow: inset 0 0 0 1px var(--focus-line), var(--hl); }
+.agent-button[aria-busy="true"]:disabled {
+  opacity: 1;
+  cursor: progress;
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line), var(--hl);
+}
 .small-button--warning { color: var(--amber-text); background: var(--amber-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--hl); }
 .small-button--warning:hover:not(:disabled) { color: var(--amber-text-hover); background: var(--amber-bg-hover); box-shadow: inset 0 0 0 1px var(--amber-line), var(--hl-strong); }
 /* 选中/开启态（换行开关、diff 开关这类 toggle）。不能只换到 --surface-2：那正是 .small-button 的
@@ -74,3 +80,16 @@
 @media (prefers-reduced-motion: reduce) {
   :is(.small-button, .primary-button, .danger-button, .icon-button) { transition: none; }
 }
+
+/* Status occupies two text lines at every phase. Longer descriptions remain readable in place. */
+.agent-action-feedback {
+  block-size: 2lh;
+  min-inline-size: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+  line-height: 1.45;
+}
+.agent-action-feedback:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.agent-action-feedback [role="alert"] { color: var(--red-text); }
