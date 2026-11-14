@@ -69,7 +69,6 @@ vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({
 
 vi.mock('../src/renderer/src/components/WorkspaceSidebar', () => ({ WorkspaceSidebar: () => null }))
 vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDock: () => null }))
-vi.mock('../src/renderer/src/components/WorkspaceBoard', () => ({ WorkspaceBoard: () => null }))
 vi.mock('../src/renderer/src/components/TopRowChrome', () => ({
   SurfaceSwitch: () => null,
   TopRowLeadingChrome: () => null

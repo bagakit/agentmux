@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import ts from 'typescript'
 import { AgentProviderRegistry } from '@agentmux/core'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -10,8 +10,6 @@ import type { AppConfig, ExecutorDetection, ExecutorDetectionInput } from '../sr
 import { AgentSettingsPane } from '../src/renderer/src/components/settings/AgentSettingsPane'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
-import { BoardDiscussionCanvas } from '../src/renderer/src/components/BoardDiscussionCanvas'
-import type { BoardRow } from '../src/renderer/src/lib/project-board'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { executorDetectionKey, useAppStore, type ExecutorDetectionState } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -111,7 +109,7 @@ it('missing type and unknown read reasons remain distinct and disappear when the
   expect(status()).toBe('Not checked'); expect(card().textContent).not.toContain('original I/O reason')
 })
 
-it('actual launcher and Board consumers ignore same-ID command replacements; aggregate still uses the best matching Host', async () => {
+it('the actual launcher ignores same-ID command replacements; aggregate still uses the best matching Host', async () => {
   const changed = { ...config, executors: { ...config.executors, codex: { ...config.executors.codex!, command: 'later' } } }
   await act(async () => useAppStore.setState({ tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) },
     agentComposerDrafts: { region: 'Preserved launcher draft' } }))
@@ -121,15 +119,6 @@ it('actual launcher and Board consumers ignore same-ID command replacements; agg
   await act(async () => useAppStore.setState({ config: changed }))
   expect(picks()).toEqual(['Review', 'Codex']);
   expect(dom.container.querySelector('.agent-pick__unconfirmed')?.getAttribute('aria-label')).toBe('Not checked'); expect(useAppStore.getState().agentComposerDrafts.region).toBe('Preserved launcher draft')
-  const row: BoardRow = { id: 'main', name: 'Main', path: _hygiene_fixturePath("repo"), workspace: config.workspaces[0]!, kind: 'branch',
-    branch: { name: 'main', worktreePath: _hygiene_fixturePath("repo"), workspaceId: 'workspace', isCurrent: true },
-    runsByColumn: { inbox: [], working: [], 'needs-you': [], done: [] }, sessions: [], searchText: 'main' }
-  await act(async () => useAppStore.setState({ config }))
-  await dom.render(<BoardDiscussionCanvas row={row} anchor={config.workspaces[0]!} onClose={vi.fn()} onOpenBranches={vi.fn()} />)
-  const board = () => [...document.querySelectorAll('.discussion-provider-grid button strong')].map(node => node.textContent)
-  expect(board()).toEqual(['Codex', 'Review'])
-  await act(async () => useAppStore.setState({ config: changed }))
-  expect(board()).toEqual(['Review'])
   expect(await list()).toEqual([['codex', 'unknown'], ['review', 'available']])
   const remote = config.hosts[1]!
   const connectionChanged: AppConfig = { ...config, hosts: [config.hosts[0]!, { ...remote, hostname: 'later.invalid' }] }
@@ -207,6 +196,6 @@ it('all actual production record lookups pass captured-input matching; source di
     visit(source)
   }
   expect(reads.length).toBeGreaterThan(0)
-  expect(new Set(reads.map(read => read.path)).size).toBeGreaterThan(1)
+  expect([...new Set(reads.map(read => relative(root, read.path)))]).toContain('store.ts')
   expect(reads.filter(read => !read.guarded)).toEqual([])
 })

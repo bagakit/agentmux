@@ -43,7 +43,7 @@ describe('fan-out is wired end to end', () => {
     const ipc = read('../src/main/ipc.ts')
     expect(ipc).toContain("handle('workspaces:runFanOut'")
     expect(ipc).toContain("handle('workspaces:keepOneOfFanOut'")
-    expect(ipc).toContain('keepOneOfFanOut(')
+    expect(ipc).toContain('worktreeCloseout.keepOne(input)')
     // 扇出的编排**不在** ipc.ts：它在 fanout-request 里，因为 handler 长在 registerIpc 的闭包里，
     // 本仓没有任何测试 import 得到它——于是在 handler 第一行插一句 `return { kind: 'rejected' }`，
     // 扇出对用户永久失效而这里 5 条全绿（实测）。handler 现在只转发。
@@ -63,18 +63,9 @@ describe('fan-out is wired end to end', () => {
     expect(store).toContain('keepOneOfFanOut(')
   })
 
-  // The two user gestures. Without these the slice is reachable only from a test: nobody can start a
-  // bake-off, and nobody can resolve one.
-  it('gives the user a way to start a fan-out and a way to keep one lane', () => {
+  it('starts a fan-out through the live Branches panel', () => {
     const branches = read('../src/renderer/src/components/BranchesPanel.tsx')
-    // Starting: the panel builds a request through the pure model, then calls the store action.
     expect(branches).toContain('buildFanOutRequest(')
     expect(branches).toContain('runFanOut(')
-
-    const strip = read('../src/renderer/src/components/FanOutStrip.tsx')
-    const board = read('../src/renderer/src/components/WorkspaceBoard.tsx')
-    // Resolving: the comparison strip offers a keep control, wired to the store from the board.
-    expect(strip).toContain('fanOutKeepSplit(')
-    expect(board).toContain('keepOneOfFanOut(')
   })
 })

@@ -15,8 +15,6 @@ if (scope === 'metadata-paths') {
     ['focus-row-hover', 'FocusContextRow', 'displayPath(context.workspacePath, context.hostId)', 'context.workspacePath'],
     ['focus-lane-hover', 'FocusProjectLanes', 'displayPath(lane.path, lane.hostId)', 'lane.path'],
     ['recent-retained-hover', 'RecentFocusTimeline', 'displayPath(identity.workspacePath, identity.hostId)', 'identity.workspacePath'],
-    ['board-row-body', 'WorkspaceBoard', ">{row.path ? displayPath(row.path, hostId) : meta.emptyPathLabel}</small>", ">{row.path ? row.path : meta.emptyPathLabel}</small>"],
-    ['board-discussion-body', 'BoardDiscussionCanvas', ">{row.path ? displayPath(row.path, hostId) : 'No worktree'}</small>", ">{row.path ? row.path : 'No worktree'}</small>"],
     ['activity-context-hover', 'ProjectActivityMenu', 'const path = zone.path ? displayPath(zone.path, zone.hostId ?? undefined) : null', 'const path = zone.path'],
     ['sender-project-hover', 'DesktopClientUiProvider', 'title={displayPath(project.path, hostId)}', 'title={project.path}'],
     ['goals-project-hover', 'GoalsCommonActions', 'displayPath(action.project.path, action.project.hostId)', 'action.project.path'],

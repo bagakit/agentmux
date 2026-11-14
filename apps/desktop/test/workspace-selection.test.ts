@@ -1,12 +1,11 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
-import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { AgentLaunchResult, AppConfig, BrowserSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { AppConfig, BrowserSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { revealFileExplorerPath } from '../src/renderer/src/lib/file-explorer-selection.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -404,95 +403,6 @@ describe('universal new tab transitions', () => {
     expect(session).toMatchObject({ kind: 'agent', providerId: 'codex', workspacePath: workspace.path })
   })
 
-  it('starts a Board discussion in the selected Branch workspace and keeps Board visible', async () => {
-    const { workspace: mainWorkspace } = prepareUniversalTab()
-    const featureWorkspace: WorkspaceRecord = {
-      id: 'feature-board',
-      name: 'feature/board',
-      hostId: 'local',
-      path: _hygiene_fixturePath("repo.worktrees/feature-board"),
-      kind: 'worktree',
-      repoPath: mainWorkspace.path,
-      branch: 'feature/board'
-    }
-    useAppStore.setState((state) => ({
-      config: { ...state.config!, workspaces: [mainWorkspace, featureWorkspace] },
-      mainSurface: 'board'
-    }))
-    let launched: Extract<SessionSnapshot, { kind: 'agent' }> | null = null
-    const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => {
-      const sessionId = input.agentSessionId!
-      launched = {
-        id: sessionId,
-        kind: 'agent',
-        providerId: 'codex',
-        executorId: 'codex',
-        capabilities: {
-          terminal: true,
-          timeline: 'streaming',
-          permission: 'observe',
-          providerResume: true,
-          replyCorrelation: 'none'
-        },
-        hostId: 'local',
-        workspacePath: featureWorkspace.path,
-        label: 'Codex · feature/board',
-        createdAt: 10,
-        updatedAt: 10,
-        processState: 'running',
-        status: { state: 'working', source: 'native-hook', observedAt: 10 },
-        latestOutputBytes: 0,
-        control: {
-          kind: 'agent',
-          hostId: 'local',
-          agentSessionId: sessionId,
-          run: { runId: sessionId }
-        }
-      }
-      return {
-        created: agentCreationFixture(launched), projectionFailures: [],
-        session: launched,
-        timeline: { agentSessionId: sessionId, revision: 0, items: [] }
-      } satisfies AgentLaunchResult
-    })
-
-    await useAppStore.getState().launchBoardAgent(featureWorkspace.id, 'codex', 'Review the board')
-
-    const state = useAppStore.getState()
-    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
-      executorId: 'codex',
-      prompt: 'Review the board',
-      workspacePath: featureWorkspace.path
-    }))
-    expect(state.activeWorkspaceId).toBe(featureWorkspace.id)
-    expect(state.mainSurface).toBe('board')
-    expect(state.sessions).toContainEqual(launched)
-    expect(Object.values(state.tabs).map(titleWorkbenchSurface)).toContainEqual(expect.objectContaining({
-      kind: 'agent',
-      phase: 'attached',
-      workspaceId: featureWorkspace.id,
-      sessionId: launched!.id
-    }))
-  })
-
-  it('keeps Board visible and leaves only the existing Launcher recovery path when discussion launch fails', async () => {
-    const { workspace } = prepareUniversalTab()
-    useAppStore.setState({ mainSurface: 'board', sessions: [], error: null })
-    vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('provider failed'))
-
-    await expect(
-      useAppStore.getState().launchBoardAgent(workspace.id, 'codex', 'Discuss failure')
-    ).rejects.toThrow('provider failed')
-
-    const state = useAppStore.getState()
-    expect(state.mainSurface).toBe('board')
-    expect(state.sessions).toEqual([])
-    expect(Object.values(state.tabs).map(titleWorkbenchSurface)).toContainEqual(expect.objectContaining({
-      kind: 'launcher',
-      workspaceId: workspace.id
-    }))
-  })
-
   it('replaces and closes the same tab with a Main-owned browser resource', async () => {
     const { workspace, tabId } = prepareUniversalTab()
 
@@ -707,7 +617,7 @@ describe('Scratch Topic workbench binding', () => {
       executorId: 'codex', hostId: workspace.hostId, workspacePath: workspace.path,
       prompt: 'work together', scratchTopicId: topic.id,
       agentSessionId: expect.any(String), createOperationId: expect.any(String)
-    }))
+    }), undefined)
     const launched = await launch.mock.results[0]!.value
     const attached = useAppStore.getState()
     expect(attached.tabs[tabId]?.topicId).toBe(topic.id)

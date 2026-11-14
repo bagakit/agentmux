@@ -228,7 +228,7 @@ describe('formatRelativeAge 的后缀由调用方给，且 now 一档永不带',
 // 发现新抄的一份是结构层的活。逐个点名买到的是：这两个面各自都真的在取 lib 的档，而不是
 // 其中一个偷偷留着自己那份阶梯。
 // ---------------------------------------------------------------------------
-const AGE_CONSUMERS = ['components/WorkspaceBoard.tsx', 'components/SurfaceToolDock.tsx'] as const
+const AGE_CONSUMERS = ['components/LauncherResumePicker.tsx', 'components/SessionRecap.tsx', 'components/FocusProjectLanes.tsx'] as const
 
 describe.each(AGE_CONSUMERS)('%s 的年龄取自这个 lib', (relativePath) => {
   it('它 import 了 relative-age，而不是自己判档', () => {

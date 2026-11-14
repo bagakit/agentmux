@@ -1,4 +1,5 @@
 const {app,BrowserWindow}=require('electron')
+const assert=require('node:assert/strict')
 const fs=require('node:fs/promises'),path=require('node:path')
 const [html,out]=process.argv.slice(2)
 app.setPath('userData',path.join(out,'private-profile'));app.setPath('sessionData',path.join(out,'private-session'))
@@ -9,24 +10,24 @@ await win.loadFile(html)
 const read=s=>win.webContents.executeJavaScript(s)
 for(let i=0;i<200&&!await read('Boolean(window.hostIdentityReady)');i++)await new Promise(r=>setTimeout(r,50))
 if(!await read('Boolean(window.hostIdentityReady)'))throw Error('Renderer not ready')
-const scenes=[['focus-wide','focus',0,1280],['focus-narrow','focus',0,640],['sidebar-wide','groups',1,1280],['sidebar-narrow','groups',1,640],['board-local','board',0,1280],['board-ssh','board',1,1280],['board-unconfigured','board',2,1280],['board-long-narrow','board',3,640]]
-for(const [name,scene,index,width] of (process.env.AGENTMUX_HOST_IDENTITY_WRAP_MUTANT==='1'?scenes.filter(s=>s[0]==='board-long-narrow'):scenes)){
+const scenes=[['focus-wide','focus',0,1280],['focus-narrow','focus',0,640],['sidebar-wide','groups',1,1280],['sidebar-narrow','groups',1,640],['breadcrumb-local','breadcrumb',0,1280],['breadcrumb-ssh','breadcrumb',1,1280],['breadcrumb-unconfigured','breadcrumb',2,1280],['breadcrumb-long-narrow','breadcrumb',3,640]]
+for(const [name,scene,index,width] of scenes){
 win.setContentSize(width,800);await read(`window.hostIdentityScene(${JSON.stringify(scene)},${index})`);await new Promise(r=>setTimeout(r,650));await read('document.fonts.ready');await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
-if(name==='board-long-narrow'){
-const hostTextWidth=await read(`document.querySelector('.board-host-scope > span').getBoundingClientRect().width`)
-receipt.layoutProof={hostTextWidth,minimumExclusive:24,mutant:process.env.AGENTMUX_HOST_IDENTITY_WRAP_MUTANT==='1'}
-if(hostTextWidth<=24)throw Error('Native layout: host text width must exceed 24 CSS px')
-const target=await read(`(() => {const button=[...document.querySelectorAll('.board-toolbar button')].find(b=>b.textContent.includes('Refresh'));if(!button)throw Error('Refresh missing');const r=button.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,box:r.toJSON(),hit:button.contains(document.elementFromPoint(x,y)),enabled:!button.disabled,before:window.hostIdentityBranchReads}})()`)
-receipt.layoutProof.refreshTarget=target
-if(!target.hit||!target.enabled||target.box.x<0||target.box.x+target.box.width>width||target.box.y+target.box.height>800)throw Error('Refresh not fully reachable')
-win.webContents.debugger.attach('1.3')
-for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:target.x,y:target.y,button:'left',clickCount:1})
-await new Promise(r=>setTimeout(r,200))
-const after=await read('({reads:window.hostIdentityBranchReads,runtimeAttempts:window.hostIdentityRuntimeAttempts})')
-if(after.reads<=target.before||after.runtimeAttempts!==0)throw Error('Refresh did not reach preview Git API safely')
-receipt.layoutProof.passed=true;receipt.refreshClick={nativePointer:true,...target,after};win.webContents.debugger.detach()
+const identities=await read(`[...document.querySelectorAll('.host-identity')].map(n=>({hostId:n.dataset.hostId,kind:n.dataset.hostKind,text:n.textContent,title:n.title,aria:n.getAttribute('aria-label')}))`)
+assert.equal(await read('window.hostIdentityRuntimeAttempts'),0,'Capture must not mutate a Runtime')
+if(scene==='breadcrumb'){
+assert.equal(await read(`document.querySelector('.breadcrumbs > strong')?.textContent`),index===3?'feature/remote-host-identity-long-branch':'main')
+if(index===0)assert.deepEqual(identities,[],'Local breadcrumb does not repeat the machine identity')
+else{
+assert.equal(identities.length,1)
+const hostId=['local','ssh-studio','missing-host','ssh-long'][index]
+assert.equal(identities[0].hostId,hostId)
+assert.ok(identities[0].aria.includes(hostId),'The original Host ID remains accessible')
+assert.equal(identities[0].kind,index===2?'unknown':'ssh')
+assert.equal(identities[0].text,index===1?'Studio':index===2?'missing-host':'Production Research Workstation Singapore')
 }
-const file=name+'.png';await fs.writeFile(path.join(out,file),(await win.webContents.capturePage()).toPNG());receipt.images.push({file,scene,index,width,identities:await read(`[...document.querySelectorAll('.host-identity')].map(n=>({text:n.textContent,title:n.title,aria:n.getAttribute('aria-label')}))`)})
+}
+const file=name+'.png';await fs.writeFile(path.join(out,file),(await win.webContents.capturePage()).toPNG());receipt.images.push({file,scene,index,width,identities})
 }
 receipt.captured=true
 }catch(e){receipt.error=e.stack;process.exitCode=1}finally{await fs.writeFile(path.join(out,'capture.json'),JSON.stringify(receipt,null,2));app.exit(process.exitCode||0)}})

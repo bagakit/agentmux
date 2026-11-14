@@ -1,3 +1,4 @@
+import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar'
 // @vitest-environment happy-dom
 import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act, useState } from 'react'
@@ -11,8 +12,6 @@ import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { ResolvedAgentAvatar } from '../src/renderer/src/components/AgentAvatar'
 import { BrowserOperationStatus } from '../src/renderer/src/components/BrowserOperationSurface'
 import { FocusTimelineEventPreview } from '../src/renderer/src/components/FocusTimelineEventPreview'
-import { WorkspaceBoard } from '../src/renderer/src/components/WorkspaceBoard'
-import { BoardRowsProvider } from '../src/renderer/src/hooks/useBoardRows'
 import { focusWorkingFacts } from '../src/renderer/src/lib/focus-timeline-event-facts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -210,11 +209,9 @@ it('Browser running has its own role and keeps exact operation, control, semanti
   expect(stop).toHaveBeenCalledOnce(); expect(take).not.toHaveBeenCalled(); expect(activity).toEqual(original)
 })
 
-it('real Board work and historical Working observations remain distinct meanings with retained rows and source facts', async () => {
+it('current Agent work and historical Working observations remain distinct meanings with retained identity and source facts', async () => {
   const session = composerSession(); session.label = 'Original board Agent'; session.status = { state: 'working', source: 'native-hook', observedAt: _newTailFixtureEpoch(0, 0, 11) }
   useAppStore.setState({ sessions: [session], activeWorkspaceId: 'workspace' })
-  vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'git-repository', hostId: 'local',
-    repoPath: composerConfig.workspaces[0]!.path, branches: [{ name: 'original-branch', workspaceId: 'workspace', worktreePath: session.workspacePath, isCurrent: true }] })
   const facts = focusWorkingFacts({ startAt: _newTailFixtureEpoch(0, 0, 1), startKnown: true, endAt: _newTailFixtureEpoch(0, 0, 1001), end: 'run-ended' },
     { detailed: value => `Original timestamp ${value}` } as Parameters<typeof focusWorkingFacts>[1], undefined, undefined, _newTailFixtureEpoch(0, 0, 2001))
   const originalFacts = structuredClone(facts), anchorHost = document.createElement('section'), anchor = document.createElement('button')
@@ -222,19 +219,17 @@ it('real Board work and historical Working observations remain distinct meanings
   anchorHost.append(anchor); document.body.append(anchorHost)
   const close = vi.fn()
   try {
-    await dom.render(<><BoardRowsProvider enabled><WorkspaceBoard /></BoardRowsProvider>
+    await dom.render(<><AgentAvatar sessionId={session.id} executorId={session.executorId} providerId={session.providerId} label={session.label} state={session.status.state} />
       <FocusTimelineEventPreview facts={facts} anchor={anchor} onClose={close} onMouseEnter={() => {}} onMouseLeave={() => {}} /></>)
-    const head = dom.container.querySelector('.board-column-head--working')!, work = glyph(head, 'status.working', 13)
-    const row = dom.container.querySelector('[data-board-row="original-branch"]')!
-    expect(row).not.toBeNull(); expect(row.querySelector('.board-cell--working')?.textContent).toContain('Original board Agent')
-    glyph(row.querySelector('.agent-avatar__status--working'), 'status.working', 10)
+    const avatar = dom.container.querySelector('.agent-avatar')!
+    expect(avatar).not.toBeNull()
+    const work = glyph(avatar.querySelector('.agent-avatar__status--working'), 'status.working', 10)
     const preview = document.querySelector<HTMLElement>('.recent-focus__event-preview[data-event-kind="work"]')!
     const historyIcon = glyph(preview.querySelector('header'), 'object.activity', 14)
     expect(preview.textContent).toContain('Working observation'); expect(preview.textContent).toContain('Run ended')
     const describedBy = anchor.getAttribute('aria-describedby')
     await customize()
-    expect(dom.container.querySelector('.board-column-head--working')).toBe(head); expect(head.querySelector('svg')).toBe(work)
-    expect(dom.container.querySelector('[data-board-row="original-branch"]')).toBe(row)
+    expect(dom.container.querySelector('.agent-avatar')).toBe(avatar); expect(avatar.querySelector('.agent-avatar__status--working svg')).toBe(work)
     expect(preview.querySelector('header svg')).toBe(historyIcon); expect(anchor.getAttribute('aria-describedby')).toBe(describedBy)
     expect(facts).toEqual(originalFacts); expect(session.status.state).toBe('working'); expect(dom.draft()).toBe('Keep my draft')
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))

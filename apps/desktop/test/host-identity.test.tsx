@@ -6,8 +6,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { HostBadge } from '../src/renderer/src/components/HostBadge'
 import { FocusProjectLanes } from '../src/renderer/src/components/FocusProjectLanes'
 import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar'
-import { WorkspaceBoard } from '../src/renderer/src/components/WorkspaceBoard'
-import { BoardRowsProvider } from '../src/renderer/src/hooks/useBoardRows'
 import { ProjectGroupsTree } from '../src/renderer/src/components/ProjectGroupsTree'
 import { projectWorkspaces } from '../src/renderer/src/lib/workspace-projects'
 import { directoryIdentity } from '../src/shared/space-addresses'
@@ -79,19 +77,6 @@ it('breadcrumb consumes readable configured machine name and preserves branch id
   await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, workspaces: [{ id: 'project', hostId: 'local', name: 'Same project', path: _hygiene_fixturePath("same/path"), kind: 'folder', branch: 'main' }] } }))
   expect(badges()).toHaveLength(0)
   expect(container.textContent).toBe('main')
-})
-
-it('Board presents its original machine name using the shared identity without claiming connectivity', async () => {
-  vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'git-repository', hostId: 'farm', repoPath: _hygiene_fixturePath("same/path"), branches: [] })
-  await mount(<BoardRowsProvider enabled><WorkspaceBoard /></BoardRowsProvider>)
-  await act(async () => { await vi.waitFor(() => expect(container.querySelector('.board-host-scope')).not.toBeNull()) })
-  const badge = container.querySelector<HTMLElement>('.board-host-scope')!
-  expect(badge.dataset.hostId).toBe('farm')
-  expect(badge.textContent).toBe('Build machine')
-  await act(async () => badge.focus())
-  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('farm')
-  expect(badge.getAttribute('aria-label')).not.toMatch(/connected|healthy/i)
-  vi.restoreAllMocks()
 })
 it('mixed Group members retain original project icons and exact host labels including unavailable members', async () => {
   const config = useAppStore.getState().config!

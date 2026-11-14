@@ -673,14 +673,13 @@ describe('each attention call site is wired to the shared vocabulary', () => {
     expect(pair.test(decoy)).toBe(false)
   })
 
-  it('the two surfaces whose dot already carries attention do not also emit the attribute', () => {
+  it('the roster whose dot already carries attention do not also emit the attribute', () => {
     // The fan-out lane and the roster row each render `.status--<state>` from a mapping that sends
     // needs-you to `waiting` and error to `error` — the shared vocabulary's amber and red, with amber
     // additionally carrying a `?` pip. Adding a second mark on the same element would be the same fact
     // twice, which is what the Project Rail's one-signal-per-row rule exists to prevent. This pins the
     // deletion so a future edit re-adding the attribute has to confront the reason it went away.
     for (const [component, mapper] of [
-      ['FanOutStrip.tsx', 'laneState'],
       ['AgentRoster.tsx', 'stateFor']
     ] as const) {
       const source = read(`../src/renderer/src/components/${component}`)
@@ -715,17 +714,6 @@ describe('each attention call site is wired to the shared vocabulary', () => {
     expect(attentionAttributeExpressions(direct)).toEqual(['accentFor(s)'])
     expect(attentionAttributeExpressions(spread)).toEqual(['x.category'])
     expect(attentionAttributeExpressions(literal)).toEqual([])
-  })
-
-  it('the Board columns take their words from the mapping module', () => {
-    const source = read('../src/renderer/src/components/WorkspaceBoard.tsx')
-    const descriptions = descriptionExpressions(source, 'COLUMN_META')
-    expect(Object.keys(descriptions).sort()).toEqual([...PROJECT_BOARD_COLUMNS].sort())
-    for (const [column, expression] of Object.entries(descriptions)) {
-      expect(expression, `${column} must read the shared description`).toContain(
-        'BOARD_COLUMN_DESCRIPTIONS'
-      )
-    }
   })
 
   it('the Agents dock groups take the same words for the same two columns', () => {

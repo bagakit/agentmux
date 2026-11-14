@@ -576,14 +576,7 @@ const GUARD_EXCEPTIONS: ReadonlyArray<{ anchor: string; kind: 'fact' | 'debt'; r
       'event.target !== event.currentTarget 就退出，连子元素冒泡上来的按键都不接。' +
       '与 span:requestClose 同一类——按钮语义的激活键，不是提交草稿。'
   },
-  {
-    anchor: 'components/WorkspaceBoard.tsx::span:openRow',
-    kind: 'fact',
-    reason:
-      '事实豁免：Board 行首是 role=button 的 span，按 Enter/Space 打开这一行（openRow → 打开 Topic/' +
-      'workspace/worktree），行首里只有 strong/small 文本，没有任何可编辑元素，不承载文本草稿。' +
-      '与 span:requestClose / div:onSelect 同一类。'
-  }
+
 ]
 
 // debt 例外必须坐在这些文本编辑元素上、fact 例外必须不坐在上面。standalone/自结束标签的 tagName 都是裸元素名。

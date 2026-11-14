@@ -10,7 +10,7 @@ import { observeAgentSession, observationSummary } from '../src/renderer/src/lib
  * 收敛判定住在 Core 的 `@agentmux/core/agent-status`（observeAgent），渲染侧只经 observeAgentSession 把
  * SessionSnapshot 归一后喂给它——不新建第二套塌成 busy 的逻辑。这一族证两件事：
  *   1. 三条不折叠的轴（进程活性 / 语义活性 / 就绪性）从 SessionSnapshot 端到端各自可判、互不塌陷；
- *   2. 真实生产调用者——WorkspaceBoard 的 RunCard——确实走了这个投影（源码接线断言，排除定义文件）。
+ *   2. 真实生产调用者——SessionPane 的 ActivityView——确实走了这个投影（源码接线断言，排除定义文件）。
  *
  * 用源码断言钉接线，与本仓既有的 workspace-board.test.ts 同一口径：要证的是"某段渲染代码接到了这个
  * 投影"，纯函数全绿证明不了组件真的调了它。
@@ -45,7 +45,7 @@ function agentSession(overrides: Partial<Extract<SessionSnapshot, { kind: 'agent
 }
 
 describe('桌面消费者读同一份观察合同：三轴不折叠', () => {
-  it('进程 alive + semantic unknown + readiness pending 从 SessionSnapshot 端到端各自可判', () => {
+  it('原生待答请求与进程活性、就绪性从 SessionSnapshot 端到端各自可判', () => {
     const pending = observeAgentSession(
       agentSession({
         processState: 'running',
@@ -62,7 +62,7 @@ describe('桌面消费者读同一份观察合同：三轴不折叠', () => {
       NOW
     )
     expect(pending.process).toBe('running')
-    expect(pending.semantic).toBe('unknown')
+    expect(pending.semantic).toBe('awaiting-input')
     expect(pending.readiness).toBe('pending')
   })
 
@@ -137,14 +137,11 @@ describe('桌面消费者读同一份观察合同：三轴不折叠', () => {
   })
 })
 
-describe('真实生产调用者：WorkspaceBoard 的 RunCard 走了这个投影', () => {
-  const board = readFileSync(new URL('../src/renderer/src/components/WorkspaceBoard.tsx', import.meta.url), 'utf8')
-
-  it('RunCard 从共享 lib 导入并调用 observeAgentSession（排除定义文件本身）', () => {
-    // 接回本地手拼一份 busy 会让这两条红。定义文件是 agent-observation.ts；这里断言的是消费组件。
-    expect(board).toContain("from '../lib/agent-observation'")
-    expect(board).toContain('observeAgentSession(session, Date.now())')
-    // 三段读数确实被拼成用户可见文本落在渲染上，而不是算完丢弃。
-    expect(board).toContain('observationSummary(')
+describe('live Session conversation consumes the shared observation', () => {
+  it('passes the original Agent semantic observation into ActivityView', () => {
+    const source = readFileSync(new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url), 'utf8')
+    expect(source).toContain("from '../lib/agent-observation'")
+    expect(source).toContain("activitySemantic: session.kind === 'agent' ? observeAgentSession(session, Date.now()).semantic : 'unsupported'")
+    expect(source).toContain('<ActivityView {...activityProps}')
   })
 })

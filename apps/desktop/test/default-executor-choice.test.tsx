@@ -5,11 +5,9 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 import type { AppConfig } from '../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
-import { BoardDiscussionCanvas } from '../src/renderer/src/components/BoardDiscussionCanvas'
 import { defaultExecutorChoice } from '../src/renderer/src/lib/executors'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { primaryMoteExecutorChoice } from '../src/renderer/src/lib/primary-mote-executor'
-import type { BoardRow } from '../src/renderer/src/lib/project-board'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { executorDetectionKey, useAppStore, type ExecutorDetectionState } from '../src/renderer/src/store'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
@@ -58,15 +56,6 @@ it('Launcher keeps the remembered Workspace choice when correcting an unusable s
   useAppStore.setState({ executorDetections: detections({ claude: 'ready', codex: 'missing', gemini: 'ready' }) })
   await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)
   expect(launcherSelection()).toBe('Gemini')
-})
-
-it('Board discussion starts on the first ready Executor in configured order', async () => {
-  const workspace = config.workspaces[0]!
-  const row: BoardRow = { id: 'main', name: 'Main', path: workspace.path, workspace, kind: 'branch',
-    branch: { name: 'main', worktreePath: workspace.path, workspaceId: workspace.id, isCurrent: true },
-    runsByColumn: { inbox: [], working: [], 'needs-you': [], done: [] }, sessions: [], searchText: 'main' }
-  await dom.render(<BoardDiscussionCanvas row={row} anchor={workspace} onClose={vi.fn()} onOpenBranches={vi.fn()} />)
-  expect(document.querySelector('.discussion-provider-grid button[aria-pressed="true"] strong')?.textContent).toBe('Claude')
 })
 
 it('a new primary Mote without a remembered choice uses the same default', () => {

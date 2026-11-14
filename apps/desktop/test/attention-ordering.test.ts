@@ -177,8 +177,7 @@ const ORDERING_SSOT = 'lib/attention-event.ts'
 const ORDERING_CONSUMERS = [
   '../src/renderer/src/lib/agent-roster.ts',
   '../src/renderer/src/lib/quick-switch.ts',
-  '../src/renderer/src/lib/row-attention.ts',
-  '../src/renderer/src/lib/fanout-group.ts'
+  '../src/renderer/src/lib/row-attention.ts'
 ]
 
 function rendererSources(): string[] {

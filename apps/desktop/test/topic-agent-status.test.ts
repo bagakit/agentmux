@@ -488,7 +488,7 @@ describe('#409 头像的注意力取值必须画得出来', () => {
      * 控制）会被 `.project-rail-row` 前缀吞掉，于是判据对着一条合法规则报红。BEM 的 `__` 子元素
      * 是另一个东西，不是这个载体的一部分。
      */
-    const CARRIERS = ['status__dot', 'agent-avatar', 'board-run-card', 'project-rail-row']
+    const CARRIERS = ['status__dot', 'agent-avatar', 'project-rail-row']
     /** 类名以这个词结束（后面不再接 `-`、`_` 或别的词字符），才算命中这个载体本身。 */
     const carriesState = (selector: string): boolean =>
       CARRIERS.some((carrier) => new RegExp(`\\.${carrier}(?![\\w-])`, 'u').test(selector))

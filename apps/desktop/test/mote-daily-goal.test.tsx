@@ -313,7 +313,7 @@ it('Demand Supervisor: new Continue needs a saved responsible Supervisor while o
 })
 
 it('Demand Supervisor: finite start uses only the explicit responsible Session or unique assignee and never creates an Agent', async () => {
-  const launch = vi.spyOn(useAppStore.getState(), 'launchBoardAgent')
+  const launch = vi.spyOn(useAppStore.getState(), 'launchAgent')
   await demands.update('goal', { sessionIds: [session.agentSessionId, 'last-history-only'] })
   await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'unique-owner-start', operation: 'demand.start', demandId: 'goal' })).resolves.toMatchObject({ receipt: { sessionId: session.agentSessionId } })
   const before = [...writes]

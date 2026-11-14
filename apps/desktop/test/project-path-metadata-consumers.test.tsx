@@ -14,8 +14,6 @@ import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapsh
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { FocusProjectLanes } from '../src/renderer/src/components/FocusProjectLanes'
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
-import { WorkspaceBoard } from '../src/renderer/src/components/WorkspaceBoard'
-import { BoardDiscussionCanvas } from '../src/renderer/src/components/BoardDiscussionCanvas'
 import { GoalsCommonActions } from '../src/renderer/src/components/GoalsCommonActions'
 import { ConversationInputDetails } from '@agentmux/client-ui'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
@@ -24,10 +22,8 @@ import { LauncherResumePicker } from '../src/renderer/src/components/LauncherRes
 import { AttentionRequestPanel } from '../src/renderer/src/components/AttentionRequestPanel'
 import { ContinuousProgressControl } from '../src/renderer/src/components/ContinuousProgressControl'
 import { HostProjectsPane } from '../src/renderer/src/components/settings/HostProjectsPane'
-import { BoardRowsProvider } from '../src/renderer/src/hooks/useBoardRows'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { deriveFocusProjectLanes } from '../src/renderer/src/lib/focus-project-lanes'
-import { buildProjectBranchLanes } from '../src/renderer/src/lib/project-board'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { api } from '../src/renderer/src/lib/api'
@@ -112,23 +108,6 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     expect(element('.workspace-topic-entry .selector-row__identity small').textContent).toBe(expected)
     expect(mote.directoryPath).toBe(path)
     expect(topic.directoryPath).toBe(path)
-  })
-
-  it.each(modes)('Board row and discussion detail display one styled path: %j %s', async (host, absolute, expected) => {
-    const { workspace, session } = seed(host, absolute)
-    const snapshot = { kind: 'git-repository' as const, hostId: host.id, repoPath: path,
-      branches: [{ name: 'main', isCurrent: true, worktreePath: path, workspaceId: workspace.id }] }
-    vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue(snapshot)
-    const rows = buildProjectBranchLanes(snapshot, [workspace], [session])
-    expect(rows).toHaveLength(1)
-    await dom.render(<BoardRowsProvider enabled><WorkspaceBoard /></BoardRowsProvider>)
-    const small = element('.board-branch-head__identity small[title]')
-    expect([small.textContent, small.title]).toEqual([expected, expected])
-    await dom.render(<BoardDiscussionCanvas row={rows[0]!} anchor={workspace} onClose={() => {}} onOpenBranches={() => {}} />)
-    const detail = element('.discussion-canvas small[title]')
-    expect([detail.textContent, detail.title]).toEqual([expected, expected])
-    expect(api.workspaces.listBranches).toHaveBeenCalledWith('one')
-    expect(rows[0]!.path).toBe(path)
   })
 
   it.each(modes)('activity Zone styles its resource path and navigates the exact original workface: %j %s', async (host, absolute, expected) => {
