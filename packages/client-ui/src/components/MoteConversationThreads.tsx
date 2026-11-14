@@ -81,9 +81,10 @@ function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onE
   const [allReplies, setAllReplies] = useState(false)
   const [retry, setRetry] = useState(0), owner = useRef<object>({})
   const observed = useRef<{ key: string; read: MoteWorkReader; page: MoteDialoguePage | null; retry: number } | null>(null)
+  const canRead = visible && (visibility.visible || discovering)
   useEffect(() => {
     const lifetime = {}; owner.current = lifetime
-    if (!visible || !visibility.visible && !discovering) return
+    if (!canRead) return
     if (observed.current?.key === key && observed.current.read === read && observed.current.page === refreshSource && observed.current.retry === retry) return
     void Promise.all(event.sources.map(async source => {
       const value = await read(source), original = value.source.envelope
@@ -93,7 +94,7 @@ function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onE
     })).then(values => { if (owner.current === lifetime) { observed.current = { key, read, page: refreshSource, retry }; setState({ key, values, issue: null }) } })
       .catch(error => { if (owner.current === lifetime) setState(previous => ({ key, values: previous.key === key ? previous.values : [], issue: error instanceof Error ? error.message : String(error) })) })
     return () => { if (owner.current === lifetime) owner.current = {} }
-  }, [key, read, visible, visibility.visible, discovering, retry, refreshSource])
+  }, [key, read, canRead, retry, refreshSource])
   const selected = state.key === key ? state : { values: [], issue: null }
   const first = selected.values[0]?.value, summary = first?.source.envelope.body.split('\n').find(line => line.trim())
   const hasQuestion = selected.values.some(({ value }) => value.dispatch.events.some(event => event.kind === 'question' || event.kind === 'escalation'))
@@ -207,7 +208,7 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
       const shown = matches(event), heading = history && shown && previousDay !== day
       if (shown) previousDay = day
       return <li key={event.id} hidden={!shown} data-selected={open === event.id || undefined}>{heading ? <h3 className="mote-threads__day">{day}</h3> : null}
-        <WorkEventCard key={event.id} event={event} read={readWork} visible={visible} discovering={discovering && viewport.visible} memberName={memberName} onOpen={onOpenWork} refreshSource={page} onSummary={onSummary}
+        <WorkEventCard key={event.id} event={event} read={readWork} visible={visible && view === 'work'} discovering={discovering && viewport.visible} memberName={memberName} onOpen={onOpenWork} refreshSource={page} onSummary={onSummary}
           expanded={expanded.has(event.id)} onExpand={() => toggle(event.id)} detailHost={wide ? (open === event.id ? pane : null) : undefined} />
       </li>
     })}</ol>
