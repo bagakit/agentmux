@@ -1,0 +1,91 @@
+{
+  "name": "@agentmux/providers",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/bagakit/agentmux.git",
+    "directory": "packages/providers"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./antigravity/hook-response": {
+      "types": "./dist/antigravity/hook-response.d.ts",
+      "import": "./dist/antigravity/hook-response.js"
+    },
+    "./antigravity/launch-options": {
+      "types": "./dist/antigravity/launch-options.d.ts",
+      "import": "./dist/antigravity/launch-options.js"
+    },
+    "./antigravity/provider": {
+      "types": "./dist/antigravity/provider.d.ts",
+      "import": "./dist/antigravity/provider.js"
+    },
+    "./antigravity/native-history": {
+      "types": "./dist/antigravity/native-history.d.ts",
+      "import": "./dist/antigravity/native-history.js"
+    },
+    "./antigravity/native-session": {
+      "types": "./dist/antigravity/native-session.d.ts",
+      "import": "./dist/antigravity/native-session.js"
+    },
+    "./codex/launch-options": {
+      "types": "./dist/codex/launch-options.d.ts",
+      "import": "./dist/codex/launch-options.js"
+    },
+    "./claude/launch-options": {
+      "types": "./dist/claude/launch-options.d.ts",
+      "import": "./dist/claude/launch-options.js"
+    },
+    "./gemini/launch-options": {
+      "types": "./dist/gemini/launch-options.d.ts",
+      "import": "./dist/gemini/launch-options.js"
+    },
+    "./grok/launch-options": {
+      "types": "./dist/grok/launch-options.d.ts",
+      "import": "./dist/grok/launch-options.js"
+    },
+    "./traex/launch-options": {
+      "types": "./dist/traex/launch-options.d.ts",
+      "import": "./dist/traex/launch-options.js"
+    },
+    "./cursor/launch-options": {
+      "types": "./dist/cursor/launch-options.d.ts",
+      "import": "./dist/cursor/launch-options.js"
+    },
+    "./hermes/launch-options": {
+      "types": "./dist/hermes/launch-options.d.ts",
+      "import": "./dist/hermes/launch-options.js"
+    },
+    "./claude/usage": {
+      "types": "./dist/claude/usage.d.ts",
+      "import": "./dist/claude/usage.js"
+    },
+    "./codex/usage": {
+      "types": "./dist/codex/usage.d.ts",
+      "import": "./dist/codex/usage.js"
+    },
+    "./antigravity/acp-probe": {
+      "types": "./dist/antigravity/acp-probe.d.ts",
+      "import": "./dist/antigravity/acp-probe.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "json-rpc-2.0": "1.8.1"
+  }
+}

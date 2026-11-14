@@ -21,7 +21,7 @@ export async function inspectRuntimeApplicationPayload(repositoryRoot) {
   const manifest = JSON.parse(await readFile(join(desktop, 'package.json'), 'utf8'))
   const copies = [], generated = [], links = [], modes = []
   // Every workspace package is read with one npm call; installed packages ship as installed.
-  const packageFiles = await runtimePackageSelection(['capsule', 'demand', 'diagnostic-evidence', 'git', 'identity', 'relay']
+  const packageFiles = await runtimePackageSelection(['capsule', 'demand', 'diagnostic-evidence', 'git', 'identity', 'providers', 'relay']
     .map(name => join(repositoryRoot, 'packages', name)))
   const clone = (source, target) => copies.push({ source, target, clone: true })
   const copy = (source, target, recursive = false) => copies.push({ source, target, recursive })

@@ -1,6 +1,6 @@
 import { prepareCodexToolExecutionLaunch } from './codex-tool-execution-launch.js'
 import { prepareCodexExecutionHelper } from './codex-execution-helper.js'
-import { CODEX_USAGE_CAPABILITY } from './codex-usage.js'
+import { CODEX_USAGE_CAPABILITY } from '@agentmux/providers/codex/usage'
 import { planCodexQuestionReply } from './codex-question.js'
 import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'

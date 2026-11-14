@@ -13,7 +13,12 @@ export async function buildHookWorker(coreRoot = resolve(import.meta.dirname, '.
     entryPoints: [resolve(coreRoot, 'bin/agentmux-hook.js')], outfile,
     bundle: true, platform: 'node', format: 'esm', target: 'node24', write: false,
     metafile: true, logLevel: 'silent',
-    alias: { '@agentmux/identity': resolve(coreRoot, '../identity/src/index.ts') },
+    alias: {
+      '@agentmux/identity': resolve(coreRoot, '../identity/src/index.ts'),
+      '@agentmux/providers/antigravity/hook-response': resolve(coreRoot, '../providers/src/antigravity/hook-response.ts'),
+      '@agentmux/providers/claude/usage': resolve(coreRoot, '../providers/src/claude/usage.ts'),
+      '@agentmux/providers/codex/usage': resolve(coreRoot, '../providers/src/codex/usage.ts')
+    },
     plugins: [{ name: 'hook-entry-owner', setup(context) {
       context.onResolve({ filter: /^\.\.\/dist\/agent-hook-command\.js$/ }, () => ({ path: resolve(coreRoot, 'src/agent-hook-command.ts') }))
     } }]

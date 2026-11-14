@@ -1,6 +1,6 @@
 import { prepareClaudeToolExecutionLaunch } from './claude-tool-execution-launch.js'
 import { prepareClaudeExecutionHelper } from './claude-execution-helper.js'
-import { CLAUDE_USAGE_CAPABILITY } from './claude-usage.js'
+import { CLAUDE_USAGE_CAPABILITY } from '@agentmux/providers/claude/usage'
 import { inspectClaudeHookActivation } from './claude-hook-activation.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource, claudeRecoveryFiles } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'

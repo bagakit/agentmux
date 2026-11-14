@@ -1,4 +1,4 @@
-import { ANTIGRAVITY_PASSIVE_HOOK_RESPONSES } from './providers/antigravity-hook-response.js'
+import { ANTIGRAVITY_PASSIVE_HOOK_RESPONSES } from '@agentmux/providers/antigravity/hook-response'
 
 // Lightweight native contributions shared by the worker and its pre-load entry.
 const contributions: Readonly<Record<string, Readonly<Record<string, string>>>> = {

@@ -12,7 +12,7 @@ import {
   type AgentHookEventNameSource,
   type HookEventNamePayloadKey
 } from './agent-hook-event.js'
-import { usageTranscriptDecoder } from './providers/usage-transcript.js'
+import { usageTranscriptDecoder } from './provider-usage.js'
 import { isLeftoverHookInvocation } from './launch-scoped-hook.js'
 import { hookResponseFor } from './hook-passive-response.js'
 export { hookResponseFor } from './hook-passive-response.js'

@@ -706,6 +706,9 @@ importers:
       '@agentmux/identity':
         specifier: workspace:*
         version: link:../identity
+      '@agentmux/providers':
+        specifier: workspace:*
+        version: link:../providers
       '@agentmux/relay':
         specifier: workspace:*
         version: link:../relay
@@ -947,6 +950,19 @@ importers:
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
 
   packages/native-desktop:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  packages/providers:
+    dependencies:
+      json-rpc-2.0:
+        specifier: 1.8.1
+        version: 1.8.1
     devDependencies:
       '@types/node':
         specifier: ^24.0.0

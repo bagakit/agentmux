@@ -1,5 +1,20 @@
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
-import { createAntigravityProvider } from './antigravity.js'
+import { antigravityProvider } from '@agentmux/providers/antigravity/provider'
+import { createAntigravityAcpProbe } from '@agentmux/providers/antigravity/acp-probe'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
+import { antigravityNativeHistory } from '@agentmux/providers/antigravity/native-history'
+import { antigravityNativeSession } from '@agentmux/providers/antigravity/native-session'
+import { AgentMuxError } from '../errors.js'
+import { nativeProcessBirth, nativeProcessFiles } from '../agent-native-process.js'
+import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
+import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
+import { isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextHasSpeech, nativeTextTrim, type NativeText } from '../native-history-value.js'
+import { nativeTextBetween } from '../native-history-source.js'
+import { observeRead } from '../observation-read.js'
+import { AgentMuxRpcLines, isRpcId, rpcEncode } from '../public-rpc-frame.js'
+import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryObservation, AgentProviderSessionHistoryObservationContext, AgentSessionHistoryItem } from '../types.js'
+import { executionHomeDirectory, executionPath } from './execution-environment.js'
+import { catalog, hookCommandTimeout, hookToolFields, runScopedHookCommand } from './shared.js'
 import { createClaudeProvider } from './claude.js'
 import { createCodexProvider } from './codex.js'
 import { createCopilotProvider } from './copilot.js'
@@ -14,6 +29,30 @@ import { createPiProvider } from './pi.js'
 import { createTraexProvider } from './traex.js'
 
 export type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
+  const { catalog: seed, planManagedHooks, ...provider } = antigravityProvider({
+    formatHookToolOutput, hookToolFields, hookCommandTimeout, runScopedHookCommand
+  })
+  const { assertAntigravityHistorySource, readAntigravitySessionHistoryPage } =
+    antigravityNativeHistory<NativeText, AgentProviderSessionHistoryContext, AgentSessionHistoryItem>({
+      AgentMuxError, NativeJsonlHistoryReader, isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextHasSpeech,
+      nativeTextTrim, nativeTextBetween
+    })
+  const { discoverAntigravityNativeSession, observeAntigravitySessionHistory } =
+    antigravityNativeSession<AgentProviderSessionHistoryObservation, AgentProviderSessionHistoryObservationContext>({
+      AgentMuxError, nativeProcessBirth, nativeProcessFiles, observeNativeJsonlHistory, assertAntigravityHistorySource
+    })
+  return defineAgentProvider({
+    ...provider,
+    catalog: catalog(seed),
+    probeAcp: createAntigravityAcpProbe({ observeRead, AgentMuxRpcLines, isRpcId, rpcEncode }),
+    planManagedHooks: ({ env, workspacePath }) => planManagedHooks(executionPath(executionHomeDirectory(env), workspacePath)),
+    discoverNativeSession: discoverAntigravityNativeSession,
+    readSessionHistoryPage: readAntigravitySessionHistoryPage,
+    observeSessionHistory: observeAntigravitySessionHistory
+  })
+}
+
 /** Composition-only list. Provider-specific definitions live in their own modules. */
 export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory): readonly AgentProvider[] {
   return [
@@ -33,7 +72,6 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
   ]
 }
 
-export { createAntigravityProvider } from './antigravity.js'
 export { createClaudeProvider } from './claude.js'
 export { createCodexProvider } from './codex.js'
 export { createCopilotProvider } from './copilot.js'
