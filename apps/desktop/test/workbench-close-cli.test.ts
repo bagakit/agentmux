@@ -483,6 +483,41 @@ it.runIf(business).each(['Keep Session & Close', 'Stop & Close'])('actual GUI %s
   }
 })
 
+it.runIf(business).each(['missing', 'exited', 'successor'])('a real original Agent Stop ACK consumes only its unchanged View after the snapshot becomes %s', async observation => {
+  const f = await fixture(), actual = f.host.client.stopAgent.bind(f.host.client)
+  vi.spyOn(f.host.client, 'stopAgent').mockImplementationOnce(async (...args) => {
+    const receipt = await actual(...args)
+    const state = f.store.getState()
+    f.store.setState({ sessions: observation === 'missing' ? state.sessions.filter(s => s.id !== f.agent.agentSessionId)
+      : state.sessions.map(s => s.id !== f.agent.agentSessionId || s.control.kind !== 'agent' ? s : observation === 'exited' ? { ...s, processState: 'exited' as const }
+        : { ...s, control: { ...s.control, run: { runId: f.run.runId } } }) })
+    return receipt
+  })
+  const prepared = f.prepared(await f.cli('prepare', { operationId: 'retired-ack-' + observation,
+    target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: 'healthy-tab' }, keepAgentSessions: false }))
+  const result = await f.apply(prepared)
+  if (observation === 'successor') {
+    expect(result.code).toBe(1)
+    expect(f.store.getState().tabs['healthy-tab']?.regions['healthy-region']).toBeDefined()
+  } else {
+    expect(f.prepared(result)).toMatchObject({ outcome: 'applied', resources: [{ outcome: 'acknowledged', receipt: { agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run } }] })
+    expect(f.store.getState().tabs['healthy-tab']).toBeUndefined()
+  }
+  expect(f.stops).toHaveBeenCalledTimes(1)
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+  expect(f.store.getState().documents[f.key]?.content).toBe('Original unsaved content')
+})
+
+it.runIf(business)('loss of a namespace already confirmed by this Main is unknown rather than a missing operation or a complete empty list', async () => {
+  const f = await fixture(), prepared = f.prepared(await f.prepare('known-before-namespace-loss'))
+  await rm(f.user.path + '.close-operations', { recursive: true })
+  await expect(f.rpc.call('space.close.inspect', { operationId: prepared.operationId })).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_UNCONFIRMED' })
+  await expect(f.rpc.call('space.close.ls', {})).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_UNCONFIRMED' })
+  expect((await f.apply(prepared)).code).toBe(1)
+  expect(f.stops).not.toHaveBeenCalled()
+  expect(f.store.getState().tabs['target-tab']).toBeDefined()
+})
+
 it.runIf(Boolean(restartMode))('private restart worker restores the original workface and discovers retained close operations without replay', async () => {
   const f = await fixture()
   if (restartMode === 'writer') {
