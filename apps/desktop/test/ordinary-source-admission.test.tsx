@@ -49,6 +49,7 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
   let session: AgentMuxAgentSession | undefined, frozen: AgentExecutionOpenInput | undefined
   const input = vi.fn(async () => { throw Error('This admission proof never sends an Agent input.') })
   const d = {
+    readAgentInputEpoch: vi.fn(async (): Promise<string | undefined> => descriptionDenied ? undefined : 'original-route-cut'),
     resolveAgentCreationSessionId: vi.fn(async () => 'original-target-session'),
     inspectAgentCreation: vi.fn(async () => {
       if (!session) throw new AgentMuxError('The controlled executor has not returned a Session.', 'AGENT_CREATION_UNKNOWN')
@@ -129,6 +130,11 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
   const start = () => Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Launch')!
   await vi.waitFor(async () => { await act(async () => {}); expect(start().disabled, dom.container.textContent ?? '').toBe(false) })
   await act(async () => { start().click() })
+  await vi.waitFor(() => expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)).toBeDefined())
+  const birth = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)!
+  expect(birth.request.content).toMatchObject({ inputRuntimeId: 'runtime-D' })
+  if (descriptionDenied) expect(birth.request.content).not.toHaveProperty('inputEpoch')
+  else expect(birth.request.content).toHaveProperty('inputEpoch', 'original-route-cut')
   await vi.waitFor(() => expect(bindings.create,dom.container.textContent ?? '').toHaveBeenCalledOnce())
   await vi.waitFor(() => expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.receipt?.outcome).toBe('partial'))
   const original = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)!

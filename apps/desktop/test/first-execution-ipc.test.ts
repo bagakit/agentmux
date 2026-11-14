@@ -21,8 +21,31 @@ import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { AgentMuxControlServer as RealStorageControlServer } from '../../../packages/core/src/public-rpc-server'
+import { runDesktopStorageHostProbe } from './helpers/storage-recovery-host-probe'
 
 const initialRendererState = useAppStore.getState()
+
+it('the registered Main source export is consumed by a second real Host adapter process and releases only its copies', async () => {
+  const f = await owningBridge(), directory = await mkdtemp('/tmp/amux-real-host-source-'), socket = join(directory, 'desktop.sock')
+  const server = new RealStorageControlServer({ socketPath: socket, ...(bridge.storageRecoveryExports ? { storageRecoveryExports: bridge.storageRecoveryExports } : {}) })
+  const original = JSON.stringify({ version: 1, state: { agentComposerDrafts: { 'original-region': 'Original private unsent input' } } })
+  try {
+    await bridge.api!.ui.writeWorkbenchState(original)
+    await server.start()
+    const child = await runDesktopStorageHostProbe(directory, socket)
+    expect(child.code, child.stderr).toBe(0)
+    const result = JSON.parse(child.stdout)
+    expect(result.pid).not.toBe(process.pid)
+    expect(result.result.members).toContainEqual(expect.objectContaining({ id: 'desktop.user-state/document', target: f.workbenchUserState.path }))
+    expect(result.bodies).toContain(original)
+    expect(await f.workbenchUserState.read()).toBe(original)
+    const { readdir } = await import('node:fs/promises')
+    expect(await readdir(f.workbenchUserState.path + '.recovery-exports')).toEqual([])
+    expect(f.client.ensureAgentContinuity).not.toHaveBeenCalled()
+    expect(f.client.submitAgentPrompt).not.toHaveBeenCalled()
+  } finally { await server.stop(); await f.dispose(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 }) }
+}, 40_000)
 const initialLauncherState = useLauncherState.getState()
 let disposePreview: (() => void) | undefined
 beforeAll(async () => { disposePreview = await useAppStore.getState().initialize() })

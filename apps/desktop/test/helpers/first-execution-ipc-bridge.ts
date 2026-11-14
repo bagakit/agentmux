@@ -17,8 +17,10 @@ import { WorkspaceFiles } from '../../src/main/workspace-files'
 import { LocalExecutionHost } from '@agentmux/core'
 import { RuntimeController } from '../../src/main/runtime-controller'
 import { WorkbenchUserStateStore } from '../../src/main/workbench-user-state'
+import { WorkbenchWindowStore } from '../../src/main/workbench-window-store'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
+  storageRecoveryExports: undefined as import('@agentmux/core').StorageRecoveryExportsPort | undefined,
   publicCoreEndpointPath: undefined as string | undefined,
   directory: '', goals: new Map<string, { id: string }>(), invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, Set<(...args: unknown[]) => void>>(),
@@ -61,7 +63,9 @@ vi.mock('@agentmux/native-desktop', async importOriginal => {
   } }
 })
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
-  AgentMuxControlServer: class { readonly path = bridge.publicCoreEndpointPath; async start() {} async stop() {} }
+  AgentMuxControlServer: class { readonly path = bridge.publicCoreEndpointPath;
+    constructor(options: { storageRecoveryExports?: import('@agentmux/core').StorageRecoveryExportsPort }) { bridge.storageRecoveryExports = options.storageRecoveryExports }
+    async start() {} async stop() {} }
 }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ subscribe: () => () => {},
   get: async (id: string) => bridge.goals.get(id) ?? null,
@@ -106,14 +110,14 @@ afterAll(async () => {
 
 export const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'private-agent', run: { runId: 'old-run' } }
 
-export async function owningBridge(actual?: { client: DesktopRuntimeClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[]; publicCoreEndpointPath?: string; spatialStatePath?: string }, options?: { filesWorkspace?: boolean; scratchWorkspace?: boolean }) {
+export async function owningBridge(actual?: { client: DesktopRuntimeClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[]; publicCoreEndpointPath?: string; spatialStatePath?: string }, options?: { filesWorkspace?: boolean; scratchWorkspace?: boolean; publicCoreEndpointPath?: string }) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-first-execution-ipc-"))
   const previousInitializations = new Set(bridge.notesInitializations)
   isolateCoreFixtureEnvironment(actual ? dirname(actual.client.agentMessageQueuePath()) : root)
   if (actual) vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', actual.client.agentMessageQueuePath())
   if (actual?.spatialStatePath) vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', actual.spatialStatePath)
   bridge.directory = root
-  bridge.publicCoreEndpointPath = actual?.publicCoreEndpointPath
+  bridge.publicCoreEndpointPath = actual?.publicCoreEndpointPath ?? options?.publicCoreEndpointPath
   bridge.goals.clear(); for (const goal of actual?.goals ?? []) bridge.goals.set(goal.id, structuredClone(goal))
   await mkdir(join(root, 'Local Storage', 'leveldb'), { recursive: true })
   if (options?.scratchWorkspace) await mkdir(join(root, 'scratch'))
@@ -167,7 +171,7 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
   })()
   try { release = await registerIpc({ workbenchUserState, appDocumentSources: () => ({ current: { mode: 'prod', filePath: appFilePath }, loading: null }), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
-    workbenchWindows: { setNativeOwner: () => () => {} } as never, applicationAccess: {} as never,
+    workbenchWindows: { setNativeOwner: () => () => {}, recoverySource: () => new WorkbenchWindowStore(join(root, 'workbench-windows.json')).recoverySource() } as never, applicationAccess: {} as never,
     scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }
   catch (error) {
     try { await dispose() } catch (cleanup) { throw new AggregateError([error, cleanup], 'Private IPC setup and cleanup failed') }

@@ -10,7 +10,8 @@ if (mode === '--reliability-input' || mode === '--reliability-spatial-window') {
   process.exit(0)
 }
 if (!['--owner', '--checkpoint', '--auxiliary', '--restart'].includes(mode)) throw Error('Choose --owner, --checkpoint, --auxiliary, --restart or --reliability-input/--reliability-spatial-window')
-const evidence = resolve(root, '.local/durable-workbench-user-state', mode.slice(2))
+const evidence = process.env.AGENTMUX_DURABLE_WORKBENCH_EVIDENCE
+  ? resolve(process.env.AGENTMUX_DURABLE_WORKBENCH_EVIDENCE) : resolve(root, '.local/durable-workbench-user-state', mode.slice(2))
 mkdirSync(evidence, { recursive: true })
 const receipts = []
 function suite(label, config, { env = {}, file, test, failure } = {}) {

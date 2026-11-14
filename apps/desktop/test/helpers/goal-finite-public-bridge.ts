@@ -29,6 +29,7 @@ export function installGoalFinitePublicBridge(rpc:AgentMuxRpcClient){
   assertAppDocumentSender(event,sender as never,{current:{mode:'prod',filePath:'/private-goal/index.html'},loading:null})
   requests.push({channel,input:structuredClone(args[0])})
   if(channel==='goals:execute')return await control(parseAgentMuxControlRequest(args[0]))
+  if(channel==='demands:inputEpoch')return await runtime.callOriginalCore('local','goal.input.epoch',args[0] as never,{})
   if(channel==='demands:list')return await readDesktopGoals(runtime)
   // Original demands:inspectDispatch registration reads this same public Goal;
   // delivery is the controlled Electron leaf, not a replacement input owner.

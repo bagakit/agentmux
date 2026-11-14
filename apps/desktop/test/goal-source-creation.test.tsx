@@ -50,7 +50,7 @@ async function fixture(sourceCarrier = 'B-in-A') {
   let session: AgentMuxAgentSession | undefined, frozen: AgentExecutionOpenInput | undefined
   const locatorWorkspacePath = '/D/agent-workspaces/' + 'a'.repeat(64)
   const forbidden = vi.fn(async () => { throw Error('Creation sends no task or navigation input.') })
-  const d = { resolveAgentCreationSessionId: vi.fn(async () => 'same-SID'), inspectAgentCreation: vi.fn(async () => {
+  const d = { readAgentInputEpoch: vi.fn(async (): Promise<string | undefined> => 'original-D-cut'), resolveAgentCreationSessionId: vi.fn(async () => 'same-SID'), inspectAgentCreation: vi.fn(async () => {
     if (!session) throw new AgentMuxError('The original creation is absent.', 'AGENT_CREATION_UNKNOWN'); return session
   }), listHostExecutors: vi.fn(async () => ({ runtimeId: 'D', executors: [executor] })), hostEnvironment: vi.fn(async (selector?: { agentSessionId: string }) => selector ? {
     homeDirectory: '/D/home', agentWorkspace: { runtimeId: 'D', agentSessionId: selector.agentSessionId, workspacePath: locatorWorkspacePath }
@@ -78,6 +78,7 @@ async function fixture(sourceCarrier = 'B-in-A') {
       return { ...created, execution: await bindings.inspect(frozen.bindingId) }
     }) }
   const local = { ...d, agentCreationAuthority: vi.fn(async () => ({ runtimeId: 'B' })),
+    readAgentInputEpoch: vi.fn(async (): Promise<string | undefined> => 'original-B-cut'),
     listHostExecutors: vi.fn(async (selector?: { executorId?: string }) => ({ runtimeId: 'B', executors: [{ ...executor, configRevision: 'B-revision', label: 'Original B configuration' },
       ...(selector?.executorId === 'codex' ? [{ ...executor, executorId: 'codex', configRevision: 'B-codex-revision', label: 'Codex' }] : [])] })),
     createHostAgentWithDelivery: vi.fn(async (input: { agentSessionId: string; createOperationId: string; executorId: string; executorRevision?: string; workspacePath: string }) => {
@@ -119,6 +120,9 @@ it.each([{ carrier: 'local', agent: 'local' }, { carrier: 'local', agent: 'D-in-
   await vi.waitFor(() => expect(document.querySelector('[aria-label="New Goal Agent configuration"]')?.textContent).toContain(agent === 'local' ? 'Original B configuration' : 'Original D configuration'))
   await vi.waitFor(() => expect([...document.querySelectorAll<HTMLButtonElement>('.goal-agent-picker button')].find(value => value.textContent === 'Create Agent')?.disabled).toBe(false))
   expect(f.bindings.create).not.toHaveBeenCalled(); await button('Create Agent')
+  await vi.waitFor(() => expect(readGoalSourceCreationDraft(useAppStore.getState().goalAgentCreationDrafts[key], goal.id, 'assignees')).toBeDefined())
+  const birth = readGoalSourceCreationDraft(useAppStore.getState().goalAgentCreationDrafts[key], goal.id, 'assignees')!
+  expect(birth.request, birth.issue).toMatchObject({ content: { inputRuntimeId: agent === 'local' ? 'B' : 'D', inputEpoch: agent === 'local' ? 'original-B-cut' : 'original-D-cut' } })
   await vi.waitFor(() => expect(agent === 'local' ? f.local.createHostAgentWithDelivery : f.bindings.create).toHaveBeenCalledOnce())
   await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker__search')).not.toBeNull())
   const draft = readGoalSourceCreationDraft(useAppStore.getState().goalAgentCreationDrafts[key], goal.id, 'assignees')!
@@ -135,6 +139,32 @@ it.each([{ carrier: 'local', agent: 'local' }, { carrier: 'local', agent: 'D-in-
   expect(f.frozen?.agent.prompt).toBeUndefined(); expect(f.forbidden).not.toHaveBeenCalled(); expect(oldMain).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts); expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+})
+
+it.each([undefined, 'restored-B-cut'])('a denied namespace observation keeps the original Runtime pin and lets its owner decide cut %s before any Start', async cut => {
+  const f = await fixture(), originalCall = vi.mocked(api.spaceMounts.call).getMockImplementation()!
+  f.local.readAgentInputEpoch.mockResolvedValue(cut)
+  const reads = vi.fn()
+  vi.mocked(api.spaceMounts.call).mockImplementation(async (method, input, signal) => {
+    if (method === 'describe' && 'executionOnly' in input && input.executionOnly) { reads(); throw new AgentMuxError('Original qualification reader denied', 'CONTROL_PERMISSION_DENIED') }
+    return await originalCall(method, input, signal)
+  })
+  await dom.render(<GoalAgentPicker demand={goal} role="assignees" onSave={async () => false} onClose={() => {}} />)
+  await prepareProject(f, JSON.stringify(['host', 'local'])); await button('Create Agent')
+  await vi.waitFor(() => expect(readGoalSourceCreationDraft(useAppStore.getState().goalAgentCreationDrafts[key], goal.id, 'assignees')).toBeDefined())
+  const draft = readGoalSourceCreationDraft(useAppStore.getState().goalAgentCreationDrafts[key], goal.id, 'assignees')!
+  expect(draft.request).toMatchObject({ content: { inputRuntimeId: 'B' } }); expect(draft.request.content).not.toHaveProperty('inputEpoch')
+  expect(reads).toHaveBeenCalledOnce()
+  if (cut === undefined) {
+    await vi.waitFor(() => expect(f.local.createHostAgentWithDelivery).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(readGoalSourceCreationDraft(useAppStore.getState().goalAgentCreationDrafts[key], goal.id, 'assignees')).toHaveProperty('receipt'))
+    expect(readGoalSourceCreationDraft(useAppStore.getState().goalAgentCreationDrafts[key], goal.id, 'assignees')!.issue).toBeUndefined()
+  } else {
+    await vi.waitFor(() => expect(document.body.textContent).toContain('earlier or unconfirmed storage cut'))
+    expect(f.local.createHostAgentWithDelivery).not.toHaveBeenCalled()
+  }
+  expect(f.bindings.create).not.toHaveBeenCalled(); expect(f.forbidden).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Keep unsent input')
 })
 
 it('an unsupported selected locator keeps the Goal request and composer draft without admission or a home retry', async () => {
@@ -155,6 +185,7 @@ it('an unsupported selected locator keeps the Goal request and composer draft wi
 
 it('an original Reach C with an unknown ACK is inspected and explicitly continued through the same Main reference before the actual Source L, without a Launcher slot or repeated creation', async () => {
   const f = await fixture(), originalSpaceCall = vi.mocked(api.spaceMounts.call).getMockImplementation()!
+  const epoch = vi.spyOn(api.sessions, 'readInputEpoch').mockResolvedValue('original-coordinator-cut')
   vi.spyOn(api.sessions, 'executionCoordinatorTarget').mockResolvedValue({ hostId: 'local', runtimeId: 'A' })
   vi.spyOn(api.hosts, 'home').mockResolvedValue({ routeHostId: 'local', homeDirectory: '/A/original-home' })
   vi.mocked(api.spaceMounts.call).mockImplementation(async (method, input, signal) => method === 'executors' && 'hostId' in input && input.hostId === 'local'
@@ -174,6 +205,9 @@ it('an original Reach C with an unknown ACK is inspected and explicitly continue
   const save = vi.fn(async () => false), render = () => dom.render(<GoalAgentPicker demand={goal} role="assignees" onSave={save} onClose={() => {}} />)
   await render(); await prepareProject(f, 'independent-coordinator'); await button('Create Agent')
   await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+  expect(request.inputEpoch).toBe('original-coordinator-cut')
+  expect(request.inputRuntimeId).toBe('A')
+  expect(epoch).toHaveBeenCalledExactlyOnceWith('local')
   await vi.waitFor(() => expect(document.body.textContent).toContain('Original Main ACK lost'))
   expect(request).toMatchObject({ hostId: 'local', workspacePath: '/A/original-home', executorId: 'A-selected', executorRevision: 'A-revision',
     toolWorkspace: { id: f.observerProject.id, hostId: 'B-in-A', path: '/B/original-project' }, sourceCoordinator: { runtimeId: 'A', resourceRuntimeId: 'B', workingDirectory: 'device-home' } })

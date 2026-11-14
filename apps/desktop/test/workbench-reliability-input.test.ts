@@ -3,7 +3,6 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 import { durableWriteFile } from '@agentmux/core'
 import { createBatchedPersistentStorage, USER_SAVE_REPLY_MS } from '../src/renderer/src/lib/persisted-ui-writer'
@@ -86,13 +85,9 @@ it('a second real process reads the exact latest original input after owner reco
   const f = await fixture(), owner = new WorkbenchUserStateStore(f.path), frame = {}
   await owner.writeFromRenderer(frame, { value: bytes('durable authored draft and original queue'), writeRevision: 2 }, () => true)
   await expect(owner.writeFromRenderer(frame, { value: bytes('late old'), writeRevision: 1 }, () => true)).rejects.toThrow()
-  const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild')
   const worker = join(f.root, 'reader.mjs')
-  await build({ stdin: { resolveDir: process.cwd(), contents: `import { WorkbenchUserStateStore } from './apps/desktop/src/main/workbench-user-state.ts'; const value=await new WorkbenchUserStateStore(process.argv[2]).read(); process.stdout.write(JSON.stringify({pid:process.pid,value}));` },
-    outfile: worker, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
-    alias: { '@agentmux/core': resolve('packages/core/src/durable-write.ts'), '@agentmux/core/object-avatar': resolve('packages/core/src/object-avatar.ts'), '@agentmux/core/mote-avatar-series': resolve('packages/core/src/mote/avatar-series.ts'), '@agentmux/identity': resolve('packages/identity/src/index.ts') },
-    banner: { js: "import {createRequire as readerCreateRequire} from 'node:module'; const require=readerCreateRequire(import.meta.url);" } })
-  const child = spawnSync(process.execPath, [worker, f.path], { encoding: 'utf8', timeout: 10000 })
+  await writeFile(worker, `import { WorkbenchUserStateStore } from ${JSON.stringify(resolve('apps/desktop/src/main/workbench-user-state.ts'))}; const value=await new WorkbenchUserStateStore(process.argv[2]).read(); process.stdout.write(JSON.stringify({pid:process.pid,value}));`)
+  const child = spawnSync(process.execPath, ['--import', resolve('packages/core/scripts/helpers/core-source-loader.mjs'), worker, f.path], { encoding: 'utf8', timeout: 20000 })
   expect(child.status, child.stderr).toBe(0)
   const observed = JSON.parse(child.stdout)
   expect(observed.pid).not.toBe(process.pid); expect(observed.value).toBe(bytes('durable authored draft and original queue'))

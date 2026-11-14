@@ -1,8 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
 const fault = vi.hoisted(() => ({ directorySync: false, calls: 0, directory: null as string | null }))
 vi.mock('node:fs/promises', async original => {
@@ -97,14 +96,9 @@ it('a new operation namespace requires its original parent ACK again after an un
 it('second real process restores the same confirmed window and Browser Region reference', async () => {
   const root = await fixture(), path = join(root, 'windows.json'), owner = new WorkbenchWindowStore(path)
   await owner.save(arrangement)
-  const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild')
   const worker = join(root, 'read-window.mjs')
-  await build({ stdin: { resolveDir: process.cwd(), contents: `import {WorkbenchWindowStore} from './apps/desktop/src/main/workbench-window-store.ts';process.stdout.write(JSON.stringify({pid:process.pid,result:await new WorkbenchWindowStore(process.argv[2]).load()}));` },
-    outfile: worker, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
-    alias: { '@agentmux/core/object-id': resolve('packages/core/src/object-id.ts'), '@agentmux/core/control': resolve('packages/core/src/control.ts'),
-      '@agentmux/core': resolve('packages/core/src/durable-write.ts'), '@agentmux/identity': resolve('packages/identity/src/index.ts') },
-    banner: { js: "import {createRequire as windowReaderRequire} from 'node:module';const require=windowReaderRequire(import.meta.url);" } })
-  const processRead = spawnSync(process.execPath, [worker, path], { encoding: 'utf8', timeout: 10000 })
+  await writeFile(worker, `import {WorkbenchWindowStore} from ${JSON.stringify(resolve('apps/desktop/src/main/workbench-window-store.ts'))};process.stdout.write(JSON.stringify({pid:process.pid,result:await new WorkbenchWindowStore(process.argv[2]).load()}));`)
+  const processRead = spawnSync(process.execPath, ['--import', resolve('packages/core/scripts/helpers/core-source-loader.mjs'), worker, path], { encoding: 'utf8', timeout: 20000 })
   expect(processRead.status, processRead.stderr).toBe(0)
   const actual = JSON.parse(processRead.stdout); expect(actual.pid).not.toBe(process.pid); expect(actual.result).toEqual({ state: arrangement, writable: true, issue: null })
 })

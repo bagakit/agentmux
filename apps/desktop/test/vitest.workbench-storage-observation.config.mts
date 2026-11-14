@@ -1,8 +1,10 @@
 import { defineConfig } from 'vitest/config'
 import base from './vitest.mote-context.config.mts'
-import { relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.AGENTMUX_STORAGE_OBSERVATION_MUTATION
 const adjacent = !!process.env.AGENTMUX_STORAGE_OBSERVATION_ADJACENT
@@ -15,7 +17,7 @@ export default defineConfig({ ...base, cacheDir: resolve(root, '.tmp/workbench-s
     let anchor: string | undefined, replacement: string | undefined
     if (file === 'apps/desktop/src/renderer/src/store.ts') {
       if (mutation === 'hide-renderer-pending') {
-        anchor = 'userStatePending: persistentWorkbenchStorage.pending()'; replacement = 'userStatePending: false'
+        anchor = 'userStatePending: (false ? persistentWorkbenchStorage.pending() : desktopUserDocument.pending()) || auxiliaryUserDataPending()'; replacement = 'userStatePending: false'
       }
       if (mutation === 'trust-equal-spatial') { anchor = '!coreSpatialPersistence.pendingChanges &&'; replacement = '' }
     }
@@ -36,7 +38,28 @@ export default defineConfig({ ...base, cacheDir: resolve(root, '.tmp/workbench-s
         mutated: !!anchor, originalSha256: hash(original), loadedSha256: hash(source) }) + '\n')
     }
     return { code: source, map: null }
-  } }],
+  } }, {
+    // Vite happy-dom normalizes import.meta.url to a browser location. This
+    // original Node script must retain its own exact file URL; its native
+    // reader/path validation and every business assertion remain unchanged.
+    name: 'original-node-script-source-url', enforce: 'pre', transform(source, id) {
+      const target = resolve(root, 'apps/desktop/scripts/package-runtime-upgrade.mjs')
+      if (id.split('?')[0] !== target) return null
+      const raw = readFileSync(target, 'utf8'), hash = (value: string) => createHash('sha256').update(value).digest('hex')
+      const count = source.split('import.meta.url').length - 1
+      assert.equal(count, 2, 'Keep the two original Node source-URL expressions')
+      const sourceURL = pathToFileURL(target).href, loaded = source.replaceAll('import.meta.url', JSON.stringify(sourceURL))
+      const trace = process.env.AGENTMUX_RESTART_SOURCE_URL_TRACE
+      if (trace) {
+        assert.ok(isAbsolute(trace), 'Use an explicit source-URL evidence path')
+        appendFileSync(trace, JSON.stringify({ pid: process.pid, path: target, sourceURL,
+          rawSourceSHA256: hash(raw), beforeSourceSHA256: hash(source), loadedSHA256: hash(loaded),
+          importMetaURLCount: count, mutation: mutation ?? null,
+          purpose: 'Same original Node source URL; fileURLToPath and native-reader path logic are unchanged.' }) + '\n', { mode: 0o600 })
+      }
+      return { code: loaded, map: null }
+    }
+  }],
   test: { ...base.test, ...(adjacent ? { environment: 'happy-dom' } : {}), include: adjacent ? ['apps/desktop/test/workbench-storage-authority.test.ts',
     'apps/desktop/test/desktop-client-observation.test.ts']
     : ['apps/desktop/test/workbench-storage-observation.test.ts', 'apps/desktop/test/package-install-workbench-continuity.test.ts'], passWithNoTests: false }

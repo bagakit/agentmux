@@ -380,14 +380,18 @@ describe('Launcher native conversation resume', () => {
 
   it('keeps the exact native operation and Session ID when an unknown result is retried', async () => {
     vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => nativeCatalog(input))
+    const epoch = vi.spyOn(api.sessions, 'readInputEpoch').mockResolvedValue('original-import-cut')
     const resume = vi.fn().mockRejectedValue(new Error('Native resume acknowledgement is unknown'))
     await open([], { resumeNativeSession: resume })
     await click(button('Resume Session', dialog()))
     const first = resume.mock.calls[0][0]
+    expect(first.inputEpoch).toBe('original-import-cut')
     expect(dialog().textContent).toContain('acknowledgement is unknown')
     expect(options()).toHaveLength(1)
+    epoch.mockResolvedValue('later-import-cut')
     await click(button('Resume Session', dialog()))
     expect(resume.mock.calls[1][0]).toEqual(first)
+    expect(epoch).toHaveBeenCalledExactlyOnceWith('local')
     expect(useAppStore.getState().agentComposerDrafts['launcher-region']).toBe('UNSENT DRAFT')
   })
 
