@@ -1,3 +1,8 @@
+import { useMountedFocusClock } from '../lib/use-mounted-focus-clock'
+import { spaceMountKey } from '../../../shared/space-mount'
+import { mountedSessionFacts } from '../lib/space-mount-sessions'
+import { mountedFocusActivity, mountedFocusMatches, mountedFocusTextMatches, mountedFocusProjectKey } from '../lib/mounted-focus-presentation'
+import { mountedSpaceInputs, mountedSpaceTarget, mountedSpaceRegions } from '../lib/space-mount-view'
 import { SpaceSourceReaders } from './SpaceSourceReaders'
 import { LocalRetainedInputsPanel } from './LocalRetainedInputs'
 import { MountedSpaceFocus } from './MountedSpaceFocus'
@@ -356,16 +361,46 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     measure([], observer)
     return () => { active = false; observer.disconnect() }
   }, [visible, documentActive, hasBoardCards, hasBoardLanes])
+  const mountedInputs = useAppStore(state => state.mountedSpaceInputs)
+  const mountedObservations = useAppStore(state => state.mountedSpaceObservations)
+  const mountedSessions = useAppStore(state => state.mountedSpaceSessions)
+  const mountedNow = useMountedFocusClock(mountedSessions, visible && documentActive)
+  const mountedProjects = useMemo(() => {
+    const result: Array<{ id: string; name: string; hostId: string; target: NonNullable<ReturnType<typeof mountedSpaceTarget>>; snapshot: typeof mountedObservations[string]['snapshot'] }> = []
+    try { for (const key of Object.keys(mountedSpaceInputs(mountedInputs))) {
+      try {
+        const target = mountedSpaceTarget(mountedInputs, key)
+        if (!target) continue
+        const observation = mountedObservations[key], snapshot = observation?.snapshot?.scope.space ? observation.snapshot : observation?.lastPresentSnapshot
+        result.push({ id: mountedFocusProjectKey(target), name: snapshot?.scope.space?.name ?? 'Connected Space', hostId: target.hostId,
+          target, snapshot })
+      } catch { /* An unreadable original reference stays with its existing service notice. */ }
+    } } catch { /* The original input owner reports storage failure. */ }
+    return result
+  }, [mountedInputs, mountedObservations])
   const projectOptions = useMemo(() => {
     const options = [...new Map([...filterLanes.map(lane => ({ id: focusLaneProjectKey(lane), name: lane.labels[0]!, hostId: lane.hostId })),
-      ...retainedProjects.map(item => ({ id: item.key, name: item.name, hostId: item.hostId }))].map(item => [item.id, item])).values()]
+      ...retainedProjects.map(item => ({ id: item.key, name: item.name, hostId: item.hostId })), ...mountedProjects].map(item => [item.id, item])).values()]
     const names = new Map<string, number>(), hosts = new Map(config?.hosts.map(host => [host.id, host.label]))
     for (const item of options) names.set(item.name, (names.get(item.name) ?? 0) + 1)
     return options.map(item => ({ ...item, name: names.get(item.name)! > 1 ? `${item.name} · ${hosts.get(item.hostId) || item.hostId}` : item.name }))
-  }, [filterLanes, retainedProjects, config?.hosts])
+  }, [filterLanes, retainedProjects, config?.hosts, mountedProjects])
   // Facets reuse the same supplied observations, with only their own dimension
   // excluded. No history reads, owner writes or unrelated-session queries.
   const projectCounts = new Map<string, number>(), stateCounts = new Map<import('../lib/focus-filters').FocusStateFilter, number>(), typeCounts = new Map<FocusSourceType, number>()
+  for (const project of mountedProjects) {
+    const snapshot = project.snapshot, metadata = mountedSessions[spaceMountKey(project.target.reference)]
+    const members = mountedSessionFacts(snapshot, metadata)
+    for (const member of snapshot ? mountedSpaceRegions(snapshot) : []) {
+      if (!member.region.agentSessionId || !mountedFocusTextMatches(member, snapshot, query)) continue
+      const activity = mountedFocusActivity(members.get(member.key), mountedNow)
+      if (mountedFocusMatches({ ...filters, projects: [] }, project.target, snapshot, activity)) projectCounts.set(project.id, (projectCounts.get(project.id) ?? 0) + 1)
+      if (mountedFocusMatches({ ...filters, states: [] }, project.target, snapshot, activity)) for (const state of FOCUS_FILTER_STATES) {
+        if (mountedFocusMatches({ ...filters, states: [state.id] }, project.target, snapshot, activity)) stateCounts.set(state.id, (stateCounts.get(state.id) ?? 0) + 1)
+      }
+      if (mountedFocusMatches({ ...filters, types: [] }, project.target, snapshot, activity) && snapshot?.scope.space?.kind === 'folder') typeCounts.set('project', (typeCounts.get('project') ?? 0) + 1)
+    }
+  }
   for (const row of searched) {
     const keys = projectsForRow(row), types = typesForRow(row)
     const projectMatch = filters.projects.length === 0 || keys.some(key => focusMatchesProject(key, filters.projects)), typeMatch = focusMatchesTypes(types, filters.types), stateMatch = focusMatchesState(row, filters.states)
@@ -471,7 +506,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     </FocusToolbar>
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main" data-agent-reveal={agentReveal ? true : undefined}>
-      <MountedSpaceFocus visible={visible} query={query} />
+      <MountedSpaceFocus visible={visible} query={query} filters={filters} now={mountedNow} />
       <OrdinarySpaceMemberFocus visible={visible} query={query} onSelect={reference => {
         if (onSelectLocation) onSelectLocation(reference)
         else {
@@ -497,7 +532,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       }} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
       <FocusHistorySearch search={historySearch} active={visible} />
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => openMoteContext(pmoAttention[0]!)}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context</span></button> : null}
-      {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
+      {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && mountedProjects.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes && !leadingResults || undefined}>
             {hasBoardLanes || leadingResults ? <FocusProjectLanes resourceMenus leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} cardMetrics={laneMetrics} replyLines={replyLines} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={displayedCurrentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}

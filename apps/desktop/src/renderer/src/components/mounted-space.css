@@ -77,3 +77,26 @@
 .mounted-space-agent__inputs p { margin:0; line-height:1.6; }
 .mounted-space-agent__inputs pre { margin:0; max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
 .mounted-space-agent__inputs button { justify-self:start; }
+
+/* Source membership shares Focus card language without entering the local Session store. */
+.mounted-space-focus .mounted-space-focus__source { border:0; border-radius:0; }
+.mounted-space-focus .mounted-space-focus__source > header { padding:4px 0 10px; font-size:12px; }
+.mounted-space-focus .mounted-space-focus__source > header > strong { overflow-wrap:anywhere; }
+.mounted-space-focus__agents { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); gap:8px; }
+.mounted-space-focus__agents > li { min-width:0; border:1px solid var(--line-soft); border-radius:6px; background:var(--surface-0); }
+.mounted-space-focus .mounted-space-focus__member { border:0; border-radius:6px; padding:10px; min-width:0; }
+.mounted-space-focus .focus-context__identity { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.mounted-space-focus .focus-context__identity strong { flex:1 1 140px; min-width:0; overflow-wrap:anywhere; }
+.mounted-space-focus .focus-context__state { display:inline-flex; align-items:center; gap:4px; }
+.mounted-space-focus .mounted-space-focus__member .focus-context__state small { position:static; width:auto; height:auto; overflow:visible; clip-path:none; white-space:normal; }
+.mounted-space-focus .focus-context__copy { display:grid; gap:6px; min-width:0; }
+.mounted-space-focus .focus-context__detail { color:var(--text-3); font-size:11px; overflow-wrap:anywhere; }
+.mounted-space-focus__identity { padding:0 10px 8px; font-size:11px; color:var(--text-3); }
+.mounted-space-focus__identity summary, .mounted-space-focus__resources summary { cursor:pointer; padding:5px 0; }
+.mounted-space-focus__identity[open] { display:block; }
+.mounted-space-focus__identity small { display:block; margin-top:4px; }
+.mounted-space-focus__resources { margin-top:8px; font-size:12px; color:var(--text-3); }
+.mounted-space-focus__resource { display:flex; gap:12px; align-items:baseline; justify-content:space-between; width:100%; padding:7px 8px; border:0; border-radius:4px; background:transparent; color:var(--text); text-align:left; font:inherit; }
+.mounted-space-focus__resource strong { min-width:0; overflow-wrap:anywhere; font-weight:500; }
+.mounted-space-focus__resource:hover { background:var(--surface-1); }
+.mounted-space-focus__resource:focus-visible { outline:2px solid var(--focus-line); outline-offset:-2px; }
