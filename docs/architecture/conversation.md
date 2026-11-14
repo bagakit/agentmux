@@ -67,7 +67,7 @@ Inputs 的有界搜索与分页由 `agent.history` 与 `agent.input.ls` 提供�
 - `sessionHistoryCheckpoint`／`readSessionHistoryChanges` 保留为原生 primitive，`agent.history` 继续提供来源读取。
 - Store 事务仍返回 stream 与 changed position，经既有事件进入 raw applier 与 Renderer；临时 view 的合同不替代这条路径。
 
-声明 `changesCursor` 与 `replayCursor` 的 Provider（字段见 [`AgentSessionHistoryPage`](../../packages/core/src/types.ts)）从同一次冻结读取取得页快照的 changes 边界与页起点，通常经共享的 [`NativeJsonlHistoryReader`](../../packages/core/src/native-jsonl-history-reader.ts)；这避免了另做一次 checkpoint 时，checkpoint 与页读取之间同一 ID 的版本竞态。支持耐久变化读取的 Provider 在 `AgentProvider` 上声明 `readConversationChanges`（[agent-provider.ts](../../packages/core/src/agent-provider.ts)）。Pi 的 [`readPiConversationChanges`](../../packages/core/src/providers/pi-native-history.ts) 从切点之前的叶记录继续逐项校验 parent 关系；分支改变由 Reader 表达为来源 gap，之后的 Current 读取重新读取选中的分支。
+声明 `changesCursor` 与 `replayCursor` 的 Provider（字段见 [`AgentSessionHistoryPage`](../../packages/core/src/types.ts)）从同一次冻结读取取得页快照的 changes 边界与页起点，通常经共享的 [`NativeJsonlHistoryReader`](../../packages/core/src/native-jsonl-history-reader.ts)；这避免了另做一次 checkpoint 时，checkpoint 与页读取之间同一 ID 的版本竞态。支持耐久变化读取的 Provider 在 `AgentProvider` 上声明 `readConversationChanges`（[agent-provider.ts](../../packages/core/src/agent-provider.ts)）。Pi 的 [`readPiConversationChanges`](../../packages/providers/src/pi/native-history.ts) 从切点之前的叶记录继续逐项校验 parent 关系；分支改变由 Reader 表达为来源 gap，之后的 Current 读取重新读取选中的分支。
 
 调用关联以每个 part 对其 scoped invocation 的 `invocation-member` 归属表达，单个成员也保留；`conversationInvocationId` 由 Core 唯一定义。归属及其所在事件的版本，不依赖同一批是否读到另一个成员，公共 Reader 也不为此反查全部历史。相同的调用身份不合并父发言，也不表示未读的对端内容已经可读。
 
@@ -103,7 +103,7 @@ captured 历史由 Session Store 持有，当前或近期窗口只是查询，�
 | Provider | 原生来源与身份 | 变化观察 | 原生 Resume |
 | --- | --- | --- | --- |
 | Grok | [`native-history.ts`](../../packages/providers/src/grok/native-history.ts)：耐久对话 owner 为 `updates.jsonl`；`chat_history.jsonl` 可被 compaction 替换；身份与同目录 `summary.json` 及 Session 目录对齐 | 已核验的 JSONL（含首次落盘） | Session ID |
-| Pi | [`provider.ts`](../../packages/providers/src/pi/provider.ts)／[`pi-native-history.ts`](../../packages/core/src/providers/pi-native-history.ts)：`session_file` 的分支 JSONL；身份来自原生 session header 与受信 Hook binding | 同一份 JSONL | session file |
+| Pi | [`provider.ts`](../../packages/providers/src/pi/provider.ts)／[`native-history.ts`](../../packages/providers/src/pi/native-history.ts)：`session_file` 的分支 JSONL；身份来自原生 session header 与受信 Hook binding | 同一份 JSONL | session file |
 | Antigravity | [`antigravity-native-session.ts`](../../packages/providers/src/antigravity/native-session.ts)：主 CLI 持有的 `presence/<UUID>.lock`；[`antigravity-native-history.ts`](../../packages/providers/src/antigravity/native-history.ts) 读 compact `transcript.jsonl` 与同目录 `transcript_full.jsonl` | 两份 transcript，一起清理 | Conversation UUID |
 | Cursor | [`cursor-native-history.ts`](../../packages/core/src/providers/cursor-native-history.ts)：当前 Run 打开的 `store.db` 与原生 metadata／conversation protobuf | DB／WAL／journal 原生提交的实际 revision（`observeNativeSqliteHistory`） | Conversation UUID |
 | TraeX | [`traex.ts`](../../packages/providers/src/traex/provider.ts) 经 [`app-server-native-session.ts`](../../packages/providers/src/app-server/native-session.ts)／[`app-server-native-history.ts`](../../packages/providers/src/app-server/native-history.ts)：当前 Run 打开的 `rollout-*.jsonl` 与 `session_meta`；页读取由原生 app-server 解释 indexed history | 同一份 rollout（`observeNativeJsonlHistory`） | Session ID |
