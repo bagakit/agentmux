@@ -1462,8 +1462,8 @@ export type AppState = GitReadingActions & {
   ): Promise<AgentMuxControlResult>
   /** Whether the original display selection was committed. Refusal preserves the current context.
    * `keepSurface` places and selects the same occurrence without leaving the current main surface (Focus shows it in place). */
-  sessionLocationRequest: { requestId: string; sessionId: string; label: string; groupId?: string; keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string }; issue?: string } | null
-  requestSessionLocations(sessionId: string, options?: { keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string } | null }): boolean
+  sessionLocationRequest: { requestId: string; sessionId: string; label: string; groupId?: string; keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string; runtimeId?: string }; issue?: string } | null
+  requestSessionLocations(sessionId: string, options?: { keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string; runtimeId?: string } | null }): boolean
   dismissSessionLocationRequest(requestId: string): void
   chooseSessionLocation(requestId: string, reference: SessionLocationReference): boolean
   selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean; reference?: SessionLocationReference }): boolean
@@ -8287,7 +8287,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       original.control.hostId !== options.subject.hostId || original.control.agentSessionId !== options.subject.agentSessionId)) return false
     set({ sessionLocationRequest: { requestId: mintObjectId(), sessionId, label: original?.label ?? sessionId,
       keepSurface: options?.keepSurface ?? current.mainSurface === 'agents',
-      ...(original?.control.kind === 'agent' ? { subject: { hostId: original.control.hostId, agentSessionId: original.control.agentSessionId } } : {}),
+      ...(original?.control.kind === 'agent' ? { subject: { hostId: original.control.hostId, agentSessionId: original.control.agentSessionId,
+        ...(options?.subject?.runtimeId === undefined ? {} : { runtimeId: options.subject.runtimeId }) } } : {}),
       ...(!agentRegionLocationsKnown() ? { issue: 'Location sources are not confirmed yet. The original Agent and workface are kept.' } : {}) } })
     return true
   },
@@ -8303,7 +8304,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return false
     }
     const execution = request.subject ? agentRegionExecution({ tabId: reference.tabId, regionId: reference.regionId, agentSessionId: request.subject.agentSessionId }) : null
-    if (request.subject && execution?.hostId !== request.subject.hostId) {
+    if (request.subject && (execution?.hostId !== request.subject.hostId || request.subject.runtimeId !== undefined && execution?.runtimeId !== request.subject.runtimeId)) {
       set({ sessionLocationRequest: { ...request, issue: 'The original Agent binding at this location is unconfirmed. Its workface is kept; refresh the original Host or choose a confirmed location.' } })
       return false
     }
