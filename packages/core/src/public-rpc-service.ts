@@ -735,7 +735,10 @@ export class AgentMuxRpcService {
     await source.owner.call('runtime.owner.identity', source.params, context)
     return await spaceMemberRuntime({ store: this.spatial, clients: hostId => this.clients(hostId, { signal: context.openingSignal ?? context.signal }),
       ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}), local: {
-        call: async (method, params, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.call(method, endpoint.params, original) },
+        call: async (method, params, original) => {
+          if (method === 'skill.ls') return await this.callOwnedBusiness(method, params as AgentMuxRpcParams<typeof method>, original)
+          const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.call(method, endpoint.params, original)
+        },
         subscribe: async (method, params, emit, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.subscribe(method, endpoint.params, emit, original) }
       } }, input, context)
   }
@@ -1002,6 +1005,14 @@ export class AgentMuxRpcService {
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
     this.assertExposed(method)
     await assertHostRouteDispatch(context, method, params, false)
+    return await this.callOwnedBusiness(method, params, context)
+  }
+  /** One business owner. A verified original member already owns its dispatch;
+   * local calls retain that actor and exact route restriction without dispatching
+   * a second, different method through the outer envelope. */
+  private async callOwnedBusiness<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
+    context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> {
+    this.assertExposed(method)
     if (isStorageRecoveryMethod(method)) {
       if (context.transport !== 'unix' || context.principal?.kind !== 'user' || !context.principal.id || context.caller !== undefined || context.routeDelegation !== undefined)
         throw new AgentMuxError('Storage recovery requires the original local Unix user without an Agent caller or delegated route.', 'CONTROL_PERMISSION_DENIED')

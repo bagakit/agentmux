@@ -28,6 +28,11 @@ export function parseSpaceMemberRoute(value: unknown): SpaceMemberRoute {
 export function assertSpaceMemberCall(target: SpaceMemberRoute, call: { method: string; params: unknown }, stream: boolean): void {
   const allowed: readonly string[] = stream ? SPACE_MEMBER_STREAMS : SPACE_MEMBER_CALLS
   if (!allowed.includes(call.method)) throw new AgentMuxError('This method is outside the original Space member interaction surface.', 'CONTROL_PERMISSION_DENIED')
+  if (call.method === 'skill.ls') {
+    const p = rpcRecord(call.params, ['hostId', 'agentSessionId'])
+    if (p.hostId !== 'local' || p.agentSessionId !== target.agentSessionId) mismatch()
+    return
+  }
   if (!('expectedRun' in target) && (call.method === 'runtime.bootstrap' || call.method === 'runtime.events')) throw new AgentMuxError(
     'Conversation access does not open another Session or process observation.', 'CONTROL_PERMISSION_DENIED')
   const p = rpcRecord(call.params, AGENTMUX_HOSTED_RPC_FIELDS[call.method as keyof typeof AGENTMUX_HOSTED_RPC_FIELDS])

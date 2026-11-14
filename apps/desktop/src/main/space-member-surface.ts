@@ -71,6 +71,13 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   }
   const actions: Actions = {
     read,
+    skills: async (_value, requestSignal) => {
+      const page = await ports.rpc.call('space.member.call', { target: input.target,
+        call: { method: 'skill.ls', params: conversationReference } }, requestSignal ? { signal: requestSignal } : {}) as import('@agentmux/core').AgentMuxRpcResult<'skill.ls'>
+      check()
+      if (page.hostId !== 'local' || page.agentSessionId !== input.target.agentSessionId) throw new AgentMuxError('These Skills belong to another original Agent.', 'SPACE_MEMBER_TARGET_MISMATCH')
+      return page.skills
+    },
     history: async (value, requestSignal) => {
       const page = await client.readAgentSessionHistory({ ...conversationInput(value.input), ...conversationReference }, requestSignal ? { signal: requestSignal } : {})
       check()
@@ -143,7 +150,7 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   if (signal.aborted) { await dispose(); signal.throwIfAborted() }
   return { initial, call: async (method, value, requestSignal) => {
     requestSignal?.throwIfAborted(); check()
-    if (readingOnly && !method.startsWith('conversation') && method !== 'history' && method !== 'historyResource' && method !== 'inputMailbox') throw new AgentMuxError('This original surface grants conversation reading only.', 'CONTROL_PERMISSION_DENIED')
+    if (readingOnly && !method.startsWith('conversation') && method !== 'history' && method !== 'historyResource' && method !== 'inputMailbox' && method !== 'skills') throw new AgentMuxError('This original surface grants conversation reading only.', 'CONTROL_PERMISSION_DENIED')
     const result = await actions[method](value, requestSignal); requestSignal?.throwIfAborted(); return result
   }, start: () => { if (!readingOnly) void client.connect().then(refresh).catch(report) }, dispose }
 }

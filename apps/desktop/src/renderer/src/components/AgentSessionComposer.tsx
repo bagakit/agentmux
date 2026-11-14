@@ -55,6 +55,9 @@ export type AgentComposerAvailability = {
   disabled: boolean
   placeholder: string
 }
+async function originalSkillsUnavailable(): Promise<import('@agentmux/core').AgentSkill[]> {
+  throw new Error('The original Skills reader is unconfirmed. Refresh its original reading; your draft is kept.')
+}
 
 /** One shared identity for "no queue", so the selector returns a stable reference when empty. */
 const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
@@ -269,9 +272,9 @@ export function AgentSessionComposer({
   const submitMode = source && !session
     ? { canType: true, canSubmit: false, primaryAction: 'send' as const, placeholder: 'Original Agent is unconfirmed. Your draft and file tools remain available.' }
     : composerSubmitMode(session, disabled || readOnly)
-  const completion = useComposerCandidates({ scope: JSON.stringify([draftOwner, sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null]),
+  const completion = useComposerCandidates({ scope: JSON.stringify([draftOwner, sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null, source?.inputReading?.conversation.identity]),
     active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue, sessionId: source ? undefined : sessionId,
-    providerId: !source && session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
+    providerId: !source && session?.kind === 'agent' ? session.providerId : undefined, ...(source ? { originalSkills: source.inputReading?.skills ?? originalSkillsUnavailable } : {}), commands: composerOptions?.commands ?? [], insertion: insertionRef })
   const requestPending = session?.kind === 'agent' && Boolean(session.pendingInteraction)
   const nativeQueuePending = session?.kind === 'agent' && Boolean(interactionNativeComposerBinding(session))
 
@@ -382,7 +385,7 @@ export function AgentSessionComposer({
   if (source) notices.push({ id: 'source-message-tools', occurrence: JSON.stringify(source.target), notice: {
     kind: 'indeterminate', notice: {
       step: 'Some message tools are unavailable on this connection',
-      mode: `${source.inputReading ? 'Agent mail, automation, Skills and image transfer do not yet have an original route here.' : 'The original input history is not connected yet. Agent mail, automation, Skills and image transfer also need their original routes.'} Your draft and the existing message waiting controls are kept.`,
+      mode: `${source.inputReading ? 'Agent mail, automation and image transfer do not yet have an original route here.' : 'The original input history and Skills reader are not connected yet. Agent mail, automation and image transfer also need their original routes.'} Your draft and the existing message waiting controls are kept.`,
       restore: 'Continue editing, referencing confirmed project files and using this message queue. Open the original Agent workface for its other tools; this connection will not use another local Agent.'
     }
   } })
@@ -483,7 +486,7 @@ export function AgentSessionComposer({
       completionFeedback={completion.completionFeedback}
       tools={(referenceTools) => <AgentComposerTools key={completion.scope} active={visible} disabled={!submitMode.canType} commands={completion.commands} referenceTools={referenceTools}
         viewMode={viewMode} onViewModeChange={(mode) => source ? setViewMode(sessionId, mode, { focus: false }) : setViewMode(sessionId, mode)}
-        loadSkills={source ? async () => { throw new Error('Original Agent Skills are unavailable through this member connection. Your draft is kept; open the original Agent workface to inspect them.') } : completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
+        loadSkills={completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
         onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
         {...(!source && session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
       value={text}

@@ -71,6 +71,7 @@ export type SpaceMountMemberEvent =
   | { type: 'observation-error'; error: { code: string; message: string } }
   | { type: 'error'; error: { code: string; message: string } }
 export type SpaceMountMemberMethods = {
+  skills: { input: Record<string, never>; result: import('@agentmux/core').AgentSkill[] }
   read: { input: Record<string, never>; result: import('./contracts').SessionSnapshot }
   history: { input: { input: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'> }; result: import('@agentmux/core').AgentSessionHistoryReadPage }
   historyResource: { input: { input: import('@agentmux/core').AgentSessionHistoryResourceRequest }; result: import('@agentmux/core').AgentSessionHistoryResourceReadResult }
@@ -95,7 +96,7 @@ export type SpaceMountMemberSurface = {
   call<M extends keyof SpaceMountMemberMethods>(method: M, input: SpaceMountMemberMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountMemberMethods[M]['result']>
   dispose(): void | Promise<void>
 }
-export type SpaceMountReadingMethods = Pick<SpaceMountMemberMethods, 'conversationRead' | 'conversationCheckpoint' | 'conversationChanges' | 'conversationRelease' | 'conversationWatch' | 'conversationUnwatch' | 'history' | 'historyResource' | 'inputMailbox'>
+export type SpaceMountReadingMethods = Pick<SpaceMountMemberMethods, 'conversationRead' | 'conversationCheckpoint' | 'conversationChanges' | 'conversationRelease' | 'conversationWatch' | 'conversationUnwatch' | 'history' | 'historyResource' | 'inputMailbox' | 'skills'>
 export type SpaceMountReadingSurface = Pick<SpaceMountMemberSurface, 'initial' | 'dispose'> & {
   call<M extends keyof SpaceMountReadingMethods>(method: M, input: SpaceMountReadingMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountReadingMethods[M]['result']>
 }

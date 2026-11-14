@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
-import { SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberAdmission } from './space-member.js'
+import { SPACE_MEMBER_INVOCATIONS, SPACE_MEMBER_NATIVE_CALLS, parseSpaceMemberAdmission, type SpaceMemberAdmission } from './space-member.js'
 import { parseHostExecutorInventory, type AgentMuxHostExecutorInventory } from './executor-contract.js'
 import type { AgentMuxSpaceAgentTarget } from './space-control.js'
 
@@ -33,6 +33,7 @@ export const HOST_ROUTE_INVOCATIONS = [
 export const HOST_ROUTE_CALLS = [
   'route.edges', 'route.edge.inspect', 'route.choices', 'route.executors',
   'runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer',
+  ...SPACE_MEMBER_NATIVE_CALLS,
   'agent.open', 'agent.open.describe', 'space.ls', 'space.inspect', 'space.apply',
   'space.member.call', 'space.member.name.inspect', 'space.member.name.change', 'agent.name.inspect', 'agent.name.change',
   'agent.execution.create', 'agent.execution.binding', 'agent.execution.continue', 'agent.execution.rejoin',

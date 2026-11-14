@@ -11,7 +11,7 @@ import type { AgentMuxSpatialStateStore } from './spatial-state.js'
 import type { HostRouteGateway } from './host-route-gateway.js'
 import type { AgentMuxRpcCallContext, AgentMuxRpcCoreClient } from './public-rpc-service.js'
 import type { SpaceMemberParams, SpaceMemberCallMethod, SpaceMemberStreamMethod } from './space-member.js'
-import { SPACE_MEMBER_INPUT_READING_INVOCATIONS } from './space-member.js'
+import { SPACE_MEMBER_INPUT_READING_INVOCATIONS, SPACE_MEMBER_NATIVE_CALLS } from './space-member.js'
 import type { AgentMuxHostedStreamEvent } from './hosted-client-contract.js'
 
 type RuntimePort = {
@@ -65,7 +65,8 @@ export async function spaceMemberRuntime(ports: {
     const authorization = await ports.gateway.authorizeMemberControl({ ...input, createOperationId: initial.createOperationId }, context)
     const rpc = executionRouteRpc(ports.gateway, initial.adoptedRoute, authorization, undefined, context)
     port = {
-      call: (method, params) => rpc.call(method, params as import('./hosted-client-contract.js').AgentMuxHostedRuntimeParameterMap[SpaceMemberCallMethod], original.signal ? { signal: original.signal } : {}),
+      call: (method, params, callContext) => rpc.call(method, params as import('./public-rpc.js').AgentMuxRpcParams<SpaceMemberCallMethod>, {
+        ...(original.signal ? { signal: original.signal } : {}), ...(callContext.runtimeFence ? { runtimeFence: callContext.runtimeFence } : {}) }),
       subscribe: async (method, params, emit) => {
         let initial: unknown
         const reader = await rpc.subscribe(method, params as import('./hosted-client-contract.js').AgentMuxHostedRuntimeParameterMap[SpaceMemberStreamMethod], {
@@ -74,7 +75,7 @@ export async function spaceMemberRuntime(ports: {
       }
     }
   } else if (initial.hostId === 'local' && input.target.runtimeId === input.target.reference.runtimeId) {
-    port = { call: (method, params) => ports.local.call(method, scoped(params), context),
+    port = { call: (method, params, callContext) => ports.local.call(method, scoped(params), callContext),
       subscribe: (method, params, emit) => ports.local.subscribe(method, scoped(params), emit, context) }
   } else {
     if (original.routeDelegation || original.caller || original.principal?.kind !== 'user') throw new AgentMuxError('This foreign member needs the current viewer’s original verified route and receiver grant.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED')
@@ -84,7 +85,7 @@ export async function spaceMemberRuntime(ports: {
     const client = matches[0]!.client
     if (!client.forwardRpc || !client.subscribeRpc) throw new AgentMuxError('The original carrier has no public member interaction transport.', 'RUNTIME_UNAVAILABLE')
     port = {
-      call: (method, params) => client.forwardRpc!(method, scoped(params) as import('./hosted-client-contract.js').AgentMuxHostedRuntimeParameterMap[SpaceMemberCallMethod], context),
+      call: (method, params, callContext) => client.forwardRpc!(method, scoped(params) as import('./public-rpc.js').AgentMuxRpcParams<SpaceMemberCallMethod>, callContext),
       subscribe: async (method, params, emit) => {
         let initial: unknown
         const reader = await client.subscribeRpc!(method, scoped(params) as import('./hosted-client-contract.js').AgentMuxHostedRuntimeParameterMap[SpaceMemberStreamMethod], {
@@ -94,6 +95,19 @@ export async function spaceMemberRuntime(ports: {
     }
   }
   await assertCurrent()
+  if ((SPACE_MEMBER_NATIVE_CALLS as readonly string[]).includes(input.call.method)) {
+    const identity = rpcRecord(await port.call('runtime.owner.identity', { expectedRuntimeId: input.target.runtimeId }, context)), owner = rpcRecord(identity.owner)
+    if (owner.runtimeId !== input.target.runtimeId) throw new AgentMuxError('The original member execution Runtime changed.', 'RUNTIME_OWNER_MISMATCH')
+    const runtimeFence = { runtimeId: input.target.runtimeId, ownerInstanceId: rpcString(owner.ownerInstanceId, 'Original execution owner') }
+    await assertCurrent()
+    const originalPort = port
+    port = { ...originalPort, call: async (method, params, callContext) => {
+      const result = await originalPort.call(method, params, { ...callContext, runtimeFence })
+      await assertCurrent()
+      return result
+    } }
+    return { port, context, assertCurrent }
+  }
   // These original methods already validate the exact SID/expected Run at D.
   // Re-reading it here would add a second network admission before each key.
   const fencedInput = invocation && ['writeAgent', 'pasteAgent', 'submitAgentPrompt', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'signalAgent'].includes(String(invocation.method))

@@ -145,7 +145,7 @@ export function registerSpaceMountIpc(ports: {
     return { initial: surface.initial, dispose: async () => { if (members.get(key) === surface) members.delete(key); await surface.dispose() } }
   }))
   const memberFields: { [M in keyof SpaceMountMemberMethods]: string[] } = {
-    history: ['input'], historyResource: ['input'], inputMailbox: ['input'],
+    history: ['input'], historyResource: ['input'], inputMailbox: ['input'], skills: [],
     read: [], attach: ['afterByte'], refreshAttachment: ['attachmentId','afterByte'], replay: ['attachmentId','afterByte'], detach: ['attachmentId'],
     conversationRead: ['input'], conversationCheckpoint: ['input'], conversationChanges: ['input'], conversationRelease: ['view'], conversationWatch: ['view'], conversationUnwatch: ['readerId'],
     resize: ['attachmentId','cols','rows'], write: ['data','source','observation'], paste: ['text','terminalData','observation'],

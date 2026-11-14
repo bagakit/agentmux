@@ -3,6 +3,7 @@ import { parseSpaceAuthorityRef, type SpaceAuthorityRef } from './space-referenc
 import type { AgentMuxRunRef } from './types.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import { AgentMuxError } from './errors.js'
+import type { AgentMuxRpcParams, AgentMuxRpcResult } from './public-rpc.js'
 
 export type SpaceMemberAdmission = { kind: 'creation' | 'association'; operationId: string }
 /** A locator pin, never a grant or a replacement creation identity. */
@@ -41,22 +42,27 @@ export const SPACE_MEMBER_INVOCATIONS = [
   ...SPACE_MEMBER_INPUT_READING_INVOCATIONS,
 ] as const
 export type SpaceMemberInvocation = typeof SPACE_MEMBER_INVOCATIONS[number]
-export const SPACE_MEMBER_CALLS = ['runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer'] as const
+export const SPACE_MEMBER_HOSTED_CALLS = ['runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer'] as const
+/** Original public owners, not additional Hosted SDK invocations. */
+export const SPACE_MEMBER_NATIVE_CALLS = ['skill.ls'] as const
+export const SPACE_MEMBER_CALLS = [...SPACE_MEMBER_HOSTED_CALLS, ...SPACE_MEMBER_NATIVE_CALLS] as const
 export const SPACE_MEMBER_STREAMS = ['runtime.events', 'runtime.attachment-watch', 'runtime.replay-watch', 'runtime.conversation-watch'] as const
 export type SpaceMemberCallMethod = typeof SPACE_MEMBER_CALLS[number]
 export type SpaceMemberStreamMethod = typeof SPACE_MEMBER_STREAMS[number]
-export type SpaceMemberHostedCall<M extends SpaceMemberCallMethod = SpaceMemberCallMethod> = {
+export type SpaceMemberNativeMethod = typeof SPACE_MEMBER_NATIVE_CALLS[number]
+export type SpaceMemberHostedCall<M extends typeof SPACE_MEMBER_HOSTED_CALLS[number] = typeof SPACE_MEMBER_HOSTED_CALLS[number]> = {
   [K in M]: { method: K; params: AgentMuxHostedRuntimeParameterMap[K] }
 }[M]
 export type SpaceMemberHostedWatch<M extends SpaceMemberStreamMethod = SpaceMemberStreamMethod> = {
   [K in M]: { method: K; params: AgentMuxHostedRuntimeParameterMap[K] }
 }[M]
+export type SpaceMemberNativeCall = { [M in SpaceMemberNativeMethod]: { method: M; params: AgentMuxRpcParams<M> } }[SpaceMemberNativeMethod]
 export const SPACE_MEMBER_METHODS = { 'space.member.call': 'long', 'space.member.watch': 'long' } as const
 export type SpaceMemberParams = {
-  'space.member.call': { target: SpaceMemberRoute; call: SpaceMemberHostedCall }
+  'space.member.call': { target: SpaceMemberRoute; call: SpaceMemberHostedCall | SpaceMemberNativeCall }
   'space.member.watch': { target: SpaceMemberRoute; call: SpaceMemberHostedWatch }
 }
 export type SpaceMemberResults = {
-  'space.member.call': AgentMuxHostedRuntimeResultMap[SpaceMemberCallMethod]
+  'space.member.call': AgentMuxHostedRuntimeResultMap[typeof SPACE_MEMBER_HOSTED_CALLS[number]] | AgentMuxRpcResult<SpaceMemberNativeMethod>
   'space.member.watch': AgentMuxHostedStreamInitialMap[SpaceMemberStreamMethod]
 }

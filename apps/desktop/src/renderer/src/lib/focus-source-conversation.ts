@@ -7,6 +7,7 @@ import type { ComposerInputReading } from './use-composer-input-history'
 /** The same original surface feeds the common input reader, without a configured-Host fallback. */
 export function sourceComposerInputReading(surface: SpaceMountReadingSurface, port: ConversationReadApi, agentSessionId: string, identity: string): ComposerInputReading {
   return {
+    skills: () => surface.call('skills', {}),
     reference: { hostId: surface.initial.hostId, agentSessionId },
     conversation: { reference: { hostId: 'local', agentSessionId }, identity, port },
     readHistory: (input, signal) => surface.call('history', { input }, signal),

@@ -17,6 +17,7 @@ const EMPTY: readonly string[] = Object.freeze([])
 const EMPTY_MESSAGES: readonly AgentSessionUserMessage[] = Object.freeze([])
 /** A fixed original reader supplies data only; it is never a Session or input grant. */
 export type ComposerInputReading = {
+  skills(): Promise<import('@agentmux/core').AgentSkill[]>
   reference: SessionHistoryReference
   conversation: { reference: SessionHistoryReference; identity: string; port: ConversationReadApi }
   readHistory: InputHistoryRead
