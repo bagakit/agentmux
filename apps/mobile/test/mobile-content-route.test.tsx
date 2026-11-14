@@ -5,7 +5,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { readSurveyPresentation } from '../../desktop/src/renderer/src/lib/mobile-presentation'
-import { click, fixture, mount, mounted } from './conversation-fixture'
+import { click, fixture, mount, mounted, openAppMenu } from './conversation-fixture'
 
 const native = vi.hoisted(() => ({ back: null as (() => void) | null }))
 vi.mock('../src/platform/native/device', async original => ({ ...await original<Record<string, unknown>>(),
@@ -47,9 +47,10 @@ it.each(['browser', 'native'])('%s Back leaves visible Survey content without po
   })
   const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} native={mode === 'native'} />)
   const originalEditor = view.element.querySelector('[contenteditable=true]')
-  await click(visibleButton(view.element, '手机设置与连接'))
+  await openAppMenu(view.element)
   const surveyEntry = document.body.querySelector<HTMLButtonElement>('.mobile-drawer-workfaces button')
   expect(surveyEntry).not.toBeNull(); await click(surveyEntry!)
+  await vi.waitFor(() => expect(view.element.textContent).toContain('准确原研究'))
   await click(visibleButton(view.element, '准确原研究'))
   const second = [...view.element.querySelectorAll<HTMLElement>('.mobile-survey-tab')].find(tab => tab.querySelector('h2')?.textContent === 'second原标签')!
   await click(visibleButton(second, '查看网页'))
@@ -67,7 +68,8 @@ it.each(['browser', 'native'])('%s Back leaves visible Survey content without po
   const calls = vi.mocked(f.client.forwardRpc!).mock.calls.length
   await click(visibleButton(view.element, 'Topics'))
   expect(getDeviceWorkface().snapshot().record.presentation!.topics).toEqual(topicFrames)
-  expect(view.element.querySelector('.mobile-topic-source-reader')?.closest('[hidden]')).toBeNull()
+  await vi.waitFor(() => expect(view.element.querySelector('.mobile-topic-source-reader')).not.toBeNull())
+  expect(view.element.querySelector('.mobile-topic-source-reader')!.closest('[hidden]')).toBeNull()
   expect(vi.mocked(f.client.forwardRpc!).mock.calls.slice(calls).some(([method]) => method === 'browser.targets')).toBe(false)
   expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
 })

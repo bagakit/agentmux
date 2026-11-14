@@ -1,3 +1,4 @@
+import { openPrimary } from './mobile-root-navigation'
 import { act, createRef } from 'react'
 import { Blob as NodeBlob } from 'node:buffer'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -133,9 +134,10 @@ it('removes a real browser chooser only on explicit cancellation and ignores its
   expect(input).toBeTruthy()
   window.dispatchEvent(new Event('focus'))
   expect(button(view.element, '取消本次选择')).toBeDefined()
-  await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Space'))
+  await openPrimary(view.element, 'Space')
   expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('session-original') })
-  await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
+  await vi.waitFor(() => expect(view.element.querySelector('.mobile-session-list button')).not.toBeNull())
   await click(view.element.querySelector('.mobile-session-list button')!)
   await click(button(view.element, '取消本次选择'))
   expect(input.isConnected).toBe(false)

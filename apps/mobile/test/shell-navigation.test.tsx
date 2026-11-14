@@ -1,3 +1,4 @@
+import { openPrimary } from './mobile-root-navigation'
 import './mobile-lan-crypto.setup'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -54,10 +55,10 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     expect(view.element.querySelector('.mobile-project-avatar')).not.toBeNull()
     const originalEditor = editor(view.element)
     await paste(view.element, '切换页面仍保留的草稿')
-    await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Space'))
+    await openPrimary(view.element, 'Space')
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
     expect(editor(view.element)).toBe(originalEditor)
-    await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
+    await openPrimary(view.element, 'Focus')
     await click(await waitForElement(view.element, '.mobile-session-list button'))
     expect(editor(view.element)).toBe(originalEditor); expect(originalEditor.textContent).toBe('切换页面仍保留的草稿')
     await view.render(<MobileApp client={null} connection={unavailable} platform={platform} />)
@@ -76,7 +77,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     localStorage.setItem(STORAGE, '{cannot-read-original-reference')
     const view = await mount(<MobileApp client={clientFixture().client} connection={connected} platform={createBrowserPlatform()} />)
     expect(view.element.textContent).toContain('已存的记录尚未覆盖')
-    await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Space'))
+    await openPrimary(view.element, 'Space')
     expect(localStorage.getItem(STORAGE)).toBe('{cannot-read-original-reference')
     await click(button(view.element, '用当前工作面替换记录'))
     expect(JSON.parse(localStorage.getItem(STORAGE)!)).toMatchObject({ ...emptyDeviceWorkface(), selectedSessionId: null, hostUrl: '', panel: 'conversation' })
@@ -103,7 +104,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     expect(originalEditor.textContent).toBe('原请求与草稿都保留')
     expect(button(view.element, 'Send').disabled).toBe(false)
 
-    await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
+    await openPrimary(view.element, 'Focus')
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
     expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain(offline.message)
     await view.render(<MobileApp client={f.client} connection={connected} platform={platform} />)
@@ -131,7 +132,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     const f = clientFixture(), platform = createBrowserPlatform()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
     expect(view.element.textContent).toContain('已存的记录尚未覆盖')
-    await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
+    await openPrimary(view.element, 'Focus')
     await click(await waitForElement(view.element, '.mobile-session-list button'))
     await view.render(<MobileApp client={null} connection={unavailable} platform={platform} />)
     expect(localStorage.getItem(STORAGE)).toBe(original)
@@ -143,7 +144,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     const original = localStorage.getItem(STORAGE), f = clientFixture()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('device storage unavailable') })
-    await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
+    await openPrimary(view.element, 'Focus')
     await click(await waitForElement(view.element, '.mobile-session-list button'))
     expect(write).toHaveBeenCalledWith(STORAGE, expect.stringContaining('session-original'))
     expect(view.element.textContent).toContain('暂时无法保存导航位置')

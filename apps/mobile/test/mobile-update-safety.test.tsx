@@ -1,3 +1,4 @@
+import { openPrimary } from './mobile-root-navigation'
 import { act, createRef } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fileUploadRevision } from '@agentmux/core/files'
@@ -572,8 +573,8 @@ it('keeps a dispatched original send updateable across real mobile workface swit
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action />{app}</MobileWebUpdateSafetyProvider>)
   await paste(view.element, '原正文'); await click(button(view.element, 'Send'))
   await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
-  await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Space'))
-  await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Space')
+  await openPrimary(view.element, 'Focus')
   await click(await waitForElement(view.element, '.mobile-session-list button'))
   expect(await apply()).toEqual({ status: 'navigating' })
   await view.render(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /></MobileWebUpdateSafetyProvider>)
