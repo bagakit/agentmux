@@ -4,6 +4,8 @@
 
 夹具使用私有 home、独立 Profile metadata、原加密凭据 owner、真实 native Session 和隐藏 BrowserWindow。它启动本地 HTTP、HTTPS 与有认证／无认证 SOCKS5 TCP 服务；仅允许连接这些夹具端口。HTTPS 只在这些私有 Session 中接受准确主机和准确 leaf 证书，另一 leaf 必须真实拒绝；不改全局证书策略。公开证书与 fingerprint 留在收据中，私钥随私有 home 清理。
 
+生产 IPC 与夹具的 `app.on('login')` 都使用原 ProxyAuth 模块的 `createBrowserProfileProxyLoginHandler`，夹具不复制接管策略。真实 app login 必须经过该共享入口并由原准确 Session capability owner 回答；其他 Session、站点认证和其他代理端点保留 Chromium 默认处理。原凭据 owner 继续在发送秘密前复核原端点／代次。
+
 第一进程创建 direct、plain SOCKS 和 authenticated SOCKS 三个原 Profile。真实页面与 HTTPS CONNECT、普通 HTTP、compiled CLI → JSON-RPC → 原 network owner 的 check/probe 分别核对线路。原 Session 的私有代理 capability 不能供其他 Session 或任意本机客户端使用，也不能转发到目标站。认证拒绝仅使准确请求失败；明确修正凭据后恢复。证书拒绝和凭据观察未知不能改写或关闭已经健康的线路，三份原页面与站点数据继续保留。
 
 第一进程退出后，第二个不同 PID 从原 metadata、原 encrypted credential 文件和原 native partition 恢复；不重新创建身份或重种站点数据。原 Profile ID、配置、partition、native storagePath、cookie、localStorage、IndexedDB 与页面草稿必须相同。第二进程先经 compiled CLI 只读原 operation 的历史，外部 wire 同时核对没有新代理连接，然后才显式发起新的检查。此证明不代签完整 Desktop 工作面或 Agent Run 恢复。
