@@ -138,22 +138,26 @@ export async function migrateTopicDirectories({ home = homedir(), scratchRoot = 
         else await retainDirectoryIdentity(physical, { ...local, original: row.identityDirectoryPath }, { helperPath })
       }
       const destinationRoot = kind === 'mote' ? roots.motes : roots.topics
+      const destination = kind === 'mote' || dirname(logicalPhysical) === roots.scratch
+        ? join(root, relative(logicalRoot, row.destinationPath)) : physical
       await ensureDirectory(destinationRoot); await syncDirectory(root)
-      if (saved?.aliasPending && ownedSource) {
-        if (stagedTarget !== logicalPhysical) throw failure('The committed operation does not witness this exact destination.', 'DIRECTORY_MIGRATION_RESULT_UNKNOWN')
-        await exchange({ root, rootInfo, source: ownedSource, destination: physical, object: physical, context: local, helperPath, hooks: nativeOptions })
-        if (kind !== 'mote' || basename(physical) === short) { row.state = 'already-migrated'; continue }
-      }
-      const steps = []
-      if (kind === 'mote' && dirname(logicalPhysical) === roots.scratch) steps.push(join(root, 'motes', long))
-      if (kind === 'mote') steps.push(join(root, 'motes', short))
-      else if (dirname(logicalPhysical) === roots.scratch) steps.push(join(root, 'topics', long))
       let moved = false
-      for (const destination of steps) if (destination !== physical) {
-        await exchange({ root, rootInfo, source: physical, destination, object: physical, context: local, helperPath, hooks: nativeOptions })
-        physical = destination; moved = true
+      if (saved?.aliasPending) {
+        // An interrupted exchange must finish at the address in its original witness.
+        const intermediate = kind === 'mote' && dirname(logicalPhysical) === roots.scratch && stagedTarget === join(roots.motes, long)
+        const confirmed = ownedSource ? stagedTarget === logicalPhysical : (physical !== destination && stagedTarget === row.destinationPath) || intermediate
+        if (!confirmed)
+          throw failure('The original operation does not witness this exact destination.', 'DIRECTORY_MIGRATION_RESULT_UNKNOWN')
+        const witnessed = join(root, relative(logicalRoot, stagedTarget))
+        await exchange({ root, rootInfo, source: ownedSource ?? physical, destination: witnessed, object: physical, context: local, helperPath, hooks: nativeOptions })
+        moved = !ownedSource
+        physical = witnessed
       }
-      row.state = moved ? 'migrated' : kind === 'mote' ? 'already-migrated' : 'identity-confirmed'
+      if (destination !== physical) {
+        await exchange({ root, rootInfo, source: physical, destination, object: physical, context: local, helperPath, hooks: nativeOptions })
+        moved = true
+      }
+      row.state = moved ? 'migrated' : kind === 'mote' || ownedSource ? 'already-migrated' : 'identity-confirmed'
     } catch (error) { row.issue = issue(error); row.state = error.code === 'DIRECTORY_MIGRATION_KIND_UNKNOWN' || error.code === 'DIRECTORY_MIGRATION_RESULT_UNKNOWN' ? 'unknown' : 'error'; report.success = false }
   }
   return report
