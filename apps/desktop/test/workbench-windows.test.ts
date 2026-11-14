@@ -64,6 +64,8 @@ async function fixture(store?: Store) {
   const owner = new WorkbenchWindows(main as unknown as BrowserWindow, persisted, () => [{ x: 0, y: 0, width: 1800, height: 1100 }])
   owner.setNativeOwner({ beforeClosing: async () => {} })
   const outcomes: Array<'applied' | 'rejected' | 'unconfirmed'> = []
+  let returnContext: unknown
+  const setReturnContext = (value: unknown) => { returnContext = value }
   const nativeReturns = vi.fn(async () => {})
   owner.setNativeOwner({ beforeClosing: nativeReturns })
   const event = { sender: main.webContents, senderFrame: main.webContents.mainFrame } as never
@@ -75,12 +77,15 @@ async function fixture(store?: Store) {
         admissions.push({ first: owner.windowOpen(ticket as never, () => {}), repeated: owner.windowOpen(ticket as never, () => {}) })
         const child = new Window(); children.push(child); owner.createdWindow(child as unknown as BrowserWindow, ticket)
       }
-      owner.accept(event, { requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: request.action === 'return' ? outcomes.shift() ?? 'applied' : 'applied', message: null })
+      owner.accept(event, { requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: request.action === 'return' ? outcomes.shift() ?? 'applied' : 'applied', message: null,
+        ...(request.action === 'prepare' ? { returnContext: returnContext === undefined ? { surface: 'space', view: 'tab', reference: {
+          displayWorkspaceId: request.target.displayWorkspaceId, groupId: request.target.groupId, tabId: request.target.tabId,
+          regionId: request.target.kind === 'region' ? request.target.regionId : 'region' } } : returnContext } : {}) })
     })
   })
   await owner.rendererReady(event)
   cleanup.push(async () => { owner.dispose(); await rm(directory, { recursive: true, force: true }) })
-  return { owner, store: persisted, main, children, tickets, admissions, directory, outcomes, nativeReturns }
+  return { owner, store: persisted, main, children, tickets, admissions, directory, outcomes, nativeReturns, setReturnContext }
 }
 async function opened(f: Awaited<ReturnType<typeof fixture>>, operationId = 'open') {
   const page = await f.owner.call('app.window.open', { operationId, target }, context)
@@ -412,4 +417,60 @@ describe('original workface native presentation owner', () => {
     expect(restored.target).toEqual(target); expect(restored.documentGeneration).not.toBe(identity.documentGeneration)
     expect(JSON.parse(await readFile(join(f.directory, 'windows.json'), 'utf8')).windows[0].geometry).toMatchObject({ width: 800, height: 600 })
   })
+})
+
+
+it('[window-return] captures trusted original context before launch, persists it and distinguishes explicit return', async () => {
+  const f = await fixture()
+  const reference = { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'exact-page' }
+  const original = { surface: 'survey', reference, selection: { kind: 'page', regionId: 'exact-page', browserId: 'original-browser' } }
+  f.setReturnContext(original)
+  const identity = await opened(f, 'context-open')
+  const saved = JSON.parse(await readFile(join(f.directory, 'windows.json'), 'utf8'))
+  expect(saved.windows[0].returnContext).toEqual(original)
+  const open = f.main.webContents.send.mock.calls.find(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'open')![1]
+  expect(open.returnContext).toEqual(original)
+  f.setReturnContext({ ...original, surface: 'space', view: 'tab' })
+  const returned = await f.owner.call('app.window.return', { operationId: 'context-return', ...identity }, context)
+  expect(returned.recordedOperation?.state).toBe('confirmed')
+  const returning = f.main.webContents.send.mock.calls.findLast(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'return')![1]
+  expect(returning).toMatchObject({ navigate: true, returnContext: original })
+  expect(f.children[0]!.destroyed).toBe(true)
+})
+it('[window-return] unknown origin leaves the healthy window open and does not guess Space', async () => {
+  const f = await fixture()
+  f.setReturnContext({ surface: 'survey', reference: { displayWorkspaceId: 'different', groupId: 'group', tabId: 'tab', regionId: 'region' } })
+  await opened(f, 'unknown-origin')
+  expect(f.children[0]!.destroyed).toBe(false)
+  const open = f.main.webContents.send.mock.calls.find(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'open')![1]
+  expect(open.returnContext).toBeNull()
+  expect(snapshot(f).issue).toContain('return context remains unconfirmed')
+})
+it('[window-return] recovery keeps original stored context without automatic navigation', async () => {
+  const first = await fixture()
+  const original = { surface: 'focus', reference: { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' }, view: 'region' }
+  first.setReturnContext(original); await opened(first, 'restart-context')
+  const restored = await fixture(first.store)
+  await vi.waitFor(() => expect(restored.children).toHaveLength(1))
+  const open = restored.main.webContents.send.mock.calls.find(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'open')![1]
+  expect(open.returnContext).toEqual(original)
+  expect(open.navigate).toBeUndefined()
+  restored.children[0]!.webContents.emit('render-process-gone')
+  await vi.waitFor(() => expect(restored.main.webContents.send.mock.calls.some(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'return')).toBe(true))
+  const returning = restored.main.webContents.send.mock.calls.findLast(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'return')![1]
+  expect(returning.returnContext).toEqual(original); expect(returning.navigate).not.toBe(true)
+})
+
+it.each([null, { surface: 'unread-original', original: ['keep', 'these', 'bytes'] }])('[window-return] restored unread origin keeps its raw source and a nonblocking service notice: %j', async raw => {
+  const first = await fixture(); await opened(first, 'unread-restart-context')
+  const { state: saved } = await first.store.load()
+  expect(saved.windows).toHaveLength(1)
+  await first.store.save({ ...saved, windows: saved.windows.map(record => ({ ...record, returnContext: raw })) })
+  const restored = await fixture(first.store)
+  await vi.waitFor(() => expect(restored.children).toHaveLength(1))
+  const open = restored.main.webContents.send.mock.calls.find(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'open')![1]
+  expect(open.returnContext).toBeNull(); expect(restored.children[0]!.destroyed).toBe(false)
+  expect(snapshot(restored).issue).toContain('return context remains unconfirmed')
+  await restored.owner.prepareQuit()
+  expect((await first.store.load()).state.windows[0]!.returnContext).toEqual(raw)
 })

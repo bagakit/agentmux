@@ -2049,3 +2049,156 @@ it('[page-order] repeated exact page admission preserves the user order while st
   expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
   expect((await core.read())!.graph).toEqual(graph)
 })
+
+
+it.each([false, true, 'focus-local'] as const)('[window-return-app] original exact-page host returns to its Survey unless later navigation supersedes it: %s', async later => {
+  let requestListener: ((request: import('../src/shared/workbench-windows').WorkbenchWindowRequest) => void) | undefined
+  vi.spyOn(api.ui.workbenchWindows, 'onRequest').mockImplementation(listener => { requestListener = listener; return () => { requestListener = undefined } })
+  const response = vi.spyOn(api.ui.workbenchWindows, 'respond').mockImplementation(() => {})
+  vi.spyOn(api.ui.workbenchWindows, 'ready').mockResolvedValue({ windowId: 'return-app-main', documentGeneration: 'return-app-main-document' })
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const child = frame.contentWindow!, childDocument = frame.contentDocument!
+  // happy-dom adoptNode makes ownerDocument non-configurable, so it cannot return
+  // an already adopted node. Mirror that platform move only; real cross-document
+  // Guest/DOM preservation is covered by the independent Electron consumer.
+  for (const owner of [document, childDocument]) vi.spyOn(owner, 'adoptNode').mockImplementation(<T extends Node>(node: T): T => {
+    node.parentNode?.removeChild(node)
+    Object.defineProperty(node, 'ownerDocument', { value: owner, configurable: true })
+    return node
+  })
+  const slot = childDocument.createElement('div'); slot.id = 'workbench-window-root'; childDocument.body.append(slot)
+  Object.defineProperty(childDocument, 'readyState', { configurable: true, value: 'complete' })
+  vi.spyOn(window, 'open').mockReturnValue(child)
+  try {
+    const page = await showHeaderPage(), before = useAppStore.getState()
+    const projection = surveyPageProjection({ kind: 'page', ...page }, catalog(), before.tabs, () => {})!, reference = projection.selection[0]!
+    const target = { kind: 'region' as const, ...reference }, identity = { windowId: 'return-app-child', documentGeneration: 'return-app-child-document' }
+    const dispatch = async (action: object, id: string) => {
+      expect(requestListener).toBeDefined()
+      await act(async () => requestListener!({ requestId: id, ...identity, target, ...action } as import('../src/shared/workbench-windows').WorkbenchWindowRequest))
+      await vi.waitFor(() => expect(response.mock.calls.some(([reply]) => reply.requestId === id)).toBe(true))
+      return response.mock.calls.find(([reply]) => reply.requestId === id)![0]
+    }
+    const prepared = await dispatch({ action: 'prepare' }, 'prepare-original-return')
+    expect(prepared).toMatchObject({ outcome: 'applied', returnContext: { surface: 'survey', reference, selection: { kind: 'page', ...page } } })
+    const context = prepared.returnContext!
+    expect(await dispatch({ action: 'open', returnContext: context, url: 'about:blank', frameName: 'exact-original-shell' }, 'open-original-return')).toMatchObject({ outcome: 'applied' })
+    expect(childDocument.querySelector('.browser-surface')).not.toBeNull()
+    expect(childDocument.querySelector('.workbench-window-toolbar')?.textContent).toContain('Return to Survey')
+    await act(async () => useAppStore.getState().setMainSurface('workbench'))
+    const work = useAppStore.getState().workbenchSpaceSelection
+    if (!later) {
+      expect(await dispatch({ action: 'return', returnContext: context, navigate: true }, 'explicit-original-return')).toMatchObject({ outcome: 'applied' })
+      expect(useAppStore.getState().mainSurface).toBe('survey')
+      expect(useAppStore.getState().surveyZoneSelection).toEqual({ kind: 'page', ...page })
+      expect(useAppStore.getState().workbenchSpaceSelection).toBe(work)
+    } else {
+      if (later === 'focus-local') await act(async () => useAppStore.getState().setMainSurface('agents'))
+      childDocument.dispatchEvent(new Event('compositionstart', { bubbles: true }))
+      await act(async () => requestListener!({ requestId: 'later-original-return', ...identity, target, action: 'return', returnContext: context, navigate: true }))
+      expect(response.mock.calls.some(([reply]) => reply.requestId === 'later-original-return')).toBe(false)
+      if (later === 'focus-local') {
+        const beforeClose = useAppStore.getState()
+        await click(named('Close Focus workspace'))
+        expect(useAppStore.getState().mainSurface).toBe(beforeClose.mainSurface)
+        expect(useAppStore.getState().workbenchSpaceSelection).toBe(beforeClose.workbenchSpaceSelection)
+        expect(document.querySelector('.global-focus-surface')?.classList.contains('global-board-surface--session-open')).toBe(false)
+      } else await act(async () => useAppStore.getState().setMainSurface('agents'))
+      await act(async () => childDocument.dispatchEvent(new Event('compositionend', { bubbles: true })))
+      await vi.waitFor(() => expect(response.mock.calls.some(([reply]) => reply.requestId === 'later-original-return' && reply.outcome === 'applied')).toBe(true))
+      expect(useAppStore.getState().mainSurface).toBe('agents')
+      if (later === 'focus-local') expect(document.querySelector('.global-focus-surface')?.classList.contains('global-board-surface--session-open')).toBe(false)
+    }
+    expect(useAppStore.getState().tabs[reference.tabId]!.regions[reference.regionId]).toBe(before.tabs[reference.tabId]!.regions[reference.regionId])
+  } finally { frame.remove() }
+})
+
+
+it('[window-return-app] one automatic native-window intent retains its exact context without lending it to a concurrent public open', async () => {
+  let listener: ((request: import('../src/shared/workbench-windows').WorkbenchWindowRequest) => void) | undefined
+  vi.spyOn(api.ui.workbenchWindows, 'onRequest').mockImplementation(value => { listener = value; return () => { listener = undefined } })
+  vi.spyOn(api.ui.workbenchWindows, 'ready').mockResolvedValue({ windowId: 'intent-main', documentGeneration: 'intent-document' })
+  const replies = vi.spyOn(api.ui.workbenchWindows, 'respond').mockImplementation(() => {})
+  const page = await showHeaderPage(), state = useAppStore.getState(), reference = surveyPageProjection({ kind: 'page', ...page }, catalog(), state.tabs, () => {})!.selection[0]!
+  const target = { kind: 'region' as const, ...reference }, context = { surface: 'focus' as const, reference, view: 'region' as const }
+  let finish!: (value: import('@agentmux/core/control').AppWindowPage) => void
+  const calls = vi.spyOn(api.ui.workbenchWindows, 'call').mockImplementation(() => new Promise(resolve => { finish = resolve as typeof finish }))
+  const { openWorkbenchWindow } = await import('../src/renderer/src/lib/workbench-windows')
+  const pending = openWorkbenchWindow(target, { focus: false, returnContext: context })
+  await vi.waitFor(() => expect(calls).toHaveBeenCalledOnce())
+  const original = calls.mock.calls[0]![1] as import('@agentmux/core/control').AppWindowParamsMap['app.window.open']
+  expect(original).toEqual({ operationId: expect.any(String), target, focus: false })
+  const prepare = async (requestId: string, operationId: string) => {
+    await act(async () => listener!({ requestId, windowId: 'intent-child', documentGeneration: 'intent-child-document', action: 'prepare', operationId, target }))
+    await vi.waitFor(() => expect(replies.mock.calls.some(([reply]) => reply.requestId === requestId)).toBe(true))
+    return replies.mock.calls.find(([reply]) => reply.requestId === requestId)![0]
+  }
+  expect((await prepare('exact-intent-prepare', original.operationId)).returnContext).toEqual(context)
+  expect((await prepare('other-public-prepare', 'another-original-operation')).returnContext).toMatchObject({ surface: 'survey' })
+  finish({ windows: [], recordedOperation: { method: 'app.window.open', input: original, actor: { kind: 'user', id: 'desktop' },
+    state: 'unknown', windowId: 'intent-child', documentGeneration: 'intent-child-document', message: 'Original acknowledgement unknown' } })
+  await act(async () => pending)
+  expect((await prepare('same-unknown-intent', original.operationId)).returnContext).toEqual(context)
+  const inspect = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Inspect original open')
+  expect(inspect).toBeDefined()
+  const unknown = openWorkbenchWindow(target, { focus: false, returnContext: null })
+  await vi.waitFor(() => expect(calls).toHaveBeenCalledTimes(2))
+  const unknownInput = calls.mock.calls[1]![1] as import('@agentmux/core/control').AppWindowParamsMap['app.window.open']
+  expect((await prepare('known-unknown-origin', unknownInput.operationId)).returnContext).toBeNull()
+  finish({ windows: [], recordedOperation: { method: 'app.window.open', input: unknownInput, actor: { kind: 'user', id: 'desktop' },
+    state: 'rejected', windowId: null, documentGeneration: null, message: 'Fixture original operation declined before launch' } })
+  await act(async () => unknown)
+})
+
+it('[window-return-app] an existing old research cannot reclaim the same occurrence after its Tab moves to another research', async () => {
+  const state = useAppStore.getState(), tab = source()
+  const neighbor = createWorkbenchTab('return-old-zone-sibling', { kind: 'launcher', workspaceId: resource.id, regionId: 'return-old-zone-sibling-region' })
+  useAppStore.setState({ tabs: { ...state.tabs, [neighbor.id]: neighbor }, layouts: { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', neighbor.id)! } })
+  await checkpointSpatialWorkbench()
+  const beforeCatalog = catalog(), reference = beforeCatalog.locations.find(row => row.tabId === tab.id && row.groupId === 'source-group' && row.regionId === 'composition-page')!
+  const original = { surface: 'survey' as const, reference: { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId },
+    selection: { zoneId: zones.source, selection: [{ tabId: tab.id, regionId: reference.regionId }], active: { tabId: tab.id, regionId: reference.regionId } } }
+  await dom.render(<App />)
+  const nearby = await useAppStore.getState().createWorkbenchZone({ workspaceId: resource.id, spaceIds: [] })
+  const moved = await useAppStore.getState().composeSurveyTabs({ ...request(), target: { kind: 'existing', zoneId: nearby.zone.zoneId,
+    workspaceId: resource.id, displayWorkspaceId: resource.id, groupId: 'source-group' } })
+  expect(moved.outcome).toBe('moved')
+  expect(catalog().tabs.find(row => row.tabId === neighbor.id)?.zoneId).toBe(zones.source)
+  expect(catalog().tabs.find(row => row.tabId === tab.id)?.zoneId).toBe(nearby.zone.zoneId)
+  expect(catalog().locations.some(row => ['displayWorkspaceId', 'groupId', 'tabId', 'regionId'].every(key => row[key as keyof typeof row] === original.reference[key as keyof typeof original.reference]))).toBe(true)
+  await act(async () => useAppStore.getState().setMainSurface('agents'))
+  const held = useAppStore.getState()
+  const { revealWorkbenchContext } = await import('../src/renderer/src/lib/workbench-windows')
+  expect(() => revealWorkbenchContext(original)).toThrow('original Survey return location')
+  expect(useAppStore.getState().mainSurface).toBe(held.mainSurface)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held.surveyZoneSelection)
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(held.workbenchSpaceSelection)
+  expect(useAppStore.getState().tabs[tab.id]!.regions[reference.regionId]).toBe(held.tabs[tab.id]!.regions[reference.regionId])
+})
+
+it('[window-return-app] a sole Browser borrows the unique visible Survey occurrence while its canonical Space host stays parked', async () => {
+  let listener: ((request: import('../src/shared/workbench-windows').WorkbenchWindowRequest) => void) | undefined
+  let changes: ((value: import('../src/shared/workbench-windows').WorkbenchWindowSnapshot) => void) | undefined
+  vi.spyOn(api.ui.workbenchWindows, 'onRequest').mockImplementation(value => { listener = value; return () => { listener = undefined } })
+  vi.spyOn(api.ui.workbenchWindows, 'onChanged').mockImplementation(value => { changes = value; return () => { changes = undefined } })
+  vi.spyOn(api.ui.workbenchWindows, 'ready').mockResolvedValue({ windowId: 'plain-return-main', documentGeneration: 'plain-return-document' })
+  const replies = vi.spyOn(api.ui.workbenchWindows, 'respond').mockImplementation(() => {})
+  const native = await api.browser.create('plain-return-sibling', 'https://return.example.test/sibling', resource.id)
+  const state = useAppStore.getState(), browser = source().regions['composition-page']!
+  const sibling = createWorkbenchTab('plain-return-sibling-tab', { ...native, kind: 'browser', browserId: native.id,
+    regionId: 'plain-return-sibling-region', workspaceId: resource.id })
+  sibling.space = source().space!
+  useAppStore.setState({ tabs: { ...state.tabs, [source().id]: createWorkbenchTab(source().id, browser), [sibling.id]: sibling }, layouts: { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', sibling.id)! } })
+  state.selectMainRegion({ displayWorkspaceId: resource.id, groupId: 'source-group', tabId: sibling.id, regionId: 'plain-return-sibling-region' })
+  const page = await showHeaderPage(), reference = surveyPageProjection({ kind: 'page', ...page }, catalog(), useAppStore.getState().tabs, () => {})!.selection[0]!
+  const originalTarget = { kind: 'region' as const, ...reference }
+  await act(async () => changes!({ issue: null, windows: [{ windowId: 'plain-return-shell', documentGeneration: 'plain-return-shell-document', target: originalTarget,
+    presentation: 'pending', bounds: null, focused: null }] }))
+  await act(async () => listener!({ action: 'prepare', requestId: 'plain-survey-prepare', operationId: 'plain-survey-public-open',
+    windowId: 'plain-return-shell', documentGeneration: 'plain-return-shell-document', target: originalTarget }))
+  await vi.waitFor(() => expect(replies.mock.calls.some(([reply]) => reply.requestId === 'plain-survey-prepare')).toBe(true))
+  expect(replies.mock.calls.find(([reply]) => reply.requestId === 'plain-survey-prepare')![0]).toMatchObject({ outcome: 'applied',
+    returnContext: { surface: 'survey', reference, selection: { kind: 'page', ...page } } })
+})

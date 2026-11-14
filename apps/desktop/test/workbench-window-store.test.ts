@@ -42,3 +42,13 @@ it('reads the exact durable original operation independently of unrelated receip
   await expect(f.store.operation(operation.input.operationId)).rejects.toThrow('does not match')
   expect(JSON.parse(await readFile(join(receipts, name), 'utf8')).input.operationId).toBe('different-original')
 })
+
+it('[window-return] retains unread provenance beside healthy original windows during saving', async () => {
+  const f = await fixture(), unknown = { future: ['original', null], surface: 'unread' }
+  const retained = { ...state, windows: [{ ...state.windows[0]!, returnContext: unknown }] }
+  await f.store.save(retained)
+  const restored = await new WorkbenchWindowStore(f.path).load()
+  expect(restored.writable).toBe(true); expect(restored.state).toEqual(retained)
+  await f.store.save(restored.state)
+  expect(JSON.parse(await readFile(f.path, 'utf8')).windows[0].returnContext).toEqual(unknown)
+})

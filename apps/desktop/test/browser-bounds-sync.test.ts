@@ -689,3 +689,56 @@ describe('原生视图给焦点框让位（#341）', () => {
     ).toMatch(/^\{focus\.nativeViewYieldsToRing\}$/)
   })
 })
+
+
+it('[window-return-geometry] forced same-value confirmation waits for the original writer ACK and latest observed geometry', async () => {
+  const first = { x: 220, y: 74, width: 960, height: 690 }, later = { ...first, y: 104, height: 660 }
+  const ack = deferred(), applied: unknown[] = []
+  let hold = false, confirmed = false
+  const apply = vi.fn(async (bounds: unknown) => { if (hold) { hold = false; await ack.promise }; applied.push(bounds) })
+  const sync = new LatestBrowserBoundsSynchronizer(apply, vi.fn())
+  sync.observe(first); await vi.waitFor(() => expect(applied).toEqual([first]))
+  hold = true
+  const confirmation = sync.confirm(first).then(() => { confirmed = true })
+  expect(confirmed).toBe(false); expect(apply).toHaveBeenCalledTimes(2)
+  sync.observe(later)
+  ack.resolve(); await confirmation
+  expect(applied).toEqual([first, first, later]); expect(confirmed).toBe(true)
+  sync.dispose()
+})
+it('[window-return-geometry] failed or retired confirmation cannot claim a geometry ACK', async () => {
+  const failed = new Error('Original native write was not acknowledged'), onError = vi.fn()
+  const sync = new LatestBrowserBoundsSynchronizer(async () => { throw failed }, onError)
+  await expect(sync.confirm({ x: 0, y: 0, width: 10, height: 20 })).rejects.toBe(failed)
+  expect(onError).toHaveBeenCalledWith(failed)
+  sync.dispose()
+  await expect(sync.confirm({ x: 0, y: 0, width: 10, height: 20 })).rejects.toThrow('retired')
+})
+
+it('[window-return-geometry] a later confirmation keeps its own ACK after an older observation fails', async () => {
+  let fail!: (error: Error) => void
+  const first = new Promise<void>((_resolve, reject) => { fail = reject }), issue = new Error('Older observation failed'), onError = vi.fn()
+  const apply = vi.fn().mockImplementationOnce(() => first).mockResolvedValue(undefined)
+  const sync = new LatestBrowserBoundsSynchronizer(apply, onError)
+  sync.observe({ x: 0, y: 0, width: 20, height: 30 })
+  const latest = { x: 220, y: 74, width: 960, height: 690 }, confirmation = sync.confirm(latest)
+  fail(issue)
+  await expect(confirmation).resolves.toBeUndefined()
+  expect(onError).toHaveBeenCalledExactlyOnceWith(issue)
+  expect(apply).toHaveBeenLastCalledWith(latest, undefined)
+  sync.dispose()
+})
+
+it('[window-return-geometry] an unknown write ACK invalidates only its geometry cache before the next real observation', async () => {
+  const a = { x: 220, y: 74, width: 960, height: 690 }, b = { ...a, y: 104, height: 660 }
+  let accepted: unknown = null, loseAck = false
+  const issue = new Error('Native write applied but ACK was lost'), apply = vi.fn(async (bounds: unknown) => { accepted = bounds; if (loseAck) { loseAck = false; throw issue } })
+  const sync = new LatestBrowserBoundsSynchronizer(apply, vi.fn())
+  sync.observe(a); await vi.waitFor(() => expect(accepted).toEqual(a))
+  loseAck = true
+  await expect(sync.confirm(b)).rejects.toBe(issue)
+  expect(accepted).toEqual(b)
+  sync.observe(a)
+  await vi.waitFor(() => expect(accepted).toEqual(a))
+  expect(apply).toHaveBeenCalledTimes(3); sync.dispose()
+})
