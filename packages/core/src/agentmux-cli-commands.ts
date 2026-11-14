@@ -1,3 +1,4 @@
+import { parseBrowserTaskControlPayload } from './browser-task-control.js'
 import { parseBrowserProxyEdit } from './browser-proxy-library.js'
 import { APP_CAPTURE_CLI_COMMANDS } from './app-capture-cli.js'
 import { parseConversationSnapshotInput } from './conversation-snapshot.js'
@@ -140,6 +141,10 @@ const numbers = (f: Flags, map: Readonly<Record<string, string>>): Record<string
     if (!Number.isFinite(result)) invalid(`${flag} must be a number.`)
     return [key, result]
   }))
+function taskCommandParams(request: unknown): Record<string, unknown> {
+  const { operation: _operation, ...params } = parseBrowserTaskControlPayload(request)
+  return params
+}
 function command(method: string, usage: string, summary: string, specs: FlagSpec,
   parse: (f: Flags) => Record<string, unknown> | Promise<Record<string, unknown>>, details?: string): AgentMuxCliCommand {
   return { method, usage, summary, flags: specs, ...(details ? { details } : {}), parse: async args => parse(flags(args, specs)) }
@@ -759,6 +764,16 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   }, 'Only an existing immutable version runs. Without --input, stdin is one flat JSON object of parameters. --input carries {parameters, calls}: calls maps a subflow step id to {parameters, items:[{id, parameters, calls?}]} — once takes exactly 1 item, each takes 1–16, nesting up to 4 levels and 32 child runs per invocation. Continue supplies the same item ids in the same order with fresh values; completed items are not rerun. All values together are bounded to 64 KiB and never enter the saved asset or durable progress. This cannot approve a human checkpoint or reclaim human input ownership.'),
   command('browser.task.inspect', '--browser ID [--run ID]', 'Read one exact task run tree: root, subflow call items, child runs, cursors, operation ids and shared cost.', { '--browser': 'data', '--run': 'data' }, f => ({ browserId: id(f, '--browser', true), ...fields(f, { '--run': 'runId' }) }),
     'Without --run this reads the Browser\'s original selected run, or null. A child run id returns its whole original tree. Asset bodies, fresh values and human approval payloads are never returned.'),
+  command('browser.task.parallel', '--browser ID --asset ID --version N --input FILE|-', 'Start one frozen task version on an explicit Browser/Profile target set; return its original durable operation.',
+    { '--browser': 'data', '--asset': 'data', '--version': 'value', '--input': 'data' }, async f => {
+      value(f, '--version', true)
+      return taskCommandParams({ operation: 'browser.task.parallel', browserId: id(f, '--browser', true), assetId: id(f, '--asset', true), ...numbers(f, { '--version': 'version' }), input: await readControlJsonInput(value(f, '--input', true)!, 'Parallel task invocation') })
+    }, 'Input carries {operationId, concurrency?, targets:[{id,browserId,profileId,parameters,calls?}]}. Keep the original operationId after an unknown response and inspect it; repeating this request never replays existing work. Each target uses its exact current Profile and its own fresh values. Shared Profiles are scheduled one at a time within parallel work; one failed target does not stop healthy targets. A canceled reader does not cancel execution.'),
+  command('browser.task.parallel-list', '--browser ID [--before OPERATION] [--limit N]', 'List original task executions in one source library without restoring pages.',
+    { '--browser': 'data', '--before': 'data', '--limit': 'value' }, f => taskCommandParams({ operation: 'browser.task.parallel-list', browserId: id(f, '--browser', true), ...fields(f, { '--before': 'before' }), ...numbers(f, { '--limit': 'limit' }) })),
+  command('browser.task.parallel-inspect', '--browser ID [--operation-id ID] [--after TARGET] [--limit N]', 'Read one original explicit target set and a bounded page of exact target/run results.',
+    { '--browser': 'data', '--operation-id': 'data', '--after': 'data', '--limit': 'value' }, f => taskCommandParams({ operation: 'browser.task.parallel-inspect', browserId: id(f, '--browser', true), ...fields(f, { '--operation-id': 'operationId', '--after': 'after' }), ...numbers(f, { '--limit': 'limit' }) }),
+    'Without an operation id this reads the original selected execution, or null. --after keeps the exact returned target boundary. Run ids can be inspected through browser task inspect using each returned target Browser. This read does not restore native pages.'),
   command('browser.task.batch', '--browser ID --asset ID --version N [--batch ID] < batch.json', 'Run a bounded list of items through the original immutable task version.', { '--browser': 'data', '--asset': 'data', '--version': 'value', '--batch': 'data' }, f => {
     value(f, '--version', true)
     return { browserId: id(f, '--browser', true), assetId: id(f, '--asset'), ...numbers(f, { '--version': 'version' }), ...fields(f, { '--batch': 'batchId' }) }

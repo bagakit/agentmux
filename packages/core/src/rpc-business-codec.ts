@@ -113,7 +113,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
     'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'demand.start', 'demand.continuation-action', 'browser.run', 'browser.replay',
-    'browser.stop', 'browser.create', 'browser.close', 'agent.open', 'demand.patrol-all', 'browser.task.run', 'browser.task.batch'].includes(operation)
+    'browser.stop', 'browser.create', 'browser.close', 'agent.open', 'demand.patrol-all', 'browser.task.run', 'browser.task.batch', 'browser.task.parallel'].includes(operation)
   const input = { ...body, schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation,
     ...(caller && usesCaller ? { caller } : {}) }
   const parsed = parseAgentMuxControlRequest(input)
