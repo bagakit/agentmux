@@ -141,10 +141,20 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
   const readerBefore = await read('readingProof.events.filter(event=>event.type==="wheel").length')
   await wheel(reading, -250)
   await ready(`readingProof.events.slice(${readerBefore}).some(event=>event.type==='wheel' && event.detail.trusted && event.detail.deltaY===-250)`)
+  const readerFeed = `document.querySelector(${JSON.stringify(readerSelector)})`
+  const latestReaderAction = `document.querySelector('[data-workbench-region-id="reading-region"] [data-message-tool-control="jump-to-latest"]')`
+  const readerTailDistance = `(()=>{const feed=${readerFeed};return feed.scrollHeight-feed.clientHeight-feed.scrollTop})()`
+  const awayFromTail = await ready(`${latestReaderAction}?.checkVisibility() && ${readerTailDistance} > 2 && ${readerTailDistance}`)
+  await click(latestReaderAction)
+  await ready(`${readerTailDistance} <= 2 && !${latestReaderAction}`)
+  const afterFollow = await inspect()
+  sameHistory(older, afterFollow)
+  assert.ok(afterFollow.focused, 'Returning the adjacent Reader to follow preserves terminal focus')
   const cut = await ready('readingProof.nativeCut()')
   const recordId = await append()
   const accepted = await ready(`readingProof.appendDisposition(${JSON.stringify(cut)},${JSON.stringify(recordId)},false)`)
   await read(twoFrames)
+  const readerFollowingTail = await ready(`${readerTailDistance} <= 2 && {tailDistance:${readerTailDistance}}`)
   const duringReader = await inspect()
   sameHistory(older, duringReader)
   assert.ok(duringReader.focused, 'Passive adjacent reading and append preserve terminal focus')
@@ -195,6 +205,6 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
   await shot('terminal-neighbor')
   return { before, up, older, duringReader, duringNative, after, live, calls, originalAttachment: attachment,
     unrelated: { runId: unrelated.reference.runId, rawBytes: otherReplay.replay.reduce((n, row) => n + row.dataBytes.byteLength, 0), rendererBytes: unrelatedBytes },
-    reader: { recordId, acceptedRevision: accepted.accepted.revision }, timings: { scroll: scrolling, scrollP95: p95(scrolling),
+    reader: { recordId, awayFromTail, followingTail: readerFollowingTail.tailDistance, acceptedRevision: accepted.accepted.revision }, timings: { scroll: scrolling, scrollP95: p95(scrolling),
       input, inputP95: p95(input), nativeOutput: { solo, shared } } }
 }

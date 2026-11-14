@@ -39,6 +39,7 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'verify-conversation-progressive-reading.mjs'),
   ...(terminalNeighbor ? [
+    path.join(import.meta.dirname, 'verify-live-terminal-ui-system.mjs'),
     path.join(import.meta.dirname, 'fixtures/terminal-wheel/xterm-instrumented.ts'),
     path.join(root, 'apps/desktop/electron.vite.config.ts')
   ] : []),
