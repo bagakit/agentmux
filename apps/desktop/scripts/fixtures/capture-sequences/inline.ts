@@ -84,10 +84,12 @@ function assertStitchedSource(image: NativeImage, first: NativeImage, last: Nati
   const stripBytes = appended * image.getSize().width * 4
   assertSourcePixels(image.toBitmap(), Buffer.concat([first.toBitmap(), last.toBitmap().subarray(-stripBytes)]), context)
 }
-async function readPreview(overlay: BrowserWindow, previous?: string) {
+async function readPreview(overlay: BrowserWindow, previous?: string, expectedSize?: { width: number; height: number }) {
   return await until('decoded accepted image preview', () => js(overlay, `(() => {
     const preview = document.querySelector('.capture-live-preview img')
     if (!preview?.complete || !preview.naturalWidth || preview.src === ${JSON.stringify(previous ?? '')}) return null
+    const expected = ${JSON.stringify(expectedSize ?? null)}
+    if (expected && Math.abs(preview.naturalWidth * expected.height / expected.width - preview.naturalHeight) > 2) return null
     return { src: preview.src, width: preview.naturalWidth, height: preview.naturalHeight }
   })()`))
 }
@@ -210,7 +212,12 @@ async function run() {
   const sourceInput = await js(source, '({clicks:window.sourceClicks,wheels:window.sourceWheels,scroll:document.scrollingElement.scrollTop})')
   assert.ok(sourceInput.scroll > initialOffset, 'the original source must actually scroll after input')
   const lastGuiSource = await sourcePixels(selected)
-  const nextPreview = await readPreview(overlay, firstPreview.src)
+  const expectedGuiSize = {
+    width: firstGuiSource.getSize().width,
+    height: firstGuiSource.getSize().height + Math.round((sourceInput.scroll - initialOffset) * sourceSelection.scale)
+  }
+  // scrollend settles the source, while accepted native exposures can still lag behind it.
+  const nextPreview = await readPreview(overlay, firstPreview.src, expectedGuiSize)
   const chromeBounds = await js(overlay, `[...document.querySelectorAll('.capture-live-toolbar, .capture-live-preview')].map(el => el.getBoundingClientRect().toJSON())`)
   const overlayFrame = overlay.getBounds()
   const left = Math.max(0, Math.min(selected.x, ...chromeBounds.map((r: DOMRect) => overlayFrame.x + r.left)) - 8)
@@ -256,6 +263,7 @@ async function run() {
   assert.equal(overlay.isVisible(), false, 'the original surface is retained hidden for Resume until this original operation ends')
   await click(review, 'Confirm'); await closed
   const guiImage = nativeImage.createFromDataURL(delivered.dataUrl)
+  assert.deepEqual(guiImage.getSize(), expectedGuiSize, 'the confirmed PNG includes the settled scroll distance')
   assertThumbnail(nextPreview, guiImage)
   assertStitchedSource(guiImage, firstGuiSource, lastGuiSource, 'Confirmed GUI PNG')
   result.observations.push({ acceptedPreview: [[firstPreview.width, firstPreview.height], [nextPreview.width, nextPreview.height]] })
