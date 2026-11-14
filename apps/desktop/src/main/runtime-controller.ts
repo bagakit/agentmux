@@ -1,4 +1,6 @@
 import { originalExecutionBindingId } from './execution-binding-reference'
+import { callDesktopHostRoute } from './host-routes-client'
+import type { DesktopHostRouteMethod, DesktopHostRouteTarget } from '../shared/host-routes'
 import { configuredAgentFallbackLabel as agentFallbackLabel, workspacePresentationLabel as workspaceLabel } from '@agentmux/host/presentation-configuration'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseCreationContinueParams, parseCreationContinueResult, type AgentMuxCreationContinueParams } from '@agentmux/core'
@@ -2583,6 +2585,12 @@ export class RuntimeController {
       ? { ...params, hostId: 'local' } as AgentMuxRpcParams<M> : params
     const result = await callOriginalDesktopHost(client, method, originalParams, context)
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
+  }
+
+  callHostRoute<M extends DesktopHostRouteMethod>(target: DesktopHostRouteTarget, method: M,
+    params: import('@agentmux/core/host-route').HostRouteParams[M], signal?: AbortSignal
+  ): Promise<import('@agentmux/core/host-route').HostRouteResults[M]> {
+    return callDesktopHostRoute(hostId => this.configuredClient(hostId), target, method, params, signal)
   }
 
   /** One trusted App intent, bound to its original configured transport and Core owner.

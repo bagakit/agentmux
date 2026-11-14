@@ -124,6 +124,7 @@ import { inspectMoteContext, moteContextEvidencePort } from './mote-context-obse
 import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
 import { registerNodePublishingIpc } from './node-publishing-ipc.js'
+import { registerHostRoutesIpc } from './host-routes-ipc.js'
 import { registerHostRuntimeObservationIpc } from './host-runtime-observation-ipc.js'
 import { registerSearchIpc } from './search-ipc.js'
 import { SessionHistoryReadOwners } from './session-history-read.js'
@@ -970,6 +971,7 @@ export async function registerIpc(args: {
   // A conflict crosses IPC with its code; the Renderer offers recovery from that fact, never from wording.
   handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))
   const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, call: callUserRpc, owner: (target, method, params, context) => args.runtime.callNodeOwner(target, method, params, context) })
+  const hostRouteReads = registerHostRoutesIpc({ handle: handleWithEvent, call: (target, method, params, signal) => args.runtime.callHostRoute(target, method, params, signal) })
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
     call: callUserRpc })
   handleWithEvent('hosts:prepareTailcatKey', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.hosts.tailcat-key'>) =>
@@ -2736,7 +2738,7 @@ export async function registerIpc(args: {
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
-      { owner: 'host-runtime-reads', dispose: () => { hostRuntimeReads.dispose(); nodePublishingReads.dispose() } },
+      { owner: 'host-runtime-reads', dispose: () => { hostRuntimeReads.dispose(); nodePublishingReads.dispose(); hostRouteReads.dispose() } },
       { owner: 'search-reads', dispose: () => searchReads.dispose() },
       { owner: 'history-reads', dispose: () => historyReads.dispose() },
       { owner: 'conversation-reads', dispose: () => conversationReads.dispose() },

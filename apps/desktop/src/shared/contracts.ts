@@ -1682,6 +1682,7 @@ export type AgentMuxDesktopApi = {
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<import('@agentmux/core').ApplicationAccessResultMap[M]>
   }
   nodePublishing: import('./node-publishing.js').DesktopNodePublishingPort
+  hostRoutes: import('./host-routes.js').DesktopHostRoutes
   hosts: {
     prepareTailcatKey(input: AgentMuxRpcParams<'settings.hosts.tailcat-key'>): Promise<AgentMuxRpcResult<'settings.hosts.tailcat-key'>>
     home(host: HostConfig, context?: { signal?: AbortSignal }): Promise<AgentMuxRpcResult<'settings.hosts.home'>>
@@ -2286,7 +2287,8 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'applications' | 'conversation' | 'landmarks' | 'toolkit'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'hostRoutes' | 'applications' | 'conversation' | 'landmarks' | 'toolkit'> & {
+  hostRoutes: import('./host-routes.js').PreloadHostRoutes
   toolkit: Omit<AgentMuxDesktopApi['toolkit'], 'add' | 'update' | 'remove'> & {
     add(...args: Parameters<AgentMuxDesktopApi['toolkit']['add']>): Promise<import('./toolkit-configuration-result').ToolkitConfigurationResult<Awaited<ReturnType<AgentMuxDesktopApi['toolkit']['add']>>>>
     update(...args: Parameters<AgentMuxDesktopApi['toolkit']['update']>): Promise<import('./toolkit-configuration-result').ToolkitConfigurationResult<Awaited<ReturnType<AgentMuxDesktopApi['toolkit']['update']>>>>
