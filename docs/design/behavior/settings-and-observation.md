@@ -211,6 +211,8 @@ Toolkit 沿现有执行 owner 持有工具身份、捕获的配置版本、固�
 
 TUI 的持续重绘走原终端字节与回放链，不累计为 Toolkit 文本结果，不套用有限结果的输出预算或机器结果通道。终端 Gap、读取失败或显示挂载失败不授权停止健康 Run。进程终局只认准确 Run 的权威状态和 exitCode，与终端历史完整性分别表达；自然退出或明确停止后保留最新 Run、执行回执和可读画面。下一次准入可回收已权威确认终态的旧 Run，清理或持久确认未知时保留原事实，不能误删运行中或状态未知的 Run。Toolkit 只在必要状态点保存绑定与回执，不重复保存终端字节；状态核对定位准确 Run，成本不随无关 Session 的历史或输出增长。
 
+原 TUI 准入存在而 Run 引用未知时，Toolkit 首次加载、打开及明确检查使用私有保存的原准备，向同一 Core 查询启动回执。返回该操作的准确 Run 后沿原绑定接回，仍未确认时保留原首次失败和查询结果。查询不准备、派发或退休启动请求，也不以旧已结束 Run 替代当前执行。原回执读到终局时保留该次结果，当前仅观察的动作不派发下一次执行。现有 Toolkit inspect 与订阅消费同一事实。
+
 视图与进程分离采用成熟终端的边界：[tmux 的 detach／attach](https://man.openbsd.org/tmux.1)区分关闭客户端与原进程存续，[VS Code 的持久终端](https://code.visualstudio.com/docs/terminal/advanced)区分接回原进程与重新启动进程。AgentMux 沿自身 Runtime 的权威事实兑现该区分；这些参考不构成新进程已恢复原身份的证明。呈现沿[《TUI Toolkit 的配置与终端》](../presentation/settings-and-observation.md#tui-toolkit-的配置与终端)。
 
 ### Toolkit 结果链接在 Survey 打开
