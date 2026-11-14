@@ -285,4 +285,9 @@ it.each(['saved', 'unknown'] as const)('the original Mote permission distinguish
   expect(inspect).toHaveBeenLastCalledWith({ agentSessionId: sid, operationId: input.operationId })
   expect(view.element.textContent).toContain('这个请求已完成')
   expect(f.respond).toHaveBeenCalledOnce()
+  const settled = { ...original }; delete settled.pendingInteraction
+  await act(async () => f.emit({ type: 'agent-session', session: settled }))
+  const retained = view.element.querySelector(`[data-original-response="${input.operationId}"][data-original-request="original-permission"]`)!
+  expect(retained.querySelector('.mobile-send-status__subject > strong')?.textContent).toBe('Original permission')
+  expect(button(retained, '查询答复结果')).not.toBeNull()
 })

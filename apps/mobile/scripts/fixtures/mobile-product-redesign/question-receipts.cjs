@@ -52,6 +52,8 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await button('沿用原资料', '.agent-interaction--async')
   await button('发送答案', '.agent-interaction--async')
   await until('document.querySelector("[data-question-state=unknown] .agent-question__original")')
+  const retainedSubject = '[data-original-request="request-original"] .mobile-send-status__subject > strong'
+  await until(`document.querySelector(${JSON.stringify(retainedSubject)})?.textContent==="请确认本次资料读取"`)
   await capture('native-question-unknown')
   await button('继续原发送', '.agent-interaction--async')
   await until('document.querySelector("[data-question-state=submitted]")')
