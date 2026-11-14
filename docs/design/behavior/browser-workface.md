@@ -146,6 +146,9 @@ Browser 的协作者选择、创建 Agent、网页输入控制和程序执行分
 ### 从 Browser 创建 Agent
 
 - 人工控制的 Browser 明确没有关联 Agent 时，在[协作者选择](#browser-协作者选择与交接)中独立保留“在右侧创建 Agent”。默认一次点击在该 Browser 展示所在的同一 Tab 中、相邻右侧新建 Region 并创建一个 Agent；可明确选择其他分割方向。Survey 从准确网页进入时，创建后显示该准确原 Tab 内的 Browser／新 Agent 分栏，并能聚焦新 Agent；不扩大到来源 Zone 的其他 Tab，也不另建 Tab／Zone 掩盖分栏。创建前能查看实际 Executor／执行 Host 与目录，并可附加本次用户任务；缺省仍按原初始观察指令。落点选择不改变执行 cwd，不能按页面文案猜任务或按候选数量暗开新 Tab。保留原 Browser、页面、地址、输入及其他 Region，不覆盖已有内容；单独关闭该 Browser 只作用其准确 Region，沿原确认合同保留或停止关联 Agent，不能连带关闭整个混合 Tab。后来本人导航优先；空间身份、布局持久化与 Agent 生命周期沿原 Core 公共能力，创建后的原 Browser 与新 Agent 组合在真实重启后仍可见并按原身份恢复。
+- **独立 Survey 新 Agent 使用专用执行目录。** 普通网页按准确 Browser 已确认的稳定 Profile 身份使用 Survey 根下的目录；本地 Host 默认为 `~/.agentmux/survey/<Profile稳定ID>`，默认环境也使用自己的真实 Profile ID。创建前以实际 Profile 名称和真实 Host／path 说明执行目标，不用名称、顶部筛选器、当前 Work 项目或展示所在 Zone 推导目录。目录由实际执行 Host 的原资源 owner 确认；原本已明确的项目执行目标继续沿原合同，不因展示在 Survey 就改写。Profile 改名或切换默认环境不改变原目录，后续选择不迁移、重建或改写已有 Agent、原 Session／Run 及待确认创建请求的 Host／cwd。
+- **匿名页的 Agent 目录与临时网站数据分开。** 匿名 Browser 没有普通 Profile，按准确 Browser 的稳定身份在 Survey 根下独立隔离，不落到普通默认 Profile，也不以一次性网站 session、URL 或标题作为目录键。网站临时数据的结束仍沿[匿名 Browser](#匿名-browser)；明确创建的 Agent、文件、成果和操作回执保留原 owner，不因关闭匿名页、清理网站数据或回收 Profile 而自动删除、迁移或停止。
+- Survey 目录沿原 Host／Workspace 资源 owner 按需准备和登记为普通目录资源，可被原资源入口发现；创建留在 Survey，不切换 Work，不增设 Profile 目录映射 Store，也不改写原 Browser 的资源归属或用执行目录决定展示位置。目录及资源登记确认、本次 Agent 创建、位置保存、初始输入和控制交接分别表达真实结果；准备失败或未知保留原 Browser、草稿、健康 Run 与原请求恢复入口，不静默回退 Scratch 或另选 Host／目录。
 - 新 Agent 的初始指令携带本次准确 Browser 及其展示位置、当前页面的必要上下文，明确先查 Browser 和空间相关 skill，再复用该 Browser 工作，不重新创建或猜测目标。页面 URL、标题与页面内容仍是来源数据，不能升级为平台指令或新的操作授权。
 - 用户这次点击同时明确授权把该 Browser 交给本次新建的 Agent；创建和准确关联确认后，通过原可信 Browser 控制链自动交接，无需再点一次交还。Agent 从当前页面重新观察，原程序、历史步骤与未知副作用不自动重放，原接管和停止继续可用。创建已发生、位置已保存、初始指令已投递与控制已交接分别按实际回执表达；未确认时保留原身份、页面和仍可用能力，并说明失败步骤及恢复动作，不盲目再创建 Agent。
 - 入口选择消费准确 Browser 的控制和关联事实，不以“当前没有运行中的程序”、历史操作条是否可见或 Session 展示列表缺席推断无人关联；未知明确为未知。已有准确关联时沿原交还入口继续工作，不借本入口替换原 Agent 或恢复身份。

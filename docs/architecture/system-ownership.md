@@ -92,7 +92,7 @@ Agent 生命周期由 Host 的 Core owner 持有；Main 的 `RuntimeController` 
 | --- | --- |
 | 通用 Run 及其字节、生命周期 | ctxmux；Core 经 `CtxmuxRunAdapter` 核对身份并消费 |
 | AgentSession、原生 handle、当前 Run 关联与 Timeline | [Core Session Store](../../packages/core/src/agent-session-store.ts)；默认目录由 [runtime-paths.ts](../../packages/core/src/runtime-paths.ts) 决定，Desktop 注入 [userData Store 路径](../../apps/desktop/src/main/agent-session-store-path.ts) |
-| 宿主配置、Executor 与 Workspace 配置 | [ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 串行提交，[config-store.ts](../../apps/desktop/src/main/config-store.ts) 保存 |
+| 宿主配置、Executor 与 Workspace 配置 | [ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 串行提交，[ConfigStore](../../apps/desktop/src/main/config-store.ts) 保存；未确认保存先在同队列读原文件，经[原 Runtime 配置接缝](../../apps/desktop/src/main/runtime-config-transaction.ts)准备／验证、确认准确文件及父目录后提交并发布实际值，随后合入新 edit；读回不再 save 或重放 Toolkit 准备 |
 | Tab／Region／布局及展示偏好 | [Core Spatial owner](../../packages/core/src/spatial-state.ts) 持有身份与布局；Renderer Store 的 `initialize` / `projectPersistedWorkbench` / `restorePersistedWorkbench` 读取并投影，偏好和草稿归 client |
 | Goal／Demand 内容与确认记录 | [Demand Store](../../packages/demand/src/demand-store.ts)；宿主提供明确 root，读取失败不替换成空 Store |
 | Note 正文与稳定块／引用 | 原 Files owner 的 `.note.md`；共享 [Markdown codec](../../packages/client-ui/src/note/note-markdown.ts) 供 Desktop／Mobile 编辑和读取、Host 处理同一格式，写入与 CAS 仍归原 Files owner；Core [轻量格式入口](../../packages/core/src/note-format.ts) 只解释身份头 |
