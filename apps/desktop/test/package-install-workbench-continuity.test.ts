@@ -144,7 +144,7 @@ async function fixture() {
     workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
       persistence: { userStatePending: false, userStateContentDigest: 'e'.repeat(64), spatial: { revision: 1, aligned: true } },
       focus: { executionSessionId: 'agent-session', pmoSessionId: null },
-      survey: { collectedZoneIds: ['zone-missing', 'zone-a'],
+      survey: { pageReferences: [], collectedZoneIds: ['zone-missing', 'zone-a'],
         organization: { ungrouped: ['zone-a'], groups: [{ groupId: 'survey-group', name: 'Retained research', collapsed: true, zoneIds: ['zone-missing', 'closed-zone-slot'] }] },
         selection: { zoneId: 'zone-a', selection: [{ tabId: 'tab-b', regionId: 'browser' }], active: { tabId: 'tab-b', regionId: 'browser' } } },
       desktop: { selection: { surface: 'space', mainSurface: 'workbench', focusView: null, space: null, goalId: null },
@@ -200,7 +200,7 @@ it.each(['before', 'after', 'both'] as const)('[survey-install] a missing %s Sur
 })
 
 it('[survey-install] observes an explicitly empty saved Survey as known empty', async () => {
-  const f = await fixture(), empty = { collectedZoneIds: [], organization: { ungrouped: [], groups: [] }, selection: null }
+  const f = await fixture(), empty = { pageReferences: [], collectedZoneIds: [], organization: { ungrouped: [], groups: [] }, selection: null }
   io.before!.workbench.survey = structuredClone(empty); after().survey = structuredClone(empty)
   const result = await install(f)
   expect(result.ui.status).toBe('committed'); expect(result.ui.observation.workbench.survey).toEqual(empty)
@@ -743,4 +743,85 @@ it('[prepared-stage] rejects a canonical reverse alias to the retained stage bef
   expect((await lstat(f.app)).isSymbolicLink()).toBe(true)
   expect((await lstat(stage)).ino).toBe(retained.ino)
   expect((await stat(f.app)).ino).toBe(retained.ino)
+})
+
+
+it.each(['before', 'after', 'both'] as const)('[survey-pages-install] missing %s Page reference facts stay unknown through the original installer without blocking healthy GUI and Runs', async missing => {
+  const f = await fixture()
+  if (missing !== 'after') Reflect.deleteProperty(io.before!.workbench.survey!, 'pageReferences')
+  if (missing !== 'before') Reflect.deleteProperty(after().survey!, 'pageReferences')
+  const original = structuredClone(io.before), expected = structuredClone(io.after)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error }))
+  expect(io.pid).toBe(202); expect(io.quits).toBe(1); expect(io.cutovers).toBe(1)
+  expect(agent().control!.run.runId).toBe('agent-run'); expect(io.before).toEqual(original); expect(io.after).toEqual(expected)
+  expect(outcome.error, 'Only an observed Page reference may enter workbench identity').toBeNull()
+  expect(outcome.result?.ui.status, 'An absent Page reference is unknown, never complete continuity').toBe('unknown')
+  expect(outcome.result?.ui.reason).toContain('Page reference')
+  expect(outcome.result?.ui.continuity).toEqual({ before: original, after: expected })
+  if (missing !== 'after') expect(outcome.result?.ui.continuity?.before?.workbench.survey).not.toHaveProperty('pageReferences')
+  if (missing !== 'before') expect(outcome.result?.ui.observation.workbench.survey).not.toHaveProperty('pageReferences')
+})
+
+it('[survey-pages-install] current explicitly empty Page references remain known and can certify unchanged original workbench', async () => {
+  const f = await fixture(), original = structuredClone(io.before), expected = structuredClone(io.after), result = await install(f)
+  expect(result.ui.status).toBe('committed'); expect(result.ui.observation.workbench.survey?.pageReferences).toEqual([])
+  expect(io.before).toEqual(original); expect(io.after).toEqual(expected); expect(agent().control!.run.runId).toBe('agent-run')
+})
+
+it.each(['Browser occupant', 'Region identity', 'reference order', 'removed reference'] as const)('[survey-pages-install] changed known %s cannot certify Page continuity', async change => {
+  const f = await fixture(), references = [{ regionId: 'page-one', browserId: 'browser-one' }, { regionId: 'page-two', browserId: 'browser-two' }]
+  Object.assign(io.before!.workbench.survey!, { pageReferences: structuredClone(references) }); Object.assign(after().survey!, { pageReferences: structuredClone(references) })
+  if (change === 'Browser occupant') after().survey!.pageReferences[0]!.browserId = 'replacement-browser'
+  if (change === 'Region identity') after().survey!.pageReferences[0]!.regionId = 'replacement-region'
+  if (change === 'reference order') after().survey!.pageReferences.reverse()
+  if (change === 'removed reference') after().survey!.pageReferences.pop()
+  const original = structuredClone(io.before), expected = structuredClone(io.after)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error }))
+  expect(io.pid).toBe(202); expect(io.before).toEqual(original); expect(io.after).toEqual(expected); expect(agent().control!.run.runId).toBe('agent-run')
+  expect(outcome.error, 'Known Page reference changes must withhold complete continuity').toBeTruthy()
+  expect(outcome.error?.message).toBe('The original workbench, Region descriptors or focus have not been restored.')
+  expect(outcome.error?.transaction.ui.status).toBe('unknown'); expect(outcome.error?.transaction.ui.continuity).toEqual({ before: original, after: expected })
+})
+
+it.each(['empty to nonempty', 'nonempty to empty'] as const)('[survey-pages-install] changed known %s Page references cannot borrow an empty array as unknown', async change => {
+  const f = await fixture(), reference = { regionId: 'browser', browserId: 'browser-id' }
+  if (change === 'empty to nonempty') after().survey!.pageReferences.push(reference)
+  else io.before!.workbench.survey!.pageReferences.push(reference)
+  const original = structuredClone(io.before), expected = structuredClone(io.after)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error }))
+  expect(io.before).toEqual(original); expect(io.after).toEqual(expected); expect(io.pid).toBe(202); expect(agent().control!.run.runId).toBe('agent-run')
+  expect(outcome.error, 'An observed empty array must still participate in identity comparison').toBeTruthy()
+  expect(outcome.error?.message).toBe('The original workbench, Region descriptors or focus have not been restored.')
+  expect(outcome.error?.transaction.ui.status).toBe('unknown')
+})
+
+it.each(['membership', 'organization', 'selection', 'layout', 'Run', 'save pending'] as const)('[survey-pages-install] unknown Page observation does not weaken original %s authority', async field => {
+  const f = await fixture(); Reflect.deleteProperty(io.before!.workbench.survey!, 'pageReferences')
+  if (field === 'membership') after().survey!.collectedZoneIds = []
+  if (field === 'organization') after().survey!.organization.groups[0]!.collapsed = false
+  if (field === 'selection') after().survey!.selection = null
+  if (field === 'layout') after().layouts.workspace!.groups[0]!.tabOrder.reverse()
+  if (field === 'Run') agent().control!.run.runId = 'different-unconfirmed-run'
+  if (field === 'save pending') io.before!.workbench.persistence!.userStatePending = true
+  const original = structuredClone(io.before), expected = structuredClone(io.after)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error }))
+  expect(io.before).toEqual(original); expect(io.after).toEqual(expected)
+  expect(outcome.error, 'An unrelated missing Page observation cannot remove an existing installation guard').toBeTruthy()
+  expect(outcome.result).toBeNull()
+  if (field === 'save pending') { expect(io.pid).toBe(201); expect(io.quits).toBe(0); expect(io.cutovers).toBe(0); expect(outcome.error?.transaction.ui.status).toBe('not-started') }
+  else { expect(io.pid).toBe(202); expect(io.cutovers).toBe(1); expect(outcome.error?.transaction.ui.status).toBe('unknown') }
+})
+
+it.each([
+  { name: 'null', value: null },
+  { name: 'non-array', value: { regionId: 'browser', browserId: 'browser-id' } },
+  { name: 'missing Browser identity', value: [{ regionId: 'browser' }] },
+  { name: 'unowned field', value: [{ regionId: 'browser', browserId: 'browser-id', extra: true }] }
+])('[survey-pages-install] provided malformed $name Page facts reject before quitting the original GUI', async ({ value }) => {
+  const f = await fixture(); Object.assign(io.before!.workbench.survey!, { pageReferences: value })
+  const original = structuredClone(io.before), expected = structuredClone(io.after)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error }))
+  expect(io.before).toEqual(original); expect(io.after).toEqual(expected); expect(io.pid).toBe(201); expect(io.quits).toBe(0); expect(io.cutovers).toBe(0)
+  expect(outcome.error, 'A provided malformed value must not be treated as an unavailable observation').toBeTruthy()
+  expect(outcome.error?.transaction.ui.status).toBe('not-started')
 })
