@@ -9,6 +9,7 @@ import type { FocusReplyLines } from '../../../shared/focus-preferences'
 import type { FocusAgentReveal } from '../lib/focus-agent-navigation'
 import { desktopPresentationCommitted } from '../lib/desktop-presentation'
 import { focusCardTrackHeight } from '../lib/focus-lane-layout'
+import { focusContextHeat, focusContextVisit } from '../lib/focus-attention'
 import { focusTopicContextKey, type FocusTopicHeading } from '../lib/focus-collection-lanes'
 import { FocusTopicLabel } from './FocusTopicLabel'
 
@@ -16,7 +17,8 @@ const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, co
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections }: {
+export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits }: {
+  visits?: ReadonlyMap<string, number>
   contexts: readonly FocusContext[]; columns: number; scrollRef: RefObject<HTMLDivElement | null>; visible: boolean
   layoutReady?: boolean
   replyLines?: FocusReplyLines
@@ -120,10 +122,10 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
     const sourceKey = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(sourceKey), section = sections?.get(sourceKey)
     return <Fragment key={contextKey(context)}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.id} aria-label={`Topic · ${section.name}`}><FocusTopicLabel topic={section} /></div> : null}
     <div className="focus-context-card" style={{ display: 'grid', minHeight: cardHeight + (topic ? 28 : 0) }}
-      data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'}
+      data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
-      {full ? <FocusContextCardBody context={context} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
+      {full ? <FocusContextCardBody context={context} summaryActive={visible} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
         identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} onSelect={onSelect} topic={topic} />
         : <button type="button" className={`focus-context focus-context--card${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}

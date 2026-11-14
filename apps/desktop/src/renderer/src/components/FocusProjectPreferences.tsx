@@ -1,0 +1,84 @@
+import * as Popover from '@agentmux/client-ui/components/Modal'
+import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { FOCUS_PROJECT_COLORS, focusProjectPreference, focusProjectTint, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
+import { saveFocusPreferences } from '../lib/focus-preferences'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { useAppStore } from '../store'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
+
+/** Draft stays at its exact original project on a failed save; no workspace or runtime writes. */
+export function FocusProjectPreferences({ projectKey, name }: { projectKey: string; name: string }) {
+  const projects = useAppStore(state => state.config?.focus?.projects)
+  const saved = focusProjectPreference(projectKey, projects ?? [])
+  const [open, setOpen] = useState(false), [draft, setDraft] = useState(saved)
+  const baseline = useRef<readonly FocusProjectPreference[]>([])
+  const [pending, setPending] = useState(false), [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const generation = useRef(0), draftVersion = useRef(0), inFlight = useRef(false)
+  const trigger = useRef<HTMLButtonElement>(null), escape = useRef(false)
+  const panel = useRef<HTMLDivElement>(null)
+  const [panelElement, setPanelElement] = useState<HTMLDivElement | null>(null)
+  const attachPanel = useCallback((element: HTMLDivElement | null) => { panel.current = element; setPanelElement(element) }, [])
+  useLayoutEffect(() => {
+    const anchor = trigger.current, content = panel.current
+    if (!open || !anchor || !content) return
+    let attached = true
+    const update = async () => {
+      const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-start', middleware: [offset(5), flip(), shift({ padding: 8 })] })
+      if (attached) Object.assign(content.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
+    }
+    const stop = autoUpdate(anchor, content, () => { void update() })
+    return () => { attached = false; stop() }
+  }, [open, panelElement])
+  function begin(next: boolean) {
+    ++generation.current
+    if (next) { baseline.current = projects ?? []; setDraft(saved); setError(null); setNotice(null); draftVersion.current = 0 }
+    setOpen(next)
+  }
+  function edit(next: FocusProjectPreference) { ++draftVersion.current; setDraft(next) }
+  function reviewCurrent() {
+    const current = useAppStore.getState().config?.focus?.projects ?? []
+    const previous = focusProjectPreference(projectKey, baseline.current)
+    const value = focusProjectPreference(projectKey, current)
+    edit({ ...value, pinned: draft.pinned !== previous.pinned ? draft.pinned : value.pinned,
+      note: draft.note !== previous.note ? draft.note : value.note, color: draft.color !== previous.color ? draft.color : value.color,
+      collapsed: draft.collapsed !== previous.collapsed ? draft.collapsed : value.collapsed })
+    baseline.current = current
+    setNotice(`Currently saved: ${value.pinned ? 'pinned' : 'unpinned'} · ${value.color}${value.note ? ' · ' + value.note : ' · no note'}. Your draft is kept; save to apply it.`)
+    setError(null)
+  }
+  async function save() {
+    if (inFlight.current) return
+    inFlight.current = true
+    const token = generation.current, version = draftVersion.current
+    setPending(true); setError(null); setNotice(null)
+    const original = baseline.current
+    const next = original.some(item => item.key === projectKey) ? original.map(item => item.key === projectKey ? draft : item) : [...original, draft]
+    try {
+      await saveFocusPreferences({ projects: next }, { projects: original })
+      if (generation.current !== token) return
+      baseline.current = useAppStore.getState().config?.focus?.projects ?? next
+      if (draftVersion.current !== version) { setNotice('Earlier changes saved. Your newer edits are kept.'); return }
+      const returnFocus = Boolean(panel.current?.contains(panel.current.ownerDocument.activeElement))
+      begin(false); if (returnFocus) trigger.current?.focus({ preventScroll: true })
+    }
+    catch (cause) { if (generation.current === token) setError(presentError(cause)) }
+    finally { inFlight.current = false; setPending(false) }
+  }
+  return <Popover.Root modal={false} open={open} onOpenChange={begin}>
+    <Popover.Trigger asChild><button ref={trigger} type="button" className="icon-button focus-project-preferences__trigger" aria-label={`Project preferences · ${name}`} title="Pin, note and color"><SemanticIcon name="action.more" size={13} /></button></Popover.Trigger>
+    <DocumentOverlayPortal component={Popover.Portal}><Popover.Content ref={attachPanel} className="focus-project-preferences" data-focus-project-preferences="" aria-describedby={undefined} style={{ position: 'fixed', visibility: 'hidden' }}
+      onEscapeKeyDown={() => { escape.current = true }} onCloseAutoFocus={event => { event.preventDefault(); if (escape.current) trigger.current?.focus({ preventScroll: true }); escape.current = false }}>
+      <Popover.Title asChild><strong className="focus-project-preferences__name">{name}</strong></Popover.Title>
+      <label className="focus-project-preferences__pin"><input type="checkbox" aria-label="Pin project" checked={draft.pinned} onChange={event => edit({ ...draft, pinned: event.target.checked })} />Pin project</label>
+      <label className="focus-project-preferences__note">Personal note<input aria-label="Project note" value={draft.note} placeholder="A familiar name or reminder" onChange={event => edit({ ...draft, note: event.target.value })} /></label>
+      <fieldset><legend>Background</legend><div className="focus-project-preferences__colors">{FOCUS_PROJECT_COLORS.map(color => <button type="button" key={color} aria-label={`Project color · ${color}`} title={color} aria-pressed={draft.color === color}
+        style={{ background: `color-mix(in srgb, ${focusProjectTint(color)} 26%, var(--surface-1))` }} onClick={() => edit({ ...draft, color })}>{draft.color === color ? <SemanticIcon name="status.selected" size={13} /> : null}</button>)}</div></fieldset>
+      {error ? <div role="status" className="focus-project-preferences__error">{error}<button type="button" className="small-button" onClick={reviewCurrent} aria-label="Review current project preferences">Review current settings</button></div> : null}
+      {notice ? <p role="status">{notice}</p> : null}
+      <div className="focus-project-preferences__actions"><button type="button" className="small-button" onClick={() => begin(false)}>Cancel</button><button type="button" className="small-button" disabled={pending} onClick={() => void save()} aria-label="Save project preferences">{pending ? 'Saving…' : error ? 'Retry save' : 'Save'}</button></div>
+    </Popover.Content></DocumentOverlayPortal>
+  </Popover.Root>
+}

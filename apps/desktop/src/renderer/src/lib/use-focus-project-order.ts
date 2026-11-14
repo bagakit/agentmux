@@ -1,57 +1,35 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
-import type { FocusProjectLane } from './focus-project-lanes'
+import { useEffect, useRef, type RefObject } from 'react'
+import { focusLaneProjectKey, type FocusProjectLane } from './focus-project-lanes'
+import { EMPTY_FOCUS_PROJECTS, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
 
-/** Coalesce only presentation order. Facts stay current and continuous activity
- * cannot postpone an update forever. Hidden Focus owns no reorder timer. */
-export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible: boolean, rows: RefObject<HTMLElement | null>, interaction?: RefObject<boolean>): FocusProjectLane[] {
-  const desired = lanes.map(lane => lane.id)
-  const signature = JSON.stringify(desired)
-  const latest = useRef(desired)
-  latest.current = desired
-  const [order, setOrder] = useState(desired)
-  const ordered = JSON.stringify(order)
-  const wasVisible = useRef(visible)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pressed = useRef(false)
+/** Identity is the route. Activity stays live; only an explicit arrangement replaces that route. */
+export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible: boolean, rows: RefObject<HTMLElement | null>, interaction?: RefObject<boolean>,
+  preferences: readonly FocusProjectPreference[] = EMPTY_FOCUS_PROJECTS, arrangeRevision = 0): FocusProjectLane[] {
+  const route = useRef({ revision: arrangeRevision, projects: [] as string[], lanes: [] as string[] })
+  if (route.current.revision !== arrangeRevision) route.current = { revision: arrangeRevision, projects: [], lanes: [] }
+  const projectRanks = new Map(route.current.projects.map((id, index) => [id, index]))
+  const laneRanks = new Map(route.current.lanes.map((id, index) => [id, index]))
+  for (const lane of lanes) {
+    const project = focusLaneProjectKey(lane)
+    if (!projectRanks.has(project)) { projectRanks.set(project, projectRanks.size); route.current.projects.push(project) }
+    if (!laneRanks.has(lane.id)) { laneRanks.set(lane.id, laneRanks.size); route.current.lanes.push(lane.id) }
+  }
   useEffect(() => {
-    if (!visible) return
-    const down = (event: PointerEvent) => { pressed.current = Boolean(event.target instanceof Node && rows.current?.contains(event.target)); if (interaction) interaction.current = pressed.current }
-    const up = () => { pressed.current = false; if (interaction) interaction.current = false }
+    if (!visible || !interaction) return
+    const document = rows.current?.ownerDocument ?? window.document
+    const down = (event: PointerEvent) => { interaction.current = Boolean(event.target instanceof Node && rows.current?.contains(event.target)) }
+    const up = () => { interaction.current = false }
     document.addEventListener('pointerdown', down, true)
     document.addEventListener('pointerup', up, true)
     document.addEventListener('pointercancel', up, true)
-    window.addEventListener('blur', up)
+    document.defaultView?.addEventListener('blur', up)
     return () => {
-      up()
-      document.removeEventListener('pointerdown', down, true)
-      document.removeEventListener('pointerup', up, true)
-      document.removeEventListener('pointercancel', up, true)
-      window.removeEventListener('blur', up)
+      up(); document.removeEventListener('pointerdown', down, true); document.removeEventListener('pointerup', up, true)
+      document.removeEventListener('pointercancel', up, true); document.defaultView?.removeEventListener('blur', up)
     }
   }, [visible, rows, interaction])
-  useEffect(() => {
-    const entering = visible && !wasVisible.current
-    wasVisible.current = visible
-    if (!visible || entering) {
-      if (timer.current !== null) clearTimeout(timer.current)
-      timer.current = null
-      if (entering) setOrder(latest.current)
-      return
-    }
-    if (signature === ordered || timer.current !== null) return
-    // Keep one bounded window even if task activity keeps changing the target order.
-    const apply = () => {
-      const selection = window.getSelection()
-      const reading = !selection?.isCollapsed && Boolean(selection?.anchorNode && rows.current?.contains(selection.anchorNode))
-      if (pressed.current || reading || rows.current?.contains(document.activeElement) || rows.current?.querySelector('.is-menu-open')) {
-        timer.current = setTimeout(apply, 3000)
-        return
-      }
-      timer.current = null; setOrder(latest.current)
-    }
-    timer.current = setTimeout(apply, 3000)
-  }, [visible, ordered, signature, rows])
-  useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current) }, [])
-  const ranks = new Map(order.map((id, index) => [id, index]))
-  return [...lanes].sort((a, b) => (ranks.get(a.id) ?? order.length) - (ranks.get(b.id) ?? order.length))
+  const pins = new Map(preferences.filter(item => item.pinned).map((item, index) => [item.key, index]))
+  return [...lanes].sort((a, b) => (pins.get(focusLaneProjectKey(a)) ?? pins.size) - (pins.get(focusLaneProjectKey(b)) ?? pins.size)
+    || projectRanks.get(focusLaneProjectKey(a))! - projectRanks.get(focusLaneProjectKey(b))!
+    || laneRanks.get(a.id)! - laneRanks.get(b.id)!)
 }

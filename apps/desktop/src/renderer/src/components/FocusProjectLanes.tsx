@@ -23,6 +23,11 @@ import { categorySpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget 
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { TopicCategoryDialog } from './TopicCategoryDialog'
 import { SpaceIconPicker } from './SpaceIconPicker'
+import { FocusProjectPreferences } from './FocusProjectPreferences'
+import { focusProjectPreference, focusProjectTint, moveFocusProject, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
+import { saveFocusPreferences } from '../lib/focus-preferences'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeObjectIdentifierIcon = semanticIconComponent('object.identifier')
@@ -30,6 +35,16 @@ const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 const CollectionIcon = semanticIconComponent('object.folder')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const UNMEASURED_CARDS: FocusLaneMetrics = { width: 0, padding: 4, gap: 2, cardGap: 2 }
+type ProjectChange = { kind: 'move'; key: string; target: string; after: boolean } | { kind: 'visibility'; key: string; collapsed: boolean }
+function applyProjectChange(original: readonly FocusProjectPreference[], change: ProjectChange) {
+  if (change.kind === 'move') {
+    if (![change.key, change.target].every(key => original.some(item => item.key === key && item.pinned))) throw Error('A pinned project changed. Review the current settings before retrying this move.')
+    return moveFocusProject(original, change.key, change.target, change.after)
+  }
+  const current = focusProjectPreference(change.key, original)
+  return original.some(item => item.key === change.key) ? original.map(item => item.key === change.key ? { ...item, collapsed: change.collapsed } : item)
+    : [...original, { ...current, collapsed: change.collapsed }]
+}
 
 function collectionCountLabel(lane: FocusScanLane) {
   const topics = focusCollectionTopicCount(lane), agents = lane.contextRefs.length
@@ -48,7 +63,8 @@ function FocusCollectionHeadingIcon({ lane, icons, resourceMenus }: { lane: Focu
 }
 
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2, resourceMenus = false }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds }: {
+  quietLanes?: ReadonlySet<string>; protectedLanes?: ReadonlySet<string>; forceExpanded?: boolean; revealedLaneIds?: ReadonlySet<string>
   /** Only a real resource consumer opts in; Settings examples remain static. */
   resourceMenus?: boolean
   leading?: ReactNode
@@ -58,13 +74,33 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   lanes: readonly FocusScanLane[]; selectedProjectKey: string
   currentLaneId?: string | null | undefined
   revealRequestId?: string | undefined
-  onSelect(projectKey: string): void; renderLane(lane: FocusScanLane, heading: ReactNode): ReactNode
+  onSelect(projectKey: string): void; renderLane(lane: FocusScanLane, heading: ReactNode, compact?: boolean): ReactNode
   recentProjects?: readonly FocusRetainedProject[]; onRead?(at: number): void
   cardMetrics?: FocusLaneMetrics; replyLines?: FocusReplyLines
 }) {
   const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
   const hosts = useAppStore(state => state.config?.hosts)
+  const preferences = useAppStore(state => state.config?.focus?.projects)
+  const dragged = useRef<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ key: string; after: boolean } | null>(null)
+  const [orderFailure, setOrderFailure] = useState<{ message: string; change: ProjectChange; original: readonly FocusProjectPreference[] } | null>(null)
+  const savingPreferences = useRef(false)
+  const [preferencePending, setPreferencePending] = useState(false)
+  async function saveProjectChange(change: ProjectChange, original: readonly FocusProjectPreference[]) {
+    if (savingPreferences.current) return
+    savingPreferences.current = true
+    setPreferencePending(true)
+    try { const next = applyProjectChange(original, change); await saveFocusPreferences({ projects: next }, { projects: original }); setOrderFailure(null) }
+    catch (cause) { setOrderFailure({ message: presentError(cause), change, original }) }
+    finally { savingPreferences.current = false; setPreferencePending(false) }
+  }
+  function movePin(key: string, direction: -1 | 1) {
+    const original = preferences ?? [], pins = original.filter(item => item.pinned), index = pins.findIndex(item => item.key === key)
+    const neighbor = pins[index + direction]
+    if (!neighbor) return
+    void saveProjectChange({ kind: 'move', key, target: neighbor.key, after: direction > 0 }, original)
+  }
   const ownerDocument = useWorkbenchDocument()
   // This one editor host survives Collection reparenting after metadata changes.
   const [categoryTarget, setCategoryTarget] = useState<TopicCategory | null>(null)
@@ -78,14 +114,18 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   const renameCategory = (target: TopicCategory) => { captureInvoker(); setCategoryTarget(target) }
   const returnFocus = () => invoker.current?.isConnected ? invoker.current : null
   const descriptionId = useId()
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const [collapsed, setCollapsed] = useState<ReadonlyMap<string, boolean>>(() => new Map())
+  const initialQuiet = useRef(new Map<string, boolean>())
   const currentCollectionId = lanes.find(lane => lane.collection?.topics.some(topic => topic.id === currentLaneId))?.id
   useEffect(() => {
     if (!revealRequestId || !currentCollectionId) return
-    setCollapsed(current => { if (!current.has(currentCollectionId)) return current; const next = new Set(current); next.delete(currentCollectionId); return next })
+    setCollapsed(current => { if (current.get(currentCollectionId) === false) return current; return new Map(current).set(currentCollectionId, false) })
   }, [revealRequestId, currentCollectionId])
-  function toggleCollection(id: string) {
-    setCollapsed(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  function toggleCollection(id: string, compact: boolean) {
+    setCollapsed(current => new Map(current).set(id, !compact))
+  }
+  function toggleProject(key: string, compact: boolean) {
+    void saveProjectChange({ kind: 'visibility', key, collapsed: !compact }, preferences ?? [])
   }
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
@@ -95,17 +135,43 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
     return () => clearInterval(timer)
   }, [visible])
   return <section className="focus-project-lanes" aria-label="Focus context scan">
+    {preferencePending ? <div className="focus-project-order-status" role="status">Saving project preferences…</div> : null}
+    {orderFailure ? <div className="focus-project-order-error" role="status">{orderFailure.message}<button type="button" className="small-button" onClick={() => void saveProjectChange(orderFailure.change, orderFailure.original)}>Retry project {orderFailure.change.kind === 'move' ? 'order' : 'visibility'}</button>
+      <button type="button" className="small-button" onClick={() => {
+        const current = useAppStore.getState().config?.focus?.projects ?? []
+        void saveProjectChange(orderFailure.change, current)
+      }}>Retry using current settings</button></div> : null}
     <div className="focus-project-lanes__rows" ref={rowsRef}>
       {leading}
-      {lanes.map(lane => <FocusLaneArticle name={lane.name} summary={lane.summary} visible={visible} className={`focus-project-lanes__row${!lane.collection && selectedProjectKey === focusLaneProjectKey(lane) ? ' is-selected' : ''}`} data-focus-source={lane.collection ? 'collection' : origins?.get(lane.id)?.kind} data-focus-collection={lane.collection ? lane.id : undefined} data-collapsed={lane.collection && collapsed.has(lane.id) || undefined} data-focus-current={currentLaneId === lane.id || lane.collection?.topics.some(topic => topic.id === currentLaneId) || undefined} data-project-id={lane.collection ? undefined : lane.projectId} data-project-key={lane.collection ? undefined : focusLaneProjectKey(lane)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
+      {lanes.map(lane => {
+        const key = focusLaneProjectKey(lane), preference = focusProjectPreference(key, resourceMenus ? preferences ?? [] : [])
+        const project = !lane.collection && !lane.topicId && !lane.locationUnconfirmed
+        const current = currentLaneId === lane.id || Boolean(lane.collection?.topics.some(topic => topic.id === currentLaneId))
+        if (!initialQuiet.current.has(lane.id) && !forceExpanded) initialQuiet.current.set(lane.id, Boolean(quietLanes?.has(lane.id)))
+        // Relevant new work, a visit or an observation issue can reopen a quiet
+        // lane once. Returning to idle must never silently fold it again.
+        if (initialQuiet.current.get(lane.id) && (preference.pinned || current || protectedLanes?.has(lane.id)
+          || revealedLaneIds?.has(lane.id) || quietLanes && !quietLanes.has(lane.id))) initialQuiet.current.set(lane.id, false)
+        const automaticallyCompact = Boolean(initialQuiet.current.get(lane.id)) && !preference.pinned && !current && !protectedLanes?.has(lane.id)
+        const compact = !forceExpanded && !revealedLaneIds?.has(lane.id) && (lane.collection ? collapsed.get(lane.id) ?? automaticallyCompact : preference.collapsed ?? automaticallyCompact)
+        return <FocusLaneArticle name={lane.name} summary={lane.summary} visible={visible} className={`focus-project-lanes__row${!lane.collection && selectedProjectKey === key ? ' is-selected' : ''}`} data-focus-source={lane.collection ? 'collection' : origins?.get(lane.id)?.kind} data-focus-collection={lane.collection ? lane.id : undefined} data-collapsed={compact || undefined} data-focus-current={current || undefined} data-project-id={lane.collection ? undefined : lane.projectId} data-project-key={lane.collection ? undefined : key} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}
+          data-pinned={preference.pinned || undefined} data-focus-project-color={preference.color} data-project-drop-target={dropTarget?.key === key ? dropTarget.after ? 'after' : 'before' : undefined}
+          style={{ '--focus-project-color': focusProjectTint(preference.color) } as CSSProperties}
+          onDragOver={event => { if (project && preference.pinned && dragged.current && dragged.current !== key) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const box = event.currentTarget.getBoundingClientRect(); setDropTarget({ key, after: event.clientY > box.top + box.height / 2 }) } }}
+          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
+          onDrop={event => { event.preventDefault(); const from = dragged.current; dragged.current = null; setDropTarget(null); const box = event.currentTarget.getBoundingClientRect(); if (from && project && preference.pinned) void saveProjectChange({ kind: 'move', key: from, target: key, after: event.clientY > box.top + box.height / 2 }, preferences ?? []) }}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
+          {project && resourceMenus ? <button type="button" className="focus-project-disclosure" aria-label={`${compact ? 'Expand' : 'Collapse'} project · ${lane.labels[0]}`} aria-expanded={!compact} disabled={preferencePending || forceExpanded || revealedLaneIds?.has(lane.id)} title={forceExpanded || revealedLaneIds?.has(lane.id) ? 'Expanded for this search or exact reveal' : compact ? 'Expand project' : 'Collapse project'} onClick={() => toggleProject(key, compact)}><ThemeNavigationDisclosureIcon size={11} /></button> : null}
+          {project && resourceMenus && preference.pinned ? <button type="button" className="focus-project-pin-handle" draggable={!preferencePending} disabled={preferencePending} aria-busy={preferencePending || undefined} aria-label={`Reorder pinned project · ${lane.labels[0]}`} title={preferencePending ? 'Saving project order…' : 'Drag to reorder · Alt + ↑ / ↓'}
+            onDragStart={event => { dragged.current = key; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', key) }} onDragEnd={() => { dragged.current = null; setDropTarget(null) }}
+            onKeyDown={event => { if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); movePin(key, event.key === 'ArrowUp' ? -1 : 1) } }}><SemanticIcon name="action.pin" size={12} /></button> : null}
           {lane.collection ? <>
             <span className="focus-project-lanes__source">Collection</span>
-            <FocusLaneHeadingMenu enabled={resourceMenus} lane={lane} collapsed={collapsed.has(lane.id)} onToggleCollection={() => toggleCollection(lane.id)} onRename={renameCategory} onChangeIcon={changeIcon}><button type="button" className="focus-project-lanes__axis focus-project-lanes__collection" aria-expanded={!collapsed.has(lane.id)}
+            <FocusLaneHeadingMenu enabled={resourceMenus} lane={lane} collapsed={compact} onToggleCollection={() => toggleCollection(lane.id, compact)} onRename={renameCategory} onChangeIcon={changeIcon}><button type="button" className="focus-project-lanes__axis focus-project-lanes__collection" aria-expanded={!compact}
               aria-current={lane.collection.topics.some(topic => topic.id === currentLaneId) ? 'location' : undefined}
               aria-label={`${lane.name} · ${collectionCountLabel(lane)}`}
-              title={lane.name} onClick={() => toggleCollection(lane.id)}>
+              title={lane.name} onClick={() => toggleCollection(lane.id, compact)}>
               <ThemeNavigationDisclosureIcon size={11} aria-hidden="true" /><FocusCollectionHeadingIcon lane={lane} icons={icons} resourceMenus={resourceMenus} />
               <span className="focus-project-lanes__label"><strong>{lane.name}</strong></span>
               <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
@@ -122,12 +188,14 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
             <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
           </button></FocusLaneHeadingMenu>
           {lane.summary ? <span id={descriptionId + lane.id} className="focus-project-lanes__summary">{lane.summary}</span> : null}</>}
+          {project && preference.note ? <span className="focus-project-lanes__personal-note" data-focus-project-note="" title={preference.note}>{preference.note}</span> : null}
+          {project && resourceMenus ? <FocusProjectPreferences projectKey={key} name={lane.labels[0] ?? lane.name} /> : null}
           <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} />
           {lane.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
         </span>
-        )}</div>
-      </FocusLaneArticle>)}
+        , compact)}</div>
+      </FocusLaneArticle>})}
       {recentProjects.map(project => <article className="focus-project-lanes__row" data-project-id={project.projectId} data-project-key={project.key} data-observed-project="true" key={`observed:${project.key}`}>
         <FocusProjectObservation project={project} recent onRead={onRead} cardMetrics={cardMetrics} replyLines={replyLines} />
       </article>)}

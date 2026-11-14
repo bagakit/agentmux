@@ -8,7 +8,8 @@ import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout
 import type { FocusReplyLines, FocusTopicPresentation } from '../../../shared/focus-preferences'
 
 /** The actual scan and its settings example share grouping, state heads and Topic presentation. */
-export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLines = 2, topicPresentation = 'cards', renderCards }: {
+export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLines = 2, topicPresentation = 'cards', renderCards, compact = false }: {
+  compact?: boolean
   lane: FocusScanLane; contexts: readonly FocusContext[]; heading: ReactNode; metrics: FocusLaneMetrics
   replyLines?: FocusReplyLines; topicPresentation?: FocusTopicPresentation
   renderCards(contexts: readonly FocusContext[], columns: number, topics?: ReadonlyMap<string, FocusTopicHeading>, sections?: ReadonlyMap<string, FocusTopicHeading>): ReactNode
@@ -29,7 +30,7 @@ export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLi
     </header>
   }
   return <><div className="focus-project-lanes__title">{heading}<div className="focus-project-lanes__status-rail" aria-label="Context states">
-    {FOCUS_BUCKETS.filter(bucket => sparse || (contexts.length > 0 && groups[bucket].length === 0)).map(bucket => {
+    {FOCUS_BUCKETS.filter(bucket => compact || sparse || (contexts.length > 0 && groups[bucket].length === 0)).map(bucket => {
       if (actual[bucket].length > 0) return groupHeader(bucket, true)
       const meta = FOCUS_BUCKET_PRESENTATION[bucket], Icon = meta.icon
       return <span className="focus-context-group__header" data-bucket={bucket} title={`${meta.label} · 0`} aria-label={`${meta.label} · 0`} key={bucket}><Icon size={12} aria-hidden="true" /></span>

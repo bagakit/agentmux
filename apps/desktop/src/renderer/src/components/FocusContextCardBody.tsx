@@ -4,15 +4,17 @@ import { agentContextForSession, focusTimelineStamp } from '../lib/focus-context
 import { sessionPresentationById } from '../lib/session-presentation'
 import { useAppStore } from '../store'
 import { FocusContextRow } from './FocusContextRow'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 
 /** Only an actual body reads the retained recap. Identity, grouping and service
  * detail remain the projection owner's facts, including unconfirmed Mote scope. */
-export function FocusContextCardBody(props: ComponentProps<typeof FocusContextRow>) {
+export function FocusContextCardBody({ summaryActive = true, ...props }: ComponentProps<typeof FocusContextRow> & { summaryActive?: boolean }) {
   const { context } = props
-  useEffect(() => { if (context.access?.readConversation) void context.access.readConversation().catch(error => useAppStore.getState().reportError(error)) }, [context.access?.readConversation])
+  const presentationActive = useWorkbenchPresentationActive(), active = summaryActive && presentationActive
+  useEffect(() => { if (active && context.access?.readConversation) void context.access.readConversation().catch(error => useAppStore.getState().reportError(error)) }, [active, context.access?.readConversation])
   const summary = !props.disclosure || props.disclosure.summary > 0
   const facts = useAppStore(useShallow(state => {
-    if (context.access || !summary || context.recap !== undefined) return { session: undefined, timeline: undefined, name: undefined }
+    if (!active || context.access || !summary || context.recap !== undefined) return { session: undefined, timeline: undefined, name: undefined }
     const timeline = state.timelines[context.id]
     return { session: sessionPresentationById(state.sessions).get(context.id), timeline,
       name: state.agentNames[context.id], ...focusTimelineStamp(timeline) }
