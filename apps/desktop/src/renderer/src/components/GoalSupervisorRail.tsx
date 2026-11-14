@@ -4,6 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { demandAgentReferenceLabel, goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
 import type { GoalPlanReviewer } from '@agentmux/demand/goal-plan'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { GoalContinuationAgent } from './GoalContinuationControl'
@@ -100,7 +101,7 @@ export function GoalSupervisorRail({ demand, onOpenDiscussion, discussionBusy = 
       <span>Next · {nextOwner}</span><p>{next.nextOwner.action}</p>
     </div> : <p className="goal-supervisor-rail__empty">{demand.responsibility ? 'No open execution responsibility recorded.' : 'Execution responsibility has not been observed.'}</p>}
     {demand.delegationObservationIssue ? <p className="goal-supervisor-rail__issue" role="status">{demand.delegationObservationIssue}</p> : null}
-    {onOpenDiscussion ? <button type="button" className="small-button goal-supervisor-rail__discussion" disabled={discussionBusy} onClick={onOpenDiscussion}><DiscussionIcon size={13} aria-hidden="true" />Open goal discussion</button> : null}
+    {onOpenDiscussion ? <Button type="button" className="goal-supervisor-rail__discussion" disabled={discussionBusy} onClick={onOpenDiscussion}><DiscussionIcon size={13} aria-hidden="true" />Open goal discussion</Button> : null}
     <section className="goal-supervisor-rail__coordination" aria-label="Coordination history">
       <h3>Coordination</h3>
       {entries.length ? <ol className="goal-supervisor-rail__timeline">{shown.map(entry => <li key={entry.key} data-goal-coordination={entry.key}>
@@ -111,7 +112,7 @@ export function GoalSupervisorRail({ demand, onOpenDiscussion, discussionBusy = 
         {entry.detail ? <details className="goal-supervisor-rail__detail"><summary>Read record</summary><p>{entry.detail}</p></details> : null}
         <span className="goal-supervisor-rail__operation" title={`${entry.sourceKind} ${entry.sourceId}`} aria-label={`${entry.sourceKind} ${entry.sourceId}`}>{entry.sourceKind} · <code>{compactReferenceId(entry.sourceId)}</code></span>
       </li>)}</ol> : <p className="goal-supervisor-rail__empty">No coordination records yet.</p>}
-      {entries.length > RECENT ? <button type="button" className="small-button" aria-expanded={all} onClick={() => setAll(value => !value)}>{all ? 'Show recent only' : `Show ${entries.length - RECENT} earlier`}</button> : null}
+      {entries.length > RECENT ? <Button type="button" aria-expanded={all} onClick={() => setAll(value => !value)}>{all ? 'Show recent only' : `Show ${entries.length - RECENT} earlier`}</Button> : null}
     </section>
   </section>
 }

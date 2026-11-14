@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { goalRequestFirstDestination, useGoalAgentName } from '../lib/goal-discussion-recipient'
 import { useRef, useState } from 'react'
 import type { DemandRecord } from '../lib/global-demand-board'
@@ -103,8 +104,8 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
   const needsSupervisor = !manager || !['available', 'busy'].includes(manager.state)
   const canContinue = pending && patrol?.supervisorAgentSessionId && manager?.agentSessionId === patrol.supervisorAgentSessionId && manager.agentSessionId === targetSessionId && manager.runId &&
     targetHostId && manager.hostId === targetHostId && manager.state !== 'ended' && manager.state !== 'unknown' && !patrol.attempts.some(a => a.attemptedAt) && (!attempt || attempt.target.runId !== manager.runId)
-  const openConversation = targetSessionId ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? targetSessionId : null, targetHostId,
-    targetHostId ? undefined : 'The original Supervisor destination is unconfirmed. Check the retained inspection to read its destination.', undefined, entryContext)}>{targetName ? `Open ${targetName} conversation` : 'Open owner conversation'}</button> : null
+  const openConversation = targetSessionId ? <Button type="button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? targetSessionId : null, targetHostId,
+    targetHostId ? undefined : 'The original Supervisor destination is unconfirmed. Check the retained inspection to read its destination.', undefined, entryContext)}>{targetName ? `Open ${targetName} conversation` : 'Open owner conversation'}</Button> : null
   return <div className={`goal-patrol${compact ? ' goal-patrol--compact' : ''}`} aria-label="PMO 巡查" onClick={event => event.stopPropagation()}>
     <div className="goal-patrol__actions">
       <button type="button" className={(primary ?? !pending) && !needsSupervisor && !firstDestination ? 'primary-button' : 'small-button'} aria-busy={busy}
@@ -113,8 +114,8 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
           pending ? observed?.reason ?? '原巡查请求已保存；正在读取原回执。' : '正在请求原 PMO 巡查；实际工作状态以原 Agent 为准。', undefined, entryContext)
         void run(pending ? () => readOriginal(entry) : () => request(entry), entry)
       }}>{busy ? 'Checking original inspection…' : pending ? 'Check original inspection' : targetName ? `Request inspection from ${targetName}` : 'Request owner inspection'}</button>
-      {!compact && !embedded && patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>Read inspection</button> : null}
-      {canContinue ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(continueOriginal)}>Continue original inspection</button> : null}
+      {!compact && !embedded && patrol ? <Button type="button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>Read inspection</Button> : null}
+      {canContinue ? <Button type="button" disabled={busy} onClick={() => void run(continueOriginal)}>Continue original inspection</Button> : null}
       {!embedded && (!compact || needsSupervisor) ? openConversation : null}
       {needsSupervisor ? <button type="button" className={primary && !firstDestination ? 'primary-button' : 'small-button'} onClick={() => setSupervisorGoalId(demand.id)}>Choose Supervisor</button> : null}
     </div>
@@ -134,7 +135,7 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
     {patrol || embedded || compact && targetSessionId && !needsSupervisor ? <details className="goal-patrol__source"><summary>{compact ? 'Inspection details' : 'Original inspection and input'}</summary>
       {embedded ? <><div className="goal-patrol__secondary">{openConversation}</div>{manager ? <p>Supervisor: {manager.agentSessionId ?? 'Unassigned'} · {manager.state}. {manager.reason}</p> : null}{observed?.state === 'missing' ? <p>The original inspection has not started. Restore its original Supervisor or explicitly choose a Supervisor; selection never sends input.</p> : null}</> : null}
       {compact ? <div className="goal-patrol__secondary">
-        {patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>Read inspection</button> : null}
+        {patrol ? <Button type="button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>Read inspection</Button> : null}
         {!needsSupervisor ? openConversation : null}
       </div> : null}
       {patrol ? <dl><dt>Inspection operation</dt><dd>{patrol.operationId}</dd>

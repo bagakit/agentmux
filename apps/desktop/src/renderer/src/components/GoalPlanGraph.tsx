@@ -3,6 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { GoalPlanNodeProjection, GoalPlanNodeState, GoalPlanUnknownReason } from '@agentmux/demand/goal-plan'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
@@ -162,8 +163,8 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
     </dl>
     {item.delegation?.report ? <GoalPlanDelivery key={item.delegation.operationId} demand={demand} item={item} historical={historical} author={<NodeExecutor item={item} />} draft={draft} onDraft={onDraft} previousDrafts={previousDrafts} onReadGoal={onReadGoal} onConfirmed={onConfirmed} /> : null}
     {item.delegation ? <div className="goal-plan-node__actions">
-      <button type="button" className="small-button" data-goal-plan-open="executor" onClick={() => void open(item.delegation!.workerAgentSessionId, delegationWorkerHostId(item.delegation!))}>Open executor</button>
-      <button type="button" className="small-button" data-goal-plan-open="owner" onClick={() => void open(item.delegation!.ownerAgentSessionId, item.delegation!.hostId)}>Open owner</button>
+      <Button type="button" data-goal-plan-open="executor" onClick={() => void open(item.delegation!.workerAgentSessionId, delegationWorkerHostId(item.delegation!))}>Open executor</Button>
+      <Button type="button" data-goal-plan-open="owner" onClick={() => void open(item.delegation!.ownerAgentSessionId, item.delegation!.hostId)}>Open owner</Button>
     </div> : null}
     {item.delegation && !item.delegation.report ? <GoalPlanThread key={JSON.stringify([item.delegation.hostId, item.delegation.sourceMessageId])} delegation={item.delegation} /> : null}
   </div>
@@ -222,7 +223,7 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
   const stateIssue = demand.planStateIssue ?? (projection && !projection.progress
     ? "Node states are unavailable: this Goal's Host returned the plan without them. Read this Goal again; update that Host if the state remains unavailable. The plan itself is unchanged." : undefined)
   const stateService = stateIssue ? <p className="goals-service" role="status" data-goal-plan-states-unavailable>{stateIssue}{' '}
-    <button type="button" className="small-button" disabled={readingState} onClick={() => void readState()}>{readingState ? 'Reading Goal…' : 'Read Goal again'}</button>
+    <Button type="button" disabled={readingState} onClick={() => void readState()}>{readingState ? 'Reading Goal…' : 'Read Goal again'}</Button>
   </p> : null
   if (!projection) return <section className={`goal-plan goal-plan--empty${compact ? ' goal-plan--compact' : ''}`} aria-label="Goal plan" data-goal-plan-empty>
     <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Not saved yet</span></div>
@@ -314,7 +315,7 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
       })}</ul>
     </section> : null}
     {selected ? <div className="goal-plan__reading" ref={reading} id={readingId}>
-      <div className="goals-section-heading"><h3 ref={readingHeading} tabIndex={-1}>{selected.node.title}</h3><button type="button" className="small-button" onClick={() => closeNode(selected.node.id)}>Back to node</button></div>
+      <div className="goals-section-heading"><h3 ref={readingHeading} tabIndex={-1}>{selected.node.title}</h3><Button type="button" onClick={() => closeNode(selected.node.id)}>Back to node</Button></div>
       {historical ? <p className="goals-caption" role={!exact ? 'status' : undefined}>{exact ? 'Previous attempt' : 'The selected original attempt is unavailable.'}</p> : null}
       {(!historical || exact) ? <NodeDetail key={JSON.stringify([demand.id, selected.node.id, attemptId])} demand={demand} item={selected} historical={historical} dependencyNames={selected.node.dependsOn.map(id => byId.get(id)!.node.title)} onIssue={setIssue}
         draft={reviewKey && retainedReviews?.[reviewKey] ? { ...retainedReviews[reviewKey], ...reviewNotices[reviewNoticeKey] } : undefined} onDraft={value => {

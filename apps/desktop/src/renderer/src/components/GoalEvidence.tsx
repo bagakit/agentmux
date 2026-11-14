@@ -3,6 +3,7 @@ import { demandEvidenceLabel, demandEvidenceText, type DemandEvidence, type Dema
 import { readGoalFileEvidence } from '@agentmux/core/goal-evidence'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { documentKey } from '../lib/workbench-tabs'
@@ -72,6 +73,6 @@ function Evidence({ reference }: { reference: DemandEvidence }) {
     <button type="button" className="goals-evidence__copy" aria-label={`Copy evidence location ${label}`} title="Copy full location" onClick={() => void copy()}>Copy</button>
     {typeof reference === 'string' && !external ? <small>Original reference · File source not recorded</small> : null}
     {typeof reference !== 'string' ? <details><summary>{sourceName}</summary><code>{reference.resource.workspacePath}</code><small>{reference.resource.hostId} · {reference.resource.workspaceId} · {reference.revision ?? 'Revision not recorded'}</small></details> : null}
-    {issue ? <span className="goals-service" role="status">{issue}{changed ? <button type="button" className="small-button" disabled={busy} onClick={() => void open(true)}>View current file</button> : null}</span> : null}
+    {issue ? <span className="goals-service" role="status">{issue}{changed ? <Button type="button" disabled={busy} onClick={() => void open(true)}>View current file</Button> : null}</span> : null}
   </span>
 }

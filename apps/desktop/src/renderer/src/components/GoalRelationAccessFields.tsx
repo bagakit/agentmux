@@ -1,5 +1,6 @@
 import type { GoalRelationAccess, GoalRuntimeAccess, GoalInspectionAccess } from '@agentmux/core/control'
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../shared/contracts'
 import { SelectionField } from './SelectionField'
 import { useEffect, useRef, useState } from 'react'
@@ -48,7 +49,7 @@ function GoalInputConnections({ reference, hosts, access, original, disabled, on
       selected={access?.coordinator ? JSON.stringify(access.coordinator) : ''} title="Agent connection" label={`Coordinator connection for ${reference.execution.runtimeId}`}
       routeNoun="Coordinator" empty="Choose an independent saved device…" disabled={disabled} input onChange={coordinator => onChange({ ...access, coordinator })} />
       {!external ? <><small>Checking can use the Agent connection; continuing also needs project access.</small>
-        {access?.coordinator && access.source ? <button type="button" className="small-button" disabled={disabled} onClick={() => onChange({ source: access.source! })}>Use project connection for Check</button> : null}</> : <small>Project access alone cannot control this Agent.</small>}</> : null}</>
+        {access?.coordinator && access.source ? <Button type="button" disabled={disabled} onClick={() => onChange({ source: access.source! })}>Use project connection for Check</Button> : null}</> : <small>Project access alone cannot control this Agent.</small>}</> : null}</>
 }
 function GoalCarrierConnection({ runtimeId, hosts, values, selected, title, label, routeNoun, empty, disabled, input = false, onChange }: {
   runtimeId: string; hosts: readonly HostConfig[]; values: GoalRuntimeAccess[]; selected: string; title: string; label: string
@@ -89,7 +90,7 @@ function GoalCarrierConnection({ runtimeId, hosts, values, selected, title, labe
           if (!choice) return
           onChange(choice.value)
         }} />
-      <button type="button" className="small-button" disabled={disabled || !carrier || reading} onClick={() => void readRoutes()}>{reading ? 'Reading saved routes…' : `Read saved ${routeNoun} routes`}</button>
+      <Button type="button" disabled={disabled || !carrier || reading} onClick={() => void readRoutes()}>{reading ? 'Reading saved routes…' : `Read saved ${routeNoun} routes`}</Button>
       {discovery?.issue ? <p role="status">{discovery.issue}</p> : discovery?.result ? <small>{discovery.result.routes.some(route => route.agentTarget.runtimeId === runtimeId)
         ? `Choose a saved route above. Its access is checked ${input ? 'for each requested action' : 'when saving'}.` : `No saved route on this device ends at the original ${routeNoun}.`}</small> : null}
     </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { DemandProjection } from '../lib/global-demand-board'
 
 const RECENT = 6
@@ -30,6 +31,6 @@ export function GoalActivity({ demand }: { demand: Pick<DemandProjection, 'id' |
         </div>
       </li>)}
     </ol>
-    {timeline.length > RECENT ? <button type="button" className="small-button goals-activity__more" aria-expanded={all} onClick={() => setAll(value => !value)}>{all ? 'Show recent only' : `Show ${timeline.length - RECENT} earlier`}</button> : null}
+    {timeline.length > RECENT ? <Button type="button" className="goals-activity__more" aria-expanded={all} onClick={() => setAll(value => !value)}>{all ? 'Show recent only' : `Show ${timeline.length - RECENT} earlier`}</Button> : null}
   </section>
 }

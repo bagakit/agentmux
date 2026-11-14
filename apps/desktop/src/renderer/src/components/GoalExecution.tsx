@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { GoalContinuationControl } from './GoalContinuationControl'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useMemo, useState } from 'react'
@@ -47,9 +48,9 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
   }
   return <section className="goal-collaboration goal-team" aria-label="Goal collaboration">
     <header className="goal-team__heading"><h2>Team</h2><details className="goal-team__edit"><summary>Edit relationships</summary><div className="goal-team__editors">
-      <button type="button" className="small-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Supervisor</button>
-      <button type="button" className="small-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Executors</button>
-      <button type="button" className="small-button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Related</button>
+      <Button type="button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Supervisor</Button>
+      <Button type="button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Executors</Button>
+      <Button type="button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Related</Button>
     </div></details></header>
     <div className="goal-team__actors">{team.groups.map(group => <div className="goal-team__group" key={group.id} data-goal-team-reference={group.id}>
       {group.actors.map(actor => <GoalTeamActorCard key={actor.key} actor={actor} onRecommend={recommend} />)}
@@ -63,12 +64,12 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
       </div> : null}
       {group.unconfirmedRoles.length ? <div className="goal-team__unqualified-roles">
         <span>{group.unconfirmedRoles.map(role => <span key={role} data-goal-team-role={role} data-role-host="unconfirmed">{roleNames[role]} </span>)} · {group.reference ? 'Current execution not observed' : 'Host not confirmed'}</span>
-        <button type="button" className="small-button" onClick={() => setRole(group.unconfirmedRoles[0]!)}>Review relationship</button>
+        <Button type="button" onClick={() => setRole(group.unconfirmedRoles[0]!)}>Review relationship</Button>
       </div> : null}
     </div>)}</div>
     {!team.groups.length ? <p className="goals-caption">No Agents assigned yet. Use Edit relationships to choose them.</p> : null}
     {!demand.supervisorSessionId && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
-    {creationDrafts.map(role => <p key={role} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="small-button" onClick={() => setRole(role)}>Check creation and relationship</button></p>)}
+    {creationDrafts.map(role => <p key={role} className="goals-service" role="status">Original Agent creation retained.<Button type="button" onClick={() => setRole(role)}>Check creation and relationship</Button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <GoalContinuationControl demand={demand} active={active} onChooseSupervisor={() => setRole('supervisor')} />
     {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={team.groups.filter(group => group.roles.includes('related')).flatMap(group => group.actors.map(actor => actor.session.id))} /> : null}</details> : null}
@@ -90,7 +91,7 @@ const GoalTeamActorCard = memo(function GoalTeamActorCard({ actor, onRecommend }
     <div className="goal-team__roles">{actor.roles.length ? actor.roles.map(role => <span key={role} data-goal-team-role={role}>{roleNames[role]}</span>) : goalTeamSourceLabels(actor.identity).map(label => <span key={label}>{label}</span>)}</div>
     <FocusContextCardBody context={context} selected={false} onSelect={open} />
     <p className="goal-team__context">{context.workspaceName} · {session.control.hostId}</p>
-    {actor.recommended ? <button type="button" className="small-button goal-team__recommend" aria-label={`Assign ${context.name} as Supervisor`} onClick={() => void onRecommend(session.control.agentSessionId)}>Assign as Supervisor</button> : null}
+    {actor.recommended ? <Button type="button" className="goal-team__recommend" aria-label={`Assign ${context.name} as Supervisor`} onClick={() => void onRecommend(session.control.agentSessionId)}>Assign as Supervisor</Button> : null}
   </div>
 })
 function GoalArrangement({ sessionIds }: { sessionIds: string[] }) {

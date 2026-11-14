@@ -5,6 +5,7 @@ import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { GoalRelationAccess } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentExecutionRecoveryReference, AgentLaunchResult, AppConfig } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { retainGoalAgentCreationDraft, useAppStore } from '../store'
@@ -179,12 +180,12 @@ export function GoalSourceCreation({ goalId, role, config, selection, onSelectio
     {raw !== undefined ? draft ? <div className="goal-agent-picker__receipt" role="status">
       <strong>{outcome === 'retired' ? 'Original Agent retired; reference retained' : complete ? observed ? 'Original project occurrence observed' : 'Original creation receipt retained' : 'Original Agent request retained'}</strong><span>{draft.project.path}</span>
       {draft.issue ? <p role="status">{draft.issue}</p> : null}
-      <button type="button" className="small-button" disabled={disabled || reading} onClick={() => void check(draft)}>{reading ? 'Checking…' : 'Check original creation'}</button>
-      {!complete ? <button type="button" className="small-button" disabled={disabled || draft.kind === 'goal-coordinator-create' && draft.submitted && !draft.acknowledged && !recovery}
-        onClick={() => void send(draft, draft.submitted)}>{draft.submitted ? 'Continue original creation' : 'Save request and create once'}</button> : null}
+      <Button type="button" disabled={disabled || reading} onClick={() => void check(draft)}>{reading ? 'Checking…' : 'Check original creation'}</Button>
+      {!complete ? <Button type="button" disabled={disabled || draft.kind === 'goal-coordinator-create' && draft.submitted && !draft.acknowledged && !recovery}
+        onClick={() => void send(draft, draft.submitted)}>{draft.submitted ? 'Continue original creation' : 'Save request and create once'}</Button> : null}
       <details><summary>Original request details</summary><pre>{JSON.stringify({ draft, observation: observed }, null, 2)}</pre></details>
     </div> : <p className="goals-service" role="status">The original creation uses an unreadable format. Its complete input is retained; no replacement Agent was requested.</p>
-      : editing ? <><button type="button" className="small-button" disabled={disabled} onClick={() => void chooseFolder()}>Choose local folder…</button>
+      : editing ? <><Button type="button" disabled={disabled} onClick={() => void chooseFolder()}>Choose local folder…</Button>
         <SourceAgentTargetSetup key={chosenFolder} config={config} active={!disabled} actionLabel="Use project and Agent device" preparationNote="Create the Agent next. Creation sends no task." disabled={disabled}
           initialSelection={chosenFolder ? { resourceWorkspaceId: chosenFolder, agentWorkspaceId: null }
             : selection ? { resourceWorkspaceId: selection.project.id, agentWorkspaceId: null, source: selection } : undefined}
@@ -194,12 +195,12 @@ export function GoalSourceCreation({ goalId, role, config, selection, onSelectio
           : selection?.agentTarget.runtimeId === selection?.target.reference.runtimeId ? 'Agent runs on the project device'
             : `Agent target · ${selection?.agentTarget.hostId ?? 'Unconfirmed'}${selection?.agentTarget.adoptedRoute ? ` · ${selection.agentTarget.adoptedRoute.hops.length} hops` : ''} · Runtime ${compactReferenceId(selection?.agentTarget.runtimeId ?? '')}`}</span>
         <details className="goal-team__identity-details"><summary>Project and Agent references</summary><code>{JSON.stringify(selection)}</code></details>
-        <button type="button" className="small-button" disabled={disabled} onClick={() => setEditing(true)}>Edit project and Agent device</button></div>
+        <Button type="button" disabled={disabled} onClick={() => setEditing(true)}>Edit project and Agent device</Button></div>
         <SelectionField label="New Goal Agent configuration" value={launcher.executorId ?? ''} disabled={disabled}
           options={launcher.executors.map(value => ({ value: value.id, label: value.label, description: value.providerId }))}
           onValueChange={executorId => { if (selection) onSelection({ ...selection, executorId }) }} />
-        <button type="button" className="small-button" disabled={disabled} onClick={launcher.refresh}>Refresh configurations</button>
-        <button type="button" className="primary-button" disabled={disabled || !launcher.ready} onClick={create}>Create Agent</button>
+        <Button type="button" disabled={disabled} onClick={launcher.refresh}>Refresh configurations</Button>
+        <Button type="button" variant="primary" disabled={disabled || !launcher.ready} onClick={create}>Create Agent</Button>
         {launcher.issue ? <p className="goals-service" role="status">{launcher.issue}</p> : null}</>}
     {raw === undefined || draft ? <p className="goals-caption">Creation sends no task. Save this Agent’s relationship separately.</p> : null}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}

@@ -3,6 +3,7 @@ import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseGoalPlanReviewInput, type GoalPlanReview, type GoalPlanReviewInput } from '@agentmux/demand/goal-plan'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { api } from '../lib/api'
 import { applyGoalDelegationResult, beginGoalDelegationRead } from '../lib/goal-delegation-work'
@@ -102,8 +103,8 @@ export function GoalPlanDelivery({ demand, item, historical, author, draft, onDr
     {!historical && item.state === 'review' || request ? <div className="goal-delivery__review" aria-label="Independent node review">
       {!acknowledged && request ? <div className="goals-service" role="status">
         {current.pending ? 'Saving or reading the original review…' : current.issue ?? 'Original review request retained.'}
-        <div className="goals-inline-actions"><button type="button" className="small-button" disabled={current.pending} onClick={() => void readOriginal()}>Read original Goal</button>
-          {!historical && current.reread && item.state === 'review' && delegation.operationId === request.review.delegationOperationId ? <button type="button" className="small-button" disabled={current.pending} onClick={() => void submit()}>Submit original review</button> : null}</div>
+        <div className="goals-inline-actions"><Button type="button" disabled={current.pending} onClick={() => void readOriginal()}>Read original Goal</Button>
+          {!historical && current.reread && item.state === 'review' && delegation.operationId === request.review.delegationOperationId ? <Button type="button" disabled={current.pending} onClick={() => void submit()}>Submit original review</Button> : null}</div>
       </div> : current.issue ? <p className="goals-service" role="status">{current.issue}</p> : null}
       {!historical ? <details className="goal-delivery__form"><summary>Record review</summary>
       <p className="goals-caption">Run the declared check independently and record what you observed. This reviews this attempt only.</p>
@@ -111,7 +112,7 @@ export function GoalPlanDelivery({ demand, item, historical, author, draft, onDr
       <label>Observed result<textarea aria-label="Review observed result" rows={2} value={current.result} readOnly={Boolean(request)} onChange={event => onDraft({ ...current, result: event.target.value })} /></label>
       <label>Evidence locations <small>One per line</small><textarea aria-label="Review evidence locations" rows={2} value={current.evidence} readOnly={Boolean(request)} onChange={event => onDraft({ ...current, evidence: event.target.value })} /></label>
       <label>Review note<textarea aria-label="Review note" rows={2} value={current.note} readOnly={Boolean(request)} onChange={event => onDraft({ ...current, note: event.target.value })} /></label>
-      {!request ? <div className="goals-inline-actions"><button type="button" className="primary-button" onClick={() => void submit('pass')}>Pass node</button><button type="button" className="small-button" onClick={() => void submit('changes')}>Request changes</button></div> : null}
+      {!request ? <div className="goals-inline-actions"><Button type="button" variant="primary" onClick={() => void submit('pass')}>Pass node</Button><Button type="button" onClick={() => void submit('changes')}>Request changes</Button></div> : null}
       </details> : null}
       {request ? <details><summary>Original review request</summary><pre>{JSON.stringify(request, null, 2)}</pre></details> : null}
     </div> : null}
@@ -124,7 +125,7 @@ export function GoalPlanDelivery({ demand, item, historical, author, draft, onDr
         {review.check.evidence.length ? <GoalEvidence evidence={review.check.evidence} criterion="Previous independent review" /> : null}
       </div>)}
       {previousDrafts[attempt.operationId]?.request ? <details><summary>Original review request</summary><pre>{JSON.stringify(previousDrafts[attempt.operationId]!.request, null, 2)}</pre>
-        {previousDrafts[attempt.operationId]?.issue ? <p className="goals-service">{previousDrafts[attempt.operationId]!.issue}</p> : null}<button type="button" className="small-button" onClick={onReadGoal}>Read original Goal</button>
+        {previousDrafts[attempt.operationId]?.issue ? <p className="goals-service">{previousDrafts[attempt.operationId]!.issue}</p> : null}<Button type="button" onClick={onReadGoal}>Read original Goal</Button>
       </details> : null}
       <GoalPlanThread delegation={attempt} />
     </article>)}</details> : null}

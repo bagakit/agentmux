@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { agentRegionExecution, useAppStore } from '../store'
 import { retainedFocusContext } from '../lib/focus-context'
 import type { GoalTeamIdentity } from '../lib/goal-team'
@@ -38,7 +39,7 @@ export const GoalTeamReference = memo(function GoalTeamReference({ identity, rea
       : <div><strong>{name}</strong><p className="goals-caption">{read?.loading ? 'Reading its original identity…' : 'Original metadata is not yet confirmed.'}</p></div>}
     <p className="goal-team__source" title={`${subject.hostId}${source?.history?.workspacePath ? ` · ${source.history.workspacePath}` : ''}`}>{subject.hostId}{source?.history?.workspacePath ? ` · ${source.history.workspacePath}` : ''}</p>
     <div className="goal-team__reference-actions">
-      {source?.history && source.state !== 'deleted' ? <button type="button" className="small-button" onClick={event => setReading(event.currentTarget)}>Read original conversation</button> : null}
+      {source?.history && source.state !== 'deleted' ? <Button type="button" onClick={event => setReading(event.currentTarget)}>Read original conversation</Button> : null}
       <details className="goal-team__identity-details"><summary>Reference details</summary><dl>
         <div><dt>Session</dt><dd><code>{subject.agentSessionId}</code></dd></div><div><dt>Host</dt><dd>{subject.hostId}</dd></div>
         {source?.history ? <><div><dt>Agent configuration</dt><dd>{source.history.executorId}</dd></div>
@@ -46,7 +47,7 @@ export const GoalTeamReference = memo(function GoalTeamReference({ identity, rea
           {source.history.nativeHandle ? <div><dt>Native conversation</dt><dd><code>{source.history.nativeHandle.sessionId}</code></dd></div> : null}</> : null}
       </dl></details>
     </div>
-    {read?.issue ? <div className="goals-service" role="status"><span>{read.issue}</span><button type="button" className="small-button" onClick={onRetry}>Read original identity again</button></div> : null}
+    {read?.issue ? <div className="goals-service" role="status"><span>{read.issue}</span><Button type="button" onClick={onRetry}>Read original identity again</Button></div> : null}
     {reading ? <AgentSessionReadingSurface source={subject} label={name} returnTrigger={reading} onClose={() => setReading(null)} /> : null}
   </div>
 })

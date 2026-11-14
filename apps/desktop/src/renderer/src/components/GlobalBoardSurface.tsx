@@ -4,6 +4,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import type { GoalStage } from '../lib/goal-presentation'
@@ -171,7 +172,7 @@ export function GlobalBoardSurface() {
       {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<ThemeActionClearIcon size={11} /></button>)}</div> : null}
       {creation ? <div className="goals-service goals-creation" role="status" data-direct-goal-id={creation.id}>
         {creation.pending ? creation.phase === 'save' ? 'Saving goal…' : 'Goal saved. Preparing its discussion…' : creation.phase === 'save' ? creation.notSaved ? 'The goal is not saved. Save this same goal to continue.' : 'Goal save is unconfirmed. Read this same goal before continuing.' : 'Goal saved. Its discussion is unconfirmed; the original workface is kept.'}
-        {creation.error ? <><span>{creation.error}</span><button type="button" className="primary-button" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? 'Save this goal' : 'Read goal again' : 'Retry goal discussion'}</button></> : null}
+        {creation.error ? <><span>{creation.error}</span><Button type="button" variant="primary" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? 'Save this goal' : 'Read goal again' : 'Retry goal discussion'}</Button></> : null}
       </div> : null}
       <div className={`goals-collection goals-collection--${collectionView}`} role="region" aria-label="Global goals">
         <GoalsCollectionBody view={collectionView} groups={groups} columns={columns} visibleStatuses={visibleStatuses} hasGoals={projectedDemands.length > 0} hasMatches={filteredDemands.length > 0} query={query} filterCount={appliedFilters.length} hideStart={creation?.phase === 'save' && !creation.notSaved} onClearConditions={clearConditions} onShowFinished={() => setShowHistory(true)} renderRow={renderRow} />

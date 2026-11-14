@@ -1,6 +1,7 @@
 import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import type { GoalResponsibilityRow } from '@agentmux/core/goal-responsibility'
 import { demandAgentReferenceLabel, type DemandAgentReference } from '@agentmux/demand/relations'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { GoalNextStepSource } from '../lib/goal-presentation'
 import { GoalExecutionResponsibility } from './GoalResponsibilitySummary'
 import { GoalEvidence } from './GoalEvidence'
@@ -22,10 +23,10 @@ export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, re
     {embedded && observation?.input.state !== 'confirmed' && (!responsibilities?.get(`start:${start.operationId}`) || responsibilities.get(`start:${start.operationId}`)?.binding === 'confirmed') ? <p className="goals-caption">Original input unconfirmed</p> : null}
     {observation?.goalResult ? <p className={embedded ? 'goals-caption' : 'goals-service'}>Goal-level results are available. Their association with this Start is unknown.</p> : null}
     {embedded && observation?.attention ? <p className="goals-caption">Supervisor reminder {observation.attention.state === 'confirmed' ? 'received' : observation.attention.state}.
-      {start.attention && observation.attention.state !== 'confirmed' ? <button type="button" className="small-button" onClick={() => void openAgent(start.attention!.supervisorAgentSessionId, start.attention!.hostId)}>Open original Supervisor</button> : null}
+      {start.attention && observation.attention.state !== 'confirmed' ? <Button type="button" onClick={() => void openAgent(start.attention!.supervisorAgentSessionId, start.attention!.hostId)}>Open original Supervisor</Button> : null}
     </p> : !embedded && observation?.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{observation.attention.reason} Goal results and human review remain separate.</p></details> : !embedded && observation?.attention ? <p className="goals-service" role="status">Supervisor reminder {observation.attention.state}. {observation.attention.reason} Reminder receipt does not accept this Goal.
-      {start.attention ? <button type="button" className="small-button"
-        onClick={() => void openAgent(start.attention!.supervisorAgentSessionId, start.attention!.hostId)}>Open original Supervisor</button> : null}
+      {start.attention ? <Button type="button"
+        onClick={() => void openAgent(start.attention!.supervisorAgentSessionId, start.attention!.hostId)}>Open original Supervisor</Button> : null}
     </p> : null}
     <div className="goal-delegation__actions">
       {'target' in start ? <span className="goals-caption">Original Source member · current execution needs its exact Source entry</span> : <button type="button" className={primary !== false && focus?.kind === 'start' && focus.operationId === start.operationId && !observation?.goalResult ? 'primary-button' : 'small-button'} title={`Host ${start.hostId} · Session ${start.agentSessionId}`}

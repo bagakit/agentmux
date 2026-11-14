@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { useAppStore, retainGoalPlanRequest } from '../store'
 import { goalDiscussionRequestKey } from '../lib/goal-discussion-request'
@@ -81,28 +82,28 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   return <div className="goal-plan__request" data-goal-plan-request-feedback>
     {!demand.supervisorSessionId ? <>
       <p className="goals-muted">Choose a Supervisor to make this plan.</p>
-      <button type="button" className="small-button" data-goal-plan-request={original ? undefined : true} disabled={working} onClick={chooseSupervisor}>Choose Supervisor to plan</button>
+      <Button type="button" data-goal-plan-request={original ? undefined : true} disabled={working} onClick={chooseSupervisor}>Choose Supervisor to plan</Button>
     </> : null}
     {demand.supervisorSessionId && typeof demand.supervisorSessionId !== 'string' && !original ? <p className="goals-service" role="status">Supervisor {currentPresentation.name} is retained. Planning requires its original current execution access.</p> : null}
     {typeof demand.supervisorSessionId === 'string' || original ? <div className="goals-inline-actions">
-      <button type="button" className="small-button" data-goal-plan-request disabled={pending || busy || working} onClick={() => { setUnsentSelection(null); onRequest() }}>
+      <Button type="button" data-goal-plan-request disabled={pending || busy || working} onClick={() => { setUnsentSelection(null); onRequest() }}>
         {pending ? `Preparing request to ${presentation.name ?? 'Supervisor'}…` : original ? `Check request to ${presentation.name ?? 'original Supervisor'}`
           : retained && retained.requestId !== unsentSelection ? `Check request to ${currentPresentation.name ?? 'Supervisor'}` : `Ask ${currentPresentation.name ?? 'Supervisor'} to plan`}
-      </button>
-      {newRequest && typeof demand.supervisorSessionId === 'string' ? <button type="button" className="small-button" disabled={working || pending} onClick={() => void run(async () => {
+      </Button>
+      {newRequest && typeof demand.supervisorSessionId === 'string' ? <Button type="button" disabled={working || pending} onClick={() => void run(async () => {
         await useAppStore.getState().requestDemandPmoTask(demand.id, 'plan', { newRequest: true })
-      })}>New request to {currentPresentation.name ?? 'current Supervisor'}</button> : null}
-      {typeof target === 'string' ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? target : null,
+      })}>New request to {currentPresentation.name ?? 'current Supervisor'}</Button> : null}
+      {typeof target === 'string' ? <Button type="button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? target : null,
         targetHostId, targetHostId === undefined ? 'The original Supervisor destination is unconfirmed. Check the retained request to read its destination.' : undefined)}>
-        Open {presentation.name ?? 'Supervisor'} conversation</button> : null}
-      {canContinue ? <button type="button" className="small-button" disabled={working} onClick={() => void run(async () => {
+        Open {presentation.name ?? 'Supervisor'} conversation</Button> : null}
+      {canContinue ? <Button type="button" disabled={working} onClick={() => void run(async () => {
         const cut = beginGoalDelegationRead()
         applyGoalDelegationResult(await api.demands.delegation('goal.patrol.continue', { goalId: demand.id, patrolOperationId: original.operationId,
           operationId: mintObjectId(), expectedRunId: currentRun }), cut)
-      })}>Continue original planning request</button> : null}
+      })}>Continue original planning request</Button> : null}
     </div> : null}
     {firstDestination ? <div className="goals-inline-actions">
-      <button type="button" className="small-button" disabled={working || pending || busy} onClick={() => void run(sendFirstDestination)}>Send planning request</button>
+      <Button type="button" disabled={working || pending || busy} onClick={() => void run(sendFirstDestination)}>Send planning request</Button>
       <span className="goals-caption" title={`Host ${firstDestination.hostId} · Session ${firstDestination.agentSessionId} · Run ${firstDestination.runId}`}>First send to {firstPresentation.name ?? 'the current Supervisor'} on {firstHostName}.</span>
     </div> : null}
     {observed ? firstDestination ? <>

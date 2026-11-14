@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { GoalEvidence } from './GoalEvidence'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useRef, useState, Fragment, type ReactNode } from 'react'
@@ -85,7 +86,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
       {row.report ? <p className="goal-delegation__summary">{row.report.grounding.summary}</p> : null}
       {row.issue && row.issue !== current.delegationObservationIssue ? <p className="goals-service" role="status">{row.issue}</p> : null}
       {row.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{row.attention.reason} The report and human review remain separate.</p></details> : row.attention ? <p className="goals-service" role="status">Supervisor reminder {row.attention.state === 'prepared' ? 'prepared' : 'unknown'}. {row.attention.reason} Reminder receipt does not accept this Goal.
-        {row.delegation.attention ? <button type="button" className="small-button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId, row.delegation.attention!.hostId)}>Open original Supervisor</button> : null}
+        {row.delegation.attention ? <Button type="button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId, row.delegation.attention!.hostId)}>Open original Supervisor</Button> : null}
       </p> : null}
       <div className="goal-delegation__actions">
         {row.state === 'report' ? <button type="button" className={!embedded || primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'primary-button' : 'small-button'} disabled={busy.has(row.delegation.operationId)}
@@ -93,8 +94,8 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
         {row.state === 'collected' ? <button type="button" className={!embedded || primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'primary-button' : 'small-button'} onClick={() => void review()}>Review results</button> : null}
         <button type="button" className={embedded && primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId && !['report', 'collected'].includes(row.state) ? 'primary-button' : 'small-button'} title={`Host ${delegationWorkerHostId(row.delegation)} · Session ${row.delegation.workerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.workerAgentSessionId, delegationWorkerHostId(row.delegation))}>Open original Agent</button>
-        <button type="button" className="small-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}
-          onClick={() => void openAgent(row.delegation.ownerAgentSessionId, row.delegation.hostId)}>Open task owner</button>
+        <Button type="button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}
+          onClick={() => void openAgent(row.delegation.ownerAgentSessionId, row.delegation.hostId)}>Open task owner</Button>
       </div>
       <details className="goal-delegation__source"><summary>Task and source</summary>
         <dl><dt>Owner Host</dt><dd>{row.delegation.hostId}</dd><dt>Worker Host</dt><dd>{delegationWorkerHostId(row.delegation)}</dd><dt>Owner</dt><dd>{row.delegation.ownerAgentSessionId}</dd>
@@ -124,11 +125,11 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
     ...(planFirst ? [overviewPanel] : []),
     ...records.filter(record => record.key === focusedKey).map(record => <Fragment key={record.key}>{record.element}</Fragment>),
     ...(!planFirst ? [overviewPanel] : []),
-    ...(others.length ? [<div key="original-executions" className="goal-work-area__records"><details><summary data-goal-other-work>{others.length} original {others.length === 1 ? 'execution' : 'executions'}{needsAttention ? ` · ${needsAttention} need checking` : ''}</summary>{others.map(record => <Fragment key={record.key}>{record.element}</Fragment>)}</details><button type="button" className="small-button" onClick={() => void refresh()}>Refresh reports</button></div>] : [])
+    ...(others.length ? [<div key="original-executions" className="goal-work-area__records"><details><summary data-goal-other-work>{others.length} original {others.length === 1 ? 'execution' : 'executions'}{needsAttention ? ` · ${needsAttention} need checking` : ''}</summary>{others.map(record => <Fragment key={record.key}>{record.element}</Fragment>)}</details><Button type="button" onClick={() => void refresh()}>Refresh reports</Button></div>] : [])
   ] : records.map(record => <Fragment key={record.key}>{record.element}</Fragment>)
   const responsibility = <GoalResponsibilitySummary demand={current} active={active} embedded={embedded} represented={embedded ? represented : undefined} primary={embedded ? primary && focus?.kind === 'patrol' : undefined} />
   return <>{!planFirst ? <>{beforeRecords}{responsibility}</> : null}{rows.length || starts.length || current.delegationObservationIssue || issue || embedded && plan ? <section id={`goal-work-${demand.id}`} tabIndex={-1} className="goal-delegation" aria-label={embedded ? 'Original work records' : 'Delegated work'}>
-    <div className="goal-delegation__heading">{!embedded ? <strong>Delegated work</strong> : null}{(!embedded || !others.length) && (rows.length || starts.length) ? <button type="button" className="small-button" onClick={() => void refresh()}>Refresh reports</button> : null}</div>
+    <div className="goal-delegation__heading">{!embedded ? <strong>Delegated work</strong> : null}{(!embedded || !others.length) && (rows.length || starts.length) ? <Button type="button" onClick={() => void refresh()}>Refresh reports</Button> : null}</div>
     {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
     {recordNodes}
 

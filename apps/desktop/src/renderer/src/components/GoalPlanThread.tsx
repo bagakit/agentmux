@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import type { DemandDelegation } from '@agentmux/demand/delegations'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { MailboxOriginalMessage } from './MailboxCollaboration'
 
@@ -27,11 +28,11 @@ export function GoalPlanThread({ delegation }: { delegation: DemandDelegation })
     return () => { current = false }
   }, [expanded, retry, hostId, sourceMessageId, threadId, ownerAgentSessionId, workerAgentSessionId, ownerRunId, workerRunId])
   return <div className="goal-plan-node__thread">
-    <button type="button" className="small-button" aria-expanded={expanded} data-goal-plan-thread={sourceMessageId}
-      onClick={() => setExpanded(value => !value)}>{expanded ? 'Hide original thread' : 'Read original thread'}</button>
+    <Button type="button" aria-expanded={expanded} data-goal-plan-thread={sourceMessageId}
+      onClick={() => setExpanded(value => !value)}>{expanded ? 'Hide original thread' : 'Read original thread'}</Button>
     {expanded ? <section aria-label="Original plan thread">
       {loading ? <p className="goals-caption" role="status">Reading original thread…</p> : null}
-      {issue ? <p className="goals-service" role="status">{issue} <button type="button" className="small-button" onClick={() => setRetry(value => value + 1)}>Read again</button></p> : null}
+      {issue ? <p className="goals-service" role="status">{issue} <Button type="button" onClick={() => setRetry(value => value + 1)}>Read again</Button></p> : null}
       {record ? <>
         <MailboxOriginalMessage record={record.source} />
         {record.replies.map(reply => <MailboxOriginalMessage key={reply.envelope.messageId} record={reply} />)}
