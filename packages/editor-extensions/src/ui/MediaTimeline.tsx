@@ -30,14 +30,21 @@ export function MediaTimeline({ bounds, fraction, buffered, label, valueText, cl
   // A key let go while the pointer still holds the thumb does not end that drag.
   const pressed = useRef(false)
   const span = bounds ? Math.max(0, bounds.end - bounds.start) : 0
-  const onPointerMove = (event: ReactPointerEvent<HTMLInputElement>) => {
-    if (!bounds || span <= 0) return
-    const track = event.currentTarget.getBoundingClientRect(), lane = event.currentTarget.parentElement!.getBoundingClientRect()
+  // The thumb's width, read once per pointing: a style read on every move would cost a style pass each time.
+  const thumbWidth = useRef<number | null>(null)
+  const pointAt = (input: HTMLInputElement, clientX: number): Pointed | null => {
+    if (!bounds || span <= 0) return null
+    const track = input.getBoundingClientRect(), lane = input.parentElement!.getBoundingClientRect()
     // A native range maps a press over the thumb's travel, not the whole track, and lands on a step; the pointed time is that value.
-    const thumb = Number.parseFloat(getComputedStyle(event.currentTarget).getPropertyValue('--media-thumb')) || 0, travel = track.width - thumb
-    const along = travel > 0 ? Math.min(1, Math.max(0, (event.clientX - track.left - thumb / 2) / travel)) : 0
+    const thumb = thumbWidth.current ??= Number.parseFloat(getComputedStyle(input).getPropertyValue('--media-thumb')) || 0, travel = track.width - thumb
+    if (travel <= 0) return null
+    const along = Math.min(1, Math.max(0, (clientX - track.left - thumb / 2) / travel))
     const x = thumb / 2 + along * travel
-    setHover({ time: bounds.start + Math.round(along * TIMELINE_STEPS) / TIMELINE_STEPS * span, edge: track.width > 0 ? x / track.width : 0, x: track.left - lane.left + x })
+    return { time: bounds.start + Math.round(along * TIMELINE_STEPS) / TIMELINE_STEPS * span, edge: x / track.width, x: track.left - lane.left + x }
+  }
+  const onPointerMove = (event: ReactPointerEvent<HTMLInputElement>) => {
+    const pointed = pointAt(event.currentTarget, event.clientX)
+    if (pointed) setHover(pointed)
   }
   const onPointerDown = (event: ReactPointerEvent<HTMLInputElement>) => {
     if (event.button !== 0) return
@@ -51,7 +58,7 @@ export function MediaTimeline({ bounds, fraction, buffered, label, valueText, cl
   return <div className="media-player__timeline">
     <input className="media-player__slider" type="range" data-media-timeline="" aria-label={label} aria-valuetext={valueText}
       min={0} max={TIMELINE_STEPS} step={1} value={Math.round(fraction * TIMELINE_STEPS)} style={style}
-      onPointerMove={onPointerMove} onPointerLeave={() => setHover(null)} onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove} onPointerLeave={() => { thumbWidth.current = null; setHover(null) }} onPointerDown={onPointerDown}
       onChange={event => { if (bounds) onScrub(bounds.start + Number(event.currentTarget.value) / TIMELINE_STEPS * span) }}
       onPointerUp={land} onPointerCancel={land} onLostPointerCapture={land} onKeyUp={() => { if (!pressed.current) onLand() }} onBlur={land} />
     {hover ? <output className="media-player__bubble" aria-hidden="true" style={{ left: `${hover.x}px` }}>{clock(hover.time)}</output> : null}
