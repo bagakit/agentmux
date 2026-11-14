@@ -17,7 +17,7 @@ await mkdir(state, { recursive: true })
 const out = await mkdtemp(join(state, 'run-'))
 const appRoot = join(out, 'electron-app')
 const receipt = { schema: 'agentmux.native-host-exclusion-proof.v1', passed: false,
-  boundary: 'Real Electron Main, visible uniquely colored BrowserWindow, native helper discovery and ScreenCaptureKit PNGs. The wrong-PID helper must fail the excluded pixel assertion; compile failures and timeouts are infrastructure failures. No real macOS 12/13 device claim.' }
+  boundary: 'Real Electron Main, visible neutral host with a controlled color marker, native helper discovery and ScreenCaptureKit PNGs. Only host previews are retained. The wrong-PID helper must fail the excluded pixel assertion; compile failures and timeouts are infrastructure failures. No real macOS 12/13 device claim.' }
 const wrongPid = {
   before: 'includeHostWindows ? [getpid()] : [getpid(), hostPID]',
   after: 'includeHostWindows ? [getpid()] : [getpid(), hostPID + 1]',
@@ -128,7 +128,12 @@ try {
   receipt.failure = error instanceof Error ? error.message : String(error)
   process.exitCode = 1
 } finally {
-  if (receipt.passed) await rm(out, { recursive: true, force: true })
-  else receipt.output = out
+  if (receipt.passed) {
+    for (const target of [appRoot, join(out, 'baseline-helper'), join(out, 'wrong-pid-helper'), join(out, 'baseline/user-data'), join(out, 'wrong-pid/user-data')]) {
+      await rm(target, { recursive: true, force: true })
+    }
+  }
+  receipt.output = out
+  await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))
   console.log(JSON.stringify(receipt))
 }

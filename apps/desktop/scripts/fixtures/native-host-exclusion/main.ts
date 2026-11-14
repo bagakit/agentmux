@@ -11,7 +11,7 @@ app.setPath('userData', join(out, 'user-data'))
 app.on('window-all-closed', () => {})
 const receipt: any = {
   schema: 'agentmux.native-host-exclusion-fixture.v1', passed: false, checks: [],
-  boundary: 'One real Electron Main owns the visible host BrowserWindow and NativeDesktop. Real native discovery and display PNGs are decoded in memory; no pixels, paths or draft text are retained.'
+  boundary: 'One real Electron Main owns the visible host BrowserWindow and NativeDesktop. Real native discovery and display PNGs are decoded in memory; only the controlled host preview is retained, never desktop pixels, user paths or draft text.'
 }
 let host: BrowserWindow | undefined
 let native: NativeDesktop | undefined
@@ -81,6 +81,7 @@ async function run() {
   check('the host with its exact colored marker is visible and frontmost', host.isVisible() && app.isActive() && host.isFocused())
   const content = host.getContentBounds(), display = screen.getDisplayMatching(content)
   const paintedHost = await host.webContents.capturePage(), paintedSize = paintedHost.getSize()
+  await writeFile(join(out, 'host.png'), paintedHost.toPNG())
   const own = colorPixels(paintedHost.toPNG().toString('base64'), markerRegion(
     { width: paintedSize.width, height: paintedSize.height, frame: { x: 0, y: 0, width: content.width, height: content.height } },
     { x: 0, y: 0, width: content.width, height: content.height }))
