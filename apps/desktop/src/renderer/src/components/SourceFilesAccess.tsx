@@ -37,7 +37,7 @@ export function SourceFilesAccess({ workspace, visible }: { workspace: Workspace
   if (input?.locator && !message && !retained.length && !retainedCreations.length && !retainedFolders.length && !registrationUnknown) return null
   return <div className="file-operation-service" role="status">
     {message ? <p>{message}</p> : null}
-    {registrationUnknown ? <p>The original folder registration request is retained. Current discovery does not confirm a missing registration reply.</p> : null}
+    {registrationUnknown ? <><p>The original folder registration request is retained. Current discovery does not confirm a missing registration reply.</p><button className="small-button" disabled={busy} onClick={() => void check()}>Check original registration</button></> : null}
     {result?.status === 'registration-required' ? <><p>Connect this folder to its original Files owner to create, move or delete paths. Existing editors remain available.</p>
       <button className="small-button" disabled={busy} onClick={() => {
         const packet = result.registration
