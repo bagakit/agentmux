@@ -24,6 +24,7 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel, status, t
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [original] = useState(entry.text)
   const [text, setText] = useState(entry.text)
+  const [expanded, setExpanded] = useState(false)
   const inFlight = useRef(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -45,14 +46,22 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel, status, t
       <label htmlFor={fieldId}>{editorLabel}</label>
       {status}
     </div>
-    <ComposerTextarea variant="compact" id={fieldId} ref={textareaRef} autoFocus aria-label={editorLabel} rows={3} value={text} onValueChange={setText} readOnly={saving} />
+    <ComposerTextarea variant="compact" expanded={expanded} id={fieldId} ref={textareaRef} autoFocus aria-label={editorLabel}
+      aria-describedby={error ? `${fieldId}-save-error` : undefined} rows={3} value={text} onValueChange={setText} readOnly={saving} />
     <ActionFeedback bounded tabIndex={error ? 0 : undefined}>
       {!entry.editable ? <span role="status">原消息已锁定，编辑稿仍可复制。</span> : null}
-      {error ? <span role="alert">{error}</span> : entry.editable
+      {error ? <span id={`${fieldId}-save-error`} role="alert">{error}</span> : entry.editable
         ? <span role="status">{saving ? <><SemanticIcon name="status.loading" animation="spin" size={13} /> 正在保存待发消息</>
           : '保存修改后仍需单独发送。'}</span> : null}
     </ActionFeedback>
-    <ComposerEditFooter leading={tools}>
+    <ComposerEditFooter leading={<>
+      {tools}
+      <Button aria-controls={fieldId} aria-expanded={expanded} onMouseDown={event => {
+        if (event.button === 0 && textareaRef.current === event.currentTarget.ownerDocument.activeElement) event.preventDefault()
+      }} onClick={() => setExpanded(current => !current)}>
+        {expanded ? '收起正文' : '展开正文'}
+      </Button>
+    </>}>
       <Button onClick={onCancel} disabled={saving}>取消</Button>
       <Button variant="primary" aria-label="保存待发消息" aria-busy={saving} disabled={saving || !entry.editable || !text.trim()} onClick={() => { void save() }}>保存</Button>
     </ComposerEditFooter>
