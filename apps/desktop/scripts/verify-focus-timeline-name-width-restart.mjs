@@ -49,11 +49,12 @@ const receipt = { schema: projectRoutesJoin ? 'agentmux.focus-stable-routes-rest
   mode: projectRoutesJoin ? 'project-routes-join' : collectionLayoutJoin ? 'collection-layout-join' : rulerJoin ? 'ruler-join' : 'name-width',
   boundary: 'Existing ordinary production Main/preload/Renderer, public Core Provider and real private PTY. Controlled first-hydrate Focus timestamps are visit inputs, not execution duration. Repository CLI fixture, not vendor Writer or user installation. First process receives one initial seed; second receives none. No HOME environment reassignment, package, build or user Runtime.' }
 let client, session, originalRun, hostProcess, hostBirth, hostRpc, failure, interruption, stage = 'prepare'
+const retainUnconfirmedPrivateWork = () => receipt.runtimeConnection?.confirmed === false || Boolean(receipt.createOperationId && !session)
 const abort = signal => {
   interruption ??= new Error(`Private width restart interrupted: ${signal}`)
   for (const connection of connections) connection.close()
   for (const socket of diagnosticSockets) socket.close()
-  void stopProbeProcesses(process.pid + 1_000_000_000, privateRoot).catch(error => { receipt.cleanup.interruptionError = error.message })
+  if (!retainUnconfirmedPrivateWork()) void stopProbeProcesses(process.pid + 1_000_000_000, privateRoot).catch(error => { receipt.cleanup.interruptionError = error.message })
 }
 const watchdog = setTimeout(() => abort('bounded deadline'), 140_000)
 const onSigterm = () => abort('SIGTERM'), onSigint = () => abort('SIGINT')
@@ -465,8 +466,22 @@ try {
   const fixtureSource = join(repositoryRoot, 'packages/core/test/fixtures/fake-codex-cli.mjs'), ownedFixture = join(privateRoot, 'fake-codex-cli.mjs')
   await copyFile(fixtureSource, ownedFixture); assert.equal(digest(await readFile(ownedFixture)), digest(await readFile(fixtureSource)))
   await writeFile(executable, `#!/bin/sh\nif [ "$1" = '--version' ]; then printf 'Private codex fixture 1\\n'; exit 0; fi\nexec ${quote(process.execPath)} ${quote(ownedFixture)} "$@"\n`, { mode: 0o700 })
-  client = await core.connectLocalAgentMux({ store: new core.AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json')) })
-  session = await client.createAgent({ createOperationId: randomUUID(), providerId: 'codex', executorId: 'width-probe', commandOverride: executable,
+  client = new core.AgentMuxClient({ store: new core.AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json')) })
+  const connectionStartedAt = Date.now()
+  receipt.runtimeConnection = { configuredRuntimeDirectory: runtimeDirectory, configuredStateDirectory: environment.AGENTMUX_STATE_DIRECTORY, observations: [], confirmed: false }
+  await waitFor('original private Runtime connection', async () => {
+    const startedAt = Date.now()
+    try { await client.connectRuntime(); receipt.runtimeConnection.confirmed = true; return true }
+    catch (error) {
+      receipt.runtimeConnection.observations.push({ code: error.code, detail: error.detail ?? null, elapsedMs: Date.now() - startedAt, totalElapsedMs: Date.now() - connectionStartedAt })
+      if (error instanceof core.AgentMuxError && error.code === 'CTXMUX_STARTUP_PENDING') return null
+      throw error
+    }
+  }, 30_000)
+  await client.connect()
+  receipt.runtimeConnection.identity = client.runtimeIdentity()
+  const createOperationId = randomUUID(); receipt.createOperationId = createOperationId
+  session = await client.createAgent({ createOperationId, providerId: 'codex', executorId: 'width-probe', commandOverride: executable,
     workspacePath, injectAgentMuxGuide: false, env: fixtureEnvironment, cols: 100, rows: 30 })
   receipt.originalSession = { agentSessionId: session.agentSessionId, run: { ...session.run } }
   originalRun = (await client.listRuns()).find(value => value.runId === session.run.runId)
@@ -577,7 +592,7 @@ try {
   } finally { await freshVerifier.dispose(); await freshRpc.dispose() }
   stage = 'source-and-compiled-input-stability'
   receipt.inputsAfter = await binding(); assert.deepEqual(receipt.inputsAfter, receipt.inputsBefore); receipt.passed = true
-} catch (error) { failure = error; receipt.failure = { stage, name: error.name, message: error.message, stack: error.stack } }
+} catch (error) { failure = error; receipt.failure = { stage, name: error.name, code: error.code, detail: error.detail, message: error.message, stack: error.stack } }
 finally {
   clearTimeout(watchdog); process.off('SIGTERM', onSigterm); process.off('SIGINT', onSigint)
   for (const socket of diagnosticSockets) socket.close()
@@ -615,7 +630,14 @@ finally {
     receipt.cleanup.privateHostExit = { pid: hostProcess.pid, exitCode: hostProcess.exitCode, signal: hostProcess.signalCode }
   })
   for (const child of children) await attempt(async () => { if (child.pid) await stopProbeProcesses(child.pid, privateRoot) })
-  await attempt(async () => { await stopProbeProcesses(process.pid + 1_000_000_000, privateRoot); receipt.cleanup.remainingOwnedProcesses = await listProbeProcesses(-1, privateRoot); assert.deepEqual(receipt.cleanup.remainingOwnedProcesses, []); await rm(privateRoot, { recursive: true }); receipt.cleanup.ownedPrivateRootsRemoved = true })
+  await attempt(async () => {
+    if (retainUnconfirmedPrivateWork()) {
+      receipt.cleanup.retainedUnconfirmedWork = { privateRoot, configuredRuntimeDirectory: runtimeDirectory, createOperationId: receipt.createOperationId }
+      receipt.cleanup.remainingOwnedProcesses = await listProbeProcesses(-1, privateRoot)
+      return
+    }
+    await stopProbeProcesses(process.pid + 1_000_000_000, privateRoot); receipt.cleanup.remainingOwnedProcesses = await listProbeProcesses(-1, privateRoot); assert.deepEqual(receipt.cleanup.remainingOwnedProcesses, []); await rm(privateRoot, { recursive: true }); receipt.cleanup.ownedPrivateRootsRemoved = true
+  })
   for (const [name, value] of previous) value === undefined ? delete process.env[name] : process.env[name] = value
   if (errors.length) { receipt.cleanup.errors = errors; receipt.passed = false; failure ??= new Error(errors.join('; ')) }
   await writeFile(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
