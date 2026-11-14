@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { parseSettingsPreferenceParams, type CommonActionsConfigure, type CommonActionsObservation, type SettingsPreferenceRequest, type SettingsPreferenceResult } from '@agentmux/core'
+import { parseSettingsPreferenceParams, type ChannelHeaderConfigure, type ChannelHeaderObservation, type CommonActionsConfigure, type CommonActionsObservation, type SettingsPreferenceRequest, type SettingsPreferenceResult } from '@agentmux/core'
 import { DEFAULT_GOALS_COMMON_ACTIONS, resolveGoalsCommonActions } from '@agentmux/host/goals-preferences'
+import { CHANNEL_PRESENTATIONS, channelHeaderChoice as headerChoice } from '../shared/channel-presentation.js'
 import { ConfigConflict, configValuesEqual } from '../shared/config-edit.js'
 import type { AppConfig } from '../shared/contracts.js'
 import type { ConfigOwner } from './config-owner.js'
@@ -45,9 +46,32 @@ export async function configureGoalsCommonActions(owner: ConfigOwner, value: Com
     return { ...rest, ...(input.directory === null ? {} : { goalsCommonActions: input.directory }) }
   })
 }
+function observeHeaders(config: AppConfig, adapterId?: string): ChannelHeaderObservation {
+  const saved = config.appearance.channelHeaderVisibility ?? {}
+  const labels = new Map<string, string>(Object.values(CHANNEL_PRESENTATIONS).map(item => [item.adapterId, item.title]))
+  const ids = adapterId ? [adapterId] : [...new Set([...labels.keys(), ...Object.keys(saved)])]
+  return { adapters: ids.map(adapterId => ({ adapterId, label: labels.get(adapterId) ?? null, authored: headerChoice(saved, adapterId), visible: headerChoice(saved, adapterId) !== false })),
+    revision: 'sha256:' + createHash('sha256').update(JSON.stringify(ids.map(id => [id, headerChoice(saved, id)]))).digest('hex') }
+}
+export async function configureChannelHeader(owner: ConfigOwner, value: ChannelHeaderConfigure): Promise<AppConfig> {
+  const input = parseSettingsPreferenceParams('settings.channels.header.configure', value)
+  return owner.update(current => {
+    const saved = current.appearance.channelHeaderVisibility ?? {}
+    if (headerChoice(saved, input.adapterId) !== input.expected) throw new ConfigConflict('appearance.channelHeaderVisibility.' + input.adapterId)
+    const next = { ...saved }
+    if (input.visible === null) delete next[input.adapterId]
+    else Object.defineProperty(next, input.adapterId, { value: input.visible, enumerable: true, configurable: true, writable: true })
+    return { ...current, appearance: { ...current.appearance, channelHeaderVisibility: next } }
+  })
+}
 export async function executeSettingsPreferencesControl(request: SettingsPreferenceRequest, owner: ConfigOwner): Promise<SettingsPreferenceResult> {
   const { operation, schemaVersion: _version, requestId: _id, ...body } = request
   const input = parseSettingsPreferenceParams(operation, body)
+  if (operation === 'settings.channels.header.inspect') return { operation, ...await owner.inspect(config => observeHeaders(config, (input as { adapterId?: string }).adapterId)) }
+  if (operation === 'settings.channels.header.configure') {
+    const saved = await configureChannelHeader(owner, input as ChannelHeaderConfigure)
+    return { operation, ...observeHeaders(saved, (input as ChannelHeaderConfigure).adapterId) }
+  }
   if (operation === 'settings.goals.common-actions.inspect') return { operation, ...await owner.inspect(observe) }
   const saved = await configureGoalsCommonActions(owner, input as CommonActionsConfigure)
   return { operation, ...observe(saved) }

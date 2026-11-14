@@ -14,15 +14,22 @@ export type CommonActionsObservation = {
   availableRefs: Array<{ ref: GoalsCommonActionRef; label: string }>
   issues: Array<{ ref: GoalsCommonActionRef; code: 'PROMPT_NOT_FOUND'; message: string }>
 }
+export type ChannelHeaderConfigure = { adapterId: string; expected: boolean | null; visible: boolean | null }
+export type ChannelHeaderObservation = { adapters: Array<{ adapterId: string; label: string | null; authored: boolean | null; visible: boolean }>; revision: string }
 export type SettingsPreferenceParams = {
+  'settings.channels.header.inspect': { adapterId?: string }
+  'settings.channels.header.configure': ChannelHeaderConfigure
   'settings.goals.common-actions.inspect': Record<string, never>
   'settings.goals.common-actions.configure': CommonActionsConfigure
 }
 export type SettingsPreferenceResults = {
+  'settings.channels.header.inspect': ChannelHeaderObservation
+  'settings.channels.header.configure': ChannelHeaderObservation
   'settings.goals.common-actions.inspect': CommonActionsObservation
   'settings.goals.common-actions.configure': CommonActionsObservation
 }
 export const SETTINGS_PREFERENCE_METHODS = {
+  'settings.channels.header.inspect': 'short', 'settings.channels.header.configure': 'long',
   'settings.goals.common-actions.inspect': 'short', 'settings.goals.common-actions.configure': 'long'
 } as const
 export type SettingsPreferenceMethod = keyof typeof SETTINGS_PREFERENCE_METHODS
@@ -44,7 +51,20 @@ export function parseGoalsCommonActions(value: unknown, code = 'INVALID_CONTROL_
   if (new Set(items.map(item => item.kind + ':' + item.id)).size !== items.length) invalid(code)
   return { items, collapsed: p.collapsed as boolean }
 }
+function adapter(value: unknown, code: string): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) invalid(code)
+  return value as string
+}
+function authored(value: unknown, code: string): boolean | null {
+  if (value !== null && typeof value !== 'boolean') invalid(code)
+  return value as boolean | null
+}
 export function parseSettingsPreferenceParams<M extends SettingsPreferenceMethod>(method: M, value: unknown): SettingsPreferenceParams[M] {
+  if (method === 'settings.channels.header.inspect' || method === 'settings.channels.header.configure') {
+    const p = rpcRecord(value, method.endsWith('.inspect') ? ['adapterId'] : ['adapterId', 'expected', 'visible'])
+    if (method === 'settings.channels.header.inspect') return (p.adapterId === undefined ? {} : { adapterId: adapter(p.adapterId, 'INVALID_CONTROL_REQUEST') }) as SettingsPreferenceParams[M]
+    return { adapterId: adapter(p.adapterId, 'INVALID_CONTROL_REQUEST'), expected: authored(p.expected, 'INVALID_CONTROL_REQUEST'), visible: authored(p.visible, 'INVALID_CONTROL_REQUEST') } as SettingsPreferenceParams[M]
+  }
   const p = rpcRecord(value, method === 'settings.goals.common-actions.inspect' ? [] : ['expected', 'directory', 'promptEdits'])
   if (method === 'settings.goals.common-actions.inspect') return {} as SettingsPreferenceParams[M]
   const directory = p.directory === null ? null : parseGoalsCommonActions(p.directory)
@@ -62,7 +82,19 @@ export function parseSettingsPreferenceParams<M extends SettingsPreferenceMethod
   return { expected, directory, ...(promptEdits === undefined ? {} : { promptEdits }) } as SettingsPreferenceParams[M]
 }
 export function parseSettingsPreferenceResult<M extends SettingsPreferenceMethod>(method: M, value: unknown): SettingsPreferenceResults[M] {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['directory', 'effective', 'revision', 'availableRefs', 'issues'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  if (method === 'settings.channels.header.inspect' || method === 'settings.channels.header.configure') {
+    const p = rpcRecord(value, ['adapters', 'revision'], code)
+    if (!Array.isArray(p.adapters)) invalid(code)
+    const adapters = (p.adapters as unknown[]).map(value => {
+      const a = rpcRecord(value, ['adapterId', 'label', 'authored', 'visible'], code), choice = authored(a.authored, code)
+      if (a.visible !== (choice !== false)) invalid(code)
+      return { adapterId: adapter(a.adapterId, code), label: a.label === null ? null : text(a.label, code), authored: choice, visible: choice !== false }
+    })
+    if (new Set(adapters.map(row => row.adapterId)).size !== adapters.length) invalid(code)
+    return { adapters, revision: text(p.revision, code) } as SettingsPreferenceResults[M]
+  }
+  const p = rpcRecord(value, ['directory', 'effective', 'revision', 'availableRefs', 'issues'], code)
   const directory = p.directory === null ? null : parseGoalsCommonActions(p.directory, code), effective = parseGoalsCommonActions(p.effective, code)
   if (!Array.isArray(p.availableRefs) || !Array.isArray(p.issues)) invalid(code)
   const availableRefs = (p.availableRefs as unknown[]).map(value => { const a = rpcRecord(value, ['ref', 'label'], code); return { ref: ref(a.ref, code), label: text(a.label, code) } })

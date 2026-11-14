@@ -1675,6 +1675,7 @@ export type AgentMuxDesktopApi = {
   config: {
     get(): Promise<AppConfig>
     save(config: AppConfig, expected: AppConfig): Promise<AppConfig>
+    configureChannelHeader(input: import('@agentmux/core').ChannelHeaderConfigure): Promise<AppConfig>
     configureGoalsCommonActions(input: import('@agentmux/core').CommonActionsConfigure): Promise<AppConfig>
     onChange(listener: (config: AppConfig) => void): () => void
   }

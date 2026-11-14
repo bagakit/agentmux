@@ -1673,6 +1673,8 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       demandId: id(result.demandId, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), requestId: id(result.requestId, 'Activity operation is invalid.', 'CONTROL_PROTOCOL_ERROR'),
       activity: result.activity === null ? null : parseControlDemandActivity(result.activity), diskDurability: 'confirmed' } }
   }
+  // Narrow each result shape before reconstructing its correlated receipt union.
+  if (operation === 'settings.channels.header.inspect' || operation === 'settings.channels.header.configure') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseSettingsPreferenceResult(operation, result) }
   if (isSettingsPreferenceMethod(operation)) return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseSettingsPreferenceResult(operation, result) }
   if (operation === 'demand.activity.collection') {
     if (result.diskDurability !== 'confirmed' || !Array.isArray(result.groups)) throw new AgentMuxError('Activity collection is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')

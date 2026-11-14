@@ -1,7 +1,8 @@
+import { CHANNEL_PRESENTATIONS } from '../../../shared/channel-presentation'
 /** Renderer copy and setup guidance only. The Host adapter verifies protocol support and identity. */
 export const manualConnectionPlatforms = {
   discord: {
-    adapterId: 'discord', title: 'Discord', domain: 'discord.com', consoleUrl: 'https://discord.com/developers/applications', consoleLabel: 'Developer Portal',
+    ...CHANNEL_PRESENTATIONS.discord, domain: 'discord.com', consoleUrl: 'https://discord.com/developers/applications', consoleLabel: 'Developer Portal',
     appIdLabel: 'Application ID', appIdPlaceholder: 'Application ID from General Information', credentialLabel: 'Bot token',
     credentialHint: 'Find your Application ID in General Information and Bot token on the Bot page.',
     createHint: 'Create an application and add its bot in the Developer Portal, then return here.',
@@ -10,7 +11,7 @@ export const manualConnectionPlatforms = {
     limits: 'Saving credentials does not confirm Gateway connection, channel access or message delivery. Check this connection and the selected channel separately.'
   },
   telegram: {
-    adapterId: 'telegram', title: 'Telegram', domain: 'telegram.org', consoleUrl: 'https://t.me/BotFather', consoleLabel: 'BotFather',
+    ...CHANNEL_PRESENTATIONS.telegram, domain: 'telegram.org', consoleUrl: 'https://t.me/BotFather', consoleLabel: 'BotFather',
     appIdLabel: 'Bot user ID', appIdPlaceholder: 'Numeric bot ID returned by getMe', credentialLabel: 'Bot token',
     credentialHint: 'Create a bot with BotFather. Enter its numeric user ID and bot token; the connection check verifies they belong to the same bot.',
     createHint: 'Use the Bot API getMe result to read the bot’s numeric id. Keep the complete token private.',

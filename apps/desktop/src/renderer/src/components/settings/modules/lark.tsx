@@ -1,8 +1,9 @@
+import { CHANNEL_PRESENTATIONS } from '../../../../../shared/channel-presentation'
 import { ConnectionHostingSettings } from '../ConnectionHostingSettings'
 import type { SettingsModule } from '../settings-catalog'
 const feishuArtwork = new URL('../../../assets/connector-icons/feishu.ico', import.meta.url).href
 function ChannelIcon({ size = 14 }: { size?: number | undefined }) { return <img src={feishuArtwork} width={size} height={size} alt="" /> }
-const platform = { adapterId: 'feishu', title: 'Lark' } as const
+const platform = CHANNEL_PRESENTATIONS.lark
 export const larkSettingsModule = {
   id: 'lark', archetype: 'console', group: 'conversation-channels', title: 'Lark',
   description: 'Chat with your Agents from Feishu or Lark.',

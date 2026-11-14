@@ -351,6 +351,12 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (actual.resource !== request.resource || (actual.item as Record<string, unknown>).id !== request.id) fail()
       break
     case 'settings.resource.remove': if (actual.resource !== request.resource || actual.id !== request.id) fail(); break
+    case 'settings.channels.header.inspect': case 'settings.channels.header.configure': {
+      const rows = actual.adapters as Array<{ adapterId: string; authored: boolean | null }>
+      if (request.adapterId !== undefined && (rows.length !== 1 || rows[0]!.adapterId !== request.adapterId)) fail()
+      if (request.operation === 'settings.channels.header.configure' && rows[0]!.authored !== request.visible) fail()
+      break
+    }
     case 'settings.goals.common-actions.configure': {
       if (JSON.stringify(actual.directory) !== JSON.stringify(request.directory)) fail()
       break

@@ -1,4 +1,4 @@
-import { configureGoalsCommonActions, executeSettingsPreferencesControl } from './settings-preferences-control.js'
+import { configureChannelHeader, configureGoalsCommonActions, executeSettingsPreferencesControl } from './settings-preferences-control.js'
 import { isSettingsPreferenceMethod } from '@agentmux/core'
 import { SettingsTailcatConfiguration } from './settings-tailcat-configuration.js'
 import { notesStorageInspection } from '@agentmux/core'
@@ -972,6 +972,7 @@ export async function registerIpc(args: {
   const disposeCapsuleDocument = capsuleDocuments.register(ipcMain)
   const conversationReads = registerConversationReadIpc({ handle: handleWithEvent,
     connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } }) })
+  handle('config:configureChannelHeader', (input: import('@agentmux/core').ChannelHeaderConfigure) => sessionInputOperationResult(() => configureChannelHeader(configOwner, input)))
   handle('config:configureGoalsCommonActions', (input: import('@agentmux/core').CommonActionsConfigure) => sessionInputOperationResult(() => configureGoalsCommonActions(configOwner, input)))
   handle('config:get', () => config)
   // A conflict crosses IPC with its code; the Renderer offers recovery from that fact, never from wording.

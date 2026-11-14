@@ -499,6 +499,7 @@ const mockApi: AgentMuxDesktopApi = {
     nameHistory:async()=>({records:[],nextCursor:null}),
     onChange:listener=>{mockSpatialListeners.add(listener);return ()=>{mockSpatialListeners.delete(listener)}}},
   config: {
+    configureChannelHeader: async () => { throw new Error('Channel header changes require the original ConfigOwner.') },
     configureGoalsCommonActions: async () => { throw new Error('Common action changes require the original ConfigOwner.') },
     get: async () => structuredClone(mockConfig),
     save: async (config, expected) => {
