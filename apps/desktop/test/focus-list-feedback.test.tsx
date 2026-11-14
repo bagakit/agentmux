@@ -175,6 +175,38 @@ it('applies the actual reachable CSS to a visible and parked communication mark'
   } finally { style.remove() }
 })
 
+it.each(['solitary', 'communication', 'operation'] as const)('applies the actual List height rule to a fresh %s consumer while preserving the original button and body', async shape => {
+  const style = document.createElement('style'); style.textContent = feedbackStyles; document.head.append(style)
+  try {
+    await render()
+    const originalCard = card('sender'), button = originalCard.querySelector<HTMLButtonElement>('button.focus-context')!
+    const body = button.querySelector('.focus-context__copy'), owner = button.parentElement
+    const pending = operation()
+    expect(body).not.toBeNull(); expect(owner?.children.length).toBe(1)
+    if (shape === 'communication') await emit(event(1))
+    if (shape === 'operation') await act(async () => { beginAgentOperation(pending) })
+    const height = getComputedStyle(button).height || 'auto'
+    expect(owner?.children.length).toBe(shape === 'solitary' ? 1 : 2)
+    expect(height).toBe(shape === 'solitary' ? '100%' : 'auto')
+    if (shape === 'communication') expect(feedback('sender')).not.toBeNull()
+    if (shape === 'operation') {
+      expect(originalCard.querySelector('.agent-operation-feedback')).not.toBeNull()
+      expect(useAppStore.getState().agentOperations[agentOperationKey(pending)]).toBe(pending)
+    }
+    expect(card('sender')).toBe(originalCard); expect(originalCard.querySelector('button.focus-context')).toBe(button)
+    expect(button.querySelector('.focus-context__copy')).toBe(body); expect(button.parentElement).toBe(owner)
+    if (shape !== 'operation') {
+      if (shape === 'solitary') await emit(event(1))
+      expect(feedback('sender')).not.toBeNull(); expect(owner?.children.length).toBe(2)
+      await emit({ type: 'agent-message-observation', state: 'unavailable' })
+      expect(feedback('sender')).toBeNull(); expect(owner?.children.length).toBe(1)
+      expect(originalCard.querySelector('button.focus-context')).toBe(button)
+      expect(button.querySelector('.focus-context__copy')).toBe(body); expect(button.parentElement).toBe(owner)
+    }
+    console.log('LIST_SIBLING_HEIGHT ' + JSON.stringify({ shape, height, originalButton: true, originalBody: true }))
+  } finally { style.remove() }
+})
+
 it('keeps pending glyph accents consistent through the real animated wrapper and parked SVG', async () => {
   const style = document.createElement('style'); style.textContent = feedbackStyles; document.head.append(style)
   const releaseTheme = mountThemeRuntime(window, { appAppearance: 'dark' })

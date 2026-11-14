@@ -12,8 +12,9 @@ const feedback = components + 'AgentOperationFeedback.tsx'
 const index = library + 'focus-list-activity.ts'
 const surface = components + 'GlobalFocusSurface.tsx'
 const css = 'apps/desktop/src/renderer/src/styles/agent-operation-feedback.css'
+const focusCss = 'apps/desktop/src/renderer/src/styles/focus.css'
 export const listFeedbackSources = [surface, components + 'FocusContextCards.tsx', components + 'FocusContextCardBody.tsx', components + 'FocusContextRow.tsx', feedback,
-  index, library + 'use-collaboration-reading.ts', css]
+  index, library + 'use-collaboration-reading.ts', css, focusCss]
 export const listFeedbackMutations = [
   { label: 'real-list-active-subscription', file: surface, before: 'useCollaborationActivity(activityScope, visible && documentActive)', after: 'useCollaborationActivity(activityScope, false)' },
   { label: 'real-card-chain-consumes-activity', file: surface, before: 'goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={focusExecutionSession}', after: 'goalLinks={goalLinks} identities={contextIdentities} onSelect={focusExecutionSession}' },
@@ -26,7 +27,8 @@ export const listFeedbackMutations = [
   { label: 'close-is-immediately-inert', file: feedback, before: 'inert={!open} aria-hidden={!open}', after: 'inert={false} aria-hidden={!open}' },
   { label: 'close-returns-inside-focus-only', file: feedback, before: 'if (!next && !compact && content.current?.contains(content.current.ownerDocument.activeElement)) trigger.current?.focus({ preventScroll: true })', after: 'if (false) trigger.current?.focus({ preventScroll: true })' },
   { label: 'only-visible-communication-moves', file: css, before: ".focus-communication-feedback[data-motion-active='true'] .focus-communication-feedback__mark { animation-play-state: running; }", after: ".focus-communication-feedback[data-motion-active='false'] .focus-communication-feedback__mark { animation-play-state: running; }" },
-  { label: 'pending-motion-wrapper-keeps-accent', file: css, before: '.agent-operation-feedback__label > :is(svg, .semantic-icon-motion) { flex: none; color: var(--operation-accent); }', after: '.agent-operation-feedback__label > svg { flex: none; color: var(--operation-accent); }' }
+  { label: 'pending-motion-wrapper-keeps-accent', file: css, before: '.agent-operation-feedback__label > :is(svg, .semantic-icon-motion) { flex: none; color: var(--operation-accent); }', after: '.agent-operation-feedback__label > svg { flex: none; color: var(--operation-accent); }' },
+  { label: 'feedback-siblings-keep-the-original-button-at-natural-height', file: focusCss, before: '.focus-context-card > .focus-context:only-child { height: 100%; }', after: '.focus-context-card > .focus-context { height: 100%; }' }
 ]
 
 async function verify() {
