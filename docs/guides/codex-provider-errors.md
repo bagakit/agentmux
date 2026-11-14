@@ -56,6 +56,12 @@ Provider 的 [`observeCodexSessionStatus`](../../packages/core/src/providers/cod
 
 上述适配表限定为准确原生 JSONL 路径；状态观察与 saved-history 共用 `codexTurnOutcome`，共同对话和 publication 消费原记录上的 `turnOutcome`。目标字段、同源归并和共享摘要见[原生结果协议](../specs/conversation-protocol.md#native-request-and-turn-outcomes)，实际消费入口及 indexed history 的未知边界见[对话机制](../architecture/conversation.md#原生结果的接线与能力边界)。这些路径不表示官方 API、WebSocket 或 Python SDK 的所有错误在 CLI 都会出现，模型、完整 API error.type、Retry-After 等字段也不因此变成已暴露事实。真实支持按轮记录实际字段及对应实现的证明报告；没有原生终局记录或读取失败时保观察未知／明确诊断，不改健康 Run。
 
+## 原生工具安装完整性
+
+`codex --version` 成功只证明主程序可执行，不能证明原生工具可用。较新的 macOS 官方分发是完整目录包，包含 `codex-package.json`、`bin/codex`、`bin/codex-code-mode-host`、执行服务、资源与 `codex-path/rg`；只复制主程序会遗漏工具依赖。准确布局以对应 release 的 [官方 package 合同](https://github.com/openai/codex/blob/rust-v0.169.0/scripts/codex_package/README.md) 为准，安装沿同一 release 的 [官方安装器](https://github.com/openai/codex/blob/rust-v0.169.0/scripts/install/install.sh)，不由 AgentMux 另造安装目录或补件规则。
+
+遇到原生工具实际返回 helper executable 缺失时，核对准确运行程序、安装来源、完整包与同版本摘要，并在独立原生会话执行一次真实工具调用。修复外部安装须保全凭据、配置及健康进程的原映像；不能通过重建用户 Session 或修改可用性显示来代替工具执行证明。Executor 的模板命令、Host 注册命令与当前 Run 的真实程序分别观察；刷新执行环境的行为见[设置与观察](../design/behavior/settings-and-observation.md#分区资源与配置生效)。
+
 ## 当前源码入口与交付边界
 
 [Codex Provider](../../packages/core/src/providers/codex.ts) 的 `createCodexProvider` 持有原生协议接缝；[原生历史 reader](../../packages/core/src/providers/app-server-native-history.ts) 的 `readAppServerSessionHistoryPage` 持有对话记录投影，[原生只读 helper](../../packages/core/src/providers/app-server-native-read.ts) 的 `withAppServerNativeRead` 不执行模型请求。通用 [AgentProvider](../../packages/core/src/agent-provider.ts) 与 [Core Client](../../packages/core/src/client.ts) 的 `statusAgent` 是公共能力和当前状态出口，`probeCapabilities` 的 executable 检查不能证明模型服务有容量。
