@@ -5205,7 +5205,13 @@ export async function retainConversationQuestionReply(sessionId: string, key: st
   })
   if (!admitted) throw new Error('The original question reply record changed; this callback cannot replace it.')
   await flushMessageWorkbench(false)
-  if (attempt.phase === 'unknown') reconcileRetainedQuestionReplies([sessionId])
+  if (attempt.phase === 'unknown') {
+    for (const session of agentSessionPresentationIndex(useAppStore.getState().sessions).get(sessionId) ?? []) {
+      if (session.control.agentSessionId === sessionId && session.control.hostId === attempt.hostId &&
+        session.control.run.runId === attempt.input?.expectedRun?.runId)
+        reconcileConversationQuestionReplies(session.control, session.promptInputNotApplied)
+    }
+  }
 }
 /** The original intent owner runs independently of how many Regions display this Session. */
 export function reconcileConversationQuestionReplies(control: AgentSessionControl, notApplied?: import('@agentmux/core/prompt-condition').AgentPromptNotApplied): void {
