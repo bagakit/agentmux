@@ -2530,9 +2530,37 @@ export class AgentMuxClient {
       const { nativeCreationKeys: _privateCreationKeys, executorInvocation: _invocation, ...publicRetirement } = retired
       return { kind: 'retired-agent', ...publicRetirement }
     }
-    if (durable) return this.projectSession(durable)
+    if (durable) {
+      if (createOperationId !== undefined) this.assertCreationOperation(durable.creation?.createOperationId, createOperationId)
+      return this.projectSession(durable)
+    }
     const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
+    if (started?.creation?.persistence === 'unconfirmed' && createOperationId !== undefined)
+      this.assertCreationOperation(started.creation.createOperationId, createOperationId)
     return started?.creation?.persistence === 'unconfirmed' ? this.projectSession(started) : undefined
+  }
+
+  private assertCreationOperation(actual: string | undefined, expected: string): void {
+    if (actual !== expected) throw new AgentMuxError(
+      'This Session has no matching original creation operation. Its identity and existing capabilities are preserved.',
+      actual === undefined ? 'AGENT_CREATION_UNKNOWN' : 'AGENT_CREATION_OPERATION_CONFLICT', undefined,
+      { disposition: 'not_applied', confirmedInputBytes: null })
+  }
+
+  /** Check both directions before admitting a control or consuming a retained no-Run receipt. */
+  private async readCreationCancellationTarget(input: AgentCreationCancellationInput) {
+    const existing = await this.readCreationSession(input.agentSessionId, input.createOperationId)
+    const closed = await this.store.loadClosedCreation(input.agentSessionId)
+    const correlation = await this.store.loadCreationCorrelation(input.agentSessionId)
+    const key = agentLifecycleOperationIdentity('create', input.agentSessionId, input.createOperationId)
+    for (const reservation of [closed, correlation]) {
+      if (!reservation) continue
+      if (reservation.agentSessionId !== input.agentSessionId || reservation.operationId !== key ||
+        reservation.preparedCreation && reservation.preparedCreation.agentSessionId !== input.agentSessionId)
+        throw new AgentMuxError('The retained creation belongs to another original operation or Session.', 'AGENT_CREATION_OPERATION_CONFLICT')
+      if (reservation.preparedCreation) this.assertCreationOperation(reservation.preparedCreation.creation?.createOperationId, input.createOperationId)
+    }
+    return { existing, closed, correlation }
   }
 
   /** Retained body by exact identity; absence is explicit, never inferred from a control projection. */
@@ -2616,8 +2644,7 @@ export class AgentMuxClient {
   /** Durable original-CID withdrawal. It never stops a Run or authorizes a new input. */
   async cancelAgentCreation(value: AgentCreationCancellationInput): Promise<AgentCreationCancellationResult> {
     const input = parseAgentCreationCancellation(value), runtime = await this.agentCreationAuthority()
-    const previous = await this.store.loadCreationSessionId(input.createOperationId)
-    if (previous && previous !== input.agentSessionId) throw new AgentMuxError('The original creation names another Session.', 'AGENT_CREATION_OPERATION_CONFLICT')
+    const { correlation } = await this.readCreationCancellationTarget(input)
     await this.store.admitCreationCancellation({ ...input, runtimeId: runtime.runtimeId })
     const active = this.activeCreations.get(input.createOperationId)
     if (active) {
@@ -2625,7 +2652,6 @@ export class AgentMuxClient {
       // The durable control is already visible at Start/input gates. This reader must not wait for an unknown Native ACK.
       return await this.creationCancellationInspection(input, undefined, true)
     }
-    const correlation = await this.store.loadCreationCorrelation(input.agentSessionId)
     if (correlation?.preparedCreation) {
       // An earlier exact-key fence keeps its own immutable control; this explicit cancellation may advance that same monotone fence.
       try { await this.resolveAgentCreation(correlation.creationResolution?.request ?? input) }
@@ -2645,7 +2671,7 @@ export class AgentMuxClient {
     if (!cancellation) return unknown('The original execution cancellation has not been observed.')
     if (cancellation.agentSessionId !== input.agentSessionId || cancellation.operationId !== input.operationId || cancellation.runtimeId !== (await this.agentCreationAuthority()).runtimeId)
       throw new AgentMuxError('The original cancellation target, control or Runtime changed.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
-    const existing = await this.readCreationSession(input.agentSessionId, input.createOperationId)
+    const { existing, closed, correlation: pending } = await this.readCreationCancellationTarget(input)
     if (existing) {
       const initial = existing.kind === 'agent' ? (await this.store.readMetadata(input.agentSessionId))?.initialInput : undefined
       const submitted = initial?.key ? await this.inspectAgentPromptSubmission(initial.key) : null
@@ -2659,9 +2685,7 @@ export class AgentMuxClient {
         initialInput: confirmed ? 'already-dispatched' : notDispatched || notRequested ? 'held' : 'unknown',
         diskDurability: acknowledged ? 'confirmed' : 'unconfirmed', issue: issue ?? null }
     }
-    const closed = await this.store.loadClosedCreation(input.agentSessionId)
     if (closed?.creationResolution?.receipt.outcome === 'fenced') return { cancellation, outcome: 'cancelled', run: null, initialInput: 'unknown', diskDurability: acknowledged ? 'confirmed' : 'unconfirmed', issue: null }
-    const pending = await this.store.loadCreationCorrelation(input.agentSessionId)
     const key = agentLifecycleOperationIdentity('create', input.agentSessionId, input.createOperationId)
     try {
       await this.connectRuntime()
