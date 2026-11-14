@@ -22,7 +22,7 @@ export const listFeedbackMutations = [
   { label: 'supervision-is-not-a-send', file: index, before: "pulse.kind === 'supervision' ? 'updated'", after: "false ? 'updated'" },
   { label: 'unrelated-activity-retains-references', file: index, before: 'held?.pulse === pulse && held.direction === direction ? held', after: 'false ? held' },
   { label: 'visible-return-keeps-original-phase', file: feedback, before: 'Math.min(0, activity.pulse.startedAt - Date.now())', after: '0' },
-  { label: 'a-new-event-owns-its-feedback', file: feedback, before: '<span key={activity.pulse.id} className="focus-communication-feedback__mark"', after: '<span className="focus-communication-feedback__mark"' },
+  { label: 'visible-owner-replaces-only-the-motion-mark', file: feedback, before: '<span key={`${activity.pulse.id}:${visible}`} className="focus-communication-feedback__mark"', after: '<span key={activity.pulse.id} className="focus-communication-feedback__mark"' },
   { label: 'close-is-immediately-inert', file: feedback, before: 'inert={!open} aria-hidden={!open}', after: 'inert={false} aria-hidden={!open}' },
   { label: 'close-returns-inside-focus-only', file: feedback, before: 'if (!next && !compact && content.current?.contains(content.current.ownerDocument.activeElement)) trigger.current?.focus({ preventScroll: true })', after: 'if (false) trigger.current?.focus({ preventScroll: true })' },
   { label: 'only-visible-communication-moves', file: css, before: ".focus-communication-feedback[data-motion-active='true'] .focus-communication-feedback__mark { animation-play-state: running; }", after: ".focus-communication-feedback[data-motion-active='false'] .focus-communication-feedback__mark { animation-play-state: running; }" },

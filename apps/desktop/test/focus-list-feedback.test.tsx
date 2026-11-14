@@ -140,14 +140,27 @@ it('keeps the original expiry and does not replay historical observations after 
   await emit(event(4)); expect(feedback('sender')?.dataset.direction).toBe('sent')
 })
 
-it('preserves the original animation phase after a related leaf leaves and reenters its viewport', async () => {
+it('recreates only the decorative mark at the original pulse age when its visible owner changes', async () => {
   await render(); vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
   await emit(event(1)); const node = feedback('sender')!, update = intersections.get(node)
+  const originalCard = card('sender'), body = originalCard.querySelector('button.focus-context'), label = node.lastElementChild
+  const originalMark = node.querySelector('.focus-communication-feedback__mark'), pulseId = node.dataset.activityId
   expect(update).toBeTypeOf('function')
-  await act(async () => update!(false)); await act(async () => { await vi.advanceTimersByTimeAsync(600) }); await act(async () => update!(true))
+  expect(body).not.toBeNull(); expect(originalMark).not.toBeNull()
+  await act(async () => update!(false))
+  const parkedMark = node.querySelector('.focus-communication-feedback__mark')
+  expect(parkedMark).not.toBe(originalMark); expect(originalMark!.isConnected).toBe(false)
+  expect(node.dataset.motionActive).toBe('false'); expect(node.dataset.activityId).toBe(pulseId)
+  expect(feedback('sender')).toBe(node); expect(card('sender')).toBe(originalCard)
+  expect(originalCard.querySelector('button.focus-context')).toBe(body); expect(node.lastElementChild).toBe(label)
+  await act(async () => { await vi.advanceTimersByTimeAsync(600) }); await act(async () => update!(true))
+  const returnedMark = node.querySelector('.focus-communication-feedback__mark')
+  expect(returnedMark).not.toBe(parkedMark); expect(parkedMark!.isConnected).toBe(false)
+  expect(returnedMark?.getAttribute('aria-hidden')).toBe('true'); expect(node.dataset.activityId).toBe(pulseId)
   expect(node.dataset.motionActive).toBe('true'); expect(parseFloat(node.style.getPropertyValue('--activity-delay'))).toBeLessThanOrEqual(-600)
-  const oldMark = node.querySelector('.focus-communication-feedback__mark')
-  await emit(event(2)); expect(node.querySelector('.focus-communication-feedback__mark')).not.toBe(oldMark)
+  expect(feedback('sender')).toBe(node); expect(originalCard.querySelector('button.focus-context')).toBe(body); expect(node.lastElementChild).toBe(label)
+  await emit(event(2)); expect(node.querySelector('.focus-communication-feedback__mark')).not.toBe(returnedMark)
+  expect(originalCard.querySelector('button.focus-context')).toBe(body); expect(node.lastElementChild).toBe(label)
 })
 
 it('applies the actual reachable CSS to a visible and parked communication mark', async () => {
@@ -156,7 +169,8 @@ it('applies the actual reachable CSS to a visible and parked communication mark'
     await render(); await emit(event(1)); const node = feedback('sender')!, mark = node.querySelector<HTMLElement>('.focus-communication-feedback__mark')!
     expect(getComputedStyle(mark).animationPlayState).toBe('running')
     await act(async () => intersections.get(node)!(false))
-    expect(getComputedStyle(mark).animationPlayState).toBe('paused')
+    const parked = node.querySelector<HTMLElement>('.focus-communication-feedback__mark')!
+    expect(parked).not.toBe(mark); expect(getComputedStyle(parked).animationPlayState).toBe('paused')
     expect(host.querySelector('.agent-operation-feedback__motion')).toBeNull()
   } finally { style.remove() }
 })
