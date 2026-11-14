@@ -81,7 +81,7 @@ export function assertPatrolExecutions(goal: Pick<Demand, 'dispatches' | 'delega
 }
 
 /** Planning depends on its original proposal/manager, never unrelated execution history. */
-export function demandPatrolScope(goal: Demand, purpose?: 'plan'): string {
+export function demandPatrolScope(goal: Parameters<typeof demandResponsibilityScope>[0] & Pick<Demand, 'plan'>, purpose?: 'plan'): string {
   return purpose === 'plan' ? JSON.stringify({ purpose: 'plan', goalId: goal.id, supervisor: goal.supervisorSessionId,
     alignmentRevision: goal.alignment?.revision ?? null, planRevision: goal.plan?.revision ?? 0 }) : demandResponsibilityScope(goal)
 }
