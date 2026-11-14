@@ -5345,7 +5345,25 @@ export class AgentMuxRpcService {
         cleanup = () => sub.dispose(); initial = { observation: await first }
       }
       if (controller.signal.aborted) { await dispose(); throw new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED') }
-      return { initial: initial as AgentMuxRpcStreamInitial<M>, ...(start ? { start } : {}), dispose }
+      // Opening is already acknowledged. A later start failure belongs to this
+      // reader; letting it escape would close unrelated peers on the channel.
+      const startReader = async () => {
+        if (closed) return
+        try { await start!() }
+        catch (error) {
+          if (closed) return
+          const failure = readerError(error)
+          try { await dispose() }
+          catch (releaseError) {
+            const release = readerError(releaseError)
+            failure.message += ` Reader release could not be confirmed (${release.code}): ${release.message}`
+          }
+          // This terminal error still belongs to the original subscription,
+          // even though its local resources have already been released.
+          await onEvent({ type: 'error', error: failure } as AgentMuxRpcStreamEvent<M>)
+        }
+      }
+      return { initial: initial as AgentMuxRpcStreamInitial<M>, ...(start ? { start: startReader } : {}), dispose }
     } catch (error) { await dispose(); throw error }
   }
 }
