@@ -58,7 +58,7 @@ import { createRendererSessionEvents } from './session-events'
 import { createRendererHistoryObservation } from './history-observation'
 import { createRendererSearchRead } from './search-read'
 import { unwrapBrowserRunResult } from '../../../shared/browser-run-result'
-import { BROWSER_PROFILE_RESULT_METHODS, ipcResult, unwrapIpcResultMethods } from '../../../shared/ipc-result'
+import { BROWSER_PROFILE_RESULT_METHODS, ipcResult, unwrapIpcResult, unwrapIpcResultMethods } from '../../../shared/ipc-result'
 import { createRendererHistoryRead, createRendererUsageRead, createRendererRecordInspect, createRendererRecordDelete } from './history-read'
 import { createRendererHostObservation, createRendererHostAgentResources } from './host-observation'
 import {
@@ -1691,7 +1691,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       return Object.assign(result.topics, result.issues.length ? { issues: result.issues } : {})
     } },
     control: createRendererControlApi(preload.control),
-    workbenchClose: { call: (method, input) => preload.workbenchClose.call(method, input).then(unwrapSessionObservationResult) },
+    workbenchClose: { call: (method, input) => preload.workbenchClose.call(method, input).then(unwrapIpcResult) },
     browser: {
       ...unwrapIpcResultMethods<AgentMuxDesktopApi['browser'], typeof BROWSER_PROFILE_RESULT_METHODS[number]>(preload.browser as never, BROWSER_PROFILE_RESULT_METHODS),
       runScript: (...args) => preload.browser.runScript(...args).then(unwrapBrowserRunResult)

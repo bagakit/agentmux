@@ -2312,7 +2312,7 @@ export type AgentMuxDesktopApi = {
 }
 
 export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit' | 'workbenchClose' | 'sourceFiles'> & {
-  workbenchClose: { call<M extends import('@agentmux/core').SpaceCloseMethod>(method: M, input: import('@agentmux/core').SpaceCloseParams[M]): Promise<import('./session-observation-result').SessionObservationResult<import('@agentmux/core').SpaceCloseResults[M]>> }
+  workbenchClose: { call<M extends import('@agentmux/core').SpaceCloseMethod>(method: M, input: import('@agentmux/core').SpaceCloseParams[M]): Promise<import('./ipc-result').IpcResult<import('@agentmux/core').SpaceCloseResults[M]>> }
   hostRoutes: import('./host-routes.js').PreloadHostRoutes
   sourceFiles: import('./source-files-client.js').SourceFilesPreloadApi
   spaceMounts: import('./space-mount.js').SpaceMountPreloadApi
