@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MoteActivityConversation } from './MoteActivityConversation'
 import { CapturedProcessRecord } from '@agentmux/client-ui/components/CapturedProcessRecord'
 import { conversationItemRef, conversationRecordId } from '@agentmux/core/conversation'
@@ -837,7 +838,7 @@ export function ActivityView({
     {readingNotice}
     {conversationReading ? (!fullReadFailure || moteConversation) && readingIssues.length > 0 ? <ConversationReadFailure
       scope={readingServiceScope} issues={readingIssues} visible={readingEnabled} /> : null : readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
-      <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>{readingWindow.retryLabel}</button></div> : null}
+      <Button type="button" disabled={readingWindow.loading} onClick={readingWindow.retry}>{readingWindow.retryLabel}</Button></div> : null}
   </>
   const readNotice = moteMainService ? null : originalReadNotice
   const collapseTraces = (nativeHistoryPage?.items.some(item => item.contentParts.some(part =>

@@ -4,6 +4,7 @@ import type { CapsuleEmbedInput } from '@agentmux/client-ui/platform'
 import type { CapsuleInspection } from '@agentmux/core/capsule'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { BrowserSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useWorkbenchBrowserPresentation, type WorkbenchPresentation } from '../lib/workbench-presentation'
@@ -34,7 +35,7 @@ export function ConversationCapsule(input: CapsuleEmbedInput) {
 function CapsuleReference({ uri, title }: CapsuleEmbedInput) {
   const [notice, setNotice] = useState('Page presentation location is unconfirmed. The original page reference is retained.')
   return <div className="conversation-capsule__reference"><strong>{title || 'Saved page'}</strong><code>{uri}</code><span role="status">{notice}</span>
-    <button type="button" className="small-button" onClick={() => { void api.ui.openObjectLink(uri).catch(error => setNotice(presentError(error))) }}>Open in Browser</button></div>
+    <Button type="button" onClick={() => { void api.ui.openObjectLink(uri).catch(error => setNotice(presentError(error))) }}>Open in Browser</Button></div>
 }
 
 function CapsulePage({ uri, capsuleId, title, visible, browserId, owner }: CapsuleEmbedInput & { browserId: string; owner: WorkbenchPresentation }) {
@@ -129,7 +130,7 @@ function CapsulePage({ uri, capsuleId, title, visible, browserId, owner }: Capsu
       </span>
     </header>
     {!collapsed ? <>
-      {notice ? <div className="conversation-capsule__notice" role="status"><span>{notice}</span><button type="button" className="small-button" onClick={() => setRetry(value => value + 1)}>Retry original page</button></div> : null}
+      {notice ? <div className="conversation-capsule__notice" role="status"><span>{notice}</span><Button type="button" onClick={() => setRetry(value => value + 1)}>Retry original page</Button></div> : null}
       {active && browser ? <CapsuleNativePage browser={browser} presentation={presentation} release={release} />
         : <div className="conversation-capsule__placeholder" role={loading ? 'status' : undefined} data-loading={loading ? '' : undefined}>{loading ? 'Connecting saved page…' : !visible ? 'Page preview paused while outside the reading window' : 'The original page reference is kept below.'}</div>}
     </> : null}

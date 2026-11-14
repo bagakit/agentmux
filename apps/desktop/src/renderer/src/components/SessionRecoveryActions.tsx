@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -84,11 +85,11 @@ export function SessionRecoveryActions({ source, restoring, hideRestore = false,
   }
   const canSubmit = existing || (destination === 'agent' ? Boolean(executorId && config?.executors[executorId]) : Boolean(target))
   return <div className="session-recovery-actions">
-    {startNew ? <StartNewConversation source={source} executorId={startNew.executorId} /> : hideRestore ? null : <button type="button" className="small-button" disabled={restoreDisabled || restoring} title={source.diagnostic} onClick={onRestore}>
+    {startNew ? <StartNewConversation source={source} executorId={startNew.executorId} /> : hideRestore ? null : <Button type="button" disabled={restoreDisabled || restoring} title={source.diagnostic} onClick={onRestore}>
       <SemanticIcon name={restoreIcon} size={12} /> {restoring ? workingLabel : restoreLabel}
-    </button>}
-    {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={event => onTakeOver(event.currentTarget)}><ThemeNavigationForwardIcon size={12} /> Take over</button> : null}
-    <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><ThemeActionSearchIcon size={12} /> Analyze…</button>
+    </Button>}
+    {onTakeOver ? <Button type="button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={event => onTakeOver(event.currentTarget)}><ThemeNavigationForwardIcon size={12} /> Take over</Button> : null}
+    <Button type="button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><ThemeActionSearchIcon size={12} /> Analyze…</Button>
     <Dialog.Root recoveryCloseDisabled={busy} open={mode !== null} onOpenChange={next => { if (!next) close() }}>
       <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="dialog-scrim" />
@@ -118,10 +119,10 @@ export function SessionRecoveryActions({ source, restoring, hideRestore = false,
           {existing && !result && !error ? <p className="session-recovery-dialog__hint">An original request is retained. Check its current result before choosing another action.</p> : null}
           {destination === 'mote' && directory.error ? <p role="status" className="session-recovery-dialog__hint">Mote directory read is unconfirmed: {directory.error}. The saved recipient remains; refresh its original directory before choosing a replacement.</p> : null}
           {result?.kind === 'confirmed' && !error ? <p role="status">{result.message}</p> : result || error ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Request unconfirmed', mode: error ?? result!.message, restore: 'Check the original request.' } }} /> : null}
-          <footer><button ref={cancel} type="button" className="small-button" disabled={busy} onClick={close}>{result?.kind === 'confirmed' ? 'Done' : 'Cancel'}</button>
-            <button type="button" className="small-button session-recovery-dialog__confirm" disabled={busy || !canSubmit} onClick={() => void submit()}>
+          <footer><Button ref={cancel} type="button" disabled={busy} onClick={close}>{result?.kind === 'confirmed' ? 'Done' : 'Cancel'}</Button>
+            <Button type="button" className="session-recovery-dialog__confirm" disabled={busy || !canSubmit} onClick={() => void submit()}>
               {busy ? 'Checking…' : existing || result ? 'Check original request' : destination === 'mote' ? 'Send analysis' : 'Create analysis Agent'}
-            </button></footer>
+            </Button></footer>
         </Dialog.Content>
       </DocumentOverlayPortal>
     </Dialog.Root>

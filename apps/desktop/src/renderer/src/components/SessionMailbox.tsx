@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MoteInputReceipt } from './MoteInputReceipt'
 import type { PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { api } from '../lib/api'
@@ -748,7 +749,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
             disclosure={{ scope, id: 'original-automation-target', occurrence: progressUnavailable.message, visible: progressVisible }}
             notice={{ kind: 'indeterminate', notice: { step: 'Original automation target unconfirmed', mode: progressUnavailable.message,
             restore: 'Refresh the original Session observation to read its metadata. No other Agent is substituted.' } }}
-            inlineActions={progressUnavailable.onRefresh ? <button type="button" className="small-button" aria-label="Refresh original Session" title="Refresh original Session" onClick={progressUnavailable.onRefresh}>Refresh</button> : undefined} /> : null}
+            inlineActions={progressUnavailable.onRefresh ? <Button type="button" aria-label="Refresh original Session" title="Refresh original Session" onClick={progressUnavailable.onRefresh}>Refresh</Button> : undefined} /> : null}
       </div> : null}
       </div>
       {hasProgress && folder !== 'progress' ? <button ref={automationEntry} type="button" className="composer-mailbox__automation" aria-label="Automation"

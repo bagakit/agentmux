@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseCapsuleRpcParams, parseCapsuleRpcResult, type CapsuleInputObservation, type CapsuleInteraction } from '@agentmux/core/capsule'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { observeCapsuleQuestionAttempt, useCapsuleQuestionEditor, type CapsuleQuestionAttempt as Attempt } from '../lib/capsule-question-editors'
 
@@ -160,13 +161,13 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
     <div className="capsule-question__actions">
       {current.status === 'pending' ? <>
         <span role="status">{attempt?.pending ? 'Saving original operation…' : dirty ? 'Unsaved draft' : 'Draft saved'}</span>
-        <button type="button" className="small-button capsule-question__save" disabled={Boolean(issue) || !dirty || Boolean(attempt)} onClick={() => void saveDraft()}>Save draft</button>
-        {!remote ? <button type="button" className="primary-button capsule-question__confirm" disabled={Boolean(issue) || Boolean(attempt) || !current.target || !answer.trim()}
-          onClick={() => void confirm()}>Confirm answer</button> : null}
+        <Button type="button" className="capsule-question__save" disabled={Boolean(issue) || !dirty || Boolean(attempt)} onClick={() => void saveDraft()}>Save draft</Button>
+        {!remote ? <Button type="button" variant="primary" className="capsule-question__confirm" disabled={Boolean(issue) || Boolean(attempt) || !current.target || !answer.trim()}
+          onClick={() => void confirm()}>Confirm answer</Button> : null}
       </> : <span role="status">Answer saved{delivery ? ` · ${inputObservationLabel(delivery)}` : ''}</span>}
       {!remote && current.status === 'answered' && current.reply?.phase === 'prepared' && (delivery?.status === 'unknown' || delivery?.status === 'unavailable') ?
-        <button type="button" className="small-button" disabled={Boolean(issue) || attempt?.pending || inspecting} onClick={() => void confirm(true)}>Continue saved confirmation</button> : null}
-      {attempt && !attempt.pending ? <button type="button" className="primary-button capsule-question__confirm" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? 'Inspecting…' : 'Inspect original operation'}</button> : inspectSavedReply ?
+        <Button type="button" disabled={Boolean(issue) || attempt?.pending || inspecting} onClick={() => void confirm(true)}>Continue saved confirmation</Button> : null}
+      {attempt && !attempt.pending ? <Button type="button" variant="primary" className="capsule-question__confirm" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? 'Inspecting…' : 'Inspect original operation'}</Button> : inspectSavedReply ?
         <button type="button" className={settled ? 'small-button' : 'primary-button capsule-question__confirm'} disabled={inspecting} onClick={() => void inspectRestored()}>Inspect original operation</button> : null}
     </div>
     {remote ? <p className="capsule-question__notice">Drafts are saved on the original node. Confirm this answer in that node’s trusted App; this remote page cannot authorize Agent input.</p> : null}

@@ -5,6 +5,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { parseConversationLandmarkWrite, type ConversationItemRef, ConversationRef, ConversationLandmark, ConversationLandmarkChange, ConversationLandmarkPage, ConversationLandmarkWrite } from '@agentmux/core/conversation'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { useAppStore, retainConversationLandmarkIntent, clearConversationLandmarkIntent } from '../store'
 import { conversationLandmarkIntentKey, conversationLandmarkRecordKey } from '../lib/conversation-landmark-intent'
@@ -114,9 +115,9 @@ function LandmarkPopover({ title, trigger, active, onOpen, children }: {
 function Pending({ state }: { state: ReturnType<typeof useLandmarks> }) {
   return <>{state.issue ? <p className="conversation-landmark__issue" role="status">{state.issue}</p> : null}
     {state.intent ? <div className="conversation-landmark__pending"><p>Original save intent retained. Availability of its record is checked separately.</p><code className="conversation-landmark__operation">{state.intent.operationId}</code>
-      <button type="button" className="small-button" disabled={state.busy} onClick={() => { void state.check() }}>Check original save</button>
-      <button type="button" className="small-button" disabled={state.busy} onClick={() => { void state.apply(state.intent!.change) }}>Retry original save</button>
-      {state.conflict ? <button type="button" className="small-button" disabled={state.busy} onClick={() => { void state.refreshAfterConflict() }}>{state.conflict === 'missing' ? 'Review missing point' : 'Refresh after conflict'}</button> : null}
+      <Button type="button" disabled={state.busy} onClick={() => { void state.check() }}>Check original save</Button>
+      <Button type="button" disabled={state.busy} onClick={() => { void state.apply(state.intent!.change) }}>Retry original save</Button>
+      {state.conflict ? <Button type="button" disabled={state.busy} onClick={() => { void state.refreshAfterConflict() }}>{state.conflict === 'missing' ? 'Review missing point' : 'Refresh after conflict'}</Button> : null}
     </div> : null}</>
 }
 function SaveConversationLandmarkInner({ reference, routeHostId, active = true }: { reference: ConversationItemRef; routeHostId?: string | undefined; active?: boolean }) {
@@ -130,7 +131,7 @@ function SaveConversationLandmarkInner({ reference, routeHostId, active = true }
       <label htmlFor={field}>Name</label><input id={field} value={name} onChange={event => setName(event.target.value)} readOnly={state.busy || !!state.intent || !!state.confirmed} autoComplete="off" placeholder="A place to return to"/>
       <p className="conversation-landmark__source">{reference.source.kind === 'native' ? `${reference.source.providerId} · Native record` : 'Captured record'} · <code>{reference.source.recordId}</code></p>
       <Pending state={state}/>
-      {state.confirmed ? <p role="status">Saved. Return from Reading points.</p> : <button type="submit" className="small-button" disabled={state.busy || !!state.intent || !name.trim()}>{state.busy ? 'Saving…' : 'Save reading point'}</button>}
+      {state.confirmed ? <p role="status">Saved. Return from Reading points.</p> : <Button type="submit" disabled={state.busy || !!state.intent || !name.trim()}>{state.busy ? 'Saving…' : 'Save reading point'}</Button>}
     </form>
   </LandmarkPopover>
 }
@@ -157,15 +158,15 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
       {state.page?.points.map(point => <div className="conversation-landmark__row" key={point.id}>
         {edit?.id === point.id ? <form onSubmit={event => { event.preventDefault(); if (edit.name.trim() && !state.intent) void state.apply({ kind: 'rename', id: point.id, name: edit.name }) }} onKeyDown={event => { if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
           <label><span className="sr-only">Reading point name</span><input aria-label="Reading point name" value={edit.name} readOnly={state.busy || !!state.intent} onChange={event => setEdit({ ...edit, name: event.target.value })}/></label>
-          <button type="submit" className="small-button" disabled={state.busy || !!state.intent || !edit.name.trim()}>Save name</button>
-          <button type="button" className="small-button" onClick={() => setEdit(null)}>Cancel</button>
+          <Button type="submit" disabled={state.busy || !!state.intent || !edit.name.trim()}>Save name</Button>
+          <Button type="button" onClick={() => setEdit(null)}>Cancel</Button>
         </form> : <><button type="button" className="conversation-landmark__destination" title={point.name} onClick={() => { void openPoint(point) }}><span>{point.name}</span><small>{point.reference.source.kind === 'native' ? `${point.reference.source.providerId} · Native` : 'Captured'}</small></button>
           <button type="button" className="icon-button" aria-label={`Rename ${point.name}`} disabled={state.busy || !!state.intent} onClick={() => setEdit({ id: point.id, name: point.name })}><EditIcon size={12}/></button>
           <button type="button" className="icon-button" aria-label={`Remove ${point.name}`} disabled={state.busy || !!state.intent} onClick={() => { void state.apply({ kind: 'remove', id: point.id }) }}><RemoveIcon size={12}/></button></>}
       </div>)}
     </div>
     <Pending state={state}/><RetainedLandmarkIntents reference={reference} active={active} onAccepted={state.adopt} excludeOperationId={state.intent?.operationId}/>{navigation ? <p role="status">{navigation}</p> : null}
-    <footer><button type="button" className="small-button" disabled={state.busy} onClick={() => { void state.refresh() }}>Refresh points</button><span>Original record references</span></footer>
+    <footer><Button type="button" disabled={state.busy} onClick={() => { void state.refresh() }}>Refresh points</Button><span>Original record references</span></footer>
   </LandmarkPopover>
 }
 

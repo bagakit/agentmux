@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
 
@@ -29,10 +30,10 @@ export function ConversationReadFailure({ scope, issues, hasContent = true, visi
       aria-label={issue.label} aria-busy={issue.loading || undefined}>
       <strong>{issue.label}</strong>
       {issue.reasons.map((reason, index) => <p key={index}>{reason}</p>)}
-      <button type="button" className="small-button" disabled={issue.loading || !visible}
+      <Button type="button" disabled={issue.loading || !visible}
         aria-label={issue.retryLabel} onMouseDown={event => event.preventDefault()} onClick={issue.retry}>
         {issue.loading ? 'Retrying…' : issue.retryLabel}
-      </button>
+      </Button>
     </section>)}
   </div>
   const notices: ServiceNoticeItem[] = issues.map(issue => ({ id: issue.id, cause: issue.id,

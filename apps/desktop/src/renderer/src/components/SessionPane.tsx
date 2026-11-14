@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { LocalRetainedInputs } from './LocalRetainedInputs'
 import { SessionRecordDetails } from './SessionRecordDetails'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
@@ -790,11 +791,11 @@ export function SessionPane({
 
   const unobservedActionsAt = (origin = mailboxOrigin, displayId: string | null = null) => {
     const canAct = projectionPolicy.allowsRecovery && unobservedIdentity
-    const checkOriginal = <button type="button" className="small-button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
+    const checkOriginal = <Button type="button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
       <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Reading…' : 'Check original'}
-    </button>
-    const continueOriginal = <button type="button" className="small-button" disabled={continuingCreation}
-      onClick={() => void continueOriginalCreation()}>{continuingCreation ? 'Requesting…' : 'Continue now'}</button>
+    </Button>
+    const continueOriginal = <Button type="button" disabled={continuingCreation}
+      onClick={() => void continueOriginalCreation()}>{continuingCreation ? 'Requesting…' : 'Continue now'}</Button>
     const recoveryActions = recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource}
       hideRestore={Boolean(storageDiagnostic && !creationWaiting)} onTakeOver={takeOverAt(origin, displayId)} restoring={refreshing}
       workingLabel="Reading…" restoreLabel="Check original" restoreIcon="action.refresh" onRestore={() => void refreshUnobserved()} /> : checkOriginal
@@ -964,8 +965,8 @@ export function SessionPane({
         mode: session?.processState === 'running' ? 'Confirmed Session running; input remains available.'
           : 'Creation confirmed; process and input unconfirmed.',
         restore: 'Check again for this same Session and Timeline.'
-      }} actions={!readOnly && session ? <button type="button" className="small-button" disabled={refreshing}
-        onClick={() => { void refresh() }}><ThemeActionRefreshIcon size={12} /> Check again</button> : null} />
+      }} actions={!readOnly && session ? <Button type="button" disabled={refreshing}
+        onClick={() => { void refresh() }}><ThemeActionRefreshIcon size={12} /> Check again</Button> : null} />
     </div>
   )
   // Lifecycle, recovery and observation remain owned here. Each confirmed display
@@ -1097,8 +1098,8 @@ export function SessionPane({
           kind: 'indeterminate', notice: { step: `Retained history metadata could not be read: ${historyCatalogue.error}`,
             mode: 'The original Region and Session reference remain visible. Its current state is unconfirmed.',
             restore: 'Check again to read the same Session identity; no Agent will be started.' }
-        }} actions={<button type="button" className="small-button" disabled={historyCatalogue.loading}
-          onClick={historyCatalogue.refresh}><ThemeActionRefreshIcon size={12} /> Check again</button>} /> : null}
+        }} actions={<Button type="button" disabled={historyCatalogue.loading}
+          onClick={historyCatalogue.refresh}><ThemeActionRefreshIcon size={12} /> Check again</Button>} /> : null}
         {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
@@ -1149,9 +1150,9 @@ export function SessionPane({
   const agentRecoveryControlsAt = (origin = mailboxOrigin, displayId: string | null = null) => !projectionPolicy.allowsRecovery ? (
     <span>Open this Session in its Project to restore it.</span>
   ) : pendingResume ? (
-    <div className="session-recovery-actions"><button type="button" className="primary-button" disabled={recovering || refreshing} onClick={() => void recover()}>
+    <div className="session-recovery-actions"><Button type="button" variant="primary" disabled={recovering || refreshing} onClick={() => void recover()}>
       <ThemeActionResumeSessionIcon size={12} /> {recovering || refreshing ? 'Checking…' : continuityNotice!.actionLabel}
-    </button></div>
+    </Button></div>
   ) : recoverableFrontendNotice ? (
     <button type="button" className={frontendSurface ? 'primary-button' : 'small-button'} disabled={recovering || refreshing} onClick={() => void recover()}>
       <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Checking…' : recoverableFrontendNotice.actionLabel ?? 'Resume'}
@@ -1162,9 +1163,9 @@ export function SessionPane({
     restoreDisabled={continuityNotice ? !(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) : false}
     restoreLabel={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'Re-read original' : continuityNotice?.remedy.kind === 'wait' ? 'Waiting for operation' : 'Restore original'}
     onRestore={() => { if (continuityNotice && continuityRefreshEnabled(continuityNotice)) void refreshOriginal(); else void recover() }} /> : (
-    <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
+    <Button type="button" disabled={recovering} onClick={() => void recover()}>
       <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Resuming…' : 'Resume'}
-    </button>
+    </Button>
   )
   const originalReadNotice = originalReadError?.source === activitySourceKey ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
     step: 'Original Session recheck failed', mode: originalReadError.message,
@@ -1187,13 +1188,13 @@ export function SessionPane({
         : 'The last Run observation is running. Existing terminal and input paths are retained; the frontend connection state is unknown.',
       restore: frontendNotice.detail
     } }}
-    actions={projectionPolicy.allowsRecovery ? <button type="button" className="small-button" disabled={refreshing}
-      onClick={() => void refreshOriginal()}><ThemeActionRefreshIcon size={12} /> {refreshing ? 'Checking…' : 'Refresh observation'}</button> : undefined}
+    actions={projectionPolicy.allowsRecovery ? <Button type="button" disabled={refreshing}
+      onClick={() => void refreshOriginal()}><ThemeActionRefreshIcon size={12} /> {refreshing ? 'Checking…' : 'Refresh observation'}</Button> : undefined}
   /> : null
-  const readOriginalOutputAction = <button type="button" className="small-button"
+  const readOriginalOutputAction = <Button type="button"
     onClick={() => { setRetainedOutputKey(readingRetainedOutput ? null : activitySourceKey); setHistoryOpen(false); useAppStore.getState().setViewMode(sessionId, 'terminal') }}>
     {readingRetainedOutput ? 'Back to recovery' : 'Read original output'}
-  </button>
+  </Button>
   const agentRecoveryActionAt = (origin = mailboxOrigin, displayId: string | null = null) => <>{agentRecoveryControlsAt(origin, displayId)}{session.kind === 'agent' && runEndedByRuntimeRestart(session) ? <AgentCloseAction session={session} /> : null}{needsSessionSurface && (!pendingResume || readingRetainedOutput) ? readOriginalOutputAction : null}{!pendingResume && recoverableFrontendNotice?.actionDetail ? <p className="session-startup-action-detail">{recoverableFrontendNotice.actionDetail}</p> : null}</>
   const agentRecoveryAction = agentRecoveryActionAt()
   const coreRestorePresentation = session.kind === 'agent' ? agentContinuityPresentation(session) : null
@@ -1386,14 +1387,14 @@ export function SessionPane({
                   <span className="terminal-recovery__readonly">Open this Session in its Project to recover it.</span>
                 ) : session.kind === 'terminal' ? (
                   disconnected ? (
-                    <button type="button" className="small-button" disabled={refreshing} onClick={() => void refresh()}>
+                    <Button type="button" disabled={refreshing} onClick={() => void refresh()}>
                       <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Checking…' : 'Check again'}
-                    </button>
+                    </Button>
                   ) : (
                     // The PTY is gone for good — relaunch a fresh terminal in the same cwd.
-                    <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
+                    <Button type="button" disabled={recovering} onClick={() => void recover()}>
                       <ThemeActionRestartTerminalIcon size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
-                    </button>
+                    </Button>
                   )
                 ) : agentRecoveryAction}
               </div>

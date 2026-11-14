@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentLearningOperation, AgentLearningSource, AgentLearningTarget } from '@agentmux/core/agent-learning'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { executorsForHost } from '../lib/executors'
 import { retainAgentLearningReviewDraft, useAppStore } from '../store'
@@ -155,8 +156,8 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
     }, 'confirm')
   }
   const issueNotice = issue ? <div className="session-takeover__issue" role="status"><strong>Original result needs attention</strong><p>{issue.message}</p>
-    <p>The original work and request are kept.</p><div className="session-learning__actions"><button type="button" className="small-button" disabled={busy} onClick={() => void refresh()}>Inspect original request</button>
-      {issue.action === 'confirm' ? <button type="button" className="small-button" disabled={busy || dirty || !executorId || !selectedTarget} onClick={() => void confirm()}>Retry exact confirmation</button> : null}</div></div> : null
+    <p>The original work and request are kept.</p><div className="session-learning__actions"><Button type="button" disabled={busy} onClick={() => void refresh()}>Inspect original request</Button>
+      {issue.action === 'confirm' ? <Button type="button" disabled={busy || dirty || !executorId || !selectedTarget} onClick={() => void confirm()}>Retry exact confirmation</Button> : null}</div></div> : null
   return <section ref={surface} className="session-takeover session-learning" aria-label="Review Agent experience" hidden={!active} inert={!active} aria-busy={busy}
     onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
     <div className="session-takeover__content">
@@ -169,33 +170,33 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
           { value: '', label: 'Choose an existing extraction' }, ...operations.map(row => ({ value: row.operationId, label: row.operationId, description: row.candidate ? 'Candidate ready for review' : 'Extraction in progress' }))]} /> : null}
         <AgentExecutorPicker presentation="field" label="Extraction Agent" unsetLabel="Choose an Agent" executors={executors} selected={executorId} onSelect={id => { setExecutorId(id); keep({ executorId: id }) }} disabled={busy || pendingId.current !== null} />
         <p>The extraction Agent reads the original work and proposes reusable experience. This step does not send anything to a Mote or Topic.</p>
-        <button type="button" className="small-button" disabled={busy || !executorId} onClick={() => void extract()}>{pendingId.current ? 'Continue original extraction' : 'Extract experience'}</button>
+        <Button type="button" disabled={busy || !executorId} onClick={() => void extract()}>{pendingId.current ? 'Continue original extraction' : 'Extract experience'}</Button>
         {pendingId.current ? <p>The original request is retained. Check it or explicitly continue this same request; no new identity will be created.</p> : null}
       </> : <>
         {operation.approved ? <div className="session-learning__status" role="status"><strong>Reviewed candidate confirmed</strong><span>{operation.approved.target.kind === 'mote' ? 'Mote' : 'Topic'} · {approvedTarget?.label ?? 'Original destination'}</span>
           <p>{operation.learner?.state === 'created' && operation.learner.context === 'confirmed' ? 'The learning task was delivered. Review its result and saved content to confirm knowledge changes.' : 'Learning delivery is unconfirmed. Use Check original to inspect this same request.'}</p>
-          {operation.learner ? <div className="session-learning__actions"><button type="button" className="small-button" onClick={() => viewAgent(operation.learner!.agentSessionId)}>View learning Agent</button>
-            {['prepared', 'unknown', 'not-applied'].includes(operation.learner.state) ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal('learning')}>Continue original delivery</button> : null}</div> : null}
+          {operation.learner ? <div className="session-learning__actions"><Button type="button" onClick={() => viewAgent(operation.learner!.agentSessionId)}>View learning Agent</Button>
+            {['prepared', 'unknown', 'not-applied'].includes(operation.learner.state) ? <Button type="button" disabled={busy} onClick={() => void continueOriginal('learning')}>Continue original delivery</Button> : null}</div> : null}
         </div> : <div className="session-learning__status" role="status"><strong>{operation.candidate ? 'Experience ready to review' : operation.proposer.state === 'created' ? 'Extraction task created' : 'Extraction delivery is unconfirmed'}</strong>
-          <div className="session-learning__actions"><button type="button" className="small-button" onClick={() => viewAgent(operation.proposer.agentSessionId)}>View extraction Agent</button>
-            {['prepared', 'unknown', 'not-applied'].includes(operation.proposer.state) ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal('extraction')}>Continue original extraction</button> : null}</div></div>}
+          <div className="session-learning__actions"><Button type="button" onClick={() => viewAgent(operation.proposer.agentSessionId)}>View extraction Agent</Button>
+            {['prepared', 'unknown', 'not-applied'].includes(operation.proposer.state) ? <Button type="button" disabled={busy} onClick={() => void continueOriginal('extraction')}>Continue original extraction</Button> : null}</div></div>}
         {!operation.candidate ? <p>The candidate is not ready. Read the original extraction again to check its proposal.</p> : <>
           {!operation.approved || dirty ? <label className="session-learning__draft">{operation.approved ? 'Later edit retained · outside the confirmed candidate' : `Candidate · revision ${operation.revision}`}<textarea aria-label="Experience candidate" value={draft} readOnly={!!operation.approved} onChange={event => { const content = event.target.value; setDraft(content); keep({ draft: { expectedRevision: view.current.draft?.expectedRevision ?? operation.revision, content } }) }} spellCheck={false} /></label> : null}
           {operation.approved ? <details className="session-learning__candidate"><summary>Read the exact confirmed candidate · revision {operation.approved.candidateRevision}</summary><pre className="session-learning__confirmed">{operation.candidate.content}</pre>
-            <button type="button" className="small-button" onClick={() => viewAgent(operation.proposer.agentSessionId)}>View extraction Agent</button></details> : null}
+            <Button type="button" onClick={() => viewAgent(operation.proposer.agentSessionId)}>View extraction Agent</Button></details> : null}
           {!operation.approved ? <>{conflict ? <div className="session-learning__conflict"><p>The saved candidate changed. Compare it below and merge the changes you want into your retained draft above.</p>
             <details open><summary>Current saved candidate · revision {operation.revision}</summary><pre className="session-learning__confirmed">{operation.candidate.content}</pre></details>
-            <button type="button" className="small-button" disabled={busy || !draft.trim()} onClick={() => void save(true)}>Save merged draft against revision {operation.revision}</button></div> : null}
-            <div className="session-learning__actions"><button type="button" className="small-button" disabled={busy || conflict || !dirty || !draft.trim()} onClick={() => void save()}>Save draft</button>{dirty ? <span>Save your edits before confirmation.</span> : <span>Review the sources, conditions and uncertainty.</span>}</div>
+            <Button type="button" disabled={busy || !draft.trim()} onClick={() => void save(true)}>Save merged draft against revision {operation.revision}</Button></div> : null}
+            <div className="session-learning__actions"><Button type="button" disabled={busy || conflict || !dirty || !draft.trim()} onClick={() => void save()}>Save draft</Button>{dirty ? <span>Save your edits before confirmation.</span> : <span>Review the sources, conditions and uncertainty.</span>}</div>
             <div className="session-learning__field"><span aria-hidden="true">Learning destination</span>
               <SelectionField label="Learning destination" value={targetKey} onValueChange={key => { setTargetKey(key); keep({ target: targets.find(item => item.value === key)?.target ?? null }) }} disabled={busy} options={[{ value: '', label: 'Choose a Mote or Topic' }, ...targets]} />
               {selectedTarget ? <p className="session-learning__destination">{targets.find(item => item.value === targetKey)!.description}</p> : null}</div>
             <div className="session-learning__field"><span aria-hidden="true">Learning Agent</span>
               <AgentExecutorPicker presentation="field" label="Learning Agent" unsetLabel="Choose an Agent" executors={executors} selected={executorId} onSelect={id => { setExecutorId(id); keep({ executorId: id }) }} disabled={busy} /></div>
-            <div className="session-learning__confirmation"><button type="button" className="small-button" aria-label={issue?.action === 'confirm' ? 'Result needs attention · Inspect original result' : 'Confirm & send for learning'} disabled={busy || issue?.action !== 'confirm' && (dirty || !executorId || !selectedTarget)} onClick={() => {
+            <div className="session-learning__confirmation"><Button type="button" aria-label={issue?.action === 'confirm' ? 'Result needs attention · Inspect original result' : 'Confirm & send for learning'} disabled={busy || issue?.action !== 'confirm' && (dirty || !executorId || !selectedTarget)} onClick={() => {
               if (issue?.action === 'confirm') surface.current?.querySelector<HTMLElement>('.session-learning__confirmation .session-takeover__issue')?.scrollIntoView({ block: 'nearest' })
               else void confirm()
-            }}>{issue?.action === 'confirm' ? 'Result needs attention · Inspect original result' : 'Confirm & send for learning'}</button>
+            }}>{issue?.action === 'confirm' ? 'Result needs attention · Inspect original result' : 'Confirm & send for learning'}</Button>
               {issue?.action === 'confirm' ? issueNotice : null}</div>
           </> : null}
         </>}
@@ -209,7 +210,7 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
           </dl>
         </details>
       </>}
-      <footer className="session-takeover__footer"><span>{busy ? 'Reading the original operation…' : 'Your original Agent and work stay here.'}</span><button type="button" className="small-button" disabled={busy} onClick={() => void refresh()}>Check original</button></footer>
+      <footer className="session-takeover__footer"><span>{busy ? 'Reading the original operation…' : 'Your original Agent and work stay here.'}</span><Button type="button" disabled={busy} onClick={() => void refresh()}>Check original</Button></footer>
     </div>
   </section>
 }

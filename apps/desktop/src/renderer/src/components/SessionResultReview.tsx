@@ -1,4 +1,5 @@
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -46,8 +47,8 @@ export function SessionResultReview({ sessionId, origin, visible, surfaceAnchor 
       style={{ positionAnchor: surfaceAnchor }} onToggle={event => setExpanded(event.newState === 'open')}>
       {expanded && visible ? <SessionResultReviewContent sessionId={sessionId} origin={origin} onNavigate={collapse}
         controls={<div className="session-result-review__actions" aria-label="Result review controls">
-          <button type="button" className="small-button" onClick={() => { collapse(); trigger.current?.focus({ preventScroll: true }) }}><ThemeNavigationDownIcon size={12} /> Collapse</button>
-          <button type="button" className="small-button" aria-label="Dismiss result review" onClick={() => {
+          <Button type="button" onClick={() => { collapse(); trigger.current?.focus({ preventScroll: true }) }}><ThemeNavigationDownIcon size={12} /> Collapse</Button>
+          <Button type="button" aria-label="Dismiss result review" onClick={() => {
             const surface = trigger.current?.closest('.agent-surface')
             const active = document.activeElement
             const ownsFocus = active === trigger.current || popover.current?.contains(active)
@@ -55,7 +56,7 @@ export function SessionResultReview({ sessionId, origin, visible, surfaceAnchor 
               ? previousFocus.current : surface?.querySelector<HTMLElement>('.xterm-helper-textarea, .composer [role="textbox"], .agent-region-header__more')
             collapse(); setDismissed(true)
             if (ownsFocus) target?.focus({ preventScroll: true })
-          }}><ThemeActionCloseIcon size={12} /> Close</button>
+          }}><ThemeActionCloseIcon size={12} /> Close</Button>
         </div>} /> : null}
     </aside>
     <ModalAttachmentDismissal active={Boolean(expanded && popover.current && getModalOverlayContainer(popover.current))} targetRef={popover}

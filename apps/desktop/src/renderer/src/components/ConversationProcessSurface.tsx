@@ -5,6 +5,7 @@ import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeP
 import { ObservedProcessDock, type RecordedProcessObservation } from '@agentmux/client-ui/components/WorkflowObservation'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { conversationItemRef } from '@agentmux/core/conversation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 
 // This is placement within one work surface, never a Reader or a record store.
@@ -64,7 +65,7 @@ export function ConversationProcessObservation({ process, scope, selected, onSel
         {observation.status === 'running' ? <span>最近记录：进行中</span> : null}
         {observation.status === 'interrupted' ? <span>记录标记为中断</span> : null}
         {locateNotice ? <span role="status">{locateNotice}</span> : null}</>}
-      action={reference ? <button type="button" className="small-button" onClick={() => void locate()}>查看过程</button> : undefined}
+      action={reference ? <Button type="button" onClick={() => void locate()}>查看过程</Button> : undefined}
       onClose={close} />, placement.target, key)
     : null
   return <>

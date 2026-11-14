@@ -268,7 +268,7 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
             : renderFooter()}
       </div> : null}
     </WindowOverlayPortal>
-    {available && edit?.sessionId === sessionId && !opened && !selection ? <div className="conversation-annotation-recovery" role="status">批注草稿已保留。<button type="button" className="small-button" onClick={() => { focusRequested.current = { origin: document.activeElement }; setOpened(true) }}>继续批注</button></div> : null}
+    {available && edit?.sessionId === sessionId && !opened && !selection ? <div className="conversation-annotation-recovery" role="status">批注草稿已保留。<Button type="button" onClick={() => { focusRequested.current = { origin: document.activeElement }; setOpened(true) }}>继续批注</Button></div> : null}
     {status ? <span className="conversation-annotation-status" role="status">{status}</span> : null}
   </>
 }

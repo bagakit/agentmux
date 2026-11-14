@@ -1,4 +1,5 @@
 import * as Dialog from '@agentmux/client-ui/components/Modal'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentSessionUsagePage } from '@agentmux/core'
@@ -42,8 +43,8 @@ function Usage({ target }: { target: LocalInputTarget }) {
   const captured = observation?.page.captured
   return <section aria-label="Captured body usage" aria-busy={running}>
     <div className="session-record-details__heading"><strong>Captured record bodies</strong>
-      {running ? <button type="button" className="small-button" onClick={() => { reader.current?.abort(); setRunning(false) }}>Stop inspection</button>
-        : <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Inspect again</button>}</div>
+      {running ? <Button type="button" onClick={() => { reader.current?.abort(); setRunning(false) }}>Stop inspection</Button>
+        : <Button type="button" onClick={() => setAttempt(value => value + 1)}>Inspect again</Button>}</div>
     {captured?.status === 'measured' ? <>
       <p className="session-record-details__amount">{bytes(observation!.logicalBytes)} <span>logical JSON · {observation!.records.toLocaleString()} versions</span></p>
       <p role="status">{captured.complete ? 'Captured range inspected' : running ? 'Inspecting captured range…' : 'Partial inspection · stopped'} · {observation!.pages} pages</p>
@@ -61,11 +62,11 @@ export function SessionRecordDetails({ target, deleted = false, onDeleted }: { t
   const [confirmedDeleted, setConfirmedDeleted] = useState(deleted)
   const identity = JSON.stringify([target.hostId, target.agentSessionId])
   return <Dialog.Root open={open} onOpenChange={setOpen}>
-    <Dialog.Trigger asChild><button type="button" className="small-button session-record-details-trigger">Record details</button></Dialog.Trigger>
+    <Dialog.Trigger asChild><Button type="button" className="session-record-details-trigger">Record details</Button></Dialog.Trigger>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="dialog-surface session-record-dialog session-record-details" onPointerDownCapture={event => event.stopPropagation()}>
-        <header><Dialog.Title>Record details</Dialog.Title><Dialog.Close asChild><button type="button" className="small-button">Close</button></Dialog.Close></header>
+        <header><Dialog.Title>Record details</Dialog.Title><Dialog.Close asChild><Button type="button">Close</Button></Dialog.Close></header>
         <Dialog.Description>Original Session records. Reading does not restore an Agent.</Dialog.Description>
         {open ? <div key={identity} className="session-record-details__body">
           <dl className="session-record-details__facts"><div><dt>Host</dt><dd>{target.hostId}</dd></div><div><dt>Session</dt><dd>{target.agentSessionId}</dd></div><div><dt>Owner</dt><dd>AgentMux Core · captured body JSON</dd></div></dl>

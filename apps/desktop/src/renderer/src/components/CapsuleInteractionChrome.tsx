@@ -4,6 +4,7 @@ import { formatAmuxObjectLink } from '@agentmux/core/sharing'
 import type { CapsuleInspection, CapsuleInteraction } from '@agentmux/core/capsule'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { CapsuleQuestionReply } from './CapsuleQuestionReply'
 
@@ -81,7 +82,7 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
       {questions === null && loading ? <p className="capsule-chrome__empty" role="status">Reading the original page requests…</p> : null}
       {questions?.map(question => <CapsuleQuestionReply key={question.interactionId} {...(browserId ? { browserId } : {})} visible={visible && open} remote={remote} interaction={question} onUpdated={updated} />)}
       {issue ? <p className="capsule-chrome__issue" role="status"><IssueIcon size={13} aria-hidden="true" /><span>{issue}</span>
-        <button type="button" className="small-button" disabled={loading} onClick={() => void refresh()}>Retry page details</button></p> : null}
+        <Button type="button" disabled={loading} onClick={() => void refresh()}>Retry page details</Button></p> : null}
       {!embedded ? <details className="capsule-chrome__source"><summary>Page identity and source</summary><code>{remote ? capsuleId : formatAmuxObjectLink({ kind: 'capsule', capsuleId })}</code>
         {remote ? <p>Original node <code>{remote.hostId}</code> · Runtime <code>{remote.runtimeId}</code></p> : null}
         {page ? <><code>{page.record.contentRoot}</code>{page.endpoint.status === 'available' ? <code>{page.endpoint.url}</code> : <p>{page.endpoint.issue.message}</p>}</> : null}</details> : null}

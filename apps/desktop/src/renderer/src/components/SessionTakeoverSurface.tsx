@@ -4,6 +4,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
 import { focusTakeoverResult, inspectTakeover, inspectTakeoverClub, prepareTakeoverClub, retainsTakeoverRequest, takeoverOperationSubject, takeOverSession, type TakeoverSource } from '../lib/session-takeover'
 import { agentOperationsForSubject, type AgentOperationFeedback } from '../lib/agent-operation'
@@ -315,16 +317,16 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
       </div>
       <header className="session-takeover__heading">
         <div><h2>{source.derived ? source.derived.label : source.destinationKind === 'club' ? 'Continue in a Club.' : 'Keep the work moving.'}</h2><p>{source.derived ? 'Choose an Agent to start this from the original work.' : previousRequest ? 'The earlier takeover Agent was closed. Choose an Agent to take over again.' : source.destinationKind === 'club' ? 'Choose an existing team, then an Agent to take over there.' : 'Choose where the next Agent takes over.'}</p></div>
-        <button type="button" className="icon-button session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><ThemeActionCancelIcon size={16} /></button>
+        <IconButton type="button" className="session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><ThemeActionCancelIcon size={16} /></IconButton>
       </header>
       {source.derived ? <details className="session-takeover__instruction" open={source.derived.instruction.trim().length <= 220}>
         <summary><span>Instruction</span><small>Sent to the new Agent with the original work</small></summary>
         <p>{source.derived.instruction.trim()}</p>
       </details> : null}
       {operations.length ? <details className="session-takeover__retained"><summary>Unfinished Takeovers · {operations.length}</summary>
-        {operations.map(operation => <button type="button" key={operation.operationId} className="small-button" disabled={busy || creatingClub} onClick={() => { void resume(operation) }}>
+        {operations.map(operation => <Button type="button" key={operation.operationId} disabled={busy || creatingClub} onClick={() => { void resume(operation) }}>
           <span>{operation.takeoverSource.coreRequest ? 'Review original Takeover' : 'Review Club preparation'} · {operationDestination(operation)}</span>
-          <code title={operation.operationId}>{operation.operationId}</code></button>)}
+          <code title={operation.operationId}>{operation.operationId}</code></Button>)}
       </details> : null}
       {!source.derived && subject.hostId && subject.agentSessionId ? <AgentPromotionRecovery target={{ hostId: subject.hostId, agentSessionId: subject.agentSessionId }} /> : null}
       {!source.derived ? <>
@@ -335,7 +337,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
             disabled={busy || creatingClub || unconfirmed || closedRequest !== null} options={placements} />
         </details>
         {!destinations.length ? <p>No destination is confirmed yet. Open its existing Project or Club, then return to this work.</p> : null}
-        {source.destinationKind === 'club' ? <div className="session-takeover__club-create"><button type="button" className="small-button" disabled={busy || creatingClub || unconfirmed || Boolean(workingSource.clubPreparation) || operations.some(operation => operation.takeoverSource.clubPreparation && !operation.takeoverSource.coreRequest) || closedRequest !== null || config?.promotion?.enabled === false} onClick={() => { void createClub() }}><MoteIcon size={14} />{creatingClub ? 'Creating Club…' : 'Create a Club first'}</button><small>Two steps: create the team, then choose its Agent.</small></div> : null}
+        {source.destinationKind === 'club' ? <div className="session-takeover__club-create"><Button type="button" disabled={busy || creatingClub || unconfirmed || Boolean(workingSource.clubPreparation) || operations.some(operation => operation.takeoverSource.clubPreparation && !operation.takeoverSource.coreRequest) || closedRequest !== null || config?.promotion?.enabled === false} onClick={() => { void createClub() }}><MoteIcon size={14} />{creatingClub ? 'Creating Club…' : 'Create a Club first'}</Button><small>Two steps: create the team, then choose its Agent.</small></div> : null}
       </> : null}
       {notice ? <p className="session-takeover__notice" role="status">{notice}</p> : null}
       {source.derived || destination || workingSource.coreRequest ? <AgentExecutorPicker executors={executors} selected={selected} preferred={preferred} active={active && !closing} disabled={busy || creatingClub || unconfirmed || closedRequest !== null || !source.derived && !destination}
@@ -348,11 +350,11 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
       {issue ? <div className="session-takeover__issue" role="status">
         <strong>{closedRequest ? 'Takeover Agent was closed' : unconfirmed ? 'Takeover is not confirmed' : 'Could not take over'}</strong><p>{issue}</p>
         <div className="session-takeover__issue-actions">
-          {closedRequest ? <button type="button" className="small-button" disabled={busy} onClick={chooseAnother}>Choose another Agent</button> : null}
-          {currentReport?.agent && currentReport.to && currentReport.outcome === 'partial' ? <button type="button" className="small-button" onClick={() => { focusTakeoverResult(workingSource, currentReport); close(false) }}>Open created Agent</button> : null}
-          {workingSource.clubPreparation && !workingSource.coreRequest ? <button type="button" className="small-button" disabled={busy || creatingClub} onClick={() => { void createClub() }}>Continue original Club preparation</button> : null}
-          {workingSource.coreRequest && !closedRequest ? <button type="button" className="small-button" disabled={busy} onClick={() => { const request = workingSource.coreRequest!; if (request.content.kind === 'takeover-agent') { admitted.current = false; void choose(request.content.executorId) } }}>Continue original Takeover</button> : null}
-          <button type="button" className="small-button" disabled={busy} onClick={() => { void check() }}><ThemeActionRefreshIcon size={12} /> Check again</button>
+          {closedRequest ? <Button type="button" disabled={busy} onClick={chooseAnother}>Choose another Agent</Button> : null}
+          {currentReport?.agent && currentReport.to && currentReport.outcome === 'partial' ? <Button type="button" onClick={() => { focusTakeoverResult(workingSource, currentReport); close(false) }}>Open created Agent</Button> : null}
+          {workingSource.clubPreparation && !workingSource.coreRequest ? <Button type="button" disabled={busy || creatingClub} onClick={() => { void createClub() }}>Continue original Club preparation</Button> : null}
+          {workingSource.coreRequest && !closedRequest ? <Button type="button" disabled={busy} onClick={() => { const request = workingSource.coreRequest!; if (request.content.kind === 'takeover-agent') { admitted.current = false; void choose(request.content.executorId) } }}>Continue original Takeover</Button> : null}
+          <Button type="button" disabled={busy} onClick={() => { void check() }}><ThemeActionRefreshIcon size={12} /> Check again</Button>
         </div>
       </div> : null}
     </div>

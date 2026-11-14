@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/identity'
 import type { AgentSessionRecordDeleteInput, AgentSessionRecordDeletionReceipt, AgentSessionRecordInspection } from '@agentmux/core/agent-session-record'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { retainedSessionRecordDelete } from '../lib/session-record-delete'
 import type { LocalInputTarget } from '../lib/local-retained-inputs'
@@ -69,12 +70,12 @@ export function SessionRecordDelete({ target, onDeleted }: { target: LocalInputT
   const drifted = request && observed?.state === 'retired' && (request.expectedRetiredAt !== observed.retiredAt || request.expectedRetirementRevision !== observed.retirementRevision)
   return <section className="session-record-delete" aria-label="Delete AgentMux record" aria-busy={busy || checking}>
     <div className="session-record-details__heading"><strong>AgentMux record</strong>
-      <button type="button" className="small-button" disabled={checking} onClick={() => { setError(null); setAttempt(value => value + 1) }}>Check original result</button></div>
+      <Button type="button" disabled={checking} onClick={() => { setError(null); setAttempt(value => value + 1) }}>Check original result</Button></div>
     {deleted ? <>
       <p role="status">Core confirms this AgentMux record is deleted. {deleted.receipt.deletion.phase === 'pending' ? 'Indexed record cleanup is pending.' : 'Indexed record cleanup is complete.'}</p>
       <p className="muted">Original Session identity is retained. Provider originals, Runtime files, shared input journal and your saved local inputs remain with their owners. No physical disk recovery is claimed.</p>
       {anotherOperation ? <p className="session-record-details__warning">Another original operation deleted this record. Your saved request has not been confirmed and is kept.</p> : null}
-      {deleted.receipt.deletion.phase === 'pending' && !anotherOperation ? <button type="button" className="small-button" disabled={busy || checking || held.state === 'unavailable'} onClick={() => void execute(true)}>Finish recorded cleanup</button> : null}
+      {deleted.receipt.deletion.phase === 'pending' && !anotherOperation ? <Button type="button" disabled={busy || checking || held.state === 'unavailable'} onClick={() => void execute(true)}>Finish recorded cleanup</Button> : null}
     </> : observed?.state === 'retired' ? <>
       {request ? <p role="status">The original request is retained; its deletion is not confirmed. A current retired observation does not prove that request was not applied.</p> : null}
       {observed.pendingLifecycle ? <p role="status">Core retains a pending lifecycle operation. Its original target and work are kept; deletion is unavailable for this observation.</p> : null}
@@ -83,14 +84,14 @@ export function SessionRecordDelete({ target, onDeleted }: { target: LocalInputT
         <strong>Delete AgentMux record?</strong>
         <p>{target.hostId} · <span className="session-record-delete__identity">{target.agentSessionId}</span></p>
         <p>Core records for this original closed Session will no longer be readable or continued. Provider originals, Runtime resources and saved local drafts and queues are kept. This does not reclaim physical disk space.</p>
-        <div className="session-record-delete__actions"><button type="button" className="small-button" onClick={() => setConfirming(false)}>Keep record</button>
+        <div className="session-record-delete__actions"><Button type="button" onClick={() => setConfirming(false)}>Keep record</Button>
           <button type="button" className="small-button danger-button" disabled={busy} onClick={() => void execute()}>Delete AgentMux record</button></div>
       </div> : <button type="button" className="small-button danger-button" disabled={busy || checking || observed.pendingLifecycle || Boolean(drifted) || held.state === 'unavailable'} onClick={() => setConfirming(true)}>
         {request ? 'Retry original deletion' : 'Delete AgentMux record'}</button>}
     </> : observed?.state === 'active' ? <p role="status">Core reports this Session as active. Its existing capabilities and records are kept.</p>
       : <p role="status">{checking ? 'Checking the original Core record…' : 'The original record state has not been confirmed. Absence is not a deletion receipt.'}</p>}
     {held.state === 'unavailable' ? <p className="session-record-details__warning" role="status">{held.issue}</p> : null}
-    {busy && deleted?.receipt.deletion.phase !== 'complete' ? <button type="button" className="small-button" onClick={() => writer.current?.abort(new Error('Stopped waiting for the original record operation'))}>Stop waiting</button> : null}
+    {busy && deleted?.receipt.deletion.phase !== 'complete' ? <Button type="button" onClick={() => writer.current?.abort(new Error('Stopped waiting for the original record operation'))}>Stop waiting</Button> : null}
     {error ? <p className="session-record-details__warning" role="status">{error}</p> : null}
   </section>
 }
