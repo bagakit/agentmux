@@ -101,9 +101,10 @@ async function captureDisplays({ includeHostWindows = false } = {}) {
 function productionSurface() {
   const write = async (path: string, contents: string) => {
     const timing = JSON.parse(contents)
-    active.writes.push(timing)
-    active.diagnosticAfterVisible = active.windows.length === count && active.windows.every((entry: any) => entry.window.isVisible())
+    const row = active
+    row.diagnosticAfterVisible = row.windows.length === count && row.windows.every((entry: any) => entry.window.isVisible())
     await writeFile(path, contents)
+    row.writes.push(timing)
   }
   const bind = new Function('CaptureSurface', 'getNativeDesktopOwner', 'config', 'pinScreenshot', 'copyScreenshotText', 'returnScreenshotFocus', 'writeFile', 'join', 'app',
     __CAPTURE_STARTUP_IPC_REGISTRATION__ + '\nreturn captureSurface')
