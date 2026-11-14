@@ -1,5 +1,5 @@
-export type GoalsCommonActionRef = { kind: 'builtin'; id: 'understand' | 'ideas' | 'next' } | { kind: 'prompt'; id: string }
-export type GoalsCommonActionsConfig = { items: GoalsCommonActionRef[]; collapsed: boolean }
+import type { GoalsCommonActionsConfig } from '@agentmux/core'
+export type { GoalsCommonActionRef, GoalsCommonActionsConfig } from '@agentmux/core'
 
 export const GOALS_VIEW_IDS = ['list', 'board'] as const
 export type GoalsView = typeof GOALS_VIEW_IDS[number]

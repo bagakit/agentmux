@@ -55,12 +55,17 @@ function replace(config: AppConfig, resource: BasicKind, id: string, value: Fiel
     else Object.defineProperty(executors, id, { value, enumerable: true, configurable: true, writable: true })
     return { ...config, executors: executors as AppConfig['executors'] }
   }
-  const prompts = (config.composerShortcuts ?? []).filter((prompt) => prompt.id !== id)
-  if (value) {
-    const index = (config.composerShortcuts ?? []).findIndex((prompt) => prompt.id === id)
-    const prompt = { id, ...value } as ComposerShortcut
-    if (index < 0) prompts.push(prompt)
-    else prompts.splice(index, 0, prompt)
+  return replaceSettingsPrompts(config, [{ id, value }])
+}
+
+/** Validate uniqueness against the final atomic Prompt candidate, not intermediate edits. */
+export function replaceSettingsPrompts(config: AppConfig, edits: readonly { id: string; value: Fields | undefined }[]): AppConfig {
+  const prompts = [...(config.composerShortcuts ?? [])]
+  for (const { id, value } of edits) {
+    const index = prompts.findIndex(prompt => prompt.id === id)
+    if (value === undefined) { if (index >= 0) prompts.splice(index, 1) }
+    else if (index < 0) prompts.push({ id, ...value } as ComposerShortcut)
+    else prompts[index] = { id, ...value } as ComposerShortcut
   }
   const keywords = new Set<string>()
   for (const prompt of prompts) {
@@ -72,6 +77,8 @@ function replace(config: AppConfig, resource: BasicKind, id: string, value: Fiel
   }
   return { ...config, composerShortcuts: prompts }
 }
+
+export function validateSettingsPrompt(value: Fields): Fields { return validate('prompts', normalizePrompt(value), false) }
 
 /** Fixed resource operations consume the same typed Main schema and the same short owner transaction. */
 export async function executeSettingsResourcesControl(request: Request, owner: ConfigOwner): Promise<Result> {

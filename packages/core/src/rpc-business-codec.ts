@@ -351,6 +351,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (actual.resource !== request.resource || (actual.item as Record<string, unknown>).id !== request.id) fail()
       break
     case 'settings.resource.remove': if (actual.resource !== request.resource || actual.id !== request.id) fail(); break
+    case 'settings.goals.common-actions.configure': {
+      if (JSON.stringify(actual.directory) !== JSON.stringify(request.directory)) fail()
+      break
+    }
     case 'demand.activity.collection': {
       const groups = actual.groups as Array<{ demandId: string }>
       if (groups.length !== request.demandIds.length || groups.some((group, index) => group.demandId !== request.demandIds[index])) fail()

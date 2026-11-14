@@ -4,7 +4,7 @@ import { isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import { resolveComposerShortcuts } from '../../../../shared/composer-shortcut-library'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { createCommonActionPrompt, DEFAULT_GOALS_COMMON_ACTIONS } from '../../lib/goals-common-actions'
-import { saveGoalsCommonActions } from '../../lib/goals-common-actions-config'
+import { saveGoalsCommonActions, savePromptLibrarySettings } from '../../lib/goals-common-actions-config'
 import { useResourceDrafts } from './use-resource-drafts'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { useSettingsSave } from './SettingsSaveBar'
@@ -78,7 +78,7 @@ function useGoalsPromptDrafts(config: AppConfig) {
     const submittedDirectory = directory.beginSave()
     let accepted: AppConfig | undefined
     const committed = await saveState.run(async () => {
-      accepted = await saveGoalsCommonActions({ directory: commonConfig(submittedDirectory.value), expectedDirectory: commonConfig(submittedDirectory.expected),
+      accepted = await (scope === 'goals' ? saveGoalsCommonActions : savePromptLibrarySettings)({ directory: commonConfig(submittedDirectory.value), expectedDirectory: commonConfig(submittedDirectory.expected),
         prompts: { value: normalized, expected: Object.values(submitted.expected) } })
     })
     submitted.finish(accepted ? promptRecords(resolveComposerShortcuts(accepted)) : undefined)

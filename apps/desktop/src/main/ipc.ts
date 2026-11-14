@@ -1,3 +1,5 @@
+import { configureGoalsCommonActions, executeSettingsPreferencesControl } from './settings-preferences-control.js'
+import { isSettingsPreferenceMethod } from '@agentmux/core'
 import { notesStorageInspection } from '@agentmux/core'
 import { registerBrowserTaskParallelIpc } from './browser-task-parallel-ipc.js'
 import { createProfileCookieFileIo } from './browser-profile-cookie-file-io.js'
@@ -858,6 +860,7 @@ export async function registerIpc(args: {
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
     }
+    if (isSettingsPreferenceMethod(request.operation)) return executeSettingsPreferencesControl(request as import('@agentmux/core').SettingsPreferenceRequest, configOwner)
     if (isBrowserProfileControlRequest(request)) return await executeBrowserProfileControl(request,
       { profiles: browserProfiles, usage: profileUsage, network: profileNetworkControl, openBookmark: openProfileBookmark }, nameChangeRequests.getStore()?.context.actor)
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
@@ -968,6 +971,7 @@ export async function registerIpc(args: {
   const disposeCapsuleDocument = capsuleDocuments.register(ipcMain)
   const conversationReads = registerConversationReadIpc({ handle: handleWithEvent,
     connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } }) })
+  handle('config:configureGoalsCommonActions', (input: import('@agentmux/core').CommonActionsConfigure) => sessionInputOperationResult(() => configureGoalsCommonActions(configOwner, input)))
   handle('config:get', () => config)
   // A conflict crosses IPC with its code; the Renderer offers recovery from that fact, never from wording.
   handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))

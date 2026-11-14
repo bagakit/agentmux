@@ -1,3 +1,4 @@
+import { isSettingsPreferenceMethod, parseSettingsPreferenceParams, parseSettingsPreferenceResult } from './settings-preferences.js'
 import { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './browser-lifecycle.js'
 import { parseResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import { parseAgentStopReceipt } from './agent-stop-receipt.js'
@@ -553,6 +554,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'demand.list') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
+  if (isSettingsPreferenceMethod(source.operation)) return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, ...parseSettingsPreferenceParams(source.operation, Object.fromEntries(Object.entries(source).filter(([key]) => !['operation', 'schemaVersion', 'requestId'].includes(key)))) } as AgentMuxControlRequest
   if (source.operation === 'demand.activity.collection') {
     if (!Array.isArray(source.demandIds)) throw new AgentMuxError('Activity collection needs unique exact Goal IDs.', 'INVALID_CONTROL_REQUEST')
     const demandIds = source.demandIds.map(value => id(value, 'Activity Goal ID is invalid.', 'INVALID_CONTROL_REQUEST'))
@@ -1671,6 +1673,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       demandId: id(result.demandId, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), requestId: id(result.requestId, 'Activity operation is invalid.', 'CONTROL_PROTOCOL_ERROR'),
       activity: result.activity === null ? null : parseControlDemandActivity(result.activity), diskDurability: 'confirmed' } }
   }
+  if (isSettingsPreferenceMethod(operation)) return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseSettingsPreferenceResult(operation, result) }
   if (operation === 'demand.activity.collection') {
     if (result.diskDurability !== 'confirmed' || !Array.isArray(result.groups)) throw new AgentMuxError('Activity collection is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
     const groups = result.groups.map(value => {

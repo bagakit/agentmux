@@ -1,3 +1,4 @@
+import { parseSettingsPreferenceParams } from './settings-preferences.js'
 import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { parseNotesStorageParams } from './public-rpc-notes-storage.js'
 import { SPACE_MEMBER_CLI_COMMANDS } from './space-member-cli.js'
@@ -239,6 +240,8 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  empty('settings.goals.common-actions.inspect', 'Read original ordered common-action references, Prompt choices and unresolved references; this is a current observation, not a past save acknowledgement.'),
+  command('settings.goals.common-actions.configure', '--input FILE|-', 'Save the complete ordered common-action directory and optional referenced Prompt edits atomically.', { '--input': 'data' }, async f => parseSettingsPreferenceParams('settings.goals.common-actions.configure', await readControlJsonInput(value(f, '--input', true)!, 'Common actions')) as unknown as Record<string, unknown>, 'Input {expected,directory,promptEdits?}. expected/directory are {items:[{kind:builtin|prompt,id}],collapsed:boolean} or null (absent/default). Preserve [] as an explicit empty directory. promptEdits:[{id,expected:full editable Prompt fields|null,value:full editable Prompt fields}] creates/edits only referenced Prompts; it never deletes unrelated Prompts. Prompt fields are {keyword,label,body,providerId?,states?,reactionIcon?}; read settings prompts inspect for their full original values. Example when inspect.directory is null: {"expected":null,"directory":{"items":[{"kind":"builtin","id":"next"}],"collapsed":false}}. Existing unresolved unchanged references remain issues. CAS covers the directory and each edited Prompt in one original ConfigOwner save. After an unknown reply, inspect current values; matching values are not proof of that past request, and no mutation is replayed automatically.'),
   ...HOST_ROUTE_CLI_COMMANDS,
   ...SPACE_MEMBER_CLI_COMMANDS, ...SPACE_FOLDER_CLI_COMMANDS, ...SPACE_AUTHORITY_CLI_COMMANDS,
   ...NODE_PUBLISHING_CLI_COMMANDS,

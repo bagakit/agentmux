@@ -1,3 +1,4 @@
+import { parseGoalsCommonActions } from '@agentmux/core'
 import { APP_ICON_IDS } from '@agentmux/client-ui/app-icon-catalog'
 import { validateComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
@@ -271,13 +272,7 @@ export const agentDerivedActionsSchema = z.custom<AgentDerivedActionsConfig>(val
   try { parseAgentDerivedActionsConfig(value); return true } catch { return false }
 }, 'Derived actions are invalid.').transform(value => parseAgentDerivedActionsConfig(value))
 
-const goalsCommonActionsSchema = z.object({
-  items: z.array(z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('builtin'), id: z.enum(['understand', 'ideas', 'next']) }).strict(),
-    z.object({ kind: z.literal('prompt'), id: z.string().min(1) }).strict()
-  ])).refine(items => new Set(items.map(item => `${item.kind}:${item.id}`)).size === items.length, 'Common action references must be unique'),
-  collapsed: z.boolean()
-}).strict()
+export const goalsCommonActionsSchema = z.custom<import('@agentmux/core').GoalsCommonActionsConfig>(value => { try { parseGoalsCommonActions(value); return true } catch { return false } }, 'Common action references are invalid.').transform(value => parseGoalsCommonActions(value))
 
 /**
  * 可改可删的默认 prompt。一份定义两处用：`configSchema` 在**键缺席**时回填它，`DEFAULT_CONFIG`

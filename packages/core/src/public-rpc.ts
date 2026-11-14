@@ -1,3 +1,4 @@
+import { SETTINGS_PREFERENCE_OPERATIONS } from './settings-preferences.js'
 import { NOTES_STORAGE_METHODS, type NotesStorageParamsMap, type NotesStorageResultMap, type NotesStorageMethod } from './public-rpc-notes-storage.js'
 import { PROVIDER_CATALOG_METHODS, type ProviderCatalogParamsMap, type ProviderCatalogResultMap, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
 import { SPACE_MEMBER_METHODS, type SpaceMemberParams, type SpaceMemberResults } from './space-member.js'
@@ -55,6 +56,7 @@ import { AGENTMUX_RPC_HOST_MAINTENANCE_METHODS, type HostMaintenanceMethod, type
 
 /** Canonical public names and their existing business owner. No wire aliases. */
 export const AGENTMUX_RPC_CONTROL_METHODS = {
+  ...SETTINGS_PREFERENCE_OPERATIONS,
   'message.pending.ls': 'message.pending.ls', 'message.pending.edit': 'message.pending.edit', 'message.pending.send': 'message.pending.send', 'message.pending.stop': 'message.pending.stop',
   'message.pending.archive': 'message.pending.archive', 'message.pending.restore': 'message.pending.restore',
   'agent.open': 'agent.open', 'agent.rename': 'agent.rename', 'agent.view': 'agent.view',

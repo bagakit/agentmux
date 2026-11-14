@@ -1,3 +1,4 @@
+import { SETTINGS_PREFERENCE_METHODS } from './settings-preferences.js'
 import type { AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import type { RendererAllocationsInput, RendererAllocationsResult } from './renderer-allocations.js'
 import type { RendererSceneCaptureInput, RendererSceneCaptureResult, RendererSceneInspectInput, RendererSceneInspection } from './renderer-performance-scene.js'
@@ -758,6 +759,7 @@ export type AgentMuxControlRequest =
   | (RequestBase & BrowserDefaultPayload)
   | (RequestBase & BrowserProfileControlPayload)
   | AgentMuxControlSettingsWorkspaceAddRequest
+  | import('./settings-preferences.js').SettingsPreferenceRequest
   | AgentMuxControlSettingsResourceRequest
   | AgentMuxControlSettingsHostsRequest
   | AgentMuxControlSettingsExecutorRefreshRequest
@@ -850,6 +852,7 @@ export type AgentMuxControlBrowserReplayPlan = {
 }
 
 export type AgentMuxControlResult =
+  | import('./settings-preferences.js').SettingsPreferenceResult
   | PendingMessageControlResult
   | BrowserTaskControlResult
   | ToolkitResult
@@ -1307,6 +1310,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   , 'demand.decision-log': 'short'
   , 'demand.activity.append': 'short'
   , 'demand.activity.inspect': 'short'
+  , ...SETTINGS_PREFERENCE_METHODS
   , 'demand.activity.collection': 'short'
   , 'demand.activity.read': 'short'
 }

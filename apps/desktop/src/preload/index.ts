@@ -188,6 +188,7 @@ const api: AgentMuxPreloadApi = {
     onChange:listener=>{const receive=(_event:unknown,state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>listener(state);ipcRenderer.on('spatial:changed',receive);return ()=>ipcRenderer.removeListener('spatial:changed',receive)}
   },
   config: {
+    configureGoalsCommonActions: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('config:configureGoalsCommonActions', input)),
     get: () => ipcRenderer.invoke('config:get'),
     save: async (config: AppConfig, expected: AppConfig) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('config:save', config, expected)),
     onChange: (listener) => {

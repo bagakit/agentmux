@@ -6733,6 +6733,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (isBrowserProfileControlRequest(request)) {
       throw Object.assign(new Error('Browser Profiles belong to the Main Profile owner.'), { code: 'CONTROL_FAILED' })
     }
+    if (request.operation === 'settings.goals.common-actions.inspect' || request.operation === 'settings.goals.common-actions.configure') throw controlFailure('CONTROL_FAILED', 'Structured preferences belong to the original Main ConfigOwner.')
     if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
         request.operation === 'settings.workspaces.add' ||
         request.operation === 'settings.executors.refresh' ||
