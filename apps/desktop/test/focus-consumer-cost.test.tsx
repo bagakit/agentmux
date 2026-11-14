@@ -353,8 +353,8 @@ it.each([8, 32, 128])('held merging visits Topic entries linearly and preserves 
   const iterator = Array.prototype[Symbol.iterator]
   const observation = vi.spyOn(Array.prototype, Symbol.iterator).mockImplementation(function (this: unknown[]) {
     const original = iterator.call(this)
-    return { next() { const next = original.next(); const value = next.value as { contextIds?: unknown } | undefined
-      if (!next.done && Array.isArray(value?.contextIds) && value.contextIds.some(id => contextIds.has(id))) topicEntries++
+    return { next() { const next = original.next(); const value = next.value as { contextRefs?: { hostId: string; id: string }[] } | undefined
+      if (!next.done && Array.isArray(value?.contextRefs) && value.contextRefs.some(ref => ref.hostId === 'local' && contextIds.has(ref.id))) topicEntries++
       return next }, [Symbol.iterator]() { return this } }
   })
   try {

@@ -18,7 +18,7 @@ import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
-import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
+import { directoryIdentity, homeZoneId, workspaceZoneId } from '../src/shared/space-addresses'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
@@ -31,7 +31,7 @@ import { resolveFocusPreferences } from '../src/shared/focus-preferences'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
+import { desktopBindingsFromSpatial, desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import type { FocusScanLane } from '../src/renderer/src/lib/focus-collection-lanes'
 
@@ -135,12 +135,24 @@ beforeEach(async () => {
   const sessions = [...topics.map(topic => agent(topic.id.split('-').at(-1)!, workspace, topic)), agent('checkout', checkout)]
   config = { ...composerConfig, workspaces: [workspace, project, checkout], focus: { topicPresentation: 'cards', recentActivityHours: 48 } }
   const tab = { ...createWorkbenchTab('heading-original-tab', { kind: 'agent', phase: 'attached', regionId: 'heading-original-region', workspaceId: workspace.id, sessionId: 'alpha' }), topicId: byId('alpha').id, space: topicSource(workspace, byId('alpha')) }
+  const checkoutSpaceId = directoryIdentity(checkout.hostId, checkout.repoPath ?? checkout.path)
+  const checkoutTab = { ...createWorkbenchTab('heading-checkout-tab', { kind: 'agent', phase: 'attached', regionId: 'heading-checkout-region', workspaceId: checkout.id, sessionId: 'checkout' }),
+    space: { spaceId: checkoutSpaceId, zoneId: workspaceZoneId(checkoutSpaceId, checkout.id) } }
   useAppStore.setState({ ...initial, loading: false, config, sessions, topicCategories: categoriesFromSpatial(graph), spaceZoneBindings: bindings,
-    scratchTopicSnapshots: { [workspace.id]: snapshot(workspace, topics) }, tabs: { [tab.id]: tab },
-    layouts: Object.fromEntries(config.workspaces.map(value => [value.id, createWorkspaceLayout('group:' + value.id, value.id === workspace.id ? [tab.id] : [])])),
+    scratchTopicSnapshots: { [workspace.id]: snapshot(workspace, topics) }, tabs: { [tab.id]: tab, [checkoutTab.id]: checkoutTab },
+    layouts: Object.fromEntries(config.workspaces.map(value => [value.id, createWorkspaceLayout('group:' + value.id, value.id === workspace.id ? [tab.id] : value.id === checkout.id ? [checkoutTab.id] : [])])),
     activeWorkspaceId: project.id, mainSurface: 'agents', timelines: {}, agentNames: Object.fromEntries(sessions.map(value => [value.id, value.label])),
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { alpha: 'Original unsent draft' },
     selectWorkspace, launchTerminal, localHome: join(fixtureRoot, 'home') }, true)
+  const presented = desktopSpatialGraph(useAppStore.getState(), topics, graph)
+  const ordinaryZones = presented.zones.filter(zone => zone.workspaceId !== workspace.id)
+  const originalSpaces = new Set(graph.spaces.map(space => space.spaceId))
+  const mounted = await spatial.commit({ expectedRevision: (await spatial.read())!.revision, graph: { ...graph,
+    spaces: [...graph.spaces, ...presented.spaces.filter(space => !originalSpaces.has(space.spaceId))],
+    zones: [...graph.zones, ...ordinaryZones], bindings: [...graph.bindings, ...presented.bindings.filter(binding => ordinaryZones.some(zone => zone.zoneId === binding.zoneId))],
+    tabs: presented.tabs, regions: presented.regions, layouts: presented.layouts, tabLayouts: presented.tabLayouts,
+    resources: { ...presented.resources, ...graph.resources } } })
+  useAppStore.setState({ spaceZoneBindings: { ...desktopBindingsFromSpatial(mounted.graph), ...bindings } })
   vi.spyOn(api.topics, 'call').mockImplementation(owner.call.bind(owner))
   vi.spyOn(api.spatial, 'read').mockImplementation(() => spatial.read())
   vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
@@ -222,7 +234,7 @@ it('remote same-ID/same-revision Category only copies its exact Space and never 
   // consumer's typed remote input directly rather than fabricate a second local Scratch.
   const remoteLane: FocusScanLane = { id: JSON.stringify(['focus-collection', remoteCategory.hostId, [remoteCategory.spaceId]]), hostId: remoteCategory.hostId,
     workspaceId: '', projectId: '', projectWorkspaceId: null, name: remoteCategory.title, labels: [remoteCategory.title], path: '', topicId: null,
-    recovery: null, summary: null, activeAgentIds: [], contextIds: [], collection: { confirmed: true, categories: [remoteCategory], topics: [] } }
+    recovery: null, summary: null, activeAgentRefs: ([]).map(id => ({ hostId: remoteCategory.hostId, id })), contextRefs: ([]).map(id => ({ hostId: remoteCategory.hostId, id })), collection: { confirmed: true, categories: [remoteCategory], topics: [] } }
   await act(async () => root!.render(<FocusProjectLanes resourceMenus lanes={[remoteLane]} selectedProjectKey="" onSelect={selected} renderLane={(_lane, title) => title} />))
   const original = host.querySelector<HTMLElement>('.focus-project-lanes__axis')!
   await act(async () => { original.focus(); original.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, shiftKey: true, key: 'F10' })) })

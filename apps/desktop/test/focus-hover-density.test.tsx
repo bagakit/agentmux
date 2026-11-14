@@ -11,7 +11,7 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 const dom = composerDOM({ agentInformation: true }), name = 'Original Agent', reply = 'Original reply with **evidence** and an unchanged reading source.'
 const session = composerSession('density-subject')
 const base = () => agentContextForSession(session, undefined, name, composerConfig.workspaces[0], null)
-const identity: FocusContextIdentity = { occurrenceCount: 2, tabs: ['first', 'second'].map(group => ({
+const identity: FocusContextIdentity = { locations: { status: 'confirmed', occurrences: [] }, occurrenceCount: 2, tabs: ['first', 'second'].map(group => ({
   tabId: 'original-tab', occurrenceKey: group, groupId: group, title: name, active: false,
   locationLabel: `Project · ${group}`, highlightedRegionIds: ['subject'], regions: [
     { regionId: 'neighbor', bounds: { x: 0, y: 0, width: .4, height: 1 }, surfaceKind: 'browser', executorLabel: 'Browser', activity: 'No recent activity' },
@@ -49,7 +49,7 @@ it('keeps every exact occurrence in compact shared glyphs without repeating its 
 })
 
 it('retains a distinct Tab title and original proportional geometry rather than guessing a new position', async () => {
-  await open(base(), { occurrenceCount: 1, tabs: [{ ...identity.tabs[0]!, title: 'Distinct original Tab' }] })
+  await open(base(), { locations: identity.locations, occurrenceCount: 1, tabs: [{ ...identity.tabs[0]!, title: 'Distinct original Tab' }] })
   await source()
   const position = preview().querySelector('.focus-context-hover__position-copy')!
   expect(position.querySelector('strong')?.textContent).toBe('Distinct original Tab')

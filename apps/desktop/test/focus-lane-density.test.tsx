@@ -10,7 +10,7 @@ import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 const dom = composerDOM(), onSelect = vi.fn()
 const summary = 'Original Topic description with full task requirements. '.repeat(8) + 'COMPLETE TOPIC DESCRIPTION TAIL'
 const lane: FocusProjectLane = { id: 'original-lane', workspaceId: 'original-workspace', projectId: 'original-project', name: 'Original Topic', path: fixturePath('original-topic'), hostId: 'original-host',
-  labels: ['Original Topic'], topicId: 'original-topic', recovery: null, projectWorkspaceId: null, summary, objectKind: 'topic', activeAgentIds: ['original-agent'], contextIds: ['original-agent'], lastActivityAt: null }
+  labels: ['Original Topic'], topicId: 'original-topic', recovery: null, projectWorkspaceId: null, summary, objectKind: 'topic', activeAgentRefs: (['original-agent']).map(id => ({ hostId: 'original-host', id })), contextRefs: (['original-agent']).map(id => ({ hostId: 'original-host', id })), lastActivityAt: null }
 async function render(visible = true) { await dom.render(<FocusProjectLanes lanes={[lane]} selectedProjectKey="unchanged-selection" onSelect={onSelect} visible={visible} renderLane={(_lane, heading) => <>{heading}<p>Original Agent card content</p></>} />) }
 const article = () => dom.container.querySelector<HTMLElement>('article')!
 const axis = () => dom.container.querySelector<HTMLButtonElement>('.focus-project-lanes__axis')!

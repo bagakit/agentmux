@@ -5,9 +5,9 @@ import type { FocusContext } from '../src/renderer/src/lib/focus-context'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 it('retains completed and terminal-only projects while distinguishing live Agent Run counts', () => {
-  const rows = [{ id: 'a', workspaceId: 'alpha', workspaceName: 'Alpha', workspacePath: _hygiene_fixturePath("alpha"), liveAgent: true }, { id: 'done', workspaceId: 'alpha', workspaceName: 'Alpha', workspacePath: _hygiene_fixturePath("alpha"), liveAgent: false }, { id: 'terminal', workspaceId: 'beta', workspaceName: 'Beta', workspacePath: _hygiene_fixturePath("beta"), liveAgent: false }] as FocusContext[]
+  const rows = [{ id: 'a', hostId: 'local', workspaceId: 'alpha', workspaceName: 'Alpha', workspacePath: _hygiene_fixturePath("alpha"), liveAgent: true }, { id: 'done', hostId: 'local', workspaceId: 'alpha', workspaceName: 'Alpha', workspacePath: _hygiene_fixturePath("alpha"), liveAgent: false }, { id: 'terminal', hostId: 'local', workspaceId: 'beta', workspaceName: 'Beta', workspacePath: _hygiene_fixturePath("beta"), liveAgent: false }] as FocusContext[]
   const lanes = deriveFocusProjectLanes(rows)
-  expect(lanes.map(lane => ({ workspaceId: lane.workspaceId, labels: lane.labels, active: lane.activeAgentIds, contexts: lane.contextIds }))).toEqual([
+  expect(lanes.map(lane => ({ workspaceId: lane.workspaceId, labels: lane.labels, active: lane.activeAgentRefs.map(ref => ref.id), contexts: lane.contextRefs.map(ref => ref.id) }))).toEqual([
     { workspaceId: 'alpha', labels: ['Alpha'], active: ['a'], contexts: ['a', 'done'] }, { workspaceId: 'beta', labels: ['Beta'], active: [], contexts: ['terminal'] }
   ])
 })
@@ -28,7 +28,7 @@ it('gathers closed worktree Agents with the default project while preserving ori
     const lanes = deriveFocusProjectLanes(rows, config, { topics: {}, worktrees: [{ hostId: source.hostId, path: source.path, repoPath: target.path, branch: source.branch!, removed }] })
     expect(lanes).toHaveLength(1)
     expect(lanes[0]).toMatchObject({ workspaceId: target.id, projectId: target.id, path: target.path, labels: ['Project'], recovery: null,
-      activeAgentIds: ['original-agent', 'default-agent'], contextIds: ['original-agent', 'default-agent'] })
+      activeAgentRefs: (['original-agent', 'default-agent']).map(id => ({ hostId: 'local', id })), contextRefs: (['original-agent', 'default-agent']).map(id => ({ hostId: 'local', id })) })
   }
   expect(rows[0]!.workspacePath).toBe(source.path)
   expect(rows[0]!.workspace).toBe(source)
@@ -36,14 +36,14 @@ it('gathers closed worktree Agents with the default project while preserving ori
   const openLanes = deriveFocusProjectLanes([row('original-agent', openSource)], { ...config, workspaces: [target, openSource] })
   expect(openLanes[0]).toMatchObject({ workspaceId: source.id, path: source.path, labels: ['Project', 'feature'] })
 })
-it('uses the retained Tab presentation after completed cleanup withdraws the original resource', () => {
+it('does not infer project membership from a detached retained Tab after its resource is withdrawn', () => {
   const target: WorkspaceRecord = { id: 'default', name: 'Project', kind: 'folder', hostId: 'local', path: _hygiene_fixturePath('project') }
   const originalPath = _hygiene_fixturePath('project-checkout')
   const row = { id: 'original-agent', hostId: 'local', workspaceId: 'unregistered', workspaceName: 'Feature', workspacePath: originalPath,
     topicId: null, liveAgent: true } as FocusContext
   const tabs = { original: { workspaceId: target.id, regions: { original: { sessionId: row.id } } } } as unknown as Record<string, WorkbenchTab>
-  const lanes = deriveFocusProjectLanes([row], { workspaces: [target] } as AppConfig, { topics: {}, worktrees: [{ hostId: 'local', path: originalPath, repoPath: target.path, branch: 'feature', removed: true }] }, tabs)
+  const lanes = deriveFocusProjectLanes([row], { workspaces: [target] } as AppConfig, { topics: {}, worktrees: [{ hostId: 'local', path: originalPath, repoPath: target.path, branch: 'feature', removed: true }] }, new Map(), Date.now())
   expect(lanes).toHaveLength(1)
-  expect(lanes[0]).toMatchObject({ workspaceId: target.id, labels: ['Project'], path: target.path, recovery: null, activeAgentIds: [row.id] })
+  expect(lanes[0]).toMatchObject({ workspaceId: 'unconfirmed-project', labels: ['Project location unconfirmed'], path: '', recovery: null, locationUnconfirmed: true, activeAgentRefs: ([row.id]).map(id => ({ hostId: 'local', id })) })
   expect(row.workspacePath).toBe(originalPath)
 })

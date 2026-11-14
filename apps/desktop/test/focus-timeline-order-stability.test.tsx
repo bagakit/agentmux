@@ -26,7 +26,7 @@ afterEach(async () => {
   useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
   document.getElementById('agentmux-window-overlay-host')?.remove()
 })
-const key = (project: string, id?: string) => id === undefined ? JSON.stringify(['private', project]) : JSON.stringify([JSON.stringify(['private', project]), id])
+const key = (project: string, id?: string) => id === undefined ? JSON.stringify(['private', project]) : JSON.stringify([JSON.stringify(['private', project]), 'private', id])
 function entry(id: string, hours: number, project = 'alpha', name = id): AgentFocusHistoryEntry {
   return { sessionId: id, focusedAt: NOW - hours * HOUR, identity: { name, kind: 'agent', providerId: 'claude', hostId: 'private', workspacePath: _hygiene_fixturePath("private/history"), project: { id: project, name: project === 'alpha' ? 'Alpha' : 'Beta' } } }
 }
@@ -35,7 +35,7 @@ function context(id: string, name: string, activityAt: number | null): FocusCont
   return { id, name, lastActivityAt: activityAt, detail: 'Existing task observation', state: 'running', stateLabel: 'Idle', processState: 'running', bucket: 'idle', kind: 'agent', providerId: 'claude', hostId: 'private', topicId: null, workspaceId: id === 'd' ? 'beta' : 'alpha', workspaceName: id === 'd' ? 'Beta' : 'Alpha', workspacePath: _hygiene_fixturePath("private/history"), liveAgent: true, actionable: false, runId: `observed-${id}`, workingEnteredAt: null, workspace: undefined }
 }
 function lanes(contexts: readonly FocusContext[]): FocusProjectLane[] {
-  return ['alpha', 'beta'].map(id => ({ id, workspaceId: id, projectId: id, projectWorkspaceId: id, name: id === 'alpha' ? 'Alpha' : 'Beta', path: _hygiene_fixturePath("private/history"), labels: [id === 'alpha' ? 'Alpha' : 'Beta'], topicId: null, recovery: null, summary: null, activeAgentIds: [], contextIds: contexts.filter(c => c.workspaceId === id).map(c => c.id) }))
+  return ['alpha', 'beta'].map(id => ({ id, workspaceId: id, projectId: id, hostId: 'private',  projectWorkspaceId: id, name: id === 'alpha' ? 'Alpha' : 'Beta', path: _hygiene_fixturePath("private/history"), labels: [id === 'alpha' ? 'Alpha' : 'Beta'], topicId: null, recovery: null, summary: null, activeAgentRefs: ([]).map(id => ({ hostId: 'private', id })), contextRefs: (contexts.filter(c => c.workspaceId === id).map(c => c.id)).map(id => ({ hostId: 'private', id })) }))
 }
 
 /** Real private FileStore/Provider Reader; only the existing desktop transport is isolated.

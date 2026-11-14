@@ -3,6 +3,8 @@ import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import type { AgentMuxSpaceCatalog, TopicCategory } from '@agentmux/core/control'
 import type { AppConfig, ScratchTopicSnapshot, SessionSnapshot } from '../src/shared/contracts'
 import { directoryIdentity, homeZoneId, type SpaceZoneBindings } from '../src/shared/space-addresses'
@@ -81,11 +83,11 @@ async function menu(id: string) {
 }
 function readCollectionLanes() {
   const state = useAppStore.getState(), projection = createFocusProjectionSelector()(state)
-  const lanes = deriveFocusProjectLanes(projection.laneContexts, config, undefined, state.tabs, Date.now(), state.scratchTopicSnapshots)
+  const lanes = deriveFocusProjectLanes(projection.laneContexts, config, undefined, undefined, Date.now(), state.scratchTopicSnapshots)
   return { state, lanes, catalog: spatialCatalog(state, topics), scan: deriveFocusCollectionLanes(lanes, spatialCatalog(state, topics), { bindings: state.spaceZoneBindings, categories: state.topicCategories }) }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); select.mockClear()
   const base = Date.now() - 10_000
   topics = [topic('a', 'Alpha Topic — original source'), topic('b', 'Beta Topic — original source'), topic('c', 'Multiple C'), topic('d', 'Multiple D'), topic('unknown', 'Unknown classification Topic'), topic('unclassified', 'Confirmed unclassified Topic')]
@@ -104,14 +106,17 @@ beforeEach(() => {
     agent('needs-you', topics[1]!, base + 500, true), agent('c1', topics[2]!, base), agent('d1', topics[3]!, base), agent('unknown', topics[4]!, base), agent('unclassified', topics[5]!, base), agent('project', null, base)]
   const tab = { ...createWorkbenchTab('original-topic-tab', { kind: 'agent', phase: 'attached', regionId: 'original-topic-region', workspaceId: scratchWorkspace.id, sessionId: 'a1' }),
     topicId: topics[0]!.id, space: source(topics[0]!) }
-  useAppStore.setState({ ...initial, loading: false, config, sessions, tabs: { [tab.id]: tab },
-    layouts: { [scratchWorkspace.id]: createWorkspaceLayout('original-topic-group', [tab.id]), [project.id]: createWorkspaceLayout('project-group', []) },
+  const projectTab = createWorkbenchTab('original-project-tab', { kind: 'agent', phase: 'attached', regionId: 'project-region', workspaceId: project.id, sessionId: 'project' })
+  useAppStore.setState({ ...initial, loading: false, config, sessions, tabs: { [tab.id]: tab, [projectTab.id]: projectTab },
+    layouts: { [scratchWorkspace.id]: createWorkspaceLayout('original-topic-group', [tab.id]), [project.id]: createWorkspaceLayout('project-group', [projectTab.id]) },
     scratchTopicSnapshots: topicSnapshot(), spaceZoneBindings: bindings, topicCategories: categories,
     mainSurface: 'agents', activeWorkspaceId: project.id, timelines: {}, agentNames: Object.fromEntries(sessions.map(session => [session.id, session.label])),
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { a1: 'Original unsent input', a2: 'Second original draft' } }, true)
   vi.spyOn(api.workspaces, 'listBranches').mockImplementation(async id => ({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: config.workspaces.find(workspace => workspace.id === id)?.path ?? fixturePath('unknown') }))
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'repository', icon: null })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
+  vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), topics) })
+  await initializeSpatialControlFixture(topics)
   host = document.createElement('div'); later = document.createElement('input'); later.value = 'Original input and selection'; document.body.append(host, later)
   root = createClientUiRoot(host)
 })
@@ -305,20 +310,20 @@ it('the typed source join isolates same-name Hosts and rejects a display Zone ma
   const { lanes, catalog } = readCollectionLanes(), alpha = lanes.find(lane => lane.topicId === topicBy('a').id)!
   const remote = category('33333333-3333-4333-8333-333333333333', categories[0]!.title, 'remote')
   const remotePath = fixturePath('remote-topics/original'), remoteContent = directoryIdentity('remote', remotePath), remoteZone = homeZoneId(remoteContent)
-  const remoteLane: FocusProjectLane = { ...alpha, id: 'exact-remote-topic-lane', hostId: 'remote', workspaceId: 'remote-topics', projectId: 'remote-project', path: remotePath, topicId: 'remote-topic', contextIds: ['remote-agent'], activeAgentIds: ['remote-agent'] }
+  const remoteLane: FocusProjectLane = { ...alpha, id: 'exact-remote-topic-lane', hostId: 'remote',  workspaceId: 'remote-topics', projectId: 'remote-project', path: remotePath, topicId: 'remote-topic', contextRefs: (['remote-agent']).map(id => ({ hostId: 'remote', id })), activeAgentRefs: (['remote-agent']).map(id => ({ hostId: 'remote', id })) }
   const otherCatalog: AgentMuxSpaceCatalog = { ...catalog, spaces: [...catalog.spaces, { spaceId: remote.spaceId, hostId: 'remote', kind: 'container', name: remote.title, directoryPath: remote.directoryPath, projectId: null }],
     zones: [...catalog.zones, { zoneId: remoteZone, workspaceId: remoteLane.workspaceId, hostId: 'remote', kind: 'home', directoryPath: remotePath, branch: null }],
     bindings: [...catalog.bindings, { zoneId: remoteZone, spaceId: remote.spaceId }] }
   const all = deriveFocusCollectionLanes([alpha, remoteLane], otherCatalog, { categories: [...categories, remote], bindings: { ...bindings,
     [remoteZone]: { spaceId: remoteContent, workspaceId: remoteLane.workspaceId, topicId: remoteLane.topicId!, directoryPath: remotePath, contentKind: 'topic', relations: { [remote.spaceId]: true } } } })
   expect(all).toHaveLength(2); expect(all.every(lane => lane.collection?.confirmed)).toBe(true)
-  expect(all.map(lane => lane.contextIds)).toEqual([alpha.contextIds, ['remote-agent']])
+  expect(all.map(lane => lane.contextRefs)).toEqual([alpha.contextRefs, [{ hostId: 'remote', id: 'remote-agent' }]])
   const original = source(topicBy('a')), decoyZone = JSON.stringify([original.spaceId, 'display-only'])
   const badBindings = { [decoyZone]: bindings[original.zoneId]! }
   const displayCatalog = { ...catalog, zones: [...catalog.zones, { ...catalog.zones.find(zone => zone.zoneId === original.zoneId)!, zoneId: decoyZone }],
     bindings: catalog.bindings.filter(binding => binding.zoneId !== original.zoneId).concat({ zoneId: decoyZone, spaceId: categories[0]!.spaceId }) }
   const unknown = deriveFocusCollectionLanes([alpha], displayCatalog, { categories, bindings: badBindings })
-  expect(unknown).toHaveLength(1); expect(unknown[0]!.collection?.confirmed).toBe(false); expect(unknown[0]!.contextIds).toEqual(alpha.contextIds)
+  expect(unknown).toHaveLength(1); expect(unknown[0]!.collection?.confirmed).toBe(false); expect(unknown[0]!.contextRefs).toEqual(alpha.contextRefs)
 })
 
 it('closed or unrelated updates add no history/native/terminal reads and retain real card identity', async () => {

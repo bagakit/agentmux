@@ -14,8 +14,8 @@ it('keeps committed membership through an abandoned render and an active kind ch
   const categories = ['a', 'b'].map(id => ({ categoryId: id, hostId: 'local', spaceId: id,
     directoryPath: `/category/${id}`, title: id, revision: 'original' })) satisfies TopicCategory[]
   const lane: FocusProjectLane = { id: 'original-lane', workspaceId: 'workspace', projectId: 'project', projectWorkspaceId: null,
-    name: 'Topic', path: '/topic', hostId: 'local', labels: ['Topic'], topicId: 'topic', recovery: null, summary: null,
-    objectKind: 'topic', activeAgentIds: ['agent'], contextIds: ['agent'] }
+    name: 'Topic', path: '/topic', hostId: 'local',  labels: ['Topic'], topicId: 'topic', recovery: null, summary: null,
+    objectKind: 'topic', activeAgentRefs: (['agent']).map(id => ({ hostId: 'local', id })), contextRefs: (['agent']).map(id => ({ hostId: 'local', id })) }
   function source(category: string) {
     const catalog: AgentMuxSpaceCatalog = { zones: [{ zoneId, workspaceId: 'workspace', hostId: 'local', kind: 'home', directoryPath: '/topic', branch: null }],
       spaces: categories.map(value => ({ spaceId: value.spaceId, hostId: value.hostId, kind: 'container', name: value.title, directoryPath: value.directoryPath, projectId: null })),

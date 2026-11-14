@@ -16,6 +16,10 @@ import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey, 
 import { observeFocusHistoryIdentity } from '../src/renderer/src/lib/focus-history-identity'
 import { groupFocusTimeline } from '../src/renderer/src/lib/focus-history-timeline'
 import { focusTimeSegments } from '../src/renderer/src/lib/focus-time-window'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 
 // Keep Store, Focus, project filters, lanes and the timeline real. PTY paint is unrelated.
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
@@ -32,16 +36,21 @@ let root: Root, container: HTMLDivElement
 const projection = () => createFocusProjectionSelector()(useAppStore.getState()).laneContexts
 const boardRows = () => [...container.querySelectorAll<HTMLElement>('.focus-project-board__live .focus-project-lanes__row')]
 const headingLabels = (lane: HTMLElement) => [...lane.querySelectorAll('.focus-project-lanes__label')].map(label => label.textContent)
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const config: AppConfig = { ...composerConfig, workspaces }
   const sessions = workspaces.map(workspace => ({ ...composerSession(workspace.id), workspacePath: workspace.path }))
   vi.spyOn(api.workspaces, 'listBranches').mockImplementation(async id => ({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspaces.find(workspace => workspace.id === id)!.path }))
   vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
-  useAppStore.setState({ config, sessions, timelines: {}, tabs: {}, layouts: {}, scratchTopicSnapshots: {}, agentNames: {},
+  const tabs = Object.fromEntries(workspaces.map(workspace => { const tab = createWorkbenchTab('tab-' + workspace.id,
+    { kind: 'agent', phase: 'attached', regionId: 'region-' + workspace.id, workspaceId: workspace.id, sessionId: workspace.id }); return [tab.id, tab] }))
+  useAppStore.setState({ config, sessions, timelines: {}, tabs, layouts: Object.fromEntries(workspaces.map(workspace =>
+    [workspace.id, createWorkspaceLayout('group-' + workspace.id, ['tab-' + workspace.id])])), scratchTopicSnapshots: {}, agentNames: {},
     mainSurface: 'agents', loading: false, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } },
     agentComposerDrafts: { 'branch-a': 'Keep the original draft' } })
+  vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), []) })
+  await initializeSpatialControlFixture()
 })
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove()
@@ -102,11 +111,11 @@ it('separates Hosts, repositories, Topics and unknown membership while retaining
   const lanes = deriveFocusProjectLanes(variants, { ...state.config!, workspaces: [...workspaces, remote, different] })
   expect(lanes).toHaveLength(6)
   expect(new Set(lanes.filter(lane => !lane.topicId).map(lane => focusProjectKey(lane.hostId, lane.projectId))).size).toBe(4)
-  expect(lanes.filter(lane => lane.topicId).map(lane => lane.contextIds)).toEqual([['topic-a'], ['topic-b']])
+  expect(lanes.filter(lane => lane.topicId).map(lane => lane.contextRefs.map(ref => ref.id))).toEqual([['topic-a'], ['topic-b']])
   const known = retainedWorktreeFacts([], { kind: 'git-repository', hostId: 'local', repoPath, branches: [{ name: 'feature/a', worktreePath: first.workspacePath, workspaceId: first.workspaceId, isCurrent: false }] })
   const removed = retainedWorktreeFacts(known, { kind: 'git-repository', hostId: 'local', repoPath, branches: [] })
   const [retained] = deriveFocusProjectLanes([{ ...first, workspace: undefined }], state.config, { topics: {}, worktrees: removed })
-  expect(retained).toMatchObject({ projectId, labels: [repoPath, 'feature/a'], recovery: 'removed', contextIds: ['branch-a'] })
+  expect(retained).toMatchObject({ projectId, labels: [repoPath, 'feature/a'], recovery: 'removed', contextRefs: (['branch-a']).map(id => ({ hostId: 'local', id })) })
 })
 
 it('preserves old historical project observations when a new rootless project identity becomes confirmed', () => {

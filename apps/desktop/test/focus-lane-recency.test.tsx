@@ -1,3 +1,7 @@
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import {act, createElement} from 'react'
@@ -22,7 +26,12 @@ it('moves stale lanes behind actionable and recent work without reordering ties 
   const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
   try {
     useAppStore.setState({mainSurface: 'agents', focusView: 'list', config: {...config, workspaces}, sessions: selected, timelines: {}, agentNames: {}, tabs: {}, agentFocus: {execution: {sessionId: 'stale', history: []}, pmo: {sessionId: null}}})
-    await act(async () => root.render(createElement(GlobalFocusSurface)))
+    const tabs = Object.fromEntries(workspaces.map(workspace => [workspace.id, createWorkbenchTab(workspace.id,
+      {kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: workspace.id, sessionId: workspace.id})]))
+    useAppStore.setState({tabs, layouts: Object.fromEntries(workspaces.map(workspace => [workspace.id, createWorkspaceLayout('original-group', [workspace.id])]))})
+    vi.spyOn(api.spatial, 'read').mockResolvedValue({schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), [])})
+    await initializeSpatialControlFixture()
+    await act(async () => root.render(createElement(GlobalFocusSurface, {currentReference: {displayWorkspaceId: 'stale', groupId: 'original-group', tabId: 'stale', regionId: 'original-region'}})))
     const order = () => [...element.querySelectorAll<HTMLElement>('.focus-project-lanes__row')].map(row => row.dataset.projectId)
     expect(order()).toEqual(['attention', 'working', 'recent-a', 'recent-b', 'exact-day', 'stale', 'unknown'])
     const stale = element.querySelector('button[data-session-id="stale"]')!
@@ -53,5 +62,5 @@ it('uses task events and authoritative state-entry time, excluding heartbeat, li
   expect(process[0]!.lastActivityAt).toBeNull()
   const entered = selector({...input, sessions: [{...input.sessions[0]!, semanticStatus: {...input.sessions[0]!.semanticStatus, stateEnteredAt: now}}]})
   expect(entered[0]!.lastActivityAt).toBe(now)
-  expect(deriveFocusProjectLanes(before, null, undefined, {}, now)).toHaveLength(1)
+  expect(deriveFocusProjectLanes(before, null, undefined, undefined, now)).toHaveLength(1)
 })

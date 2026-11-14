@@ -1,3 +1,7 @@
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -27,6 +31,11 @@ beforeEach(async () => {
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: fixturePath('older') })
   useAppStore.setState({ config: { ...config, workspaces }, sessions, timelines: {}, tabs: {}, agentNames: {}, scratchTopicSnapshots: {},
     mainSurface: 'agents', agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { older: 'Original unsent draft' } })
+  const tabs = Object.fromEntries(workspaces.map(workspace => [workspace.id, createWorkbenchTab(workspace.id,
+    { kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: workspace.id, sessionId: workspace.id })]))
+  useAppStore.setState({ tabs, layouts: Object.fromEntries(workspaces.map(workspace => [workspace.id, createWorkspaceLayout('original-group', [workspace.id])])) })
+  vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), []) })
+  await initializeSpatialControlFixture()
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(initial, true); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -44,7 +53,7 @@ it('aggregates activity across every checkout of the original Host/Project befor
     semanticStatus: { state: 'done' as const, source: 'native-hook' as const, stateEnteredAt: now, observedAt: now } }
   const input = { ...state, config: { ...config, workspaces: [...config.workspaces, checkout] }, sessions: [...state.sessions, session] }
   const contexts = createFocusProjectionSelector()(input).laneContexts
-  const lanes = deriveFocusProjectLanes(contexts, input.config, undefined, {}, now)
+  const lanes = deriveFocusProjectLanes(contexts, input.config, undefined, undefined, now)
   const project = lanes.filter(lane => lane.projectId === 'older')
   expect(project).toHaveLength(2)
   expect(project.map(lane => lane.lastActivityAt)).toEqual([now, now])
@@ -128,6 +137,6 @@ it('uses the saved recent window to distinguish newly sorted work from stable ol
   const sessions = state.sessions.map((session, index) => session.kind === 'agent' && index < 2 ? { ...session,
     semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: now, stateEnteredAt: now - (index === 0 ? 30 : 20) * 3_600_000 } } : session)
   const rows = select({ ...state, sessions }).laneContexts
-  expect(deriveFocusProjectLanes(rows, { ...state.config!, focus: { recentActivityHours: 12 } }, undefined, {}, now).map(lane => lane.projectId)).toEqual(['older', 'newer', 'unknown'])
-  expect(deriveFocusProjectLanes(rows, { ...state.config!, focus: { recentActivityHours: 48 } }, undefined, {}, now).map(lane => lane.projectId)).toEqual(['newer', 'older', 'unknown'])
+  expect(deriveFocusProjectLanes(rows, { ...state.config!, focus: { recentActivityHours: 12 } }, undefined, undefined, now).map(lane => lane.projectId)).toEqual(['older', 'newer', 'unknown'])
+  expect(deriveFocusProjectLanes(rows, { ...state.config!, focus: { recentActivityHours: 48 } }, undefined, undefined, now).map(lane => lane.projectId)).toEqual(['newer', 'older', 'unknown'])
 })

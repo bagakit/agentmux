@@ -14,6 +14,10 @@ import { applyConfigEdit } from '../src/shared/config-edit'
 import { resolveFocusRecentActivityHours, type FocusRecentActivityHours } from '../src/shared/focus-preferences'
 import type { AppConfig } from '../src/shared/contracts'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 
 // Native PTY painting does not participate in lane ordering.
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
@@ -105,8 +109,13 @@ it('updates the actual GlobalFocusSurface for 12 and 72 hours while retaining pr
       semanticStatus: { ...status, ...(id === 'unknown' ? {} : { stateEnteredAt: now - (id === 'old30' ? 30 : id === 'mid18' ? 18 : id === 'exact12' ? 12 : 2) * hour }) } }
   })
   const config = { ...composerConfig, workspaces }
-  useAppStore.setState({ config, mainSurface: 'agents', sessions, timelines: {}, tabs: {}, agentNames: {},
+  const tabs = Object.fromEntries(workspaces.map(workspace => { const tab = createWorkbenchTab('tab-' + workspace.id,
+    { kind: 'agent', phase: 'attached', regionId: 'region-' + workspace.id, workspaceId: workspace.id, sessionId: workspace.id }); return [tab.id, tab] }))
+  useAppStore.setState({ config, mainSurface: 'agents', sessions, timelines: {}, tabs, layouts: Object.fromEntries(workspaces.map(workspace =>
+    [workspace.id, createWorkspaceLayout('group-' + workspace.id, ['tab-' + workspace.id])])), agentNames: {},
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+  vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), []) })
+  await initializeSpatialControlFixture()
   await dom.render(<GlobalFocusSurface />)
   const order = () => [...dom.container.querySelectorAll<HTMLElement>('.focus-project-lanes__row')].map(row => row.dataset.projectId)
   expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'mid18', 'old30', 'unknown'])

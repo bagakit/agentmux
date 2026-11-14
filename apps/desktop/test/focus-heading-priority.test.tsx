@@ -23,7 +23,7 @@ it('keeps identity, location, activity and status readable before a long optiona
     name: '磁盘清理', labels: ['磁盘清理'], path: fixturePath(kind), hostId: 'local',
     topicId: kind === 'topic' || kind === 'mote' ? kind : null,
     ...(kind === 'topic' || kind === 'mote' ? { objectKind: kind } : {}),
-    activeAgentIds: [kind], contextIds: [kind], recovery: null,
+    activeAgentRefs: ([kind]).map(id => ({ hostId: 'local', id })), contextRefs: ([kind]).map(id => ({ hostId: 'local', id })), recovery: null,
     lastActivityAt: Date.now(), summary: '定位磁盘占用与增长，保留原任务上下文和工作信息。'.repeat(30)
   }))
   const origins = new Map<string, FocusLaneOrigin>(kinds.map(kind => [kind, {
