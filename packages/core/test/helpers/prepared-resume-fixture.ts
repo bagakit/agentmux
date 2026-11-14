@@ -53,7 +53,7 @@ export async function fixture(delivery: 'positional-argv' | 'post-launch-only' =
   const memory = owner === 'memory' ? new core.AgentMuxMemoryAgentSessionStore() : undefined
   async function reader() {
     const store = memory ?? new core.AgentMuxFileAgentSessionStore(storePath), client = new core.AgentMuxClient({ store, providers: [provider] }), inner = client as any
-    Object.defineProperty(inner.hookServer, 'port', { value: 0 }); await client.connect()
+    Object.defineProperty(inner.hookServer, 'port', { value: 0 })
     const rawInput = vi.fn(), openInput = inner.kernel.openInput.bind(inner.kernel), observed = new WeakSet<object>()
     vi.spyOn(inner.kernel, 'openInput').mockImplementation(async (...args: any[]) => {
       const channel = await openInput(...args)
@@ -67,7 +67,7 @@ export async function fixture(delivery: 'positional-argv' | 'post-launch-only' =
     const value = { store, client, inner, rawInput, nativeStart: inner.kernel.startPrepared.bind(inner.kernel), nativeList: inner.kernel.list.bind(inner.kernel),
       start: vi.spyOn(inner.kernel, 'startPrepared'), stop: vi.spyOn(inner.kernel, 'stop'), input: semanticInput,
       inputCount: () => rawInput.mock.calls.length + semanticInput.mock.calls.length }
-    clients.push(value); return value
+    clients.push(value); await client.connect(); return value
   }
   const original = await reader()
   cleanups.push(async () => {
