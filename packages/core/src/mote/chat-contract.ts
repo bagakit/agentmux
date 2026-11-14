@@ -1,8 +1,8 @@
-import type { MoteConnectionRef, MotePreferencesTarget } from './mote-preferences.js'
-import type { ConnectionActor, ConnectionApplication } from './connections-contract.js'
-import type { ConnectionEnrollmentCallContext } from './connection-enrollment-contract.js'
-import type { ConnectionDelivery } from './connection-delivery-contract.js'
-import type { MoteChatDiagnosis, MoteChatDiagnosisInput } from './mote-chat-diagnosis.js'
+import type { MoteConnectionRef, MotePreferencesTarget } from '../mote-preferences.js'
+import type { ConnectionActor, ConnectionApplication } from '../connections-contract.js'
+import type { ConnectionEnrollmentCallContext } from '../connection-enrollment-contract.js'
+import type { ConnectionDelivery } from '../connection-delivery-contract.js'
+import type { MoteChatDiagnosis, MoteChatDiagnosisInput } from './chat-diagnosis.js'
 
 /** Chat policy is owned once by the connector Host, separately from MOTE.md group defaults. */
 export type MoteChatTarget = MotePreferencesTarget
@@ -51,7 +51,7 @@ export type MoteChatAllocate = {
 }
 export type MoteChatReplyReference = { ingressId: string; route: 'original-owner' | 'unconfirmed' }
 export type MoteChatReplyInput = Pick<MoteChatReplyReference, 'ingressId'> & { operationId: string; body: string }
-export type MoteChatReplyOperation = { operationId: string; action: 'reply'; target: MoteChatTarget; ingressId: string; deliveryOperationIds: string[]; binding: import('./room-binding-contract.js').RoomBinding }
+export type MoteChatReplyOperation = { operationId: string; action: 'reply'; target: MoteChatTarget; ingressId: string; deliveryOperationIds: string[]; binding: import('../room-binding-contract.js').RoomBinding }
 export type MoteChatReplyResult = { operation: MoteChatReplyOperation; deliveries: ConnectionDelivery[] }
 export type MoteChatOperation =
   | MoteChatReplyOperation

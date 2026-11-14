@@ -184,8 +184,8 @@ export * from './search-contract.js'
 export * from './search-codec.js'
 export * from './search-reader.js'
 
-export * from './mote-connection-contract.js'
-export * from './mote-connection-codec.js'
+export * from './mote/connection-contract.js'
+export * from './mote/connection-codec.js'
 export * from './note-history.js'
 export * from './note-merge.js'
 
@@ -203,7 +203,7 @@ export type { AgentInputSubmit, AgentInputSubmitResult } from './agent-input-sub
 export * from './agent-input-context-capture.js'
 export * from './client-incident.js'
 
-export * from './mote-chat.js'
+export * from './mote/chat.js'
 export { agentDiscoveryActivity } from './agent-discovery.js'
 
 export * from './external-conversation.js'

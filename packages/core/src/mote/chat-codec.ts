@@ -1,10 +1,10 @@
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
-import { parseMoteConnectionValues, parseMotePreferencesTarget, sameMotePreferencesTarget } from './mote-preferences.js'
-import { parseConnectionDelivery } from './connection-delivery-codec.js'
-import { parseConnectionActor, parseRoomBinding } from './room-binding-codec.js'
-import { parseMoteChatDiagnosis } from './mote-chat-diagnosis.js'
-import type { MoteChatConfiguration, MoteChatEvent, MoteChatGeneration, MoteChatMethod, MoteChatOperation, MoteChatParamsMap, MoteChatPerson, MoteChatResultMap, MoteChatReviewMark, MoteChatValues } from './mote-chat-contract.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
+import { parseMoteConnectionValues, parseMotePreferencesTarget, sameMotePreferencesTarget } from '../mote-preferences.js'
+import { parseConnectionDelivery } from '../connection-delivery-codec.js'
+import { parseConnectionActor, parseRoomBinding } from '../room-binding-codec.js'
+import { parseMoteChatDiagnosis } from './chat-diagnosis.js'
+import type { MoteChatConfiguration, MoteChatEvent, MoteChatGeneration, MoteChatMethod, MoteChatOperation, MoteChatParamsMap, MoteChatPerson, MoteChatResultMap, MoteChatReviewMark, MoteChatValues } from './chat-contract.js'
 
 export const MOTE_CHAT_RPC_METHODS = {
   'space.mote.chat.configure': 'long', 'space.mote.chat.inspect': 'short', 'space.mote.chat.history': 'short',
@@ -68,7 +68,7 @@ export function parseMoteChatGeneration(v: unknown, code: Code = 'CONTROL_PROTOC
     executionHostId: text(p.executionHostId, code), agentSessionId: text(p.agentSessionId, code), createOperationId: text(p.createOperationId, code), phase: p.phase as 'preparing' | 'ready',
     createdAt: count(p.createdAt, code), lastActivityAt: count(p.lastActivityAt, code) }
 }
-function replyDeliveryMatches(o: Extract<MoteChatOperation, { action: 'reply' }>, delivery: import('./connection-delivery-contract.js').ConnectionDelivery): boolean {
+function replyDeliveryMatches(o: Extract<MoteChatOperation, { action: 'reply' }>, delivery: import('../connection-delivery-contract.js').ConnectionDelivery): boolean {
   const binding = o.binding, source = delivery.reference.source
   return o.deliveryOperationIds[delivery.fragment.ordinal] === delivery.operationId && delivery.fragment.count === o.deliveryOperationIds.length && delivery.bindingId === binding.bindingId && delivery.bindingRevision === binding.revision &&
     source.kind === 'mote-chat-reply' && source.operationId === o.operationId && source.ingressId === o.ingressId &&

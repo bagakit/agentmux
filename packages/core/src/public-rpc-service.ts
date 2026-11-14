@@ -66,10 +66,10 @@ import { parseCapsuleInputRequest, parseCapsuleInputResult, type CapsuleInputPor
 import { isCapsuleRuntimeMethod, parseCapsuleRuntimeParams, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimePort } from './capsule-runtime.js'
 import { isCapsuleMethod, parseCapsuleRpcParams, parseCapsuleRpcResult, type CapsuleCallContext, type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from './capsule.js'
 import { parseExternalConversationReference, parseExternalConversationReceipt } from './external-conversation.js'
-import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
+import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote/chat-codec.js'
 import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResult,
   type AgentLearningPort, type AgentLearningMethod } from './agent-learning.js'
-import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
+import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote/chat-contract.js'
 import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
 import { mintObjectId } from './object-id.js'
 import { parseTerminalRecoveryInput, parseTerminalRecoveryResult } from './terminal-recovery.js'
@@ -99,8 +99,8 @@ import { parseRendererTraceResult } from './renderer-trace.js'
 import { ConversationLandmarkStore } from './conversation-landmark-store.js'
 import { parseConversationLandmarkQuery, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isConnectionServiceMethod, parseConnectionServiceParams } from './connection-service-codec.js'
-import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
-import type { MoteConnectionPort, MoteConnectionMethod } from './mote-connection-contract.js'
+import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote/connection-codec.js'
+import type { MoteConnectionPort, MoteConnectionMethod } from './mote/connection-contract.js'
 import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickPreferencesPort, type MoteConnectionPreferencesPort, type MoteConnectionPreferencesReadInput, type MoteConnectionPreferencesSaveParams } from './mote-preferences.js'
 import { isConnectionProfileMethod, parseConnectionProfileParams } from './connection-profile-codec.js'
 import { isConnectionEnrollmentMethod, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
@@ -1271,7 +1271,7 @@ export class AgentMuxRpcService {
           if (target.expectedResource.hostId !== caller.hostId || target.expectedResource.workspacePath !== caller.session.workspacePath && !exactExecutionDirectory) throw new AgentMuxError('Mote bot operations stay within the authenticated Agent Workspace or its exact durable Mote execution directory on the original Host.', 'CONTROL_PERMISSION_DENIED')
         }
         if (method === 'space.mote.connection.sync') {
-          const sync = input as import('./mote-connection-contract.js').MoteConnectionSync
+          const sync = input as import('./mote/connection-contract.js').MoteConnectionSync
           if (!await this.ports.connections?.ownsEnrollmentConnection?.(sync.connection.connectionId, caller.agentSessionId)) throw new AgentMuxError('This bot was not enrolled by the original Agent.', 'CONTROL_PERMISSION_DENIED')
         }
       }

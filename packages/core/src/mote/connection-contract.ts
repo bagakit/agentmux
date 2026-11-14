@@ -3,10 +3,10 @@ import type {
   MoteConnectionRef,
   MoteConnectionPreferencesSaveParams,
   MoteConnectionPreferencesSaveResult
-} from './mote-preferences.js'
-import type { ConnectionEnrollmentOperation, ConnectionEnrollmentCallContext, ConnectionEnrollmentAdvanceInput } from './connection-enrollment-contract.js'
-import type { DesiredConnectionProfile, ConnectionProfileOperation } from './connection-profile-contract.js'
-import type { ConnectionSetupInitialPublication, ConnectionSetupOperation, ConnectionSetupAdvance } from './connection-setup-contract.js'
+} from '../mote-preferences.js'
+import type { ConnectionEnrollmentOperation, ConnectionEnrollmentCallContext, ConnectionEnrollmentAdvanceInput } from '../connection-enrollment-contract.js'
+import type { DesiredConnectionProfile, ConnectionProfileOperation } from '../connection-profile-contract.js'
+import type { ConnectionSetupInitialPublication, ConnectionSetupOperation, ConnectionSetupAdvance } from '../connection-setup-contract.js'
 
 /** Public client preparation provenance; it grants no authority over current appearance. */
 export type MoteConnectionSource = {

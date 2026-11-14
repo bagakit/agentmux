@@ -1295,7 +1295,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   async append(input: AgentMuxMessageAppendInput, newMessage?: { deliveryMode?: 'reference' | 'outbox'; provenance?: AgentMuxMessageProvenance; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean>;
-    conversationKind?: import('./ingress-contract.js').ConnectionIngressMessage['conversationKind']; moteReply?: import('./mote-chat-contract.js').MoteChatReplyReference }): Promise<AgentMuxMessageReceipt> {
+    conversationKind?: import('./ingress-contract.js').ConnectionIngressMessage['conversationKind']; moteReply?: import('./mote/chat-contract.js').MoteChatReplyReference }): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
       await newMessage?.reauthorize?.()
       const messageId = input.messageId ?? mintObjectId()

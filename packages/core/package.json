@@ -55,8 +55,8 @@
       "import": "./dist/capsule.js"
     },
     "./mote-chat": {
-      "types": "./dist/mote-chat.d.ts",
-      "import": "./dist/mote-chat.js"
+      "types": "./dist/mote/chat.d.ts",
+      "import": "./dist/mote/chat.js"
     },
     "./mote-input-source": {
       "types": "./dist/mote-input-source.d.ts",
@@ -115,8 +115,8 @@
       "import": "./dist/note-format.js"
     },
     "./mote-connections": {
-      "types": "./dist/mote-connections.d.ts",
-      "import": "./dist/mote-connections.js"
+      "types": "./dist/mote/connections.d.ts",
+      "import": "./dist/mote/connections.js"
     },
     "./automatic-input-source": {
       "types": "./dist/automatic-input-source.d.ts",

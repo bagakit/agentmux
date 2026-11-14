@@ -1,6 +1,6 @@
-import { sameConnectionApplication } from './connections-contract.js'
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
+import { sameConnectionApplication } from '../connections-contract.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
 import {
   parseMotePreferencesTarget,
   parseMoteConnectionValues,
@@ -8,10 +8,10 @@ import {
   parseMotePreferencesSaveResult,
   sameMotePreferencesTarget,
   sameMoteConnectionValues
-} from './mote-preferences.js'
-import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, summarizeConnectionEnrollmentPreset } from './connection-enrollment-codec.js'
-import { parseConnectionProfileOperation, parseDesiredConnectionProfile } from './connection-profile-codec.js'
-import { parseConnectionSetupInitialPublication, parseConnectionSetupOperation, parseConnectionSetupParams } from './connection-setup-codec.js'
+} from '../mote-preferences.js'
+import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, summarizeConnectionEnrollmentPreset } from '../connection-enrollment-codec.js'
+import { parseConnectionProfileOperation, parseDesiredConnectionProfile } from '../connection-profile-codec.js'
+import { parseConnectionSetupInitialPublication, parseConnectionSetupOperation, parseConnectionSetupParams } from '../connection-setup-codec.js'
 import type {
   MoteConnectionMethod,
   MoteConnectionSource,
@@ -20,7 +20,7 @@ import type {
   MoteConnectionOperation,
   MoteConnectionParamsMap,
   MoteConnectionResultMap
-} from './mote-connection-contract.js'
+} from './connection-contract.js'
 
 export const MOTE_CONNECTION_RPC_METHODS = {
   'space.mote.connection.create': 'long',
@@ -168,14 +168,14 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
           )
             fail()
           return {
-            params: params as import('./mote-preferences.js').MoteConnectionPreferencesSaveParams,
+            params: params as import('../mote-preferences.js').MoteConnectionPreferencesSaveParams,
             observedReceipt:
               r.observedReceipt === null
                 ? null
                 : (parseMotePreferencesSaveResult(
                     r.observedReceipt,
                     params
-                  ) as import('./mote-preferences.js').MoteConnectionPreferencesSaveResult)
+                  ) as import('../mote-preferences.js').MoteConnectionPreferencesSaveResult)
           }
         })()
   const result: MoteConnectionOperation = {

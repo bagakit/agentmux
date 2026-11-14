@@ -1,4 +1,4 @@
-import type { MoteChatReplyReference } from './mote-chat-contract.js'
+import type { MoteChatReplyReference } from './mote/chat-contract.js'
 import { sameConnectionApplication } from './connections-contract.js'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { renderAgentMuxMessageEnvelope, channelQuoteWireMatchesEnvelope, parseAgentMuxMessagePrefix } from './agent-message-render.js'
