@@ -5,6 +5,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join } from 'node:path'
+
+// Each case drives real Hosts through separate public CLI processes.
+vi.setConfig({ testTimeout: 60_000 })
 const cleanup: CrossHostCleanup = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 type Owner = Awaited<ReturnType<typeof crossHostOwner>>

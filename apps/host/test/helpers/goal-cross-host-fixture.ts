@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { expect, vi } from 'vitest'
-import * as core from '../../../../packages/core/src/index.js'
-import { connectHostedAgentMux, type AgentMuxHostedClient } from '../../../../packages/core/src/hosted.js'
+// The Host resolves Core by its package name. Any other copy is a second class whose
+// spies never reach the Host's client, which would then activate a real detached Runtime.
+import * as core from '@agentmux/core'
+import type { AgentMuxHostedClient } from '../../../../packages/core/src/hosted.js'
 import type { AgentMuxRuntimeOwnerIdentity } from '../../../../packages/core/src/hosted-client-contract.js'
 import { rpcOwnerFixture } from '../../../../packages/core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, type CliResult } from '../../../../packages/core/test/helpers/object-cli-rpc.js'
@@ -13,7 +16,11 @@ export type CrossHostCleanup = Array<() => void | Promise<void>>
 /** Two genuine semantic owners; only the Native byte transport is deterministic. */
 export async function crossHostOwner(cleanup: CrossHostCleanup, name: string, ids: string[]) {
   const original = await rpcOwnerFixture(ids, core, () => ({ providerId: 'claude', executorId: 'claude' }))
-  cleanup.push(original.close)
+  cleanup.push(async () => {
+    const activated = existsSync(join(original.root, 'ctxmux.sock'))
+    await original.close()
+    expect.soft(activated, 'A real Runtime outlives this private root; only the Native byte transport may serve these owners.').toBe(false)
+  })
   for (const agentSessionId of ids) {
     const previous = (await original.store.readMetadata(agentSessionId))!
     await original.store.compareAndSwap(previous, { ...previous, nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: name + '-' + agentSessionId + '-native', transcriptPath: join(original.root, 'native.jsonl') } })
@@ -39,7 +46,7 @@ export async function crossHostOwner(cleanup: CrossHostCleanup, name: string, id
     const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function () {
       const inner = this as unknown as typeof original.inner
       await inner.registry.load('local'); inner.connected = true
-      for (const key of ['isConnected', 'status', 'identity', 'input', 'openInput', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[key] = native[key]
+      for (const key of ['connect', 'isConnected', 'status', 'identity', 'input', 'openInput', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[key] = native[key]
       this.providers.get('claude').planPromptInput = text => ({ kind: 'single-phase', data: text + '\r' })
     })
     try {
@@ -50,7 +57,7 @@ export async function crossHostOwner(cleanup: CrossHostCleanup, name: string, id
     } finally { connect.mockRestore() }
     rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
     identity = (await rpc.call('runtime.owner.identity', {})).owner
-    reader = await connectHostedAgentMux({ rpc, expectedRuntimeId: identity.runtimeId, forwardRpc: async (method, params, context) => {
+    reader = await core.connectHostedAgentMux({ rpc, expectedRuntimeId: identity.runtimeId, forwardRpc: async (method, params, context) => {
       const entry = { method, params: structuredClone(params) } as typeof forwarded[number]; forwarded.push(entry)
       const result = await rpc.call(method, params, context); entry.result = result
       if (method === 'message.federation.intake' && lostIntakeAck) { lostIntakeAck = false; throw Object.assign(Error('The private transport lost the original committed intake ACK.'), { code: 'CONTROL_UNAVAILABLE' }) }

@@ -7,6 +7,9 @@ import { createWorkspaceLayout, createWorkbenchViewLayout } from '@agentmux/core
 import { contributeGoalDiscussionBinding } from '../src/goal-discussion-bindings.js'
 import { workspaceProjectId } from '../src/workspace-projects.js'
 import { crossHostOwner, type CrossHostCleanup } from './helpers/goal-cross-host-fixture.js'
+
+// Each case drives real Hosts through separate public CLI processes.
+vi.setConfig({ testTimeout: 60_000 })
 const cleanup: CrossHostCleanup = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
