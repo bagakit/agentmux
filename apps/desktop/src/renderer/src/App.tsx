@@ -727,7 +727,8 @@ function DesktopApp() {
   const renderedToolDockWidth = Math.min(toolDockMaximumWidth, getRenderedToolDockWidth(toolDockWidth, projectRailOpen))
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
-  const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall' || (mainSurface === 'workbench' && Boolean(workspace))
+  const hasSpaceWorkface = Boolean(workspace || ordinaryLayout)
+  const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall' || (mainSurface === 'workbench' && hasSpaceWorkface)
   const workbenchVisible = mainSurface === 'workbench' && !settingsOpen
   const workfaceVisible = workbenchVisible && !spaceContent.expanded
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
@@ -934,7 +935,7 @@ function DesktopApp() {
               </div>
             <section className="workspace-main-surface" data-desktop-surface={desktopSurface[mainSurface]}
               aria-hidden={spaceContent.expanded || undefined} inert={spaceContent.expanded}>
-              {!workspace && mainSurface === 'workbench' ? (
+              {!hasSpaceWorkface && mainSurface === 'workbench' ? (
                 <section className="welcome">
                   <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
                   <div className="eyebrow">Terminal-first agent workbench</div>

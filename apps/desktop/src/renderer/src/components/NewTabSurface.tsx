@@ -156,7 +156,9 @@ export function NewTabSurface({
   const rawSourceSelection = useAppStore(state => !ordinaryEmptyGroup && Boolean(state.workbenchSpaceSelection?.sourceRuntimeId &&
     !isOriginalSourceWorkspaceProjection(state.workbenchSpaceSelection.workspaceId)))
   const rawSourceUnknown = useAppStore(state => rawSourceSelection && !originalRawSourceOccurrenceConfirmed(state, currentCoreSpatialGraph()))
-  const implicitSourceKey = useAppStore(state => ordinaryEmptyGroup || rawSourceSelection ? undefined : originalSourceEntryForSelection(state)?.key)
+  // A registered Source beside an ordinary Tab is context, not the Launcher's execution owner.
+  const implicitSourceKey = useAppStore(state => ordinaryEmptyGroup || rawSourceSelection || !tabId || !state.tabs[tabId]?.source
+    ? undefined : originalSourceEntryForSelection(state)?.key)
   const implicitSourceObservation = useAppStore(state => implicitSourceKey ? state.mountedSpaceObservations[implicitSourceKey] : undefined)
   const implicitSource = useMemo(() => implicitSourceKey ? originalSourceLauncherExecution(useAppStore.getState(), tabId, regionId, currentCoreSpatialGraph()) : undefined,
     [implicitSourceKey, sourceInputs, implicitSourceObservation, tabId, regionId])

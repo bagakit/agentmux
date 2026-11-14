@@ -325,6 +325,8 @@ export function hasOriginalSourceFileSurface(state: OriginalSpaceSelectionState,
 export function originalSpaceWorkspace(state: OriginalSpaceSelectionState, workspaceId: string | null, graph?: AgentMuxSpatialGraph | null): WorkspaceRecord | undefined {
   if (!workspaceId) return undefined
   const choice = state.workbenchSpaceSelection
+  const configured = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+  if (configured && !choice?.sourceRuntimeId && !isOriginalSourceWorkspaceProjection(workspaceId) && !rawSourceFileWorkspaceId(workspaceId)) return configured
   if (choice?.sourceRuntimeId && choice.workspaceId === workspaceId && !isOriginalSourceWorkspaceProjection(workspaceId) &&
     !originalRawSourceOccurrenceConfirmed(state, graph)) return undefined
   const selected = originalSourceEntryForSelection(state)
@@ -339,7 +341,7 @@ export function originalSpaceWorkspace(state: OriginalSpaceSelectionState, works
     return { ...resource, id: projected ? workspaceId : resource.id, kind: resource.kind === 'worktree' ? 'worktree' : 'folder', hostId: selected.target.hostId }
   }
   if (rawSourceFileWorkspaceId(workspaceId)) return undefined
-  return state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+  return configured
 }
 export function ensureOriginalSourceFilesInput(state: OriginalSpaceSelectionState, workspaceId: string, graph?: AgentMuxSpatialGraph | null): SourceFilesInputs {
   const current = state.sourceFilesInputs ?? emptySourceFilesInputs()

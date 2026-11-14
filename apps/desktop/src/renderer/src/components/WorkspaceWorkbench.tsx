@@ -1257,7 +1257,8 @@ function PaneGroup({
   }
 
   const createTabAction = <button type="button" className="pane-action"
-    disabled={projection?.placementConfirmed === false} onClick={() => onNewTab(group.id)}
+    disabled={projection?.placementConfirmed === false}
+    onPointerDown={event => event.stopPropagation()} onClick={() => onNewTab(group.id)}
     title={mote ? 'New discussion' : 'New tab'} aria-label={mote ? 'New discussion' : 'New Tab'}>
     <ThemeActionCreateTabIcon size={13} />
   </button>
@@ -2087,7 +2088,7 @@ export function WorkspaceWorkbench({
   }
 
   function newTab(groupId: string): void {
-    if (source) {
+    if (sourceWorkspace) {
       useAppStore.getState().openOriginalSpaceLauncher(workspaceId, groupId)
       return
     }
@@ -2109,8 +2110,10 @@ export function WorkspaceWorkbench({
         return
       }
       const presentationOnly = groupId === workbenchZoneUnplacedGroupId(zone.zoneId)
+      const reveal = viewOwnership === 'owner'
       const tabId = openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId,
-        ...(!presentationOnly && groupId ? { tabGroupId: groupId } : {}), zoneId: zone.zoneId, reveal: false })
+        ...(!presentationOnly && groupId ? { tabGroupId: groupId } : {}), zoneId: zone.zoneId, reveal })
+      if (reveal) return
       const created = useAppStore.getState()
       const tab = tabId ? created.tabs[tabId] : undefined
       const originalGroup = presentationOnly ? created.layouts[projection.displayWorkspaceId]?.groups.find(group => group.tabOrder.includes(tabId!))?.id : groupId
