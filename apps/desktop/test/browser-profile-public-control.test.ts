@@ -167,8 +167,8 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
       profile: expect.objectContaining({ id: WORK_ID, label: 'Work', source: expect.objectContaining({ importedCookies: 4 }) }),
       usage: { complete: true, native:{status:'idle',pages:0,workers:0,requests:0,downloads:0}, browsers: [{ browserId: 'b-open', workspaceId: 'w-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] } })
 
-    const created = await call(ports, { operation: 'browser.profile.create', label: 'Release review' })
-    expect(created).toMatchObject({ revision: 1, profile: { label: 'Release review', isDefault: false } })
+    const created = await call(ports, { operation: 'browser.profile.create', operationId: 'release-review-original', label: 'Release review' })
+    expect(created).toMatchObject({ revision: 1, creation: { receipt: { action: 'browser.profile.create', operationId: 'release-review-original' }, current: { state: 'present' } } })
     expect(await call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: ports.profiles.listProfiles().find(value => value.id === WORK_ID)!.revision, edit: { label: 'Northwind', hue: 288, notes: 'QA' } }))
       .toMatchObject({ revision: 2, profile: { id: WORK_ID, label: 'Northwind', hue: 288, notes: 'QA' } })
     expect(await call(ports, { operation: 'browser.profile.set-default', profileId: WORK_ID })).toEqual({ revision: 3, profileId: WORK_ID })

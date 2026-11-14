@@ -31,7 +31,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-profile-bookmarks-')); roots.push(root); fault.root = root
   const path = join(root, 'profiles.json'), store = new BrowserProfileStore(path), native = vi.fn(() => { throw Error('No implicit native Session') })
   const manager = new BrowserProfileManager(store, { prepare: () => undefined, nativeSession: native } as never, () => root)
-  await manager.initialize(); const profile = manager.listProfiles()[0]!, other = await manager.createProfile('Other Profile')
+  await manager.initialize(); const profile = manager.listProfiles()[0]!, other = await manager.createProfile('Other Profile', crypto.randomUUID(), profileCreationTestActor)
   const list = (folderId: string | null = null, operationId?: string) => manager.bookmarks.list(profile.id, folderId, operationId)
   let serial = 0
   const edit = async (change: Parameters<typeof manager.bookmarks.edit>[3]) => manager.bookmarks.edit(profile.id, (await list()).revision, `edit-${++serial}`, change)
@@ -186,3 +186,5 @@ describe('managed Profile bookmarks use the original metadata, exact scope and B
     } finally { await server.stop(); await core.dispose() }
   }, 30_000)
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

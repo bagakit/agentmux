@@ -4,7 +4,11 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserProxyAsset } from '@agentmux/core/control'
 const port = vi.hoisted(() => ({ saveProxy: vi.fn(), deleteProxy: vi.fn(), assignProxy: vi.fn(), flush: vi.fn() }))
-vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port, ui: { requestStorageFlush: port.flush } } }))
+vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: { ...port,
+  createProfileIdentity: async (input: any) => { const saved = await port.saveProxy(input.edit); (port as any).createdProxy = saved.proxy; return { revision: saved.revision, creation: { operationId: input.operationId, receipt: { createdId: saved.proxy.id }, current: { state: 'present' }, durability: 'confirmed' } } },
+  inspectProfileCreation: async (operationId: string) => ({ revision: 4, creation: { operationId, receipt: (port as any).createdProxy ? { createdId: (port as any).createdProxy.id } : null, current: { state: 'present' } } }),
+  readProfiles: async () => ({ revision: 4, proxies: [(port as any).createdProxy] })
+}, ui: { requestStorageFlush: port.flush } } }))
 import { BrowserProxyLibrary } from '../src/renderer/src/components/settings/BrowserProxyLibrary'
 import { browserProxyDrafts } from '../src/renderer/src/lib/browser-proxy-drafts'
 import { DESKTOP_FRAGMENT_KEYS } from '../src/renderer/src/lib/desktop-user-fragments'
@@ -19,6 +23,7 @@ async function input(label: string, text: string) { await act(async () => { cons
 async function click(label: string) { expect(button(label), label).toBeDefined(); await act(async () => button(label).click()) }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); localStorage.clear(); vi.resetAllMocks()
+  ;(port as any).createdProxy = undefined
   port.flush.mockResolvedValue(undefined)
   port.saveProxy.mockImplementation(async (edit, id) => ({ proxy: { ...edit, id: id ?? 'new-asset', revision: 'saved-v2' }, revision: 4 }))
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -79,21 +84,26 @@ describe('original proxy library editor and Desktop draft owner', () => {
     expect(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProxyLibraryDrafts)).toBe(before)
     expect(container.textContent).toContain('has not been saved to disk'); expect(port.saveProxy).not.toHaveBeenCalled()
   })
-  it('clears a failed draft write notice only after Retry receives the original checkpoint ACK', async () => {
+  it('keeps an original creation undispatched when its pending request checkpoint fails, then retries the same request', async () => {
     await render(); await input('Proxy asset name', 'Saved once'); await input('Proxy asset server', a.server)
-    port.flush.mockRejectedValueOnce(new Error('Original draft flush unconfirmed')); await click('Save proxy')
-    expect(container.textContent).toContain('Original draft flush unconfirmed')
-    const pending = deferred<void>(); port.flush.mockReturnValueOnce(pending.promise)
-    await click('Retry draft storage')
-    expect(container.textContent).toContain('Original draft flush unconfirmed')
-    await act(async () => pending.resolve())
-    expect(container.textContent).not.toContain('Original draft flush unconfirmed')
+    port.flush.mockRejectedValueOnce(new Error('Original pending request save unconfirmed')); await click('Save proxy')
+    expect(container.textContent).toContain('has not been dispatched')
+    expect(port.saveProxy).not.toHaveBeenCalled()
+    const original = JSON.parse(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProfileCreations)!)['browser.profile.proxy.create']
+    await click('Save proxy')
+    expect(port.saveProxy).toHaveBeenCalledTimes(1)
+    expect(field('Saved proxy asset').value).toBe('new-asset')
+    expect(original.operationId).toBeTruthy()
   })
-  it('keeps a confirmed asset save separate from a failed draft checkpoint', async () => {
+  it('keeps the original created identity when saving the client confirmation fails and resolves it without another creation', async () => {
     await render(); await input('Proxy asset name', 'Saved once'); await input('Proxy asset server', a.server)
-    port.flush.mockRejectedValueOnce(new Error('Original draft flush unconfirmed'))
+    port.flush.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('Original client confirmation save unconfirmed'))
+    await click('Save proxy')
+    expect(port.saveProxy).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain('saving its client confirmation is unconfirmed')
+    expect(field('Proxy asset name').value).toBe('Saved once')
+    expect(JSON.parse(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProfileCreations)!)['browser.profile.proxy.create'].operationId).toBeTruthy()
     await click('Save proxy')
     expect(port.saveProxy).toHaveBeenCalledTimes(1); expect(field('Saved proxy asset').value).toBe('new-asset')
-    expect(container.textContent).toContain('Draft storage:'); expect(field('Proxy asset name').value).toBe('Saved once')
   })
 })

@@ -43,7 +43,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'profile-retention-')); roots.push(root)
   const path = join(root, 'profiles.json'), store = new BrowserProfileStore(path)
   await store.list()
-  const created = await store.createProfile('Retained original'), profile = created.profile, data = join(root, 'Partitions', profile.id)
+  const created = await store.createProfile('Retained original', crypto.randomUUID(), profileCreationTestActor), profile = created.profile, data = join(root, 'Partitions', profile.id)
   await mkdir(join(data, 'nested'), { recursive: true }); await writeFile(join(data, 'nested', 'site.data'), 'complete original site data'); await writeFile(join(data, 'cookies.bin'), Buffer.from([3, 8, 1, 0]))
   const archive = (await store.archiveProfile(profile.id, profile.revision, { partition: browserProfilePartition(profile.id), relativePath: `Partitions/${profile.id}` })).archive
   let now = Date.now(), exclusive = true
@@ -59,7 +59,7 @@ async function fixture() {
 
 describe('retained Profile expiry and exact irreversible cleanup', () => {
   it('removes the exact inactive partition after a verified durable whole copy and retains its original receipt', async () => {
-    const f = await fixture(), neighbor = await f.store.createProfile('Healthy neighbor'), purgeId = mintObjectId()
+    const f = await fixture(), neighbor = await f.store.createProfile('Healthy neighbor', crypto.randomUUID(), profileCreationTestActor), purgeId = mintObjectId()
     const result = await f.purge(purgeId)
     expect(result.purge).toMatchObject({ purgeId, archiveId: f.archive.id, profileId: f.profile.id, status: 'deleted' })
     await expect(readFile(join(f.data, 'cookies.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -193,3 +193,5 @@ describe('retained Profile expiry and exact irreversible cleanup', () => {
     expect(() => assertBrowserProfileControlTarget(request as any, { operation: request.operation, ...parsed, purge: { ...(parsed as any).purge, archiveId: 'wrong-archive' } } as any)).toThrow('another original action')
   })
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

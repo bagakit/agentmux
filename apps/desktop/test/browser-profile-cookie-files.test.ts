@@ -31,7 +31,7 @@ afterEach(async()=>{vi.restoreAllMocks();transport.open.mockReset();person.show.
 async function fixture(){
   const root=await mkdtemp(join(tmpdir(),'amux-cookie-file-'));roots.push(root);fault.root=root
   const path=join(root,'profiles.json'),store=new BrowserProfileStore(path),sessions={prepare:()=>undefined,nativeSession:vi.fn((id:string)=>({id}))}
-  const manager=new BrowserProfileManager(store,sessions as never,()=>root);await manager.initialize();const profile=manager.listProfiles()[0]!,other=await manager.createProfile('Independent Profile')
+  const manager=new BrowserProfileManager(store,sessions as never,()=>root);await manager.initialize();const profile=manager.listProfiles()[0]!,other=await manager.createProfile('Independent Profile', crypto.randomUUID(), profileCreationTestActor)
   const jars=new Map<string,Map<string,ReturnType<typeof normalizeProfileFileCookie>>>([[profile.id,new Map()],[other.id,new Map()]])
   const set=vi.fn(async(id:string,c:ReturnType<typeof normalizeProfileFileCookie>)=>{jars.get(id)!.set(profileCookieIdentity(c),structuredClone(c));return 'applied' as const})
   const read=vi.fn(async(id:string)=>[...jars.get(id)!.values()].map(c=>({...c,expires:c.expires??-1,session:c.expires===null})))
@@ -194,3 +194,5 @@ describe('Profile Cookie file exchange keeps the original data, person and effec
     }finally{await server.stop();await core.dispose()}
   },60_000) // Twelve fresh compiled CLI processes share the loaded host; each still uses its original owner budget.
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

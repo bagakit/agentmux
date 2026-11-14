@@ -57,7 +57,7 @@ async function fixture() {
   let manager: BrowserProfileManager
   const sessions = createBrowserProfileSessions({ session: id => { manager.resolvePartition(id); return native(id) }, retainedSession: native, network: () => undefined, openContents: () => [] })
   manager = new BrowserProfileManager(store, sessions, () => root); await manager.initialize()
-  const profile = await manager.createProfile('Original retained Profile'), data = join(root, 'Partitions', profile.id)
+  const profile = await manager.createProfile('Original retained Profile', crypto.randomUUID(), profileCreationTestActor), data = join(root, 'Partitions', profile.id)
   await mkdir(join(data, 'nested'), { recursive: true }); await writeFile(join(data, 'nested', 'site.data'), 'original site data')
   const usage = createBrowserProfileUsage({ open: () => [], readSaved: async () => null, nativeUse: id => manager.nativeUse(id), deleteProfile: (...args) => manager.deleteProfile(...args) })
   const token = () => manager.listProfiles().find(value => value.id === profile.id)!.revision
@@ -66,10 +66,10 @@ async function fixture() {
 
 describe('Profile recycle and exact restore on the original metadata and native owners', () => {
   it('atomically retains the full original record and untouched partition, then restores the original identity with a fresh token after restart', async () => {
-    const f = await fixture(), folder = await f.manager.createFolder('Original folder', f.manager.listRevision())
+    const f = await fixture(), folder = await f.manager.createFolder('Original folder', f.manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     await f.manager.updateProfile(f.profile.id, { notes: 'Original notes', tags: ['Keep'], folderId: folder.id, pinned: true, agentAccess: false,
       environment: { userAgent: 'Original UA', acceptLanguages: ['fr-FR'] }, network: { mode: 'proxy', server: 'http://proxy.example:8080' } }, f.token())
-    const { proxy } = await f.manager.saveProxy({ label: 'Retained proxy asset', server: 'http://proxy.example:8080' })
+    const { proxy } = await f.manager.saveProxy({ label: 'Retained proxy asset', server: 'http://proxy.example:8080' }, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     expect(await f.manager.assignProxy(proxy.id, proxy.revision, [{ profileId: f.profile.id, expectedRevision: f.token() }])).toMatchObject([{ outcome: 'updated' }])
     const original = JSON.parse(await readFile(f.path, 'utf8')).profiles.find((p: any) => p.id === f.profile.id)
     const bytes = await readFile(join(f.data, 'nested', 'site.data')), token = f.token()
@@ -159,7 +159,7 @@ describe('Profile recycle and exact restore on the original metadata and native 
   })
 
   it('checks retained source before acquiring a replacement Session, rejects stale archive/folder conflicts and never overwrites another owner', async () => {
-    const f = await fixture(), folder = await f.manager.createFolder('Later removed', f.manager.listRevision())
+    const f = await fixture(), folder = await f.manager.createFolder('Later removed', f.manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     await f.manager.updateProfile(f.profile.id, { folderId: folder.id }, f.token())
     const receipt = await f.usage.deleteProfile(f.profile.id, approval(f.profile.id), f.token())
     await f.manager.deleteFolder(folder.id, f.manager.listRevision())
@@ -307,3 +307,5 @@ describe('Profile recycle and exact restore on the original metadata and native 
   })
 
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

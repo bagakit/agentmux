@@ -234,12 +234,12 @@ describe('Profile native activity and exact configuration versions', () => {
   })
 
   it('allows A/B edits and Folder CAS across activity checkpoints while ordering every actual snapshot', async () => {
-    const f = await fixture(), other = await f.manager.createProfile('B'), a = f.profile(f.id), b = f.profile(other.id)
+    const f = await fixture(), other = await f.manager.createProfile('B', crypto.randomUUID(), profileCreationTestActor), a = f.profile(f.id), b = f.profile(other.id)
     const folderRevision = f.manager.listRevision(), sequence = f.manager.listSequence()
     await f.manager.recordActivity(f.id, checkpoint(f.manager.activityObserverId))
     expect(f.manager.listRevision()).toBe(folderRevision); expect(f.manager.listSequence()).toBeGreaterThan(sequence)
     expect(f.profile(f.id).revision).toBe(a.revision)
-    await f.manager.createFolder('Unaffected by observation', folderRevision)
+    await f.manager.createFolder('Unaffected by observation', folderRevision, crypto.randomUUID(), profileCreationTestActor)
     await Promise.all([f.manager.updateProfile(f.id, { notes: 'A changed' }, a.revision), f.manager.updateProfile(other.id, { notes: 'B changed' }, b.revision)])
     expect(f.profile(f.id)).toMatchObject({ notes: 'A changed', activity: { observedRunMs: 1000 } }); expect(f.profile(other.id).notes).toBe('B changed')
   })
@@ -269,7 +269,7 @@ describe('Profile native activity and exact configuration versions', () => {
     expect(restarted.listProfiles()[0]!.activity).toMatchObject({ observedRunMs: 3000, state: 'unknown', lastUsedAt: 12_000 })
     await restarted.recordActivity(f.id, checkpoint(restarted.activityObserverId, cp.observerId, { unionMs: 250, observedAt: 100_000, lastUsedAt: 100_000 }))
     expect(restarted.listProfiles()[0]!.activity).toMatchObject({ observedRunMs: 3250, interruptions: 1 })
-    const source = restarted.listProfiles()[0]!, copied = await restarted.copyProfile(f.id, 'Independent', source.revision)
+    const source = restarted.listProfiles()[0]!, copied = await restarted.copyProfile(f.id, 'Independent', source.revision, crypto.randomUUID(), profileCreationTestActor)
     expect(copied.activity).toBeUndefined(); expect(copied.revision).not.toBe(source.revision)
     const stored = JSON.parse(await readFile(f.path, 'utf8')).profiles.find((value: any) => value.id === f.id)
     expect(stored.activity.gaps).toContainEqual({ id: cp.observerId + ':unclosed', after: 12_000, until: 100_000, reason: 'observation-interrupted' })
@@ -293,7 +293,7 @@ describe('Profile native activity and exact configuration versions', () => {
   it('serializes same-Profile network apply before native side effects while independent edits and checkpoints progress', async () => {
     const gate = deferred<void>(), entered = deferred<void>(), applied: unknown[] = []
     const apply = vi.fn(async (_id: string, route: unknown) => { applied.push(route); if (applied.length === 1) { entered.resolve(); await gate.promise } })
-    const f = await fixture({ prepare: () => undefined, apply }), other = await f.manager.createProfile('Independent'), token = f.profile(f.id).revision
+    const f = await fixture({ prepare: () => undefined, apply }), other = await f.manager.createProfile('Independent', crypto.randomUUID(), profileCreationTestActor), token = f.profile(f.id).revision
     const first = f.manager.updateProfile(f.id, { network: { mode: 'direct' } }, token)
     await entered.promise
     const stale = f.manager.updateProfile(f.id, { network: { mode: 'proxy', server: 'proxy.invalid:8080' } }, token)
@@ -306,7 +306,7 @@ describe('Profile native activity and exact configuration versions', () => {
   })
 
   it('changes only affected Profile tokens on folder removal and never revives an accurately deleted Profile from late activity', async () => {
-    const f = await fixture(), b = await f.manager.createProfile('B'), folder = await f.manager.createFolder('Shared', f.manager.listRevision())
+    const f = await fixture(), b = await f.manager.createProfile('B', crypto.randomUUID(), profileCreationTestActor), folder = await f.manager.createFolder('Shared', f.manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     await f.manager.updateProfile(b.id, { folderId: folder.id }, b.revision)
     const a = f.profile(f.id).revision, tokenB = f.profile(b.id).revision
     await f.manager.deleteFolder(folder.id, f.manager.listRevision())
@@ -334,7 +334,7 @@ describe('Profile native activity and exact configuration versions', () => {
   })
 
   it('does not count a failed Profile candidate and retains old A until exact native destruction after a committed switch', async () => {
-    const f = await fixture(), b = await f.manager.createProfile('B'), n = native(f)
+    const f = await fixture(), b = await f.manager.createProfile('B', crypto.randomUUID(), profileCreationTestActor), n = native(f)
     await n.owner.create('switch', 'https://original.invalid/', 'workspace', f.id)
     fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => { throw new Error('candidate load failed') }
     await expect(n.owner.switchProfile('switch', b.id)).rejects.toThrow('candidate load failed')
@@ -391,11 +391,14 @@ describe('Profile native activity and exact configuration versions', () => {
       const read = await run(['ls']); expect(read.sequence).toBeGreaterThan(initial.sequence); expect(read.revision).toBe(initial.revision)
       const saved = await run(['update', '--profile', f.id, '--expected-revision', token, '--notes', 'Public exact token'])
       expect(saved.profile.activity).toMatchObject({ observedRunMs: 1000, history: 'partial' })
-      const copied = await run(['copy', '--profile', f.id, '--expected-revision', saved.profile.revision, '--label', 'New identity'])
-      expect(copied.profile.activity).toBeUndefined(); expect(copied.profile.revision).not.toBe(saved.profile.revision)
+      const copied = await run(['copy', '--operation-id', 'activity-copy-original', '--profile', f.id, '--expected-revision', saved.profile.revision, '--label', 'New identity'])
+      const copiedProfile = f.manager.listProfiles().find(value => value.id === copied.creation.receipt.createdId)!
+      expect(copiedProfile.activity).toBeUndefined(); expect(copiedProfile.revision).not.toBe(saved.profile.revision)
       expect(() => parseBrowserProfileControlPayload({ operation: 'browser.profile.update', profileId: f.id, expectedRevision: 0, edit: { notes: 'wrong scope' } }, ['operation'])).toThrow()
       expect(() => parseBrowserProfileControlPayload({ operation: 'browser.profile.update', profileId: f.id, expectedRevision: saved.profile.revision, edit: { activity: { observedRunMs: 5000 } } }, ['operation'])).toThrow()
       expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: read.revision, profiles: read.profiles, folders: [], views: [] })).toThrow()
     } finally { await server.stop(); await core.dispose() }
   }, 40_000)
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

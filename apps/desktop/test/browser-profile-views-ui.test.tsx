@@ -11,7 +11,10 @@ const port = vi.hoisted(() => {
     bulkUpdateProfiles: vi.fn(async () => [] as unknown[]), saveProfileView: vi.fn(), deleteProfileView: vi.fn(), updateProfile: vi.fn(),
     detectProfileImportSources: vi.fn(async () => []), readProfileProxySignIn: vi.fn(async () => null), listProfileSites: vi.fn(async () => []) }
 })
-vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port } }))
+vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: { ...port,
+  createProfileIdentity: async (input: any) => { const saved = await port.saveProfileView(input.label, input.query, input.expectedRevision); return { revision: saved.revision, creation: { operationId: input.operationId, receipt: { createdId: saved.view.id }, current: { state: 'present' }, durability: 'confirmed' } } },
+  inspectProfileCreation: async () => ({ creation: { receipt: null } })
+}, ui: { requestStorageFlush: async () => {} } } }))
 const state = vi.hoisted(() => ({ tabs: {}, config: { browser: { agentAutomation: true } }, reportError: vi.fn() }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), { getState: () => state }) }))
 import { BROWSER_PROFILE_RESULT_METHODS, ipcResult, unwrapIpcResultMethods } from '../src/shared/ipc-result'
@@ -22,7 +25,7 @@ const profile = (id: string, label = 'Same name'): BrowserProfileSummary => ({ i
 let root: Root, container: HTMLDivElement
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  vi.clearAllMocks(); browserProfiles.reset()
+  localStorage.clear(); vi.clearAllMocks(); browserProfiles.reset()
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
   port.set({ revision: 1, sequence: 1, profiles: [profile('p-a'), profile('p-b')], folders: [], views: [] })
 })

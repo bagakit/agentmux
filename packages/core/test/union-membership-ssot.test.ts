@@ -153,6 +153,7 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'browser.history': true,
   'browser.profile.ls': true,
   'browser.profile.inspect': true,
+  'browser.profile.creation.inspect': true,
   'browser.profile.create': true,
   'browser.profile.folder.create': true,
   'browser.profile.folder.rename': true,

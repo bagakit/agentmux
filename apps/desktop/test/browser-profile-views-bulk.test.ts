@@ -26,7 +26,7 @@ const selected = (manager: BrowserProfileManager, ids: string[]) => ids.map(prof
 describe('Profile query, saved views and exact metadata batches on original owners', () => {
   it('filters native observation status, tag, saved proxy route and last observed time without inventing absent history', async () => {
     const { manager, store, id } = await fixture(), now = 1_800_000_000_000
-    const idle = await manager.createProfile('Same name'), unknown = await manager.createProfile('Same name')
+    const idle = await manager.createProfile('Same name', crypto.randomUUID(), profileCreationTestActor), unknown = await manager.createProfile('Same name', crypto.randomUUID(), profileCreationTestActor)
     await manager.updateProfile(id, { tags: ['Work'], network: { mode: 'proxy', server: { scheme: 'http', host: 'proxy.example', port: 8080 } } }, selected(manager, [id])[0]!.expectedRevision)
     // Exercise the original absolute checkpoint path; no renderer-derived timing or fake runtime table.
     await manager.recordActivity(id, { observerId: manager.activityObserverId, previousObserverId: null, sequence: 1, unionMs: 100, observedAt: now, lastUsedAt: now - 100, active: true, gaps: [] })
@@ -45,9 +45,9 @@ describe('Profile query, saved views and exact metadata batches on original owne
   })
 
   it('keeps named query identity and exact folder scope across restart, without copying selection or changing Profile tokens', async () => {
-    const { manager, path, id } = await fixture(), folder = await manager.createFolder('Review', manager.listRevision())
+    const { manager, path, id } = await fixture(), folder = await manager.createFolder('Review', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     const token = selected(manager, [id])[0]!.expectedRevision
-    const { view } = await manager.saveView('Proxy review', { folderId: folder.id, route: 'proxy', sort: 'recent' }, manager.listRevision())
+    const { view } = await manager.saveView('Proxy review', { folderId: folder.id, route: 'proxy', sort: 'recent' }, manager.listRevision(), undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     view.query.search = 'caller mutation'
     expect(manager.listViews()[0]!.query.search).toBeUndefined()
     expect(selected(manager, [id])[0]!.expectedRevision).toBe(token)
@@ -66,9 +66,9 @@ describe('Profile query, saved views and exact metadata batches on original owne
 
   it('reads semantically identical saved views after real JSON key reordering without changing original Profile data or bytes', async () => {
     const { manager, path, id } = await fixture()
-    const other = await manager.createProfile('Retained second Profile')
+    const other = await manager.createProfile('Retained second Profile', crypto.randomUUID(), profileCreationTestActor)
     await manager.updateProfile(id, { tags: ['Keep'], notes: 'Retain this configuration' }, selected(manager, [id])[0]!.expectedRevision)
-    const { view } = await manager.saveView('Unknown first', { status: 'unknown', sort: 'name' }, manager.listRevision())
+    const { view } = await manager.saveView('Unknown first', { status: 'unknown', sort: 'name' }, manager.listRevision(), undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     const expectedProfiles = manager.listProfiles(), expectedPartition = manager.resolvePartition(id)
     const original = JSON.parse(await readFile(path, 'utf8'))
     // Both the view and its query have a different legal JSON insertion order.
@@ -87,21 +87,21 @@ describe('Profile query, saved views and exact metadata batches on original owne
     expect(await readFile(path, 'utf8')).toBe(bad)
     expect(restarted.resolvePartition(id)).toBe(expectedPartition)
     await rm(path)
-    await expect(restarted.saveView('No empty replacement', {}, restarted.listRevision())).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(restarted.saveView('No empty replacement', {}, restarted.listRevision(), undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('returns the exact view commit revision through Manager and public service despite a later confirmed collection write before its ACK', async () => {
     const { manager, store } = await fixture(), before = manager.listRevision()
-    const save = store.saveView.bind(store)
-    store.saveView = async (...args) => {
+    const save = store.createIdentity.bind(store)
+    store.createIdentity = async (...args) => {
       const saved = await save(...args)
-      await manager.createProfile('Later independent collection commit')
+      if (args[0].operation === 'browser.profile.view.create') await manager.createProfile('Later independent collection commit', crypto.randomUUID(), profileCreationTestActor)
       return saved
     }
-    const receipt = await executeBrowserProfileControl({ operation: 'browser.profile.view.create', label: 'Exact ACK', query: { sort: 'name' }, expectedRevision: before },
-      { profiles: manager, usage: {} as never, network: {} as never }, undefined)
-    expect(receipt).toMatchObject({ operation: 'browser.profile.view.create', revision: before + 1, view: { label: 'Exact ACK', query: { sort: 'name' } } })
+    const receipt = await executeBrowserProfileControl({ operation: 'browser.profile.view.create', operationId: 'exact-view-original', label: 'Exact ACK', query: { sort: 'name' }, expectedRevision: before },
+      { profiles: manager, usage: {} as never, network: {} as never }, profileCreationTestActor)
+    expect(receipt).toMatchObject({ operation: 'browser.profile.view.create', revision: before + 1, creation: { receipt: { operationId: 'exact-view-original', createdKind: 'view' } } })
     expect(manager.listRevision()).toBe(before + 2)
     expect(receipt.revision).not.toBe(manager.listRevision())
   })
@@ -110,15 +110,15 @@ describe('Profile query, saved views and exact metadata batches on original owne
     const { manager, id } = await fixture(), revision = manager.listRevision(), token = selected(manager, [id])[0]!.expectedRevision, sequence = manager.listSequence()
     await manager.recordActivity(id, { observerId: manager.activityObserverId, previousObserverId: null, sequence: 1, unionMs: 20, observedAt: 100, lastUsedAt: 90, active: true, gaps: [] })
     expect(manager.listSequence()).toBe(sequence + 1); expect(manager.listRevision()).toBe(revision)
-    await manager.saveView('Known usage', { lastUsed: 'week' }, revision)
+    await manager.saveView('Known usage', { lastUsed: 'week' }, revision, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     expect(selected(manager, [id])[0]!.expectedRevision).toBe(token)
     const bytes = await manager.listViews()
-    await expect(manager.saveView('Stale', {}, revision)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+    await expect(manager.saveView('Stale', {}, revision, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
     expect(manager.listViews()).toEqual(bytes)
   })
 
   it('freezes accurate IDs/tokens, continues partial failures, preserves original tags and never adds a newly matching Profile', async () => {
-    const { manager, id } = await fixture(), second = await manager.createProfile('Same name'), third = await manager.createProfile('Same name')
+    const { manager, id } = await fixture(), second = await manager.createProfile('Same name', crypto.randomUUID(), profileCreationTestActor), third = await manager.createProfile('Same name', crypto.randomUUID(), profileCreationTestActor)
     await manager.updateProfile(id, { tags: ['Original'] }, selected(manager, [id])[0]!.expectedRevision)
     const items = selected(manager, [id, second.id]), beforeThird = manager.listProfiles().find(profile => profile.id === third.id)
     await manager.updateProfile(second.id, { notes: 'newer independent draft' }, selected(manager, [second.id])[0]!.expectedRevision)
@@ -135,7 +135,7 @@ describe('Profile query, saved views and exact metadata batches on original owne
   })
 
   it('moves and removes tags through original queued edits without clearing notes, routes, default or unrelated config', async () => {
-    const { manager, id } = await fixture(), other = await manager.createProfile('Other'), folder = await manager.createFolder('Shared', manager.listRevision())
+    const { manager, id } = await fixture(), other = await manager.createProfile('Other', crypto.randomUUID(), profileCreationTestActor), folder = await manager.createFolder('Shared', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     await manager.updateProfile(id, { notes: 'Keep notes', tags: ['Keep', 'Remove'], agentAccess: false }, selected(manager, [id])[0]!.expectedRevision)
     await manager.bulkUpdate(selected(manager, [id, other.id]), { kind: 'move', folderId: folder.id })
     await manager.bulkUpdate(selected(manager, [id]), { kind: 'remove-tag', tag: 'Remove' })
@@ -151,11 +151,11 @@ describe('Profile query, saved views and exact metadata batches on original owne
     await expect(manager.bulkUpdate(items, { kind: 'move', folderId: 'unavailable' })).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe(before)
     await writeFile(path, '{ original unreadable bytes')
-    await expect(manager.saveView('Retained', {}, manager.listRevision())).rejects.toThrow()
+    await expect(manager.saveView('Retained', {}, manager.listRevision(), undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })).rejects.toThrow()
     expect(await manager.bulkUpdate(items, { kind: 'pin', pinned: true })).toMatchObject([{ profileId: id, outcome: 'failed' }])
     expect(await readFile(path, 'utf8')).toBe('{ original unreadable bytes')
     await rm(path)
-    await expect(manager.saveView('No substitute', {}, manager.listRevision())).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(manager.saveView('No substitute', {}, manager.listRevision(), undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -171,7 +171,7 @@ describe('Profile query, saved views and exact metadata batches on original owne
   })
 
   it('runs actual compiled CLI query, saved-view create/update/delete and exact partial bulk calls through original Main owners', async () => {
-    const { root, manager, id } = await fixture(), other = await manager.createProfile('CLI other')
+    const { root, manager, id } = await fixture(), other = await manager.createProfile('CLI other', crypto.randomUUID(), profileCreationTestActor)
     const core = await privateRpcCorePort(join(root, 'sessions.json'), join(root, 'messages.ndjson'))
     const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: core.clients,
       execute: async (request, context) => { if (!isBrowserProfileControlRequest(request)) throw new Error('Unexpected operation'); return executeBrowserProfileControl(request,
@@ -181,7 +181,8 @@ describe('Profile query, saved views and exact metadata batches on original owne
       const env = objectCliEnvironment(root, { NODE_NO_WARNINGS: '1' })
       const run = async (args: string[]) => { const reply = await runCompiledObjectCli(['browser', 'profile', ...args], env); expect(reply.code, reply.stderr).toBe(0); return JSON.parse(reply.stdout).result }
       const list = await run(['ls']); expect(list.views).toEqual([])
-      const saved = (await run(['view', 'create', '--label', 'CLI view', '--query', '{"status":"unknown","sort":"name"}', '--expected-revision', String(list.revision)])).view
+      const savedId = (await run(['view', 'create', '--operation-id', 'cli-view-original', '--label', 'CLI view', '--query', '{"status":"unknown","sort":"name"}', '--expected-revision', String(list.revision)])).creation.receipt.createdId
+      const saved = manager.listViews().find(value => value.id === savedId)!
       expect((await run(['ls', '--view', saved.id])).filter).toMatchObject({ viewId: saved.id, query: saved.query })
       const items = selected(manager, [id, other.id]); await manager.updateProfile(other.id, { notes: 'external update' }, items[1]!.expectedRevision)
       const receipt = await run(['bulk-update', '--items', JSON.stringify(items), '--action', '{"kind":"add-tag","tag":"CLI"}'])
@@ -201,3 +202,5 @@ describe('Profile query, saved views and exact metadata batches on original owne
     expect(native.get).not.toHaveBeenCalled()
   }, 45_000)
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

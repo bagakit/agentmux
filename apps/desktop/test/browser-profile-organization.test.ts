@@ -35,8 +35,8 @@ describe('Profile organization on the original metadata owner', () => {
 
   it('persists canonical tags, stable folder identity, pinning and empty folders across a new original owner', async () => {
     const { manager, path, id } = await fixture()
-    const folder = await manager.createFolder('Research', manager.listRevision())
-    const empty = await manager.createFolder('Empty folder', manager.listRevision())
+    const folder = await manager.createFolder('Research', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
+    const empty = await manager.createFolder('Empty folder', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     await manager.updateProfile(id, { tags: [' Work ', 'Work', 'cafe\u0301', 'café'], folderId: folder.id, pinned: true }, manager.listProfiles().find(profile => profile.id === id)!.revision)
     expect(manager.listProfiles()[0]).toMatchObject({ tags: ['Work', 'café'], folderId: folder.id, pinned: true })
     await manager.renameFolder(folder.id, 'Research renamed', manager.listRevision())
@@ -49,8 +49,8 @@ describe('Profile organization on the original metadata owner', () => {
 
   it('atomically deletes only a folder and its exact references, retaining all Profiles and unrelated metadata', async () => {
     const { manager, path, id } = await fixture()
-    const work = await manager.createProfile('Work'), another = await manager.createProfile('Another'), other = await manager.createProfile('Other')
-    const folder = await manager.createFolder('Assigned', manager.listRevision()), retained = await manager.createFolder('Retained', manager.listRevision())
+    const work = await manager.createProfile('Work', crypto.randomUUID(), profileCreationTestActor), another = await manager.createProfile('Another', crypto.randomUUID(), profileCreationTestActor), other = await manager.createProfile('Other', crypto.randomUUID(), profileCreationTestActor)
+    const folder = await manager.createFolder('Assigned', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor), retained = await manager.createFolder('Retained', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     await manager.updateProfile(work.id, { folderId: folder.id, tags: ['keep'], pinned: true, notes: 'Keep original purpose' }, manager.listProfiles().find(profile => profile.id === work.id)!.revision)
     await manager.updateProfile(another.id, { folderId: folder.id }, manager.listProfiles().find(profile => profile.id === another.id)!.revision)
     await manager.updateProfile(other.id, { folderId: retained.id }, manager.listProfiles().find(profile => profile.id === other.id)!.revision)
@@ -71,9 +71,9 @@ describe('Profile organization on the original metadata owner', () => {
 
   it('copies tags and the same folder reference without pinning the new identity or altering the source', async () => {
     const { manager, path, id } = await fixture()
-    const folder = await manager.createFolder('Shared organization', manager.listRevision())
+    const folder = await manager.createFolder('Shared organization', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     await manager.updateProfile(id, { tags: ['Source tag'], folderId: folder.id, pinned: true, agentAccess: false }, manager.listProfiles().find(profile => profile.id === id)!.revision)
-    const source = manager.listProfiles()[0], copied = await manager.copyProfile(id, 'Copy', manager.listProfiles().find(profile => profile.id === id)!.revision)
+    const source = manager.listProfiles()[0], copied = await manager.copyProfile(id, 'Copy', manager.listProfiles().find(profile => profile.id === id)!.revision, crypto.randomUUID(), profileCreationTestActor)
     expect(copied).toMatchObject({ tags: ['Source tag'], folderId: folder.id, agentAccess: false })
     expect(copied.pinned).toBeUndefined(); expect(copied.id).not.toBe(id)
     expect(manager.listProfiles().find(value => value.id === id)).toEqual(source)
@@ -87,7 +87,7 @@ describe('Profile organization on the original metadata owner', () => {
 
   it('refuses foreign and stale folder edits without writing or widening their scope', async () => {
     const { manager, path, id } = await fixture(), revision = manager.listRevision()
-    const folder = await manager.createFolder('Original', revision)
+    const folder = await manager.createFolder('Original', revision, crypto.randomUUID(), profileCreationTestActor)
     const bytes = await readFile(path, 'utf8')
     await expect(manager.renameFolder(folder.id, 'Stale', revision)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
     await expect(manager.updateProfile(id, { folderId: 'foreignFolder' }, manager.listProfiles().find(profile => profile.id === id)!.revision)).rejects.toThrow()
@@ -100,7 +100,7 @@ describe('Profile organization on the original metadata owner', () => {
 
   it('preserves unreadable original organization bytes and never creates substitute metadata for a missing edit source', async () => {
     const { manager, path, id } = await fixture()
-    const folder = await manager.createFolder('Saved', manager.listRevision())
+    const folder = await manager.createFolder('Saved', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     const original = JSON.parse(await readFile(path, 'utf8')); original.profiles[0].folderId = 'missingFolder'
     const bytes = JSON.stringify(original); await writeFile(path, bytes)
     await expect(manager.deleteFolder(folder.id, manager.listRevision())).rejects.toThrow()
@@ -108,7 +108,7 @@ describe('Profile organization on the original metadata owner', () => {
     expect(await readFile(path, 'utf8')).toBe(bytes)
     expect(manager.resolvePartition(id)).toContain(id)
     await rm(path)
-    await expect(manager.createFolder('No replacement', manager.listRevision())).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(manager.createFolder('No replacement', manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(manager.updateProfile(id, { pinned: true }, manager.listProfiles().find(profile => profile.id === id)!.revision)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(native.get).not.toHaveBeenCalled()
@@ -141,13 +141,15 @@ describe('Profile organization on the original metadata owner', () => {
     try {
       const env = objectCliEnvironment(root, { NODE_NO_WARNINGS: '1' })
       const run = async (args: string[]) => { const reply = await runCompiledObjectCli(['browser', 'profile', ...args], env); expect(reply.code, reply.stderr).toBe(0); return JSON.parse(reply.stdout).result }
-      const folder = (await run(['folder', 'create', '--label', 'CLI folder', '--expected-revision', String(manager.listRevision())])).folder
+      const folderId = (await run(['folder', 'create', '--operation-id', 'cli-folder-original', '--label', 'CLI folder', '--expected-revision', String(manager.listRevision())])).creation.receipt.createdId
+      const folder = manager.listFolders().find(value => value.id === folderId)!
       expect((await run(['ls'])).folders).toEqual([folder])
       await run(['update', '--profile', id, '--expected-revision', manager.listProfiles().find(value => value.id === id)!.revision, '--tags', '[" CLI ","CLI","Release"]', '--folder', folder.id, '--pin'])
       expect((await run(['inspect', '--profile', id])).profile).toMatchObject({ tags: ['CLI', 'Release'], folderId: folder.id, pinned: true })
       const renamed = await run(['folder', 'rename', '--folder', folder.id, '--label', 'Renamed folder', '--expected-revision', String(manager.listRevision())])
       expect(renamed.folder).toEqual({ id: folder.id, label: 'Renamed folder' })
-      const copy = (await run(['copy', '--profile', id, '--label', 'CLI copy', '--expected-revision', manager.listProfiles().find(value => value.id === id)!.revision])).profile
+      const copyId = (await run(['copy', '--operation-id', 'cli-copy-original', '--profile', id, '--label', 'CLI copy', '--expected-revision', manager.listProfiles().find(value => value.id === id)!.revision])).creation.receipt.createdId
+      const copy = manager.listProfiles().find(value => value.id === copyId)!
       expect(copy).toMatchObject({ folderId: folder.id, tags: ['CLI', 'Release'] }); expect(copy.pinned).toBeUndefined()
       const removed = await run(['folder', 'delete', '--folder', folder.id, '--expected-revision', String(manager.listRevision())])
       expect(removed).toMatchObject({ folderId: folder.id, deleted: true, unassignedProfileIds: [id, copy.id] })
@@ -162,3 +164,5 @@ describe('Profile organization on the original metadata owner', () => {
     expect(native.get).not.toHaveBeenCalled()
   }, 40_000)
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

@@ -48,7 +48,9 @@ describe('browser profile built CLI reaches the public Control owner', () => {
           case 'browser.profile.create': {
             const created = { id: 'N3wPr0f1leXy', revision: 'new-profile-token', label: request.label, createdAt: 9, isDefault: false, source: null }
             profiles = [...profiles, created]; revision += 1
-            return { operation: request.operation, revision, profile: created }
+            return { operation: request.operation, revision, creation: { operationId: request.operationId,
+              receipt: { operationId: request.operationId, actor: nameContext!.actor as never, action: request.operation, requestDigest: 'sha256:' + 'a'.repeat(64), createdId: created.id, createdKind: 'profile', committedAt: 9 },
+              current: { state: 'present', createdId: created.id }, durability: 'confirmed' } }
           }
           case 'browser.profile.update': {
             if (request.expectedRevision !== find(request.profileId).revision) throw new AgentMuxError(`Browser Profiles changed since revision was read; current revision is ${revision}.`, 'BROWSER_PROFILE_REVISION_CONFLICT')
@@ -159,7 +161,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
     expect(inspected.body.result).toMatchObject({ profile: { id: WORK_ID, hue: 288 }, usage: { complete: true, browsers: [{ browserId: 'b-1', state: 'open' }] } })
     inUse = false
 
-    expect((await run(['create', '--label', 'Release review'])).body.result).toMatchObject({ revision: 4, profile: { label: 'Release review', isDefault: false } })
+    expect((await run(['create', '--operation-id', 'create-original', '--label', 'Release review'])).body.result).toMatchObject({ revision: 4, creation: { receipt: { operationId: 'create-original', createdId: 'N3wPr0f1leXy' } } })
     expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '3', '--label', 'Northwind', '--hue', '300', '--notes', ''])).body.result)
       .toMatchObject({ revision: 5, profile: { id: WORK_ID, label: 'Northwind', hue: 300, notes: '' } })
     expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '5', '--clear-hue'])).body.result.profile).not.toHaveProperty('hue')
@@ -170,7 +172,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
     expect(requests()).toEqual([
       { operation: 'browser.profile.ls' },
       { operation: 'browser.profile.inspect', profileId: WORK_ID },
-      { operation: 'browser.profile.create', label: 'Release review' },
+      { operation: 'browser.profile.create', operationId: 'create-original', label: 'Release review' },
       { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: '3', edit: { label: 'Northwind', hue: 300, notes: '' } },
       { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: '5', edit: { hue: null } },
       { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: '6',

@@ -37,7 +37,10 @@ const port = vi.hoisted(() => {
     importProfile: vi.fn()
   }
 })
-vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port } }))
+vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: { ...port,
+  createProfileIdentity: async (input: any) => { const created = await port.createProfile(input.label); return { revision: port.get().revision, creation: { operationId: input.operationId, receipt: { createdId: created.id }, current: { state: 'present' }, durability: 'confirmed' } } },
+  inspectProfileCreation: async () => ({ creation: { receipt: null } })
+}, ui: { requestStorageFlush: async () => {} } } }))
 const store = vi.hoisted(() => ({
   tabs: {} as Record<string, unknown>,
   config: { browser: { agentAutomation: true } } as { browser: { agentAutomation: boolean; exitCheckUrl?: string } },
@@ -71,7 +74,7 @@ async function select(label: string) {
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  browserProfiles.reset(); port.listeners.clear()
+  localStorage.clear(); browserProfiles.reset(); port.listeners.clear()
   for (const fn of [port.readProfiles, port.updateProfile, port.setDefaultProfile, port.createProfile, port.deleteProfile,
     port.readProfileProxySignIn, port.setProfileProxySignIn]) fn.mockClear()
   port.set({ revision: 4, sequence: 4, folders: [], views: [], profiles: [personal, client] })

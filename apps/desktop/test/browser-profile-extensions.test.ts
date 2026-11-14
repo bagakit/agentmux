@@ -43,7 +43,7 @@ async function fixture() {
   }
   const sessions = createBrowserProfileSessions({ session: native, network: () => undefined, openContents: () => [] })
   const manager = new BrowserProfileManager(store, sessions, () => root); await manager.initialize()
-  const profile = manager.listProfiles()[0]!, other = await manager.createProfile('Independent Profile')
+  const profile = manager.listProfiles()[0]!, other = await manager.createProfile('Independent Profile', crypto.randomUUID(), profileCreationTestActor)
   const reviews: any[] = []
   manager.extensions.setConfirmationHandler(async review => { reviews.push(structuredClone(review)); return consent })
   const token = () => manager.listProfiles().find(item => item.id === profile.id)!.revision
@@ -306,3 +306,5 @@ describe('Profile extensions share the original configuration and native Session
     } finally { await server.stop(); await core.dispose() }
   }, 30_000)
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

@@ -149,8 +149,8 @@ describe('BrowserProfileStore', () => {
     await store.listProfiles()
 
     const [{ profile: first }, { profile: second }] = await Promise.all([
-      store.createProfile('Research'),
-      store.createProfile('Development')
+      store.createProfile('Research', crypto.randomUUID(), profileCreationTestActor),
+      store.createProfile('Development', crypto.randomUUID(), profileCreationTestActor)
     ])
 
     expect(first).toMatchObject({ label: 'Research', isDefault: false, source: null })
@@ -158,7 +158,7 @@ describe('BrowserProfileStore', () => {
     expect(first.id).not.toBe(second.id)
     expect(await store.listProfiles()).toEqual(expect.arrayContaining([first, second]))
     expect(JSON.parse(await readFile(path, 'utf8')).profiles).toHaveLength(3)
-    await expect(store.createProfile(' Development ')).rejects.toThrow('surrounding whitespace')
+    await expect(store.createProfile(' Development ', crypto.randomUUID(), profileCreationTestActor)).rejects.toThrow('surrounding whitespace')
     expect(JSON.parse(await readFile(path, 'utf8')).profiles).toHaveLength(3)
   })
 
@@ -178,11 +178,11 @@ describe('BrowserProfileStore', () => {
     const before = await readFile(path, 'utf8')
     mockedFs.rename.mockRejectedValueOnce(new Error('rename failed'))
 
-    await expect(store.createProfile('Will fail')).rejects.toThrow('rename failed')
+    await expect(store.createProfile('Will fail', crypto.randomUUID(), profileCreationTestActor)).rejects.toThrow('rename failed')
 
     expect(await readFile(path, 'utf8')).toBe(before)
     expect(await readdir(root)).toEqual(['browser-profiles.json'])
-    await expect(store.createProfile('After failure')).resolves.toMatchObject({ profile: { label: 'After failure' } })
+    await expect(store.createProfile('After failure', crypto.randomUUID(), profileCreationTestActor)).resolves.toMatchObject({ profile: { label: 'After failure' } })
   })
 
   it('commits a pending fresh import as one Profile transition without persisting private source data', async () => {
@@ -298,3 +298,5 @@ describe('BrowserProfileStore', () => {
     expect(await store.listPendingImports()).toEqual([pending])
   })
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

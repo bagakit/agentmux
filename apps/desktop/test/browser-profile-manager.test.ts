@@ -236,7 +236,7 @@ describe('BrowserProfileManager', () => {
   it('requires a current user confirmation bound to the exact Profile before deletion', async () => {
     const { manager } = managerFixture()
     await manager.initialize()
-    await manager.createProfile('Work')
+    await manager.createProfile('Work', crypto.randomUUID(), profileCreationTestActor)
 
     await expect(manager.deleteProfile(CREATED_ID, undefined as never)).rejects.toMatchObject({
       code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
@@ -276,7 +276,7 @@ describe('BrowserProfileManager', () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
 
-    const created = await manager.createProfile('Work')
+    const created = await manager.createProfile('Work', crypto.randomUUID(), profileCreationTestActor)
     expect(created).toMatchObject({ id: CREATED_ID, label: 'Work' })
     expect(JSON.stringify(manager.listProfiles())).not.toContain('partition')
 
@@ -290,7 +290,7 @@ describe('BrowserProfileManager', () => {
     manager.onChange(snapshot => heard.push(snapshot))
     // Another writer of the same file committed a rename; the next commit through this Main carries it.
     store.profiles[0] = { ...store.profiles[0]!, label: 'Renamed elsewhere' }
-    await manager.createProfile('Work')
+    await manager.createProfile('Work', crypto.randomUUID(), profileCreationTestActor)
     expect(manager.listProfiles().map(profile => profile.label)).toEqual(['Renamed elsewhere', 'Work'])
     expect(heard).toEqual([{ trash: [], legacyPendingDeletes: [], revision: 1, sequence: 1, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], views: [], proxyAssets: [], profiles: manager.listProfiles() }])
     heard[0]!.profiles[0]!.label = 'Mutated by a subscriber'
@@ -367,7 +367,7 @@ describe('BrowserProfileManager', () => {
       return await createProfile(label)
     })
 
-    const creating = manager.createProfile('Work')
+    const creating = manager.createProfile('Work', crypto.randomUUID(), profileCreationTestActor)
     await vi.waitFor(() => expect(createStarted).toBe(true))
     let disposed = false
     const disposing = manager.dispose().then(() => { disposed = true })
@@ -543,3 +543,5 @@ describe('BrowserProfileManager', () => {
     expect(electronMocks.sessionFor(partition(IMPORT_ID)).clearStorageData).toHaveBeenCalledOnce()
   })
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

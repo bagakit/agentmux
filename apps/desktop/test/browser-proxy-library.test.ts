@@ -32,8 +32,8 @@ const edit = { label: 'Local proxy', server: 'http://proxy.example:8080', notes:
 
 describe('stable proxy assets on the original Profile and native route owners', () => {
   it('keeps original IDs, pinned versions and routes across independent asset edits and a fresh owner read', async () => {
-    const { manager, path, id, native } = await fixture(), other = await manager.createProfile('Independent')
-    const { proxy } = await manager.saveProxy(edit), initial = items(manager, [id])
+    const { manager, path, id, native } = await fixture(), other = await manager.createProfile('Independent', crypto.randomUUID(), profileCreationTestActor)
+    const { proxy } = await manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor }), initial = items(manager, [id])
     expect(manager.listProfiles()[0]!.networkApplication).toBeUndefined()
     expect(native.size).toBe(0)
     const result = await manager.assignProxy(proxy.id, proxy.revision, initial)
@@ -47,15 +47,15 @@ describe('stable proxy assets on the original Profile and native route owners', 
     const restarted = new BrowserProfileManager(new BrowserProfileStore(path), { prepare: async () => {}, apply: async () => {}, observe: () => {} } as never)
     await restarted.initialize()
     expect(restarted.listProxies()).toEqual([changed]); expect(restarted.listProfiles().find(profile => profile.id === id)).toMatchObject({ id, network: bound.network, proxyBinding: bound.proxyBinding })
-    const copy = await manager.copyProfile(id, 'Copy settings', bound.revision)
+    const copy = await manager.copyProfile(id, 'Copy settings', bound.revision, crypto.randomUUID(), profileCreationTestActor)
     expect(copy).toMatchObject({ proxyBinding: bound.proxyBinding, network: bound.network, source: null }); expect(native.has(copy.id)).toBe(false)
     await expect(manager.deleteProxy(proxy.id, changed.revision)).rejects.toMatchObject({ code: 'BROWSER_PROXY_IN_USE' })
     const external = manager.listProxies(); external[0]!.label = 'Caller mutation'; expect(manager.listProxies()[0]!.label).toBe(edit.label)
   })
 
   it('freezes ordered exact selections, continues partial conflicts and never adds a later matching Profile', async () => {
-    const { manager, id, native } = await fixture(), second = await manager.createProfile('Same name'), third = await manager.createProfile('Same name')
-    const { proxy } = await manager.saveProxy(edit), selected = items(manager, [id, second.id])
+    const { manager, id, native } = await fixture(), second = await manager.createProfile('Same name', crypto.randomUUID(), profileCreationTestActor), third = await manager.createProfile('Same name', crypto.randomUUID(), profileCreationTestActor)
+    const { proxy } = await manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor }), selected = items(manager, [id, second.id])
     await manager.updateProfile(second.id, { notes: 'Newer original input' }, selected[1]!.expectedRevision)
     const results = await manager.assignProxy(proxy.id, proxy.revision, selected)
     expect(results.map(row => [row.profileId, row.expectedRevision, row.outcome])).toEqual([[id, selected[0]!.expectedRevision, 'updated'], [second.id, selected[1]!.expectedRevision, 'failed']])
@@ -67,7 +67,7 @@ describe('stable proxy assets on the original Profile and native route owners', 
   })
 
   it('rechecks an asset changed while native apply awaits, then rolls the original route back without publishing a false binding', async () => {
-    const { manager, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit)
+    const { manager, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     manager.prepareSession(id); const target = native.get(id)!, hold = gate(), entered = gate()
     target.setProxy.mockImplementationOnce(async () => { entered.release(); await hold.promise })
     const pending = manager.assignProxy(proxy.id, proxy.revision, items(manager, [id]))
@@ -81,7 +81,7 @@ describe('stable proxy assets on the original Profile and native route owners', 
   })
 
   it('serializes same-Profile edits, preserves independent Profiles and clears provenance only on explicit manual route edits', async () => {
-    const { manager, native, id } = await fixture(), second = await manager.createProfile('Other'), { proxy } = await manager.saveProxy(edit)
+    const { manager, native, id } = await fixture(), second = await manager.createProfile('Other', crypto.randomUUID(), profileCreationTestActor), { proxy } = await manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     manager.prepareSession(id); const hold = gate(), entered = gate(), target = native.get(id)!
     target.setProxy.mockImplementationOnce(async () => { entered.release(); await hold.promise })
     const before = items(manager, [id])[0]!, first = manager.assignProxy(proxy.id, proxy.revision, [before]); await entered.promise
@@ -97,7 +97,7 @@ describe('stable proxy assets on the original Profile and native route owners', 
   })
 
   it('keeps a route whose setProxy or connection-close ACK is unknown distinct from confirmed native configuration', async () => {
-    const { manager, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit)
+    const { manager, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     manager.prepareSession(id); const target = native.get(id)!
     expect(manager.listProfiles()[0]!.networkApplication!.status).toBe('unknown')
     target.closeAllConnections.mockRejectedValue(new Error('Native close reply unavailable'))
@@ -108,7 +108,7 @@ describe('stable proxy assets on the original Profile and native route owners', 
   })
 
   it('observes a committed original file after a lost write ACK without publishing the old cached binding or replaying native apply', async () => {
-    const { manager, store, id, native } = await fixture(), { proxy } = await manager.saveProxy(edit)
+    const { manager, store, id, native } = await fixture(), { proxy } = await manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     const write = store.updateProfile.bind(store)
     vi.spyOn(store, 'updateProfile').mockImplementationOnce(async (...args) => { await write(...args); throw Object.assign(new Error('The original metadata write acknowledgement was lost. Inspect the original Profile before retrying.'), { code: 'PROFILE_WRITE_UNCONFIRMED' }) })
     const result = await manager.assignProxy(proxy.id, proxy.revision, items(manager, [id]))
@@ -122,10 +122,10 @@ describe('stable proxy assets on the original Profile and native route owners', 
   })
 
   it('never initializes a missing original catalog while reconciling an unconfirmed proxy write', async () => {
-    const { manager, store, path, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit)
+    const { manager, store, path, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     const original = await readFile(path)
     vi.spyOn(store, 'saveProxy').mockImplementationOnce(async () => { await rename(path, path + '.held'); throw new Error('Original proxy write acknowledgement unavailable') })
-    await expect(manager.saveProxy({ ...edit, label: 'Unconfirmed edit' })).rejects.toMatchObject({ code: 'BROWSER_PROFILE_WRITE_UNCONFIRMED' })
+    await expect(manager.saveProxy({ ...edit, label: 'Unconfirmed edit' }, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })).rejects.toMatchObject({ code: 'BROWSER_PROFILE_WRITE_UNCONFIRMED' })
     await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(manager.listProfiles()[0]!.id).toBe(id); expect(manager.listProxies()).toEqual([proxy]); expect(native.size).toBe(0)
     expect(await readFile(path + '.held')).toEqual(original)
@@ -145,7 +145,7 @@ describe('stable proxy assets on the original Profile and native route owners', 
     const oldRecord = JSON.parse(await readFile(authPath, 'utf8')); delete oldRecord.profiles[id].proxy; await writeFile(authPath, JSON.stringify(oldRecord))
     const auth = createBrowserProfileProxyAuth(ports)
     manager.bindProxyCredentialsBeforeNetworkChange = profileId => auth.bindCurrentProxy(profileId)
-    const { proxy } = await manager.saveProxy({ label: 'Replacement', server: 'http://replacement.example:8181' })
+    const { proxy } = await manager.saveProxy({ label: 'Replacement', server: 'http://replacement.example:8181' }, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })
     expect(await manager.assignProxy(proxy.id, proxy.revision, items(manager, [id]))).toMatchObject([{ outcome: 'updated' }])
     const stored = JSON.parse(await readFile(authPath, 'utf8'))
     expect(stored.profiles[id].proxy).toEqual({ host: 'proxy.example', port: 8080 })
@@ -157,16 +157,16 @@ describe('stable proxy assets on the original Profile and native route owners', 
   })
 
   it('preserves unreadable source bytes and does not mint a substitute library or send a native request', async () => {
-    const { manager, path, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit), selected = items(manager, [id])
+    const { manager, path, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor }), selected = items(manager, [id])
     const bytes = '{retain original unreadable library bytes'; await writeFile(path, bytes)
-    await expect(manager.saveProxy(edit)).rejects.toThrow(); await expect(manager.deleteProxy(proxy.id, proxy.revision)).rejects.toThrow()
+    await expect(manager.saveProxy(edit, undefined, undefined, { operationId: crypto.randomUUID(), actor: profileCreationTestActor })).rejects.toThrow(); await expect(manager.deleteProxy(proxy.id, proxy.revision)).rejects.toThrow()
     expect(await manager.assignProxy(proxy.id, proxy.revision, selected)).toMatchObject([{ outcome: 'failed' }])
     expect(await readFile(path, 'utf8')).toBe(bytes); expect(native.size).toBe(0)
     expect(manager.listProxies()).toEqual([proxy])
   })
 
   it('runs distinct compiled CLI asset CRUD and exact assignment through original RPC/Main owners', async () => {
-    const { root, manager, id, native } = await fixture(), other = await manager.createProfile('CLI other')
+    const { root, manager, id, native } = await fixture(), other = await manager.createProfile('CLI other', crypto.randomUUID(), profileCreationTestActor)
     const core = await privateRpcCorePort(join(root, 'sessions.json'), join(root, 'messages.ndjson'))
     const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: core.clients, execute: async (request, context) => {
       if (!isBrowserProfileControlRequest(request)) throw new Error('Unexpected operation')
@@ -176,7 +176,7 @@ describe('stable proxy assets on the original Profile and native route owners', 
     try {
       const env = objectCliEnvironment(root, { NODE_NO_WARNINGS: '1' }), run = async (args: string[]) => { const reply = await runCompiledObjectCli(['browser', 'profile', ...args], env); expect(reply.code, reply.stderr).toBe(0); return JSON.parse(reply.stdout).result }
       expect((await run(['proxy', 'ls'])).proxies).toEqual([])
-      const { proxy } = await run(['proxy', 'create', '--edit', JSON.stringify(edit)]), selected = items(manager, [id, other.id])
+      const created = await run(['proxy', 'create', '--operation-id', 'proxy-cli-original', '--edit', JSON.stringify(edit)]), proxy = manager.listProxies().find(value => value.id === created.creation.receipt.createdId)!, selected = items(manager, [id, other.id])
       await manager.updateProfile(other.id, { notes: 'Newer edit' }, selected[1]!.expectedRevision)
       const receipt = await run(['proxy', 'assign', '--proxy', proxy.id, '--expected-revision', proxy.revision, '--items', JSON.stringify(selected)])
       expect(receipt.results.map((row: any) => [row.profileId, row.outcome])).toEqual([[id, 'updated'], [other.id, 'failed']])
@@ -189,8 +189,10 @@ describe('stable proxy assets on the original Profile and native route owners', 
       await run(['proxy', 'delete', '--proxy', proxy.id, '--expected-revision', updated.revision]); expect(manager.listProxies()).toEqual([])
       expect((await runCompiledObjectCli(['browser', 'profile', 'proxy', 'assign', '--help'], env)).stdout).toContain('never a query')
       expect((await runCompiledObjectCli(['browser', '--skill'], env)).stdout).toContain('proxy assign --proxy ID')
-      expect(() => parseBrowserProfileControlPayload({ operation: 'browser.profile.proxy.create', edit: { ...edit, password: 'do-not-echo' } }, ['operation'])).toThrow(/unsupported fields/)
+      expect(() => parseBrowserProfileControlPayload({ operation: 'browser.profile.proxy.create', operationId: 'malformed-proxy-original', edit: { ...edit, password: 'do-not-echo' } }, ['operation'])).toThrow(/unsupported fields/)
       expect(() => assertBrowserProfileControlTarget({ operation: 'browser.profile.proxy.assign', proxyId: proxy.id, expectedRevision: proxy.revision, items: selected }, { operation: 'browser.profile.proxy.assign', ...receipt, proxyId: 'wrong-original-id' })).toThrow(/exact asset/)
     } finally { await server.stop(); await core.dispose() }
   }, 45_000)
 })
+
+const profileCreationTestActor = { kind: 'user' as const, id: 'original-test-author', verified: true }

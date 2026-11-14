@@ -1046,6 +1046,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'browser.history': 'short',
       'browser.profile.ls': 'short',
       'browser.profile.inspect': 'short',
+      'browser.profile.creation.inspect': 'short',
       'browser.profile.create': 'long',
       'browser.profile.folder.create': 'long',
       'browser.profile.folder.rename': 'long',
