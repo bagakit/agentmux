@@ -1,12 +1,13 @@
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { BrowserProfileDeleteApproval } from '../shared/contracts.js'
+import type { BrowserProfileNativeUse, BrowserProfileRecycleReceipt } from '@agentmux/core/control'
 
 export type SavedBrowserUse = { browserId: string; workspaceId?: string; title: string; url: string }
 
 /** One Browser that holds a Profile: open has a native owner now, saved restores into it later. */
 export type BrowserProfileUse = { browserId: string; workspaceId?: string; title: string; url: string; state: 'open' | 'saved' }
 /** complete is false when saved Tabs could not be read; the list then names only open Browsers. */
-export type BrowserProfileUsage = { browsers: BrowserProfileUse[]; complete: boolean }
+export type BrowserProfileUsage = { browsers: BrowserProfileUse[]; complete: boolean; native?: BrowserProfileNativeUse }
 
 /**
  * Saved Browser Regions that still name a Profile. A Region that has not been
@@ -31,8 +32,8 @@ export type BrowserProfileUsagePorts = {
   open(profileId: string): { browserId: string; workspaceId: string | null; title: string; url: string }[]
   /** null means no saved Tabs exist yet (known empty); a rejection means the saved Tabs are unknown. */
   readSaved(): Promise<{ graph: AgentMuxSpatialGraph } | null>
-  deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
-  clearPreviews(profileId: string): Promise<{ status: 'removed' | 'unavailable'; warning?: string }>
+  nativeUse(profileId: string): BrowserProfileNativeUse
+  deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string, assertUnused: () => Promise<void>): Promise<BrowserProfileRecycleReceipt>
 }
 
 function profileError(message: string, code: string, extra: Record<string, unknown> = {}, cause?: unknown): Error {
@@ -60,18 +61,20 @@ export function createBrowserProfileUsage(ports: BrowserProfileUsagePorts) {
       // Read open owners after the saved read so a Browser that starts using the Profile meanwhile is seen.
       const open = openUses(ports, profileId)
       const ids = new Set(open.map(use => use.browserId))
-      return { browsers: [...open, ...(saved ? savedUses(saved.graph, profileId, ids) : [])], complete }
+      return { browsers: [...open, ...(saved ? savedUses(saved.graph, profileId, ids) : [])], complete, native: ports.nativeUse(profileId) }
     },
 
-    async deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void> {
+    async deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string): Promise<BrowserProfileRecycleReceipt> {
+      // The manager invokes this guard inside the same per-Profile configuration queue and again
+      // after source IO, while new native admission is fenced. Nothing is removed before commit.
+      return ports.deleteProfile(profileId, approval, expectedRevision, async () => {
       let saved: { graph: AgentMuxSpatialGraph } | null
       try { saved = await ports.readSaved() }
       catch (cause) {
-        throw profileError('Saved Tabs could not be read, so it is unknown whether a Browser still needs this Profile. Nothing was deleted; try again.',
+        throw profileError('Saved Tabs could not be read, so it is unknown whether a Browser still needs this Profile. Its original data is kept; try again.',
           'BROWSER_PROFILE_USAGE_UNKNOWN', {}, cause)
       }
-      // Checked after the read and in the same turn as the manager's synchronous removal, so a
-      // Browser that starts using this Profile while saved Tabs are read is still seen.
+      // Read current native owners after the saved read, including candidates and closing pages.
       const open = openUses(ports, profileId)
       const ids = new Set(open.map(use => use.browserId))
       const savedList = saved ? savedUses(saved.graph, profileId, ids) : []
@@ -84,17 +87,16 @@ export function createBrowserProfileUsage(ports: BrowserProfileUsagePorts) {
         throw profileError(`Browser Profile is still used by the saved Browser "${name}"${savedList.length > 1 ? ` and ${savedList.length - 1} more` : ''}. Open it and switch it to another Profile, or close it, then delete again.`,
           'BROWSER_PROFILE_IN_USE', { details: { browsers } })
       }
-      const clearPreviews = async () => {
-        const cleared = await ports.clearPreviews(profileId)
-        if (cleared.status === 'unavailable') console.warn('Browser Profile was deleted; its historical preview cleanup is unconfirmed:', cleared.warning)
+      const native = ports.nativeUse(profileId)
+      if (native.status === 'unknown') {
+        throw profileError('Native Profile use could not be confirmed. Original Profile data is kept; retry after its workers, requests and downloads can be read.',
+          'BROWSER_PROFILE_USAGE_UNKNOWN', { details: { native } })
       }
-      try { await ports.deleteProfile(profileId, approval) }
-      catch (error) {
-        // Deleted, with its site data still to clear: the deleted Profile's previews go now as well.
-        if ((error as { code?: unknown } | null)?.code === 'BROWSER_PROFILE_DATA_CLEAR_PENDING') await clearPreviews()
-        throw error
+      if (native.status !== 'idle') {
+        throw profileError('This Profile still has native workers, requests or downloads. Let them finish before recycling; their existing work remains available.',
+          'BROWSER_PROFILE_IN_USE', { details: { native } })
       }
-      await clearPreviews()
+      })
     }
   }
 }

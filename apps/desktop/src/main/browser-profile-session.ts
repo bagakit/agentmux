@@ -1,7 +1,7 @@
-import type { BrowserProfileNetworkApplication, BrowserProfileEnvironment } from '@agentmux/core/control'
+import type { BrowserProfileNetworkApplication, BrowserProfileEnvironment, BrowserProfileNativeUse } from '@agentmux/core/control'
 import type { BrowserProfilePageEnvironmentPorts } from './browser-profile-page-environment.js'
 import { createBrowserProfileEnvironment } from './browser-profile-environment.js'
-import type { Session, WebContents } from 'electron'
+import type { Session, WebContents, DownloadItem } from 'electron'
 import { browserProfileProxyConfig, type BrowserProfileNetwork } from '../shared/browser-profile-network.js'
 
 /**
@@ -15,6 +15,7 @@ import { browserProfileProxyConfig, type BrowserProfileNetwork } from '../shared
  */
 export type BrowserProfileSessionPorts = {
   session(profileId: string): Session
+  retainedSession?(profileId: string): Session
   network(profileId: string): BrowserProfileNetwork | undefined
   environment?(profileId: string): BrowserProfileEnvironment | undefined
   defaultLanguage?(): string
@@ -33,13 +34,46 @@ function routeKey(network: BrowserProfileNetwork | undefined): string {
   return JSON.stringify(network ?? { mode: 'system' })
 }
 
+type NativeSessionObservation = { profileId: string; requests: Set<number>; downloads: Set<DownloadItem>; issue: string | null }
+// One original native Session owns these event facts, shared by any client of the same Session.
+const nativeSessionObservations = new WeakMap<Session, NativeSessionObservation>()
+const nativeProfileSessions = new Map<string, Session>()
+function observeNativeSession(target: Session, profileId: string): NativeSessionObservation {
+  const existing = nativeSessionObservations.get(target)
+  if (existing) { if (existing.profileId !== profileId) throw new Error('Native Session ownership differs from this Profile'); return existing }
+  const observation: NativeSessionObservation = { profileId, requests: new Set(), downloads: new Set(), issue: null }
+  nativeSessionObservations.set(target, observation)
+  try {
+    // Normal Profile sessions only. Capsule response listeners own their separate Capsule partitions.
+    target.webRequest.onBeforeRequest((details, callback) => {
+      try { observation.requests.add(details.id) }
+      catch { observation.issue = 'Request observation is unavailable; original native work remains available.' }
+      finally { callback({}) }
+    })
+    target.webRequest.onCompleted(details => { observation.requests.delete(details.id) })
+    target.webRequest.onErrorOccurred(details => { observation.requests.delete(details.id) })
+    target.on('will-download', (_event, item) => {
+      observation.downloads.add(item)
+      item.on('done', () => {
+        try { if (item.getState() === 'completed' || item.getState() === 'cancelled' || item.getState() === 'interrupted' && !item.canResume()) observation.downloads.delete(item) }
+        catch { /* Keep the exact unknown native item; a failed observation cannot prove it ended. */ }
+      })
+    })
+  } catch { observation.issue = 'Native use observation could not be established. The original Profile remains available.' }
+  return observation
+}
+
 export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) {
+  const ownedSession = (profileId: string, retained = false): Session => {
+    const target = retained && ports.retainedSession ? ports.retainedSession(profileId) : ports.session(profileId)
+    observeNativeSession(target, profileId); nativeProfileSessions.set(profileId, target)
+    return target
+  }
   const environment = ports.environment && ports.defaultLanguage ? createBrowserProfileEnvironment({
-    session: ports.session, settings: ports.environment, defaultLanguage: ports.defaultLanguage
+    session: ownedSession, settings: ports.environment, defaultLanguage: ports.defaultLanguage
   }) : undefined
   // What each session currently uses, and the one application in flight for it.
   const applied = new WeakMap<Session, { key: string; confirmed: boolean }>()
-  const owners = new Map<string, Session>()
   const pending = new WeakMap<Session, { key: string; done: Promise<void> }>()
   // Sessions whose route is a proxy: their pages must not send WebRTC around it.
   const proxied = new WeakSet<Session>()
@@ -52,7 +86,6 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
     const done = (async () => {
       // One route at a time per session: a newer route waits for the one in flight, then wins.
       await running?.done.catch(() => {})
-      owners.set(profileId, target)
       applied.delete(target)
       try {
         await target.setProxy(browserProfileProxyConfig(network ?? { mode: 'system' }))
@@ -72,6 +105,22 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
   }
 
   return {
+    nativeSession(profileId: string): Session { return ownedSession(profileId) },
+    retainedSession(profileId: string): Session { return ownedSession(profileId, true) },
+    profileOfSession(target: Session): string | null { return nativeSessionObservations.get(target)?.profileId ?? null },
+    nativeUse(profileId: string): BrowserProfileNativeUse {
+      const target = nativeProfileSessions.get(profileId)
+      // This factory has never admitted that Profile's native Session in this process.
+      if (!target) return { status: 'idle', pages: 0, workers: 0, requests: 0, downloads: 0 }
+      const observed = nativeSessionObservations.get(target)
+      if (!observed || observed.issue) return { status: 'unknown', pages: null, workers: null, requests: null, downloads: null, reason: observed?.issue ?? 'Native Profile use has not been observed.' }
+      try {
+        for (const item of observed.downloads) if (item.getState() === 'completed' || item.getState() === 'cancelled' || item.getState() === 'interrupted' && !item.canResume()) observed.downloads.delete(item)
+        const pages = ports.openContents().filter(contents => !contents.isDestroyed() && contents.session === target).length
+        const workers = Object.keys(target.serviceWorkers.getAllRunning()).length, requests = observed.requests.size, downloads = observed.downloads.size
+        return { status: pages || workers || requests || downloads ? 'in-use' : 'idle', pages, workers, requests, downloads }
+      } catch { return { status: 'unknown', pages: null, workers: null, requests: observed.requests.size, downloads: null, reason: 'Native workers or downloads could not be observed. The original Profile and work are kept.' } }
+    },
     /**
      * Await before creating or restoring any page of this Profile. Returns nothing when there is
      * nothing to apply: a session that was never given a route already follows the system settings,
@@ -79,8 +128,7 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
      */
     prepare(profileId: string): Promise<void> | undefined {
       environment?.prepare(profileId)
-      const target = ports.session(profileId), network = ports.network(profileId)
-      owners.set(profileId, target)
+      const target = ownedSession(profileId), network = ports.network(profileId)
       const key = routeKey(network)
       if (applied.get(target)?.key === key) return undefined
       if (!applied.has(target) && !pending.has(target) && network === undefined) { applied.set(target, { key, confirmed: false }); return undefined }
@@ -88,7 +136,7 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
     },
 
     networkApplication(profileId: string, configured: BrowserProfileNetwork | undefined): BrowserProfileNetworkApplication | undefined {
-      const target = owners.get(profileId), key = routeKey(configured)
+      const target = nativeProfileSessions.get(profileId), key = routeKey(configured)
       if (!target && configured === undefined) return undefined
       return { scope: 'session-proxy-config', status: !target ? 'unknown' : pending.get(target)?.key === key ? 'pending' : applied.get(target)?.key === key && applied.get(target)!.confirmed ? 'applied' : 'unknown' }
     },
@@ -102,7 +150,7 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
 
     /** A saved route change: apply it now, so open pages reconnect through the new route. */
     async apply(profileId: string, network: BrowserProfileNetwork | undefined): Promise<void> {
-      await apply(ports.session(profileId), network, profileId)
+      await apply(ownedSession(profileId), network, profileId)
     },
 
     /**

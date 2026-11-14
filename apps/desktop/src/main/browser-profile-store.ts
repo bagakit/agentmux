@@ -2,7 +2,7 @@ import { parseBrowserProxyEdit, parseBrowserProxyAsset, type BrowserProxyAsset, 
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, isAbsolute } from 'node:path'
 import { app } from 'electron'
 import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
@@ -112,6 +112,15 @@ const pendingImportSchema = z
   })
   .strict()
 
+const retainedPartitionSchema = z.object({
+  partition: z.string().min(1),
+  relativePath: z.string().min(1).refine(value => !isAbsolute(value) && !value.split(/[\\/]/u).some(part => !part || part === '..' || part === '.'), 'Retained data must stay inside its original session root')
+}).strict()
+export type BrowserProfileRetainedPartition = z.infer<typeof retainedPartitionSchema>
+const trashRecordSchema = z.object({ id: folderIdSchema, revision: z.string().min(1), archivedAt: nonNegativeSafeIntegerSchema,
+  profile: profileRecordSchema, data: retainedPartitionSchema }).strict()
+export type BrowserProfileTrashRecord = z.infer<typeof trashRecordSchema>
+
 // JSON object key order is not a persistence contract. Parse the same view semantics as public input.
 const viewSchema = z.unknown().transform((value, context): BrowserProfileView => {
   try { return parseBrowserProfileView(value) }
@@ -130,6 +139,7 @@ const metadataSchema = z
     folders: z.array(folderSchema).optional(),
     views: z.array(viewSchema).optional(),
     proxyAssets: z.array(proxyAssetSchema).optional(),
+    trash: z.array(trashRecordSchema).optional(),
     pendingImports: z.array(pendingImportSchema),
     /** Profiles already removed from the list whose site data is not confirmed cleared yet. */
     pendingDeletes: z.array(profileIdSchema).optional()
@@ -141,8 +151,8 @@ const metadataSchema = z
       if (proxyIds.has(proxy.id)) context.addIssue({ code: 'custom', path: ['proxyAssets', index, 'id'], message: 'Duplicate proxy identity' })
       proxyIds.add(proxy.id)
     }
-    for (const [index, profile] of metadata.profiles.entries()) {
-      if (profile.proxyBinding && (!proxyIds.has(profile.proxyBinding.proxyId) || profile.network?.mode !== 'proxy')) context.addIssue({ code: 'custom', path: ['profiles', index, 'proxyBinding'], message: 'Profile proxy binding is missing its asset or route' })
+    for (const { profile, path } of [...metadata.profiles.map((profile, index) => ({ profile, path: ['profiles', index] })), ...(metadata.trash ?? []).map((entry, index) => ({ profile: entry.profile, path: ['trash', index, 'profile'] }))]) {
+      if (profile.proxyBinding && (!proxyIds.has(profile.proxyBinding.proxyId) || profile.network?.mode !== 'proxy')) context.addIssue({ code: 'custom', path: [...path, 'proxyBinding'], message: 'Profile proxy binding is missing its asset or route' })
     }
     const folderIds = new Set<string>()
     for (const [index, folder] of (metadata.folders ?? []).entries()) {
@@ -174,9 +184,16 @@ const metadataSchema = z
       if (viewIds.has(view.id)) context.addIssue({ code: 'custom', path: ['views', index, 'id'], message: 'Duplicate saved Profile view identity' })
       viewIds.add(view.id)
     }
+    const archiveIds = new Set<string>()
+    for (const [index, archive] of (metadata.trash ?? []).entries()) {
+      if (archive.id === archive.profile.id || archiveIds.has(archive.id) || profileIds.has(archive.id) || profileIds.has(archive.profile.id) || archiveIds.has(archive.profile.id) || archive.profile.id === metadata.defaultProfileId || archive.data.partition !== browserProfilePartition(archive.profile.id)) {
+        context.addIssue({ code: 'custom', path: ['trash', index], message: 'Archived Profile identity or original data ownership conflicts' })
+      }
+      archiveIds.add(archive.id); archiveIds.add(archive.profile.id)
+    }
     const pendingIds = new Set<string>()
     for (const [index, pending] of metadata.pendingImports.entries()) {
-      if (profileIds.has(pending.profileId)) {
+      if (profileIds.has(pending.profileId) || archiveIds.has(pending.profileId)) {
         context.addIssue({
           code: 'custom',
           path: ['pendingImports', index, 'profileId'],
@@ -193,7 +210,7 @@ const metadataSchema = z
       pendingIds.add(pending.profileId)
     }
     for (const [index, id] of (metadata.pendingDeletes ?? []).entries()) {
-      if (profileIds.has(id) || pendingIds.has(id)) {
+      if (profileIds.has(id) || pendingIds.has(id) || archiveIds.has(id)) {
         context.addIssue({ code: 'custom', path: ['pendingDeletes', index], message: `Deleted Browser Profile is still listed: ${id}` })
       }
       pendingIds.add(id)
@@ -201,12 +218,12 @@ const metadataSchema = z
   })
 
 type BrowserProfileMetadata = z.infer<typeof metadataSchema>
-type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
+export type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 /** The whole committed list after one write; the manager replaces its cache with it. */
-export type BrowserProfileSnapshot = { proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; activitySources: Record<string, string> }
+export type BrowserProfileSnapshot = { proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
 
 function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
   if (source === null) return null
@@ -215,12 +232,12 @@ function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null
 }
 
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
-  return { proxyAssets: structuredClone(metadata.proxyAssets ?? []), activitySources: Object.fromEntries(metadata.profiles.filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
+  return { proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
     views: structuredClone(metadata.views ?? []), revision: metadata.revision ?? 0, sequence: metadata.sequence ?? metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
     profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
 
-function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string): BrowserProfileSummary {
+export function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string): BrowserProfileSummary {
   return {
     id: profile.id,
     revision: profileConfigurationRevision(profile),
@@ -306,7 +323,7 @@ export class BrowserProfileStore {
   recordActivity(profileId: string, value: BrowserProfileActivityCheckpoint): Promise<BrowserProfileSnapshot> {
     return this.enqueue(async () => {
       const checkpoint = activityCheckpointSchema.parse(value), metadata = await this.readMetadata()
-      const current = metadata.profiles.find(profile => profile.id === profileId)
+      const current = metadata.profiles.find(profile => profile.id === profileId) ?? metadata.trash?.find(entry => entry.profile.id === profileId)?.profile
       if (!current) throw new Error(`Unknown Browser Profile: ${profileId}`)
       const previous = current.activity, same = previous?.checkpoint.observerId === checkpoint.observerId
       if (!same && (previous?.checkpoint.observerId ?? null) !== checkpoint.previousObserverId) {
@@ -322,7 +339,8 @@ export class BrowserProfileStore {
       for (const gap of checkpoint.gaps) gaps.set(gap.id, { ...gap })
       const observedRunMs = (previous?.observedRunMs ?? 0) + checkpoint.unionMs - (same ? previous!.checkpoint.unionMs : 0)
       const activity = profileActivitySchema.parse({ observedRunMs, lastUsedAt: Math.max(previous?.lastUsedAt ?? 0, checkpoint.lastUsedAt), checkpoint, gaps: [...gaps.values()] })
-      return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? { ...profile, activity } : profile) }, false)
+      return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? { ...profile, activity } : profile),
+        ...(metadata.trash ? { trash: metadata.trash.map(entry => entry.profile.id === profileId ? { ...entry, profile: { ...entry.profile, activity } } : entry) } : {}) }, false)
     })
   }
 
@@ -471,7 +489,7 @@ export class BrowserProfileStore {
     return this.enqueue(async () => {
       const metadata = await this.readMetadata()
       this.exactProxy(metadata, proxyId, expectedRevision)
-      if (metadata.profiles.some(profile => profile.proxyBinding?.proxyId === proxyId)) throw Object.assign(new Error('This proxy is still bound to a Profile. Keep it or explicitly change those routes first.'), { code: 'BROWSER_PROXY_IN_USE' })
+      if ([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].some(profile => profile.proxyBinding?.proxyId === proxyId)) throw Object.assign(new Error('This proxy is still bound to an active or recycled Profile. Keep it or explicitly change those routes first.'), { code: 'BROWSER_PROXY_IN_USE' })
       return this.commit({ ...metadata, proxyAssets: (metadata.proxyAssets ?? []).filter(proxy => proxy.id !== proxyId) })
     })
   }
@@ -540,47 +558,40 @@ export class BrowserProfileStore {
     })
   }
 
-  /**
-   * Removes a Profile from the list and records it as deleted in the same write, before any of its
-   * site data is touched. A failed write leaves the Profile and its data as they were; a failed clear
-   * leaves only this record, which the next start clears again.
-   */
-  deleteProfile(profileId: string): Promise<BrowserProfileSnapshot> {
+  archiveProfile(profileId: string, expectedRevision: string, data: BrowserProfileRetainedPartition): Promise<{ snapshot: BrowserProfileSnapshot; archive: BrowserProfileTrashRecord }> {
     return this.enqueue(async () => {
-      const validatedProfileId = profileIdSchema.parse(profileId)
-      const metadata = await this.readOrInitialize()
-      if (metadata.defaultProfileId === validatedProfileId) {
-        throw new Error('The default Browser Profile cannot be deleted')
-      }
-      if (!metadata.profiles.some((profile) => profile.id === validatedProfileId)) {
-        throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
-      }
-      const next = metadataSchema.parse({
-        ...metadata,
-        profiles: metadata.profiles.filter((profile) => profile.id !== validatedProfileId),
-        pendingDeletes: [...(metadata.pendingDeletes ?? []), validatedProfileId]
-      })
-      return await this.commit(next)
+      const id = profileIdSchema.parse(profileId), held = retainedPartitionSchema.parse(data), metadata = await this.readMetadata()
+      if (metadata.defaultProfileId === id) throw new Error('The default Browser Profile cannot be recycled')
+      const profile = metadata.profiles.find(value => value.id === id)
+      if (!profile) throw new Error(`Unknown active Browser Profile: ${id}`)
+      this.assertProfileRevision(profile, expectedRevision)
+      if (held.partition !== browserProfilePartition(id)) throw new Error('Retained data belongs to another Profile')
+      const archive: BrowserProfileTrashRecord = { id: this.createUnusedProfileId(metadata), revision: mintObjectId(), archivedAt: Date.now(), profile: structuredClone(profile), data: held }
+      const snapshot = await this.commit({ ...metadata, profiles: metadata.profiles.filter(value => value.id !== id), trash: [...(metadata.trash ?? []), archive] })
+      return { snapshot, archive: structuredClone(archive) }
     })
   }
 
-  listPendingDeletes(): Promise<string[]> {
-    return this.enqueue(async () => [...((await this.readOrInitialize()).pendingDeletes ?? [])])
+  inspectArchive(archiveId: string): Promise<{ snapshot: BrowserProfileSnapshot; archive: BrowserProfileTrashRecord }> {
+    return this.enqueue(async () => {
+      const id = folderIdSchema.parse(archiveId), metadata = await this.readMetadata(), archive = metadata.trash?.find(value => value.id === id)
+      if (!archive) throw new Error(`Unknown archived Profile: ${id}`)
+      return { snapshot: snapshotOf(metadata), archive: structuredClone(archive) }
+    })
   }
 
-  /**
-   * The deleted Profile's site data is confirmed cleared; forget the record. The list is unchanged,
-   * so the revision stays: an edit made against the list after the delete is not refused for this.
-   */
-  finishDelete(profileId: string): Promise<void> {
+  restoreProfile(archiveId: string, expectedRevision: string, folderOverride?: string | null): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {
-      const validatedProfileId = profileIdSchema.parse(profileId)
-      const metadata = await this.readOrInitialize()
-      const pending = metadata.pendingDeletes ?? []
-      if (!pending.includes(validatedProfileId)) throw new Error(`Unknown deleted Browser Profile: ${validatedProfileId}`)
-      const rest = pending.filter((id) => id !== validatedProfileId)
-      const { pendingDeletes: _done, ...kept } = metadata
-      await this.writeMetadata(metadataSchema.parse(rest.length ? { ...kept, pendingDeletes: rest } : kept))
+      const id = folderIdSchema.parse(archiveId), metadata = await this.readMetadata(), archive = metadata.trash?.find(value => value.id === id)
+      if (!archive) throw new Error(`Unknown archived Profile: ${id}`)
+      if (archive.revision !== expectedRevision) throw new BrowserProfileConfigurationConflict(archive.revision)
+      if (metadata.profiles.some(profile => profile.id === archive.profile.id) || metadata.pendingImports.some(pending => pending.profileId === archive.profile.id) || metadata.pendingDeletes?.includes(archive.profile.id)) throw new Error('The original Profile identity is already owned. Nothing was overwritten.')
+      const profile: BrowserProfileRecord = { ...structuredClone(archive.profile), revision: mintObjectId() }
+      if (folderOverride === null) delete profile.folderId
+      else if (folderOverride !== undefined) profile.folderId = folderIdSchema.parse(folderOverride)
+      if (profile.folderId !== undefined && !(metadata.folders ?? []).some(folder => folder.id === profile.folderId)) throw Object.assign(new Error('The original folder is unavailable. Explicitly choose a current folder or restore unfiled; the archive is kept.'), { code: 'BROWSER_PROFILE_RESTORE_FOLDER_CONFLICT' })
+      const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile], trash: metadata.trash!.filter(value => value.id !== id) })
+      return { snapshot, profile: profileSummary(profile, metadata.defaultProfileId) }
     })
   }
 
@@ -689,7 +700,7 @@ export class BrowserProfileStore {
     do { id = mintObjectId() } while (
       metadata.profiles.some((profile) => profile.id === id) ||
       metadata.pendingImports.some((pending) => pending.profileId === id) ||
-      (metadata.proxyAssets ?? []).some(proxy => proxy.id === id) || (metadata.pendingDeletes ?? []).includes(id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
+      (metadata.proxyAssets ?? []).some(proxy => proxy.id === id) || (metadata.pendingDeletes ?? []).includes(id) || (metadata.trash ?? []).some(entry => entry.id === id || entry.profile.id === id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
     )
     return id
   }

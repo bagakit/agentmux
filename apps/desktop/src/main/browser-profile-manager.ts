@@ -1,3 +1,6 @@
+import type { BrowserProfileTrashEntry, BrowserProfileNativeUse, BrowserProfileRecycleReceipt, BrowserProfileRestoreReceipt } from '@agentmux/core/control'
+import { describeRetainedPartition, inspectRetainedPartition, retainedPartitionPath, BrowserProfileDataUnavailable } from './browser-profile-retained-data.js'
+import { resolve } from 'node:path'
 import { type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileViewSaveReceipt, type BrowserProfileBulkAction, type BrowserProfileSelectionItem, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
 import { mintCapabilityToken, mintObjectId } from '@agentmux/core/object-id'
 import { app, BrowserWindow, session, webContents, type Session } from 'electron'
@@ -14,6 +17,7 @@ import type {
 import {
   browserProfilePartition,
   BrowserProfileStore,
+  profileSummary, type BrowserProfileTrashRecord,
   BrowserProfileConfigurationConflict,
   type BrowserProfileActivityCheckpoint,
   validateBrowserProfileLabel,
@@ -64,8 +68,10 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private readonly importWindows = new Set<BrowserWindow>()
   private readonly activeMutations = new Set<Promise<unknown>>()
   private readonly changeListeners = new Set<(snapshot: BrowserProfileSnapshot) => void>()
-  /** Profiles whose partition is being cleared; a snapshot committed meanwhile cannot bring them back. */
-  private readonly deleting = new Set<string>()
+  /** Temporary admission fence for this exact Profile during a queued recycle or restore. */
+  private readonly retiring = new Set<string>()
+  private readonly archivedProfiles = new Map<string, BrowserProfileTrashRecord>()
+  private legacyPendingDeletes: string[] = []
   private defaultId: string | null = null
   private revision = 0
   private sequence = 0
@@ -82,11 +88,16 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   /** Applies each Profile's route to its own session; the view manager awaits it before any page opens. */
   readonly sessions: BrowserProfileSessions
 
-  constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions) {
+  constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions, private readonly sessionRoot: () => string = () => app.getPath('sessionData')) {
     this.sessions = sessions ?? createBrowserProfileSessions({
       session: profileId => session.fromPartition(this.resolvePartition(profileId)),
-      network: profileId => this.profiles.get(profileId)?.network,
-      environment: profileId => this.profiles.get(profileId)?.environment,
+      retainedSession: profileId => {
+        this.assertInitialized()
+        if (!this.profiles.has(profileId) && !this.archivedProfiles.has(profileId)) throw new Error(`Unknown retained Browser Profile: ${profileId}`)
+        return session.fromPartition(browserProfilePartition(profileId))
+      },
+      network: profileId => (this.profiles.get(profileId) ?? this.archivedProfiles.get(profileId)?.profile)?.network,
+      environment: profileId => (this.profiles.get(profileId) ?? this.archivedProfiles.get(profileId)?.profile)?.environment,
       defaultLanguage: () => app.getLocale(),
       openContents: () => webContents.getAllWebContents()
     })
@@ -119,12 +130,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         await this.clearPartition(pending.profileId)
         snapshot = await this.store.abortPendingImport(pending.profileId)
       }
-      // A deleted Profile is already out of the list, so a clear that fails again blocks nothing.
-      for (const profileId of await this.store.listPendingDeletes()) {
-        try { await this.clearPartition(profileId); await this.store.finishDelete(profileId) }
-        catch (error) { console.warn('A deleted Browser Profile still has site data; clearing is retried at the next start.', error) }
-      }
-
+      // Historical deletion tombstones contain no recoverable Profile record. Keep their original
+      // data and IDs; the recycle-bin service window exposes the unconfirmed cleanup explicitly.
       // Loading is a read, not a change; only later commits are published.
       this.replace(snapshot)
       this.initializationError = null
@@ -145,6 +152,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   resolvePartition(profileId: string): string {
     this.assertInitialized()
+    if (this.retiring.has(profileId)) throw Object.assign(new Error('This exact Profile is being recycled or restored. Its original data is kept; retry after that operation.'), { code: 'BROWSER_PROFILE_RETIREMENT_PENDING' })
     if (!this.profiles.has(profileId)) throw new Error(`Unknown Browser Profile: ${profileId}`)
     return browserProfilePartition(profileId)
   }
@@ -152,19 +160,32 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   /** The listed Profile that owns this session, or null for a private page, a Capsule or anything else. */
   profileOfSession(target: Session): string | null {
     if (!this.defaultId) return null
-    for (const id of this.profiles.keys()) if (session.fromPartition(browserProfilePartition(id)) === target) return id
-    return null
+    const id = this.sessions.profileOfSession?.(target)
+    return id && (this.profiles.has(id) || this.archivedProfiles.has(id)) ? id : null
   }
 
   /** The proxy server a Profile's route sends its pages through, if its route is a proxy. */
   proxyOf(profileId: string): { host: string; port: number } | null {
-    const network = this.profiles.get(profileId)?.network
+    const network = (this.profiles.get(profileId) ?? this.archivedProfiles.get(profileId)?.profile)?.network
     return network?.mode === 'proxy' ? { host: network.server.host, port: network.server.port } : null
   }
 
   listProfiles(): BrowserProfileSummary[] {
     this.assertInitialized()
     return [...this.profiles.values()].map(profile => this.presentProfile(profile))
+  }
+
+  private archiveSummary(entry: BrowserProfileTrashRecord): BrowserProfileTrashEntry {
+    return { id: entry.id, revision: entry.revision, archivedAt: entry.archivedAt,
+      profile: this.presentProfile(profileSummary(entry.profile, this.defaultId!), false), dataOwner: 'original-partition' }
+  }
+
+  listTrash(): BrowserProfileTrashEntry[] { this.assertInitialized(); return [...this.archivedProfiles.values()].map(entry => this.archiveSummary(entry)) }
+  /** Retained references, including future fields on the original full Profile record. No Session is acquired. */
+  listTrashedProfiles(): BrowserProfileSummary[] { this.assertInitialized(); return [...this.archivedProfiles.values()].map(entry => this.presentProfile(profileSummary(entry.profile, this.defaultId!), false)) }
+  listLegacyPendingDeletes(): string[] { this.assertInitialized(); return [...this.legacyPendingDeletes] }
+  nativeUse(profileId: string): BrowserProfileNativeUse {
+    return this.sessions.nativeUse?.(profileId) ?? { status: 'unknown', pages: null, workers: null, requests: null, downloads: null, reason: 'Native Profile ownership is unavailable; the original Profile remains available.' }
   }
 
   listViews(): BrowserProfileView[] { this.assertInitialized(); return structuredClone(this.views) }
@@ -330,8 +351,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     return results
   }
 
-  private presentProfile(profile: BrowserProfileSummary): BrowserProfileSummary {
-    const application = this.sessions.environmentApplication?.(profile.id), networkApplication = this.sessions.networkApplication?.(profile.id, profile.network)
+  private presentProfile(profile: BrowserProfileSummary, includeApplication = true): BrowserProfileSummary {
+    const application = includeApplication ? this.sessions.environmentApplication?.(profile.id) : undefined, networkApplication = includeApplication ? this.sessions.networkApplication?.(profile.id, profile.network) : undefined
     return { ...cloneProfile(profile), ...(networkApplication ? { networkApplication } : {}), ...(profile.activity && this.activitySources[profile.id] !== this.activityObserverId && profile.activity.state === 'running'
       ? { activity: { ...profile.activity, state: 'unknown' as const } } : {}), ...(application ? { environmentApplication: application } : {}) }
   }
@@ -377,35 +398,49 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     return this.trackMutation((async () => { const { snapshot, ...receipt } = await this.store.deleteFolder(folderId, expectedRevision); this.adopt(snapshot); return receipt })())
   }
 
-  async deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void> {
-    if (
-      approval?.kind !== 'user-confirmed' ||
-      approval.operation !== 'delete-profile' ||
-      approval.scope !== 'profile' ||
-      approval.profileId !== profileId
-    ) {
-      throw Object.assign(new Error('Browser Profile deletion requires explicit user approval'), {
-        code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
-      })
+  async deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string,
+    assertUnused: () => Promise<void>): Promise<BrowserProfileRecycleReceipt> {
+    if (approval?.kind !== 'user-confirmed' || approval.operation !== 'delete-profile' || approval.scope !== 'profile' || approval.profileId !== profileId) {
+      throw Object.assign(new Error('Profile recycling requires approval for this exact Profile'), { code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })
     }
-    this.resolvePartition(profileId)
-    if (profileId === this.defaultId) throw new Error('The default Browser Profile cannot be deleted')
-    const profile = this.profiles.get(profileId)!
-    await this.trackMutation((async () => {
-      this.profiles.delete(profileId)
-      this.deleting.add(profileId)
-      // The list is written first. Clearing first could leave a listed Profile with its sign-ins gone.
-      let snapshot: BrowserProfileSnapshot
-      try { snapshot = await this.store.deleteProfile(profileId) }
-      catch (error) {
-        this.deleting.delete(profileId)
-        this.profiles.set(profileId, profile)
-        throw error
-      }
-      this.deleting.delete(profileId)
-      this.adopt(snapshot)
-      await this.clearDeleted(profileId, profile.label)
-    })())
+    return this.configuration(profileId, async () => {
+      const current = await this.store.inspectProfile(profileId)
+      if (current.profile.revision !== expectedRevision) throw new BrowserProfileConfigurationConflict(current.profile.revision)
+      if (current.profile.isDefault) throw new Error('The default Browser Profile cannot be recycled')
+      // Establish the exact original native data/observation owner before checking all consumers.
+      const target = this.sessions.nativeSession?.(profileId)
+      if (!target) throw new BrowserProfileDataUnavailable()
+      await assertUnused()
+      this.retiring.add(profileId)
+      try {
+        const data = describeRetainedPartition(this.sessionRoot(), profileId, target.storagePath)
+        await inspectRetainedPartition(this.sessionRoot(), data)
+        // Source IO yields; recheck accurate native/cold ownership while new native admissions are fenced.
+        await assertUnused()
+        const { snapshot, archive } = await this.store.archiveProfile(profileId, expectedRevision, data)
+        this.adopt(snapshot)
+        return { revision: snapshot.revision, archive: this.archiveSummary(archive) }
+      } finally { this.retiring.delete(profileId) }
+    })
+  }
+
+  async restoreProfile(archiveId: string, expectedRevision: string, folderId?: string | null): Promise<BrowserProfileRestoreReceipt> {
+    this.assertInitialized()
+    const first = await this.store.inspectArchive(archiveId)
+    return this.configuration(first.archive.profile.id, async () => {
+      const { archive } = await this.store.inspectArchive(archiveId), profileId = archive.profile.id
+      if (archive.revision !== expectedRevision) throw new BrowserProfileConfigurationConflict(archive.revision)
+      this.retiring.add(profileId)
+      try {
+        // Check the held original directory before a native factory could create an empty replacement.
+        await inspectRetainedPartition(this.sessionRoot(), archive.data)
+        const target = this.sessions.retainedSession?.(profileId)
+        if (!target || !target.storagePath || resolve(target.storagePath) !== retainedPartitionPath(this.sessionRoot(), archive.data)) throw new BrowserProfileDataUnavailable()
+        const saved = await this.store.restoreProfile(archiveId, expectedRevision, folderId)
+        this.adopt(saved.snapshot)
+        return { revision: saved.snapshot.revision, archiveId, profile: this.presentProfile(saved.profile) }
+      } finally { this.retiring.delete(profileId) }
+    })
   }
 
   async detectImportSources(): Promise<BrowserProfileImportSourceSummary[]> {
@@ -564,10 +599,13 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   private replace(snapshot: BrowserProfileSnapshot): void {
     this.profiles.clear()
+    this.archivedProfiles.clear()
+    for (const entry of snapshot.trash) this.archivedProfiles.set(entry.profile.id, structuredClone(entry))
+    this.legacyPendingDeletes = [...snapshot.legacyPendingDeletes]
     this.views = structuredClone(snapshot.views)
     this.proxyAssets = structuredClone(snapshot.proxyAssets ?? [])
     this.folders = snapshot.folders.map(folder => ({ ...folder }))
-    for (const profile of snapshot.profiles) if (!this.deleting.has(profile.id)) this.profiles.set(profile.id, cloneProfile(profile))
+    for (const profile of snapshot.profiles) this.profiles.set(profile.id, cloneProfile(profile))
     this.defaultId = snapshot.defaultProfileId
     this.revision = snapshot.revision
     this.sequence = snapshot.sequence
@@ -580,7 +618,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     this.replace(snapshot)
     for (const listener of this.changeListeners) {
       // A subscriber cannot turn a committed write into a failure.
-      try { listener({ proxyAssets: this.listProxies(), activitySources: { ...this.activitySources }, sequence: snapshot.sequence, revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders(), views: this.listViews() }) }
+      try { listener({ proxyAssets: this.listProxies(), activitySources: { ...this.activitySources }, sequence: snapshot.sequence, revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders(), views: this.listViews(), trash: structuredClone(snapshot.trash), legacyPendingDeletes: [...snapshot.legacyPendingDeletes] }) }
       catch (error) { console.error('A Browser Profile change subscriber failed; the change itself is committed.', error) }
     }
   }
@@ -591,17 +629,6 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     if (!entry) throw new Error('Unknown or already consumed Browser Profile import source')
     if (entry.expiresAt < Date.now()) throw new Error('Browser Profile import source expired')
     return entry.source
-  }
-
-  /** A deleted Profile's data is cleared after the list commits; failure keeps its record for the next start. */
-  private async clearDeleted(profileId: string, label: string): Promise<void> {
-    try {
-      await this.clearPartition(profileId)
-      await this.store.finishDelete(profileId)
-    } catch (cause) {
-      throw Object.assign(new Error(`${label} was deleted, but clearing its sign-ins and site data did not finish. AgentMux clears it again when it next starts.`, { cause }),
-        { code: 'BROWSER_PROFILE_DATA_CLEAR_PENDING', profileId })
-    }
   }
 
   private async clearPartition(profileId: string): Promise<void> {
