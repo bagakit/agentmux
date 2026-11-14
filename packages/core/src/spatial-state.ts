@@ -1,5 +1,5 @@
 import { folderSpaceFacts, folderResourceIdentity, type FolderSpaceResource, type FolderDirectoryResource } from './space-folder.js';
-import { folderDirectoryResourceKey } from './space-folder-resources.js';
+import { folderDirectoryResourceKey, retainFolderDirectoryIdentity } from './space-folder-resources.js';
 import { mintObjectId } from './object-id.js';
 import { watch, type FSWatcher } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -297,8 +297,9 @@ export class AgentMuxSpatialStateStore {
       const matches = (r: FolderSpaceResource) => { const actual = folderResourceIdentity(r); return actual.hostId === expected.hostId && actual.workspacePath === expected.workspacePath && actual.projectRootPath === expected.projectRootPath; };
       const configuredResources = await configured(graph);
       const registered = configuredResources.filter(r => matches(r) && (input.workspaceId === undefined || input.workspaceId === r.id));
+      const spacesById = new Map(graph.spaces.map(space => [space.spaceId,space])), zonesById = new Map(graph.zones.map(zone => [zone.zoneId,zone]));
       const originals = graph.bindings.flatMap(binding => {
-        const space = graph.spaces.find(s => s.spaceId === binding.spaceId), zone = graph.zones.find(z => z.zoneId === binding.zoneId);
+        const space = spacesById.get(binding.spaceId), zone = zonesById.get(binding.zoneId);
         return space?.kind === 'folder' && space.hostId === expected.hostId && space.directoryPath === expected.projectRootPath &&
           zone?.hostId === expected.hostId && zone.directoryPath === expected.workspacePath && ['directory','worktree'].includes(zone.kind) &&
           (input.workspaceId === undefined || zone.workspaceId === input.workspaceId) ? [{ space, zone }] : [];
@@ -650,6 +651,7 @@ export class AgentMuxSpatialStateStore {
       if (current) for (const [key, value] of Object.entries(current.graph.resources)) {
         if (key.startsWith('owned:')) graph.resources[key] = value;
       }
+      if (current) retainFolderDirectoryIdentity(graph,current.graph);
       const groupIds = new Set(graph.projectGroups?.map(group => group.groupId));
       const removedGroupIds = new Set(input.removedProjectGroupIds ?? []);
       if (current?.graph.projectGroups?.some(group => !groupIds.has(group.groupId) && !removedGroupIds.has(group.groupId))) {

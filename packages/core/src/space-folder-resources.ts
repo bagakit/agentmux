@@ -32,3 +32,19 @@ export function folderDirectoryFacts(graph: AgentMuxSpatialGraph): { folders: Fo
   }
   return { folders, issues }
 }
+
+/** Preserve only confirmed Source identity on a same-resource layout projection.
+ * The caller owns this graph copy; missing, changed and unconfirmed entities stay untouched. */
+export function retainFolderDirectoryIdentity(graph: AgentMuxSpatialGraph, previous: AgentMuxSpatialGraph): void {
+  const originalSpaces = new Map(previous.spaces.map(space => [space.spaceId,space]))
+  const spaces = new Map(graph.spaces.map(space => [space.spaceId,space])), zones = new Map(graph.zones.map(zone => [zone.zoneId,zone]))
+  const bindings = new Set(graph.bindings.map(binding => JSON.stringify([binding.spaceId,binding.zoneId])))
+  for (const fact of folderDirectoryFacts(previous).folders) {
+    const space = spaces.get(fact.spaceId), zone = zones.get(fact.zoneId), original = originalSpaces.get(fact.spaceId)!
+    if (space?.hostId !== fact.directory.hostId || space.directoryPath !== fact.directory.projectRootPath ||
+        zone?.workspaceId !== fact.resource.id || zone.hostId !== fact.directory.hostId || zone.directoryPath !== fact.directory.workspacePath ||
+        !bindings.has(JSON.stringify([fact.spaceId,fact.zoneId]))) continue
+    space.kind = original.kind
+    space.projectId = original.projectId
+  }
+}

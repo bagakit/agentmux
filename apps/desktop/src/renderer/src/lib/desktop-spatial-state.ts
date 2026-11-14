@@ -1,4 +1,5 @@
 import type { AgentMuxSpatialGraph, AgentMuxSpatialState, AgentMuxSpatialCommit, SpatialJson } from '@agentmux/core/spatial-graph';
+import { retainFolderDirectoryIdentity } from '@agentmux/core/space-folder-resources';
 import { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '@agentmux/host/mote-model';
@@ -110,6 +111,7 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
         tabLayouts[id] = layout;
   }
   let graph: AgentMuxSpatialGraph = { ...facts, layouts: { ...previous?.layouts, ...persisted.layouts }, tabLayouts, resources };
+  if (previous) retainFolderDirectoryIdentity(graph,previous);
   const owners = new Set([...graph.zones.map(zone => zone.workspaceId), ...graph.tabs.map(tab => tab.workspaceId), ...Object.keys(graph.layouts)]);
   for (const workspace of state.config?.workspaces ?? []) {
     if (!workspace.closeout || !owners.has(workspace.id)) continue;
