@@ -36,6 +36,7 @@ const mutations = [
   { id: 'deferred-safe-top-not-compared', file: surface, from: '|| (prepared.input !== undefined && prepared.input.safeTop !== frame.safeTop)\n        ', to: '', expected: 'changed safeTop' },
   { id: 'double-failure-loses-requested-error', file: surface, from: 'if (first instanceof Error && second instanceof Error) throw first', to: "if (first instanceof Error && second instanceof Error) throw firstMode === 'included' ? first : second", expected: 'excluded-first double failure' },
   { id: 'replacement-bypasses-producer-tail', file: surface, from: 'const result = this.producerTail.then(produce)', to: 'const result = produce()', expected: 'replacement native work sequential' },
+  { id: 'capture-busy-becomes-source-failure', file: surface, from: "if ((error as { code?: unknown }).code !== 'capture_busy') throw error", to: 'if (true) throw error', expected: 'capture_busy waits for the actual lease' },
   { id: 'final-overwrites-first-shown-time', file: surface, from: 'shownMs: active.shownMs!,', to: 'shownMs: since(active.startedAt),', expected: progressive },
   { id: 'late-deferred-pollution', file: surface, from: 'private completeBackup(active: Active, mode: CaptureBackground, result: NativeDisplayFrames | Error): void {\n    if (this.active !== active) return', to: 'private completeBackup(active: Active, mode: CaptureBackground, result: NativeDisplayFrames | Error): void {', expected: 'a late deferred snapshot' },
   { id: 'final-diagnostic-missing', file: surface, from: 'if (active.shown) this.recordTiming(active, true)', to: 'void 0', expected: progressive },
@@ -71,7 +72,7 @@ async function command(label, executable, args, extra = {}, timeoutMs = 60000) {
   return result
 }
 async function units() {
-  assert.equal(mutations.length, 22)
+  assert.equal(mutations.length, 23)
   for (const mutation of mutations) assert.equal(sources[mutation.file].split(mutation.from).length, 2, 'Unique production anchor: ' + mutation.id)
   for (const mutation of [null, ...mutations]) {
     const label = mutation?.id ?? 'unit-baseline', loaded = join(out, label + '.loaded.ndjson'), json = join(out, label + '.tests.json')
@@ -95,7 +96,7 @@ async function units() {
     } else {
       assert.equal(result.code, 0, result.log)
       assert.equal(assertions.length, report.numTotalTests)
-      assert.ok(assertions.length >= 104 && assertions.every(row => row.status === 'passed'))
+      assert.ok(assertions.length >= 106 && assertions.every(row => row.status === 'passed'))
       for (const file of [surface, ipc]) assert.ok(consumed.some(row => row.file === file))
     }
     receipt.units.push({ label, code: result.code, executed: assertions.length, consumed })
