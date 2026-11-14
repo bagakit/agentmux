@@ -513,4 +513,21 @@ describe('mounted player', () => {
     expect(bubble()!.textContent).toBe('5:00')
     expect(vi.mocked(formatFileBytes).mock.calls.length).toBe(renders)
   })
+
+  it('the pointed time is the one a press there lands on: over the thumb’s travel and on the native step', async () => {
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { duration: 600 })
+    await act(async () => { media().dispatchEvent(new Event('durationchange')) })
+    layout()
+    timeline().style.setProperty('--media-thumb', '12px')
+    // A 12px thumb's centre travels 206–794px: its ends are the first and the last second, and the bubble sits on the pointed spot.
+    await point(206)
+    expect(bubble()!.textContent).toBe('0:00')
+    await point(794)
+    expect(bubble()!.textContent).toBe('10:00'); expect(bubble()!.style.left).toBe('602px')
+    expect(Number.parseFloat(timeline().style.getPropertyValue('--media-hover'))).toBeCloseTo(99)
+    // 499.1px is step 498.47 of 1000, which the range rounds to 498: 298.8 s, not the 299.08 s in between.
+    await point(499.1)
+    expect(bubble()!.textContent).toBe('4:58')
+  })
 })

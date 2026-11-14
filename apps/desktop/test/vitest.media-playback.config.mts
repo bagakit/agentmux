@@ -13,7 +13,9 @@ const changes = {
   'seek-oldest-waiting': ['packages/editor-extensions/src/engines/media-player.ts', "next = time\n      return 'queued'", "next ??= time\n      return 'queued'"],
   'seek-landing-keeps-waiting': ['packages/editor-extensions/src/engines/media-player.ts', 'next = null\n      if (time === flight', 'if (time === flight'],
   'pointer-rerenders-player': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'onPointerMove={audioOnly ? undefined : wake}',
-    'onPointerMove={audioOnly ? undefined : () => { wake(); setFacts(previous => ({ ...previous })) }}']
+    'onPointerMove={audioOnly ? undefined : () => { wake(); setFacts(previous => ({ ...previous })) }}'],
+  'pointing-bare-track': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', "getPropertyValue('--media-thumb')) || 0", "getPropertyValue('--media-thumb')) * 0 || 0"],
+  'pointing-unstepped': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'Math.round(along * TIMELINE_STEPS) / TIMELINE_STEPS * span', 'along * span']
 } as const
 
 export default defineConfig({ ...original,
