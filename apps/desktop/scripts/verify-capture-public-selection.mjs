@@ -25,7 +25,7 @@ const mutations = [
     { from: "    active.end({ state: 'completed' })\n    return { status: 'completed' } satisfies SystemScreenshotEditorFinish",
       to: "    ;(this as any).recall = this.continuation(frameInput, source.rect)\n    active.end({ state: 'completed' })\n    return { status: 'completed' } satisfies SystemScreenshotEditorFinish" }
   ], expected: 'every fresh public capture starts without initialCrop', reached: native => native.grabs.length >= 4 && native.cases.length >= 2 },
-  { id: 'public-included-fallback', edits: [{ from: 'active.session.allowBackgroundFallback === false && !usable(active.background)', to: 'false && !usable(active.background)' }],
+  { id: 'public-included-fallback', edits: [{ from: 'active.session.allowBackgroundFallback === false && !usable(first)', to: 'false && !usable(first)' }],
     expected: 'public excluded unavailable must return typed failed instead of offering included pixels', reached: native => native.grabs.length === 10 && native.cases.length >= 4 },
   { id: 'public-background-switch', edits: [{ from: 'active.session.allowBackgroundFallback === false && next !== active.background', to: 'false && next !== active.background' }],
     expected: 'public selection must not switch from excluded to included', reached: native => native.grabs.length >= 6 && native.cases.length >= 3 }
