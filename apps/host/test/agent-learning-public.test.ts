@@ -91,6 +91,28 @@ it('fences wrong proposers, human edits, stale confirmation and forged approval 
   expect(f.started).toHaveLength(1)
 })
 
+it('keeps a real prepared creation unknown without inventing a retired Run or dispatching another extraction', async () => {
+  const f = await learningPublicFixture()
+  const start = f.inner.kernel.start.mockRejectedValueOnce(new AgentMuxError('Original Start outcome is unavailable', 'CONTROL_UNAVAILABLE'))
+  const originalSource = await f.store.readMetadata('source'), originalNeighbor = await f.store.readMetadata('neighbor')
+  const prepared = await f.prepare('prepared-learning-creation')
+  expect(prepared.proposer.state, JSON.stringify({ operation: prepared, starts: start.mock.calls.length })).toBe('unknown')
+  const original = await f.core.inspectAgentCreation(prepared.proposer.agentSessionId)
+  expect(original.kind).toBe('prepared-agent-creation')
+  expect(original).not.toHaveProperty('run')
+  expect(prepared.proposer).toMatchObject({ agentSessionId: original.agentSessionId, state: 'unknown' })
+  expect(prepared.unavailable).toMatchObject([{ step: 'extraction', code: 'LEARNING_CREATION_UNCONFIRMED' }])
+  const inspected = (await f.client.call('agent.learning.inspect', { hostId: 'local', operationId: prepared.operationId })).operation!
+  expect(inspected.proposer).toEqual(prepared.proposer)
+  expect(inspected.unavailable).toMatchObject([{ code: 'LEARNING_CREATION_UNCONFIRMED' }])
+  await expect(f.client.call('agent.learning.prepare', { operationId: 'cannot-extract-uncreated-work', source: { hostId: 'local', agentSessionId: original.agentSessionId }, executorId: 'saved' })).rejects.toMatchObject({ code: 'LEARNING_SOURCE_UNCONFIRMED' })
+  expect(start).toHaveBeenCalledTimes(1)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  expect(await f.store.readMetadata('source')).toEqual(originalSource)
+  expect(await f.store.readMetadata('neighbor')).toEqual(originalNeighbor)
+  expect(await f.store.readMetadata(original.agentSessionId)).toBeNull()
+})
+
 it('keeps a lost creation ACK and original operation across owner reconstruction; never recreates or retargets it', async () => {
   const f = await learningPublicFixture(), actual = f.core.createAgentWithDelivery.bind(f.core), inspect = f.core.inspectAgentCreation.bind(f.core)
   const create = vi.spyOn(f.core, 'createAgentWithDelivery').mockImplementationOnce(async input => {
