@@ -268,12 +268,12 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     : request.bookmark && !readingSameSource ? 'Reading an earlier Run or source. Show latest to follow the current Agent.' : null
   const service = !currentContext.detailIsRecap && currentContext.detailKind === 'service' ? currentContext.detail : null
   const displayPath = usePathDisplay(), path = displayPath(context.workspacePath, context.hostId)
-  const sourceRuntimeId = context.access ? context.access.identity.runtimeId : request.bookmark?.sourceRuntimeId
+  const sourceRuntimeId = context.access?.identity.runtimeId ?? request.sourceRuntimeId ?? request.bookmark?.sourceRuntimeId ?? undefined
   const sourceHostId = context.access ? context.access.executionHostId
     : request.bookmark?.sourceRuntimeId === undefined ? request.bookmark?.hostId ?? context.hostId : undefined
   const source = <>
     <h3>Status and source</h3><p>{currentContext.detail}</p>{context.access ? <><button type="button" onClick={context.access.refresh}>Refresh observation</button><button type="button" onClick={() => context.access!.open()}>View in Space</button></> : null}
-    {context.kind === 'agent' && !context.access ? <AgentLocationsButton context={context} subject={request.control ?? request.bookmark} runtimeId={request.sourceRuntimeId ?? request.bookmark?.sourceRuntimeId} beforeOpen={() => {
+    {context.kind === 'agent' && !context.access ? <AgentLocationsButton context={context} subject={request.control ?? request.bookmark} runtimeId={sourceRuntimeId} beforeOpen={() => {
       if (!request.pinned) { request.restoreFocus(); agentInformationPreview.dismiss(request.token) }
     }} /> : null}
     {context.access ? <p>Project · {context.workspaceName}</p> : affiliation?.mote ? <p>Mote · {affiliation.mote.name}</p> : affiliation?.project ? <p>Project · {affiliation.project.name}</p> : <p>Project or Mote affiliation is not confirmed. The Executor identity is retained.</p>}

@@ -150,6 +150,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
   const candidates = locationRequest ? locationItems : items
   const results = useMemo(() => isOpen && effectiveMode === 'sessions' ? rankQuickSwitchItems(candidates, query) : NO_ITEMS,
     [isOpen, effectiveMode, candidates, query])
+  const showChoiceShortcuts = !locationRequest || results.length > 0
   const highlightedIndex = locationRequest ? results.findIndex(item => item.id === activeLocationId) : activeIndex
   function highlight(index: number) {
     if (locationRequest) setActiveLocationId(results[index]?.id ?? null)
@@ -260,9 +261,11 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          {results.length === 0 ? (
+          {results.length === 0 && !locationRequest?.issue ? (
             <div className="quick-switch__empty" role="status">
-              {locationRequest ? query.trim() ? <>No location matches “{query.trim()}”.</> : 'No confirmed locations remain. The original Session and work are kept.' : query.trim() ? <>No open session or tab matches “{query.trim()}”.</> : 'No open sessions or tabs yet.'}
+              {locationRequest
+                ? query.trim() ? <>No location matches “{query.trim()}”.</> : 'No locations to choose. The original Session and work are kept.'
+                : query.trim() ? <>No open session or tab matches “{query.trim()}”.</> : 'No open sessions or tabs yet.'}
             </div>
           ) : null}
           <div className="quick-switch__list" id="quick-switch-list" role="listbox" aria-label={locationRequest ? "Session locations" : "Sessions and tabs"} ref={listRef} hidden={results.length === 0}>
@@ -293,8 +296,8 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
           </div>
           </>}
           <div className="quick-switch__footer">
-            <span><kbd aria-label="Up arrow"><ThemeKeyUpIcon size={11} /></kbd><kbd aria-label="Down arrow"><ThemeKeyDownIcon size={11} /></kbd> to navigate</span>
-            <span><kbd aria-label="Enter"><ThemeKeyEnterIcon size={11} /></kbd> to open · <kbd>Esc</kbd> to dismiss</span>
+            <span>{showChoiceShortcuts ? <><kbd aria-label="Up arrow"><ThemeKeyUpIcon size={11} /></kbd><kbd aria-label="Down arrow"><ThemeKeyDownIcon size={11} /></kbd> to navigate</> : null}</span>
+            <span>{showChoiceShortcuts ? <><kbd aria-label="Enter"><ThemeKeyEnterIcon size={11} /></kbd> to open · </> : null}<kbd>Esc</kbd> to dismiss</span>
           </div>
         </Dialog.Content>
       </DocumentOverlayPortal>

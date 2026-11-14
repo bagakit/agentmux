@@ -234,7 +234,7 @@
 .agent-information-reader__facts > small::before { content: '·'; margin-right: 6px; }
 .agent-information-reader__change { display: block; margin-bottom: 8px; color: var(--text-3); font-size: var(--fs-micro); }
 .agent-information-reader__source { display: grid; gap: 7px; margin: 12px 0; }
-.agent-information-reader__source > div { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 8px; }
+.agent-information-reader__source > div { display: grid; grid-template-columns: min(8rem, 38%) minmax(0, 1fr); gap: 8px; }
 .agent-information-reader__source dt { color: var(--text-3); }
 .agent-information-reader__source dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 .agent-information-takeovers { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }

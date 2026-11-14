@@ -29,7 +29,7 @@ export function AgentLocationsButton({ context, subject = context.control, runti
       { hostId, agentSessionId, ...(runtimeId === undefined ? {} : { runtimeId }) }, agentRegionExecution)
   }, [tabs, catalog, bindings, context.id, hostId, agentSessionId, runtimeId])
   return <>
-    <AgentWorkLocationTrigger agentName={context.name} actionLabel="Choose location" summary={summary} describeSummary={locationLabel} onClick={() => {
+    <AgentWorkLocationTrigger agentName={context.name} actionLabel="Choose location" aria-haspopup="dialog" summary={summary} describeSummary={locationLabel} onClick={() => {
       const original = subject ? { hostId: subject.hostId, agentSessionId: subject.agentSessionId,
         ...(runtimeId === undefined ? {} : { runtimeId }) } : null
       if (useAppStore.getState().requestSessionLocations(context.id, { subject: original })) {

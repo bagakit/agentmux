@@ -129,7 +129,7 @@ export function sessionWorkbenchLocationSummary(
   catalog: AgentMuxSpaceCatalog,
   sessionId: string,
   subject: { hostId: string; agentSessionId: string; runtimeId?: string },
-  executionFor: (reference: { tabId: string; regionId: string; agentSessionId: string }) => { hostId: string; runtimeId: string | null } | null
+  executionFor: (reference: { tabId: string; regionId: string; agentSessionId: string }) => { hostId: string; runtimeId?: string } | null
 ): AgentWorkLocationSummary {
   const positions = new Set<string>()
   for (const location of catalog.locations) {
