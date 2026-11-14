@@ -83,6 +83,8 @@ export const CURSOR_HOOKS: AgentNativeHookSpecification = {
   // 固定第一方版本同时提供 hook_event_name；托管配置继续显式用 --event 传递事件名。
   eventNameSource: { kind: 'flag' },
   rules: [
+    // afterAgentResponse carries body content and can arrive after stop(completed).
+    // It grants no new activity; Core preserves the original state for a content-only event.
     { events: ['stop'], matches: payload => payload.status === 'completed', state: 'done', lifecycleEvent: 'turn-end' },
     { events: ['stop'], matches: payload => payload.status === 'error', state: 'error', lifecycleEvent: 'turn-end' },
     { events: ['stop'], matches: payload => payload.status === 'aborted', state: 'unknown', lifecycleEvent: 'turn-end' },
@@ -90,7 +92,7 @@ export const CURSOR_HOOKS: AgentNativeHookSpecification = {
     {
       events: [
         'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure',
-        'beforeShellExecution', 'beforeMCPExecution', 'afterAgentResponse'
+        'beforeShellExecution', 'beforeMCPExecution'
       ],
       state: 'working'
     }
