@@ -139,7 +139,7 @@ function adaptOpenCodePayload(payload: Record<string, unknown>): Record<string, 
 /**
  * 写进插件文件的 JS 源码。
  *
- * **这是本仓第一个内容不是 shell 命令的 managed hook**。其余九家都调 `managedHookCommand()` 往配置里
+ * 命令型 Provider 调 `runScopedHookCommand()` 往配置里
  * 写一条命令，由 CLI 在事件发生时执行它；OpenCode 没有那条通路——它的 hook 全是同进程 JS 函数
  * （`packages/plugin/src/index.ts:222-335` 的 `Hooks` 接口）。但 `AgentManagedHookMutation` 只要求
  * `{path, content}` 且 `content` 全程按字节处理（`managed-hook-installer.ts:21-31`、`:79-157`），

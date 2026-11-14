@@ -1,9 +1,7 @@
 import { readManagedHookTarget } from '../managed-hook-installer.js'
 import type { AgentProviderHookActivation, AgentProviderHookActivationContext } from '../agent-provider.js'
-import { existsSync } from 'node:fs'
 import { AgentMuxError } from '../errors.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
-import { resolveCoreBinPath } from '../runtime-paths.js'
 import { LAUNCH_SCOPED_HOOK_FLAG } from '../launch-scoped-hook.js'
 import type { ManagedHookRuntime } from '../managed-hook-runtime.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../hook-command-timeout.js'
@@ -36,52 +34,6 @@ export function catalog(input: Omit<AgentCatalogEntry, 'readySignal' | 'launchOp
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
-}
-
-/**
- * Resolve the hook runner, refusing to hand back a path that is not there.
- *
- * `resolveCoreBinPath` falls back to its first candidate when every candidate is missing, which is the
- * right shape for `AGENTMUX_CLI_PATH` (evaluated at module load — throwing there would break the import
- * for everyone, including callers that never shell out). It is the wrong shape here: the string this
- * returns gets frozen into the user's own hooks config on disk. A packaging slip that drops
- * `agentmux-hook.js` — the packaged layout resolves through `process.resourcesPath`, a set of candidates
- * that simply do not exist in a dev tree — would write a command pointing at a file that is not there,
- * and nothing downstream checks: the installer writes whatever bytes it is given, and the provider CLI
- * silently fails to spawn the hook. The user sees an Agent that never reports status while its config
- * file looks correctly installed.
- *
- * Failing loudly instead lands in `ensureManagedHooks`'s best-effort catch, which surfaces a non-fatal
- * `agent-error` naming the provider and still launches the Agent — its terminal output stays observable.
- * So the cost of this check is one honest error message; the cost of skipping it is a silent lie.
- */
-function hookRunnerPath(): string {
-  const commandPath = resolveCoreBinPath('agentmux-hook.js')
-  if (!existsSync(commandPath)) {
-    throw new AgentMuxError(
-      `Managed Hook runner is missing at ${commandPath}; refusing to write a hook command that cannot run.`,
-      'HOOK_RUNNER_MISSING'
-    )
-  }
-  return commandPath
-}
-
-/**
- * Build the managed hook command written into a provider's hooks config.
- *
- * The path is resolved now and frozen into the user's config file, so it must exist now — see
- * `hookRunnerPath`. `process.execPath` is likewise this process's interpreter, which is what makes the
- * written command reproducible for the CLI that will read it.
- */
-export function managedHookCommand(providerId: AgentProviderId): string {
-  const commandPath = hookRunnerPath()
-  return `ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
-}
-
-/** Hermes invokes shell hooks with shlex.split(...), shell=False. */
-export function hermesHookCommand(): string {
-  const commandPath = hookRunnerPath()
-  return `/usr/bin/env ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote('hermes')} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
 }
 
 /**
@@ -120,10 +72,6 @@ ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} exec "$A
   return `/bin/sh -c ${shellQuote(script)} amux-hook`
 }
 
-export function launchScopedHookCommand(providerId: AgentProviderId): string {
-  return runScopedHookCommand(providerId)
-}
-
 /**
  * Scope distinguishes this Run's prepared declaration from leftover callbacks, whether the
  * native definition travels at launch or lives in shared config. Always clear inherited values.
@@ -141,7 +89,7 @@ export function retainedHookEnvironment(scoped: boolean, carrierReady = true, ru
 /**
  * Bracketed-paste 的字节判定住在 `../bracketed-paste.js`——一个不 import 任何 `node:` 内置的叶子模块。
  *
- * 本文件第一行就是 `import { existsSync } from 'node:fs'`，渲染进程到不了这里；而终端粘贴路径
+ * 本模块还依赖安装器与原生配置读取，渲染进程不直接消费；终端粘贴路径
  * （用户按 Cmd+V 或右键 Paste）与这里的 prompt 投递是**同一个概念**：一段文本要进 PTY，ESC 怎么办。判定
  * 若留在这里，渲染层唯一的出路就是再手抄一份——那正是本仓最常复发的缺陷族。这里保留 re-export 只为不动
  * 既有消费者（`codex.ts` 直接 import，`agent-provider.ts` 的公共 re-export 块也从这里取）。
@@ -206,11 +154,11 @@ export type ProviderWithHookCommandTimeout = {
  * 那几家本就不该写这个属性位。
  *
  * 结构守卫（test/provider-hook-timeout-source.test.ts）额外用 TypeScript 类型检查器证明：`providers/` 下
- * `timeout`/`timeoutSec` 这两个属性位上再没有裸数字，且这里返回的对象的值就是那个导出常量本身（不是恰好等于
- * `10` 的另一处字面量）——行为等价挡不住「新抄一份 `10`」，只有类型检查器解析到同一个符号才挡得住。
+ * `timeout`/`timeoutSec` 这两个属性位上再没有裸数字，且返回值由同一个导出常量按原生单位换算。
+ * Provider 显式声明毫秒单位；未声明时使用秒。类型检查器解析原符号，避免再抄一份预算。
  */
-export function hookCommandTimeout(providerId: ProviderWithHookCommandTimeout): Record<string, number> {
-  return { [HOOK_COMMAND_TIMEOUT_FIELD[providerId]]: HOOK_COMMAND_TIMEOUT_SECONDS }
+export function hookCommandTimeout(providerId: ProviderWithHookCommandTimeout, unit: 'seconds' | 'milliseconds' = 'seconds'): Record<string, number> {
+  return { [HOOK_COMMAND_TIMEOUT_FIELD[providerId]]: unit === 'milliseconds' ? HOOK_COMMAND_TIMEOUT_SECONDS * 1_000 : HOOK_COMMAND_TIMEOUT_SECONDS }
 }
 
 /** The Provider declares its actual native key; the shared reader owns bounded file access. */

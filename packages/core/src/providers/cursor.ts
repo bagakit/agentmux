@@ -5,7 +5,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 import { cursorDataRoot, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
 import { discoverCursorNativeSession } from './cursor-native-session.js'
 import { cursorPromptPayloadConsumption } from './cursor-payload-consumption.js'
@@ -64,6 +64,7 @@ export const CURSOR_HOOK_EVENTS = [
  * 隔离子代理事件（`subagentStart`/`subagentStop` 携带 `subagent_id`），防止子代理覆盖主会话句柄。
  */
 export const CURSOR_HOOKS: AgentNativeHookSpecification = {
+  retainedRuntime: true,
   toolFields(eventName, payload) {
     if (eventName === 'beforeShellExecution') return hookToolFields(undefined, undefined, payload.tool_use_id)
     if (!['preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeMCPExecution'].includes(eventName)) return {}
@@ -110,13 +111,14 @@ export function createCursorManagedHookPlan(
   workspacePath: string,
   env?: ProviderExecutionEnvironment
 ): AgentManagedHookPlan {
-  const command = managedHookCommand('cursor')
+  const command = runScopedHookCommand('cursor')
   const hooks = Object.fromEntries(CURSOR_HOOK_EVENTS.map((eventName) => [eventName, [
     // 托管脚本的事件名来源保持显式 --event，不猜负载别名。
     { command: `${command} --event ${eventName}`, ...hookCommandTimeout('cursor') }
   ]]))
   return {
     providerId: 'cursor',
+    retainPreviousDeclarations: true,
     mutations: [
       {
         path: join(cursorDataRoot(workspacePath, env), 'hooks.json'),

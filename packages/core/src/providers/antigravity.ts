@@ -7,7 +7,7 @@ import { ANTIGRAVITY_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, managedHookCommand, hookCommandTimeout, hookToolFields } from './shared.js'
+import { catalog, runScopedHookCommand, hookCommandTimeout, hookToolFields } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -16,6 +16,7 @@ export const ANTIGRAVITY_HOOK_EVENTS = [
 ] as const
 
 export const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
+  retainedRuntime: true,
   toolFields(eventName, payload) {
     if (eventName !== 'PreToolUse' && eventName !== 'PostToolUse') return {}
     const call = payload.toolCall
@@ -62,7 +63,7 @@ export const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
 export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string, env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
   const targetRoot = executionPath(homeOrWorkspacePath ?? executionHomeDirectory(env), workspacePath)
   const targetPath = targetRoot.endsWith('.json') ? targetRoot : join(targetRoot, '.gemini', 'config', 'hooks.json')
-  const command = managedHookCommand('antigravity')
+  const command = runScopedHookCommand('antigravity')
   const bundle: Record<string, unknown> = {}
   for (const eventName of ANTIGRAVITY_HOOK_EVENTS) {
     const eventCmd = `${command} --event ${eventName}`
@@ -72,11 +73,12 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string, e
   }
   return {
     providerId: 'antigravity',
+    retainPreviousDeclarations: true,
     mutations: [{
       path: targetPath,
       content: `${JSON.stringify({ 'agentmux-status': bundle }, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-owned-key', key: 'agentmux-status' }
+      merge: { kind: 'json-managed-events', key: 'agentmux-status' }
     }]
   }
 }

@@ -105,7 +105,8 @@ function hash(content: Uint8Array | string): string {
 function scope(providerId: AgentProviderId, mutation: AgentManagedHookMutation): HookScope | undefined {
   const merge = mutation.merge
   // An exclusive key already carries deletion authority; shared declarations require receipts.
-  return merge && merge.kind !== 'json-owned-key' ? { providerId, path: mutation.path, merge: { kind: merge.kind } } : undefined
+  return merge && merge.kind !== 'json-owned-key' ? { providerId, path: mutation.path,
+    merge: { kind: merge.kind, ...(merge.kind === 'json-managed-events' && merge.key !== undefined ? { key: merge.key } : {}) } } : undefined
 }
 function registrationPath(stateRoot: string, original: HookScope): string {
   return join(stateRoot, 'receipts', `${hash(JSON.stringify(original))}.ownership.json`)

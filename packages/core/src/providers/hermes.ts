@@ -6,7 +6,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { readHermesSessionHistoryPage } from './hermes-native-history.js'
-import { catalog, hookToolFields, hermesHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -50,6 +50,7 @@ function extraField(payload: Readonly<Record<string, unknown>>, field: string): 
 }
 
 export const HERMES_HOOKS: AgentNativeHookSpecification = {
+  retainedRuntime: true,
   toolFields(eventName, payload) {
     if (eventName === 'pre_tool_call' || eventName === 'post_tool_call') {
       return hookToolFields(payload.tool_name, payload.tool_input, extraField(payload, 'tool_call_id'))
@@ -132,13 +133,16 @@ export function resolveHermesHome(env?: ProviderExecutionEnvironment, workspaceP
 
 export function createHermesManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
   const home = resolveHermesHome(env, workspacePath)
-  const command = hermesHookCommand()
+  // Native shlex.split + shell=False executes this explicit /bin/sh argv. The
+  // inner shell, not Hermes or its parent, resolves the original Run runtime.
+  const command = runScopedHookCommand('hermes')
   const hooks = Object.fromEntries(
     HERMES_HOOK_EVENTS.map((eventName) => [eventName, [{ command, ...hookCommandTimeout('hermes') }]])
   )
   const approvals = HERMES_HOOK_EVENTS.map((eventName) => ({ event: eventName, command }))
   return {
     providerId: 'hermes',
+    retainPreviousDeclarations: true,
     mutations: [
       {
         path: join(home, 'config.yaml'),

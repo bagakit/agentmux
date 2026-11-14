@@ -5,7 +5,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 import { readDroidSessionHistoryPage, readDroidSessionHistoryRecord } from './droid-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -42,6 +42,7 @@ export const DROID_HOOK_EVENTS = [
 ] as const
 
 export const DROID_HOOKS: AgentNativeHookSpecification = {
+  retainedRuntime: true,
   toolFields(eventName, payload) {
     if (eventName !== 'PreToolUse' && eventName !== 'PostToolUse') return {}
     return hookToolFields(payload.tool_name, payload.tool_input)
@@ -123,7 +124,7 @@ export const DROID_HOOKS: AgentNativeHookSpecification = {
 export function createDroidManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
   const override = executionEnvironmentValue(env, 'FACTORY_HOME_OVERRIDE')?.trim()
   const home = executionPath(override || executionHomeDirectory(env), workspacePath)
-  const command = managedHookCommand('droid')
+  const command = runScopedHookCommand('droid')
   const events = Object.fromEntries(DROID_HOOK_EVENTS.map((eventName) => [eventName, [{
     // matcher 测的是工具名，只有两个工具事件有这个语义。其余事件上写 matcher 是噪音。
     ...(eventName === 'PreToolUse' || eventName === 'PostToolUse' ? { matcher: '*' } : {}),
@@ -131,6 +132,7 @@ export function createDroidManagedHookPlan(env?: ProviderExecutionEnvironment, w
   }]]))
   return {
     providerId: 'droid',
+    retainPreviousDeclarations: true,
     mutations: [{
       path: join(home, '.factory', 'hooks.json'),
       content: `${JSON.stringify(events, null, 2)}\n`,

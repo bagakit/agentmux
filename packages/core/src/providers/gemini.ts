@@ -5,7 +5,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -44,6 +44,7 @@ export const GEMINI_HOOK_EVENTS = [
  * `SessionEnd` 属于会话终结，Core 不拿它判轮次。
  */
 export const GEMINI_HOOKS: AgentNativeHookSpecification = {
+  retainedRuntime: true,
   toolFields(eventName, payload) {
     if (eventName !== 'BeforeTool' && eventName !== 'AfterTool') return {}
     return hookToolFields(payload.tool_name, payload.tool_input)
@@ -92,15 +93,17 @@ export function createGeminiManagedHookPlan(homeOverride?: string, env?: Provide
   // Native Storage uses GEMINI_CLI_HOME as its home base, then appends .gemini.
   const nativeHome = homeOverride ?? (executionEnvironmentValue(env, 'GEMINI_CLI_HOME') || executionHomeDirectory(env))
   const home = executionPath(nativeHome || executionTemporaryDirectory(env), workspacePath)
-  const command = managedHookCommand('gemini')
+  const command = runScopedHookCommand('gemini')
   const hooks = Object.fromEntries(GEMINI_HOOK_EVENTS.map((eventName) => [eventName, [{
     // matcher 只在工具类事件上有意义（`matchesContext` 拿它去比 `context.toolName`）。
     // 空串与 `*` 都被读作「匹配全部」，这里显式写 `*` 与 Claude 侧保持一致。
     ...(eventName === 'BeforeTool' || eventName === 'AfterTool' ? { matcher: '*' } : {}),
-    hooks: [{ type: 'command', command, ...hookCommandTimeout('gemini') }]
+    // Native HookRunner interprets timeout in milliseconds; the common budget is seconds.
+    hooks: [{ type: 'command', command, ...hookCommandTimeout('gemini', 'milliseconds') }]
   }]]))
   return {
     providerId: 'gemini',
+    retainPreviousDeclarations: true,
     mutations: [{
       path: join(home, '.gemini', 'settings.json'),
       content: `${JSON.stringify({ hooks }, null, 2)}\n`,

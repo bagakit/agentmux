@@ -30,7 +30,7 @@ import {
   buildPromptInputPayload,
   catalog,
   hookToolFields,
-  launchScopedHookCommand,
+  runScopedHookCommand,
   hookCommandTimeout,
   sanitizeBracketedPasteText
 } from './shared.js'
@@ -175,7 +175,7 @@ const CLAUDE_PERMISSION_OPTIONS: readonly TerminalPermissionOption[] = [
  * workspace, so the plan is the same for every workspace.
  */
 export function claudeManagedPlugin(): ReturnType<typeof claudePlugin> {
-  const command = launchScopedHookCommand('claude')
+  const command = runScopedHookCommand('claude')
   return claudePlugin(Object.fromEntries(CLAUDE_HOOK_EVENTS.map((eventName) => [eventName, [{
     // 三个 tool 事件按 matcher 分派（bundle 内嵌文档的 Hook Events 表里，这三行的 Matcher 列都是
     // "Tool name"）。`*` 是「所有工具」；缺了 matcher，Claude 对 tool 事件不会分派到我们这条。

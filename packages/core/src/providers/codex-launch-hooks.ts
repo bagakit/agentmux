@@ -1,5 +1,5 @@
 import { parse, type TomlValue } from 'smol-toml'
-import { HOOK_COMMAND_TIMEOUT_SECONDS, launchScopedHookCommand } from './shared.js'
+import { HOOK_COMMAND_TIMEOUT_SECONDS, runScopedHookCommand } from './shared.js'
 
 export const CODEX_HOOK_EVENTS = [
   'SessionStart', 'PermissionRequest', 'PreToolUse', 'PostToolUse', 'UserPromptSubmit',
@@ -23,7 +23,7 @@ function unknownOption(arg: string): boolean {
 
 /** Native effective values: a permission callback waits for the person; Interrupt is capped at 3s. */
 export function codexManagedHooks(): Record<(typeof CODEX_HOOK_EVENTS)[number], HookGroup[]> {
-  const command = launchScopedHookCommand('codex')
+  const command = runScopedHookCommand('codex')
   return Object.fromEntries(CODEX_HOOK_EVENTS.map(event => [event, [{
     ...(event === 'SessionStart' ? { matcher: 'startup|resume|clear|compact' } : {}),
     hooks: [{ type: 'command', command, timeout: event === 'PermissionRequest' ? PERMISSION_TIMEOUT_SECONDS

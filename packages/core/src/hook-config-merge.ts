@@ -13,7 +13,7 @@ export type AgentHookMergeStrategy =
 /** An explicitly exclusive native key. Every sibling remains outside AgentMux's ownership. */
 export type AgentHookOwnedKeyMerge = { kind: 'json-owned-key'; key: string }
 /** Append missing current declarations under hooks.<event>; retire only proven owned leaves. */
-export type AgentHookManagedEventsMerge = { kind: 'json-managed-events' }
+export type AgentHookManagedEventsMerge = { kind: 'json-managed-events'; key?: string }
 /** The same declaration rule where native event buckets live at the root. */
 export type AgentHookRootManagedEventsMerge = { kind: 'json-root-managed-events' }
 /** Edit the existing YAML document, preserving foreign nodes and comments. */
@@ -83,10 +83,10 @@ function containsDeclaration(actual: unknown, expected: JsonObject): boolean {
     return false
   })
 }
-function currentHooks(current: JsonObject): JsonObject {
-  if (!Object.hasOwn(current, 'hooks')) return {}
-  if (!object(current.hooks)) return targetShape('Managed Hook target hooks must be a JSON object; retaining the target.')
-  return current.hooks
+function currentHooks(current: JsonObject, key = 'hooks'): JsonObject {
+  if (!Object.hasOwn(current, key)) return {}
+  if (!object(current[key])) return targetShape('Managed Hook target event container must be a JSON object; retaining the target.')
+  return current[key]
 }
 function currentBucket(current: JsonObject, event: string): unknown[] {
   if (!Object.hasOwn(current, event)) return []
@@ -161,17 +161,17 @@ function applyOwnedKey(current: string | null, owned: JsonObject, key: string): 
   if (!Object.hasOwn(owned, key)) return invalidPlan('Managed Hook owned content is missing its owned key.')
   return SERIALIZE({ ...parseCurrentObject(current), [key]: owned[key] })
 }
-function applyManagedEvents(current: string | null, owned: JsonObject, previous: JsonObject | undefined, root = false, retainPrevious = false) {
+function applyManagedEvents(current: string | null, owned: JsonObject, previous: JsonObject | undefined, root = false, retainPrevious = false, key = 'hooks') {
   const parsed = parseCurrentObject(current)
-  const expected = declarations(root ? owned : owned.hooks)
-  const merged = mergeEventBuckets(root ? parsed : currentHooks(parsed), expected, previous ? declarations(root ? previous : previous.hooks) : undefined, retainPrevious)
-  const ownedContent = Object.keys(merged.ownership).length ? SERIALIZE(root ? merged.ownership : { hooks: merged.ownership }) : null
+  const expected = declarations(root ? owned : owned[key])
+  const merged = mergeEventBuckets(root ? parsed : currentHooks(parsed, key), expected, previous ? declarations(root ? previous : previous[key]) : undefined, retainPrevious)
+  const ownedContent = Object.keys(merged.ownership).length ? SERIALIZE(root ? merged.ownership : { [key]: merged.ownership }) : null
   if (!merged.changed && current !== null) return { content: current, ownedContent }
   if (root) return { content: SERIALIZE(merged.value), ownedContent }
-  let result: JsonObject = { ...parsed, hooks: merged.value }
+  let result: JsonObject = { ...parsed, [key]: merged.value }
   // A fragment does not grant ownership of an existing user's metadata key.
-  for (const [key, value] of Object.entries(owned)) {
-    if (key !== 'hooks' && !Object.hasOwn(result, key)) result = { ...result, [key]: value }
+  for (const [field, value] of Object.entries(owned)) {
+    if (field !== key && !Object.hasOwn(result, field)) result = { ...result, [field]: value }
   }
   return { content: SERIALIZE(result), ownedContent }
 }
@@ -268,7 +268,7 @@ export function prepareMergedHookContent(current: string | null, ownedContent: s
   const previous = previousOwnedContent ? parseOwnedObject(previousOwnedContent) : undefined
   switch (strategy.kind) {
     case 'json-owned-key': return { content: applyOwnedKey(current, owned, strategy.key), ownedContent: null }
-    case 'json-managed-events': return applyManagedEvents(current, owned, previous, false, retainPrevious)
+    case 'json-managed-events': return applyManagedEvents(current, owned, previous, false, retainPrevious, strategy.key)
     case 'json-root-managed-events': return applyManagedEvents(current, owned, previous, true, retainPrevious)
     case 'yaml-managed-events': return applyYamlManagedEvents(current, owned, previous, retainPrevious)
     case 'json-managed-approvals': return applyManagedApprovals(current, owned, previous, retainPrevious)
@@ -288,7 +288,7 @@ export function inspectManagedHookContent(current: string, ownedContent: string,
       if (!Object.hasOwn(owned, strategy.key)) return invalidPlan('Managed Hook owned key is absent.')
       return { present: Object.hasOwn(parsed, strategy.key), current: isDeepStrictEqual(parsed[strategy.key], owned[strategy.key]) }
     }
-    case 'json-managed-events': return inspectEvents(currentHooks(parseCurrentObject(current)), declarations(owned.hooks))
+    case 'json-managed-events': return inspectEvents(currentHooks(parseCurrentObject(current), strategy.key), declarations(owned[strategy.key ?? 'hooks']))
     case 'json-root-managed-events': return inspectEvents(parseCurrentObject(current), declarations(owned))
     case 'yaml-managed-events': {
       const expected = declarations(owned.hooks), hooks = yamlHooks(yamlDocument(current))

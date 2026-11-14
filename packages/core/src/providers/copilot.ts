@@ -4,7 +4,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -72,6 +72,7 @@ export const COPILOT_HOOK_EVENTS = [
  * 「等我点一下」和「正在干活」在界面上长得一模一样（与 Cursor 的两个授权门同一判断）。
  */
 export const COPILOT_HOOKS: AgentNativeHookSpecification = {
+  retainedRuntime: true,
   toolFields(eventName, payload) {
     if (!['preToolUse', 'postToolUse', 'postToolUseFailure'].includes(eventName)) return {}
     return hookToolFields(payload.toolName, payload.toolArgs)
@@ -158,11 +159,9 @@ function copilotHome(env?: ProviderExecutionEnvironment, workspacePath?: string)
 /**
  * Copilot 的 managed hook 计划。
  *
- * **装到一份自己独占的文件**：`<copilot-home>/hooks/agentmux.json`。实测这个目录下的**任意文件名**
- * 都会被加载（不是只认某个固定名），所以 AgentMux 可以整文件拥有，永远不必碰用户的
- * `<copilot-home>/config.json`——那份文件的 `hooks` 键是它的另一条用户级通道，同时还装着用户的模型、
- * 授权规则等一切设置。这与 grok 的做法是同一个模式，也是为什么这里**不需要**合并策略：
- * 没有第二个写者，整文件替换就是正确且最简的实现。
+ * 装到 `<copilot-home>/hooks/agentmux.json`。实测这个目录下的任意文件名都会被加载。
+ * 该文件按事件叶子合并，保留仍可能被旧 Run 使用的回调与已有内容；不写用户的
+ * `<copilot-home>/config.json`，它还承载模型和授权等原生设置。
  *
  * **绝不写仓库层的 `.github/hooks/*.json`**：那是会被提交进用户仓库的文件（它也读那一层）。
  *
@@ -193,7 +192,7 @@ function copilotHome(env?: ProviderExecutionEnvironment, workspacePath?: string)
  * antigravity.ts），而 payload 通道对 Copilot 是明确关死的，故这是仅有且方向正确的修法。
  */
 export function createCopilotManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
-  const command = managedHookCommand('copilot')
+  const command = runScopedHookCommand('copilot')
   const hooks = Object.fromEntries(COPILOT_HOOK_EVENTS.map((eventName) => [eventName, [{
     ...(eventName === 'preToolUse' || eventName === 'postToolUse' ? { matcher: '.*' } : {}),
     // 事件名靠 `--event` 传：Copilot 的负载里没有任何事件名键（见文件头的实测记录），少了它每条事件
@@ -202,10 +201,12 @@ export function createCopilotManagedHookPlan(env?: ProviderExecutionEnvironment,
   }]]))
   return {
     providerId: 'copilot',
+    retainPreviousDeclarations: true,
     mutations: [{
       path: join(copilotHome(env, workspacePath), 'hooks', 'agentmux.json'),
       content: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
-      mode: 0o600
+      mode: 0o600,
+      merge: { kind: 'json-managed-events' }
     }]
   }
 }
