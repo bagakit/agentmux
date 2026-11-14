@@ -10516,7 +10516,6 @@ export class AgentMuxClient {
   private async continueInitialInput(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun,
     assertCurrent?: () => Promise<void>): Promise<AgentMuxStoredAgentSession> {
     let current = await this.registry.refresh(session.agentSessionId, session.run)
-    if (current.creation?.createOperationId && await this.store.readCreationCancellation(current.creation.createOperationId)) return current
     const input = current.initialInput
     if (current.creation?.resolution?.initialInputContinuation === 'held' || !input?.key || !sameRun(current.run, session.run) ||
         input.key.expectedRun.runId !== run.runId || current.run.runId !== run.runId) return current
@@ -10528,6 +10527,8 @@ export class AgentMuxClient {
     }
     let record = await this.inspectAgentPromptSubmission(input.key)
     if (!record && input.state === 'prepared' && run.state.type === 'running') {
+      // Read the fence only on the dispatch path. Existing receipts can still settle.
+      if (current.creation?.createOperationId && await this.store.readCreationCancellation(current.creation.createOperationId)) return current
       let nativeSource: { providerId: string; nativeSessionId: string } | undefined
       if (current.nativeActor?.initializationControl) {
         // Opening this existing read-only observer does not create a claim. Failure,
