@@ -9,6 +9,7 @@ import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
 import { BrowserSourceNavigation } from './BrowserSourceNavigation'
 import { CapsuleInteractionChrome } from './CapsuleInteractionChrome'
 import { BrowserFindBar } from './BrowserFindBar'
+import { DEFAULT_BROWSER_ZOOM_FACTOR } from '../../../shared/browser-zoom'
 import { browserShortcutAction } from '../lib/browser-shortcuts'
 import type { BrowserPageShortcutAction } from '../../../shared/browser-page-shortcuts'
 import { isMacPlatform } from '../lib/host-platform'
@@ -1452,6 +1453,13 @@ function BrowserPaneContent({
             onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }}
             onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })}
           />
+          {tab.zoomFactor !== undefined && Math.abs(tab.zoomFactor - DEFAULT_BROWSER_ZOOM_FACTOR) > 0.001 ? (
+            <button type="button" className="browser-zoom" aria-label={`Page zoom ${Math.round(tab.zoomFactor * 100)}%. Reset this site in this Profile to 90%`}
+              title={`Page zoom ${Math.round(tab.zoomFactor * 100)}% · This site in this Profile · Click to reset to 90%`}
+              onClick={() => void api.browser.zoom(tab.browserId, 'reset').then(browser => applyBrowserEvent({ type: 'updated', browser })).catch(reportError)}>
+              {Math.round(tab.zoomFactor * 100)}%
+            </button>
+          ) : null}
         </label>
         <BrowserOperatorPresence
           activity={browserActivity}

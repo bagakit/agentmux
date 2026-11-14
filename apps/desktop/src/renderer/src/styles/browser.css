@@ -73,6 +73,9 @@
 .browser-toolbar label:focus-within { border-color: var(--focus-line); color: var(--green); }
 .browser-toolbar input { min-width: 0; flex: 1; border: 0; padding: 0; outline: 0; color: var(--text-2); background: transparent; font: var(--fs-meta) "SFMono-Regular", monospace; }
 .browser-toolbar input.ui-input:focus-visible { outline: none; }
+.browser-zoom { flex: none; height: 24px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--sp-2); color: var(--text-2); background: var(--surface-2); font: var(--fs-meta) var(--font-sans); font-variant-numeric: tabular-nums; cursor: pointer; white-space: nowrap; }
+.browser-zoom:hover { color: var(--text); background: var(--surface-3); }
+.browser-zoom:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .browser-private-badge { flex: none; padding: 2px 5px; border-radius: var(--radius-sm); background: var(--wash-2); color: var(--text-2); font-size: var(--fs-meta); }
 .browser-private-notice { display: grid; gap: var(--sp-2); max-width: 460px; margin: var(--sp-3) auto 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .browser-private-notice strong { color: var(--text-2); }
