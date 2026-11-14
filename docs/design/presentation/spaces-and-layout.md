@@ -257,7 +257,7 @@ Project Rail 在全局工作面隐藏时，标题起点不能仍按它可见来�
 
 ### 共享机器身份标识
 
-机器身份复用同一轻量标识：混合机器的 Focus 项目行与 Project Group 成员显示可读机器短名；Folders 在机器分区标题表达，成员不重复。面包屑与 Board 的既有机器身份也使用配置名称，完整稳定 Host ID 进入 tooltip 与可访问名称。
+机器身份复用同一轻量标识：混合机器的 Focus 项目行与 Project Group 成员显示可读机器短名；Folders 在机器分区标题表达，成员不重复。面包屑的机器身份也使用配置名称，完整稳定 Host ID 进入 tooltip 与可访问名称。
 
 面包屑中的已确认本机省略，混合成员列表保留本机以区分；未知或未配置保留明确事实。Agent／Terminal Header 的执行身份规则沿[《Agent Region 的关闭与动作密度》](#agent-region-的关闭与动作密度)。
 
@@ -271,7 +271,7 @@ Project Rail 在全局工作面隐藏时，标题起点不能仍按它可见来�
 - Topic 首次打开时，Terminal 的 launching 状态直接占据目标 Region，并沿用全页加载/恢复的阶段语汇；不得短暂露出空白 Launcher 作为成功结果。
 - 启动完成后加载层卸载，Terminal 露出真实内容；失败态保持同一几何和密度预算，显示原因与 Retry，不用空白面或只留一个无动作的占位块。
 - Scratch Topic 点击后右侧必须有内容面或明确的 loading／failed surface；不可用状态沿用同一 Region 几何，不留无文字、无动作的空白区域。
-- Topic 行的主要内容区承担导航命中面，标题、摘要和 Board 行保持同一点击密度；定位、头像等辅助动作单独保留自己的命中区，不把打开 Topic 压缩成一枚孤立图标。
+- Topic 行的主要内容区承担导航命中面，标题、摘要和同层导航行保持同一点击密度；定位、头像等辅助动作单独保留自己的命中区，不把打开 Topic 压缩成一枚孤立图标。
 
 ### Topic 行的 Region 与 Agent 在场状态
 

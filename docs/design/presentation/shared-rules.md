@@ -69,7 +69,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 - 打包来源身份、发布审计与运行路径校验属于安装与诊断边界：候选、canonical 安装副本和当前运行实例只通过身份报告与文件元数据对照，不在工作面常驻显示版本号、重复状态栏或第二套 Session／Run 状态，失败阶段停留在诊断面。安装失败的保留规则、候选运行依赖完整与实际启动验收见交互合同[《打包、安装与启动事实》](../behavior/session-recovery.md#打包安装与启动事实)。
 - New Browser 的结果沿用交互合同中的可见成功／失败投影，不新增常驻版本或状态条：成功时由聚焦 Pane 的 Tab／Region 承担变化，失败时由该工作面已有的服务窗或错误面承担反馈，不能留下无变化的空白点击结果。
 
-- 整体 review 延续 Graphite / Mint 与既有 Surface 层级：Prompt 验证降级的行为见交互合同[《P0 的共同交付边界》](../behavior/agent-capabilities-and-messaging.md#p0-的共同交付边界)，Board 读取的行为见[《Board 的工作线行》](../behavior/spaces-and-layout.md#board-的工作线行)。Prompt 验证降级复用 Session 服务窗，持续可见、不遮挡、不抢焦点；Board 读取失败用现有行内错误语汇，不能用无限 loading 或空态代替。高密度 Board 的排序与分组不应反复全表扫描或复制已分组成员。
+- 整体 review 延续 Graphite / Mint 与既有 Surface 层级：Prompt 验证降级的行为见交互合同[《P0 的共同交付边界》](../behavior/agent-capabilities-and-messaging.md#p0-的共同交付边界)，工作线读取的行为见[《工作线的读取与切换》](../behavior/spaces-and-layout.md#工作线的读取与切换)。Prompt 验证降级复用 Session 服务窗，持续可见、不遮挡、不抢焦点；工作线读取失败用现有行内错误语汇，不能用无限 loading 或空态代替。高密度列表的排序与分组不应反复全表扫描或复制已分组成员。
 
 - 无独立动作的聚合头像沿用相同身份和状态色，但不显示按钮手势或交互抬升；可定位到 Session 的头像保留现有悬停与键盘焦点表现。
 - Shell 环境读取不完整时，复用服务窗的持续、中性、非模态告示，说明读取范围和恢复动作，不展示环境值，也不靠 toast 自动消失；行为归属见 [Desktop interaction](../agentmux-desktop-interaction.md) 的本地 shell 环境约束。登录 shell 降级时告示保持一行紧凑服务窗，说明「交互配置未确认，当前按登录／继承环境运行」，不显示 PATH、凭据或完整环境转储；非交互 fallback 成功后告示仍持续可见，直到下一次应用启动重新确认，布局、Session 与输入不被遮罩。
@@ -428,7 +428,7 @@ styles/
   remote-execution-settings.css  Settings 远程执行：准备、绑定、端点与身份
   settings-workflows.css  Settings 工作流偏好：阅读尺寸、宽度、Goals 视图与 Notes 目录
   settings-focus.css  Settings Focus 偏好：Map 预览、窗口范围与示例
-  board.css  Goals／讨论相关表面；历史文件名不定义全局入口或 Branch/Topic × 状态矩阵
+  session-region-host.css  SessionRegionHost 的共享工作面布局
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
   goals.css  现有 Agent Goal 与任务约束表面
   goal-continuation.css  Goal 监督向导与连续推进控件（Goal 详情与 Mote 当前工作共用）

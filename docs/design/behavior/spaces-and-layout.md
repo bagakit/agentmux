@@ -280,9 +280,11 @@ Space 是共同的外层产品概念，Project 表达可选项目来源，不能
 
 - **注意力沿导航树上卷**：某一层内有 Agent 需要你时，该层的折叠行也必须表达出来，否则折起来的项目与空闲项目无法区分，"先处理谁"就退化成逐层展开去找。上卷复用同一份 Session 投影与共享状态语汇，不建第二个聚合管线；needs-you 与 error 同时存在时保留两类准确 icon+count，其他安静活动按密度 SSOT[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)的信息预算渐进展示，不靠颜色猜状态。`done` 不升级为待处理告警，`disconnected` 保持中性。
 
-#### Board 的工作线行
+#### 工作线的读取与切换
 
-Workspace 的 Board 以工作线行呈现当前对象：项目 Workspace 中是 Branch／worktree 行，Scratch 中是 Topic 行。Board 的行、读取状态和刷新动作必须来自同一次读取，Board 与侧栏工具消费同一个请求 owner；刷新后行必须更新，读取失败不能呈现为空项目，切换 Workspace 时不得短暂显示上一个 Workspace 的 Topic。Branch 行与 Topic 行都展示对应工作线的 recap，沿用同一份 Board 行摘要来源，不复制状态管线。
+Branch／worktree 与 Topic 的列表沿各自现有资源入口读取，不另设 Workspace 的 Branch／Topic × 状态矩阵。全局目标清单与看板只沿 [Goals 行为合同](goals-and-demand.md)组织，不复制工作线或 Session 状态管线。
+
+同一列表的行、读取状态和刷新动作来自原请求 owner；刷新更新对应对象，读取失败保留已知内容并如实说明，不能呈现为空项目。切换 Workspace 时不得短暂显示上一个 Workspace 的 Topic，迟到回执不能覆盖当前来源。对象进入原工作面的导航、原身份与恢复路径保持。
 
 ### 对象树与真实注意力
 
