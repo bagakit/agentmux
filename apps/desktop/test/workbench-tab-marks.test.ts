@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
@@ -573,5 +574,26 @@ describe('markAppearance：去重键就是「画出来长什么样」', () => {
     expect(
       markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'region-nine' })
     ).not.toContain('region-nine')
+  })
+})
+
+
+describe('remote work modes remain visible in mixed Region identities', () => {
+  it('keeps equal Provider/status marks when current placement differs', () => {
+    const tab = tabWith(agentSurface('local-region', 'local-agent'), agentSurface('remote-region', 'remote-agent'))
+    const status = { state: 'running' as const, source: 'run-process' as const, observedAt: 1 }
+    const sources = [
+      { id: 'local-agent', kind: 'agent' as const, providerId: 'codex', hostId: 'local', workspacePath: '/project', status },
+      { id: 'remote-agent', kind: 'agent' as const, providerId: 'codex', hostId: 'other', workspacePath: '/agent', status,
+        toolExecution: { bindingId: 'original', resourceHostId: 'original-alias', resourceRuntimeId: 'physical-project', workspacePath: '/project' },
+        workPlacement: { agentHostId: 'other', resourceHostId: 'local' } }
+    ]
+    const facts = tabMarkAgentFactsFor(sources, undefined, undefined, 'local')
+    const marks = workbenchTabMarks(tab, facts)
+    expect(marks.map(mark => mark.kind === 'agent' ? mark.workMode : null)).toEqual(['local','remote-agent'])
+    const html = renderToStaticMarkup(createElement(WorkbenchTabMarks, { marks }))
+    expect(html).toContain('Remote Agent')
+    expect(tabRegionSummary(tab, facts)).toContain('Project local: /project')
+    expect(tabRegionSummary(tab, facts)).not.toContain('original-alias')
   })
 })

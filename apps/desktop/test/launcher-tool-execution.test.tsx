@@ -39,19 +39,37 @@ async function mount(reverse = false, settings: ContextType<typeof SettingsNavig
   await dom.render(<SettingsNavigation.Provider value={settings}><NewTabSurface tabGroupId="group" tabId="launch" regionId="input" /></SettingsNavigation.Provider>)
   return { project, warm, before: useAppStore.getState() }
 }
-const runsOn = () => dom.container.querySelector<HTMLButtonElement>('.launcher-agent-device [aria-label="Runs on"]')!
-async function mode(label: string) { await chooseField(runsOn(), label === 'Local development' ? 'local' : remote.id) }
-/** Settings prepares the arrangements the start page no longer edits; the Launcher consumes the same two fields. */
+const workMode = () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Work mode"]')!
+const editor = () => document.querySelector<HTMLElement>('.launcher-work-arrangement__dialog')!
+async function openEditor() {
+  if (!editor()) await dom.click('[aria-label="Work mode"]')
+  expect(editor()).not.toBeNull()
+}
+async function editorMode(value: string) { await act(async () => editor().querySelector<HTMLInputElement>(`input[type=radio][value="${value}"]`)!.click()) }
+async function editorField(label: string, value: string) { await chooseField(editor().querySelector<HTMLButtonElement>(`button.selection-field[aria-label="${label}"]`)!, value) }
+async function editorAction(text: string) {
+  const action = [...editor().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === text)!
+  expect(action).not.toBeUndefined(); await act(async () => action.click())
+}
+async function configure(mode: string, projectId: string, hostId?: string, startupId?: string) {
+  await openEditor(); await editorMode(mode); await editorField('Project for this arrangement', projectId)
+  if (hostId !== undefined) await editorField('Agent runs on', hostId)
+  if (startupId !== undefined) await editorField('Agent starts in', startupId)
+  await editorAction('Apply arrangement')
+}
+async function mode(label: string) { await configure(label === 'Local development' ? 'local' : 'remote-agent', 'workspace', label === 'Local development' ? undefined : remote.id) }
+/** An externally prepared tuple is retained; edits below still use the actual anchored editor. */
 async function arrange(resourceWorkspaceId: string, agentWorkspaceId: string | null) {
   await act(async () => { useAppStore.getState().selectLauncherExecution({ ...target, displayWorkspaceId: resourceWorkspaceId, groupId: 'group' },
     { resourceWorkspaceId, agentWorkspaceId }, { navigateProject: false, reveal: false }) })
 }
 async function splitAt(workspaceId: string) {
-  const project = useAppStore.getState().tabs.launch!.regions.input
-  const resourceWorkspaceId = project.kind === 'launcher' ? project.workspaceId! : 'workspace'
-  const hostId = useAppStore.getState().config!.workspaces.find(item => item.id === workspaceId)!.hostId
-  if (resourceWorkspaceId === 'workspace' && hostId !== 'local') await mode('Remote Agent')
-  else await arrange(resourceWorkspaceId, workspaceId)
+  const state = useAppStore.getState(), region = state.tabs.launch!.regions.input
+  if (region.kind !== 'launcher') throw Error('Original Launcher required')
+  const resource = state.config!.workspaces.find(item => item.id === region.workspaceId)!, agent = state.config!.workspaces.find(item => item.id === workspaceId)!
+  const sameHost = resource.hostId === agent.hostId
+  const desiredMode = resource.hostId === 'local' ? sameHost ? 'local' : 'remote-agent' : agent.hostId === 'local' ? 'remote-project' : 'remote-workspace'
+  await configure(desiredMode, resource.id, desiredMode === 'remote-agent' ? agent.hostId : undefined, sameHost ? agent.id : undefined)
   await vi.waitFor(() => expect(dom.container.querySelector('[data-executor-id="codex"]')).not.toBeNull())
   if (!dom.container.querySelector('[aria-pressed="true"][data-executor-id="codex"]')) await dom.click('[data-executor-id="codex"]')
 }
@@ -102,8 +120,7 @@ it('never aliases a retained Core choice to App templates or a new Host revision
   expect(dom.container.querySelector('[aria-label="Agent prompt"]')?.getAttribute('contenteditable')).toBe('true')
   await dom.click('[data-executor-id="codex"]')
   expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ agentExecutor: { executorRevision: 'changed-revision' } })
-  // A same-device binding is a Settings arrangement: the start page reads it and returns to the project device.
-  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.launcher-agent-device__action')].find(button => button.textContent === 'Use project device')!.click())
+  await configure('local', 'workspace', undefined, '')
   expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ workspaceId: 'workspace' })
   expect(useAppStore.getState().tabs.launch!.regions.input).not.toHaveProperty('agentWorkspaceId')
 })
@@ -127,22 +144,16 @@ it('restores the exact dual selection only on an authoritative not-applied reply
   expect(useAppStore.getState().agentComposerDrafts.input).toBe('Keep complete request')
 })
 
-it('a Settings-prepared arrangement reads on the start page and returns to the project device without preparing work', async () => {
-  const open = vi.fn()
-  const settings = { open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [],
-    channelPresentation: vi.fn(), openMoteLark: vi.fn(), chooseAgent: vi.fn() }
-  await mount(false, settings)
-  await arrange('workspace', 'workspace')
+it('the anchored editor reads an existing tuple and Cancel preserves it before an explicit ordinary-mode Apply', async () => {
+  await mount(); await arrange('workspace', 'workspace')
   const launch = vi.spyOn(api.sessions, 'launchAgent'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
-  const read = dom.container.querySelector('.launcher-agent-device[data-arrangement="settings"]')!
-  expect(read).not.toBeNull()
-  expect(read.textContent).toContain(composerConfig.workspaces[0]!.path)
-  expect(dom.container.querySelector('[aria-label="Runs on"]')).toBeNull()
   const before = useAppStore.getState()
-  await act(async () => [...read.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Remote Agents')!.click())
-  expect(open).toHaveBeenCalledExactlyOnceWith('remote-execution')
-  expect(useAppStore.getState().tabs).toBe(before.tabs)
-  await act(async () => [...read.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use project device')!.click())
+  await openEditor()
+  expect(editor().textContent).toContain(composerConfig.workspaces[0]!.path)
+  expect(editor().querySelector<HTMLButtonElement>('[aria-label="Agent starts in"]')!.dataset.value).toBe('workspace')
+  await editorMode('remote-agent'); await editorField('Agent runs on', remote.id); await editorAction('Cancel')
+  expect(editor()).toBeNull(); expect(useAppStore.getState().tabs).toBe(before.tabs)
+  await configure('local', 'workspace', undefined, '')
   expect(useAppStore.getState().tabs.launch!.regions.input).not.toHaveProperty('agentWorkspaceId')
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(launch).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
@@ -165,14 +176,38 @@ it('explains unsupported Mote dual execution while retaining normal launch, all 
 })
 
 
-it('exposes the Agent device directly without project-mode cards or early Agent creation', async () => {
-  const f = await mount(), launch = vi.spyOn(api.sessions, 'launchAgent')
-  expect(dom.container.querySelector('.launcher-execution__modes')).toBeNull()
-  expect(runsOn().dataset.value).toBe('local')
-  await mode('Remote Agent')
+it('opens every work direction from one anchored editor without early Agent creation', async () => {
+  const f = await mount(), launch = vi.spyOn(api.sessions, 'launchAgent'), home = vi.mocked(api.hosts.home)
+  expect(workMode().textContent).toContain('Local')
+  await openEditor()
+  expect([...editor().querySelectorAll<HTMLInputElement>('input[type=radio]')].map(input => input.value)).toEqual(['local', 'remote-project', 'remote-agent', 'remote-workspace'])
+  await editorMode('remote-agent'); await editorField('Agent runs on', remote.id)
+  expect(useAppStore.getState().tabs).toBe(f.before.tabs); expect(home).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
+  await editorAction('Apply arrangement')
   expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ workspaceId: 'workspace', agentWorkspaceId: remoteProject.id })
-  expect(useAppStore.getState().agentComposerDrafts).toBe(f.before.agentComposerDrafts)
-  expect(launch).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts).toBe(f.before.agentComposerDrafts); expect(launch).not.toHaveBeenCalled()
+})
+it.each(['remote-project', 'remote-workspace'])('%s opens the exact project’s own Launcher without moving relative input', async desiredMode => {
+  await mount()
+  const prompt = 'Inspect [original.md](agentmux-file:%40original.md) and keep @relative/path here.'
+  await act(async () => useAppStore.getState().setAgentComposerDraft('input', prompt))
+  const before = useAppStore.getState(), launch = vi.spyOn(api.sessions, 'launchAgent'), home = vi.mocked(api.hosts.home)
+  await openEditor(); await editorMode(desiredMode); await editorField('Project for this arrangement', remoteProject.id)
+  expect(editor().textContent).toContain('Original drafts stay with their project')
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(home).not.toHaveBeenCalled()
+  await editorAction('Cancel')
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().agentComposerDrafts.input).toBe(prompt)
+  await configure(desiredMode, remoteProject.id)
+  const after = useAppStore.getState(), created = Object.values(after.tabs).filter(tab => !before.tabs[tab.id])
+  expect(created).toHaveLength(1)
+  const destination = created[0]!, region = destination.regions[destination.layout.activeRegionId]!
+  expect(region).toMatchObject({ kind: 'launcher', workspaceId: remoteProject.id })
+  if (desiredMode === 'remote-project') expect(region).toMatchObject({ agentWorkspaceId: 'workspace' })
+  else expect(region).not.toHaveProperty('agentWorkspaceId')
+  expect(after.tabs.launch).toBe(before.tabs.launch); expect(after.agentComposerDrafts.input).toBe(prompt)
+  expect(after.agentComposerDrafts[region.regionId] ?? '').toBe('')
+  expect(after.launcherNameDrafts[region.regionId]).toBeUndefined(); expect(after.launcherOptionDrafts[region.regionId]).toBeUndefined()
+  expect(after.sessions).toBe(before.sessions); expect(after.warmTerminals).toBe(before.warmTerminals); expect(launch).not.toHaveBeenCalled()
 })
 it('an explicit device choice uses its home and returning to this device follows the original project', async () => {
   await mount(); await mode('Remote Agent')
@@ -181,7 +216,7 @@ it('an explicit device choice uses its home and returning to this device follows
   expect(useAppStore.getState().tabs.launch!.regions.input).not.toHaveProperty('agentWorkspaceId')
   expect(useAppStore.getState().tabs.launch!.regions.input.workspaceId).toBe('workspace')
 })
-it('the start page has no project or machine selector and its device label reads the exact Space project', async () => {
+it('the start page keeps the exact Space project label while arrangement selectors stay inside the editor', async () => {
   const f = await mount()
   expect(dom.container.querySelector('.launcher-environment button, .launcher-environment select')).toBeNull()
   expect(dom.container.querySelector('.launcher-execution-advanced, [aria-label="Files and tools"], [aria-label="Agent startup directory"]')).toBeNull()
@@ -191,14 +226,15 @@ it('the start page has no project or machine selector and its device label reads
   expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(f.project.path)
   expect(document.querySelector('[role="tooltip"]')?.textContent).not.toContain('opens this device')
 })
-it('Runs on is absent for a remote project and for a single configured device', async () => {
+it('a remote project and a single configured device both retain the same Work mode entry', async () => {
   await mount(true)
   expect(dom.container.querySelector('.launcher-environment__device')?.getAttribute('aria-label')).toBe('Device: Agent server')
-  expect(runsOn()).toBeNull()
+  expect(workMode().textContent).toContain('Remote Workspace')
+  await openEditor(); expect(editor().querySelector<HTMLInputElement>('input[value="remote-workspace"]')!.checked).toBe(true); await editorAction('Cancel')
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, hosts: state.config!.hosts.filter(host => host.id === 'local'),
     workspaces: state.config!.workspaces.filter(workspace => workspace.hostId === 'local') }, activeWorkspaceId: 'workspace',
     tabs: { launch: { ...state.tabs.launch!, workspaceId: 'workspace', regions: { ...state.tabs.launch!.regions, input: { ...state.tabs.launch!.regions.input, workspaceId: 'workspace' } } } } })))
-  expect(runsOn()).toBeNull()
+  expect(workMode().textContent).toContain('Local')
 })
 it('the Agent section refreshes the exact Agent device it names', async () => {
   await mount(); await mode('Remote Agent')
@@ -208,35 +244,51 @@ it('the Agent section refreshes the exact Agent device it names', async () => {
   await act(async () => refresh.click())
   await vi.waitFor(() => expect(api.executors.discover).toHaveBeenCalledWith(remote.id))
 })
-it('Runs on distinguishes identical device names by their exact IDs', async () => {
+it('the editor distinguishes identical device names by their exact IDs', async () => {
   await mount()
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, hosts: state.config!.hosts.map(host => ({ ...host, label: 'Studio' })) } })))
-  await act(async () => { runsOn().focus(); runsOn().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  await openEditor(); await editorMode('remote-agent')
+  expect(editor().querySelector('.agent-work-end__host')?.textContent).toBe('Studio · local')
+  const trigger = editor().querySelector<HTMLButtonElement>('[aria-label="Agent runs on"]')!
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
   const labels = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].map(item => item.textContent)
-  expect(labels.some(text => text?.includes('Studio · local'))).toBe(true)
   expect(labels.some(text => text?.includes('Studio · B'))).toBe(true)
 })
-it('a failed device preparation stays next to Runs on with Retry and keeps the original target and draft', async () => {
+it('failed device preparation stays in the editor and the same Apply retries without changing the original target or draft', async () => {
   const f = await mount()
   vi.mocked(api.hosts.home).mockRejectedValueOnce(new Error('home unavailable'))
   await mode('Remote Agent')
-  const status = dom.container.querySelector<HTMLElement>('.launcher-agent-device__status[data-state="failed"]')!
+  const status = editor().querySelector<HTMLElement>('.agent-work-setup__error')!
   expect(status.textContent).toContain('could not be read')
   expect(useAppStore.getState().tabs.launch!.regions.input).not.toHaveProperty('agentWorkspaceId')
   expect(useAppStore.getState().agentComposerDrafts).toBe(f.before.agentComposerDrafts)
-  await act(async () => status.querySelector<HTMLButtonElement>('button')!.click())
+  await editorAction('Apply arrangement')
   await vi.waitFor(() => expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ agentWorkspaceId: remoteProject.id }))
 })
-it('unrelated navigation does not cancel an in-flight device preparation', async () => {
+it('leaving the workface cancels pending preparation and keeps the original Launcher and complete draft', async () => {
+  await mount()
+  let resolve!: (value: { routeHostId: string; homeDirectory: string }) => void
+  let signal: AbortSignal | undefined
+  vi.mocked(api.hosts.home).mockImplementationOnce((_host, options) => { signal = options?.signal; return new Promise(done => { resolve = done }) })
+  const before = useAppStore.getState()
+  await mode('Remote Agent')
+  expect(editor().querySelector('.agent-work-setup[aria-busy="true"]')).not.toBeNull()
+  await act(async () => useAppStore.setState({ focusView: 'agents' }))
+  expect(signal?.aborted).toBe(true)
+  await act(async () => resolve({ routeHostId: remote.id, homeDirectory: remoteProject.path }))
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+})
+it('an unrelated Session observation keeps an in-flight preparation on the original workface', async () => {
   await mount()
   let resolve!: (value: { routeHostId: string; homeDirectory: string }) => void
   vi.mocked(api.hosts.home).mockReturnValueOnce(new Promise(done => { resolve = done }))
+  const before = useAppStore.getState()
   await mode('Remote Agent')
-  expect(dom.container.querySelector('.launcher-agent-device__status')?.textContent).toBe('Preparing…')
-  await act(async () => useAppStore.setState({ focusView: 'agents' }))
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, composerSession('unrelated-observation')] })))
   await act(async () => resolve({ routeHostId: remote.id, homeDirectory: remoteProject.path }))
   await vi.waitFor(() => expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ agentWorkspaceId: remoteProject.id }))
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
 
 it('keeps a failed first Host inventory unknown and retries the same runtime without borrowing App configurations', async () => {

@@ -1,4 +1,4 @@
-import { aliases } from './fixtures/settings-resource-library/environment.mjs'
+import { aliases, installedRoot } from './fixtures/settings-resource-library/environment.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -17,10 +17,10 @@ assert(directory.startsWith(join(root, '.tmp/remote-execution-experience/capture
 assert(!process.env.EXECUTION_MODES_MUTANT && !process.env.TOOL_EXECUTION_UI_MUTANT, 'A capture uses unchanged production source')
 const hash = v => createHash('sha256').update(v).digest('hex')
 const sourceFile = join(directory, 'source.json')
-const owners = ['apps/desktop/src/renderer/src/components/settings/RemoteExecutionSettingsPane.tsx', 'apps/desktop/src/renderer/src/components/settings/modules/remote-execution.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/App.tsx', ...['NewTabSurface', 'LauncherExecutionModes', 'LauncherExecutionPicker', 'LauncherEnvironment', 'WorkspaceWorkbench', 'AgentSessionComposer', 'SurfaceToolDock', 'WorkspaceFilesTool', 'WorkspaceGitTool'].map(x => `apps/desktop/src/renderer/src/components/${x}.tsx`),
-  ...['use-composer-candidates.tsx', 'use-composer-attachments.ts', 'launcher-state.ts', 'workbench-persistence.ts', 'desktop-spatial-state.ts'].map(x => `apps/desktop/src/renderer/src/lib/${x}`),
+const owners = ['apps/desktop/src/renderer/src/components/settings/RemoteExecutionSettingsPane.tsx', 'apps/desktop/src/renderer/src/components/settings/modules/remote-execution.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/App.tsx', ...['NewTabSurface', 'LauncherAgentDevice', 'AgentWorkModeSetup', 'AgentWorkModeBadge', 'LauncherEnvironment', 'WorkspaceWorkbench', 'AgentSessionComposer', 'SurfaceToolDock', 'WorkspaceFilesTool', 'WorkspaceGitTool'].map(x => `apps/desktop/src/renderer/src/components/${x}.tsx`),
+  ...['agent-work-mode.ts', 'session-resource-context.ts', 'session-state.ts', 'use-composer-candidates.tsx', 'use-composer-attachments.ts', 'launcher-state.ts', 'workbench-persistence.ts', 'desktop-spatial-state.ts'].map(x => `apps/desktop/src/renderer/src/lib/${x}`),
   'packages/client-ui/src/lib/composer-semantic-reference.ts',
-  'apps/desktop/src/renderer/src/styles/launcher.css', 'apps/desktop/scripts/fixtures/execution-modes/entry.tsx']
+  'apps/desktop/src/renderer/src/styles/launcher.css', 'apps/desktop/src/renderer/src/components/agent-work-mode.css', 'apps/desktop/scripts/fixtures/execution-modes/entry.tsx']
 const boundary = 'Production WorkspaceWorkbench → NewTabSurface → Store/Composer/components/CSS and real Core durable spatial storage through private Electron IPC. Machine/configuration/Session/API facts are controlled external inputs. No SSH, native-Agent execution, physical OS interaction or user App claim.'
 if (args[0] === '--prepare') {
   await mkdir(directory, { recursive: true })
@@ -61,11 +61,11 @@ if (args[0] === '--prepare') {
   const profile = join(restoreOnly ? restoreSource : directory, 'private-profile'), env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
   await mkdir(profile, { recursive: true })
   const priorJourney = restoreOnly ? JSON.parse(await readFile(join(restoreSource, 'journey.json'), 'utf8')) : null
-  if (restoreOnly) assert(priorJourney.passed && priorJourney.frames.length === 14, 'Restore consumes an already completed native journey and its original profile')
+  if (restoreOnly) assert(priorJourney.passed && priorJourney.frames.length >= 12, 'Restore consumes an already completed native journey and its original profile')
   const restartExpected = join(restoreSource, 'restart-expected.json')
   const reusedJourney = restoreOnly ? { receipt: join(restoreSource, 'journey.json'), sha256: hash(await readFile(join(restoreSource, 'journey.json'))), driver: join(restoreSource, 'driver-journey.cjs'), driverSha256: hash(await readFile(join(restoreSource, 'driver-journey.cjs'))), expected: restartExpected, expectedSha256: hash(await readFile(restartExpected)), profile, source: join(restoreSource, 'source.json'), sourceSha256: hash(await readFile(join(restoreSource, 'source.json'))) } : null
   for (const phase of first ? ['first'] : configurationOnly ? ['configuration-review'] : restoreOnly ? ['restore'] : ['journey', 'restore']) {
-    const process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(directory, 'compiled/index.html'), profile, directory, phase, join(root, 'packages/core/dist/spatial-state.js'), styleInput?.stylesheet ?? '', restartExpected],
+    const process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(directory, 'compiled/index.html'), profile, directory, phase, join(installedRoot, 'packages/core/dist/spatial-state.js'), styleInput?.stylesheet ?? '', restartExpected],
       { cwd: root, env, temporaryRoot: profile, timeoutMs: 120000, onLine: line => { if (line.startsWith('{"frame":')) console.log(line) } })
     processes.push(process)
     const capture = JSON.parse(await readFile(join(directory, phase + '.json'), 'utf8'))

@@ -36,6 +36,7 @@ const original: SessionSnapshot = {
   latestOutputBytes: 0, processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 },
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: remote.id, agentSessionId: 'retained-original-agent', run: { runId: 'retained-original-run' } },
+  workPlacement: { agentHostId: remote.id, resourceHostId: local.id },
   toolExecution: { bindingId: 'retained-original-binding', resourceHostId: local.id, resourceRuntimeId: 'local-runtime', workspacePath: project.path }
 }
 const snapshot = api.sessions.snapshot
@@ -44,6 +45,7 @@ api.executors.discover = async hostId => ({ routeHostId: hostId, runtimeId: `con
   { executorId: 'codex', providerId: 'codex', label: 'Codex', command: 'codex', source: 'registered', configRevision: `revision-${hostId}`, availability: 'available' },
   { executorId: 'claude', providerId: 'claude', label: 'Claude', command: 'claude', source: 'registered', configRevision: `claude-revision-${hostId}`, availability: 'available' }
 ] })
+api.hosts.home = async host => ({ routeHostId: host.id, homeDirectory: host.id === 'local' ? project.path : host.id === remote.id ? runtime.path : other.path })
 const availableDiscovery = api.executors.discover
 function inventory(kind: 'ready' | 'empty' | 'unavailable', hostId: string) {
   api.executors.discover = kind === 'ready' ? availableDiscovery : kind === 'empty'
@@ -127,7 +129,7 @@ flushSync(() => createRoot(document.getElementById('root')!).render(<DesktopClie
 Object.assign(window, { executionModesVisual: {
   get ready() { return ready }, get restored() { return restored }, get refs() { return refs }, io, project, remoteProject, runtime, other, empty, trustedEvents,
   theme(value: 'light' | 'dark') { updateThemeSelection({ appAppearance: value, themeId: 'graphite' }) },
-  show(workspaceId: string) { flushSync(() => useAppStore.getState().selectWorkspace(workspaceId)) },
+  show(workspaceId: string) { flushSync(() => { const state=useAppStore.getState(); const target=workspaceId===project.id?refs.local:workspaceId===remoteProject.id?refs.remote:null; const group=state.layouts[workspaceId]?.groups.find(group=>target&&group.tabOrder.includes(target.tabId)); if(target&&group) state.activateTab(workspaceId,group.id,target.tabId); else state.selectWorkspace(workspaceId) }) },
   checkpoint() { return prepareRendererUpdate('reload') },
   catalog() { return workbenchSelectionCatalog(useAppStore.getState()) },
   allowLaunch() { allowLaunch = true },

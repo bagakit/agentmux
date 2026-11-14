@@ -47,14 +47,17 @@ async function open() {
   })
   await dom.click('[data-open-folder]')
 }
-it('projects target-only choices and starts the selected target on its returned folder', async () => {
+it('projects target-only choices and prepares the selected target in its returned folder without starting', async () => {
   await show()
   const options = [...dom.container.querySelectorAll('option')]
   expect(options.map(item => item.value)).toEqual(['', 'shared', 'remote-only'])
   expect(options[1]!.textContent).toContain('Remote Agent')
   expect(options[1]!.textContent).toContain('Available')
   await choose('remote-only'); await open()
-  expect(useAppStore.getState().launchAgent).toHaveBeenCalledExactlyOnceWith('remote-only', '', 'target-group')
+  expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
+  const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'launcher' && region.workspaceId === 'new-folder'))!
+  expect(tab).toBeDefined()
+  expect(tab.regions[tab.layout.activeRegionId]).toMatchObject({kind:'launcher',workspaceId:'new-folder',executorId:'remote-only'})
   expect(useAppStore.getState().activeWorkspaceId).toBe('new-folder')
 })
 it('retains unknown connection facts without blocking registration or treating commands as missing', async () => {
@@ -75,7 +78,7 @@ it('does not substitute a same-ID executor after the selected connection changes
   await act(async () => { const config = useAppStore.getState().config!; useAppStore.setState({ config: { ...config, hosts: [config.hosts[0]!, replacement] }, hostExecutorInventories: { remote: inventory(replacement) } }) })
   await open()
   expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
-  expect(dom.container.textContent).toContain('Agent was not started')
+  expect(dom.container.textContent).toContain('Agent Launcher was not prepared')
   expect(useAppStore.getState().activeWorkspaceId).toBe('new-folder')
 })
 it('fences a connection replacement during registration without losing the returned folder', async () => {
@@ -90,7 +93,7 @@ it('fences a connection replacement during registration without losing the retur
   await open()
   expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
   expect(useAppStore.getState().activeWorkspaceId).toBe('new-folder')
-  expect(dom.container.textContent).toContain('Agent was not started')
+  expect(dom.container.textContent).toContain('Agent Launcher was not prepared')
 })
 it('fences a connection replacement during folder opening and keeps the registered folder', async () => {
   await show(); await choose()
@@ -100,7 +103,7 @@ it('fences a connection replacement during folder opening and keeps the register
   }) })
   await open()
   expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
-  expect(dom.container.querySelector('[data-folder-stage]')!.textContent).toContain('Agent was not started')
+  expect(dom.container.querySelector('[data-folder-stage]')!.textContent).toContain('Agent Launcher was not prepared')
 })
 it('discovers only a visible active form and rejects stale inventory from another route', async () => {
   useAppStore.setState({ hostExecutorInventories: { remote: inventory({ ...remote, hostname: 'old.invalid' }) } })
