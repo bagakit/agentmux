@@ -1,3 +1,4 @@
+import { SPACE_LINK_RESOURCE, spaceLinkDocument, type SpaceLinkTarget, type SpaceLinkAddress } from './space-link.js';
 import { folderSpaceFacts, folderResourceIdentity, type FolderSpaceResource, type FolderDirectoryResource } from './space-folder.js';
 import { folderDirectoryResourceKey, retainFolderDirectoryIdentity } from './space-folder-resources.js';
 import { mintObjectId } from './object-id.js';
@@ -659,6 +660,35 @@ export class AgentMuxSpatialStateStore {
       const state = projectSpatialState(await this.writeLocked(current, validated));
       return { state, key, diskDurability: 'confirmed' };
     });
+  }
+  /** Explicit publication is one original graph transaction; cold resolve is strictly read-only. */
+  async ensureSpaceLink(target: SpaceLinkTarget, operationId: string, assertCurrent?: () => void | Promise<void>): Promise<SpaceLinkAddress> {
+    return this.locked(async () => {
+      const current = await this.requiredState(), graph = structuredClone(current.graph)
+      const spaces = graph.spaces.filter(space => space.spaceId === target.spaceId && space.kind === 'mote')
+      if (spaces.length !== 1) throw new AgentMuxError('The exact original Mote is unconfirmed. Its identity and workface are kept.', 'SPACE_LINK_TARGET_UNCONFIRMED')
+      const document = spaceLinkDocument(graph.resources[SPACE_LINK_RESOURCE])
+      const same = (value: SpaceLinkTarget) => value.runtimeId === target.runtimeId && value.spaceId === target.spaceId && value.eventId === target.eventId
+      const previous = Object.hasOwn(document.operations, operationId) ? document.operations[operationId] : undefined
+      if (previous && !same(document.records[previous]!)) throw new AgentMuxError('This original link operation belongs to another target.', 'SPACE_LINK_OPERATION_CONFLICT')
+      let linkId = previous ?? Object.keys(document.records).find(id => same(document.records[id]!))
+      if (!linkId) { do { linkId = mintObjectId() } while (Object.hasOwn(document.records,linkId)); document.records[linkId] = structuredClone(target) }
+      Object.defineProperty(document.operations, operationId, {value: linkId, enumerable: true, configurable: true, writable: true})
+      graph.resources[SPACE_LINK_RESOURCE] = document as unknown as SpatialJson
+      await assertCurrent?.()
+      // A retry reconfirms these same bindings; an equal cold read is not a write ACK.
+      await this.writeLocked(current, parseAgentMuxSpatialGraph(graph))
+      return { runtimeId: target.runtimeId, linkId }
+    })
+  }
+  async resolveSpaceLink(address: SpaceLinkAddress): Promise<SpaceLinkTarget | null> {
+    const state = await this.requiredState(), document = spaceLinkDocument(state.graph.resources[SPACE_LINK_RESOURCE])
+    const target = document.records[address.linkId]
+    if (!target) return null
+    if (target.runtimeId !== address.runtimeId) throw new AgentMuxError('The public link belongs to another original Runtime.', 'RUNTIME_OWNER_MISMATCH')
+    if (!state.graph.spaces.some(space => space.spaceId === target.spaceId && space.kind === 'mote'))
+      throw new AgentMuxError('The original Mote target is currently unconfirmed. Its public address is retained.', 'SPACE_LINK_TARGET_UNCONFIRMED')
+    return structuredClone(target)
   }
   async commit(input: AgentMuxSpatialCommit): Promise<AgentMuxSpatialState> {
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)

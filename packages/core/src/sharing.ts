@@ -1,3 +1,5 @@
+import { formatSpaceLink, parseSpaceLinkAddress, type SpaceLinkAddress } from './space-link.js'
+export { parseSpaceLinkResult } from './space-link.js'
 import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
 import { nodeAlias } from './node-publishing.js'
 
@@ -40,7 +42,8 @@ export type AmuxObjectLinkTarget =
   | { kind: 'space'; spaceId: string }
   | { kind: 'zone'; zoneId: string }
   | { kind: 'capsule'; capsuleId: string }
-  | { kind: 'mote'; spaceId: string; eventId?: string }
+  | { kind: 'mote'; spaceId: string; eventId?: string; address?: never }
+  | { kind: 'mote'; address: SpaceLinkAddress; spaceId?: never; eventId?: never }
 
 export type AmuxGoalAddress = { runtimeId: string; namespace: string; goalUrl: string; planUrl: string }
 
@@ -50,6 +53,7 @@ export function formatGoalAddress(goalId: string, runtimeId: string, namespace: 
 }
 
 export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
+  if (target.kind === 'mote' && target.address) return formatSpaceLink(target.address)
   if (target.kind === 'goal') {
     if (typeof target.goalId !== 'string' || !target.goalId || typeof target.runtimeId !== 'string' || !target.runtimeId || typeof target.namespace !== 'string' || !target.namespace || target.section !== undefined && target.section !== 'plan') throw new TypeError('An exact Goal and its original Runtime are required.')
     return `${AMUX_PROTOCOL_DEFINITIONS.link.tag}goal/${encodeURIComponent(target.goalId)}${target.section === 'plan' ? '/plan' : ''}?runtime=${encodeURIComponent(target.runtimeId)}&namespace=${encodeURIComponent(target.namespace)}`
@@ -78,6 +82,12 @@ export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
 /** A Mote thread carries its original event within that exact Mote's stable Space. */
 export function parseAmuxObjectLink(raw: string): AmuxObjectLinkTarget {
   if (typeof raw !== 'string') throw new TypeError('An object link must be text.')
+  const mote = /^amux:\/\/mote\/([^/?#]+)\?runtime=([^&#?]+)$/u.exec(raw)
+  if (mote) {
+    const address = parseSpaceLinkAddress({linkId:mote[1],runtimeId:decodeURIComponent(mote[2]!)})
+    if (formatSpaceLink(address) !== raw) throw new TypeError('The public Mote address encoding is not canonical.')
+    return {kind:'mote',address}
+  }
   const goal = /^amux:\/\/goal\/([^/?#]+)(\/plan)?\?runtime=([^&#?]+)&namespace=([^&#?]+)$/u.exec(raw)
   if (goal) {
     const target = { kind: 'goal' as const, goalId: decodeURIComponent(goal[1]!), runtimeId: decodeURIComponent(goal[3]!), namespace: decodeURIComponent(goal[4]!), ...(goal[2] ? { section: 'plan' as const } : {}) }

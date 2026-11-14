@@ -8,7 +8,7 @@ export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
   /** The reference identifies an existing saved item, not a pin or a new membership. */
   | { kind: 'survey'; selection: AgentMuxSurveyPinReference; reference?: Pick<AgentMuxSpaceAddress, 'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'> }
-  | { kind: 'mote'; spaceId: string; eventId?: string }
+  | Extract<import('./sharing.js').AmuxObjectLinkTarget, {kind:'mote'}>
   | { kind: 'settings'; sectionId: string | null; hostId?: string }
   | { kind: 'goal'; goalId: string; runtimeId?: string; namespace?: string; section?: 'plan' }
   | { kind: 'focus-agent'; hostId: string; agentSessionId: string }
@@ -87,6 +87,7 @@ export type AgentMuxDesktopFocusResult = {
   navigation: {
     state: 'applied' | 'unchanged' | 'rejected' | 'unconfirmed'
     requested: AgentMuxDesktopFocusTarget
+    moteLink?: import('./space-link.js').SpaceLinkRecord
     expectedAgentSessionId?: string
     expectedAgentHostId?: string
     selection: AgentMuxDesktopSelection

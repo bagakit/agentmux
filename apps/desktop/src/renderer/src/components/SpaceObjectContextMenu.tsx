@@ -3,8 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import { formatMoteAddress } from '@agentmux/core/sharing'
-import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { copyMoteAddress } from '../lib/mote-address-copy'
 import { useAppStore } from '../store'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
@@ -89,7 +88,7 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
         menu.onCloseAutoFocus(event); archiveReturnFocus.current?.()
       }}>
         {target?.kind === 'mote' ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => {
-          void copyTextToClipboard(formatMoteAddress({ spaceId: target.key }), useAppStore.getState().reportError)
+          void copyMoteAddress({ spaceId: target.key }, useAppStore.getState().reportError)
         }}><ThemeObjectLinkIcon size={14} /><span>Copy Mote link</span></ContextMenu.Item> : null}
         {moteActions?.onRename ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onRename!)}><ThemeActionEditIcon size={14} /><span>Rename Mote…</span></ContextMenu.Item> : null}
         {onChangeIcon && target ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => target && onChangeIcon(target))}>

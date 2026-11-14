@@ -1,3 +1,4 @@
+import { parseSpaceLinkAddress, parseSpaceLinkTarget } from './space-link.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlFocusRequest, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
@@ -51,7 +52,7 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section', 'selection', 'reference'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section', 'selection', 'reference', 'address'], code)
   if (source.kind === 'survey') {
     fields(source, ['kind', 'selection', 'reference'], code)
     const selection = parseSurveyPinReference(source.selection, code)
@@ -71,6 +72,7 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
     return { kind: 'space', ...target }
   }
   if (source.kind === 'mote') {
+    if (Object.hasOwn(source, 'address')) { fields(source, ['kind','address'],code); return {kind:'mote',address:parseSpaceLinkAddress(source.address,code)} }
     fields(source, ['kind', 'spaceId', 'eventId'], code)
     return { kind: 'mote', spaceId: spaceControlId(source.spaceId, 'Mote Space', code, true),
       ...(Object.hasOwn(source, 'eventId') ? { eventId: spaceControlId(source.eventId, 'Mote work event', code, true) } : {}) }
@@ -220,12 +222,13 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   const source = fields(value, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
   if (source.schemaVersion !== 5 || source.operation !== 'focus' || source.ok !== true) fail('Desktop focus receipt is invalid.', code)
   const body = fields(source.result, ['navigation', 'presentation', 'input', 'floating', 'overlays', 'focus', 'partial', 'save', 'issues'], code)
-  const nav = fields(body.navigation, ['state', 'requested', 'selection', 'expectedAgentSessionId', 'expectedAgentHostId'], code)
+  const nav = fields(body.navigation, ['state', 'requested', 'selection', 'expectedAgentSessionId', 'expectedAgentHostId', 'moteLink'], code)
   const caret = fields(body.input, ['policy', 'outcome', 'before', 'after'], code)
   const saved = fields(body.save, ['layoutApplied', 'clientStateWritten', 'storageFlushRequested', 'diskDurability', 'reason'], code)
   const result: Omit<AgentMuxDesktopFocusResult, 'operation'> = {
     navigation: { state: member(nav.state, ['applied', 'unchanged', 'rejected', 'unconfirmed'], 'Navigation', code),
       requested: parseDesktopFocusTarget(nav.requested, code), selection: selection(nav.selection, code),
+      ...(nav.moteLink === undefined ? {} : {moteLink:(()=>{const link=fields(nav.moteLink,['address','target'],code);return {address:parseSpaceLinkAddress(link.address,code),target:parseSpaceLinkTarget(link.target,code)}})()}),
       ...(Object.hasOwn(nav, 'expectedAgentSessionId') ? { expectedAgentSessionId: spaceControlId(nav.expectedAgentSessionId, 'Expected Agent Session ID', code) } : {}),
       ...(nav.expectedAgentHostId === undefined ? {} : { expectedAgentHostId: spaceControlId(nav.expectedAgentHostId, 'Expected Agent Host', code) }) },
     presentation: presentation(body.presentation, code), input: { policy: member(caret.policy, ['preserve', 'target'], 'Input policy', code),
@@ -247,6 +250,11 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   if (navigation.expectedAgentHostId !== undefined && navigation.expectedAgentSessionId === undefined) fail('Agent Host condition lacks its Session.', code)
   if (observedInput.policy === 'target' && (navigation.requested.kind !== 'space' ||
     (!navigation.requested.tabId && !navigation.requested.regionId))) fail('Input target requires an exact Tab or Region.', code)
+  const address = navigation.requested.kind === 'mote' ? navigation.requested.address : undefined
+  const link = navigation.moteLink
+  if (address && (!link || link.address.runtimeId !== address.runtimeId || link.address.linkId !== address.linkId || link.target.runtimeId !== address.runtimeId))
+    fail('The public Mote receipt lost its exact original address binding.', code)
+  if (!address && link) fail('An address resolution cannot replace a literal navigation request.', code)
   if ((navigation.state === 'applied' || navigation.state === 'unchanged')) {
     const requested = navigation.requested, actual = navigation.selection
     if (requested.kind === 'survey') {
@@ -267,9 +275,12 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       requested.runtimeId !== undefined && (result.presentation.goal?.runtimeId !== requested.runtimeId || result.presentation.goal?.namespace !== requested.namespace) ||
       requested.section !== undefined && result.presentation.goal?.section !== requested.section)) fail('Goal receipt target is mismatched.', code)
     if (requested.kind === 'surface' && (actual.surface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)
-    if (requested.kind === 'mote' && (actual.surface !== 'space' || actual.space?.spaceId !== requested.spaceId ||
-      result.presentation.mote?.spaceId !== requested.spaceId || result.presentation.mote.page !== (requested.eventId === undefined ? 'discussion' : 'threads') ||
-      result.presentation.mote.eventId !== (requested.eventId ?? null))) fail('Mote receipt identities or original thread presentation are mismatched.', code)
+    if (requested.kind === 'mote') {
+      const original=requested.address ? navigation.moteLink?.target : requested
+      if (!original || actual.surface !== 'space' || actual.space?.spaceId !== original.spaceId || !result.presentation.mote ||
+        result.presentation.mote.spaceId !== original.spaceId || result.presentation.mote.page !== (original.eventId === undefined ? 'discussion' : 'threads') ||
+        result.presentation.mote.eventId !== (original.eventId ?? null)) fail('Mote receipt identities or original thread presentation are mismatched.', code)
+    }
     if (requested.kind === 'space') {
       const { kind: _, ...parent } = requested
       if (actual.surface !== 'space' || !actual.space || Object.entries(parent).some(([key, id]) => actual.space![(key === 'displayWorkspaceId' ? 'workspaceId' : key) as keyof AgentMuxDesktopSpaceSelection] !== id)) {

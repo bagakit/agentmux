@@ -7745,6 +7745,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({ mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy,
             goalReadingEntry: request.target.section ? { goalId: request.target.goalId, ...(request.target.runtimeId === undefined ? {} : { runtimeId: request.target.runtimeId, namespace: request.target.namespace! }), section: request.target.section, phase: 'ready', token: goalReadingToken! } : null })
         } else if (request.target.kind === 'mote') {
+          if (request.target.address) throw new DesktopFocusFailure({step:'target',code:'SPACE_LINK_UNRESOLVED',message:'Resolve the exact public Mote address at its original Core before navigation.',recovery:'Keep the original link and use space link resolve; the current workface is kept.'})
           const resolved = resolveDesktopMoteSelection(get(), catalog, request.target.spaceId)
           moteEntryToken = mintObjectId()
           set({ activeWorkspaceId: resolved.workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
@@ -7794,8 +7795,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (navigationState !== 'rejected') await awaitDesktopPresentation(() => {
         const actual = desktopSelection(get(), catalog)
-        if (request.target.kind === 'mote') return get().moteDiscussionEntry?.token !== moteEntryToken ||
-          actual.space?.spaceId !== request.target.spaceId || Boolean(readMoteLinkPresentation(request.target))
+        if (request.target.kind === 'mote' && !request.target.address) return get().moteDiscussionEntry?.token !== moteEntryToken ||
+          actual.space?.spaceId !== request.target.spaceId || Boolean('spaceId' in request.target && readMoteLinkPresentation(request.target))
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
         if (request.target.kind === 'goal' && request.target.section) return get().goalReadingEntry?.token !== goalReadingToken || Boolean(readGoalReadingPresentation(request.target))
         const observed = readDesktopPresentation(actual, get().tabs)
@@ -7834,7 +7835,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         issues.push({ step: 'presentation', code: 'GOAL_READING_UNCONFIRMED', message: 'The exact original Goal reading position has not been visibly confirmed.',
           recovery: 'The original link, later selection and drafts are retained. Open that same Goal again when its original source is available.' })
       }
-      const motePresentation = request.target.kind === 'mote' ? readMoteLinkPresentation(request.target) : null
+      const motePresentation = request.target.kind === 'mote' && !request.target.address ? readMoteLinkPresentation(request.target) : null
       if (motePresentation) observed.presentation = { ...observed.presentation, mote: motePresentation }
       if (navigationState !== 'rejected' && request.target.kind === 'mote' && !motePresentation) {
         navigationState = 'unconfirmed'

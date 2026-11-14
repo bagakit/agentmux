@@ -180,6 +180,7 @@ const api: AgentMuxPreloadApi = {
     }
   },
   spatial: {
+    ensureLink: input => ipcRenderer.invoke('spatial:ensureLink',input),
     openAgent: input => ipcRenderer.invoke('spatial:openAgent', input),
     read:()=>ipcRenderer.invoke('spatial:read'),
     commit:input=>ipcRenderer.invoke('spatial:commit',input),

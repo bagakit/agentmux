@@ -1,3 +1,4 @@
+import { SPACE_LINK_METHODS, parseSpaceLinkParams, parseSpaceLinkResult, type SpaceLinkMethod } from './space-link.js'
 import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult } from './agent-promotion.js'
 import { isMeshNetworkMethod, parseMeshNetworkParams, parseMeshNetworkResult } from './mesh-network.js'
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult } from './name-control.js'
@@ -513,6 +514,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'agent.open.describe') return parseAgentOpenDescription(value, parseAgentOpenDescribe(params)) as unknown as Record<string, unknown>
     if (method === 'space.folder.inspect') return parseFolderDirectoryInspection(value, parseFolderDirectoryInspectInput(params)) as unknown as Record<string, unknown>
     if (method === 'space.folder.register') return parseFolderSpaceReceipt(value, parseFolderSpaceRegisterInput(params)) as unknown as Record<string, unknown>
+    if (Object.hasOwn(SPACE_LINK_METHODS,method)) return parseSpaceLinkResult(method as SpaceLinkMethod, value, parseSpaceLinkParams(method as SpaceLinkMethod, params)) as unknown as Record<string, unknown>
     if (isSpaceAuthorityMethod(method)) {
       const input = parseSpaceAuthorityParams(method, params)
       if (method === 'space.apply') {

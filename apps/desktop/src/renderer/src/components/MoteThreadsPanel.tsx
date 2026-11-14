@@ -13,8 +13,7 @@ import { useAppStore } from '../store'
 import { api } from '../lib/api'
 import { MoteCooperation } from './MoteCooperation'
 import { MotePrivateConversations } from './MotePrivateConversations'
-import { formatMoteAddress } from '@agentmux/core/sharing'
-import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { copyMoteAddress } from '../lib/mote-address-copy'
 
 /** Threads reads original work sources even when the Main native conversation is unavailable. */
 export function MoteThreadsPanel({ scope, active, observe = active, onSelect, requestedEvent, view, onViewChange, onCount }: {
@@ -45,7 +44,7 @@ export function MoteThreadsPanel({ scope, active, observe = active, onSelect, re
   return <div className="mote-threads-panel" hidden={!active}>
     <MoteWorkThreads page={work?.page ?? null} issue={work?.issue ?? requestedIssue} loading={work?.loading ?? false} visible={active} readWork={readWork} requestedEvent={requestedEvent} view={view} onViewChange={onViewChange} showViews={view === undefined}
       renderEventActions={event => dialogue.target ? <button type="button" className="mote-conversation__link" aria-label="复制 thread 链接" onClick={() => {
-        void copyTextToClipboard(formatMoteAddress({ spaceId: dialogue.target!.spaceId, eventId: event.id }), useAppStore.getState().reportError)
+        void copyMoteAddress({ spaceId: dialogue.target!.spaceId, eventId: event.id }, useAppStore.getState().reportError)
       }}>复制 thread 链接</button> : null}
       memberName={source => members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)?.regions.find(region => region.title)?.title ?? source.origin.recipientSessionId}
       onRefresh={() => work?.refresh()} onOlder={() => void work?.older()}

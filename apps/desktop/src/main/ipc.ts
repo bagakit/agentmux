@@ -1,3 +1,4 @@
+import { parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
 import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
 import { registerSourceFilesIpc } from './source-files-ipc.js'
 import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
@@ -1552,6 +1553,18 @@ export async function registerIpc(args: {
   const disposeSpatial = spatialState.subscribe(state => {
     if(!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('spatial:changed',state)
   })
+  const linkPublications=new Map<string,import('@agentmux/core').SpaceLinkParams['space.link.ensure']>()
+  handleWithEvent('spatial:ensureLink',async (_event,input:{spaceId:string;eventId?:string;operationId:string})=>{
+    if(!input || Object.keys(input).some(key=>!['spaceId','eventId','operationId'].includes(key))) throw new Error('Use the exact original Mote publication fields.')
+    const {owner} = await callUserRpc('runtime.owner.identity',{})
+    const original=linkPublications.get(input.operationId)
+    if(original && (original.target.spaceId!==input.spaceId || original.target.eventId!==input.eventId)) throw new Error('This original link publication belongs to another target.')
+    const request = original ?? parseSpaceLinkParams('space.link.ensure',{target:{runtimeId:owner.runtimeId,spaceId:input.spaceId,...(input.eventId===undefined?{}:{eventId:input.eventId})},operationId:input.operationId})
+    linkPublications.set(input.operationId,request)
+    const result=parseSpaceLinkResult('space.link.ensure',await callUserRpc('space.link.ensure',request),request)
+    linkPublications.delete(input.operationId)
+    return result
+  })
   handleWithEvent('spatial:read',async event=>{return spatialState.readForLayout()})
   handleWithEvent('spatial:openAgent', async (event, input: import('@agentmux/core').AgentMuxRpcParams<'agent.open'>) => {
     return await callUserRpc('agent.open', input)
@@ -1639,7 +1652,8 @@ export async function registerIpc(args: {
     args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => contents.send('ui:spatialLinkIssue', message),
       async (capsuleId, operationId, signal) => await args.runtime.callOriginalCore('local', 'capsule.open', { capsuleId, operationId },
         { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }),
-      { locate: (input, signal) => callUserRpc('node.locate', input, { signal }),
+      { focusMote: async (request, signal) => ({operation:'focus',...await callUserRpc('app.focus',{target:request.target,inputPolicy:request.inputPolicy,operationId:request.requestId},{signal})}),
+        locate: (input, signal) => callUserRpc('node.locate', input, { signal }),
         openCapsule: (input, signal) => remoteCapsules.openRemoteCapsule(input, signal) })
     args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
     args.webFiles?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))

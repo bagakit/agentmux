@@ -286,3 +286,5 @@ export * from './run-control-context.js'
 export * from './terminal-control.js'
 
 export * from './space-close.js'
+
+export * from './space-link.js'

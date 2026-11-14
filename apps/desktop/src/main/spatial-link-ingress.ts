@@ -4,6 +4,7 @@ import type { CapsuleOpenResult } from '@agentmux/core/capsule'
 import { parseNodeLocateResult, type NodeLocateParams, type NodeLocateResult, type NodeLocatedMatch } from '@agentmux/core/node-locator'
 
 export type HostLinkPorts = {
+  focusMote?(request: AgentMuxControlFocusRequest, signal: AbortSignal): Promise<AgentMuxControlResult>
   locate(input: NodeLocateParams, signal: AbortSignal): Promise<NodeLocateResult>
   openCapsule(input: { hostId: string; expectedRuntimeId: string; capsuleId: string; operationId: string; objectLink?: string }, signal: AbortSignal): Promise<CapsuleOpenResult>
 }
@@ -111,8 +112,7 @@ export class SpatialLinkIngress {
       } else if (target.kind === 'goal') {
         request = { ...base, target: { kind: 'goal', goalId: target.goalId, runtimeId: target.runtimeId, namespace: target.namespace, ...(target.section ? { section: target.section } : {}) } }
       } else if (target.kind === 'mote') {
-        request = { ...base, target: { kind: 'mote', spaceId: target.spaceId,
-          ...(target.eventId === undefined ? {} : { eventId: target.eventId }) } }
+        request = { ...base, target }
       } else if (target.kind === 'agent') {
         const discovery = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'space.ls', target: {} }, controller.signal)
         if (controller.signal.aborted) return null
@@ -135,7 +135,9 @@ export class SpatialLinkIngress {
         request = { ...base, target: { kind: 'space', ...selector } }
       }
       if (controller.signal.aborted) return null
-      const result = await execute(request, controller.signal)
+      const originalFocus = target.kind === 'mote' && target.address ? this.hostLinks?.focusMote : execute
+      if (!originalFocus) throw new Error('The original Mote address authority is unavailable. Keep the exact link and restore its original connection.')
+      const result = await originalFocus(request, controller.signal)
       if (result.operation === 'focus' && (result.navigation.expectedAgentSessionId !== request.expectedAgentSessionId || result.navigation.expectedAgentHostId !== request.expectedAgentHostId))
         throw new Error('The original navigation owner did not confirm the requested Agent identity condition.')
       if (controller.signal.aborted || this.execution !== execution) return null

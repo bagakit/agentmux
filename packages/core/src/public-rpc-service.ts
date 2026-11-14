@@ -1,3 +1,4 @@
+import { SPACE_LINK_METHODS, formatSpaceLink, parseSpaceLinkParams, parseSpaceLinkResult, type SpaceLinkMethod } from './space-link.js'
 import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult, type AgentPromotionPort, type AgentPromotionMethod } from './agent-promotion.js'
 import { isMeshNetworkMethod, parseMeshNetworkParams, parseMeshNetworkResult, meshConfigurationNotApplied, type MeshNetworkPort, type MeshNetworkMethod } from './mesh-network.js'
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult, type NameControlParams } from './name-control.js'
@@ -445,6 +446,7 @@ const NATIVE_FIELDS = {
   'agent.open.describe': ['expectedRuntimeId'],
   'space.member.call': ['target','call'], 'space.member.watch': ['target','call'],
   'space.sessions.watch': ['reference'],
+  'space.link.ensure': ['target','operationId'], 'space.link.resolve': ['address'],
   'space.snapshot': ['reference'], 'space.apply': ['reference','expectedRevision','changes'], 'space.watch': ['reference','after'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
@@ -1042,6 +1044,26 @@ export class AgentMuxRpcService {
     }
     if (method === 'space.member.watch') throw new AgentMuxError('Use the original member subscription transport.', 'INVALID_CONTROL_REQUEST')
     if (method === 'space.sessions.watch') throw new AgentMuxError('Observe the original Space Session scope through its subscription API.', 'INVALID_CONTROL_REQUEST')
+    if (Object.hasOwn(SPACE_LINK_METHODS, method)) {
+      const name = method as SpaceLinkMethod, input = parseSpaceLinkParams(name,params)
+      await this.authenticated(context)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (this.ports.callOriginalCore) return parseSpaceLinkResult(name, await this.ports.callOriginalCore('local', name, input, context), input) as AgentMuxRpcResult<M>
+      const hosted = await this.ports.hostedRuntime?.()
+      if (!hosted) throw new AgentMuxError('The original Space link authority is unavailable. Retain the exact reference.', 'CONTROL_UNAVAILABLE')
+      const owner = (await hosted.call('runtime.owner.identity', {})).owner
+      const expectedRuntime = name === 'space.link.ensure' ? (input as import('./space-link.js').SpaceLinkParams['space.link.ensure']).target.runtimeId : (input as import('./space-link.js').SpaceLinkParams['space.link.resolve']).address.runtimeId
+      if (owner.runtimeId !== expectedRuntime) throw new AgentMuxError('This link belongs to another original spatial Runtime. No local target was substituted.', 'RUNTIME_OWNER_MISMATCH')
+      const source = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+      if (name === 'space.link.ensure') {
+        const request = input as import('./space-link.js').SpaceLinkParams['space.link.ensure']
+        const address = await this.spatial.ensureSpaceLink(request.target,request.operationId,async()=>{context.signal?.throwIfAborted();await context.assertCurrent?.();await this.assertRuntimeFence(context)})
+        return parseSpaceLinkResult('space.link.ensure',{...request,address,url:formatSpaceLink(address),source,diskDurability:'confirmed'},request) as AgentMuxRpcResult<M>
+      }
+      const request = input as import('./space-link.js').SpaceLinkParams['space.link.resolve'], target = await this.spatial.resolveSpaceLink(request.address)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      return parseSpaceLinkResult('space.link.resolve',{address:request.address,target,source},request) as AgentMuxRpcResult<M>
+    }
     if (isSpaceAuthorityMethod(method)) {
       const input = parseSpaceAuthorityParams(method, params)
       await this.authenticated(context)
@@ -2827,6 +2849,18 @@ export class AgentMuxRpcService {
             throw new AgentMuxError('New Goal assignment requires the complete exact Session ID.', 'INVALID_CONTROL_REQUEST')
         }
       }
+      const requestedMoteAddress = request.operation === 'focus' && request.target.kind === 'mote' && request.target.address ? structuredClone(request.target) : undefined
+      let resolvedMoteLink: import('./space-link.js').SpaceLinkRecord | undefined
+      let operationContext = context
+      if (requestedMoteAddress && request.operation === 'focus') {
+        const input = {address:requestedMoteAddress.address!}
+        const resolved = parseSpaceLinkResult('space.link.resolve', await this.call('space.link.resolve',input,context), input)
+        if (!resolved.target) throw new AgentMuxError('The original public Mote address is not registered at its authority. Keep the link; no target was guessed.', 'SPACE_LINK_UNAVAILABLE')
+        resolvedMoteLink={address:input.address,target:resolved.target}
+        operationContext = this.folderDirectoryContext(resolved.source, context)
+        request.target = {kind:'mote',spaceId:resolved.target.spaceId,...(resolved.target.eventId === undefined ? {} : {eventId:resolved.target.eventId})}
+      }
+      if (requestedMoteAddress) await operationContext.assertCurrent?.()
       result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal, nameContext)
         : request.operation === 'metrics.allocations.capture' ? { operation: 'metrics.allocations.capture', capture: await this.captureAllocations({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.scene.capture' ? { operation: 'metrics.scene.capture', capture: await this.captureScene({ target: request.target }, context.signal) }
@@ -2842,7 +2876,8 @@ export class AgentMuxRpcService {
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
         : request.operation === 'metrics.app-memory.inspect' ? { operation: 'metrics.app-memory.inspect', evidence: await this.inspectAppMemory() }
-        : await this.execute(request, nameContext, context)
+        : await this.execute(request, nameContext, operationContext)
+      if (requestedMoteAddress && resolvedMoteLink) { const focus=result as AgentMuxControlResult; if(focus.operation !== 'focus' || focus.navigation.requested.kind !== 'mote' || focus.navigation.requested.address || focus.navigation.requested.spaceId !== resolvedMoteLink.target.spaceId || focus.navigation.requested.eventId !== resolvedMoteLink.target.eventId) throw new AgentMuxError('Mote navigation returned another original target.','CONTROL_PROTOCOL_ERROR'); result={...focus,navigation:{...focus.navigation,requested:requestedMoteAddress,moteLink:resolvedMoteLink}} }
       if (independentSpatial && method === 'space.inspect') { context.signal?.throwIfAborted(); await context.assertCurrent?.() }
       return rpcControlResult(method, result as AgentMuxControlResult) as AgentMuxRpcResult<M>
     }
