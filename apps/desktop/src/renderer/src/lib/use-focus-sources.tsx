@@ -363,7 +363,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
         : agentContextForSession(session, undefined, current?.name?.current.override ?? undefined, workspace, null)
         : { ...unobservedFocusContext(candidate.runtimeId ?? '', candidate.sid, workspace,
           agentDisplayName({ userName: current?.name?.current.override, firstPrompt: reading?.firstPrompt,
-            fallbackLabel: current?.session?.label ?? 'Agent task', providerLabel: current?.session?.kind === 'agent' ? current.session.providerId : 'Agent task' }), access.issue, access),
+            fallbackLabel: current?.session?.label ?? `Agent · ${candidate.sid}`, providerLabel: current?.session?.kind === 'agent' ? current.session.providerId : 'Agent' }), access.issue, access),
           ...(current?.session?.kind === 'agent' ? { providerId: current.session.providerId, executorId: current.session.executorId } : {}), recap: reading?.recap ?? null }
       const { control: _control, ...readOnly } = context
       context = { ...readOnly, id: candidate.runtimeId ? focusSourceContextId(candidate.runtimeId, candidate.sid) : candidate.key,
