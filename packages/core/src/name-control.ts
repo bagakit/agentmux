@@ -6,7 +6,8 @@ import { parseNameChangeRecord, type AgentMuxDisplayLabelSource, type AgentMuxNa
 
 /** Source occurrence and local label ownership are distinct finite operations. */
 export type SpaceMemberNameTarget = { target: PinnedSpaceMemberIdentity; object: 'agent' | 'tab' }
-export type AgentNameTarget = { runtimeId: string; agentSessionId: string; createOperationId: string }
+export type AgentNameIdentity = { runtimeId: string; agentSessionId: string }
+export type AgentNameTarget = AgentNameIdentity & { createOperationId: string }
 export type NameChange = { kind: 'rename'; operationId: string; name: string | null; expectedNameRevision: number; source: 'manual' | 'launch' | 'derived' }
   | { kind: 'confirm'; operationId: string }
 export type NameObservation = {
@@ -28,7 +29,7 @@ export type NameControlMethod = keyof typeof NAME_CONTROL_METHODS
 export type NameControlParams = {
   'space.member.name.inspect': SpaceMemberNameTarget & { operationId?: string }
   'space.member.name.change': SpaceMemberNameTarget & { change: NameChange }
-  'agent.name.inspect': AgentNameTarget & { operationId?: string }
+  'agent.name.inspect': AgentNameIdentity & { operationId?: string }
   'agent.name.change': AgentNameTarget & { change: NameChange }
 }
 export type NameControlResults = {
@@ -51,7 +52,7 @@ export function parseNameChange(value: unknown): NameChange {
 }
 export function parseNameControlParams<M extends NameControlMethod>(method: M, value: unknown): NameControlParams[M] {
   const member = method.startsWith('space.member.'), change = method.endsWith('.change')
-  const p = rpcRecord(value, [...(member ? ['target', 'object'] : ['runtimeId', 'agentSessionId', 'createOperationId']), change ? 'change' : 'operationId'])
+  const p = rpcRecord(value, [...(member ? ['target', 'object'] : ['runtimeId', 'agentSessionId', ...(change ? ['createOperationId'] : [])]), change ? 'change' : 'operationId'])
   const action = change ? { change: parseNameChange(p.change) } : p.operationId === undefined ? {} : { operationId: rpcString(p.operationId, 'Original name operation') }
   if (member) {
     const target = parseSpaceMemberIdentity(p.target)
@@ -59,7 +60,7 @@ export function parseNameControlParams<M extends NameControlMethod>(method: M, v
     return { target: { ...target, expectedAdmission: target.expectedAdmission }, object: p.object, ...action } as NameControlParams[M]
   }
   return { runtimeId: rpcString(p.runtimeId, 'Original label Runtime'), agentSessionId: rpcString(p.agentSessionId, 'Original local Agent Session'),
-    createOperationId: rpcString(p.createOperationId, 'Original local Agent creation operation'), ...action } as NameControlParams[M]
+    ...(change ? { createOperationId: rpcString(p.createOperationId, 'Original local Agent creation operation') } : {}), ...action } as NameControlParams[M]
 }
 export function parseNameControlResult<M extends NameControlMethod>(method: M, value: unknown, input: NameControlParams[M]): NameControlResults[M] {
   const change = method.endsWith('.change'), p = rpcRecord(value, ['target', 'current', 'record', ...(change ? ['changed', 'applied', 'save'] : ['diskAcknowledgement'])])
@@ -84,6 +85,6 @@ export function parseNameControlResult<M extends NameControlMethod>(method: M, v
 export function memberAgentNameInput(input: NameControlParams['space.member.name.inspect'] | NameControlParams['space.member.name.change']):
   NameControlParams['agent.name.inspect'] | NameControlParams['agent.name.change'] {
   if (input.object !== 'agent' || input.target.expectedAdmission.kind !== 'creation') throw new AgentMuxError('An external association L is not the original local Agent creation C. Use its independent Coordinator witness.', 'SPACE_MEMBER_EXTERNAL_COORDINATOR')
-  return { runtimeId: input.target.runtimeId, agentSessionId: input.target.agentSessionId, createOperationId: input.target.expectedAdmission.operationId,
-    ...('change' in input ? { change: input.change } : input.operationId === undefined ? {} : { operationId: input.operationId }) }
+  return { runtimeId: input.target.runtimeId, agentSessionId: input.target.agentSessionId,
+    ...('change' in input ? { createOperationId: input.target.expectedAdmission.operationId, change: input.change } : input.operationId === undefined ? {} : { operationId: input.operationId }) }
 }

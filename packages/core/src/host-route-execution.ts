@@ -130,7 +130,8 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
     const operation = scope.operation
     if (stream || operation.object !== 'agent' || destination !== operation.targetRuntimeId || call.method !== operation.method || digest(call.params) !== operation.paramsDigest) deny()
     const input = parseNameControlParams(operation.method, call.params)
-    if (input.runtimeId !== operation.targetRuntimeId || input.agentSessionId !== operation.agentSessionId || operation.expectedAdmission.kind !== 'creation' || input.createOperationId !== operation.expectedAdmission.operationId) deny()
+    if (input.runtimeId !== operation.targetRuntimeId || input.agentSessionId !== operation.agentSessionId || operation.expectedAdmission.kind !== 'creation' ||
+        'change' in input && input.createOperationId !== operation.expectedAdmission.operationId) deny()
     return
   }
   if (scope.kind === 'member-control') {

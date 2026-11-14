@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import type { SpaceSnapshot } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
-import type { NameObservation } from '@agentmux/core/name-control'
+import type { AgentNameTarget, NameObservation } from '@agentmux/core/name-control'
 import type { ConversationObservation, projectConversationWindow } from '@agentmux/core/conversation'
 import type { ConversationReadApi } from '../../../shared/conversation-read'
 import type { HostConfig, SessionSnapshot } from '../../../shared/contracts'
@@ -25,13 +25,13 @@ import { readSourceConversationRecap, sourceConversationPort } from './focus-sou
 import { originalSpaceResource, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from './original-space-navigation'
 
 type Location = FocusContextAccess['locations'][number] & { member: MountedSpaceRegion; snapshot?: SpaceSnapshot }
-type Candidate = { key: string; runtimeId?: string; sid: string; locations: Location[]; target?: SpaceMountMemberTarget; authorityKey?: string; readingTarget?: import('../../../shared/space-mount').SpaceMountReadingTarget; directName?: { hostId: string; target: import('@agentmux/core/name-control').AgentNameTarget }; issue?: string }
+type Candidate = { key: string; runtimeId?: string; sid: string; locations: Location[]; target?: SpaceMountMemberTarget; authorityKey?: string; readingTarget?: import('../../../shared/space-mount').SpaceMountReadingTarget; directName?: { hostId: string; target: Pick<AgentNameTarget, 'runtimeId' | 'agentSessionId'>; changeTarget?: AgentNameTarget }; issue?: string }
 const sourceFactKey = (target: NonNullable<Candidate['readingTarget']>) => JSON.stringify([target.target.runtimeId, target.target.agentSessionId, target.target.reference.runtimeId, target.target.expectedAdmission])
-const candidateFactKey = (candidate: Candidate) => candidate.readingTarget ? sourceFactKey(candidate.readingTarget) : candidate.directName ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.directName.target.runtimeId, { kind: 'creation', operationId: candidate.directName.target.createOperationId }]) : candidate.target ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.target.target.reference, candidate.target.target.regionId]) : undefined
+const candidateFactKey = (candidate: Candidate) => candidate.readingTarget ? sourceFactKey(candidate.readingTarget) : candidate.directName ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.directName.target.runtimeId]) : candidate.target ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.target.target.reference, candidate.target.target.regionId]) : undefined
 type SourceChoice = { locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void }
 type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation;
   conversationPort?: ConversationReadApi; readConversation?: () => Promise<void>; reading?: ReturnType<typeof projectConversationWindow>;
-  rename?: (name: string | null, expectedRevision: number) => Promise<boolean>; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
+  rename?: ((name: string | null, expectedRevision: number) => Promise<boolean>) | undefined; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
 
 function SourceReader({ target, visible }: { target: SpaceMountRecord; visible: boolean }) {
   useSpaceSourceReader(target, visible)
@@ -58,28 +58,29 @@ function SessionReader({ candidate, visible, publish, refresh }: { candidate: Ca
   return null
 }
 
-/** The existing fact projection retains exact C/L labels and bounded records across Run observation gaps. */
+/** Names survive Run observation gaps; admitted members also retain bounded records. */
 function MemberReader({ candidate, visible, publish, refresh }: { candidate: Candidate; visible: boolean; publish(key: string, fact: ReadFact, sameIdentityOnly?: boolean): void; refresh: number }) {
-  const target = candidate.readingTarget ?? candidate.target, direct = candidate.directName, address = target && JSON.stringify([target, direct]), key = candidateFactKey(candidate)
+  const target = candidate.readingTarget ?? candidate.target, direct = candidate.directName, address = JSON.stringify([target, direct]), key = candidateFactKey(candidate)
   useEffect(() => {
-    if (!target || !visible) return
+    if ((!target && !direct) || !key || !visible) return
     const controller = new AbortController(); let surface: import('../../../shared/space-mount').SpaceMountReadingSurface | undefined
     const emit = (fact: Partial<ReadFact>) => { if (!controller.signal.aborted) publish(candidate.key, { key: key!, ...fact }) }
     const member = candidate.readingTarget?.target
     const name = member && { object: 'agent' as const, target: { reference: member.reference, regionId: member.regionId, runtimeId: member.runtimeId, agentSessionId: member.agentSessionId, expectedAdmission: member.expectedAdmission } }
     // Name authority is independent of Native Session reads and the conversation reader.
     const nameRead = direct && !member ? api.spaceMounts.call('agentNameInspect', { hostId: direct.hostId, expectedRuntimeId: direct.target.runtimeId, name: direct.target }, controller.signal)
-      : name ? api.spaceMounts.call('memberNameInspect', { hostId: target.hostId, reference: target.target.reference, name }, controller.signal) : undefined
+      : name ? api.spaceMounts.call('memberNameInspect', { hostId: target!.hostId, reference: target!.target.reference, name }, controller.signal) : undefined
     void nameRead?.then(observed => {
-      const rename = async (value: string | null, expectedNameRevision: number) => {
+      const rename = (member ? member.expectedAdmission.kind === 'creation' : direct?.changeTarget) ? async (value: string | null, expectedNameRevision: number) => {
         const change = { kind: 'rename' as const, operationId: mintObjectId(), name: value, expectedNameRevision, source: 'manual' as const }
-        const result = direct && !member ? await api.spaceMounts.call('agentNameChange', { hostId: direct.hostId, expectedRuntimeId: direct.target.runtimeId, name: { ...direct.target, change } })
-          : await api.spaceMounts.call('memberNameChange', { hostId: target.hostId, reference: target.target.reference, name: { ...name!, change } })
+        const result = direct?.changeTarget && !member ? await api.spaceMounts.call('agentNameChange', { hostId: direct.hostId, expectedRuntimeId: direct.target.runtimeId, name: { ...direct.changeTarget, change } })
+          : await api.spaceMounts.call('memberNameChange', { hostId: target!.hostId, reference: target!.target.reference, name: { ...name!, change } })
         if (result.applied) publish(candidate.key, { key: key!, name: { ...result, diskAcknowledgement: 'not-observed' }, nameIssue: undefined, nameSaveIssue: result.save.diskDurability === 'confirmed' ? undefined : `The original name was applied; its save is unconfirmed (${change.operationId}). ${result.save.issue ?? ''}` }, true)
         return result.applied
-      }
+      } : undefined
       emit({ name: observed, rename, nameIssue: undefined })
     }).catch(cause => emit({ nameIssue: String(cause instanceof Error ? cause.message : cause) }))
+    if (!target) return () => controller.abort()
     const observations = new Map<string, (event: ConversationObservation) => void>()
     const receive = (event: import('../../../shared/space-mount').SpaceMountMemberEvent) => {
       if (event.type === 'conversation') observations.get(event.readerId)?.(event.observation)
@@ -115,7 +116,7 @@ function MemberReader({ candidate, visible, publish, refresh }: { candidate: Can
       }
     }).catch(cause => emit({ readingIssue: String(cause instanceof Error ? cause.message : cause) }))
     return () => { controller.abort(); void Promise.resolve(surface?.dispose()).catch(() => {}) }
-  }, [address, visible, refresh, publish])
+  }, [address, key, visible, refresh, publish])
   return null
 }
 
@@ -241,7 +242,11 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
           original.target = { hostId: target.hostId, target: { reference: target.reference, regionId: member.region.regionId,
             runtimeId, agentSessionId: sid, expectedRun: observed.session.run,
             ...(member.region.creationOperationId ? { expectedAdmission: { kind: 'creation', operationId: member.region.creationOperationId } } : {}) } }
-        if (!original.directName && runtimeId === target.reference.runtimeId && observed?.authority.runtimeId === runtimeId && observed.session.agentSessionId === sid && observed.session.creation?.createOperationId) original.directName = { hostId: target.hostId, target: { runtimeId, agentSessionId: sid, createOperationId: observed.session.creation.createOperationId } }
+        if (!original.directName && runtimeId === target.reference.runtimeId) {
+          const createOperationId = observed?.authority.runtimeId === runtimeId && observed.session.agentSessionId === sid ? observed.session.creation?.createOperationId : undefined
+          original.directName = { hostId: target.hostId, target: { runtimeId, agentSessionId: sid },
+            ...(createOperationId ? { changeTarget: { runtimeId, agentSessionId: sid, createOperationId } } : {}) }
+        }
         if (observed) original.authorityKey = observed.authority.ownerInstanceId
         const issue = observation?.error ?? metadata[key]?.error ?? (current?.status === 'unavailable' || current?.status === 'unknown' ? current.issue.message : undefined)
         if (issue) original.issue = issue
@@ -254,6 +259,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       if (!sid || !runtimeId) continue
       const key = focusSourceKey(runtimeId, sid), prior: Candidate = result.get(key) ?? { key, runtimeId, sid, locations: [] }
       prior.locations.push({ source: location.source, tabId: location.reference.tabId, regionId: location.reference.regionId, member, reference: location.reference })
+      if (!prior.directName && runtimeId === location.source.reference.runtimeId) prior.directName = { hostId: location.source.hostId, target: { runtimeId, agentSessionId: sid } }
       const issue = observations[spaceMountKey(location.source.reference)]?.error
       if (issue) prior.issue = issue
       result.set(key, prior)

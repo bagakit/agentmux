@@ -14,7 +14,7 @@ export type LaunchNameOwner = ({ kind: 'reach'; input: SourceCoordinatorInput } 
   observation?: AgentMuxRpcResult<'agent.open'>
 }
 export type LaunchNameAddress = { kind: 'member'; carrier: SpaceMountTarget; name: NameControlParams['space.member.name.inspect'] }
-  | { kind: 'agent'; carrier: { hostId: string; expectedRuntimeId: string }; name: NameControlParams['agent.name.inspect'] }
+  | { kind: 'agent'; carrier: { hostId: string; expectedRuntimeId: string }; name: import('@agentmux/core/name-control').AgentNameTarget }
 export type OriginalLaunchNameInput = { target: LaunchNameAddress; change: Extract<NameControlParams['agent.name.change']['change'], { kind: 'rename' }>;
   submitted: boolean; response?: NameChangeResult; issue?: string | undefined }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -96,7 +96,7 @@ function retainedNameMatchesOwner(owner: LaunchNameOwner, role: LaunchNameRole, 
 }
 export function readLaunchName(target: LaunchNameAddress, operationId?: string, signal?: AbortSignal) {
   return target.kind === 'member' ? api.spaceMounts.call('memberNameInspect', { ...target.carrier, name: { ...target.name, ...(operationId ? { operationId } : {}) } }, signal)
-    : api.spaceMounts.call('agentNameInspect', { ...target.carrier, name: { ...target.name, ...(operationId ? { operationId } : {}) } }, signal)
+    : api.spaceMounts.call('agentNameInspect', { ...target.carrier, name: { runtimeId: target.name.runtimeId, agentSessionId: target.name.agentSessionId, ...(operationId ? { operationId } : {}) } }, signal)
 }
 const sends = new WeakMap<OriginalLaunchNameInput['change'], Promise<NameChangeResult>>()
 /** A retry is always an explicit action on the same target, OP, value and CAS. */

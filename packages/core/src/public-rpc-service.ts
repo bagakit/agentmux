@@ -932,10 +932,14 @@ export class AgentMuxRpcService {
     const target = { kind: 'agent-session', id: input.agentSessionId }
     const current = async () => {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      const session = await locals[0]!.client.readAgentSession(input.agentSessionId)
-      if (!session || session.agentSessionId !== input.agentSessionId || session.hostId !== 'local' || session.creation?.createOperationId !== input.createOperationId) throw new AgentMuxError(
-        'The original local Session creation is unconfirmed. Keep its exact name operation; no same-SID identity was substituted.', 'NAME_TARGET_UNCONFIRMED')
       if (context.caller && context.caller.agentSessionId !== input.agentSessionId) throw new AgentMuxError('A managed name call stays with its original authenticated Session.', 'CONTROL_PERMISSION_DENIED')
+      // Saved labels belong to this Runtime/SID even when its Session is not observed.
+      // Only an explicit name mutation needs the original creation witness.
+      if ('change' in input) {
+        const session = await locals[0]!.client.readAgentSession(input.agentSessionId)
+        if (!session || session.agentSessionId !== input.agentSessionId || session.hostId !== 'local' || session.creation?.createOperationId !== input.createOperationId) throw new AgentMuxError(
+          'The original local Session creation is unconfirmed. Keep its exact name operation; no same-SID identity was substituted.', 'NAME_TARGET_UNCONFIRMED')
+      }
     }
     await current()
     return method === 'agent.name.change' && 'change' in input
@@ -1099,7 +1103,7 @@ export class AgentMuxRpcService {
           ...(nameParent ? { sourceRuntimeId: nameParent.runtimeId, spaceId: nameParent.spaceId, regionId: nameParent.regionId, admissionKind: nameParent.expectedAdmission.kind, admissionOperationId: nameParent.expectedAdmission.operationId } : {}),
           ...('target' in input ? { sourceRuntimeId: input.target.reference.runtimeId, spaceId: input.target.reference.spaceId, regionId: input.target.regionId,
             admissionKind: input.target.expectedAdmission.kind, admissionOperationId: input.target.expectedAdmission.operationId }
-            : { createOperationId: input.createOperationId }) } })
+            : 'change' in input ? { createOperationId: input.createOperationId } : {}) } })
       const result = 'target' in input ? await sourceMemberName({ store: this.spatial, ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}), clients: () => this.clients(),
         local: (leaf, request, original) => this.localAgentName(leaf, request, original, nameContext), nameContext },
         method as 'space.member.name.inspect' | 'space.member.name.change', input, context)
