@@ -68,6 +68,55 @@ export const AUTHORED_ICON_DEFINITIONS = {
     shapes: [["path", {"d": "M2 4h8v8H2Z M14 12h8v8h-8Z"}], ["path", {"d": "M6 12v5h8 M10 8h8v4"}]],
     design: { rest: "Two machines connected across their original environments.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
   },
+  "cluster-cells": {
+    shapes: [["path", {"d":"M9 3h5l2 2v4H9Z M3 13h5l2 2v6H3Z M15 13h4l2 2v6h-6Z"}]],
+    design: {
+      rest: "三枚切角单元组成开放的群组，轮廓和留白表达 Cluster，不画机架或无线信号。",
+      motion: { kind: "still", animation: "none", description: "分组身份完整静止，各节点的发布和连接事实另行表达。", trigger: "原 Cluster 分组显示；不代表节点数量、全组在线或共享资格。" }
+    }
+  },
+  "node-port": {
+    shapes: [["path", {"d":"M17 10V7l-3-3H6L3 7v10l3 3h8l3-3v-3"}], ["path", {"d":"M7 12h4 M17 12h4"}]],
+    design: {
+      rest: "单枚切角 Core 单元内保留身份短槽，侧边开口表达对外发布的边界；不固定为本机或某种设备。",
+      motion: { kind: "still", animation: "none", description: "Node 对象本身静止，发布状态使用独立的准确语义实例。", trigger: "当前原 Core 节点或 Node 目的地显示；不表示监听、发布、连通或授权。" }
+    }
+  },
+  "node-published": {
+    shapes: [["path", {"d":"M17 10V7l-3-3H6L3 7v10l3 3h8l3-3v-3"}], ["path", {"d":"M7 12h4"}], ["path", {"d":"M16 10h4 M16 14h4", "data-semantic-icon-part":"stream-caret"}]],
+    design: {
+      rest: "原 Core 单元的发布口外有两条短标，完整静态轮廓仍能区别于 private 横闸和 unknown 问号。",
+      motion: { kind: "loop", animation: "stream", description: "仅口外两条短标克制地平移，Core 主体固定；默认静止，实例显式开启。", trigger: "仅准确所选 Runtime 的原发布 owner 已确认有资源或目录发布；不表示数据流量、listener、全节点在线或授权。草稿、hover 和选中不触发。" }
+    }
+  },
+  "node-private": {
+    shapes: [["path", {"d":"M17 10V7l-3-3H6L3 7v10l3 3h8l3-3v-3"}], ["path", {"d":"M7 12h4 M17 9v6"}]],
+    design: {
+      rest: "同一 Core 单元的侧口收成一条横闸，不借锁或断线图形暗示权限拒绝或连接故障。",
+      motion: { kind: "still", animation: "none", description: "已确认未共享的发布边界保持静止。", trigger: "仅准确所选 Runtime 的原发布 owner 已确认 private 或没有资源和目录发布；不由未保存开关、缺失观察或 listener 状态推导。" }
+    }
+  },
+  "node-unobserved": {
+    shapes: [["path", {"d":"M17 7l-3-3H6L3 7v10l3 3h10l1-1"}], ["path", {"d":"M7 12h4 M17.5 10a2 2 0 0 1 4 0c0 1.5-2 1.5-2 3 M19.5 16h.01"}]],
+    design: {
+      rest: "单元侧边保持观察缺口，问号占据原发布口的位置；不把未知画成 private 或失联。",
+      motion: { kind: "still", animation: "none", description: "未确认的发布事实保持静止，文字继续说明 unknown 或 unavailable。", trigger: "准确所选 Runtime 的当前发布观察未知或不可用；不推断存活、共享、连通或权限，也不撤销已有能力。" }
+    }
+  },
+  "host-route": {
+    shapes: [["path", {"d":"M2 4h4l2 2v7H2Z M16 11h4l2 2v7h-6Z"}], ["path", {"d":"M8 8h5v8h3"}]],
+    design: {
+      rest: "两枚窄切角目标单元由一条折线关联，表达本客户端保存的 Hosts 拓扑；区别于双工作面的 Remote。",
+      motion: { kind: "still", animation: "none", description: "保存的关系静止，不把连接线当在线或访问许可。", trigger: "原 Hosts 连接目录或已保存目标关系显示；不表示对方当前可达、允许的资源或维护结果。" }
+    }
+  },
+  "mobile-pass": {
+    shapes: [["path", {"d":"M7 3h7l3 3v13l-2 2H7l-2-2V5Z"}], ["path", {"d":"M8 6h4 M9 18h4 M21 9v6"}]],
+    design: {
+      rest: "竖向手持屏与独立的侧边配对短槽，表达个人移动访问；与 compute 节点的低宽单元可辨。",
+      motion: { kind: "still", animation: "none", description: "手机客户端类别静止，配对和连接事实由原设备 owner 表达。", trigger: "原 Mobile 访问目的地或客户端类别显示；不表示已配对、在线、共享或授权。" }
+    }
+  },
   "settings-channels": {
     shapes: [["path", {"d": "M3 4h7v6H6l-3 2Z M14 14h7v6h-4l-3 2Z"}], ["path", {"d": "M10 7h7v7 M3 17h6 M6 14v6"}]],
     design: { rest: "Distinct conversation channels connected through one route.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
@@ -121,7 +170,7 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "execution-split": {
-    shapes: [["rect",{"x":"2","y":"3","width":"9","height":"8","rx":"1.5"}],["rect",{"x":"13","y":"13","width":"9","height":"8","rx":"1.5"}],["path",{"d":"M11 7h5a2 2 0 0 1 2 2v4 M13 17H8a2 2 0 0 1-2-2v-4"}],["path",{"d":"M5 5.5 7 7 5 8.5 M16 17h3"}]],
+    shapes: [["path",{"d":"M2 3h7l2 2v6H2Z M13 13h7l2 2v6h-9Z"}],["path",{"d":"M11 7h5a2 2 0 0 1 2 2v4 M13 17H8a2 2 0 0 1-2-2v-4"}],["path",{"d":"M5 5.5 7 7 5 8.5 M16 17h3"}]],
     design: {
       rest: "两个分离的工作面分别以执行提示和资源横线识别，无箭头桥接表达 Agent 运行端与项目工具端的结构关系；不固定哪端是本机、云端或某家 Provider",
       motion: { kind: "still", animation: "none", description: "双端执行的对象身份保持静止，关系线不表示已连接、执行中、授权或成功。", trigger: "按 Remote execution 用途或双端绑定对象显示；原运行、连接和权限事实由各自 owner 另行表达。" }

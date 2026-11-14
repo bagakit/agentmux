@@ -21,6 +21,10 @@ const groups = {
 } as const
 
 const contexts: readonly [string, string][] = [
+  ['status.node-', 'Publication of the selected original Core; independent of listener, connection and authorization status.'],
+  ['object.node', 'Original Core identity and publication boundary; the selected Runtime may be local or remote.'],
+  ['object.hosts', 'Saved Host connections and their original allowed resources; a route is not an online claim.'],
+  ['object.mobile-access', 'Personal mobile clients and paired access devices, separate from compute nodes.'],
   ['status.toolkit-', 'Toolkit execution and result status.'],
   ['status.observation-', 'Resource observation status.'],
   ['status.connection-', 'Host connection status.'],
