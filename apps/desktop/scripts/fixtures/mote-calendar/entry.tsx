@@ -33,7 +33,8 @@ const workspacePath = new URLSearchParams(location.search).get('workspacePath')
 if (!workspacePath || !workspacePath.includes('/capture-')) throw new Error('An exact private capture workspace is required.')
 const scenario = new URLSearchParams(location.search).get('scenario')
 const discussionFilesProof = scenario === 'discussion-files'
-const navigationProof = discussionFilesProof || scenario === 'companion-navigation'
+const densityProof = scenario === 'calendar-density'
+const navigationProof = discussionFilesProof || scenario === 'companion-navigation' || densityProof
 mountThemeRuntime(window, { appAppearance: 'dark' })
 const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspacePath, name: 'Motes', kind: 'folder' }
 const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
@@ -63,13 +64,19 @@ const goal: Demand = { id: 'mote-workspace-experiment', title: '把第一个小�
   tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, activities: [], decisions: [], createdAt: now, updatedAt: now,
   alignment: { revision: 1, confirmedAt: now, summary: '先做一个可验证的结果，再决定下一步。', criteria: [{ id: 'sources', text: '保留原始证据和仍需确认的问题。' }], openQuestions: [] } }
 const calls: { method: string; params: unknown }[] = [], opened: string[] = []
-const listeners = new Set<(schedule: ContinuousProgressLoop) => void>()
 let mode = 'populated', lostCreate = false, listUnknown = false, noteUnknown = false, generation = 0
 const policies = { gap: 'skip' as const, fold: 'earlier' as const, monthEnd: 'clamp' as const, overdue: 'latest' as const }
 const calendar = { kind: 'daily' as const, time: (new Date(_batchFixtureEpoch(0, 32400)).toISOString().slice(11, 16)), timezone: 'Asia/Shanghai', policies }
 const make = (id: string, index: number, prompt: string, due: number, rest: Partial<ContinuousProgressLoop> = {}): ContinuousProgressLoop => ({ ...targets[index]!,
   loopId: id, creationOperationId: 'original-' + id, futureIntentId: 'private-intent-' + id, revision: 2, intervalMs: 60_000, calendar, prompt, status: 'active', nextCheckAt: due, ...rest })
 function sceneRecords(): ContinuousProgressLoop[] {
+  if (densityProof) {
+    const anchor = Math.floor(now / 60_000) * 60_000 + 60_000
+    return [make('group-watch', 1, '盯群：检查原群的新消息，重要的内容回原会话。', anchor,
+      { calendar: undefined, everyMs: 60_000, lastOccurrenceAt: anchor - 60_000, lastOutcome: 'sent' }),
+    make('maintenance', 0, 'Mote main heartbeat.\n\n检查主对话、未完成事项和原安排，继续已授权的工作。', anchor,
+      { calendar: undefined, everyMs: 120_000, lastOccurrenceAt: anchor - 120_000, lastOutcome: 'sent', managedSource: { sourceId: 'mote-main:fixture', revision: 'fixture' } })]
+  }
   return [make('daily-brief', 0, '早上一起看：项目进展、需要我决定的事情，以及今天最小的一步\n保留原始资料与每个待确认的问题；这段长正文需要完整的阅读宽度。 Compare the original evidence, keep unresolved choices visible, and wait for confirmation before making the next decision.', nextNine),
     make('research-timer', 1, '20 分钟后提醒我回来比较调研结论，不要替我决定或发消息给别人', now + 20 * 60_000, { calendar: undefined, afterMs: 1_200_000 }),
     make('paused-review', 1, '暂停的每周复盘：先等我确认下一个阶段', nextNine, { status: 'paused' }),
@@ -97,7 +104,6 @@ api.schedule.list = async params => {
   if (params.target) assertTarget(params.target)
   return validateScheduleRpcResult('schedule.list', { schedules: clone(params.target ? records.filter(item => item.agentSessionId === params.target!.agentSessionId) : records), executionScope: 'connected-host' }, params)
 }
-api.schedule.onChanged = listener => { listeners.add(listener); return () => { listeners.delete(listener) } }
 api.schedule.create = async (params: ScheduleParamsMap['schedule.create']) => {
   assertTarget(params.target); calls.push({ method: 'schedule.create', params: clone(params) })
   let schedule = records.find(item => item.creationOperationId === params.operationId)
@@ -106,7 +112,6 @@ api.schedule.create = async (params: ScheduleParamsMap['schedule.create']) => {
     ...('afterMs' in params ? { afterMs: params.afterMs, nextCheckAt: Date.now() + params.afterMs } : { calendar: params.calendar, nextCheckAt: now + day }),
     ...('checkIn' in params && params.checkIn ? { checkIn: params.checkIn } : {}) }; records.push(schedule) }
   if (lostCreate) { lostCreate = false; throw new Error('The original write receipt is unconfirmed. Keep this message and retry the same operation.') }
-  listeners.forEach(listener => listener(clone(schedule!)))
   return validateScheduleRpcResult('schedule.create', { schedule: clone(schedule), diskDurability: 'confirmed', executionScope: 'connected-host' }, params)
 }
 api.schedule.inspect = async params => {
@@ -119,7 +124,7 @@ const mutate = (action: 'pause' | 'resume' | 'cancel') => async (params: Schedul
   if (!previous || previous.revision !== params.expectedRevision || previous.status === 'stopped') throw new Error('PRIVATE_FIXTURE_REVISION_OR_TERMINAL_MISMATCH')
   const schedule: ContinuousProgressLoop = { ...previous, status: action === 'cancel' ? 'stopped' : action === 'pause' ? 'paused' : 'active', revision: previous.revision + 1,
     lastMutation: { operationId: params.operationId, expectedRevision: params.expectedRevision, action } }
-  records = records.map(item => item.loopId === previous.loopId ? schedule : item); listeners.forEach(listener => listener(clone(schedule)))
+  records = records.map(item => item.loopId === previous.loopId ? schedule : item)
   return validateScheduleRpcResult('schedule.' + action, { schedule: clone(schedule), diskDurability: 'confirmed' as const, executionScope: 'connected-host' as const }, params)
 }
 api.schedule.pause = mutate('pause'); api.schedule.resume = mutate('resume'); api.schedule.cancel = mutate('cancel')

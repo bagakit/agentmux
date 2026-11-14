@@ -1,6 +1,6 @@
 import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
-import { projectScheduleOccurrences, type ScheduleOccurrenceWindow } from '../src/schedule-calendar.js'
+import { projectScheduleOccurrences, scheduleForecastCount, sliceScheduleOccurrences, type ScheduleOccurrenceWindow } from '../src/schedule-calendar.js'
 import type { ContinuousProgressLoop } from '../src/continuous-progress-scheduler.js'
 import type { AgentScheduleCalendar } from '../src/agent-schedule.js'
 
@@ -73,9 +73,23 @@ describe('read-only schedule occurrences', () => {
   })
 })
 
-it('bounds minute schedule projection and marks the omitted exact time range', () => {
+it('keeps long interval projections compact and intersects exact half-open windows', () => {
   const start = _batchFixtureEpoch(1)
   const loop = { loopId: 'minute', hostId: 'local', agentSessionId: 'original', providerId: 'generic', workspacePath: '/private', intervalMs: 1000, everyMs: 60_000, prompt: 'check', nextCheckAt: start, status: 'active' as const }
   const result = projectScheduleOccurrences([loop], { from: start, to: start + 31 * 86_400_000 }, start)
-  expect(result).toEqual([{ scheduleId: 'minute', at: start, kind: 'next-due', omittedRepeat: { from: start + 60_000, to: start + 31 * 86_400_000 } }])
+  expect(result).toEqual([{ scheduleId: 'minute', at: start, kind: 'next-due' },
+    { scheduleId: 'minute', at: start + 60_000, kind: 'projected', repeat: { everyMs: 60_000, count: 31 * 1440 - 1 } }])
+  expect(sliceScheduleOccurrences(result, { from: start + 60_001, to: start + 240_000 })).toEqual([
+    { scheduleId: 'minute', at: start + 120_000, kind: 'projected', repeat: { everyMs: 60_000, count: 2 } }
+  ])
+  const twin = { ...loop, loopId: 'two-minutes', everyMs: 120_000 }
+  const window = { from: start + 86_400_000, to: start + 2 * 86_400_000 }
+  const dense = projectScheduleOccurrences([loop, twin], window, start)
+  expect(dense).toHaveLength(2)
+  expect(dense.map(item => item.repeat?.count)).toEqual([1440, 720])
+  for (const original of [loop, { ...loop, status: 'paused' as const }, { ...loop, lastOutcome: 'unknown' as const }]) {
+    const due = result[0]!
+    expect(scheduleForecastCount(due, original, start)).toBe(original === loop ? 1 : 0)
+    expect(scheduleForecastCount(due, original, start + 1)).toBe(0)
+  }
 })

@@ -3,7 +3,16 @@ import { defineConfig } from 'vitest/config'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import owning from '../agent-schedules/vitest.ui.config.mts'
-export default defineConfig({ ...owning, plugins: [...owning.plugins!, { name: 'calendar-actual-loaded-source', enforce: 'pre', transform(source, id) {
+import { bundleIdentityRuntime } from '../../../../../packages/identity/scripts/runtime-bundle.mjs'
+
+const generatedIdentity = '\0calendar-identity-runtime'
+const runtime = await bundleIdentityRuntime()
+export default defineConfig({ ...owning,
+  resolve: { alias: (owning.resolve?.alias as { find: RegExp; replacement: string }[]).filter(alias => !alias.find.test('@agentmux/identity/runtime-source')) },
+  plugins: [...owning.plugins!, { name: 'calendar-build-qualified-identity', resolveId(id) {
+    return id === '@agentmux/identity/runtime-source' ? generatedIdentity : undefined
+  }, load(id) { return id === generatedIdentity ? 'export const identityRuntimeSource = ' + JSON.stringify(runtime.source) : undefined } },
+  { name: 'calendar-actual-loaded-source', enforce: 'pre', transform(source, id) {
   const file = id.split('?')[0]!
   if (process.env.MOTE_CALENDAR_SOURCE_RECEIPT && !file.includes('/node_modules/') && /\/(apps\/desktop|packages)\//.test(file))
     appendFileSync(process.env.MOTE_CALENDAR_SOURCE_RECEIPT, JSON.stringify({ path: file, sha256: createHash('sha256').update(source).digest('hex') }) + '\n')

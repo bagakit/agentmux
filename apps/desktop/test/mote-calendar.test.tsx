@@ -9,6 +9,7 @@ import { MoteCalendar, moteScheduleQueries } from '../src/renderer/src/component
 import { MoteDetailsPanel } from '../src/renderer/src/components/MoteDetailsPanel'
 import { CalendarScheduleControl } from '../src/renderer/src/components/CalendarScheduleControl'
 import { api } from '../src/renderer/src/lib/api'
+import { calendarDayWindow, calendarHourWindows } from '../src/renderer/src/lib/mote-calendar-range'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { composerDOM } from './helpers/composer-dom-fixture'
@@ -41,7 +42,6 @@ async function owner(records: ContinuousProgressLoop[]) {
   vi.spyOn(api.schedule, 'pause').mockImplementation(params => rpc.call('schedule.pause', params))
   vi.spyOn(api.schedule, 'resume').mockImplementation(params => rpc.call('schedule.resume', params))
   vi.spyOn(api.schedule, 'cancel').mockImplementation(params => rpc.call('schedule.cancel', params))
-  vi.spyOn(api.schedule, 'onChanged').mockImplementation(listener => manager.subscribe(listener))
   return vi.spyOn(manager, 'call')
 }
 async function button(text: string) {
@@ -60,6 +60,21 @@ async function edit(label: string, value: string) {
 async function openForm() { await act(async () => { const element = dom.container.querySelector<HTMLDetailsElement>('.schedule-create')!; element.open = true; element.dispatchEvent(new Event('toggle')) }) }
 
 describe('Mote calendar original schedule consumer', () => {
+  it('groups the actual elapsed hours without duplicating or dropping DST minutes', () => {
+    const zone = 'America/New_York'
+    for (const [day, missing, folded, total] of [[21983, 2, undefined, 23], [22221, undefined, 1, 25]] as const) {
+      const date = DateTime.fromMillis(_batchFixtureEpoch(day, 43200), { zone })
+      const windows = calendarHourWindows(date)
+      const ordered = [...windows.values()]
+      const bounds = calendarDayWindow(date)
+      expect(ordered[0]?.from).toBe(bounds.from)
+      expect(ordered.at(-1)?.to).toBe(bounds.to)
+      expect(ordered.slice(1).map(window => window.from)).toEqual(ordered.slice(0, -1).map(window => window.to))
+      expect(ordered.reduce((sum, window) => sum + window.to - window.from, 0)).toBe(total * 3_600_000)
+      if (missing !== undefined) expect(windows.has(missing)).toBe(false)
+      if (folded !== undefined) expect(windows.get(folded)!.to - windows.get(folded)!.from).toBe(7_200_000)
+    }
+  })
   it('uses exact owner addresses, including confirmed aliases, and never infers a container or prefix', () => {
     expect(moteScheduleQueries(scope)).toEqual([{ scope: { hostId: target.hostId, workspacePath: target.workspacePath } }])
     expect(moteScheduleQueries({ ...scope, topic: { ...topic, confirmedDirectoryPaths: [new URL("old/home", new URL('/', import.meta.url)).pathname, new URL("new/home", new URL('/', import.meta.url)).pathname] } })).toEqual([
@@ -97,11 +112,10 @@ describe('Mote calendar original schedule consumer', () => {
     expect(dom.container.querySelector('[aria-label="Selected day arrangements"] [data-schedule-id="countdown"]')).not.toBeNull()
     await act(async () => day.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
     expect(dom.container.querySelector(("[data-mote-date=\"" + (new Date(_batchFixtureEpoch(20749, 0, 0)).toISOString().slice(0, 10)) + "\"]"))?.getAttribute('aria-pressed')).toBe('true')
-    expect(dom.container.querySelector('[data-occurrence-kind="projected"]')).not.toBeNull()
-    expect(dom.container.textContent).toContain('Planned')
+    expect(dom.container.querySelector('[aria-label="Selected date"] .mote-calendar__plan-total')?.textContent).toBe('1 planned')
     await act(async () => dom.container.querySelector<HTMLButtonElement>(("[data-mote-date=\"" + (new Date(_batchFixtureEpoch(20747, 0, 0)).toISOString().slice(0, 10)) + "\"]"))!.click())
-    expect(dom.container.querySelector('[data-occurrence-kind="last-accepted"]')).not.toBeNull()
-    expect(dom.container.textContent).toContain('Input accepted')
+    expect(dom.container.querySelector('[aria-label="Selected date"]')?.textContent).toContain('input accepted')
+    expect(dom.container.querySelectorAll('[data-schedule-id="daily"]')).toHaveLength(1)
   })
   it('opens the exact original Main Mote discussion through existing spatial navigation without changing the execution lane', async () => {
     await owner([saved('main-discussion')])
@@ -251,10 +265,12 @@ describe('Mote calendar original schedule consumer', () => {
     await owner([saved('early', { nextCheckAt: today.set({ hour: 8, minute: 15 }).toMillis() }), saved('later', { nextCheckAt: today.set({ hour: 17, minute: 45 }).toMillis() }), saved('outside', { nextCheckAt: today.plus({ weeks: 1 }).toMillis() })])
     await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
     await button('Week')
-    await vi.waitFor(() => expect(dom.container.querySelectorAll('.mote-calendar__point--week')).toHaveLength(2))
+    await vi.waitFor(() => expect(dom.container.querySelectorAll('.mote-calendar__bucket .mote-calendar__rate')).toHaveLength(2))
     expect(dom.container.querySelectorAll('[data-mote-date]')).toHaveLength(7)
-    expect([...dom.container.querySelectorAll('.mote-calendar__point--week time')].map(item => item.textContent)).toEqual([(new Date(_batchFixtureEpoch(0, 29700)).toISOString().slice(11, 16)), (new Date(_batchFixtureEpoch(0, 63900)).toISOString().slice(11, 16))])
-    expect(dom.container.querySelector('.mote-calendar__week-timeline [data-calendar-schedule-id="outside"]')).toBeNull()
+    const hourly = (hour: number) => dom.container.querySelector(`[data-calendar-hour="${today.toISODate()}:${hour}"]`)
+    expect(hourly(8)?.textContent).toContain('Original countdown early')
+    expect(hourly(17)?.textContent).toContain('Original countdown later')
+    expect(dom.container.querySelector('.mote-calendar__week-timeline')?.textContent).not.toContain('Original countdown outside')
     const slot = [...dom.container.querySelectorAll<HTMLButtonElement>('.mote-calendar__slot')].find(item => item.getAttribute('aria-label') === 'Prepare arrangement ' + tomorrow.toFormat('cccc, LLLL d') + (" at " + new Date(_batchFixtureEpoch(0, 50400)).toISOString().slice(11, 16)))!
     await act(async () => slot.click())
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement date"]')!.value).toBe(tomorrow.toISODate())
@@ -269,6 +285,37 @@ describe('Mote calendar original schedule consumer', () => {
     await button('View arrangement')
     expect(dom.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Upcoming')
     await vi.waitFor(() => expect(dom.container.querySelector<HTMLDetailsElement>('[data-schedule-id="' + created.loopId + '"] details')?.open).toBe(true))
+  })
+  it('aggregates minute cadences by date and hour and opens a bounded page for the original schedules', async () => {
+    const day = DateTime.fromMillis(now, { zone: 'UTC' }).plus({ days: 1 }).startOf('day')
+    const date = day.toISODate()!
+    const { afterMs: _afterMs, ...original } = saved('minute', { nextCheckAt: now + 60_000, lastOccurrenceAt: now - 60_000 })
+    const everyMinute = { ...original, everyMs: 60_000 }
+    const everyTwo = { ...original, loopId: 'two-minutes', creationOperationId: 'created-twice', futureIntentId: 'future-twice', everyMs: 120_000 }
+    await owner([everyMinute, everyTwo])
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(2))
+    await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-mote-date="${date}"]`)!.click())
+    expect(dom.container.querySelector('.mote-calendar__plan-total strong')?.textContent?.replace(/\D/g, '')).toBe('2160')
+    expect(dom.container.querySelectorAll('.mote-calendar__cell[data-selected="true"] [data-calendar-schedule-id]')).toHaveLength(2)
+    expect(dom.container.querySelector('[data-schedule-id="minute"]')?.textContent).toContain('Last input accepted')
+    await button('3 Days')
+    expect(dom.container.querySelectorAll('[data-calendar-hour]')).toHaveLength(72)
+    expect(dom.container.querySelectorAll('[data-occurrence-kind]')).toHaveLength(0)
+    await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-calendar-hour="${date}:20"]`)!.click())
+    expect(dom.container.querySelector('.mote-calendar__plan-total strong')?.textContent).toBe('90')
+    const details = dom.container.querySelector<HTMLDetailsElement>('.mote-calendar__time-details')!
+    await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+    await vi.waitFor(() => expect(details.querySelectorAll('li[data-occurrence-kind="projected"]')).toHaveLength(12))
+    expect(details.textContent).toContain('1–12 / 90')
+    await button('Next')
+    expect(details.textContent).toContain('13–24 / 90')
+    expect(details.querySelectorAll('li[data-occurrence-kind="projected"]')).toHaveLength(12)
+    expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(2)
+    expect(api.schedule.create).not.toHaveBeenCalled()
+    await button('Day')
+    expect(dom.container.querySelectorAll('[data-calendar-hour]')).toHaveLength(24)
+    expect(dom.container.querySelector('[data-mote-date]')?.getAttribute('data-mote-date')).toBe(date)
   })
   it('date shortcuts keep edited timing, message and a pending original creation intact', async () => {
     await owner([])
@@ -307,21 +354,21 @@ describe('Mote calendar original schedule consumer', () => {
     expect(intervals.mock.calls.filter(call => call[1] === 1000)).toHaveLength(0)
     await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
     await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-id="countdown"]')).not.toBeNull())
-    const projected = projection.mock.calls.length, subscribed = vi.mocked(api.schedule.onChanged).mock.calls.length
+    const projected = projection.mock.calls.length, reads = vi.mocked(api.schedule.list).mock.calls.length
     const presentationClocks = intervals.mock.calls.flatMap((call, index) => call[1] === 1000 ? [intervals.mock.results[index]!.value] : [])
     expect(projected).toBeGreaterThan(0); expect(presentationClocks).toHaveLength(1)
     await act(async () => useAppStore.setState({ sessions: [...useAppStore.getState().sessions, { ...neighborAgent, id: 'unrelated-presentation' }] }))
     expect(projection).toHaveBeenCalledTimes(projected)
     await dom.render(<MoteCalendar scope={scope} reference={reference} active={false} />)
     expect(projection).toHaveBeenCalledTimes(projected)
-    expect(api.schedule.onChanged).toHaveBeenCalledTimes(subscribed)
+    expect(api.schedule.list).toHaveBeenCalledTimes(reads)
     expect(clearing).toHaveBeenCalledWith(presentationClocks[0])
   })
   it('Week restores its user scroll across view changes and hidden re-entry', async () => {
     await owner([saved('countdown')])
     await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
     await button('Week')
-    await vi.waitFor(() => expect(dom.container.querySelector('.mote-calendar__point--week')).not.toBeNull())
+    await vi.waitFor(() => expect(dom.container.querySelector('.mote-calendar__bucket .mote-calendar__rate')).not.toBeNull())
     const scroller = dom.container.querySelector<HTMLDivElement>('.mote-calendar__week-scroll')!
     await act(async () => { scroller.scrollTop = 190; scroller.dispatchEvent(new Event('scroll')) })
     await button('Month'); await button('Week')

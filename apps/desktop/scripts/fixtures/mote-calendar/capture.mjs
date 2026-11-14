@@ -6,10 +6,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
+import { bundleIdentityRuntime } from '../../../../../packages/identity/scripts/runtime-bundle.mjs'
 
-const scenarios = { workspace: 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs' }
+const scenarios = { workspace: 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs', 'calendar-density': 'renderer-density.cjs' }
 const scenario = process.argv.length === 2 ? 'workspace' : process.argv.length === 3 && process.argv[2].startsWith('--scenario=') ? process.argv[2].slice('--scenario='.length) : null
-assert.ok(Object.hasOwn(scenarios, scenario), 'Use no argument or --scenario=companion-navigation or --scenario=discussion-files')
+assert.ok(Object.hasOwn(scenarios, scenario), 'Use no argument or --scenario=companion-navigation, --scenario=discussion-files or --scenario=calendar-density')
 const rendererRunner = scenarios[scenario]
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const directory = path.join(root, '.local/state/mote-workspace/capture-' + randomUUID()), compiled = path.join(directory, 'compiled')
@@ -33,7 +34,7 @@ try {
     consumed.set(file, hash); return bytes
   }
   const runnerInputs = ['capture.mjs', rendererRunner, 'README.md'].map(file => path.join(fixture, file))
-  for (const file of [...runnerInputs, path.join(root, 'apps/desktop/package.json'), path.join(root, 'apps/desktop/scripts/probe-process.mjs'), path.join(root, 'packages/client-ui/scripts/radix-overlay-aliases.ts')]) await readBound(file)
+  for (const file of [...runnerInputs, path.join(root, 'apps/desktop/package.json'), path.join(root, 'apps/desktop/scripts/probe-process.mjs'), path.join(root, 'packages/client-ui/scripts/radix-overlay-aliases.ts'), path.join(root, 'packages/identity/scripts/runtime-bundle.mjs')]) await readBound(file)
   const loaders = { '.ts': 'ts', '.mts': 'ts', '.cts': 'ts', '.tsx': 'tsx', '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'jsx', '.json': 'json', '.css': 'css',
     '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }
   const captureInputs = { name: 'capture-actual-input-bytes', setup(plugin) {
@@ -73,10 +74,11 @@ try {
       return { loader: 'js', contents: `export default class OriginalMonacoWorker extends Worker {constructor(){super(URL.createObjectURL(new Blob([${JSON.stringify(output.outputFiles[0].text)}],{type:'text/javascript'})))}}` }
     })
   } }
+  const identity = await bundleIdentityRuntime()
+  receipt.identityRuntimeSha256 = sha(identity.source)
   const generatedIdentity = { name: 'generated-identity-source-boundary', setup(plugin) {
-    plugin.onResolve({ filter: /^@agentmux\/identity\/runtime-source$/ }, () => {
-      throw new Error('Generated identity runtime source requires a build-qualified consumer fixture')
-    })
+    plugin.onResolve({ filter: /^@agentmux\/identity\/runtime-source$/ }, () => ({ path: 'runtime-source', namespace: 'original-identity' }))
+    plugin.onLoad({ filter: /.*/, namespace: 'original-identity' }, () => ({ loader: 'js', contents: 'export const identityRuntimeSource = ' + JSON.stringify(identity.source) }))
   } }
   for (const name of ['core', 'layout', 'demand', 'identity']) {
     const folder = path.join(root, 'packages', name), manifest = JSON.parse((await readBound(path.join(folder, 'package.json'))).toString('utf8'))
@@ -91,7 +93,7 @@ try {
     format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'silent', metafile: true, alias, plugins: [generatedIdentity, clientSources, workers, captureInputs],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
-  const inputs = Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !/^original-(worker|url|raw):/.test(file))
+  const inputs = Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !/^original-(worker|url|raw|identity):/.test(file))
   for (const file of inputs) assert.ok(consumed.has(path.resolve(root, file)), 'Metafile input has no actual source-byte binding: ' + file)
   receipt.source = Object.fromEntries([...consumed].map(([file, hash]) => [path.relative(root, file), hash]))
   receipt.compiler = { esbuild: browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')).version, sourceBinding: 'actual-onLoad-bytes', currentSource: true, standardCoreBuild: false }
