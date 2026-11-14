@@ -68,7 +68,7 @@ export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }:
     })
   }
   const openSettings = () => navigation?.open('goals', undefined, 'goals-common-actions')
-  return <section className={`goals-entry goals-common${contextCompact ? ' goals-common--compact' : ''}${compactFeedback ? ' goals-common--attention' : ''}`} aria-label="Common actions" aria-busy={saving || pending} data-common-context={contextCompact ? 'compact' : 'full'} onFocusCapture={event => { if (!contextCompact) returnFocus.current = event.target as HTMLElement }}>
+  return <section className={`goals-entry goals-common${contextCompact ? ' goals-common--compact' : ''}${compactFeedback ? ' goals-common--attention' : ''}`} aria-label="Common actions" aria-busy={saving || pending} data-common-collapsed={directory.collapsed} data-common-context={contextCompact ? 'compact' : 'full'} onFocusCapture={event => { if (!contextCompact) returnFocus.current = event.target as HTMLElement }}>
     <div className="goals-common__column">
       <header className="goals-common__heading"><h2>Common actions</h2>{contextCompact ? <button type="button" className="goals-common__icon" aria-label="Back to common actions" title="Back to common actions" onClick={() => { revealRequested.current = true; onReturnToCommon?.() }}><Up size={13} /></button> : <div>
         {navigation ? <button ref={settingsButton} type="button" className="goals-common__icon" aria-label="Configure common actions" title="Configure common actions" onClick={openSettings}><Settings size={13} /></button> : null}
