@@ -110,3 +110,32 @@ mode requires an authenticated user/device; a managed Agent cannot assume that
 identity. Read `agent open --help` for exact parameters and `space --skill` before
 choosing a display destination. `agent execution --help` describes original
 binding observation and operation inspection.
+
+
+### Continue the original split-work request
+
+Core prepares the resource helper and the Agent-side helper before starting either.
+A required preparation failure retains the original intent and reports its exact Host,
+helper role and step in `error.executionFailure`. This does not stop existing Agents.
+An optional upgrade observation is advice; updating Core does not itself prove that
+preparation, creation or the first input succeeded.
+
+Use `amux agent execution binding --input FILE` at the original Coordinator to read
+its retained `continuation` reference and `helperStarts`. Start facts describe submission
+and acknowledgement, not current Run health. After fixing the exact endpoint, explicitly
+run `amux agent execution continue --input FILE`, with only:
+
+```json
+{"bindingId":"ORIGINAL_BINDING","agentSessionId":"ORIGINAL_SESSION","createOperationId":"ORIGINAL_CREATE"}
+```
+
+Core loads the frozen input; do not supply a new prompt, directory, Executor or grant.
+The original Coordinator and both original Runtime identities must remain the targets.
+A Core restart or upgrade does not clear a Native Start attempt. A missing original
+Start receipt stays unknown and is never permission to submit another Start or input.
+The reply adopts only the matching original Session and creation receipt.
+
+This operation requires the same transport-authenticated user/device authority as
+execution creation. It does not elevate a managed Agent. `execution rejoin` only
+reattaches the original helper readers; `creation continue` remains the separate
+continuation for an active ordinary creation wait. Neither is an alias for this action.
