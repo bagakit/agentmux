@@ -12,6 +12,7 @@ app.whenReady().then(async()=>{try{
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
  if (scenario === '--settings-inputs') {
+   receipt.providerToolbarGaps = []
    const element = selector => `document.querySelector(${JSON.stringify(selector)})`
    const until = async check => {
      for (let attempt = 0; attempt < 120; attempt++) { if (await evaluate(check)) return; await delay(50) }
@@ -51,6 +52,17 @@ app.whenReady().then(async()=>{try{
        await until(`document.querySelector('[data-provider-id="codex"]')?.checkVisibility()`)
        await click(field('Select Codex for comparison'))
        await focus(search)
+       const gap = await evaluate(`(() => {
+         const select = ${element(field('Provider Host'))}
+         const refresh = ${element(field('Refresh Provider capabilities'))}
+         const toolbar = getComputedStyle(select.closest('.provider-comparison__toolbar'))
+         const host = select.getBoundingClientRect(), action = refresh.getBoundingClientRect()
+         const sameRow = host.top < action.bottom && action.top < host.bottom
+         return { viewport: innerWidth, sameRow, hostWidth: host.width,
+           actual: sameRow ? (toolbar.direction === 'rtl' ? host.left - action.right : action.left - host.right) : action.top - host.bottom,
+           required: parseFloat(sameRow ? toolbar.columnGap : toolbar.rowGap) }
+       })()`)
+       receipt.providerToolbarGaps.push(gap)
      },
      executor: async () => {
        await until("Boolean([...document.querySelectorAll('.settings-pane-toolbar button')].find(button => button.textContent.trim() === 'Add executor'))")
@@ -116,6 +128,10 @@ app.whenReady().then(async()=>{try{
        assert.equal(await evaluate(`document.documentElement.dataset.appearance === ${JSON.stringify(theme)}`), true)
        await frame('inputs-' + name + '-' + theme + '-' + width)
      }
+   }
+   for (const gap of receipt.providerToolbarGaps) {
+     assert.ok(gap.actual >= gap.required && gap.required > 0,
+       'The Host control and Refresh preserve the Provider toolbar gap: ' + JSON.stringify(gap))
    }
    receipt.passed = true
    return
