@@ -5,6 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
+import { selectSpatialCatalog } from '@agentmux/core/spatial-graph'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { desktopSpatialGraph } from '../../desktop/src/renderer/src/lib/desktop-spatial-state'
 import { useAppStore } from '../../desktop/src/renderer/src/store'
@@ -21,7 +22,7 @@ import { parseFileReadResult } from '../../../packages/core/src/public-rpc-files
 import { parseMoteQuickMode, serializeMoteQuickMode, scratchTopicDirectoryName } from '../../host/src/mote-model'
 import { directoryIdentity } from '../../desktop/src/shared/space-addresses'
 import { createWorkbenchTab } from '../../desktop/src/renderer/src/lib/workbench-tabs'
-import { executeSpatialControl, selectSpatialCatalog, spatialCatalog } from '../../desktop/src/renderer/src/lib/space-agent-control'
+import { executeSpatialControl, spatialCatalog } from '../../desktop/src/renderer/src/lib/space-agent-control'
 import { readMotePresentation, readAgentPresentation, readSpatialAppearance } from '../../desktop/src/renderer/src/lib/mobile-presentation'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { MobileSpatialNavigation } from '../src/navigation/MobileSpatialNavigation'
@@ -30,6 +31,7 @@ import { MobileIdentity, type MobileObjectIdentity } from '../src/navigation/Mob
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
+import { openMoteMain } from './mobile-root-navigation'
 import { button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
@@ -165,13 +167,14 @@ it('actual Service and Desktop Store preserve the canonical missing-observation 
       </MobileAgentMenuContext.Provider>
     }
     const view = await mount(<Scene />)
-    await click(button(view.element, `选择 Mote · ${f.topic.title}`))
+    await click(await vi.waitFor(() => button(view.element, `打开 Mote 主对话 · ${f.topic.title}`)))
     const row = view.element.querySelector<HTMLElement>('.mobile-mote-agents .mobile-agent-row')!
     expect(row).not.toBeNull()
     await click(row.querySelector('.mobile-agent-row__open')!)
     expect(open).toHaveBeenCalledWith('session-original', expect.anything())
     await click(row.querySelector('.mobile-session-locations summary')!)
-    await click([...row.querySelectorAll<HTMLButtonElement>('.mobile-session-locations button')].find(item => item.textContent?.includes('second-display'))!)
+    const locations = [...row.querySelectorAll<HTMLButtonElement>('.mobile-session-locations button')]
+    expect(locations).toHaveLength(2); await click(locations[1]!)
     expect(open).toHaveBeenCalledWith('session-original', expect.objectContaining({ context: expect.objectContaining({
       tabId: 'main-tab', regionId: 'main-region', displayWorkspaceId: 'second-display', groupId: 'saved-group'
     }) }))
@@ -187,13 +190,13 @@ it('actual Service and Desktop Store preserve the canonical missing-observation 
   } finally { await f.cleanup() }
 })
 
-it.each(['SID', 'Host', 'alias', 'Tab'] as const)('actual Service keeps an unconfirmed %s descriptor visible without publishing an alias as Core identity', async mismatch => {
+it.each(['SID', 'Host', 'alias', 'Tab'] as const)('actual Service retains the original Core binding after a %s presentation descriptor changes', async mismatch => {
   const f = await publicMissingSnapshot(mismatch)
   try {
     const before = useAppStore.getState().tabs, report = await f.service.call('space.ls', { target: {}, presentation: true })
     const region = report.catalog.regions.find(region => region.regionId === 'main-region')!
-    expect(region.kind).toBe('agent'); expect(region.agentSessionId).toBeNull()
-    expect(report.catalog.tabs.find(tab => tab.tabId === region.tabId)?.issue).toContain('original Agent binding is unconfirmed')
+    expect(region.kind).toBe('agent'); expect(region.agentSessionId).toBe('session-original')
+    expect(region.execution).toMatchObject({ hostId: 'host-original', cwd: fixturePath('relocated/mote') })
     expect(report.catalog.locations.some(place => place.regionId === 'main-region')).toBe(true)
     expect(useAppStore.getState().tabs).toBe(before)
     expect(f.metadataRead).not.toHaveBeenCalled()
@@ -234,7 +237,7 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     expect(value.fact.content).toEqual({ zoneId: value.catalog.zones.find(zone => zone.directoryPath === fixturePath("relocated/mote"))!.zoneId,
       hostId: value.workspace.hostId, workspaceId: value.workspace.id, workspacePath: value.workspace.path })
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} />)
-    await click(button(view.element, `选择 Mote · ${value.topic.title}`))
+    await click(button(view.element, `打开 Mote 主对话 · ${value.topic.title}`))
     expect(open).not.toHaveBeenCalled()
     await click(button(view.element, `继续主对话 · ${value.topic.title}`))
     expect(open).toHaveBeenCalledExactlyOnceWith(value.main.sessionId, expect.objectContaining({ mote: expect.objectContaining({ spaceId: value.spaceId }),
@@ -251,7 +254,7 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     const appearance = await readSpatialAppearance(value.state, value.base, undefined, [value.topic], vi.fn())
     expect(appearance.find(fact => fact.spaceId === value.spaceId)?.activities?.map(activity => activity.agentSessionId)).toContain('session-original')
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} />)
-    await click(button(view.element, `选择 Mote · ${value.topic.title}`))
+    await click(button(view.element, `打开 Mote 主对话 · ${value.topic.title}`))
     await click(button(view.element, `继续主对话 · ${value.topic.title}`))
     expect(open).toHaveBeenCalledWith('session-original', expect.objectContaining({ context: expect.objectContaining({ displayWorkspaceId: 'second-display', groupId: 'saved-group' }) }))
     await view.render(<MobileSpatialNavigation home="focus" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} />)
@@ -265,9 +268,7 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     localStorage.setItem('agentmux-mobile-home', 'mote')
     const value = original(alias), f = clientFor(value), overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Mac' }} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
-    await click(button(view.element, `选择 Mote · ${value.topic.title}`))
-    await click(button(view.element, `继续主对话 · ${value.topic.title}`))
+    await openMoteMain(view.element)
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
     const input = editor(view.element); await paste(view.element, '保留未发送原草稿')
     await click(view.element.querySelector<HTMLButtonElement>('.mobile-mote-heading')!)
@@ -291,14 +292,15 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     value.catalog = publicCatalog({ ...value.catalog, motePresentation: facts })
     const f = clientFor(value), open = vi.fn(), profile = vi.fn()
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} openProfile={profile} />)
-    await click(button(view.element, `选择 Mote · ${value.topic.title}`))
+    await click(button(view.element, `打开 Mote 主对话 · ${value.topic.title}`))
     expect(open).not.toHaveBeenCalled(); expect(view.element.textContent).toContain('not confirmed at its original location')
     await click(button(view.element, `查看 Mote 资料 · ${value.topic.title}`)); expect(profile).toHaveBeenCalledOnce()
     const mainRows = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-mote-agents .mobile-agent-row__open')].filter(item => item.textContent?.includes('继续原协调工作'))
     expect(mainRows).toHaveLength(1)
-    const places = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-locations button')]
-    const originalPlace = places.find(item => item.textContent?.includes('second-display'))!
-    expect(originalPlace).toBeDefined(); await click(originalPlace)
+    await click(mainRows[0]!.closest('.mobile-agent-row')!.querySelector('summary')!)
+    const places = [...mainRows[0]!.closest('.mobile-agent-row')!.querySelectorAll<HTMLButtonElement>('.mobile-session-locations button')]
+    expect(places).toHaveLength(2)
+    await click(places[1]!)
     expect(open).toHaveBeenCalledWith('session-original', expect.objectContaining({ context: expect.objectContaining({ displayWorkspaceId: 'second-display', groupId: 'saved-group' }) }))
     expect(f.submit).not.toHaveBeenCalled()
   })
@@ -307,7 +309,7 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     const value = original(true), f = clientFor(value), open = vi.fn(), main = vi.fn()
     value.catalog = publicCatalog({ ...value.catalog, motePresentation: [{ ...value.fact, conversation: null }] })
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={[]} openSession={open} openMainAgent={main} />)
-    await click(button(view.element, `选择 Mote · ${value.topic.title}`))
+    await click(button(view.element, `打开 Mote 主对话 · ${value.topic.title}`))
     expect(view.element.querySelector('.mobile-space-children')).toBeNull()
     expect(button(view.element, `继续主对话 · ${value.topic.title}`)).toBeDefined()
     expect(main).not.toHaveBeenCalled()
@@ -325,7 +327,7 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     const base = spatialCatalog(value.state, [topic])
     value.catalog = publicCatalog({ ...base, agentPresentation: readAgentPresentation(value.state), motePresentation: readMotePresentation(value.state, base, [topic]) })
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={[]} openSession={vi.fn()} openMainAgent={main} openProfile={profile} onCreateAgent={create} />)
-    await click(button(view.element, `选择 Mote · ${value.topic.title}`))
+    await click(button(view.element, `打开 Mote 主对话 · ${value.topic.title}`))
     await click(button(view.element, `${status === 'missing' ? '设置主 Agent' : '核对主 Agent'} · ${value.topic.title}`))
     expect(profile).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ mote: expect.objectContaining({ spaceId: value.spaceId }) }))
     expect(view.element.querySelector('.mobile-mote-selected')?.textContent).toContain('Profile')
@@ -347,10 +349,7 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     f.client.ensureAgentContinuity = recover as never
     const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Mac' }} platform={createBrowserPlatform()} />)
     expect(recover).not.toHaveBeenCalled()
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
-    await click(button(view.element, `选择 Mote · ${value.topic.title}`))
-    expect(recover).not.toHaveBeenCalled()
-    await click(button(view.element, `继续主对话 · ${value.topic.title}`))
+    await openMoteMain(view.element)
     await vi.waitFor(() => expect(recover).toHaveBeenCalledOnce())
     expect(recover).toHaveBeenCalledWith(expect.objectContaining({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, trigger: 'manual' }))
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
