@@ -10,10 +10,10 @@ export function rejectedQuestionReply(control: AgentSessionControl, notApplied: 
   key: string, attempt: DesktopQuestionReplyAttempt): DesktopQuestionReplyAttempt | null {
   try {
     if (attempt?.phase !== 'unknown') return null
+    if (attempt.hostId !== control.hostId || notApplied.submissionId !== attempt.input.operationId ||
+      notApplied.run.runId !== attempt.input.expectedRun.runId || control.run.runId !== attempt.input.expectedRun.runId ||
+      key !== questionReplyKey(control.agentSessionId, attempt.input)) return null
     parseQuestionReplyAttempt(attempt)
-    if (key !== questionReplyKey(control.agentSessionId, attempt.input) ||
-      attempt.hostId !== control.hostId || notApplied.submissionId !== attempt.input.operationId ||
-      notApplied.run.runId !== attempt.input.expectedRun.runId || control.run.runId !== attempt.input.expectedRun.runId) return null
     return { ...attempt, phase: 'rejected', diagnostic: {
       code: 'QUESTION_REPLY_NOT_APPLIED', message: 'Core confirmed the original reply was not applied. Your edited answer is kept and can be sent as a new explicit reply.'
     } }
