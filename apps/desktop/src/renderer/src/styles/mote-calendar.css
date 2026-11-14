@@ -71,15 +71,20 @@
 .mote-calendar__cell[data-today="true"] .mote-calendar__date > span { color: var(--surface-1); background: var(--green); font-weight: 650; }
 .mote-calendar__previews { display: grid; gap: var(--sp-1); margin-top: var(--sp-1); }
 .mote-calendar__point, .mote-calendar__rate, .schedule-arrangement[data-calendar-summary] { --mote-rule-ink: var(--blue); }
-.mote-calendar__point, .mote-calendar__rate { color: var(--mote-rule-ink); }
 .mote-calendar__surface [data-managed="true"] { --mote-rule-ink: var(--green); }
-.mote-calendar__point { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(54%); align-items: baseline; gap: var(--sp-1);
-  width: 100%; min-width: 0; overflow: hidden; padding: 2px var(--sp-2); border: 0; border-inline-start: 2px solid var(--mote-rule-ink);
-  border-radius: var(--radius-sm); background: color-mix(in srgb, var(--mote-rule-ink) 8%, transparent); color: var(--text); font: inherit; font-size: var(--fs-micro); text-align: start; cursor: pointer; }
-.mote-calendar__point:hover { background: color-mix(in srgb, var(--mote-rule-ink) 16%, transparent); }
+.mote-calendar__point, .mote-calendar__rate {
+  display: grid; min-width: 0; overflow: hidden; padding: 3px var(--sp-3);
+  border-radius: var(--radius-sm); background-color: color-mix(in srgb, var(--mote-rule-ink) 14%, var(--surface-1));
+  color: var(--text); line-height: 1.35;
+}
+.mote-calendar__point { width: 100%; grid-template-columns: minmax(0, 1fr) fit-content(54%); align-items: baseline; gap: var(--sp-2);
+  border: 0; font-family: inherit; font-size: var(--fs-micro); text-align: start; cursor: pointer; }
+.mote-calendar__point > span, .mote-calendar__rate > span { font-weight: 560; }
+.mote-calendar__point:is(:hover, :focus-visible) { background-color: color-mix(in srgb, var(--mote-rule-ink) 24%, var(--surface-1)); }
+.mote-calendar__point:active { background-color: color-mix(in srgb, var(--mote-rule-ink) 30%, var(--surface-1)); }
 .mote-calendar__point > :is(span, small), .mote-calendar__rate > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mote-calendar__point > small, .mote-calendar__rate > small, .mote-calendar__point > b { font: inherit; font-variant-numeric: tabular-nums; }
-.mote-calendar__point > small { color: var(--text-3); }
+.mote-calendar__point > small { color: var(--text-2); }
 .mote-calendar__point > b { display: none; }
 @container calendar-canvas (max-width: 1100px) {
   .mote-calendar__point { grid-template-columns: minmax(0, 1fr); gap: 0; }
@@ -97,10 +102,16 @@
 .mote-calendar__bucket { display: grid; align-content: center; gap: var(--sp-1); min-width: 0; min-height: 100%; padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); text-align: start; cursor: pointer; }
 .mote-calendar__bucket:not([aria-pressed="true"]):hover { background: var(--surface-2); }
 .mote-calendar__bucket:disabled { cursor: default; }
+.mote-calendar :is(.mote-calendar__point, .mote-calendar__bucket):focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .mote-calendar__bucket { transition: background-color var(--dur-fast) var(--ease-enter); }
+  .mote-calendar__point { transition: background-color var(--dur-fast) var(--ease-enter), transform var(--dur-fast) var(--ease-enter); }
+  .mote-calendar__point:active { transform: translateY(1px); }
+}
 .mote-calendar__slot { position: absolute; inset-inline-end: var(--sp-1); inset-block-start: var(--sp-1); display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); opacity: 0; cursor: pointer; }
 .mote-calendar__hour-day:hover .mote-calendar__slot, .mote-calendar__slot:focus-visible { opacity: 1; }
-.mote-calendar__rate { display: grid; gap: 1px; min-width: 0; border-inline-start: 2px solid var(--mote-rule-ink); padding: 2px var(--sp-2); color: var(--text); font-size: var(--fs-meta); }
-.mote-calendar__rate > small { color: var(--text-3); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; }
+.mote-calendar__rate { gap: 1px; font-size: var(--fs-meta); }
+.mote-calendar__rate > small { color: var(--text-2); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; }
 .mote-calendar__surface [data-attention="true"] { --mote-rule-ink: var(--amber); color: var(--amber); }
 .mote-calendar__legend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line-soft); background: var(--surface-2); }
 
