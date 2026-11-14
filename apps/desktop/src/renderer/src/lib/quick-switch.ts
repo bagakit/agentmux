@@ -83,7 +83,7 @@ export function buildSessionLocationItems(input: {
     const reference = item.target.reference, hints: string[] = []
     // Only genuine label collisions need address text. These are original IDs,
     // never invented ordinals or a different navigation target.
-    for (const [field, label] of [['tabId', 'Tab'], ['spaceId', 'Space'], ['displayWorkspaceId', 'Workspace'], ['groupId', 'Group'], ['regionId', 'Region'], ['zoneId', 'Zone'], ['workspaceId', 'Workspace']] as const) {
+    for (const [field, label] of [['tabId', 'Tab'], ['spaceId', 'Space'], ['displayWorkspaceId', 'Workspace'], ['groupId', 'Group'], ['regionId', 'Region'], ['zoneId', 'Zone']] as const) {
       const value = reference[field]
       if (others.some(other => other.target.kind === 'session-location' && other.target.reference[field] !== value)) {
         hints.push(`${label} ${value ?? 'unbound'}`)
