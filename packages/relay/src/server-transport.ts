@@ -11,7 +11,7 @@ import {
 } from "./e2ee.js";
 import { buildRelayWebSocketUrl } from "./daemon-endpoints.js";
 export type ExternalSocketMetadata = { transport: "relay"; externalSessionKey: string; relayConnectionId: string; peerPublicKeyB64?: string };
-import { createEncryptedRelaySocket } from "./encrypted-relay-socket.js";
+import { createEncryptedRelaySocket, ENCRYPTED_RELAY_HIGH_WATER_MARK } from "./encrypted-relay-socket.js";
 
 export interface RelayTransportOptions {
   logger: RelayLogger;
@@ -448,11 +448,19 @@ async function attachEncryptedSocket(
       },
     });
     await firstEncryptedFrame.finally(() => clearTimeout(deadline));
+    // ws emits no drain event. The wait has no deadline: it ends on drain progress or when the
+    // socket stops being open, which the Relay heartbeat decides from pong or drain progress.
+    const waitForTransportDrain = (): Promise<void> => new Promise<void>(resolve => {
+      const drained = () => (socket.bufferedAmount ?? 0) <= ENCRYPTED_RELAY_HIGH_WATER_MARK / 2 || socket.readyState !== WebSocket.OPEN
+      if (drained()) { resolve(); return }
+      const timer = setInterval(() => { if (drained()) { clearInterval(timer); resolve() } }, 25)
+    })
     const encryptedSocket = createEncryptedRelaySocket({
       channel,
       emitter,
       getTransportBufferedAmount: () => socket.bufferedAmount,
       terminateTransport: () => socket.terminate(),
+      waitForTransportDrain,
     });
     await attachSocket(encryptedSocket, { ...metadata!, peerPublicKeyB64: channel.peerPublicKeyB64 ?? undefined });
     attached = true;

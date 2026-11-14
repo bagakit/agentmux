@@ -2,8 +2,22 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { randomBytes } from 'node:crypto'
 import { mintObjectId } from '@agentmux/identity'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
+import { base64EncryptedWireByteLength } from './encrypted-channel.js'
 
 export interface LocalRelayConnectionInfo { readonly address?: string; readonly userAgent?: string }
+
+/** Mirrors AGENTMUX_RPC_MAX_MESSAGE_BYTES in @agentmux/core, which depends on this package. */
+export const RELAY_MAX_RPC_FRAME_BYTES = 64 * 1024 * 1024
+/**
+ * A client socket is unauthenticated until its E2EE handshake and device authorization, whether or not
+ * the Host data socket is attached, so it keeps the existing bound for client requests.
+ */
+export const CLIENT_SOCKET_MAX_PAYLOAD = 16 * 1024 * 1024
+/** Only loopback sockets holding the control token: one maximal RPC frame as base64 ciphertext. */
+export const SERVER_SOCKET_MAX_PAYLOAD = base64EncryptedWireByteLength(RELAY_MAX_RPC_FRAME_BYTES)
+/** In-flight memory toward one reader, not a frame size: the source pauses above it and resumes below the low mark. */
+export const RELAY_FORWARD_HIGH_WATER_MARK = 16 * 1024 * 1024
+export const RELAY_FORWARD_LOW_WATER_MARK = 4 * 1024 * 1024
 
 /** Local adapter for the V2 control/data protocol. Encryption remains end to end. */
 export async function startLocalRelay(options: {
@@ -18,14 +32,29 @@ export async function startLocalRelay(options: {
       response.end('Mobile page unavailable. Existing Agent Sessions remain available.')
     })
   })
-  const sockets = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024, perMessageDeflate: false })
+  // ws fixes maxPayload per server, so each role upgrades through its own instance.
+  const clientSockets = new WebSocketServer({ noServer: true, maxPayload: CLIENT_SOCKET_MAX_PAYLOAD, perMessageDeflate: false })
+  const serverSockets = new WebSocketServer({ noServer: true, maxPayload: SERVER_SOCKET_MAX_PAYLOAD, perMessageDeflate: false })
   let control: WebSocket | undefined, disposed = false
   const pairs = new Map<string, { client: WebSocket; data?: WebSocket; pending: { data: RawData; binary: boolean }[]; bytes: number; timer: NodeJS.Timeout; info: LocalRelayConnectionInfo }>()
+  const forwarded = new WeakMap<WebSocket, number>()
+  const byteLength = (data: RawData) => Array.isArray(data) ? data.reduce((sum, part) => sum + part.byteLength, 0) : data.byteLength
   const send = (socket: WebSocket | undefined, data: RawData | string, binary = false) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false
     if (socket.bufferedAmount > 8 * 1024 * 1024) { socket.close(4008, 'Reader exceeded its budget'); return false }
     socket.send(data, { binary }, error => { if (error) socket.terminate() })
     return true
+  }
+  const forward = (source: WebSocket, target: WebSocket, data: RawData, binary: boolean) => {
+    if (target.readyState !== WebSocket.OPEN) return
+    forwarded.set(target, (forwarded.get(target) ?? 0) + byteLength(data))
+    target.send(data, { binary }, error => { if (error) target.terminate() })
+    if (target.bufferedAmount <= RELAY_FORWARD_HIGH_WATER_MARK || source.isPaused) return
+    source.pause()
+    const poll = setInterval(() => {
+      if (target.readyState === WebSocket.OPEN && target.bufferedAmount > RELAY_FORWARD_LOW_WATER_MARK) return
+      clearInterval(poll); source.resume()
+    }, 25)
   }
   const notify = (message: unknown) => send(control, JSON.stringify(message))
   const drop = (id: string) => {
@@ -45,10 +74,16 @@ export async function startLocalRelay(options: {
       role === 'server' && id && !pairs.has(id) || role === 'client' && pairs.size >= 128) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return
     }
-    sockets.handleUpgrade(request, socket, head, ws => {
+    ;(role === 'server' ? serverSockets : clientSockets).handleUpgrade(request, socket, head, ws => {
       if (disposed) { ws.close(1001, 'Host stopped'); return }
-      let alive = true
-      const heartbeat = setInterval(() => { if (!alive) { ws.terminate(); return }; alive = false; ws.ping() }, 15000)
+      let alive = true, drained = 0
+      // A reader is abandoned only without pong and without drain progress. A socket paused by our own
+      // backpressure cannot have its pong read, so its liveness stays with the reader it waits on.
+      const heartbeat = setInterval(() => {
+        const progress = (forwarded.get(ws) ?? 0) - ws.bufferedAmount
+        if (!alive && !ws.isPaused && progress <= drained) { ws.terminate(); return }
+        alive = false; drained = progress; ws.ping()
+      }, 15000)
       ws.on('pong', () => { alive = true })
       ws.once('close', () => clearInterval(heartbeat))
       ws.on('error', () => ws.terminate())
@@ -62,9 +97,9 @@ export async function startLocalRelay(options: {
       if (role === 'server' && id) {
         const pair = pairs.get(id)!
         pair.data?.close(4001, 'Data replaced'); pair.data = ws; clearTimeout(pair.timer)
-        for (const frame of pair.pending) send(ws, frame.data, frame.binary)
+        for (const frame of pair.pending) forward(pair.client, ws, frame.data, frame.binary)
         pair.pending = []; pair.bytes = 0
-        ws.on('message', (data, binary) => { if (pair.data === ws) send(pair.client, data, binary) })
+        ws.on('message', (data, binary) => { if (pair.data === ws) forward(ws, pair.client, data, binary) })
         ws.once('close', () => { if (pair.data === ws) drop(id) })
         return
       }
@@ -78,9 +113,9 @@ export async function startLocalRelay(options: {
         } }
       pairs.set(key, pair); notify({ type: 'connected', connectionId: key })
       ws.on('message', (data, binary) => {
-        if (pair.data) { send(pair.data, data, binary); return }
-        const bytes = Array.isArray(data) ? data.reduce((sum, part) => sum + part.byteLength, 0) : data.byteLength
-        pair.bytes += bytes
+        if (pair.data) { forward(ws, pair.data, data, binary); return }
+        // Before the data socket attaches, only the E2EE hello (and its retries) is legal client traffic.
+        pair.bytes += byteLength(data)
         if (pair.bytes > 8 * 1024 * 1024 || pair.pending.length >= 128) { drop(key); return }
         pair.pending.push({ data, binary })
       })
@@ -104,8 +139,9 @@ export async function startLocalRelay(options: {
     hostWebSocket: (url: string) => new WebSocket(url, { headers: { Authorization: `Bearer ${controlToken}` }, handshakeTimeout: 10000, perMessageDeflate: false }), async stop() {
     if (disposed) return; disposed = true
     for (const id of [...pairs.keys()]) drop(id)
-    control?.terminate(); for (const socket of sockets.clients) socket.terminate()
-    await new Promise<void>(resolve => sockets.close(() => resolve()))
+    control?.terminate()
+    for (const sockets of [clientSockets, serverSockets]) for (const socket of sockets.clients) socket.terminate()
+    await Promise.all([clientSockets, serverSockets].map(sockets => new Promise<void>(resolve => sockets.close(() => resolve()))))
     server.closeAllConnections()
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
   } }
