@@ -41,7 +41,7 @@ beforeEach(async () => {
   })
   page = undefined as unknown as MoteDialoguePage
 })
-afterEach(async () => { await app.dispose(); useLauncherState.setState({ drafts: {} }) })
+afterEach(async () => { await app.dispose(); useLauncherState.setState({ drafts: {} }); vi.useRealTimers() })
 function retained() { expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled() }
 async function profile() { await app.mount(); await moteClick(button('Profile')); await vi.waitFor(() => expect(document.querySelector('.mote-quick-mode [aria-label="Mote heartbeat"]')?.textContent, document.querySelector('.mote-quick-mode .mote-heartbeat__issue')?.textContent ?? 'Original heartbeat read').toContain('Sent · acceptance unconfirmed')); return document.querySelector<HTMLElement>('.mote-quick-mode [aria-label="Mote heartbeat"]')! }
 it('the actual App reads safe input immediately and separates the last input from a newer skipped check', async () => {
@@ -103,6 +103,68 @@ it('explicit guidance adoption freezes a complete original request across modal 
   await vi.waitFor(() => expect(dialog.textContent).toContain('Check original adoption'))
   await moteClick(button('Check original adoption', dialog)); await vi.waitFor(() => expect(calls).toHaveLength(2))
   expect(calls[1]).toEqual(calls[0]); retained()
+})
+it('adopting guidance refreshes the original shared card and open dialog without a manual refresh', async () => {
+  const read = vi.mocked(api.motePreferences.read).getMockImplementation()!
+  let adopted = false
+  vi.mocked(api.motePreferences.read).mockImplementation(async input => {
+    const value = structuredClone(await read(input))
+    if (adopted) value.maintenance!.guidance = { ...value.maintenance!.guidance!, currentDefinition: { intentId: 'updated-definition', operationId: 'updated-definition-operation' }, adoptedRevision: 'new-guide' }
+    return value
+  })
+  const card = await profile(); await moteClick(button('Configure heartbeat', card))
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  await vi.waitFor(() => expect(dialog.querySelector('.mote-heartbeat__guidance-status')?.textContent).toBe('Work cycle adoption not confirmed'))
+  vi.spyOn(api.motePreferences, 'save').mockImplementation(async raw => {
+    const input = raw as MoteQuickPreferencesSaveParams
+    schedule = { ...schedule, revision: schedule.revision! + 1, futureIntentId: 'updated-definition', currentDefinition: { intentId: 'updated-definition', operationId: 'updated-definition-operation', baseIntentId: 'original-definition', guidanceRevision: 'new-guide' } }; adopted = true
+    return { kind: 'quick', target: input.target, operationId: input.operationId, status: 'unchanged', source: input.baseline, message: null,
+      maintenanceAdoption: { loopId: schedule.loopId, operationId: input.operationId, requestDigest: 'b'.repeat(64), actor: { kind: 'user', id: 'fixture-user' }, expectedRevision: input.action!.expectedSchedule.revision,
+        oldDefinition: input.action!.expectedDefinition, newDefinition: { intentId: 'updated-definition', operationId: 'updated-definition-operation', baseIntentId: 'original-definition', guidanceRevision: 'new-guide' }, guidance: 'Updated original guidance', preparedAt: 4000, publishedAt: 4100, state: 'adopted', issue: null } }
+  })
+  await moteClick(button('Use updated guidance', dialog))
+  await vi.waitFor(() => {
+    expect(card.querySelector('.mote-heartbeat__guidance-status')?.textContent, card.textContent ?? '').toBe('Current work cycle adopted')
+    expect(dialog.querySelector('.mote-heartbeat__guidance-status')?.textContent).toBe('Current work cycle adopted')
+  })
+  expect([...dialog.querySelectorAll('button')].some(node => node.textContent === 'Use updated guidance')).toBe(false)
+  expect(api.motePreferences.save).toHaveBeenCalledTimes(1); retained()
+})
+it('a shared lightweight schedule observation reloads guidance when its original definition changes elsewhere', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  const save = vi.spyOn(api.motePreferences, 'save')
+  const read = vi.mocked(api.motePreferences.read).getMockImplementation()!
+  let adopted = false
+  vi.mocked(api.motePreferences.read).mockImplementation(async input => {
+    const value = structuredClone(await read(input))
+    if (adopted) value.maintenance!.guidance = { ...value.maintenance!.guidance!, currentDefinition: { intentId: 'updated-definition', operationId: 'updated-definition-operation' }, adoptedRevision: 'new-guide' }
+    return value
+  })
+  const card = await profile()
+  schedule = { ...schedule, revision: schedule.revision! + 1, futureIntentId: 'updated-definition', currentDefinition: { intentId: 'updated-definition', operationId: 'updated-definition-operation', baseIntentId: 'original-definition', guidanceRevision: 'new-guide' } }; adopted = true
+  await act(async () => { vi.advanceTimersByTime(5000) })
+  await vi.waitFor(() => expect(card.querySelector('.mote-heartbeat__guidance-status')?.textContent).toBe('Current work cycle adopted'))
+  expect(save).not.toHaveBeenCalled(); retained()
+})
+it('a shared lightweight schedule observation reloads a later settlement of the same published adoption', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  const save = vi.spyOn(api.motePreferences, 'save'), read = vi.mocked(api.motePreferences.read).getMockImplementation()!
+  const definition = { intentId: 'updated-definition', operationId: 'updated-definition-operation', baseIntentId: 'original-definition', guidanceRevision: 'new-guide' }
+  schedule = { ...schedule, revision: 4, futureIntentId: definition.intentId, currentDefinition: definition,
+    guidanceAdoptions: [{ operationId: 'external-adoption', requestDigest: 'b'.repeat(64), actor: { kind: 'user', id: 'fixture-user' }, expectedRevision: 3,
+      oldDefinition: { intentId: 'original-definition', operationId: 'original-definition-operation' }, newDefinition: definition, guidance: 'Updated original guidance', preparedAt: 4000, publishedAt: 4100, state: 'unconfirmed', issue: 'Core activation is unconfirmed.' }] }
+  vi.mocked(api.motePreferences.read).mockImplementation(async input => {
+    const value = structuredClone(await read(input))
+    value.maintenance!.guidance = { ...value.maintenance!.guidance!, currentDefinition: definition,
+      adoptedRevision: schedule.guidanceAdoptions![0]!.state === 'adopted' ? 'new-guide' : null, adoptions: structuredClone(schedule.guidanceAdoptions!) }
+    return value
+  })
+  const card = await profile()
+  expect(card.querySelector('.mote-heartbeat__guidance-status')?.textContent).toBe('Work cycle adoption not confirmed')
+  schedule = { ...schedule, guidanceAdoptions: schedule.guidanceAdoptions!.map(value => ({ ...value, state: 'adopted', issue: null })) }
+  await act(async () => { vi.advanceTimersByTime(5000) })
+  await vi.waitFor(() => expect(card.querySelector('.mote-heartbeat__guidance-status')?.textContent).toBe('Current work cycle adopted'))
+  expect(save).not.toHaveBeenCalled(); retained()
 })
 it('closing while the original resume checkpoint is held sends no resume and reopening only inspects it', async () => {
   schedule.status = 'paused'; schedule.pause = { reason: 'manual', episodeId: 'manual-pause', pausedAt: 2000 }

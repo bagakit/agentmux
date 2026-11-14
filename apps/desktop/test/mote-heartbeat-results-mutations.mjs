@@ -2,9 +2,12 @@ import {appendFileSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 const base='apps/desktop/src/renderer/src/',reader=base+'lib/mote-heartbeat-reading.ts',quick=base+'components/MoteQuickMode.tsx',save=base+'lib/mote-quick-mode.ts',report=base+'lib/mote-heartbeat-report.ts'
 export const mutations={
+ 'skip-adoption-shared-refresh':[quick,[["if (lifetime.current === epoch) { liveHeartbeat.refresh(); setAttempt(value => value + 1) }",'if (lifetime.current === epoch) { setAttempt(value => value + 1) }']],'^adopting guidance refreshes'],
+ 'ignore-definition-revision':[reader,[["record.revision !== selectedSchedule.revision || record.futureIntentId !== selectedSchedule.futureIntentId ||",'false ||']],'^a shared lightweight schedule observation'],
+ 'ignore-adoption-settlement':[reader,[["adoption?.operationId !== selectedAdoption?.operationId || adoption?.state !== selectedAdoption?.state ||",'false ||']],'^a shared lightweight schedule observation'],
  'hide-work-cycle-action':[quick,[['<button type="button" className="small-button" disabled={busy || loading} onClick={() => void adopt()}>Use updated guidance</button>','<details><summary>More</summary><button type="button" className="small-button" disabled={busy || loading} onClick={() => void adopt()}>Use updated guidance</button></details>']],'^the actual Care dialog'],
  'false-current-work-cycle':[base+'components/MoteHeartbeatStatus.tsx',[['!unavailable && guidance.adoptedRevision === guidance.availableRevision','true']],'^the actual Care dialog'],
- 'adopt-on-opening':[quick,[['  const guidance = saved?.maintenance?.guidance','  const guidance = saved?.maintenance?.guidance; useLayoutEffect(() => { if (saved && !saved.pending && !busy) void adopt() }, [saved])']],'^the actual Care dialog'],
+ 'adopt-on-opening':[quick,[['  const guidance = maintenance?.guidance','  const guidance = maintenance?.guidance; useLayoutEffect(() => { if (saved && !saved.pending && !busy) void adopt() }, [saved])']],'^the actual Care dialog'],
 
  'drop-safe-input':[reader,[["...(result.input ? { input: result.input } : {})",'...{}']],'^the actual App reads safe input'],
  'borrow-other-report':[report,[['sameInputKey(link.source.inputKey, reference.inputKey) &&','']],'^the original report summary'],
