@@ -334,11 +334,15 @@ export class WorkbenchUserStateStore {
         diskDurability: 'unconfirmed', confirmedAt: null })
       return null
     }
-    validate(value)
     const contentDigest = digest(value)
+    const sizeBytes = size(value)
+    const confirmed = this.observation.lastConfirmedWrite
+    // All confirmed writes have a validated envelope. Reuse that validation only
+    // for matching bytes from this fresh read of the original file.
+    if (!confirmed || confirmed.contentDigest !== contentDigest || confirmed.sizeBytes !== sizeBytes) validate(value)
     // Equal bytes do not establish that this path still names the file confirmed
     // by an earlier write. Retain that receipt as history, separate from this read.
-    Object.assign(this.observation, { availability: 'present', contentDigest, sizeBytes: size(value),
+    Object.assign(this.observation, { availability: 'present', contentDigest, sizeBytes,
       diskDurability: 'unconfirmed', confirmedAt: null })
     return value
   }
