@@ -1,4 +1,4 @@
-import { isDeepStrictEqual } from 'node:util'
+import { dequal } from 'dequal'
 import { agentNativeTurnEnd, sameNativeHandle } from './agent-session-identity.js'
 import { nativeInputCorrelationKey, nativeInputSourceId } from './native-input-correlation.js'
 import type { AgentMuxStoredAgentSession, AgentPromptNativeResult, AgentPromptSubmissionRecord, AgentSessionHistoryItem, AgentSessionHistorySource } from './types.js'
@@ -14,13 +14,13 @@ export function queuedPromptNativeResult(record: AgentPromptSubmissionRecord, so
   if (claim?.transport !== 'native' || claim.native.outcome !== 'admitted' || !claim.acknowledged || !key ||
       claim.native.plan.operation !== 'queue-idle' || !claim.native.queuedSubmissionId) return
   const plan = claim.native.plan
-  if (!plan.clientCorrelation || !isDeepStrictEqual(nativeInputCorrelationKey(plan.clientCorrelation), key) ||
-      !isDeepStrictEqual(claim.intent?.plan, plan) || plan.sourceId !== nativeInputSourceId(source) || plan.threadId !== source.nativeSessionId) return
+  if (!plan.clientCorrelation || !dequal(nativeInputCorrelationKey(plan.clientCorrelation), key) ||
+      !dequal(claim.intent?.plan, plan) || plan.sourceId !== nativeInputSourceId(source) || plan.threadId !== source.nativeSessionId) return
   const candidates = items.filter(item => item.conversation?.nativeInput?.clientCorrelation === plan.clientCorrelation)
   if (candidates.length !== 1) return
   const input = candidates[0]!, native = input.conversation?.nativeInput
   if (input.kind !== 'user-message' || !native?.turnId || native.turnId !== input.turnId ||
-      !isDeepStrictEqual(native.source, source) || !isDeepStrictEqual(input.conversation?.adoptedInput?.key, key) ||
+      !dequal(native.source, source) || !dequal(input.conversation?.adoptedInput?.key, key) ||
       input.contentParts.length !== 1 || input.contentParts[0]?.kind !== 'text' || input.contentParts[0].text !== claim.intent?.prompt) return
   const ends = items.filter(item => item.turnId === native.turnId && item.turnOutcome !== undefined)
   if (ends.length !== 1) return
@@ -39,7 +39,7 @@ export function promptNativeResult(record: AgentPromptSubmissionRecord, session:
   if (claim.transport !== 'native') return { state: 'unsupported', reason: 'uncorrelated-carrier' }
   const plan = claim.native.plan, source = session.nativeHandle
   if (claim.native.outcome !== 'admitted' || !claim.acknowledged || !claim.native.turnId || !plan.clientCorrelation ||
-      !isDeepStrictEqual(nativeInputCorrelationKey(plan.clientCorrelation), key) || !isDeepStrictEqual(claim.intent.plan, plan) ||
+      !dequal(nativeInputCorrelationKey(plan.clientCorrelation), key) || !dequal(claim.intent.plan, plan) ||
       !record.nativeSource || !sameNativeHandle(record.nativeSource.nativeHandle, source) || record.nativeSource.actorId !== plan.actorId ||
       session.nativeActor && session.nativeActor.actorId !== plan.actorId ||
       record.run.runId !== session.run.runId || source?.kind !== 'provider' || plan.threadId !== source.sessionId ||
