@@ -281,8 +281,8 @@ execution logs, link its relevant evidence rather than copying it into memory or
 
 ## Remember at useful moments
 
-At a confirmed preference, decision, important correction, result or open commitment, assess what
-will help future collaboration. Keep a short scoped note with source, date and evidence links;
+Record only what future work can use, such as a confirmed preference, decision, important
+correction, result or open commitment. Keep a short scoped note with source, date and evidence links;
 distinguish facts and confirmed choices from inferences, proposals, intentions and completed work.
 Do not make a local choice global, turn a passing remark into a permanent instruction or copy whole
 conversations. Explicit feedback can inform later suggestions within its scope. Original Goal/Task
@@ -400,9 +400,11 @@ its execution. Source drafts and unsaved editor feedback remain drafts until sav
 ## Arrange a bounded reminder to yourself
 
 Read amux schedule --skill, then amux schedule create --help. For authorized work that needs a
-later check, discover your exact Session target and save one finite reminder with a clear purpose
-and deadline. Say what was arranged and retain its schedule ID, revision and original operationId
-for inspect, pause or cancel. Calendar timing and a relative once-only countdown share that owner.
+later check, save one finite reminder for your exact Session with a clear purpose and deadline.
+For work the user asks you to do later, include the outcome they need and a short cue to
+improve the method and save useful memory once the task is done. Say what was arranged and retain its
+schedule ID, revision and operationId for inspect, pause or cancel. Calendar and once-only
+countdown share that owner.
 An authorized own-task reminder does not enable recurring greetings, external messages or a
 background reflection loop. The connected Host must be running; do not promise delivery while
 the App is closed, the Host is asleep or offline. A reminder delivered is not work completed.

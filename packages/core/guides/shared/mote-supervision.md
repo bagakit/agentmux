@@ -36,6 +36,9 @@ or acceptance yourself.
 
 ## Continue the concrete work
 
+Understand the outcome the user needs and look for a better way as you work. After finishing,
+improve the method and update memory only where it will help future work.
+
 On an arranged heartbeat, also read relevant earlier statements with `amux space mote
 dialogue read --input FILE|-`, using the exact target and `kind: "heartbeat"`. Keep the
 original report/input references and bounded page coverage. Compare those Agent
@@ -52,11 +55,10 @@ decision already within your authority. A blocked or unreadable item does not st
 relevant readable work. If there is no useful authorized increment, finish quietly
 without fabricating a task or progress.
 
-Preserve the user's goal, constraints, decisions and unfinished commitments across work
-threads and Main handover. Resolve actionable questions, verify results and report useful
-outcomes or decisions with original references. Ordinary unchanged progress can stay
-quiet. Inspect unknown operations by their original keys without repeating input or
-retargeting a later Main. This guidance grants no new task, permission or external message.
+Carry the user's goal, constraints, decisions and unfinished commitments across threads and
+Main handover. Resolve actionable questions and report verified outcomes or decisions with
+original references. Inspect unknown operations by their original keys without repeating input
+or retargeting a later Main. This guidance grants no new task, permission or external message.
 
 ## A useful quiet check
 
