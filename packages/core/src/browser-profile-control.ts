@@ -1,4 +1,5 @@
 import { parseBrowserProxyProbe, type BrowserProxyProbeReceipt, type BrowserProxyProbeHistory } from './browser-proxy-probe.js'
+import { BROWSER_PROFILE_EXTENSION_OPERATIONS, isBrowserProfileExtensionOperation, parseBrowserProfileExtensionPayload, parseBrowserProfileExtensionResult, assertBrowserProfileExtensionTarget, type BrowserProfileExtensionOperation, type BrowserProfileExtensionPayload, type BrowserProfileExtensionResult } from './browser-profile-extensions.js'
 import { parseBrowserProxyEdit, parseBrowserProxyAsset, parseBrowserProxyBinding, parseBrowserProfileNetworkApplication, type BrowserProxyEdit, type BrowserProxyAsset, type BrowserProxyBinding, type BrowserProfileNetworkApplication } from './browser-proxy-library.js'
 import type { BrowserProfileTrashEntry, BrowserProfileNativeUse, BrowserProfileRecycleReceipt, BrowserProfileRestoreReceipt, BrowserProfilePurgeReceipt, BrowserProfilePurgeResult } from './browser-profile-trash.js'
 import { AgentMuxError } from './errors.js'
@@ -9,7 +10,7 @@ import { parseBrowserProfileQuery, parseBrowserProfileView, parseBrowserProfileS
  * typed requests and checks the shape of the owner's answers. No partition, cookie path or
  * credential is returned by this contract. A proxy sign-in write carries a password only to Main.
  */
-export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.proxy.ls', 'browser.profile.proxy.create', 'browser.profile.proxy.update', 'browser.profile.proxy.delete', 'browser.profile.proxy.assign', 'browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
+export const BROWSER_PROFILE_CONTROL_OPERATIONS = [...BROWSER_PROFILE_EXTENSION_OPERATIONS, 'browser.profile.proxy.ls', 'browser.profile.proxy.create', 'browser.profile.proxy.update', 'browser.profile.proxy.delete', 'browser.profile.proxy.assign', 'browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
   'browser.profile.folder.create', 'browser.profile.folder.rename', 'browser.profile.folder.delete',
   'browser.profile.view.create', 'browser.profile.view.update', 'browser.profile.view.delete', 'browser.profile.bulk-update',
   'browser.profile.trash.ls', 'browser.profile.trash.restore', 'browser.profile.trash.retention', 'browser.profile.trash.purge', 'browser.profile.trash.inspect',
@@ -27,7 +28,7 @@ export type BrowserProfileControlEdit = { label?: string; hue?: number | null; n
   /** Replaces the environment bundle; null restores native defaults. */
   environment?: BrowserProfileEnvironment | null; tags?: string[]; folderId?: string | null; pinned?: boolean }
 
-export type BrowserProfileControlPayload =
+export type BrowserProfileControlPayload = BrowserProfileExtensionPayload
   | { operation: 'browser.profile.proxy.ls' }
   | { operation: 'browser.profile.proxy.create'; edit: BrowserProxyEdit }
   | { operation: 'browser.profile.proxy.update'; proxyId: string; expectedRevision: string; edit: BrowserProxyEdit }
@@ -384,7 +385,7 @@ export type BrowserProfileControlUse = { browserId: string; workspaceId?: string
 /** complete is false when saved Tabs could not be read; browsers then names only open Browsers. */
 export type BrowserProfileControlUsage = { browsers: BrowserProfileControlUse[]; complete: boolean; native?: BrowserProfileNativeUse }
 
-export type BrowserProfileControlResult =
+export type BrowserProfileControlResult = BrowserProfileExtensionResult
   | { operation: 'browser.profile.proxy.ls'; revision: number; proxies: BrowserProxyAsset[] }
   | { operation: 'browser.profile.proxy.create' | 'browser.profile.proxy.update'; revision: number; proxy: BrowserProxyAsset }
   | { operation: 'browser.profile.proxy.delete'; revision: number; proxyId: string; deleted: true }
@@ -469,10 +470,11 @@ export function parseBrowserProfileProxySignIn(value: unknown): BrowserProfilePr
 
 /** Request payload after the Control envelope fields; one owner for both the CLI params and the wire request. */
 export function parseBrowserProfileControlPayload(source: Record<string, unknown>, envelope: readonly string[]): BrowserProfileControlPayload {
+  if (isBrowserProfileExtensionOperation(source.operation)) return parseBrowserProfileExtensionPayload(source)
   const code = 'INVALID_CONTROL_REQUEST'
-  const operation = source.operation
-  if (!isBrowserProfileControlOperation(operation)) fail(code, 'Browser Profile operation is invalid.')
-  const fields: Record<BrowserProfileControlOperation, readonly string[]> = {
+  if (!isBrowserProfileControlOperation(source.operation)) fail(code, 'Browser Profile operation is invalid.')
+  const operation = source.operation as Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation>
+  const fields: Record<Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation>, readonly string[]> = {
     'browser.profile.proxy.ls': [], 'browser.profile.proxy.create': ['edit'], 'browser.profile.proxy.update': ['proxyId', 'expectedRevision', 'edit'],
     'browser.profile.proxy.delete': ['proxyId', 'expectedRevision'], 'browser.profile.proxy.assign': ['proxyId', 'expectedRevision', 'items'],
     'browser.profile.ls': ['query', 'viewId'],
@@ -668,8 +670,9 @@ function folder(value: unknown, code: string): BrowserProfileFolder {
 type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 export type BrowserProfileControlResultBody = OmitEach<BrowserProfileControlResult, 'operation'>
 export function parseBrowserProfileControlResult(operation: BrowserProfileControlOperation, value: unknown): BrowserProfileControlResultBody {
+  if (isBrowserProfileExtensionOperation(operation)) { const { operation: _operation, ...body } = parseBrowserProfileExtensionResult(operation, value); return body }
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const keys: Record<BrowserProfileControlOperation, readonly string[]> = {
+  const keys: Record<Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation>, readonly string[]> = {
     'browser.profile.proxy.ls': ['revision', 'proxies'], 'browser.profile.proxy.create': ['revision', 'proxy'], 'browser.profile.proxy.update': ['revision', 'proxy'],
     'browser.profile.proxy.delete': ['revision', 'proxyId', 'deleted'], 'browser.profile.proxy.assign': ['revision', 'proxyId', 'proxyRevision', 'results'],
     'browser.profile.ls': ['revision', 'sequence', 'profiles', 'folders', 'views', 'filter'],
@@ -815,6 +818,7 @@ export function assertBrowserProfileControlTarget(request: BrowserProfileControl
     if (result.operation !== request.operation || result.profileId !== request.profileId || result.diagnostics.length > 1 || result.diagnostics.some(item => item.id !== request.operationId)) fail('CONTROL_PROTOCOL_ERROR', 'Diagnostic history does not name the original requested operation.')
     return
   }
+  if (isBrowserProfileExtensionOperation(request.operation)) { assertBrowserProfileExtensionTarget(request as BrowserProfileExtensionPayload, result as BrowserProfileExtensionResult); return }
   if (request.operation === 'browser.profile.proxy.ls') return
   if (request.operation === 'browser.profile.proxy.create' || request.operation === 'browser.profile.proxy.update') {
     if (result.operation !== request.operation || !('proxy' in result) || result.proxy.label !== request.edit.label || (request.operation === 'browser.profile.proxy.update' && result.proxy.id !== request.proxyId)) fail('CONTROL_PROTOCOL_ERROR', 'Proxy receipt belongs to another asset.')
