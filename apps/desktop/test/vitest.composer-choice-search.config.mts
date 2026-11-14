@@ -3,6 +3,7 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import assert from 'node:assert/strict'
+import type { Alias } from 'vite'
 import original from './selection-field.config.mts'
 
 const repository = resolve(import.meta.dirname, '../../..')
@@ -22,7 +23,10 @@ const mutations = {
   disabled: [tools, 'key={command.id ?? command.text} disabled={disabled}', 'key={command.id ?? command.text}']
 } as const
 export default defineConfig({ ...original, esbuild: { jsx: 'automatic' },
-  resolve: { ...original.resolve, conditions: ['browser', 'module', 'development|production'] },
+  resolve: { ...original.resolve, conditions: ['browser', 'module', 'development|production'], alias: [
+    { find: /^@agentmux\/identity\/runtime-source$/, replacement: resolve(repository, 'packages/identity/dist/runtime-source.js') },
+    ...(original.resolve?.alias as Alias[])
+  ] },
   plugins: [{ name: 'composer-choice-actual-source', enforce: 'pre', transform(source, id) {
     const path = relative(repository, id.split('?')[0]!)
     if (!path.startsWith('apps/desktop/src/') && !path.startsWith('packages/client-ui/src/')) return
