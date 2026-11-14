@@ -352,3 +352,113 @@ it.runIf(Boolean(process.env.SURVEY_LIST_RESTART_PHASE))('[survey-list-restart] 
     fixture.noLifecycle()
   }
 })
+
+it('[survey-pin] actual compiled CLI pins, discovers and unpins the same saved research without moving content', async () => {
+  const before = protectedFacts(), organization = useAppStore.getState().surveyOrganization, membership = useAppStore.getState().surveyCollectedZones
+  const pageGeneration = useAppStore.getState().surveyPageReferences
+  const reference = { kind: 'zone', zoneId: zones[0]! }
+  const input = join(fixture.directory, 'manual-pin.json')
+  expect((await command(['space', '--skill'])).stdout).toContain('Manual pins are a separate presentation preference')
+  expect((await command(['space', 'survey-list', '--help'])).stdout).toContain('expectedPinned')
+  await writeFile(input, JSON.stringify({ pin: { reference, pinned: true, expectedPinned: false } }))
+  const pinned = objectCliReceipt(JSON.parse((await command(['space', 'survey-list', '--input', input, '--operation-id', 'pin-original-research'])).stdout)).result
+  expect(pinned).toMatchObject({ outcome: 'changed', pinnedReferences: [reference], changed: true })
+  expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.pinnedItems['survey-workbench']).toEqual([JSON.stringify(['zone', zones[0]])])
+  expect(objectCliReceipt(JSON.parse((await command(['space', 'ls', '--presentation'])).stdout)).result.catalog.survey.pinnedReferences).toEqual([reference])
+  const observed = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'read-original-pin', operation: 'inspect.client' })
+  expect(observed.operation).toBe('inspect.client')
+  if (observed.operation !== 'inspect.client') throw new Error('Original client observation required')
+  expect(observed.observation.survey.pinnedReferences).toEqual([reference])
+  const stale = objectCliReceipt(JSON.parse((await command(['space', 'survey-list', '--input', input, '--operation-id', 'stale-original-pin'], 1)).stdout)).result
+  expect(stale).toMatchObject({ outcome: 'refused', issues: [{ code: 'SURVEY_PIN_CONFLICT' }] })
+  await writeFile(input, JSON.stringify({ pin: { reference, pinned: false, expectedPinned: true } }))
+  expect(objectCliReceipt(JSON.parse((await command(['space', 'survey-list', '--input', input, '--operation-id', 'unpin-original-research'])).stdout)).result).toMatchObject({ outcome: 'changed', pinnedReferences: [] })
+  expect(useAppStore.getState().surveyOrganization).toBe(organization); expect(useAppStore.getState().surveyCollectedZones).toBe(membership)
+  expect(useAppStore.getState().surveyPageReferences).toBe(pageGeneration)
+  expect(protectedFacts()).toEqual(before); fixture.noLifecycle()
+})
+
+it('[survey-pin] exact pages and same-titled researches have independent manual pins and no new member is inferred', async () => {
+  const page = { regionId: 'retained-browser-region', browserId: 'retained-browser-owner' }
+  useAppStore.setState({ surveyPageReferences: [page] })
+  const request = (reference: any, pinned: boolean, expectedPinned: boolean) => useAppStore.getState().executeControl({ schemaVersion: 5,
+    requestId: 'manual-exact-pin', operation: 'space.survey-list', pin: { reference, pinned, expectedPinned } })
+  expect(await request({ kind: 'page', ...page }, true, false)).toMatchObject({ pinnedReferences: [{ kind: 'page', ...page }] })
+  expect(await request({ kind: 'zone', zoneId: zones[1] }, true, false)).toMatchObject({ pinnedReferences: [{ kind: 'page', ...page }, { kind: 'zone', zoneId: zones[1] }] })
+  expect(await request({ kind: 'page', ...page }, false, true)).toMatchObject({ pinnedReferences: [{ kind: 'zone', zoneId: zones[1] }] })
+  expect(await request({ kind: 'zone', zoneId: 'not-saved-research' }, true, false)).toMatchObject({ outcome: 'refused', issues: [{ code: 'SURVEY_PIN_MEMBER_UNKNOWN' }] })
+  expect(useAppStore.getState().surveyPageReferences).toEqual([page]); fixture.noLifecycle()
+})
+
+it('[survey-pin] unpinning a known saved entry preserves unread neighboring bytes in the original preference scope', async () => {
+  const originalRaw = { 'other-original-scope': ['keep-original'], 'survey-workbench': [JSON.stringify(['zone', zones[0]]), { unread: 'original-data' }, 'not-a-machine-reference'] }
+  const restored = restorePersistedUiState(config, { pinnedItems: originalRaw })
+  useAppStore.setState({ pinnedItems: restored.pinnedItems, surveyPinReadRecovery: restored.surveyPinReadRecovery })
+  const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'unpin-known-only', operation: 'space.survey-list',
+    pin: { reference: { kind: 'zone', zoneId: zones[0]! }, pinned: false, expectedPinned: true } })
+  expect(result).toMatchObject({ pinnedReferences: [], issues: [{ code: 'SURVEY_PIN_PARTIAL_READ' }] })
+  const saved = JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.pinnedItems
+  expect(saved['other-original-scope']).toEqual(['keep-original']); expect(saved['survey-workbench']).toEqual([{ unread: 'original-data' }, 'not-a-machine-reference'])
+  const observed = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'inspect-partial-pins', operation: 'inspect.client' })
+  expect(observed.operation).toBe('inspect.client')
+  if (observed.operation !== 'inspect.client') throw new Error('Original observation required')
+  expect(observed.observation.survey).toMatchObject({ pinnedReferences: [], pinIssue: expect.any(String) })
+  expect(useAppStore.getState().surveyPinReadRecovery).not.toBeNull()
+  const unreadNull = restorePersistedUiState(config, { pinnedItems: { 'survey-workbench': null } })
+  useAppStore.setState({ pinnedItems: unreadNull.pinnedItems, surveyPinReadRecovery: unreadNull.surveyPinReadRecovery })
+  await prepareRendererUpdate()
+  const refused = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'keep-unread-null-pin', operation: 'space.survey-list',
+    pin: { reference: { kind: 'zone', zoneId: zones[0]! }, pinned: true, expectedPinned: false } })
+  expect(refused).toMatchObject({ outcome: 'unknown', pinnedReferences: [], issues: [{ code: 'SURVEY_PIN_SOURCE_UNREADABLE' }, { code: 'SURVEY_PIN_PARTIAL_READ' }] })
+  expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.pinnedItems['survey-workbench']).toBeNull()
+  fixture.noLifecycle()
+})
+
+it('[survey-pin] strict original request and receipt codecs preserve typed pins and refuse forged scope fields', () => {
+  const pin = { reference: { kind: 'page', regionId: 'exact-region', browserId: 'exact-browser' }, pinned: true, expectedPinned: false }
+  const request = { schemaVersion: 5, requestId: 'exact-pin-codec', operation: 'space.survey-list', pin }
+  expect(parseSpaceControlRequest(request)).toEqual(request)
+  expect(() => parseSpaceControlRequest({ ...request, pin: { ...pin, reference: { ...pin.reference, title: 'pretend owner' } } })).toThrow()
+  expect(() => parseSpaceControlRequest({ ...request, pin: { ...pin, reference: { ...pin.reference, zoneId: 'foreign-scope' } } })).toThrow()
+  expect(() => parseSpaceControlRequest({ ...request, pin: { reference: pin.reference, pinned: true } })).toThrow()
+  const receipt = { schemaVersion: 5, requestId: request.requestId, ok: true, operation: request.operation,
+    result: { scope: 'survey-list', collectedZoneIds: [], pageReferences: [], pinnedReferences: [pin.reference], storedOrganization: empty(), effectiveOrganization: empty(), outcome: 'read', changed: false, save: null, issues: [] } }
+  expect(parseSpaceControlSuccessReceipt(receipt).result).toMatchObject({ pinnedReferences: [pin.reference] })
+})
+
+it.runIf(Boolean(process.env.SURVEY_PIN_RESTART_FILE))('[survey-pin-restart] original host user document retains exact manual pins and unread neighbors across two processes', async () => {
+  const file = process.env.SURVEY_PIN_RESTART_FILE!, phase = process.env.SURVEY_PIN_RESTART_PHASE
+  const { WorkbenchUserStateStore } = await import('../src/main/workbench-user-state')
+  const { createWorkbenchUserDocument, WORKBENCH_USER_STATE_KEY } = await import('../src/renderer/src/lib/workbench-user-storage')
+  const owner = new WorkbenchUserStateStore(file + '.user.json')
+  const document = createWorkbenchUserDocument({ readWorkbenchState: () => owner.read(), importWorkbenchState: value => owner.importIfAbsent(value),
+    writeWorkbenchState: value => owner.write(value) }, () => localStorage)
+  await document.hydrate()
+  if (phase === 'write') {
+    const reference = { kind: 'zone' as const, zoneId: zones[0]! }
+    const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'durable-manual-pin', operation: 'space.survey-list',
+      pin: { reference, pinned: true, expectedPinned: false } })
+    expect(result).toMatchObject({ pinnedReferences: [reference] })
+    await prepareRendererUpdate()
+    const raw = JSON.parse(localStorage.getItem('agentmux-workbench-v1')!)
+    raw.state.pinnedItems['survey-workbench'].push({ originalUnread: 'retained data' })
+    await document.persistent.checkpoint(WORKBENCH_USER_STATE_KEY, raw)
+    const confirmed = owner.observe(); expect(confirmed.diskDurability).toBe('confirmed')
+    await writeFile(file + '.writer.json', JSON.stringify({ pid: process.pid, reference, pinScope: raw.state.pinnedItems['survey-workbench'], receipt: confirmed,
+      drafts: raw.state.agentComposerDrafts, selection: raw.state.surveyZoneSelection }))
+  } else {
+    expect(phase).toBe('read')
+    const saved = JSON.parse((await owner.read())!), original = JSON.parse(await readFile(file + '.writer.json', 'utf8'))
+    expect(original.pid).not.toBe(process.pid)
+    expect(saved.state.pinnedItems['survey-workbench']).toEqual(original.pinScope)
+    const restored = restorePersistedUiState(config, saved.state)
+    useAppStore.setState({ pinnedItems: restored.pinnedItems, surveyPinReadRecovery: restored.surveyPinReadRecovery })
+    const report = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'read-restored-pin', operation: 'space.survey-list' })
+    expect(report).toMatchObject({ pinnedReferences: [original.reference], outcome: 'unknown', issues: [{ code: 'SURVEY_PIN_PARTIAL_READ' }] })
+    expect(saved.state.agentComposerDrafts).toEqual(original.drafts); expect(saved.state.surveyZoneSelection).toEqual(original.selection)
+    expect(JSON.parse((await owner.read())!).state.pinnedItems['survey-workbench']).toEqual(original.pinScope)
+    await writeFile(file + '.reader.json', JSON.stringify({ pid: process.pid, writerPid: original.pid, reference: original.reference, report,
+      boundary: 'New actual Node process reads the same original Main user document, then original Store/UI hydration and public read. Private segmented host proof; no user Runtime or Native install claim.' }))
+  }
+  fixture.noLifecycle()
+})
