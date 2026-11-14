@@ -1970,6 +1970,7 @@ export type AgentMuxDesktopApi = {
     detect(executorId: AgentExecutorId, hostId: string): Promise<ExecutorDetection>
     discover(hostId: string): Promise<HostExecutorInventory>
     register(hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput): Promise<HostExecutorConfiguration>
+    unregister(input: import('@agentmux/core').AgentMuxRpcParams<'settings.executors.unregister'>): Promise<import('@agentmux/core').AgentMuxRpcResult<'settings.executors.unregister'>>
   }
   control: {
     onRequest(listener: (

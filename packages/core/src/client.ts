@@ -234,7 +234,7 @@ import type { AgentMuxMessageApplication } from './agent-message-envelope.js'
 import type { AgentMuxCreationOrigin } from './agent-creation-admission.js';
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
 import type { AgentExecutorConfig } from './types.js'
-import type { AgentMuxHostExecutorConfigureInput } from './executor-contract.js'
+import type { AgentMuxHostExecutorConfigureInput, AgentMuxHostExecutorRemoveInput } from './executor-contract.js'
 
 /** Zero means no authoritative observation has been recorded. */
 const unobservedTimestamp = 0
@@ -688,8 +688,19 @@ export class AgentMuxClient {
     return await this.hostExecutorOwner.configure(input)
   }
 
+  async removeHostExecutor(input: AgentMuxHostExecutorRemoveInput) {
+    if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    const request = { executorId: input.executorId, expectedRegistrationRevision: input.expectedRegistrationRevision }
+    return await this.hostExecutorOwner.remove(request, async () => {
+      if (!this.store.hostExecutorReferenced) throw new AgentMuxError('The original Session owner cannot confirm retained Executor references. Keep the registration and restore that owner before this removal.', 'EXECUTOR_REFERENCES_UNCONFIRMED')
+      if (await this.store.hostExecutorReferenced('local', request.executorId)) throw new AgentMuxError('A retained Session, history or prepared creation still depends on this Executor. Its registration and original recovery remain available.', 'EXECUTOR_REFERENCED')
+    })
+  }
+
   async createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    // Freeze the whole original intent before registry admission can await another turn.
+    input = structuredClone(input)
     if (input?.spatialIntent !== undefined) input = { ...input, spatialIntent: parseAgentCreationSpatialIntent(input.spatialIntent) }
     const allowed = ['toolExecution', 'agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt',
       'agentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource', 'spatialIntent']
@@ -699,7 +710,8 @@ export class AgentMuxClient {
     }
     let admitted: AgentCreationAdmission | undefined
     let resolved: AgentMuxAgentCreateInput | undefined
-    return await this.runAgentCreation('host', input, async (request, execution) => {
+    const release = await this.hostExecutorOwner.retainLaunch(input.executorId)
+    try { return await this.runAgentCreation('host', input, async (request, execution) => {
       const input = request as AgentMuxHostAgentCreateInput
       const { preparation } = execution
       const intentDigest = hostAgentCreationIntent(input)
@@ -759,7 +771,7 @@ export class AgentMuxClient {
         }
       }
       return await this.createAgentWithDeliveryAttempt(resolved!, admitted, execution)
-    })
+    }) } finally { release() }
   }
 
   readonly providers: AgentProviderRegistry

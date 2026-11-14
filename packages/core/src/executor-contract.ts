@@ -17,7 +17,10 @@ export type AgentMuxHostExecutorDescriptor = {
   providerId: AgentProviderId
   command: string
   source: 'provider-default' | 'registered'
+  /** Configuration digest used by original Session creation/recovery. */
   configRevision: string
+  /** Exact registered publication witness; absent for defaults or unavailable metadata. */
+  registrationRevision?: string
   availability: AgentMuxExecutorAvailability
   /** Absolute executable selected on this Host, present only after a successful check. */
   executable?: string
@@ -32,9 +35,10 @@ export type AgentMuxHostExecutorInventory = {
 function invalidInventory(): never { throw new AgentMuxError('Executor metadata does not match its original owner.', 'CONTROL_PROTOCOL_ERROR') }
 /** The same safe descriptor codec serves Settings and route readers. */
 export function parseHostExecutorDescriptor(value: unknown): AgentMuxHostExecutorDescriptor {
-  const d = rpcRecord(value, ['executorId', 'label', 'providerId', 'command', 'source', 'configRevision', 'availability', 'executable', 'cause'], 'CONTROL_PROTOCOL_ERROR')
+  const d = rpcRecord(value, ['executorId', 'label', 'providerId', 'command', 'source', 'configRevision', 'registrationRevision', 'availability', 'executable', 'cause'], 'CONTROL_PROTOCOL_ERROR')
   for (const key of ['executorId', 'label', 'providerId', 'command', 'configRevision']) if (typeof d[key] !== 'string' || !d[key] || /[\0\r\n]/u.test(d[key])) invalidInventory()
   if (!['registered', 'provider-default'].includes(d.source as string) || !isAgentMuxExecutorAvailability(d.availability)) invalidInventory()
+  if (d.registrationRevision !== undefined && (d.source !== 'registered' || typeof d.registrationRevision !== 'string' || !d.registrationRevision || /[\0\r\n]/u.test(d.registrationRevision))) invalidInventory()
   if (d.executable !== undefined && (typeof d.executable !== 'string' || !d.executable.startsWith('/') || /[\0\r\n]/u.test(d.executable))) invalidInventory()
   if (d.availability === 'available' && (!d.executable || d.cause !== undefined) || d.availability === 'check-failed' && d.cause === undefined) invalidInventory()
   if (d.cause !== undefined) {
@@ -66,4 +70,14 @@ export type AgentMuxHostExecutorConfiguration = {
 export type AgentMuxResolvedHostExecutor = {
   config: AgentExecutorConfig
   descriptor: AgentMuxHostExecutorDescriptor
+}
+
+export type AgentMuxHostExecutorRemoveInput = { executorId: string; expectedRegistrationRevision: string }
+export type AgentMuxHostExecutorRemoval = {
+  runtimeId: string
+  executorId: string
+  removedRegistration: true
+  registrationRevision: string
+  /** A removed override can expose the original Provider default with the same ID. */
+  effectiveExecutor: AgentMuxHostExecutorDescriptor | null
 }

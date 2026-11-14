@@ -56,6 +56,7 @@ export function HostExecutorSettings({ config, active, requestedHostId }: { conf
   const setAdding = (adding: boolean) => setRegistration(current => ({ ...current, adding }))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [removalError, setRemovalError] = useState<{ hostId: string; executorId: string; detail: string } | null>(null)
   const host = config.hosts.find(item => item.id === hostId)
   const acceptedHost = accepted && accepted.receipt.routeHostId === hostId && configValuesEqual(registrationTarget(accepted.host), registrationTarget(host))
   const acceptedTarget = acceptedHost && accepted.receipt.executor.executorId === executorId
@@ -86,6 +87,21 @@ export function HostExecutorSettings({ config, active, requestedHostId }: { conf
     } catch (cause) { setError(presentError(cause)) }
     finally { setSaving(false) }
   }
+  async function unregister() {
+    if (saving || !host || selectedExecutor?.source !== 'registered' || !selectedExecutor.registrationRevision) return
+    const submitted = selectedExecutor
+    setSaving(true); setError(null); setRemovalError(null)
+    try {
+      await api.executors.unregister({ hostId, executorId: submitted.executorId, expectedRegistrationRevision: submitted.registrationRevision! })
+      setRegistration(current => {
+        if (current.accepted?.receipt.executor.executorId !== submitted.executorId) return current
+        const { accepted: _removed, ...remaining } = current
+        return remaining
+      })
+      await refresh()
+    } catch (cause) { setRemovalError({ hostId, executorId: submitted.executorId, detail: presentError(cause) }) }
+    finally { setSaving(false) }
+  }
   return <div className="settings-pane-stack" aria-label="Host executors">
     <div className="settings-pane-toolbar">
       <label className="settings-compact-field"><span>Run on</span><select aria-label="Executor Host" value={hostId} disabled={saving} onChange={event => { setHostId(event.target.value); setSelected(null); setQuery(''); setError(null) }}>
@@ -98,6 +114,7 @@ export function HostExecutorSettings({ config, active, requestedHostId }: { conf
     <p className="settings-group-note">Commands and launch configuration belong to {host?.label ?? hostId}. Custom wrappers need an explicit target command. Discovery does not install software.</p>
     {inventory?.state === 'error' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Host Executor discovery failed', mode: inventory.detail ?? 'Current Host inventory is unknown. The last configurations are retained.', restore: 'Refresh this Host after restoring its connection. Existing Sessions remain available.' } }} /> : null}
     {error ? <p role="alert" className="dialog-error">{error}</p> : null}
+    {removalError?.hostId === hostId && removalError.executorId === selected ? <p role="alert" className="dialog-error">{removalError.detail}</p> : null}
     {adding ? <section className="agent-settings-card">
       <header className="agent-settings-card__header"><ThemeObjectAgentIcon size={18} /><strong>Register on {host?.label ?? hostId}</strong><button className="icon-button" aria-label="Cancel Host registration" disabled={saving} onClick={() => setAdding(false)}><ThemeActionCancelIcon size={14} /></button></header>
       <p className="settings-group-note">Enter this Host's configuration. Saved credentials stay on that Host and are never returned. Replacing an existing registered configuration uses its revision through the public register command.</p>
@@ -125,6 +142,10 @@ export function HostExecutorSettings({ config, active, requestedHostId }: { conf
         }))} />
       <div className="settings-resource-editor">{selectedExecutor ? <section className="agent-settings-card"><header className="agent-settings-card__header"><AgentAvatar executorId={selectedExecutor.executorId} providerId={selectedExecutor.providerId} label={selectedExecutor.label} size={22} /><strong>{selectedExecutor.label}</strong></header>
         <dl className="settings-executor-identity"><div><dt>Host</dt><dd>{host?.label ?? hostId}</dd></div><div><dt>Command</dt><dd><code>{selectedExecutor.command}</code></dd></div><div><dt>Resolved executable</dt><dd><code>{selectedExecutor.executable ?? 'Not confirmed'}</code></dd></div><div><dt>Source</dt><dd>{selectedExecutor.source === 'registered' ? 'Registered on this Host' : 'Provider default'}</dd></div></dl>
+        {selectedExecutor.source === 'registered' ? <div>
+          <p className="settings-group-note">Remove only this Host registration. A same-ID Provider default may remain. Retained Sessions, history and admitted launches keep their required registration.</p>
+          <div className="settings-host-executor-actions"><button className="small-button" disabled={saving || !selectedExecutor.registrationRevision} onClick={() => void unregister()}>Remove registration</button></div>
+        </div> : null}
         {selectedExecutor.cause ? <p className="settings-group-note">{selectedExecutor.cause.message}</p> : null}
       </section> : <div className="settings-resource-editor__empty"><ThemeObjectAgentIcon size={28} /><strong>{checking ? 'Reading Host configurations…' : inventory?.state === 'error' ? 'Host inventory is unknown' : 'Choose a Host Executor'}</strong><p>Inspect the command and availability supplied by this Host.</p></div>}</div>
     </div>}

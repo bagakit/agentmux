@@ -1002,6 +1002,7 @@ const mockApi: AgentMuxDesktopApi = {
     list: mockProviderCatalog
   },
   executors: {
+    unregister: async () => { throw new Error('Registration removal requires its original executing Host. The registration and existing work are retained.') },
     discover: async (hostId) => ({ routeHostId: hostId, runtimeId: `preview:${hostId}`, executors: Object.entries(mockConfig.executors).map(([executorId, config]) => ({
       executorId, label: config.label, providerId: config.providerId, command: config.providerId,
       source: 'provider-default' as const, configRevision: `preview:${hostId}:${executorId}`, availability: 'unknown' as const

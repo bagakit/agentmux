@@ -192,7 +192,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
-  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
+  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'removeHostExecutor' | 'hostEnvironment'> & {
     inspectAgentPosture?: AgentMuxClient['inspectAgentPosture']
     setAgentPosture?: AgentMuxClient['setAgentPosture']
     listTerminals?: AgentMuxClient['listTerminals']
@@ -1629,10 +1629,15 @@ export class AgentMuxRpcService {
           'The original Host route changed during this observation. Read the current saved connection again.', 'HOST_CONFIGURATION_CHANGED')
         return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
       }
-      if (method !== 'settings.executors.discover' && method !== 'settings.executors.register') await client.connect()
+      if (method !== 'settings.executors.discover' && method !== 'settings.executors.register' && method !== 'settings.executors.unregister') await client.connect()
       if (method === 'settings.executors.discover') {
         const query = parseHostSettingsParams('settings.executors.discover', params)
         const result = { routeHostId: query.hostId, ...await client.listHostExecutors({ refresh: query.refresh ?? true }) }
+        return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
+      }
+      if (method === 'settings.executors.unregister') {
+        const query = parseHostSettingsParams('settings.executors.unregister', params)
+        const result = { routeHostId: query.hostId, ...await client.removeHostExecutor({ executorId: query.executorId, expectedRegistrationRevision: query.expectedRegistrationRevision }) }
         return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
       }
       if (method === 'settings.executors.register') {

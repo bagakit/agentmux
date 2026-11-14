@@ -1,4 +1,5 @@
 import { missingExecutableCause } from './executable-diagnostics.js'
+import { mintObjectId } from './object-id.js'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, mkdir, readFile, stat } from 'node:fs/promises'
@@ -8,11 +9,12 @@ import { durableWriteFile } from './durable-write.js'
 import type { AgentCatalogEntry, AgentExecutorConfig } from './types.js'
 import type {
   AgentMuxHostExecutorConfiguration, AgentMuxHostExecutorConfigureInput,
-  AgentMuxHostExecutorDescriptor, AgentMuxHostExecutorInventory, AgentMuxResolvedHostExecutor
+  AgentMuxHostExecutorDescriptor, AgentMuxHostExecutorInventory, AgentMuxResolvedHostExecutor, AgentMuxHostExecutorRemoveInput, AgentMuxHostExecutorRemoval
 } from './executor-contract.js'
 
 const SCHEMA = 'agentmux.host-executors.v1'
 type Configurations = Record<string, AgentExecutorConfig>
+type Registry = { executors: Configurations; registrationRevisions: Record<string, string>; validRegistrationMetadata: boolean }
 type Probe = Pick<AgentMuxHostExecutorDescriptor, 'availability' | 'executable' | 'cause'>
 
 function record(value: unknown, fields?: readonly string[]): Record<string, unknown> {
@@ -96,6 +98,23 @@ async function probeCommand(config: AgentExecutorConfig, environment: NodeJS.Pro
 /** The semantic Host owner injects one instance per registry; its write tail is the sole writer. */
 export class AgentMuxHostExecutorOwner {
   private tail: Promise<void> = Promise.resolve()
+  private readonly launches = new Map<string, number>()
+
+  private serialized<T>(work: () => Promise<T>): Promise<T> {
+    const operation = this.tail.then(work)
+    this.tail = operation.then(() => {}, () => {})
+    return operation
+  }
+
+  /** A short local admission turn; the lease holds no queue across Provider/Native awaits. */
+  async retainLaunch(executorId: string): Promise<() => void> {
+    const id = text(executorId, 'Executor ID', 512)
+    return await this.serialized(async () => {
+      this.launches.set(id, (this.launches.get(id) ?? 0) + 1)
+      let retained = true
+      return () => { if (retained) { retained = false; const count = this.launches.get(id)! - 1; if (count) this.launches.set(id, count); else this.launches.delete(id) } }
+    })
+  }
   constructor(private readonly options: {
     path: string
     runtimeId: string
@@ -103,23 +122,39 @@ export class AgentMuxHostExecutorOwner {
     environment?(): NodeJS.ProcessEnv
   }) {}
 
-  private async read(): Promise<Configurations> {
+  private async read(): Promise<Registry> {
     let contents: string
     try {
       const metadata = await stat(this.options.path)
       if (!metadata.isFile()) throw new Error('Executor configuration file is not a regular file.')
       contents = await readFile(this.options.path, 'utf8')
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { executors: {}, registrationRevisions: {}, validRegistrationMetadata: true }
       const failure = new AgentMuxError('The original Host Executor configuration could not be read. Its file and existing Agents are retained.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
       Object.defineProperty(failure, 'cause', { value: error })
       throw failure
     }
     try {
-      const state = record(JSON.parse(contents), ['schema', 'runtimeId', 'executors'])
+      const state = record(JSON.parse(contents), ['schema', 'runtimeId', 'executors', 'registrationRevisions'])
       if (state.schema !== SCHEMA || state.runtimeId !== this.options.runtimeId) throw new Error('Executor configuration belongs to another semantic Host.')
       const values = record(state.executors)
-      return Object.fromEntries(Object.entries(values).map(([id, value]) => [text(id, 'Executor ID', 512), parseConfig(value)]))
+      const executors = Object.fromEntries(Object.entries(values).map(([id, value]) => [text(id, 'Executor ID', 512), parseConfig(value)]))
+      // Legacy observation is not a forged historic registration ACK. Reads never save.
+      const documentDigest = createHash('sha256').update(contents).digest('hex')
+      const legacy = (id: string) => 'legacy-observation:' + createHash('sha256').update(JSON.stringify([documentDigest, this.options.runtimeId, id])).digest('hex')
+      let registrationRevisions: Record<string, string> = {}
+      let validRegistrationMetadata = true
+      if (state.registrationRevisions === undefined) registrationRevisions = Object.fromEntries(Object.keys(executors).map(id => [id, legacy(id)]))
+      else {
+        const metadata = state.registrationRevisions
+        validRegistrationMetadata = !!metadata && typeof metadata === 'object' && !Array.isArray(metadata) &&
+          Object.keys(metadata).every(id => Object.hasOwn(executors, id)) && Object.keys(executors).every(id => {
+            const token = (metadata as Record<string, unknown>)[id]
+            return typeof token === 'string' && !!token.trim() && !/[\0\r\n]/u.test(token) && token.length <= 512
+          })
+        if (validRegistrationMetadata) registrationRevisions = { ...metadata as Record<string, string> }
+      }
+      return { executors, registrationRevisions, validRegistrationMetadata }
     } catch {
       throw new AgentMuxError('The original Host Executor configuration is invalid or belongs to another semantic Host. Restore the original file; existing Agents are retained.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
     }
@@ -135,9 +170,9 @@ export class AgentMuxHostExecutorOwner {
     return entries
   }
 
-  private descriptor(executorId: string, config: AgentExecutorConfig, source: AgentMuxHostExecutorDescriptor['source']): AgentMuxHostExecutorDescriptor {
+  private descriptor(executorId: string, config: AgentExecutorConfig, source: AgentMuxHostExecutorDescriptor['source'], registrationRevision?: string): AgentMuxHostExecutorDescriptor {
     return { executorId, label: config.label, providerId: config.providerId, command: config.command,
-      source, configRevision: revision(config), availability: 'unknown' }
+      source, configRevision: revision(config), ...(registrationRevision ? { registrationRevision } : {}), availability: 'unknown' }
   }
 
   private async observe(config: AgentExecutorConfig): Promise<Probe> {
@@ -148,30 +183,31 @@ export class AgentMuxHostExecutorOwner {
   }
 
   async list(input: { refresh?: boolean; executorId?: string } = {}): Promise<AgentMuxHostExecutorInventory> {
-    const entries = this.entries(await this.read())
+    const state = await this.read(), entries = this.entries(state.executors)
     const id = input.executorId === undefined ? undefined : text(input.executorId, 'Executor ID', 512)
     const selected = id === undefined ? [...entries] : entries.has(id) ? [[id, entries.get(id)!] as const] : []
     const executors = await Promise.all(selected.map(async ([id, { config, source }]) => ({
-      ...this.descriptor(id, config, source),
+      ...this.descriptor(id, config, source, state.registrationRevisions[id]),
       ...(input.refresh ? await this.observe(config) : {})
     })))
     return { runtimeId: this.options.runtimeId, executors }
   }
 
   async resolve(executorId: string): Promise<AgentMuxResolvedHostExecutor> {
-    const selected = this.entries(await this.read()).get(text(executorId, 'Executor ID', 512))
+    const state = await this.read(), selected = this.entries(state.executors).get(text(executorId, 'Executor ID', 512))
     if (!selected) throw new AgentMuxError('The requested Executor is not registered on this target Host. Register its existing command or choose a discovered Executor.', 'HOST_EXECUTOR_NOT_FOUND')
     const { config, source } = selected
     const observation = await this.observe(config)
     return { config: structuredClone({ ...config, ...(observation.executable ? { command: observation.executable } : {}) }),
-      descriptor: { ...this.descriptor(executorId, config, source), ...observation } }
+      descriptor: { ...this.descriptor(executorId, config, source, state.registrationRevisions[executorId]), ...observation } }
   }
 
   async configure(input: AgentMuxHostExecutorConfigureInput): Promise<AgentMuxHostExecutorConfiguration> {
     const executorId = text(input.executorId, 'Executor ID', 512), config = parseConfig(input.config)
     const expectedRevision = input.expectedRevision === undefined ? undefined : text(input.expectedRevision, 'Expected Executor revision', 512)
-    const operation = this.tail.then(async () => {
-      const current = await this.read(), selected = this.entries(current).get(executorId)
+    return await this.serialized(async () => {
+      const state = await this.read(), current = state.executors, selected = this.entries(current).get(executorId)
+      if (!state.validRegistrationMetadata) throw new AgentMuxError('Original Executor registration metadata is unavailable. Restore its original file before changing it; existing configurations remain readable.', 'EXECUTOR_REGISTRATION_UNAVAILABLE')
       if (!this.options.catalog().some(provider => provider.id === config.providerId)) {
         throw new AgentMuxError('Executor Provider is not supported by this target Host.', 'UNKNOWN_PROVIDER')
       }
@@ -183,15 +219,35 @@ export class AgentMuxHostExecutorOwner {
         expectedRevision === undefined && Object.hasOwn(current, executorId) && currentRevision !== revision(config)) {
         throw new AgentMuxError('Executor configuration changed. Read its current revision before replacing it.', 'EXECUTOR_CONFIGURATION_CONFLICT')
       }
+      let registrationRevision = state.registrationRevisions[executorId]
       if (!Object.hasOwn(current, executorId) || currentRevision !== revision(config)) {
+        registrationRevision = mintObjectId()
         const executors = { ...current, [executorId]: config }
-        const contents = JSON.stringify({ schema: SCHEMA, runtimeId: this.options.runtimeId, executors }) + '\n'
+        const contents = JSON.stringify({ schema: SCHEMA, runtimeId: this.options.runtimeId, executors, registrationRevisions: { ...state.registrationRevisions, [executorId]: registrationRevision } }) + '\n'
         await mkdir(dirname(this.options.path), { recursive: true, mode: 0o700 })
         await durableWriteFile(this.options.path, contents)
       }
-      return { runtimeId: this.options.runtimeId, executor: this.descriptor(executorId, config, 'registered') }
+      return { runtimeId: this.options.runtimeId, executor: this.descriptor(executorId, config, 'registered', registrationRevision) }
     })
-    this.tail = operation.then(() => {}, () => {})
-    return await operation
+  }
+
+  /** Same publication turn as registration/admission. No Native/Provider work enters it. */
+  async remove(input: AgentMuxHostExecutorRemoveInput, assertUnreferenced: () => Promise<void>): Promise<AgentMuxHostExecutorRemoval> {
+    const executorId = text(input.executorId, 'Executor ID', 512)
+    const expected = text(input.expectedRegistrationRevision, 'Expected registration revision', 512)
+    return await this.serialized(async () => {
+      const state = await this.read()
+      if (!Object.hasOwn(state.executors, executorId)) throw new AgentMuxError('This Host has no registered override for that Executor. Its Provider default, if present, cannot be removed.', 'HOST_EXECUTOR_NOT_REGISTERED')
+      if (!state.validRegistrationMetadata) throw new AgentMuxError('The original registration witness is unavailable. Restore its metadata before an explicit removal; existing configuration and Agents are retained.', 'EXECUTOR_REGISTRATION_UNAVAILABLE')
+      if (state.registrationRevisions[executorId] !== expected) throw new AgentMuxError('The original registration changed. Discover its current registrationRevision before deciding a new removal.', 'EXECUTOR_REGISTRATION_CONFLICT')
+      if (this.launches.has(executorId)) throw new AgentMuxError('An admitted launch still uses this Executor. Keep its registration and inspect the original creation before deciding a later removal.', 'EXECUTOR_REFERENCED')
+      await assertUnreferenced()
+      const { [executorId]: _config, ...executors } = state.executors
+      const { [executorId]: _token, ...registrationRevisions } = state.registrationRevisions
+      await durableWriteFile(this.options.path, JSON.stringify({ schema: SCHEMA, runtimeId: this.options.runtimeId, executors, registrationRevisions }) + '\n')
+      const effective = this.entries(executors).get(executorId)
+      return { runtimeId: this.options.runtimeId, executorId, removedRegistration: true, registrationRevision: expected,
+        effectiveExecutor: effective ? this.descriptor(executorId, effective.config, effective.source) : null }
+    })
   }
 }

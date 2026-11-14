@@ -212,7 +212,21 @@ export type AgentMuxMetadataTimelineResult =
   | { timeline: AgentTimelineCommit }
   | { timelineFailure: unknown }
 
+function executorDepends(session: Pick<AgentMuxStoredAgentSession, 'hostId' | 'executorId' | 'creation'>, hostId: string, executorId: string): boolean {
+  return session.hostId === hostId && session.executorId === executorId &&
+    (session.creation?.executorRevision !== undefined || !session.creation?.executorInvocationDigest)
+}
+function retainedExecutorReference(sessions: readonly AgentMuxStoredAgentSession[], retired: readonly AgentMuxRetiredAgentSession[],
+  reservations: readonly AgentMuxLifecycleReservation[], hostId: string, executorId: string): boolean {
+  return sessions.some(session => executorDepends(session, hostId, executorId)) ||
+    retired.some(session => !session.recordDeletion && session.hostId === hostId && session.history &&
+      executorDepends({ ...session.history, hostId: session.hostId }, hostId, executorId)) ||
+    reservations.some(value => value.kind === 'create' && value.preparedCreation && executorDepends(value.preparedCreation, hostId, executorId))
+}
+
 export type AgentMuxAgentSessionStore = {
+  /** Exact executing-Host dependency, including durable no-Run creation seeds. */
+  hostExecutorReferenced?(hostId: string, executorId: string): Promise<boolean>
   /** Optional read-only observation. Missing support never triggers Session hydration or repair. */
   agentSessionResourceCounts?(hostId: string, signal?: AbortSignal): Promise<{ saved: number; retired: number }>
   runningSavedAgentCount?(hostId: string, runningRunIds: readonly string[], signal?: AbortSignal): Promise<number>
@@ -2886,6 +2900,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return [...this.sessions.values()].map((session) => structuredClone(session))
   }
 
+  async hostExecutorReferenced(hostId: string, executorId: string): Promise<boolean> {
+    return retainedExecutorReference([...this.sessions.values()], this.retiredAgentSessions, [...this.reservations.values()], hostId, executorId)
+  }
+
   async loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]> {
     signal?.throwIfAborted()
     return [...this.sessions.values()].map(session => structuredClone(agentSessionMetadata(session)))
@@ -3674,6 +3692,17 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const result = await this.withReadDatabase(db => db.prepare('SELECT id FROM sessions ORDER BY rowid').all()
       .map(row => this.completeSession(db, String(row.id))!), document => document.sessions)
     return result
+  }
+
+  async hostExecutorReferenced(hostId: string, executorId: string): Promise<boolean> {
+    await this.tail
+    // Query only matching metadata; never hydrate history/inputs or touch Runtime.
+    return await this.withReadDatabase(db => {
+      const dependency = "(json_extract(json,'$.creation.executorRevision') IS NOT NULL OR json_extract(json,'$.creation.executorInvocationDigest') IS NULL)"
+      if (db.prepare("SELECT 1 FROM sessions WHERE json_extract(json,'$.hostId')=? AND json_extract(json,'$.executorId')=? AND " + dependency + ' LIMIT 1').get(hostId, executorId)) return true
+      if (db.prepare("SELECT 1 FROM retired_sessions WHERE json_extract(json,'$.hostId')=? AND json_extract(json,'$.recordDeletion') IS NULL AND json_extract(json,'$.history.executorId')=? AND (json_extract(json,'$.history.creation.executorRevision') IS NOT NULL OR json_extract(json,'$.history.creation.executorInvocationDigest') IS NULL) LIMIT 1").get(hostId, executorId)) return true
+      return !!db.prepare("SELECT 1 FROM reservations WHERE json_extract(json,'$.kind')='create' AND json_extract(json,'$.preparedCreation.hostId')=? AND json_extract(json,'$.preparedCreation.executorId')=? AND (json_extract(json,'$.preparedCreation.creation.executorRevision') IS NOT NULL OR json_extract(json,'$.preparedCreation.creation.executorInvocationDigest') IS NULL) LIMIT 1").get(hostId, executorId)
+    }, document => retainedExecutorReference(document.sessions, document.retiredAgentSessions, document.reservations, hostId, executorId), undefined, true)
   }
 
   async loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]> {

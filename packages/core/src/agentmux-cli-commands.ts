@@ -1252,6 +1252,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.derived-actions.delete', '<id> [--input <file|->]', 'Delete a custom derived action using optional complete expected fields. Official actions are hidden, never deleted.', 1),
   settings('settings.executors.refresh', '<id> --host <id>', 'Refresh one Executor availability observation.', 1),
   settings('settings.executors.discover', '--host <id>', 'Discover registered and supported default Executors on the exact target Host.'),
+  settings('settings.executors.unregister', '<id> --host <id> --registration-revision <revision>', 'Remove the exact executing Host registration, preserving retained Session/history and in-flight creation. Use discover registrationRevision, not configRevision. Removal may reveal a same-ID Provider default. After unknown discover current facts; never replay automatically.', 1),
   settings('settings.executors.register', '<id> --host <id> --input <file|->', 'Save an explicit Executor configuration on its executing Host.', 1),
   settings('settings.applications.ls', '[--host <id>]', 'Read configured application access and original latest/unresolved operations; no connector is executed.'),
   settings('settings.applications.configure', '<id> --input <file|->', 'Save user-configured fixed connector commands, exact Host/Runtime/OS accounts, expected application account and scopes using {profile,expectedRevision}; user only.', 1),

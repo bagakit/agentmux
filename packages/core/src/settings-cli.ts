@@ -23,6 +23,9 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Rec
     if (resource === 'executors' && action === 'discover' && args.length === 4 && id === '--host' && args[3]?.length) {
       return { hostId: args[3], refresh: true }
     }
+    if (resource === 'executors' && action === 'unregister' && args.length === 7 && id?.length && args[3] === '--host' && args[4]?.length && args[5] === '--registration-revision' && args[6]?.length) {
+      return { executorId: id, hostId: args[4], expectedRegistrationRevision: args[6] }
+    }
     if (resource === 'executors' && action === 'register' && args.length === 7 && id?.length && args[3] === '--host' && args[4]?.length && args[5] === '--input') {
       return { executorId: id, hostId: args[4], input: await input(args[6]!) }
     }

@@ -10,7 +10,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-business-codec.js'
 import type { AgentMuxCreationTrust, AgentMuxCreationAuthorityIdentity } from './agent-creation-admission.js'
 import { parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput, type AgentMuxCreationTrustInput } from './agent-creation-admission.js'
-import { parseHostExecutorDescriptor, parseHostExecutorInventory, type AgentMuxHostExecutorInventory, type AgentMuxHostExecutorConfiguration, type AgentMuxHostExecutorConfigureInput } from './executor-contract.js'
+import { parseHostExecutorDescriptor, parseHostExecutorInventory, type AgentMuxHostExecutorInventory, type AgentMuxHostExecutorConfiguration, type AgentMuxHostExecutorConfigureInput, type AgentMuxHostExecutorRemoval } from './executor-contract.js'
 
 export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
   'settings.hosts.home': 'long',
@@ -19,6 +19,7 @@ export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
   'settings.hosts.network': 'long',
   'settings.executors.discover': 'long',
   'settings.executors.register': 'long',
+  'settings.executors.unregister': 'long',
   'settings.hosts.trusted-sources': 'long',
   'settings.hosts.message-trusted-sources': 'long',
   'settings.hosts.trust-message-source': 'long',
@@ -31,6 +32,7 @@ export type HostSettingsParameterMap = {
   'settings.hosts.agent-resources': { hostId: string; kind: 'records' | 'running'; expected?: AgentMuxControlSettingsResourceFields; expectedRuntimeId?: string }
   'settings.hosts.network': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
   'settings.executors.discover': { hostId: string; refresh?: boolean }
+  'settings.executors.unregister': { hostId: string; executorId: string; expectedRegistrationRevision: string }
   'settings.executors.register': { hostId: string; executorId: string; input: Omit<AgentMuxHostExecutorConfigureInput, 'executorId'> }
   'settings.hosts.trusted-sources': { hostId: string }
   'settings.hosts.trust-source': { hostId: string; input: AgentMuxCreationTrustInput }
@@ -43,6 +45,7 @@ export type HostSettingsResultMap = {
   'settings.hosts.agent-resources': HostAgentResourceObservation
   'settings.hosts.network': HostNetworkObservation
   'settings.executors.discover': AgentMuxHostExecutorInventory & { routeHostId: string }
+  'settings.executors.unregister': AgentMuxHostExecutorRemoval & { routeHostId: string }
   'settings.executors.register': AgentMuxHostExecutorConfiguration & { routeHostId: string }
   'settings.hosts.trusted-sources': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; sources: AgentMuxCreationTrust[] }
   'settings.hosts.trust-source': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; source: AgentMuxCreationTrust }
@@ -68,6 +71,11 @@ export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M,
     const p = rpcRecord(value, ['hostId', 'refresh'])
     if (p.refresh !== undefined && typeof p.refresh !== 'boolean') throw new AgentMuxError('Executor refresh must be boolean.', 'INVALID_CONTROL_REQUEST')
     return { hostId: rpcString(p.hostId, 'Route Host ID'), ...(p.refresh === undefined ? {} : { refresh: p.refresh }) } as HostSettingsParameterMap[M]
+  }
+  if (method === 'settings.executors.unregister') {
+    const p = rpcRecord(value, ['hostId', 'executorId', 'expectedRegistrationRevision'])
+    return { hostId: rpcString(p.hostId, 'Route Host ID'), executorId: rpcString(p.executorId, 'Executor ID'),
+      expectedRegistrationRevision: rpcString(p.expectedRegistrationRevision, 'Exact registration revision') } as HostSettingsParameterMap[M]
   }
   if (method === 'settings.executors.register') {
     const p = rpcRecord(value, ['hostId', 'executorId', 'input']), input = rpcRecord(p.input, ['config', 'expectedRevision'])
@@ -104,11 +112,19 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
     return result as HostSettingsResultMap[M]
   }
   const fail = (): never => { throw new AgentMuxError('Host settings result belongs to another Host or source.', 'CONTROL_PROTOCOL_ERROR') }
-  if (method === 'settings.executors.discover' || method === 'settings.executors.register') {
-    const p = rpcRecord(value, method === 'settings.executors.discover' ? ['routeHostId', 'runtimeId', 'executors'] : ['routeHostId', 'runtimeId', 'executor'], 'CONTROL_PROTOCOL_ERROR')
+  if (method === 'settings.executors.discover' || method === 'settings.executors.register' || method === 'settings.executors.unregister') {
+    const p = rpcRecord(value, method === 'settings.executors.discover' ? ['routeHostId', 'runtimeId', 'executors'] : method === 'settings.executors.unregister' ? ['routeHostId', 'runtimeId', 'executorId', 'removedRegistration', 'registrationRevision', 'effectiveExecutor'] : ['routeHostId', 'runtimeId', 'executor'], 'CONTROL_PROTOCOL_ERROR')
     if (p.routeHostId !== input.hostId || typeof p.runtimeId !== 'string' || !p.runtimeId || /[\0\r\n]/u.test(p.runtimeId)) fail()
-    if (method === 'settings.executors.discover') {
+     if (method === 'settings.executors.discover') {
       return { routeHostId: input.hostId, ...parseHostExecutorInventory({ runtimeId: p.runtimeId, executors: p.executors }) } as HostSettingsResultMap[M]
+    }
+    if (method === 'settings.executors.unregister') {
+      const expected = input as HostSettingsParameterMap['settings.executors.unregister']
+      if (p.executorId !== expected.executorId || p.removedRegistration !== true || p.registrationRevision !== expected.expectedRegistrationRevision) fail()
+      const effectiveExecutor = p.effectiveExecutor === null ? null : parseHostExecutorDescriptor(p.effectiveExecutor)
+      if (effectiveExecutor && (effectiveExecutor.executorId !== expected.executorId || effectiveExecutor.source !== 'provider-default')) fail()
+      return { routeHostId: input.hostId, runtimeId: p.runtimeId, executorId: p.executorId, removedRegistration: true,
+        registrationRevision: p.registrationRevision, effectiveExecutor } as HostSettingsResultMap[M]
     }
     const executor = parseHostExecutorDescriptor(p.executor)
     if (executor.executorId !== (input as HostSettingsParameterMap['settings.executors.register']).executorId) fail()
