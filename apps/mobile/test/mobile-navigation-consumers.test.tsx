@@ -15,7 +15,7 @@ afterEach(async () => { for (const item of mounted.splice(0)) { await act(async 
 /** Actual App consumers; counters measure SDK method calls, not physical-phone latency. */
 async function app(presentation: boolean | 'missing-provider' = true) {
   const f = fixture(), owner = getDeviceWorkface(), copy = vi.fn().mockResolvedValue(true)
-  const fullDirectory = vi.spyOn(f.client, 'agentSessions'), pointRead = vi.spyOn(f.client, 'agentSession')
+  const fullDirectory = vi.spyOn(f.client, 'agentSessions'), pointRead = vi.spyOn(f.client, 'agentSession'), durableRead = vi.spyOn(f.client, 'readAgentSession')
   const ensure = vi.fn(); f.client.ensureAgentContinuity = ensure
   f.sessions.set('peer', { ...session('peer'), providerId: 'claude' })
   let catalogFails = false
@@ -36,7 +36,7 @@ async function app(presentation: boolean | 'missing-provider' = true) {
   await openPrimary(view.element, 'Focus')
   await waitForElement(view.element, '.mobile-session-list')
   expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
-  return { ...f, ...view, fullDirectory, pointRead, copy, ensure, original, failCatalog: () => { catalogFails = true } }
+  return { ...f, ...view, fullDirectory, pointRead, durableRead, copy, ensure, original, failCatalog: () => { catalogFails = true } }
 }
 
 it('switches the five actual primary workfaces and menu without rereading the unrelated full SDK directory', async () => {
@@ -59,27 +59,42 @@ it('switches the five actual primary workfaces and menu without rereading the un
   expect(f.ensure).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
 })
 
-it('ignores unrelated Session and Run events while refreshing the exact selected Session and connection facts', async () => {
-  const f = await app(); f.pointRead.mockClear(); f.fullDirectory.mockClear()
+it('ignores unrelated Session and Run events and refreshes only the visible original Reader facts', async () => {
+  const f = await app(); f.pointRead.mockClear(); f.durableRead.mockClear(); f.fullDirectory.mockClear()
   await act(async () => f.emit({ type: 'agent-session', session: { ...session('peer'), updatedAt: 2 } }))
   await act(async () => f.emit({ type: 'run-removed', agentSessionId: 'peer', run: { runId: 'run-peer' }, evidence }))
-  expect(f.pointRead).not.toHaveBeenCalled(); expect(f.fullDirectory).not.toHaveBeenCalled()
-  // The root metadata and retained attachment scope each point-read the same Session.
-  // The static-loading control has the same two consumers; unrelated Sessions stay untouched.
   await act(async () => f.emit({ type: 'agent-session', session: { ...session(), updatedAt: 3 } }))
-  expect(f.pointRead.mock.calls).toEqual([['session-original'], ['session-original']])
-  f.pointRead.mockClear()
-  await act(async () => f.emit({ type: 'run-removed', run: { runId: 'run-original' }, evidence }))
-  expect(f.pointRead.mock.calls).toEqual([['session-original'], ['session-original']])
-  f.pointRead.mockClear()
+  expect(f.pointRead).not.toHaveBeenCalled(); expect(f.durableRead).not.toHaveBeenCalled(); expect(f.fullDirectory).not.toHaveBeenCalled()
+  // A hidden Reader parks its observation. The shell consumes that same Reader
+  // rather than maintaining a second Session observer during directory navigation.
+  await click(button(f.element, '手机设置与连接'))
+  await click(button(document.body, '提醒与诊断'))
+  await click(button(document.body, '返回这段对话'))
+  await waitForElement(f.element, '.mobile-conversation-panel:not([hidden]) [contenteditable="true"]')
+  expect(f.durableRead.mock.calls.length).toBeGreaterThan(0)
+  expect(f.durableRead.mock.calls.every(args => args[0] === 'session-original')).toBe(true)
+  f.durableRead.mockClear()
+  await act(async () => f.emit({ type: 'agent-session', session: { ...session('peer'), updatedAt: 4 } }))
+  await act(async () => f.emit({ type: 'run-removed', agentSessionId: 'peer', run: { runId: 'run-peer' }, evidence }))
+  expect(f.durableRead).not.toHaveBeenCalled()
+  for (const event of [
+    { type: 'agent-session', session: { ...session(), updatedAt: 5 } },
+    { type: 'run-removed', run: { runId: 'run-original' }, evidence },
+    { type: 'connection-state', state: 'restored', evidence }
+  ] as const) {
+    f.durableRead.mockClear()
+    await act(async () => f.emit(event))
+    expect(f.durableRead.mock.calls.length).toBeGreaterThan(0)
+    expect(f.durableRead.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(f.durableRead.mock.calls.every(args => args[0] === 'session-original')).toBe(true)
+  }
+  f.durableRead.mockClear()
   await act(async () => f.emit({ type: 'connection-state', state: 'lost', evidence }))
-  expect(f.pointRead.mock.calls).toEqual([['session-original'], ['session-original']])
-  f.pointRead.mockClear()
-  await act(async () => f.emit({ type: 'connection-state', state: 'restored', evidence }))
-  expect(f.pointRead.mock.calls).toEqual([['session-original'], ['session-original']])
+  expect(f.durableRead).not.toHaveBeenCalled()
   expect(f.fullDirectory).not.toHaveBeenCalled()
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(f.original)
+  expect(f.ensure).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
 })
 
 it('retains the actual SDK-only fallback row and original DOM across menu suspension and failed directory refreshes', async () => {
