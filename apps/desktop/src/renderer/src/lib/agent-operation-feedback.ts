@@ -38,16 +38,18 @@ export function updateAgentOperation(operation: AgentOperationFeedback, patch: P
   useAppStore.setState(state => {
     const held = state.agentOperations[key]
     const regresses = held && patch.phase && patch.phase !== held.phase &&
-      (held.phase === 'retired' || held.phase === 'succeeded' && !(held.kind !== 'stop' && patch.phase === 'retired'))
+      (held.phase === 'cancelled' || held.phase === 'retired' || held.phase === 'succeeded' && !(held.kind !== 'stop' && patch.phase === 'retired'))
     return held && !regresses
-      ? { agentOperations: { ...state.agentOperations, [key]: { ...held, ...patch } } } : state
+      ? { agentOperations: { ...state.agentOperations, [key]: { ...held, ...patch,
+        ...(held.kind === 'takeover' && held.cancellation && held.message ? { message: held.message } : {}) } } } : state
   })
 }
 
 export function dismissAgentOperation(operation: AgentOperationFeedback) {
   const key = agentOperationKey(operation)
   useAppStore.setState(state => {
-    if (state.agentOperations[key]?.phase !== 'succeeded') return state
+    const held = state.agentOperations[key]
+    if (held?.phase !== 'succeeded' || held.kind === 'takeover' && held.cancellation) return state
     const { [key]: _finished, ...agentOperations } = state.agentOperations
     return { agentOperations }
   })
@@ -105,6 +107,11 @@ export async function inspectAgentOperation(operation: AgentOperationFeedback) {
       return
     }
     if (operation.kind === 'takeover') {
+      if (started.kind === 'takeover' && started.cancellation) {
+        const { inspectTakeoverCancellation } = await import('./session-takeover-cancellation')
+        await inspectTakeoverCancellation(started)
+        return
+      }
       if (operation.takeoverSource.clubPreparation && !operation.takeoverSource.coreRequest) {
         const { inspectTakeoverClub } = await import('./session-takeover')
         const topic = await inspectTakeoverClub(operation.takeoverSource)

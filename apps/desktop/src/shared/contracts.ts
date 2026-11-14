@@ -2089,6 +2089,8 @@ export type AgentMuxDesktopApi = {
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
     owner(hostId: string, expectedRuntimeId?: string): Promise<AgentMuxRpcResult<'runtime.owner.identity'>>
     takeovers(input: import('@agentmux/core/agent-takeover').AgentTakeoverQuery): Promise<import('@agentmux/core/agent-takeover').AgentTakeoverPage>
+    takeoverCancel(input: import('@agentmux/core/agent-takeover').AgentTakeoverCancellationInput): Promise<import('@agentmux/core/agent-takeover').AgentTakeoverCancellationResult>
+    takeoverCancelInspect(input: import('@agentmux/core/agent-takeover').AgentTakeoverCancellationInput): Promise<import('@agentmux/core/agent-takeover').AgentTakeoverCancellationResult>
     continueCreation(input: import('@agentmux/core').AgentMuxCreationContinueParams): Promise<import('@agentmux/core').AgentMuxCreationContinueResult>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     historySource(reference: SessionHistorySourceReference): Promise<SessionHistorySourceObservation>

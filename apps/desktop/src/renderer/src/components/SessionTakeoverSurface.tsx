@@ -41,7 +41,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
   const subject = takeoverOperationSubject(source)
   const operations = useAppStore(useShallow(state => source.derived || !source.hostId ? [] : agentOperationsForSubject(state.agentOperations, subject)
     .filter((operation): operation is Extract<AgentOperationFeedback, { kind: 'takeover' }> => operation.kind === 'takeover' &&
-      operation.phase !== 'succeeded' && Boolean(operation.takeoverSource.clubPreparation || operation.takeoverSource.coreRequest))))
+      operation.phase !== 'succeeded' && operation.phase !== 'cancelled' && Boolean(operation.takeoverSource.clubPreparation || operation.takeoverSource.coreRequest))))
   const facts = useAppStore(useShallow(state => ({ tabs: state.tabs, layouts: state.layouts, spaceZoneBindings: state.spaceZoneBindings,
     scratchTopicSnapshots: state.scratchTopicSnapshots, topicCategories: state.topicCategories, projectGroups: state.projectGroups })))
   const catalog = useMemo(() => {

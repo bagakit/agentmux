@@ -1,10 +1,18 @@
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import type { TakeoverSource } from './session-takeover'
+import type { AgentTakeoverCancellationInput, AgentTakeoverCancellationResult } from '@agentmux/core/agent-takeover'
 
 export type AgentOperationSubject = { hostId: string; agentSessionId?: string | undefined; regionId?: string | undefined }
 export type AgentOperationKind = 'stop' | 'takeover' | 'fork'
-export type AgentOperationPhase = 'pending' | 'succeeded' | 'partial' | 'retired' | 'failed' | 'unconfirmed'
+export type AgentOperationPhase = 'pending' | 'succeeded' | 'partial' | 'retired' | 'failed' | 'unconfirmed' | 'cancelled'
+export type TakeoverCancellation = {
+  input: AgentTakeoverCancellationInput
+  pending: boolean
+  dispatch: 'not-submitted' | 'unconfirmed'
+  result?: AgentTakeoverCancellationResult
+  issue?: string | undefined
+}
 type OperationBase = {
   operationId: string; subject: AgentOperationSubject; startedAt: number
   phase: AgentOperationPhase; message?: string | undefined; canContinue?: boolean | undefined
@@ -13,7 +21,7 @@ type OperationBase = {
   callerOperationIds?: string[]
 }
 export type AgentOperationFeedback = OperationBase & (
-  { kind: 'stop'; control: AgentSessionControl } | { kind: 'takeover'; takeoverSource: TakeoverSource } | { kind: 'fork' }
+  { kind: 'stop'; control: AgentSessionControl } | { kind: 'takeover'; takeoverSource: TakeoverSource; cancellation?: TakeoverCancellation } | { kind: 'fork' }
 )
 export type AgentOperationReferences = Record<string, AgentOperationFeedback>
 export const agentOperationKey = (operation: Pick<AgentOperationFeedback, 'kind' | 'operationId' | 'subject'>) =>
@@ -46,7 +54,7 @@ export function agentOperationsForSubject(operations: AgentOperationReferences, 
 export function persistedAgentOperations(operations: AgentOperationReferences): AgentOperationReferences {
   let projection = retained.get(operations)
   if (!projection) {
-    projection = Object.fromEntries(Object.entries(operations).filter(([, operation]) => operation.phase !== 'succeeded'))
+    projection = Object.fromEntries(Object.entries(operations).filter(([, operation]) => operation.phase !== 'succeeded' || operation.kind === 'takeover' && operation.cancellation))
     retained.set(operations, projection)
   }
   return projection
@@ -54,7 +62,14 @@ export function persistedAgentOperations(operations: AgentOperationReferences): 
 
 /** A restored reference proves an earlier intent, not a still-running operation. */
 export function restoredAgentOperations(operations: AgentOperationReferences | undefined): AgentOperationReferences {
-  return Object.fromEntries(Object.entries(operations ?? {}).map(([key, operation]) => [key,
-    { ...operation, phase: 'unconfirmed', canContinue: false, message: '原操作已保留，需核对当前结果。' }
-  ]))
+  return Object.fromEntries(Object.entries(operations ?? {}).map(([key, operation]) => {
+    if (operation.kind === 'takeover' && operation.cancellation) {
+      const result = operation.cancellation.result
+      return [key, { ...operation, canContinue: false,
+        phase: result?.outcome === 'cancelled' ? 'cancelled' : 'unconfirmed',
+        cancellation: { ...operation.cancellation, pending: false },
+        message: operation.message ?? (result?.outcome === 'cancelled' ? '这次接手已取消，原工作仍保留。' : '原接手和取消请求已保留，请核对取消结果。') }]
+    }
+    return [key, { ...operation, phase: 'unconfirmed', canContinue: false, message: operation.message ?? '原操作已保留，需核对当前结果。' }]
+  }))
 }

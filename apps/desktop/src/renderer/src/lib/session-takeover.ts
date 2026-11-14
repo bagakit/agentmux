@@ -11,7 +11,7 @@ import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { api } from './api'
 import { requireAgentNewTabDestination, type AgentNewTabDestination } from './agent-new-tab-destination'
 import { beginAgentOperation, retainTakeoverRequest, updateAgentOperation, settleAgentCreation, type AgentOperationFeedback } from './agent-operation-feedback'
-import { agentOperationsForSubject } from './agent-operation'
+import { agentOperationKey, agentOperationsForSubject } from './agent-operation'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { originalTopicAddress, topicSpatialAddress } from '../../../shared/space-addresses'
 import { desktopAgentPresentationFromSpatial } from './desktop-agent-presentation'
@@ -28,6 +28,8 @@ type TakeoverSourceDetails = {
   /** Entry presentation only; Core determines the actual nature from original organization facts. */
   destinationKind?: 'club'
   expectedRuntimeId?: string
+  /** The original spatial admission owner, independently pinned from the source Agent. */
+  coreRuntimeId?: string
   /** The existing Club preparation owner retains these exact identities before content writes. */
   clubPreparation?: { operationId: string; expectedResource: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']; topicId: string; tabId: string }
   /** The full original Core request is retained only for this client intent and its recovery. */
@@ -240,7 +242,7 @@ export async function inspectTakeoverOperation(source: TakeoverSource, requestId
     if (source.coreRequest.operationId !== requestId) throw new Error('The retained Takeover request belongs to another operation.')
     const result = await api.spatial.inspectOperation({ target: { operationId: requestId } })
     if (result.request?.operationId !== requestId || result.request.report?.operationId !== requestId) throw new Error('The original Core Takeover result is unconfirmed. Keep this request and inspect it again.')
-    return nameTakeover(source, takeoverReport(result.request.report))
+    return takeoverReport(result.request.report)
   }
   const state = useAppStore.getState()
   const result = await state.executeControl({ schemaVersion: 5, requestId: `inspect:${mintObjectId()}`,
@@ -249,7 +251,7 @@ export async function inspectTakeoverOperation(source: TakeoverSource, requestId
   if (!result.request?.report || result.request.requestId !== requestId || result.request.report.requestId !== requestId) {
     throw new Error('The original takeover intent is retained; its exact creation result is unconfirmed. Check this same request again.')
   }
-  return nameTakeover(source, result.request.report)
+  return result.request.report
 }
 
 /** Renderer navigation consumes a confirmed result, including later inspection. */
@@ -390,13 +392,20 @@ async function takeOverAtDestination(source: TakeoverSource, executorId: string,
     const destination = requireAgentNewTabDestination(source.destination, spatialCatalog(state, topics), state.layouts)
     const original = await originalTakeoverSource(source)
     if (!current()) throw new Error('The original Takeover choice was closed before submission.')
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([
-      await takeoverRequestId(source, previousRequestId), destination, executorId
-    ])))
-    const operationId = source.clubPreparation && !previousRequestId ? source.clubPreparation.operationId :
-      'takeover:' + Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')
-    const held = agentOperationsForSubject(useAppStore.getState().agentOperations, { hostId: source.hostId!,
-      agentSessionId: original.agentSessionId, regionId: source.origin.regionId }).find(item => item.kind === 'takeover' && item.operationId === operationId)
+    const originals = new Map(agentOperationsForSubject(useAppStore.getState().agentOperations, { hostId: source.hostId!,
+      agentSessionId: original.agentSessionId, regionId: source.origin.regionId }).map(item => [item.operationId, item]))
+    let predecessor = previousRequestId, operationId: string, held: AgentOperationFeedback | undefined
+    do {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([
+        await takeoverRequestId(source, predecessor), destination, executorId
+      ])))
+      operationId = source.clubPreparation && !predecessor ? source.clubPreparation.operationId :
+        'takeover:' + Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')
+      held = originals.get(operationId)
+      if (held?.kind !== 'takeover' || held.cancellation?.result?.outcome !== 'cancelled') break
+      // Only this new explicit selection can succeed the confirmed cancelled intent.
+      predecessor = operationId
+    } while (held)
     request = held?.kind === 'takeover' && held.takeoverSource.coreRequest ? held.takeoverSource.coreRequest : {
       operationId, focus: false, destination, content: { kind: 'takeover-agent', executorId, source: original }
     }
@@ -407,6 +416,7 @@ async function takeOverAtDestination(source: TakeoverSource, executorId: string,
       regionId: source.origin.regionId } })
   if (reference.kind !== 'takeover') throw new Error('The retained operation belongs to another action.')
   const operation = retainTakeoverRequest(reference, frozen)
+  if (operation.cancellation) throw new Error('The original Takeover has a retained cancellation. Inspect its result; do not continue that original request.')
   // Reopening an exact completed or retired intent reads that result before the surface yields.
   // Observation failure leaves the original public action available with its immutable identity.
   if (!source.coreRequest) {
@@ -414,7 +424,8 @@ async function takeOverAtDestination(source: TakeoverSource, executorId: string,
       const observed = await api.spatial.inspectOperation({ target: { operationId: request.operationId } })
       if (observed.request?.operationId === request.operationId && observed.request.report &&
         ['opened', 'retired'].includes(observed.request.report.outcome)) {
-        const report = await nameTakeover(frozen, takeoverReport(observed.request.report))
+        const held = useAppStore.getState().agentOperations[agentOperationKey(operation)]
+        const report = held?.kind === 'takeover' && held.cancellation ? takeoverReport(observed.request.report) : await nameTakeover(frozen, takeoverReport(observed.request.report))
         settleAgentCreation(operation, report)
         return report
       }
@@ -430,7 +441,8 @@ async function takeOverAtDestination(source: TakeoverSource, executorId: string,
     // Core owns new identities and topology. Refresh only the projection, preserving later user navigation.
     try { await useAppStore.getState().refreshSpatialState() }
     catch (cause) { useAppStore.getState().reportError(new Error('The original Takeover result is retained; its workface refresh is unconfirmed. ' + String(cause))) }
-    const report = await nameTakeover(frozen, takeoverReport(result))
+    const held = useAppStore.getState().agentOperations[agentOperationKey(operation)]
+    const report = held?.kind === 'takeover' && held.cancellation ? takeoverReport(result) : await nameTakeover(frozen, takeoverReport(result))
     settleAgentCreation(operation, report)
     return report
   } catch (cause) {
@@ -494,6 +506,7 @@ export async function prepareTakeoverClub(source: TakeoverSource, onRetained?: (
 
 /** Explicit continuation sends the full retained request back to its original Core owner. */
 export async function continueTakeoverOperation(operation: Extract<AgentOperationFeedback, { kind: 'takeover' }>) {
+  if (operation.cancellation) throw new Error('This original Takeover has a retained cancellation. Inspect that cancellation; a new Takeover requires an explicit new choice.')
   const request = operation.takeoverSource.coreRequest
   if (!request || request.operationId !== operation.operationId || request.content.kind !== 'takeover-agent')
     throw new Error('The full original Core Takeover request is unavailable. Inspect this same operation; its work is kept.')
