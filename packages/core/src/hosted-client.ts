@@ -32,7 +32,7 @@ import { parseRemoteTransportObservation } from './remote-transport-observation.
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
-import { projectHostedSessionEvent, type AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
+import { hostedAgentSessionSummary, projectHostedSessionEvent, type AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-read-codec.js'
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -532,12 +532,19 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       const observeProjection = async (): Promise<void> => {
         let projectionFailure: unknown
         try {
+          // Summary consumers need process facts here, not another all-Session
+          // payload through RuntimeProjection after the body-free bootstrap.
           const projectionResponse = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
-            invocation: { method: 'runtimeProjection', args: [] } }, { signal: observationSignal() })
+            invocation: { method: sessionProjection === 'summary' ? 'listRuns' : 'runtimeProjection', args: [] } }, { signal: observationSignal() })
           requireObservation()
-          const projection = decodeHostedValue(projectionResponse.value) as Awaited<ReturnType<AgentMuxHostedClient['runtimeProjection']>>
-          for (const subject of projection.subjects) publisher.publishRunState(subject.run,
-            subject.kind === 'agent' ? subject.agentSession.agentSessionId : undefined)
+          if (sessionProjection === 'summary') {
+            const runs = decodeHostedValue(projectionResponse.value) as Awaited<ReturnType<AgentMuxHostedClient['listRuns']>>
+            for (const run of runs) publisher.publishRunState(run, run.agentSessionId ?? undefined)
+          } else {
+            const projection = decodeHostedValue(projectionResponse.value) as Awaited<ReturnType<AgentMuxHostedClient['runtimeProjection']>>
+            for (const subject of projection.subjects) publisher.publishRunState(subject.run,
+              subject.kind === 'agent' ? subject.agentSession.agentSessionId : undefined)
+          }
         } catch (error) {
           requireObservation()
           projectionFailure = error
@@ -893,7 +900,8 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       // A read receipt is not another mutation. Re-publishing the same Session
       // lets an observer's status read trigger its own next read indefinitely.
       const previous = updated?.kind === 'agent' ? bootstrap?.sessions.find(session => session.agentSessionId === updated.agentSessionId) : undefined
-      if (updated?.kind === 'agent' && !dequal(previous, updated)) emit({ type: 'agent-session', session: updated })
+      const projected = updated?.kind === 'agent' && sessionProjection === 'summary' ? hostedAgentSessionSummary(updated) : updated
+      if (projected?.kind === 'agent' && !dequal(previous, projected)) emit({ type: 'agent-session', session: projected })
     }
     return value
   }
