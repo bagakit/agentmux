@@ -80,6 +80,8 @@ it('reads all three sources for the selected visible Host and keeps exact indepe
   expect(executorTotal()).toBe('3')
   expect(container.querySelector('output')?.textContent).toBe('2')
   expect(container.querySelector('[aria-label="Executor entries"] dl')?.textContent).toBe('Provider defaults1Configured or registered2')
+  const sources = [...container.querySelectorAll('[aria-label="Session states"] time')]
+  expect(sources.map(node => node.getAttribute('datetime'))).toEqual([new Date(sampleAt).toISOString(), new Date(sampleAt - 1).toISOString()])
   expect(discover.mock.calls).toEqual([[primary.id, { refresh: false }]])
   expect(agentResources.mock.calls.map(([host, kind, runtimeId]) => [host, kind, runtimeId])).toEqual([
     [primary, 'records', primary.runtimeId], [primary, 'running', primary.runtimeId]
@@ -92,10 +94,11 @@ it('reads all three sources for the selected visible Host and keeps exact indepe
   expect(values()).toEqual(['9', '2', '0'])
   expect(executorTotal()).toBe('3')
   expect(container.querySelector('[aria-label="Executor entries"] header')?.textContent).toContain('Last confirmed')
-  expect(container.querySelector('[aria-label="Session states"] [data-reading="stale"]')?.textContent).toContain('Running saved2Last confirmed')
+  expect(container.querySelector('[aria-label="Session states"] [data-reading="stale"]')?.textContent).toBe('Running saved2')
+  expect(container.querySelector('[data-agent-source="running"]')?.textContent).toContain('Last confirmed')
   expect([...container.querySelectorAll('[role="status"]')].map(node => node.textContent)).toEqual([
-    'Executor inventory: The Executor inventory belongs to another Host or Runtime.',
-    'Running saved bindings: Original Running measurement unavailable'
+    'Executor inventory · The Executor inventory belongs to another Host or Runtime.',
+    'Running saved bindings · Original Running measurement unavailable'
   ])
 })
 
