@@ -263,10 +263,13 @@ it('an explicit checkpoint retains current input when the original database disa
 
 function confirmedLocalInput(operationId: string, text: string): AgentSteerQueueEntry {
   const run = { runId: 'original-run' }
+  const key = { kind: 'prompt' as const, agentSessionId: 'original-agent', expectedRun: run, submissionId: operationId }
+  const ref = { key, waitGeneration: 1 }
   return { operationId, text, status: 'deferred', runId: run.runId, awaitingExplicitSend: true,
-    directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'original-agent', run }, directInputBinding: { expectedRun: run },
-    inputReceipt: { persistence: 'confirmed', status: 'terminal-confirmed',
-      key: { kind: 'prompt', agentSessionId: 'original-agent', expectedRun: run, submissionId: operationId } } } as unknown as AgentSteerQueueEntry
+    directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'original-agent', run },
+    directInputBinding: { expectedRun: run, admissionIntent: { kind: 'manual-actor' } },
+    inputReceipt: { persistence: 'confirmed', status: 'terminal-confirmed', observation: 'closed', key, ref, admission: null,
+      control: { ref, state: 'dispatch-authorized', at: 1, gateId: 'original-gate' } } }
 }
 
 it('actual Store moves input and draft in one small native transaction beside a cold archive', async () => {

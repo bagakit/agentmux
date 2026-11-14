@@ -18,14 +18,15 @@ const value = (text: string) => JSON.stringify({ version: 1, state: {
 } })
 const decoded = (raw: string | null) => JSON.parse(raw!)
 const readDocument = async (owner: WorkbenchUserStateStore) => decoded(await owner.read())
-const archived = (operationId: string, enqueuedAt: number, text = operationId) => ({
-  operationId, enqueuedAt, text, archived: true,
-  directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'original-session', run: { runId: 'original-run' } },
-  directInputBinding: { expectedRun: { runId: 'original-run' } },
-  inputReceipt: { status: 'terminal-confirmed', persistence: 'confirmed', key: {
-    kind: 'prompt', agentSessionId: 'original-session', submissionId: operationId, expectedRun: { runId: 'original-run' }
-  } }
-})
+const archived = (operationId: string, enqueuedAt: number, text = operationId) => {
+  const run = { runId: 'original-run' }, key = { kind: 'prompt', agentSessionId: 'original-session', submissionId: operationId, expectedRun: run }
+  const ref = { key, waitGeneration: 1 }
+  return { operationId, enqueuedAt, text, archived: true,
+    directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'original-session', run },
+    directInputBinding: { expectedRun: run },
+    inputReceipt: { status: 'terminal-confirmed', persistence: 'confirmed', observation: 'closed', key, ref,
+      control: { ref, state: 'dispatch-authorized', at: enqueuedAt, gateId: 'original-gate' } } }
+}
 const save = (draft: string, changes: WorkbenchInputQueueChange[] = []) =>
   JSON.stringify({ version: 1, state: { agentComposerDrafts: { 'original-region': draft } }, inputQueueDelta: { changes } })
 

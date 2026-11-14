@@ -94,25 +94,32 @@ it.each([1, 1600])('actual native save bridge retains the original cold input wi
   const f = await owningBridge()
   const ownerKey = 'original-queue', operationId = 'confirmed-input', run = { runId: 'original-run' }
   const key = { kind: 'prompt', agentSessionId: ownerKey, submissionId: operationId, expectedRun: run }
+  const claim = (submissionId: string) => {
+    const claimed = { ...key, submissionId }, ref = { key: claimed, waitGeneration: 1 }
+    return { key: claimed, ref, observation: 'closed', persistence: 'confirmed', status: 'terminal-confirmed',
+      control: { ref, state: 'dispatch-authorized', at: 1, gateId: 'original-gate' } }
+  }
   const completed = {
     operationId, text: 'Original archived input', status: 'deferred', archived: true,
     directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: ownerKey, run },
     directInputBinding: { expectedRun: run, admissionIntent: { kind: 'manual-actor' } },
-    inputReceipt: { key, persistence: 'confirmed', status: 'terminal-confirmed' },
+    inputReceipt: claim(operationId),
   }
   const unresolved = { ...completed, operationId: 'unknown-input', text: 'Original unresolved input',
     inputReceipt: { key: { ...key, submissionId: 'unknown-input' }, persistence: 'observed', status: 'unknown' } }
   const archived = [completed, ...Array.from({ length: count - 1 }, (_, index) => {
     const operationId = `archived-input-${index}`
     return { ...completed, operationId, text: 'Archived historical text '.repeat(200),
-      inputReceipt: { ...completed.inputReceipt, key: { ...key, submissionId: operationId } } }
+      inputReceipt: claim(operationId) }
   })]
+  const incomplete = { ...completed, operationId: 'incomplete-receipt', text: 'Original partial receipt',
+    inputReceipt: { key: { ...key, submissionId: 'incomplete-receipt' }, persistence: 'confirmed', status: 'terminal-confirmed' } }
   try {
     const legacyEnvelope = { version: 1, state: { agentComposerDrafts: { original: 'Unsent draft' },
-      agentSteerQueues: { [ownerKey]: [...archived, unresolved] } } }
+      agentSteerQueues: { [ownerKey]: [...archived, unresolved, incomplete] } } }
     await writeFile(f.workbenchUserState.path, JSON.stringify(legacyEnvelope))
     const saved = JSON.parse((await bridge.api!.ui.readWorkbenchState())!)
-    expect(saved.state.agentSteerQueues[ownerKey]).toEqual([unresolved])
+    expect(saved.state.agentSteerQueues[ownerKey]).toEqual([unresolved, incomplete])
     expect(saved.state.agentComposerDrafts).toEqual(legacyEnvelope.state.agentComposerDrafts)
     const query = { ownerKey, operationId }
     await expect(bridge.api!.ui.readWorkbenchInputArchive(query)).resolves.toEqual({
@@ -142,7 +149,7 @@ it.each([1, 1600])('actual native save bridge retains the original cold input wi
     })
     const current = JSON.parse((await bridge.api!.ui.readWorkbenchState())!)
     expect(current.state.agentComposerDrafts).toEqual({ original: 'Edited draft' })
-    expect(current.state.agentSteerQueues[ownerKey]).toEqual([unresolved])
+    expect(current.state.agentSteerQueues[ownerKey]).toEqual([unresolved, incomplete])
   } finally { await f.dispose() }
 }, 30_000)
 
