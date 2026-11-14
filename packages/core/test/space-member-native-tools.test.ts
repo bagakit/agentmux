@@ -19,18 +19,23 @@ it.each([false, true])('the original member Skills use their native owner with N
   const skillRoot = 'private-skills-' + owner.owner.runtimeId
   const skillPath = join(workspacePath, skillRoot, 'original-skill', 'SKILL.md')
   await mkdir(join(workspacePath, skillRoot, 'original-skill'), { recursive: true })
-  await writeFile(skillPath, '---\nname: Original exact skill\ndescription: Read from original private workspace\n---\nOriginal body\n')
+  await writeFile(skillPath, '---\nname: Original exact skill\ndescription: Read from original private workspace\nmetadata:\n  version: "2.4.1"\n---\nOriginal body\n')
   const provider = new AgentProviderRegistry().get('codex')
   owner.core.providers.register({ ...provider, catalog: { ...provider.catalog, composer: { commands: provider.catalog.composer?.commands ?? [], skillRoots: [skillRoot] } } })
   const session = await owner.put(sid, 1, 'original-native-tools-run', workspacePath)
-  if (foreign) await f.b.put(sid)
+  if (foreign) {
+    f.b.core.providers.register({ ...provider, catalog: { ...provider.catalog,
+      composer: { commands: provider.catalog.composer?.commands ?? [], skillRoots: [] } } })
+    await f.b.put(sid)
+  }
   const admitted = await f.admit(foreign ? 'D-in-B' : 'local', owner.owner.runtimeId, sid, 'native-tools-original-C', undefined, workspacePath)
   const native = vi.spyOn(owner.core, 'runtimeSubject').mockRejectedValue(Error('Native is unknown, not a Skills permission'))
   const target = { kind: 'conversation' as const, reference: f.reference, regionId: admitted.address.regionId,
     runtimeId: owner.owner.runtimeId, agentSessionId: sid, expectedAdmission: { kind: 'creation' as const, operationId: admitted.requestId } }
   const result = await f.b.rpc.call('space.member.call', { target, call: { method: 'skill.ls', params: { hostId: 'local', agentSessionId: sid } } },
     { runtimeFence: { runtimeId: f.b.owner.runtimeId, ownerInstanceId: f.b.owner.ownerInstanceId } })
-  expect(result).toMatchObject({ hostId: 'local', agentSessionId: sid, workspacePath, skills: [{ name: 'Original exact skill', path: skillPath, source: 'project' }] })
+  expect(result).toMatchObject({ hostId: 'local', agentSessionId: sid, workspacePath,
+    skills: [{ name: 'Original exact skill', path: skillPath, source: 'project', version: '2.4.1' }] })
   const readOwner = vi.spyOn(owner.core, 'readAgentSession')
   for (const [runtimeFence, code] of [[{ runtimeId: 'another-execution-Runtime', ownerInstanceId: owner.owner.ownerInstanceId }, 'RUNTIME_OWNER_MISMATCH'],
     [{ runtimeId: owner.owner.runtimeId, ownerInstanceId: 'another-execution-instance' }, 'RUNTIME_OWNER_CHANGED']] as const) {
@@ -41,7 +46,8 @@ it.each([false, true])('the original member Skills use their native owner with N
     const cli = await runSourceObjectCli(['--endpoint', 'unix:' + f.b.server.path, 'space', 'member', 'call', '--input', '-'],
       objectCliEnvironment(f.b.root), JSON.stringify({ target, call: { method: 'skill.ls', params: { hostId: 'local', agentSessionId: sid } } }))
     expect(cli.code, cli.stderr).toBe(0)
-    expect(JSON.parse(cli.stdout).result.skills).toEqual([{ name: 'Original exact skill', description: 'Read from original private workspace', path: skillPath, source: 'project' }])
+    expect(JSON.parse(cli.stdout).result.skills).toEqual([{ name: 'Original exact skill', description: 'Read from original private workspace',
+      path: skillPath, source: 'project', version: '2.4.1' }])
   }
   expect(native).not.toHaveBeenCalled()
   expect(await owner.core.readAgentSession(sid)).toMatchObject({ run: session.run })

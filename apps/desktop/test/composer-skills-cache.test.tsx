@@ -36,7 +36,7 @@ async function reopen() {
 }
 
 it('delegates discovery to loadSkills on each open and shows the result — caching is Core’s job, not the menu’s', async () => {
-  const skill = { name: 'review', description: 'Review', path: _hygiene_fixturePath("skills/review/SKILL.md"), source: 'project' as const }
+  const skill = { name: 'review', description: 'Review', path: _hygiene_fixturePath("skills/review/SKILL.md"), source: 'project' as const, version: '2.4.1' }
   const loadSkills = vi.fn(async () => [skill])
   await act(async () => root.render(<AgentComposerTools disabled={false} commands={[]}
     loadSkills={loadSkills} onChooseSkill={vi.fn()} onCommand={vi.fn()} runAction={async (action) => { try { await action() } catch { /* host error rendering is covered by composer-local-feedback */ } }} />))
@@ -44,6 +44,7 @@ it('delegates discovery to loadSkills on each open and shows the result — cach
   await pointer(skillsButton(), 'pointerover')
   await act(async () => {})
   expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('review')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('Project · Version 2.4.1')
   expect(loadSkills).toHaveBeenCalledOnce()
   // Re-open: the component asks again (Core memoizes, so this is cheap) — it must NOT freeze on a
   // component-local snapshot that a launcher provider-switch could leave stale.
@@ -67,4 +68,5 @@ it('shows a discovery failure and retries on the next open rather than freezing 
   await act(async () => {})
   expect(loadSkills).toHaveBeenCalledTimes(2)
   expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('later')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('User · Version not declared')
 })
