@@ -64,6 +64,13 @@ selection, layout, cwd and Runs stay unchanged. Applied preferences and disk con
 are separate. After a partial or unknown save, read this same list before changing it.
 A missing client owner is unavailable, never an empty confirmed list.
 
+Survey presentation also reports profileView as {kind:"default"},
+{kind:"profile",profileId}, or null when the original view is unconfirmed.
+An unconfirmed view does not assert a default login environment. This is the connected client's browsing view and next
+page choice, not the Profile bound to every visible Browser or a grant of input
+permission. Read each actual page's Main-confirmed Profile. Changing the view does
+not rebind, reload or copy live pages; mixed whole research keeps its original scope.
+
 Read pageReferences from that same list. To change only precise page membership use
 {collection:{pageReferences:[{regionId,browserId}],expectedPageReferences:originalPageReferences}}.
 Each changed scope requires its matching expected set; omitted scopes stay unchanged.
