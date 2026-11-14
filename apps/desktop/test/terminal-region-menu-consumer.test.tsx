@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom'
 import type { Root } from 'react-dom/client'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
+import { terminalHistoryBoundary } from '@agentmux/client-ui/terminal/replay'
 import type { RuntimeEvent, SessionAttachResult, SessionSnapshot } from '../src/shared/contracts'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
@@ -19,6 +20,10 @@ import * as store from '../src/renderer/src/store'
 // Real browser xterm parser, buffers, selection, key handler and input subscriptions.
 // Synthetic DOM geometry and graphical addons are controlled; neither product menu is mocked.
 const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], listeners: new Set<(event: RuntimeEvent) => void>() }))
+vi.mock('@agentmux/client-ui/terminal/replay', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/client-ui/terminal/replay')>()
+  return { ...actual, terminalHistoryBoundary: vi.fn(actual.terminalHistoryBoundary) }
+})
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
@@ -46,8 +51,8 @@ function attachment(session: SessionSnapshot): SessionAttachResult {
     currentSize: { cols: 80, rows: 24 }, resizeRevision: 0, terminal: { type: 'unknown', reason: 'origin_unknown' }, gap: null,
     replay: [{ type: 'data', runId: session.control.run.runId, data: output, dataBytes: new TextEncoder().encode(output), startByte: 0, endByte: output.length }] }
 }
-function scene(session: SessionSnapshot, readOnly = false, standalone = false): ReactNode {
-  const terminal = <TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false}
+function scene(session: SessionSnapshot, readOnly = false, standalone = false, visible = true): ReactNode {
+  const terminal = <TerminalView session={session} themeId="graphite" interactiveResize={false} visible={visible} autoFocus={false}
     readOnly={readOnly} linkOrigin={origin} />
   return standalone ? terminal : <RegionContextMenu tabId={origin.tabId} regionId={origin.regionId}
     agentSessionId={session.kind === 'agent' ? session.control.agentSessionId : null}
@@ -108,6 +113,15 @@ async function openMore() {
   return menu()!
 }
 async function write(terminal: BrowserTerminal, text: string) { await act(async () => await new Promise<void>(done => terminal.write(text, done))) }
+async function deliverOutput(startByte: number, data: string) {
+  const dataBytes = new TextEncoder().encode(data), endByte = startByte + dataBytes.length
+  const event: RuntimeEvent = { type: 'core', hostId: original.hostId, event: { type: 'terminal-output',
+    agentSessionId: original.control.agentSessionId, run: original.control.run, data, dataBytes,
+    evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte } } } }
+  expect(fixture.listeners.size, 'the original Run output consumer is subscribed').toBe(1)
+  await act(async () => { for (const receive of fixture.listeners) receive(event) })
+  return endByte
+}
 function watchFocusScopeClose(node: HTMLElement) {
   const events: Event[] = []
   node.addEventListener('focusScope.autoFocusOnUnmount', event => events.push(event))
@@ -134,6 +148,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, top: 0, left: 0, width: 640, height: 384, right: 640, bottom: 384, toJSON() {} })
   fixture.terminals.length = 0; fixture.listeners.clear()
+  vi.mocked(terminalHistoryBoundary).mockClear()
   vi.spyOn(api.sessions, 'attach').mockImplementation(async control => {
     const session = store.useAppStore.getState().sessions.find(row => row.hostId === control.hostId
       && row.control.kind === control.kind && row.control.run.runId === control.run.runId
@@ -275,6 +290,51 @@ it('modal isolation and live output keep the original open terminal tools availa
   expect(copy).toHaveBeenCalledOnce(); expect(copy.mock.calls[0]![0]).toContain('Live menu output')
   expect(fixture.terminals).toHaveLength(1)
   expect(store.useAppStore.getState().agentComposerDrafts[original.id]).toBe('Original unsent draft')
+})
+
+it.each([false, true])('only samples live history for a mounted terminal menu (standalone=%s)', async standalone => {
+  const terminal = await mount(original, false, standalone)
+  const boundary = vi.mocked(terminalHistoryBoundary)
+  expect(boundary).not.toHaveBeenCalled()
+  let offset = await deliverOutput(output.length, 'Visible closed-menu output\r\n')
+  await act(async () => await vi.waitFor(() => expect(terminal.buffer.active.getLine(2)?.translateToString(true)).toBe('Visible closed-menu output')))
+  expect(boundary).not.toHaveBeenCalled()
+
+  await act(async () => root.render(scene(original, false, standalone, false)))
+  const normal = terminal.buffer.active.length
+  for (let index = 0; index < 6; index++) {
+    const line = `Hidden output ${index}`
+    offset = await deliverOutput(offset, `${line}\r\n`)
+    await act(async () => await vi.waitFor(() => expect(terminal.buffer.normal.getLine(3 + index)?.translateToString(true)).toBe(line)))
+  }
+  expect(boundary).not.toHaveBeenCalled()
+  await act(async () => root.render(scene(original, false, standalone, true)))
+  expect(boundary).not.toHaveBeenCalled()
+  expect(terminal.buffer.normal.length).toBe(normal)
+
+  const opened = await openBody()
+  expect(boundary).toHaveBeenCalledTimes(1)
+  offset = await deliverOutput(offset, '\u001b[?1049h\u001b[HCurrent alternate buffer')
+  await act(async () => await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('Current alternate buffer')))
+  expect(menu()).toBe(opened)
+  expect(boundary).toHaveBeenCalledTimes(2)
+  const note = 'The full-screen buffer has no terminal scrollback.'
+  if (standalone) {
+    expect(opened.querySelector('[role="note"]')?.textContent).toContain(note)
+  } else {
+    const info = await terminalInfo(opened)
+    expect(info.details.querySelector('[role="note"]')?.textContent).toContain(note)
+    await info.back()
+  }
+  await close()
+  await deliverOutput(offset, '\u001b[?1049lReturned to original history')
+  await act(async () => await vi.waitFor(() => expect(terminal.buffer.active.type).toBe('normal')))
+  expect(boundary).toHaveBeenCalledTimes(2)
+  expect(terminal.buffer.active.getLine(8)?.translateToString(true)).toBe('Hidden output 5')
+  expect(fixture.terminals).toEqual([terminal])
+  expect(api.sessions.attach).toHaveBeenCalledExactlyOnceWith(original.control, 0)
+  expect(api.sessions.detach).not.toHaveBeenCalled()
+  expect(api.sessions.write).not.toHaveBeenCalled()
 })
 
 it.each(['pointerup', 'pointercancel', 'pointermove'])(
