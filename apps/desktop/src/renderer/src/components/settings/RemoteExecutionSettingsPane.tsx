@@ -1,3 +1,5 @@
+import { useLauncherState } from '../../lib/launcher-state'
+import { warmLauncherId } from '../../lib/warm-terminal-preview'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveAgentName } from '@agentmux/client-ui/display-name'
@@ -87,6 +89,10 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     setActionError(null)
     const tabId = useAppStore.getState().openLauncher({ workspaceId: selection.resourceWorkspaceId, reveal: true, initialExecution: selection })
     if (!tabId) { setActionError('The Launcher could not be opened. Your selection and existing work are kept.'); return false }
+    if (selection.source) {
+      const tab = useAppStore.getState().tabs[tabId]
+      if (!tab || !useLauncherState.getState().setSourceExecution(warmLauncherId({ tabGroupId: '', regionId: tab.layout.activeRegionId }), selection.source)) return false
+    }
     onClose(); return true
   }
   function openOriginal(session: WorkAgent) {
@@ -108,7 +114,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     </nav><button type="button" className="remote-work-hosts" onClick={() => onNavigate('hosts')}>Manage Hosts</button></div>
     <section hidden={task !== 'start'} id={`${taskId}-start`} role="tabpanel" aria-labelledby={`${taskId}-start-tab`} className="remote-execution-prepare" data-settings-field="prepare">
       <div className="remote-work-intro"><h3>Where will you work?</h3><p>The working folder holds this task’s files and commands. Choose a saved folder or use a device’s home, then continue in Launcher.</p></div>
-      {prepareVisited ? <AgentWorkModeSetup config={config} active={active && task === 'start'} initialMode={initialProject && initialProject.hostId !== referenceHostId ? 'remote-project' : 'remote-agent'} initialSelection={initialSelection} actionLabel="Open in Launcher" onApply={prepare} onOpenHost={openHost} /> : null}
+      {prepareVisited ? <AgentWorkModeSetup sourceTargets config={config} active={active && task === 'start'} initialMode={initialProject && initialProject.hostId !== referenceHostId ? 'remote-project' : 'remote-agent'} initialSelection={initialSelection} actionLabel="Open in Launcher" onApply={prepare} onOpenHost={openHost} /> : null}
     </section>
     {actionError ? <p className="remote-execution-feedback" role="status">{actionError}</p> : null}
     <section hidden={task !== 'existing'} id={`${taskId}-existing`} role="tabpanel" aria-labelledby={`${taskId}-existing-tab`} className="remote-execution-bindings" data-settings-field="bindings">

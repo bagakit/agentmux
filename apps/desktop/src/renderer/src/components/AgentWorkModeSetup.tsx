@@ -9,12 +9,23 @@ import { AgentWorkModePlacement } from './AgentWorkModePlacement'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SettingsNavigation } from './SettingsNavigation'
 import './agent-work-mode.css'
+import { SourceAgentTargetSetup } from './SourceAgentTargetSetup'
 
 type Config = Pick<AppConfig, 'hosts' | 'workspaces'>
 const ProjectIcon = semanticIconComponent('object.folder')
 
 /** Edits one prospective arrangement. The original Store owns addresses, registration and creation. */
-export function AgentWorkModeSetup({ config, active, initialSelection, initialMode, fixedResourceWorkspaceId, allowLocal = false, actionLabel, preparationNote, disabled = false, onApply, onCancel, onOpenHost }: {
+export function AgentWorkModeSetup(props: AgentWorkModeSetupProps) {
+  const settings = useContext(SettingsNavigation)
+  const [sourceSelection, setSourceSelection] = useState(Boolean(props.sourceTargets && (!props.initialSelection?.agentWorkspaceId || props.initialSelection.source)))
+  if (props.sourceTargets && sourceSelection) return <>
+    <SourceAgentTargetSetup {...props} onOpenHost={props.onOpenHost ?? (settings ? id => settings.openHost(id) : undefined)} />
+    <button className="agent-work-text-action" type="button" onClick={() => setSourceSelection(false)}>Choose a custom startup directory</button>
+  </>
+  return <><LegacyAgentWorkModeSetup {...props} />{props.sourceTargets ? <button className="agent-work-text-action" type="button"
+    onClick={() => setSourceSelection(true)}>Choose through the project device and its saved routes</button> : null}</>
+}
+type AgentWorkModeSetupProps = {
   config: Config
   active: boolean
   initialSelection?: LauncherExecutionSelection | undefined
@@ -25,10 +36,13 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
   actionLabel: string
   preparationNote?: string | undefined
   disabled?: boolean
+  /** Ordinary Launcher/Remote only. Goal keeps its original finite arrangement contract. */
+  sourceTargets?: boolean
   onApply(selection: LauncherExecutionSelection): boolean | void | Promise<boolean | void>
   onCancel?: (() => void) | undefined
   onOpenHost?: ((hostId: string) => void) | undefined
-}) {
+}
+function LegacyAgentWorkModeSetup({ config, active, initialSelection, initialMode, fixedResourceWorkspaceId, allowLocal = false, actionLabel, preparationNote, disabled = false, onApply, onCancel, onOpenHost }: AgentWorkModeSetupProps) {
   const settings = useContext(SettingsNavigation), group = useId()
   const fixedProject = fixedResourceWorkspaceId !== undefined
   const initialProject = config.workspaces.find(item => item.id === (fixedResourceWorkspaceId ?? initialSelection?.resourceWorkspaceId))

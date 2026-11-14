@@ -52,6 +52,11 @@ import { WorkbenchProjectionContext } from '../lib/workbench-projection'
 import { resolveBrandHero } from '../lib/brand-hero'
 import { useShallow } from 'zustand/react/shallow'
 import { AgentOperationFeedback } from './AgentOperationFeedback'
+import { launcherSourceExecution, launcherSourceMatches } from '../lib/launcher-source'
+import { useSourceLauncher } from '../hooks/useSourceLauncher'
+import { SourceLauncherRequest } from './SourceLauncherRequest'
+import { mountedAgentOpenInput, mountedAgentOpenKey, type MountedAgentOpenInput } from '../lib/space-mount-launch'
+import { ordinarySourceLauncherRequests, sendSourceLauncherRequest } from '../lib/source-launcher-request'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -137,6 +142,17 @@ export function NewTabSurface({
     ? `zone:${JSON.stringify([creationTarget.zoneId, creationTarget.displayWorkspaceId, tabGroupId])}`
     : warmLauncherId({ tabGroupId, regionId })
   const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId, launcherId)
+  const sourceValue = useLauncherState(state => state.drafts[launcherId]?.sourceExecution)
+  let sourceExecution: ReturnType<typeof launcherSourceExecution>, sourceSelectionIssue: string | undefined
+  try { sourceExecution = launcherSourceExecution(sourceValue) } catch (cause) { sourceSelectionIssue = presentError(cause) }
+  const sourceMode = sourceValue !== undefined
+  const sourceLauncher = useSourceLauncher(sourceExecution, motionActive && !moteId)
+  const sourceInputs = useAppStore(state => state.mountedSpaceInputs)
+  const sourceBusy = useRef(new Map<string, symbol>())
+  const retainedSourceRequests = useMemo(() => {
+    try { return { inputs: ordinarySourceLauncherRequests(sourceInputs, launcherId), issue: undefined } }
+    catch (cause) { return { inputs: [], issue: presentError(cause) } }
+  }, [sourceInputs, launcherId])
   const promptDisplayText = useMemo(() => parseComposerDraft(prompt).map(part =>
     'text' in part ? part.text : part.reference.label).join(''), [prompt])
   const [optionsExpanded, setOptionsExpanded] = useState(false)
@@ -197,10 +213,10 @@ export function NewTabSurface({
   const splitWorkspaceSupported = Boolean(workspace && agentWorkspace && !isScratchWorkspaceId(workspace.id) && !isScratchWorkspaceId(agentWorkspace.id))
   const splitProjectUnsupported = Boolean(workspace && isScratchWorkspaceId(workspace.id) || agentWorkspace && isScratchWorkspaceId(agentWorkspace.id))
   const agentHost = agentWorkspace ? config?.hosts.find(candidate => candidate.id === agentWorkspace.hostId) : undefined
-  const usesHostInventory = splitExecution || agentHost?.kind === 'ssh'
+  const usesHostInventory = !sourceMode && (splitExecution || agentHost?.kind === 'ssh')
   const inventory = useAppStore(state => agentWorkspace ? state.hostExecutorInventories[agentWorkspace.hostId] : undefined)
-  const displayedExecutorId = splitExecution ? agentTarget?.agentExecutor?.executorId ?? '' : ordinaryExecutorId
-  const checkAgents = (hostId: string, options?: { onlyUnconfirmed?: boolean }) => detectExecutors(hostId, { ...options, ...(splitExecution ? { source: 'host' as const } : {}) })
+  const displayedExecutorId = sourceMode ? sourceLauncher.executorId ?? '' : splitExecution ? agentTarget?.agentExecutor?.executorId ?? '' : ordinaryExecutorId
+  const checkAgents = (hostId: string, options?: { onlyUnconfirmed?: boolean }) => sourceMode ? sourceLauncher.refresh() : detectExecutors(hostId, { ...options, ...(splitExecution ? { source: 'host' as const } : {}) })
   const localHome = useAppStore(state => state.localHome)
   const displayPath = workspace ? formatPathForDisplay(workspace.path, {
     home: host?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute
@@ -225,8 +241,8 @@ export function NewTabSurface({
   })
   const { slotHeld: warmSlotHeld } = warmPreview
   const executors = useMemo(
-    () => executorsForHost(config, agentWorkspace?.hostId, detections, inventory, splitExecution ? 'host' : undefined),
-    [config?.executors, config?.hosts, detections, agentWorkspace, inventory, splitExecution]
+    () => sourceMode ? sourceLauncher.executors : executorsForHost(config, agentWorkspace?.hostId, detections, inventory, splitExecution ? 'host' : undefined),
+    [sourceMode, sourceLauncher.executors, config?.executors, config?.hosts, detections, agentWorkspace, inventory, splitExecution]
   )
   // An unconfirmed discovery check is not evidence that the configured Agent cannot work.
   const installedExecutors = executors.filter(executor => executor.detection?.state !== 'missing')
@@ -239,14 +255,14 @@ export function NewTabSurface({
   const saveSection = useLauncherState(state => state.setSection)
   const saveExecutor = useLauncherState(state => state.selectExecutor)
   const savedExecutor = useLauncherState(state => workspace ? state.executors[workspace.id] : undefined)
-  const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId && (!splitExecution || agentTarget?.agentExecutor?.hostId === agentWorkspace?.hostId && agentTarget?.agentExecutor?.executorRevision === executor.executorRevision))
+  const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId && (sourceMode || !splitExecution || agentTarget?.agentExecutor?.hostId === agentWorkspace?.hostId && agentTarget?.agentExecutor?.executorRevision === executor.executorRevision))
   const unconfirmedAvailability = (splitExecution || agentHost?.kind === 'ssh') && (!hostExecutorInventoryMatches(inventory, agentHost) || inventory.state !== 'ready') ||
     executors.some(executor => executor.detection?.state !== 'ready' && executor.detection?.state !== 'missing')
-  const emptyHostInventoryUnconfirmed = executors.length === 0 && usesHostInventory &&
+  const emptyHostInventoryUnconfirmed = !sourceMode && executors.length === 0 && usesHostInventory &&
     (!hostExecutorInventoryMatches(inventory, agentHost) || inventory?.state !== 'ready')
   const confirmedEmptyExecutors = executors.length === 0 && !emptyHostInventoryUnconfirmed
   const retryingAvailability = useLauncherExecutorRecovery(agentHost,
-    motionActive && inputRegionActive && !controlNavigation && sections.agents !== 'hidden', unconfirmedAvailability, splitExecution ? 'host' : undefined)
+    !sourceMode && motionActive && inputRegionActive && !controlNavigation && sections.agents !== 'hidden', unconfirmedAvailability, splitExecution ? 'host' : undefined)
   function setSection(section: LauncherSection, mode: LauncherSectionMode) {
     if (section === 'agents' && mode !== 'expanded' && surfaceRef.current?.contains(document.activeElement)) restoreAgentsFocus.current = mode
     if (workspace) saveSection(workspace.id, section, mode)
@@ -259,6 +275,7 @@ export function NewTabSurface({
     surfaceRef.current.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)?.focus({ preventScroll: true })
   }, [sections.agents, motionActive])
   function chooseExecutor(id: string) {
+    if (sourceMode) { if (sourceExecution) useLauncherState.getState().setSourceExecution(launcherId, { ...sourceExecution, executorId: id }); return }
     if (splitExecution) {
       const target = materializeLauncher()
       if (target) useAppStore.getState().setLauncherAgentExecutor(target, id)
@@ -288,11 +305,11 @@ export function NewTabSurface({
   const toolsScope = JSON.stringify([regionId, workspace?.id, workspace?.hostId, workspace?.path, selectedProviderId])
   useEffect(() => { setFileReferencesOpen(false) }, [toolsScope, motionActive])
   const feedback = useComposerFeedback(toolsScope)
-  const completion = useComposerCandidates({ scope: toolsScope, active: motionActive && sections.agents === 'expanded' && busy === null, config, resourceWorkspace: workspace, runtimeWorkspace: agentWorkspace,
-    providerId: selectedProviderId, commands: providerCatalog.find(entry => entry.id === selectedProviderId)?.composer?.commands ?? [], insertion: insertionRef })
+  const completion = useComposerCandidates({ scope: toolsScope, active: !sourceMode && motionActive && sections.agents === 'expanded' && busy === null, config, resourceWorkspace: workspace, runtimeWorkspace: agentWorkspace,
+    providerId: selectedProviderId, commands: sourceMode ? [] : providerCatalog.find(entry => entry.id === selectedProviderId)?.composer?.commands ?? [], insertion: insertionRef })
   const launchOptions = useMemo(
-    () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
-    [providerCatalog, selectedProviderId]
+    () => sourceMode ? sourceLauncher.selected?.launchOptions ?? [] : providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
+    [sourceMode, sourceLauncher.selected, providerCatalog, selectedProviderId]
   )
   // Each Provider keeps its own explicit choices. Changing the target closes the disclosure,
   // while returning to the original Provider restores its unsent selection.
@@ -316,13 +333,14 @@ export function NewTabSurface({
   }, [releaseWarmTerminal, workspace?.id, warmKey, launcherId, visible, presentationActive, sections.terminal])
 
   useEffect(() => {
-    if (sections.agents === 'hidden') return
+    if (sourceMode || sections.agents === 'hidden') return
     if (!agentWorkspace || (splitExecution || agentHost?.kind === 'ssh' ? hostExecutorInventoryMatches(inventory, agentHost) : executors.every((executor) => executor.detection))) return
     if (!visible || !presentationActive || !inputRegionActive || controlNavigation) return
     void checkAgents(agentWorkspace.hostId)
-  }, [executors, inventory, agentHost, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, agentWorkspace, splitExecution, sections.agents])
+  }, [executors, inventory, agentHost, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, agentWorkspace, splitExecution, sourceMode, sections.agents])
 
   useEffect(() => {
+    if (sourceMode) return
     if (splitExecution) {
       const fallback = defaultExecutorChoice(executors)
       if (!agentTarget?.agentExecutor && fallback && launcherRef) chooseExecutor(fallback.id)
@@ -332,7 +350,7 @@ export function NewTabSurface({
     if (installedExecutors.some((executor) => executor.id === executorId)) return
     const fallback = defaultExecutorChoice(executors, savedExecutor)
     if (fallback) setExecutorId(fallback.id)
-  }, [executorId, executors, installedExecutors, savedExecutor, moteId, explicitSavedExecutor, moteExecutor, manualChoice, splitExecution, agentTarget?.agentExecutor])
+  }, [executorId, executors, installedExecutors, savedExecutor, moteId, explicitSavedExecutor, moteExecutor, manualChoice, splitExecution, sourceMode, agentTarget?.agentExecutor])
 
   async function run<T>(kind: 'agent' | 'terminal' | 'browser' | 'note', action: () => Promise<T>): Promise<void> {
     if (busy) return
@@ -356,18 +374,23 @@ export function NewTabSurface({
 
   // 「现在能不能启动」判一次，主按钮的 disabled 与 Cmd/Ctrl+Enter 那条路共用它。手抄两份时两条路会对
   // 同一概念判得不一样，症状是按钮灰着而键盘照旧发车（或反过来）。
+  const sourceSlot = tabId && regionId ? { kind: 'region' as const, tabId, regionId } : undefined
+  let sourceOriginal: MountedAgentOpenInput | undefined
+  try { if (sourceExecution && sourceSlot) sourceOriginal = mountedAgentOpenInput(sourceInputs, mountedAgentOpenKey(sourceExecution.target, sourceSlot)) }
+  catch (cause) { sourceSelectionIssue = presentError(cause) }
   const readiness = {
-    hasWorkspace: Boolean(workspace && agentWorkspace && (!splitExecution || splitWorkspaceSupported)),
-    busy: busy !== null || executionPreparing,
-    installedExecutorCount: splitExecution ? selectedExecutor ? 1 : 0 : primaryBotUnconfirmed && !explicitExecutorChoice ? 0 : installedExecutors.length
+    hasWorkspace: sourceMode ? Boolean(sourceExecution && launcherSourceMatches(sourceExecution, workspace) && sourceLauncher.ready && !sourceSelectionIssue) : Boolean(workspace && agentWorkspace && (!splitExecution || splitWorkspaceSupported)),
+    busy: busy !== null || executionPreparing || !!sourceOriginal,
+    installedExecutorCount: sourceMode ? sourceLauncher.selected ? 1 : 0 : splitExecution ? selectedExecutor ? 1 : 0 : primaryBotUnconfirmed && !explicitExecutorChoice ? 0 : installedExecutors.length
   }
   // 启动这一件事也只写一次：按钮的 onClick 与键盘那条路调的是同一个函数。抄两遍时任何一处漏掉
   // launchOptionSelection 或那两个名字，就变成「用鼠标点带着精调启动、用键盘发就丢掉精调」。
   function launchFromLauncher(): void {
-    if (!launcherCanLaunch(readiness)) return
+    if (!launcherCanLaunch(readiness) || sourceOriginal) return
     void run('agent', () => {
       const target = materializeLauncher()
       if (!target) return Promise.resolve()
+      if (sourceMode) return launchAtSource(target)
       return launchAgent(
         displayedExecutorId,
         expandSemanticReferences(prompt),
@@ -378,6 +401,23 @@ export function NewTabSurface({
         { agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }
       )
     })
+  }
+
+  async function launchAtSource(slot: { tabId: string; regionId: string }, original?: MountedAgentOpenInput) {
+    if (!original && (!sourceExecution || !launcherSourceMatches(sourceExecution, workspace))) throw Error('The original Source project changed. Its draft and request are retained.')
+    const source = sourceExecution
+    if (!original && !source) throw Error('The original Source target is unavailable. Your draft is retained.')
+    const input: MountedAgentOpenInput = original ?? { kind: 'agent-open', target: source!.target,
+      slot: { kind: 'region', ...slot }, submitted: false, origin: { kind: 'ordinary-launcher', launcherId: warmLauncherId({ tabGroupId, regionId: slot.regionId }), project: source!.project, names: { ...names } },
+      request: { operationId: crypto.randomUUID(), content: { kind: 'new-agent', executorId: displayedExecutorId, agentTarget: source!.agentTarget,
+        prompt: expandSemanticReferences(prompt), launchOptions: { ...launchOptionSelection },
+        ...(useAppStore.getState().agentComposerNotes[slot.regionId] === undefined ? {} : { agentMuxNote: useAppStore.getState().agentComposerNotes[slot.regionId] }) },
+        destination: { spaceId: source!.target.reference.spaceId, zoneId: source!.target.zoneId, newTab: true }, focus: false } }
+    const key = mountedAgentOpenKey(input.target, input.slot), token = Symbol(key)
+    if (sourceBusy.current.has(key)) return
+    sourceBusy.current.set(key, token)
+    try { await sendSourceLauncherRequest(input, !!original?.submitted) }
+    finally { if (sourceBusy.current.get(key) === token) sourceBusy.current.delete(key) }
   }
 
   function materializeLauncher() {
@@ -405,6 +445,11 @@ export function NewTabSurface({
   function chooseArrangement(selection: LauncherExecutionSelection): boolean {
     if (busy || !workspace) return false
     try {
+      if (sourceValue !== undefined && !sourceExecution) throw Error('The original arrangement is unreadable. Its complete input is retained; no replacement has been applied.')
+      if (selection.source) {
+        if (selection.resourceWorkspaceId !== workspace.id || !launcherSourceMatches(selection.source, workspace)) throw Error('The original Source selection belongs to another project. Your draft is kept.')
+        return useLauncherState.getState().setSourceExecution(launcherId, selection.source)
+      }
       const state = useAppStore.getState()
       if (launcherRef) {
         const displayWorkspaceId = projection?.displayWorkspaceId ?? workbenchTabDisplayWorkspaceId(state.layouts, launcherRef.tabId, tabGroupId)
@@ -417,9 +462,17 @@ export function NewTabSurface({
           selection, { navigateProject: false, reveal: !projection })
         if (projection) projection.onSelect(result)
       }
+      useLauncherState.getState().setSourceExecution(launcherId, undefined)
       return true
     } catch (cause) { setError(presentError(cause)); return false }
   }
+
+  const sourceSupportIssue = sourceSelectionIssue ?? sourceLauncher.issue ?? (sourceMode ? !sourceExecution || !launcherSourceMatches(sourceExecution, workspace)
+    ? 'The original project is unconfirmed. Your complete draft is kept; review Agent location.'
+    : !sourceLauncher.description ? 'Reading this project device’s launch support…' : !sourceLauncher.description.contracts.ordinaryLaunch
+      ? `Update AgentMux Core on ${host?.label ?? 'this project device'} before launching this arrangement. The current Core cannot retain its complete launch fields.`
+      : !sourceLauncher.selected ? 'Reading the selected Agent’s declarations…' : !sourceLauncher.selected.creationContract
+        ? 'This Agent device has not confirmed support for complete launch fields. Review it through the project device; your draft is kept.' : undefined : undefined)
 
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const attachments = useComposerAttachments({ scope: toolsScope, hostId: workspace?.hostId, workspacePath: workspace?.path,
@@ -439,12 +492,18 @@ export function NewTabSurface({
       style={{ '--launcher-hero': `url("${launcherHero}")`, ...(regionHeight === null ? {} : { '--launcher-region-height': `${regionHeight}px` }) } as CSSProperties} body={<>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath}
         executionControl={workspace && sections.agents === 'expanded' ? <LauncherAgentDevice key={launcherId} hosts={config?.hosts ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
-          explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} disabled={busy !== null} active={motionActive}
+          explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} sourceExecution={sourceExecution} disabled={busy !== null} active={motionActive}
           onSelect={chooseArrangement} onPreparingChange={setExecutionPreparing}
           onEditArrangement={settings ? () => settings.open('remote-execution') : undefined} /> : undefined} />
       {regionId ? operationHosts.map(hostId => <AgentOperationFeedback key={hostId} compact subject={{ hostId, regionId }} />) : null}
 
 
+      {sourceMode ? sourceSupportIssue ? <div className="launcher-source-contract" role="status">{sourceSupportIssue}
+        {settings && workspace ? <button type="button" className="agent-work-text-action" onClick={() => settings.openHost(workspace.hostId)}>{sourceLauncher.description && !sourceLauncher.description.contracts.ordinaryLaunch ? `Open ${host?.label ?? 'project device'} to update Core` : 'Project device settings'}</button> : null}
+      </div> : <details className="agent-work-startup"><summary>Launch compatibility</summary><p>The project device and selected Agent accept complete launch fields. Native tool qualification is unconfirmed here and checked during Launch preparation.</p></details> : null}
+      {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busy !== null}
+        onContinue={original => { if (original.slot.kind === 'region') void run('agent', () => launchAtSource({ tabId: original.slot.kind === 'region' ? original.slot.tabId : '', regionId: original.slot.kind === 'region' ? original.slot.regionId : '' }, original)) }} />)}
+      {retainedSourceRequests.issue ? <p role="status">{retainedSourceRequests.issue}</p> : null}
       {splitExecution && !splitWorkspaceSupported ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: splitProjectUnsupported ? 'Separate tools need project folders' : 'Original Agent location is unconfirmed',
         mode: 'Your original project, Agent selection and task are kept. No request has been sent.',
@@ -474,7 +533,7 @@ export function NewTabSurface({
           <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={promptDisplayText}>{prompt ? promptDisplayText.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
         </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
-          {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} /> : null}
+          {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busy !== null} /> : null}
           <button type="button" className="icon-button" aria-label="Refresh agents on this device" title="Refresh agents on this device" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
           {sections.agents === 'expanded' ? <button type="button" className="icon-button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><ThemeActionCollapseIcon size={13} /></button> : null}
           <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><ThemeActionCloseIcon size={13} /></button>
@@ -510,11 +569,11 @@ export function NewTabSurface({
       </> : null}
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
-        <div className="launcher-primary-actions"><LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} />
+        <div className="launcher-primary-actions"><LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busy !== null} />
           <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : executionPreparing ? 'Review arrangement…' : 'Launch'}</button>
         </div>
       </div> : null}
-      {emptyHostInventoryUnconfirmed && sections.agents !== 'hidden' ? sections.agents === 'expanded' ? null : unconfirmedConfigurations : (splitExecution || agentHost?.kind === 'ssh') && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      {sourceMode ? null : emptyHostInventoryUnconfirmed && sections.agents !== 'hidden' ? sections.agents === 'expanded' ? null : unconfirmedConfigurations : (splitExecution || agentHost?.kind === 'ssh') && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: inventory.state === 'checking' ? 'Checking agents on this host' : 'Host Executor discovery failed', mode: `${agentHost?.label ?? agentWorkspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
         restore: inventory.state === 'checking' ? 'Checking this host. Existing configurations remain selectable.'
           : retryingAvailability ? 'Rechecking automatically. You can keep writing or check again now.'

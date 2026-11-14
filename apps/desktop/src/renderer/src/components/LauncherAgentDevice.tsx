@@ -9,15 +9,18 @@ import { agentWorkModeLabel, launcherWorkPlacement, workReferenceHostId, workHos
 import { AgentWorkModeSetup } from './AgentWorkModeSetup'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
+import type { LauncherSourceExecution } from '../lib/launcher-source'
+import { AgentExecutionRelation } from './AgentExecutionRelation'
 
 const ModeIcon = semanticIconComponent('object.remote-execution')
 const DownIcon = semanticIconComponent('navigation.down')
 const NO_WORKSPACES: WorkspaceRecord[] = []
 
 /** One compact entry for every direction, editing the original unstarted Launcher only. */
-export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicitAgentWorkspaceId, disabled, active, onSelect, onPreparingChange, onEditArrangement }: {
+export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicitAgentWorkspaceId, sourceExecution, disabled, active, onSelect, onPreparingChange, onEditArrangement }: {
   hosts: HostConfig[]; workspace: WorkspaceRecord | undefined; agentWorkspace: WorkspaceRecord | undefined
   explicitAgentWorkspaceId: string | undefined; disabled: boolean; active: boolean
+  sourceExecution?: LauncherSourceExecution | undefined
   onSelect(selection: LauncherExecutionSelection): boolean
   onPreparingChange(pending: boolean): void
   onEditArrangement?: (() => void) | undefined
@@ -52,16 +55,21 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
   </span>
   return <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
     <span className="launcher-work-arrangement"><Dialog.Trigger asChild><button ref={setAnchor} type="button" className="launcher-work-arrangement__trigger" disabled={disabled || !active}
-      aria-label="Agent location" title={`Agent on ${workHostLabel(hosts, placement.agentHostId)} · Project on ${workHostLabel(hosts, placement.projectHostId)}`}>
-      <AgentWorkModeBadge placement={placement} hosts={hosts} showLocal hideTooltip={open || !active} /><DownIcon size={11} /></button></Dialog.Trigger></span>
+      aria-label="Agent location" title={sourceExecution ? `Project on ${workHostLabel(hosts, workspace.hostId)} · Agent Runtime ${sourceExecution.agentTarget.runtimeId}` : `Agent on ${workHostLabel(hosts, placement.agentHostId)} · Project on ${workHostLabel(hosts, placement.projectHostId)}`}>
+      {sourceExecution ? <><AgentExecutionRelation projectLocal={hosts.find(host => host.id === workspace.hostId)?.kind === 'local'}
+        agentLocal={hosts.find(host => host.id === workspace.hostId)?.kind === 'local' && sourceExecution.agentTarget.runtimeId === sourceExecution.target.reference.runtimeId}
+        relation={sourceExecution.agentTarget.runtimeId === sourceExecution.target.reference.runtimeId ? { kind: 'same-device' } : sourceExecution.agentTarget.adoptedRoute
+          ? sourceExecution.agentTarget.adoptedRoute.hops.length > 1 ? { kind: 'cascade', hops: sourceExecution.agentTarget.adoptedRoute.hops.length } : { kind: 'direct' } : { kind: 'unconfirmed' }} />
+        <span>{sourceExecution.agentTarget.runtimeId === sourceExecution.target.reference.runtimeId ? 'Project device' : sourceExecution.agentTarget.hostId}</span></>
+        : <AgentWorkModeBadge placement={placement} hosts={hosts} showLocal hideTooltip={open || !active} />}<DownIcon size={11} /></button></Dialog.Trigger></span>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Content ref={attach} className="launcher-work-arrangement__dialog" style={{ visibility: 'hidden' }}
         onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>
         <Dialog.Title>Choose the Agent’s device</Dialog.Title>
         <Dialog.Description>Choose a device to run the Agent for this project.</Dialog.Description>
-        <AgentWorkModeSetup config={{ hosts, workspaces }} active={active && open} allowLocal actionLabel="Apply" disabled={disabled}
+        <AgentWorkModeSetup config={{ hosts, workspaces }} active={active && open} allowLocal sourceTargets actionLabel="Apply" disabled={disabled}
           fixedResourceWorkspaceId={workspace.id}
-          initialSelection={{ resourceWorkspaceId: workspace.id, agentWorkspaceId: explicitAgentWorkspaceId ?? null }}
+          initialSelection={{ resourceWorkspaceId: workspace.id, agentWorkspaceId: explicitAgentWorkspaceId ?? null, ...(sourceExecution ? { source: sourceExecution } : {}) }}
           onCancel={() => setOpen(false)} onApply={selection => { const applied = onSelect(selection); if (applied) setOpen(false); return applied }} />
       </Dialog.Content>
     </DocumentOverlayPortal>

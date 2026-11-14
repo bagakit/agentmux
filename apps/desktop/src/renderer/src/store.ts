@@ -989,6 +989,7 @@ export type LauncherExecutionSelection = {
   resourceWorkspaceId: string
   /** Null follows the project; an explicit ID retains a split binding even on the same Host. */
   agentWorkspaceId: string | null
+  source?: import('./lib/launcher-source').LauncherSourceExecution
 }
 
 export type LauncherExecutionDestination = WorkbenchProjectionSelection & { projectChanged: boolean }

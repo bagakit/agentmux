@@ -7,6 +7,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { desktopUserFragments } from './desktop-user-state'
 import type { SplitDirection } from '@agentmux/layout'
+import { launcherSourceExecution } from './launcher-source'
 
 export type LauncherSection = 'agents' | 'terminal' | 'browser' | 'note'
 export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
@@ -21,6 +22,8 @@ export type LauncherDraft = { browser: string; note: string; noteCreation?: Note
   progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
   unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
   prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions
+  /** Exact Source selection shares this original private draft; future values remain opaque. */
+  sourceExecution?: unknown
   /** Browser-owned unsent creation options share this existing utility-draft persistence owner. */
   browserAgent?: { executorId?: string; split?: SplitDirection; hostId?: string }
   /** A Mote message sent while its Main was read. It stays on this device until delivered; a reopened view returns it to the prompt. */
@@ -47,6 +50,7 @@ type LauncherState = {
   setProgressDraft(launcherId: string, patch: Partial<NonNullable<LauncherDraft['progressDraft']>> | undefined): boolean
   retainProgressUpdate(launcherId: string): boolean
   setAgentName(launcherId: string, field: LauncherNameField, value: string): boolean
+  setSourceExecution(launcherId: string, value: import('./launcher-source').LauncherSourceExecution | undefined): boolean
   setAgentOption(launcherId: string, providerId: string, optionId: string, choiceId: string | null): boolean
   copyUtilityDraft(fromLauncherId: string, toLauncherId: string): boolean
   clearAgentInputsIfUnchanged(launcherId: string, submitted: Pick<LauncherDraft, 'prompt' | 'names' | 'optionsByProvider'>): boolean
@@ -68,6 +72,14 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
   reportStorageIssue = message => { try { save({ persistenceIssue: storageReadConfirmed ? message : 'Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.' }) } catch { /* The in-memory warning is already retained. */ } }
   return {
   persistenceIssue: null, sections: {}, drafts: {}, executors: {}, moteTopicId: null,
+  setSourceExecution(launcherId, value) {
+    try { set(state => {
+      const draft = state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT
+      launcherSourceExecution(draft.sourceExecution)
+      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, sourceExecution: value } } }
+    }); return true }
+    catch { reportStorageIssue('The original project and Agent selection could not be saved. Your current draft is retained.'); return false }
+  },
   setMoteProfileDraft(launcherId, value) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), moteProfile: value } } })); return true }
     catch { reportStorageIssue('Your profile draft could not be saved on this device. Current input remains available.'); return false }
@@ -166,7 +178,8 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
     try { set(state => {
       const draft = state.drafts[fromLauncherId]
       return !draft || fromLauncherId === toLauncherId ? state : { drafts: { ...state.drafts,
-        [toLauncherId]: { browser: draft.browser, note: draft.note, ...(draft.noteCreation ? { noteCreation: draft.noteCreation } : {}) } } }
+        [toLauncherId]: { browser: draft.browser, note: draft.note, ...(draft.noteCreation ? { noteCreation: draft.noteCreation } : {}),
+          ...(draft.sourceExecution === undefined ? {} : { sourceExecution: draft.sourceExecution }) } } }
     }); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   },

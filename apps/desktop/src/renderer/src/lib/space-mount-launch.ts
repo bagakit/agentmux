@@ -7,7 +7,10 @@ export type MountedLauncherSlot = { kind: 'region'; tabId: string; regionId: str
 export type MountedLauncherSelection = { agentHostId: string; agentTarget?: HostRouteAgentTarget | undefined; executorId: string; prompt?: string }
 /** Original user intent, retained beside this Window's private view; never a source Session or phase. */
 export type MountedAgentOpenInput = { kind: 'agent-open'; target: SpaceMountRecord; slot: MountedLauncherSlot;
-  request: AgentMuxRpcParams<'agent.open'> & { operationId: string }; submitted: boolean; receipt?: AgentMuxRpcResult<'agent.open'>; issue?: string }
+  request: AgentMuxRpcParams<'agent.open'> & { operationId: string }; submitted: boolean; receipt?: AgentMuxRpcResult<'agent.open'>; issue?: string
+  /** Private original names/slot, never sent as cross-Runtime rename authority. */
+  origin?: { kind: 'ordinary-launcher'; launcherId: string; project: import('./launcher-source').LauncherSourceExecution['project']; names: import('./launcher-name-draft').LauncherNames }
+}
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !value.includes('\0')
 const unavailable = (): never => { throw Error('The original Space task arrangement is unreadable. Its input is retained; source observation remains available.') }
@@ -50,6 +53,9 @@ export function mountedAgentOpenInput(value: unknown, key: string): MountedAgent
     destination.zoneId !== entry.target.zoneId || destination.newTab !== true) return unavailable()
   if (content.agentTarget !== undefined && (!object(content.agentTarget) || !text(content.agentTarget.hostId) || !text(content.agentTarget.runtimeId))) return unavailable()
   if (object(content.agentTarget) && content.agentTarget.adoptedRoute !== undefined) parseHostRouteAgentTarget(content.agentTarget)
+  if (entry.origin !== undefined && (!object(entry.origin) || entry.origin.kind !== 'ordinary-launcher' || !text(entry.origin.launcherId) ||
+    !object(entry.origin.project) || ![entry.origin.project.id, entry.origin.project.hostId, entry.origin.project.path].every(text) ||
+    !object(entry.origin.names) || typeof entry.origin.names.agentName !== 'string' || typeof entry.origin.names.tabName !== 'string')) return unavailable()
   const result = entry as MountedAgentOpenInput
   return mountedAgentOpenKey(result.target, result.slot) === key ? result : unavailable()
 }
