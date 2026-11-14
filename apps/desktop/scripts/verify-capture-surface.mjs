@@ -21,11 +21,15 @@ const mutations = [
   { id: 'swapped-background-sources', from: '        backgrounds: { included: includedFrame, excluded: included === excluded ? includedFrame : background(excluded) },',
     to: '        backgrounds: { included: background(excluded), excluded: background(included) },',
     expected: 'the actual editor image is the requested frozen source', reached: native => native.grabs.length === 2 && native.cases.length === 1 },
-  { id: 'cancelled-late-result-update', from: '    if (this.active === active) this.recall = this.remember(frameInput, source.rect)',
-    to: '    this.recall = this.remember(frameInput, source.rect)',
-    expected: 'a cancelled request late result must not supply the next capture selection', reached: native => native.grabs.length === 10 && native.cases.length === 10 }
+  { id: 'cross-request-recall', edits: [
+    { from: '      const initialCrop = this.continued(frame, active.session.continuation)',
+      to: '      const initialCrop = this.continued(frame, active.session.continuation ?? (this as any).recall)' },
+    { from: "    active.end({ state: 'completed' })\n    return { status: 'completed' } satisfies SystemScreenshotEditorFinish",
+      to: "    ;(this as any).recall = this.continuation(frameInput, source.rect)\n    active.end({ state: 'completed' })\n    return { status: 'completed' } satisfies SystemScreenshotEditorFinish" }
+  ], expected: 'every fresh capture starts without initialCrop', reached: native => native.grabs.length >= 4 && native.cases.length >= 2 }
 ]
-for (const mutation of mutations) assert.equal(originalSurface.split(mutation.from).length, 2, 'Unique production mutation anchor: ' + mutation.id)
+const mutated = (source, mutation) => (mutation?.edits ?? (mutation ? [{ from: mutation.from, to: mutation.to }] : [])).reduce((text, edit) => text.replace(edit.from, edit.to), source)
+for (const mutation of mutations) for (const edit of mutation.edits ?? [mutation]) assert.equal(originalSurface.split(edit.from).length, 2, 'Unique production mutation anchor: ' + mutation.id)
 
 await mkdir(resolve('.local/capture-surface'), { recursive: true })
 const out = await mkdtemp(resolve('.local/capture-surface/run-'))
@@ -55,12 +59,12 @@ try {
         assert.equal(args.path, resolve(surface))
         const original = await readFile(args.path, 'utf8')
         assert.equal(original, originalSurface, 'CaptureSurface changed while the proof was building')
-        const contents = mutation ? original.replace(mutation.from, mutation.to) : original
+        const contents = mutated(original, mutation)
         consumed.push({ file: surface, original: sha(original), consumed: sha(contents), mutation: mutation?.id ?? null })
         return { contents, loader: 'ts', resolveDir: dirname(args.path) }
       }) } }] })
     assert.equal(consumed.length, 1, label + ': the production CaptureSurface must actually load once')
-    assert.equal(consumed[0].consumed, mutation ? sha(originalSurface.replace(mutation.from, mutation.to)) : sha(originalSurface), label + ': exact consumed source')
+    assert.equal(consumed[0].consumed, mutation ? sha(mutated(originalSurface, mutation)) : sha(originalSurface), label + ': exact consumed source')
     results.push(result)
     receipt.build.push({ label, outputs: result.metafile.outputs })
 
@@ -82,9 +86,9 @@ try {
       receipt.native = native
       assert.equal(processResult.code, 0, JSON.stringify(native.failure) + processResult.log)
       assert.equal(native.passed, true)
-      assert.equal(native.cases.length, 11, 'all initial backgrounds, compositions, Tab/geometry/history, cancellation and expansion must actually execute')
-      assert.equal(native.screenshots.length, 8)
-      assert.equal(native.grabs.length, 10)
+      assert.equal(native.cases.length, 15, 'all initial backgrounds, compositions, Tab/geometry/history, cancellation, expansion and same-capture continuation must actually execute')
+      assert.equal(native.screenshots.length, 9)
+      assert.equal(native.grabs.length, 16)
       assert.equal(native.opacityChanges.length, 0, 'the unmodified lifecycle never writes host opacity')
     } else {
       assert.notEqual(processResult.code, 0, label + ': the production mutant survived')

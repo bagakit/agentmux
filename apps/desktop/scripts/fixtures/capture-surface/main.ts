@@ -3,6 +3,7 @@ import { app, BrowserWindow, nativeImage, screen } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CaptureSurface } from '../../../src/main/capture-surface'
+import { ScreenCapture } from '../../../src/main/screen-capture'
 import { SystemScreenshotEditor } from '../../../src/main/system-screenshot-editor'
 import type { CaptureBackground } from '../../../src/shared/capture-surface'
 import type { BrowserPng } from '../../../src/shared/contracts'
@@ -101,18 +102,8 @@ async function sourceImages() {
   }
   drawing.destroy()
 }
-async function open(background: CaptureBackground, expandable = true) {
-  const before = new Set(BrowserWindow.getAllWindows()), start = performance.now(), firstGrab = receipt.grabs.length
-  const outcome = surface.present({ background, attachToDraft: false, expandable, returnFocus: false,
-    complete: async (image, source, engine) => {
-      const delivery = { image, source, engine, settled: false }
-      deliveries.push(delivery)
-      const gate = deliveryGate
-      deliveryGate = null
-      if (gate) await gate
-      delivery.settled = true
-    } })
-  void outcome.catch(error => { receipt.captureError = String(error); process.stderr.write('Capture outcome failed: ' + String(error?.stack ?? error) + '\n') })
+async function waitOpen(background: CaptureBackground, before: Set<BrowserWindow>, expectedCrop: { displayId: number; crop: { x: number; y: number; width: number; height: number } } | undefined, firstGrab: number) {
+  const start = performance.now()
   const overlays = await waitFor('production overlays allocated', async () => {
     if (receipt.captureError) throw new Error(receipt.captureError)
     const fresh = BrowserWindow.getAllWindows().filter(candidate => !before.has(candidate))
@@ -129,7 +120,7 @@ async function open(background: CaptureBackground, expandable = true) {
   }
   const grabs = receipt.grabs.slice(firstGrab)
   // Record the real opened scene before any oracle can reject it; an empty executed set is never a mutation kill.
-  receipt.cases.push({ label: 'opened-' + background, elapsedMs: performance.now()-start, displays: overlays.length, grabs })
+  receipt.cases.push({ label: expectedCrop ? 'retake-continuation' : 'opened-' + background, elapsedMs: performance.now()-start, displays: overlays.length, grabs })
   assert.deepEqual(overlays.map(window => protectionAtShow.get(window)), [[true], [true]], 'every real overlay is protected before showInactive')
   assert.equal(host.getOpacity(), 0.65, 'the visible host keeps its exact prior opacity while editing')
   assert.equal(receipt.opacityChanges.length, 0, 'CaptureSurface never writes host opacity')
@@ -137,6 +128,8 @@ async function open(background: CaptureBackground, expandable = true) {
   assert.deepEqual(grabs.map((row: any) => row.opacity), [0.65, 0.65], 'both native exposures observe the unchanged host')
   for (const [index, overlay] of overlays.entries()) {
     assert.equal(infos[index].background, background)
+    assert.deepEqual(infos[index].initialCrop, infos[index].displayId === expectedCrop?.displayId ? expectedCrop.crop : undefined,
+      expectedCrop ? 'only the explicit same-capture Retake receives its crop' : 'every fresh capture starts without initialCrop')
     const actualSource = await overlay.webContents.executeJavaScript(`document.querySelector('img').src`)
     assert.ok(actualSource === sources.get(background + ':' + infos[index].displayId)!.dataUrl, 'the actual editor image is the requested frozen source')
   }
@@ -145,6 +138,21 @@ async function open(background: CaptureBackground, expandable = true) {
   await evaluate(`window.captureEvents=[];for(const type of ['pointerdown','pointerup','lostpointercapture'])document.addEventListener(type,event=>window.captureEvents.push({type,x:event.clientX,y:event.clientY,target:event.target.tagName,button:event.button}),true)`)
   await settle()
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'capture never receives the full application bridge')
+  return { overlays, infos }
+}
+async function open(background: CaptureBackground, expandable = true) {
+  const before = new Set(BrowserWindow.getAllWindows()), firstGrab = receipt.grabs.length
+  const outcome = surface.present({ background, attachToDraft: false, expandable, returnFocus: false,
+    complete: async (image, source, engine) => {
+      const delivery = { image, source, engine, settled: false }
+      deliveries.push(delivery)
+      const gate = deliveryGate
+      deliveryGate = null
+      if (gate) await gate
+      delivery.settled = true
+    } })
+  void outcome.catch(error => { receipt.captureError = String(error); process.stderr.write('Capture outcome failed: ' + String(error?.stack ?? error) + '\n') })
+  const { overlays } = await waitOpen(background, before, undefined, firstGrab)
   return { outcome, overlays }
 }
 async function run() {
@@ -216,6 +224,7 @@ async function run() {
     receipt.cases.push({ label: 'composed-' + background, size: bitmap.getSize(), markedPixels: marked, source: delivered.source, engine: delivered.engine })
   }
   const switching = await open('included')
+  await drag(130, 178, 690, 380)
   await evaluate(`window.originalCaptureCanvas=document.querySelector('canvas')`)
   const grabCount = receipt.grabs.length, opacityCount = receipt.opacityChanges.length
   await click('Rectangle'); await drag(180, 300, 230, 40)
@@ -264,7 +273,7 @@ async function run() {
 
   const expanded = await open('included')
   const nextInput = await evaluate('window.captureSurface.load()')
-  assert.deepEqual(nextInput.initialCrop, { x: 130, y: 178, width: 690, height: 380 }, 'a cancelled request late result must not supply the next capture selection')
+  assert.equal(nextInput.initialCrop, undefined, 'a cancelled request late result must not supply the next capture selection')
   if (!await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')!==null`)) await drag(130, 178, 690, 380)
   await click('Rectangle'); await drag(180, 300, 230, 40)
   const captureWindow = current
@@ -289,9 +298,50 @@ async function run() {
   assert.deepEqual({ width: deliveries.at(-1).image.width, height: deliveries.at(-1).image.height }, { width: 690, height: 380 })
   current.destroy()
   receipt.cases.push({ label: 'actual-command-e-production-window-editor-preserves-rectangle-and-crop' })
+
+  const product = new ScreenCapture({ home: out, appActive: () => true, native: () => ({
+    captureScreenshot: async () => { throw new Error('This continuation fixture uses the shared capture surface only.') },
+    writeClipboardImage: async image => { deliveries.push({ image, engine: 'same-capture-product' }) }
+  }), edit: (...args) => editor.edit(...args), present: session => surface.present(session),
+    reportIssue: issue => { (receipt.reportedIssues ??= []).push(String(issue)) } })
+  const productBefore = new Set(BrowserWindow.getAllWindows()), productGrab = receipt.grabs.length
+  const productPending = product.capture(false, 'selection', {}, 'included')
+  void productPending.catch(error => { receipt.captureError = String(error) })
+  await waitOpen('included', productBefore, undefined, productGrab)
+  await drag(130, 178, 690, 380)
+  await key('e', 'KeyE', 69, 4)
+  const productEditor = await waitFor('same-capture independent editor', async () => {
+    for (const candidate of BrowserWindow.getAllWindows()) {
+      if (productBefore.has(candidate) || candidate.isDestroyed()) continue
+      try { if (await candidate.webContents.executeJavaScript(`typeof window.screenshotEditor==='object'`)) return candidate } catch {}
+    }
+    return null
+  })
+  current = productEditor
+  current.webContents.debugger.attach('1.3')
+  await waitFor('same-capture editor decoded', async () => { try { return await evaluate(`document.querySelector('img')?.naturalWidth>0&&[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Copy'&&!b.disabled)`) } catch { return false } })
+  const beforeProductCopy = deliveries.length
+  await click('Copy')
+  await waitFor('same-capture editor Copy consumed', async () => deliveries.length === beforeProductCopy + 1 ? true : null)
+  assert.equal(productEditor.isDestroyed(), false, 'Copy retains the original editable document')
+  const beforeRetake = new Set(BrowserWindow.getAllWindows()), retakeGrab = receipt.grabs.length
+  await click('Retake')
+  const retaken = await waitOpen('included', beforeRetake, { displayId: 1, crop: { x: 130, y: 178, width: 690, height: 380 } }, retakeGrab)
+  assert.equal(retaken.infos[0].initialState, undefined, 'the Retake surface receives crop only, not editor shapes or Undo')
+  await shot('retake-continuation')
+  await key('Escape', 'Escape', 27)
+  assert.equal(productEditor.isDestroyed(), false, 'cancelling Retake returns to the original editor')
+  current = productEditor
+  await key('Escape', 'Escape', 27)
+  await productPending
+  const fresh = await open('included')
+  await key('Escape', 'Escape', 27)
+  assert.deepEqual(await fresh.outcome, { state: 'cancelled' })
+  assert.equal(receipt.reportedIssues, undefined)
+  receipt.cases.push({ label: 'actual-expand-copy-retake-continuation-then-empty-fresh-capture', crop: retaken.infos[0].initialCrop })
   surface.dispose(); editor.dispose(); host.destroy()
   assert.equal(BrowserWindow.getAllWindows().length, 0)
-  assert.equal(receipt.timings.length, 5)
+  assert.equal(receipt.timings.length, 8)
   assert.ok(receipt.timings.every((timing: any) => timing.framesMs>=0&&timing.shownMs>=timing.framesMs&&timing.presentedMs.length===2&&timing.presentedMs.every((value: any) => typeof value==='number'&&value>=0)))
   receipt.passed = true
 }
