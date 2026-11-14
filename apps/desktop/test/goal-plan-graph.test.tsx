@@ -221,7 +221,8 @@ describe('Goal plan graph', () => {
     expect([...graph()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Choose Supervisor to plan'])
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
     expect(graph()!.textContent).toContain('Starting point')
-    expect(graph()!.textContent).toContain('No saved execution plan')
+    expect(graph()!.textContent).toContain('Not saved yet')
+    expect(origin.querySelector('h3')!.getAttribute('title')).toBe('Ship the plan')
     expect(graph()!.querySelector('[data-goal-plan-request]')).not.toBeNull()
   })
 
@@ -241,7 +242,7 @@ describe('Goal plan graph', () => {
   it('places the original unconfirmed acknowledgement read before the retained proposal and graph', async () => {
     const demand = goal({ alignment: { ...alignment, confirmedAt: null } })
     seed(demand)
-    await dom.render(<GoalDetail demand={demand} onClose={vi.fn()} onOpenMote={vi.fn()} onGrill={vi.fn()} onGrounding={vi.fn()} onPlan={vi.fn()}
+    await dom.render(<GoalDetail demand={{ ...demand, sessions: [], workspacePath: null }} onClose={vi.fn()} onOpenMote={vi.fn()} onGrill={vi.fn()} onGrounding={vi.fn()} onPlan={vi.fn()}
       acknowledgementFeedback={{ pending: false, failure: { attempt: { kind: 'confirm', revision: alignment.revision }, message: 'Original receipt unconfirmed' }, reloadError: null }}
       onAcknowledgementFeedbackChange={vi.fn()} moteError={null} onRetryMote={vi.fn()} />)
     const recovery = dom.container.querySelector('[data-goal-acknowledgement-failure]')!
@@ -340,7 +341,7 @@ describe('plan graph navigation and list progress', () => {
     useAppStore.setState({ sessions: [
       { ...original, id: 'local-presentation', hostId: 'worker-host', control: { ...original.control, hostId: 'worker-host', agentSessionId: 'worker-api' },
         workPlacement: { agentHostId: 'worker-host', resourceHostId: 'tool-host' },
-        toolExecution: { bindingId: 'remote-tools', resourceHostId: 'tool-host', workspacePath: '/project/work' } },
+        toolExecution: { bindingId: 'remote-tools', resourceHostId: 'tool-host', resourceRuntimeId: 'original-tool-runtime', workspacePath: '/project/work' } },
       { ...original, id: 'other-presentation', hostId: 'another-host', control: { ...original.control, hostId: 'another-host', agentSessionId: 'worker-api' } }
     ], agentNames: { 'local-presentation': 'Exact execution lead', 'other-presentation': 'Another Agent' } })
     await dom.render(<GlobalBoardSurface />)
