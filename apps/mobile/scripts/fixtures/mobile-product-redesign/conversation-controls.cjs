@@ -95,6 +95,74 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, openGo
       assert.equal(requests.at(-1).params.target.agentSessionId, original.sid)
       await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
       result.posture = { keyboardOpens: 3, verifiedRequests: requests.map(call => call.params), original }
+
+      const choicePanel = '.mobile-command-menu[role=dialog]'
+      const commandTrigger = '.composer-tool[aria-label="Choose a command"]'
+      const commandInput = choicePanel + ' input[aria-label="查找命令"]'
+      const skillInput = choicePanel + ' input[aria-label="查找 Skills"]'
+      const rows = choicePanel + ' button[data-choice]'
+      const draft = await read(find(editor) + '.textContent')
+      const noMenuRole = async () => assert.equal(await read('!document.querySelector(".mobile-command-menu [role=menuitem]")'), true)
+      const focused = selector => 'document.activeElement===' + find(selector)
+      const undo = async () => {
+        for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'Z', modifiers: ['meta'] })
+        await until(find(editor) + '.textContent===' + JSON.stringify(draft))
+        assert.equal(await read(find(editor) + '===window.originalCaptureEditor'), true)
+      }
+
+      await resize(320, 480)
+      await read('mobileProductScene.setAppearance("dark")')
+      await tap(commandTrigger, 'Open original command search')
+      await until(focused(commandInput))
+      await until(find(choicePanel) + '.textContent.includes("核对依据")')
+      await noMenuRole()
+      await capture('controls-command-320-dark')
+      await win.webContents.insertText('no observed command')
+      await until(find(choicePanel) + '.textContent.includes("无匹配命令")')
+      assert.equal(await read('document.querySelectorAll(' + JSON.stringify(rows) + ').length'), 0)
+      await enter()
+      assert.equal(await read(find(editor) + '.textContent'), draft)
+      await key('Tab', 'Tab', 9)
+      await until(focused(choicePanel + ' [aria-label="清除命令查询"]'))
+      await capture('controls-command-empty-320-dark')
+      await escape()
+      await until('!' + find(choicePanel) + ' && ' + focused(commandTrigger))
+      assert.equal(await read(find(editor) + '.textContent'), draft)
+
+      await resize(430, 480)
+      await read('mobileProductScene.setAppearance("light")')
+      await down()
+      await until(focused(commandInput))
+      assert.equal(await read(find(commandInput) + '.value'), '')
+      await win.webContents.insertText('核对依据')
+      await until(find(rows) + '?.textContent.includes("核对依据")')
+      await enter()
+      await flush()
+      assert.equal(await read(find(editor) + '.textContent'), draft, 'Typing Enter in a query leaves the draft unchanged before explicit choice')
+      await down()
+      await until(focused(rows))
+      await capture('controls-command-keyboard-430-light')
+      await enter()
+      await until(find(editor) + '.querySelector("[data-tool-reference]")')
+      await until(focused(editor))
+      assert.equal(await read(find(editor) + '.querySelector("[data-tool-reference]").title'), 'Expand prompt: 逐项核对原始依据，保留未知与引用。')
+      await undo()
+
+      await tap('.composer-tool--mode', 'Reveal original Skill control')
+      await button('选择 Skill')
+      await until(focused(skillInput))
+      await win.webContents.insertText('实验依据')
+      await until(find(rows) + '?.textContent.includes("review-evidence")')
+      await noMenuRole()
+      await capture('controls-skill-430-light')
+      await button('review-evidence', choicePanel)
+      await until(find(editor) + '.querySelector("[data-tool-reference=skill]")')
+      await until(focused(editor))
+      assert.ok((await calls('skill.ls')).some(call => call.params.agentSessionId === original.sid && call.params.hostId === 'local'))
+      await undo()
+      await tap('.composer-tool--mode', 'Expand the original composer')
+      await tap('.composer-tool--mode', 'Restore the original collapsed composer')
+      result.choices = { command: '核对依据', skill: 'review-evidence', originalSession: original.sid, originalEditor: true, cancelReturnsFocus: true, undoRestoredDraft: true }
     } else {
       await read('mobileProductScene.settlePosture()')
       await until('mobileProductScene.facts().calls.some(c => c.method === "sdk.postureReceipt" && c.params.outcome === "unknown")')
