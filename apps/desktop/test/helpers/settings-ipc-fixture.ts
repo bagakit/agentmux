@@ -16,13 +16,19 @@ export function settingsScratchTopics(): ScratchTopics {
 }
 
 export class SettingsBrowserProfiles {
+  cookieFiles = { setFileOwner: vi.fn(), setConfirmationHandler: vi.fn() }
+  extensions = { setConfirmationHandler: vi.fn() }
+  listProfiles = vi.fn(() => [])
   sessions = { observe: vi.fn() }
   onChange = vi.fn(() => () => {})
+  onEnvironmentApplicationChange = vi.fn(() => () => {})
   async initialize() {}
+  async cleanupApprovedTrash() {}
   async dispose() {}
 }
 
 export class SettingsBrowserViews {
+  async flushProfileActivity() {}
   setPresentationWindowOwner() {}
   async release() {}
   dispose() {}
