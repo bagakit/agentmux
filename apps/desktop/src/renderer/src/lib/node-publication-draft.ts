@@ -22,9 +22,11 @@ function policyDraft(value: unknown): NodePublishingPolicy {
       !Array.isArray(value.allowedPaths) || !value.allowedPaths.every(path => typeof path === 'string') ||
       !Array.isArray(value.deniedPaths) || !value.deniedPaths.every(path => typeof path === 'string') ||
       (value.defaultPath !== null && typeof value.defaultPath !== 'string')) return unreadable()
+  const map = value.mapLocation
+  if (map !== undefined && (!record(map) || typeof map.coordinates !== 'string' || typeof map.label !== 'string' || typeof map.estimatePublicEgress !== 'boolean')) return unreadable()
   // Drafts may be temporarily invalid and paths are literal, including trailing spaces.
   return { alias: value.alias, shareResources: value.shareResources, allowedPaths: value.allowedPaths,
-    deniedPaths: value.deniedPaths, defaultPath: value.defaultPath }
+    deniedPaths: value.deniedPaths, defaultPath: value.defaultPath, ...(map === undefined ? {} : { mapLocation: { label: map.label as string, coordinates: map.coordinates as string, estimatePublicEgress: map.estimatePublicEgress as boolean } }) }
 }
 
 export function nodePublicationDraftForRuntime(value: unknown, runtimeId: string): NodePublicationDraft | undefined {

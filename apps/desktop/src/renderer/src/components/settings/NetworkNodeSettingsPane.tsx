@@ -205,6 +205,7 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
     if (!observed || editIssue) return
     void retain(observed.node.runtimeId, current => unresolved({ baseline: current?.baseline ?? baseline(observed), draft: { ...(current?.draft ?? observed.policy), ...value }, ...(current?.pending ? { pending: current.pending } : {}) })).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
   }
+  const map = draft?.mapLocation ?? { coordinates: '', label: '', estimatePublicEgress: false }
   return <>
     <section className="network-node-section" data-settings-field="publishing" aria-label="Node publishing">
       <header><div><h3>Publish {host.label}</h3><p>Review the full publication policy on this Node. Saving re-confirms all listed folders; existing owner access stays independent.</p></div><button type="button" className="small-button" disabled={busy} onClick={() => void inspect(operation, operation ? observed?.node.runtimeId : undefined)}>Refresh</button></header>
@@ -218,6 +219,19 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
           description="Let authorized Node readers see this device’s real resource measurements.">
           {field => <Switch {...field} name="shareResources" checked={draft.shareResources} onChange={event => patch({ shareResources: event.target.checked })} />}
         </FormRow>
+        <details className="network-node-identities">
+          <summary>Map location</summary>
+          <FormRow className="network-node-field" layout="stacked" label="Place name">
+            {field => <TextInput {...field} name="mapPlace" value={map.label} onChange={event => patch({ mapLocation: { ...map, label: event.target.value } })} />}
+          </FormRow>
+          <FormRow className="network-node-field" layout="stacked" label="Latitude, longitude" description="Share a point on the map with people who can read this node.">
+            {field => <TextInput {...field} name="mapCoordinates" value={map.coordinates} onChange={event => patch({ mapLocation: { ...map, coordinates: event.target.value } })} />}
+          </FormRow>
+          <FormRow className="network-node-switch" label="Estimate from this node’s internet connection"
+            description="When this node has no declared or registered location, ask GeoJS for its approximate exit region. A VPN can change the result.">
+            {field => <Switch {...field} name="mapPublicEgress" checked={map.estimatePublicEgress} onChange={event => patch({ mapLocation: { ...map, estimatePublicEgress: event.target.checked } })} />}
+          </FormRow>
+        </details>
         <div className="network-node-paths">
           <FormRow className="network-node-field" layout="stacked" label="Shared folders"
             description="Absolute paths, one per line. Only these published roots are browsable.">
@@ -239,7 +253,7 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
         <div className="network-node-save"><span role="status">{busy ? 'Reading or saving publication…' : editIssue ? 'Saved publication edit unavailable' : edit?.pending?.phase === 'in-flight' ? 'Original save is in progress' : operation ? 'Original save needs confirmation' : dirty ? 'Publication: unsaved changes' : 'Publication saved'}</span><button type="button" className="primary-button" disabled={busy || !dirty || Boolean(operation) || Boolean(newer) || Boolean(editIssue)} onClick={() => void savePolicy()}>Save publication</button></div>
       </> : <p role="status">{busy ? 'Reading this node…' : 'Publication has not been observed.'}</p>}
       {error || editIssue ? <p className="network-node-feedback" role="status">{error || editIssue}</p> : null}
-      {newer ? <><details className="network-node-identities" data-publication-review><summary>Review saved publication</summary><dl><dt>Node alias</dt><dd>{newer.policy.alias || 'No alias'}</dd><dt>System resources</dt><dd>{newer.policy.shareResources ? 'Shared' : 'Not shared'}</dd><dt>Shared folders</dt><dd className="network-node-path-review">{newer.policy.allowedPaths.join('\n') || 'No shared folders'}</dd><dt>Excluded paths</dt><dd className="network-node-path-review">{newer.policy.deniedPaths.join('\n') || 'No excluded paths'}</dd><dt>Landing folder</dt><dd>{newer.policy.defaultPath || 'Not set'}</dd><dt>Policy revision</dt><dd>{newer.policyRevision}</dd></dl></details><div className="network-node-save"><button type="button" className="small-button" onClick={() => void useSaved(newer)}>Use saved publication</button><button type="button" className="small-button" onClick={() => void useSaved(newer, true)}>Keep my publication draft</button></div></> : null}
+      {newer ? <><details className="network-node-identities" data-publication-review><summary>Review saved publication</summary><dl><dt>Node alias</dt><dd>{newer.policy.alias || 'No alias'}</dd><dt>System resources</dt><dd>{newer.policy.shareResources ? 'Shared' : 'Not shared'}</dd><dt>Map location</dt><dd>{[newer.policy.mapLocation?.label, newer.policy.mapLocation?.coordinates, newer.policy.mapLocation?.estimatePublicEgress && 'Internet estimate enabled'].filter(Boolean).join(' · ') || 'No declared location'}</dd><dt>Shared folders</dt><dd className="network-node-path-review">{newer.policy.allowedPaths.join('\n') || 'No shared folders'}</dd><dt>Excluded paths</dt><dd className="network-node-path-review">{newer.policy.deniedPaths.join('\n') || 'No excluded paths'}</dd><dt>Landing folder</dt><dd>{newer.policy.defaultPath || 'Not set'}</dd><dt>Policy revision</dt><dd>{newer.policyRevision}</dd></dl></details><div className="network-node-save"><button type="button" className="small-button" onClick={() => void useSaved(newer)}>Use saved publication</button><button type="button" className="small-button" onClick={() => void useSaved(newer, true)}>Keep my publication draft</button></div></> : null}
       {operation ? <button type="button" className="small-button" disabled={busy} onClick={() => void inspect(operation, operation ? observed?.node.runtimeId : undefined)}>Inspect original save</button> : null}
       {saved ? <details className="network-node-identities"><summary>Original node identity</summary><dl><dt>Runtime</dt><dd>{saved.node.runtimeId}</dd><dt>Core instance</dt><dd>{saved.node.ownerInstanceId}</dd><dt>Policy revision</dt><dd>{saved.policyRevision}</dd></dl><button type="button" className="small-button" disabled={busy || Boolean(operation)} onClick={() => { if (observed) void useSaved(observed) }}>Use saved settings</button></details> : null}
     </section>
