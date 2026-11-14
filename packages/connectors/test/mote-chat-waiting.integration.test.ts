@@ -40,7 +40,7 @@ it('diagnoses the original Core wait and preparation reason through the default 
     receiptObservation: 'rejoin-needed', waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin' }, preparationReason: 'context-compaction', failureCode: null, runtime: { target: 'original', state: 'running', exitCode: null } })
   expect(rejoin).toHaveBeenCalledOnce(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
   const serialized = JSON.stringify(preparation)
-  for (const privateValue of [f.root, f.creator.userId, record.body, record.ingressId, record.input!.agentSessionId,
+  for (const privateValue of [f.root, f.lanePerson.userId, record.body, record.ingressId, record.input!.agentSessionId,
     record.input!.expectedRun.runId, record.input!.operationId, record.input!.messageId, 'private-native-source', 'Private exception body', 'retrySafe', 'inputByte'])
     expect(serialized).not.toContain(privateValue)
 

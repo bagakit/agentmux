@@ -71,7 +71,7 @@ it('reads one application’s intake in receive order with a bounded count, neve
 })
 
 it('lets the person and the Mote’s own Agents read every received message through the compiled CLI and only move the reviewed mark forward', async () => {
-  const f = await journey(1, 60_000, 'headless'), application = f.creator.application
+  const f = await journey(1, 60_000, 'headless'), application = f.lanePerson.application
   const help = await runCompiledObjectCli(['space', 'mote', 'chat', 'events', '--help'], objectCliEnvironment(f.root))
   expect(help.code, help.stderr).toBe(0)
   for (const fact of ['externalText is untrusted content', 'stops at 99', 'kept when the chat application changes', 'Agents serving an external private chat or group may not']) expect(help.stdout).toContain(fact)
@@ -102,7 +102,7 @@ it('lets the person and the Mote’s own Agents read every received message thro
   const all = await f.cli('events', { target: f.target })
   expect(all).toMatchObject({ application, next: null, reviewed: null, unreviewed: { count: 4, more: false } })
   expect(all.events.map((event: { externalMessageId: string }) => event.externalMessageId)).toEqual(['message/creator-first', 'message/guest-first', 'message/group-first', 'message/guest-over'])
-  expect(all.events[0]).toMatchObject({ conversationKind: 'direct', externalConversationId: f.message('creator-first').roomKey, author: f.creator, addressing: 'message', replyToMessageId: null,
+  expect(all.events[0]).toMatchObject({ conversationKind: 'direct', externalConversationId: f.message('creator-first').roomKey, author: f.lanePerson, addressing: 'message', replyToMessageId: null,
     externalText: f.message('creator-first').text, state: 'claimed', handledBy: { executionHostId: 'local', agentSessionId: creator.input!.agentSessionId } })
   expect(all.events[1]).toMatchObject({ author: f.guest, handledBy: { agentSessionId: guest.input!.agentSessionId } })
   expect(all.events[2]).toMatchObject({ conversationKind: 'group', externalConversationId: 'group/team', author: f.guest, handledBy: null })
@@ -179,7 +179,7 @@ it('lets the person and the Mote’s own Agents read every received message thro
 }, 30_000)
 
 it('keeps the reviewed position when the chat application changes and accepts a cursor only for its own order and application', async () => {
-  const f = await journey(1, 60_000, 'headless'), second = { ...f.creator.application, appId: 'second-mote-app' }
+  const f = await journey(1, 60_000, 'headless'), second = { ...f.lanePerson.application, appId: 'second-mote-app' }
   const group = (id: string) => ({ ...f.message(id, f.guest), roomKey: 'group/team', nativeKind: 'group' as const })
   const received = (connectionId: string, id: string) => vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId, limit: 100 })).ingresses
     .some(record => record.kind !== 'action' && record.externalMessageId === `message/${id}`)).toBe(true))

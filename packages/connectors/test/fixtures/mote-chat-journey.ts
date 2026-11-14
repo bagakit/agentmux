@@ -1,7 +1,13 @@
+import { connectHostedAgentMux } from '@agentmux/core/hosted'
+import { AgentMuxHostedRuntimeService } from '../../../core/src/hosted-runtime-service.js'
+import { hostedTestOwner } from '../../../core/test/helpers/hosted-runtime-port.js'
+import { createConnectionExternalInputAuthority } from '../../../../apps/host/src/external-input-authority.js'
 import { appendFile, mkdir, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as core from '@agentmux/core'
+import { connectionApplicationScope } from '@agentmux/core/connections'
+import { MoteChatStore } from '../../src/mote-chat-store.js'
 import type { ConnectionIngressMessage } from '@agentmux/core/connections'
 import { spatialCatalog } from '@agentmux/core/spatial-state'
 import { createPublicationConversationPort, PublicationHost, type ConnectionAdapter, type MoteChatAgentPort } from '@agentmux/connectors'
@@ -16,6 +22,12 @@ import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig, WorkspaceRecord } from '../../../../apps/desktop/src/shared/contracts.js'
 import { encodeCwdDirname } from '../../../core/src/providers/grok-native-history.js'
 import { grokChunk, grokDone, grokUpdate } from '../../../core/test/fixtures/grok-updates.js'
+import { createHostConnectionOwner } from '../../../../apps/host/src/connections.js'
+import { createHostMoteMainReader, createHostMoteDialogue } from '../../../../apps/host/src/mote-dialogue.js'
+import { FileReadOwner } from '../../../../apps/host/src/file-read-owner.js'
+import { OrdinaryWorkspaceFiles } from '../../../../apps/host/src/ordinary-files.js'
+import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
+import { createWorkspaceLayout, createWorkbenchViewLayout } from '@agentmux/core/spatial-layout'
 import { feishuConfig } from './feishu.js'
 import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } from './feishu-publication.js'
 import { FeishuAdapter } from '../../src/adapters/feishu/index.js'
@@ -25,13 +37,22 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 type DirectMessage = SignedRoomMessage & { nativeKind: 'direct' | 'group' }
 
-export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' | 'codex' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined) {
+export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' | 'codex' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined, mainMode?: 'bound' | 'unbound', publicationMode: 'feishu' | 'signed-room' = 'feishu', execution: 'local' | 'remote' = 'local') {
   const publicationRefresh = vi.spyOn(PublicationHost.prototype, 'refresh')
-  const original = await rpcOwnerFixture([], core)
+  class FixtureHostClient extends core.AgentMuxClient {
+    constructor(options: core.AgentMuxClientOptions) {
+      let client: core.AgentMuxClient
+      const root = dirname((options.store as core.AgentMuxFileAgentSessionStore).path), runtimeId = 'original-mote-host'
+      const hostExecutorOwner = new core.AgentMuxHostExecutorOwner({ path: join(root, 'host-executors.json'), runtimeId, catalog: () => client.catalog() })
+      super({ ...options, hostExecutorOwner, creationAuthority: new core.AgentMuxCreationAuthority({ stateDirectory: join(root, 'creation'), runtimeId }) })
+      client = this
+    }
+  }
+  const original = await rpcOwnerFixture([], mode === 'headless' ? { ...core, AgentMuxClient: FixtureHostClient } : core)
   const client = original.client as core.AgentMuxClient
   const grokHome = join(original.root, 'grok')
   if (nativeProvider === 'grok') vi.stubEnv('GROK_HOME', grokHome)
-  const feishu = nativeProvider !== 'claude' ? await feishuPublicationHttp(publicationHttp) : undefined
+  const feishu = nativeProvider !== 'claude' && publicationMode === 'feishu' ? await feishuPublicationHttp(publicationHttp) : undefined
   if (feishu) cleanup.push(feishu.close)
   cleanup.push(async () => {
     try { await original.close() } catch (error) {
@@ -79,10 +100,26 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     runs.set(runId, run); sources.set(pid, { id, path }); return run
   })
   inner.kernel.start = start
-  inner.kernel.status = async (id: string) => { const run = runs.get(id); if (!run) throw new Error('Unknown original native Run'); return run }
+  // The durable resume owner consumes a prepared Runtime dispatch, with the
+  // same native Start leaf and operation-key retention as initial creation.
+  const runtimeIdentity = { runtimeId: 'fixture-original-core', instanceId: 'fixture-instance', buildIdentity: 'fixture', protocolVersion: 1 }
+  inner.kernel.creationRuntimeIdentity = () => runtimeIdentity
+  inner.kernel.startPrepared = async (request: { args: string[]; env: Record<string, string> }, operationKey: string, expected: core.AgentMuxCreationRuntime) => {
+    expect(expected).toEqual(runtimeIdentity)
+    expect(request.env.AGENTMUX_LIFECYCLE_OPERATION_ID).toBe(operationKey)
+    return await start({ ...request, operationKey })
+  }
+  inner.kernel.inspectPreparedStart = async (_request: unknown, operationKey: string) => [...runs.values()].find(run => run.lifecycleOperationId === operationKey) ?? null
+  inner.kernel.status = async (id: string) => { const run = runs.get(id); if (!run) throw new Error('Unknown original native Run'); return { ...run, acceptedInputBytes: original.run(id).acceptedInputBytes } }
   inner.kernel.inspectCreation = async (operationId: string) => [...runs.values()].find(run => run.lifecycleOperationId === operationId) ?? null
+  type RuntimeInput = (id: string, input: { operationId: string; expectedByte: number; data: string }) => Promise<{ run: ReturnType<typeof original.run>; appliedByteRange: { startByte: number; endByte: number } }>
+  const runtimeInput = vi.mocked(inner.kernel.input as RuntimeInput), originalInputLeaf = runtimeInput.getMockImplementation()!
+  runtimeInput.mockImplementation(async (...args: Parameters<typeof originalInputLeaf>) => {
+    const receipt = await originalInputLeaf(...args)
+    return { ...receipt, run: { ...runs.get(args[0])!, acceptedInputBytes: receipt.run.acceptedInputBytes } }
+  })
   inner.hookServer.isRunning = () => true
-  inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
+  inner.hookServer.createBinding = (_session: string, _provider: string, bindingId?: string) => ({ bindingId: bindingId ?? 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => session
   vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true, capabilities: new core.AgentProviderRegistry().get(id).catalog.capabilities }))
@@ -125,18 +162,42 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const configurationPath = join(original.root, 'original-app-config.json')
   await writeFile(configurationPath, JSON.stringify(config))
   if (mode === 'headless') {
-    const runtimeId = 'original-mote-host'
-    const hostExecutorOwner = new core.AgentMuxHostExecutorOwner({ path: join(original.root, 'host-executors.json'), runtimeId, catalog: () => client.catalog() })
-    Object.assign(client, { hostExecutorOwner, creationAuthority: new core.AgentMuxCreationAuthority({ stateDirectory: join(original.root, 'creation'), runtimeId }) })
     await client.configureHostExecutor({ executorId: 'saved-chat', config: { label: 'Original saved chat', providerId: nativeProvider, command: process.execPath, args: ['--chosen'], env: { MOTE_VALUE: 'host-owned', ...(nativeProvider === 'grok' ? { GROK_HOME: grokHome } : {}) }, injectAgentMuxGuide: false } })
   }
+  const mainHostId = execution === 'remote' ? 'original-execution' : 'local'
+  let executionReader: Awaited<ReturnType<typeof connectHostedAgentMux>> | undefined, hostingReader: Awaited<ReturnType<typeof connectHostedAgentMux>> | undefined
+  let executionEndpoint: { transport: 'unix'; path: string } | undefined
+  let hostingOwnerInstanceId = execution === 'remote' ? 'fixture-hosting-owner' : 'fixture-instance'
+  let hosting = original, hostingRuntime: AgentMuxHostedRuntimeService | undefined
+  const mainFiles = mainMode ? new FileReadOwner({ catalog: async () => { const state = await spatial.read(); return state ? spatialCatalog(state.graph) : null },
+    workspace: id => id === workspace.id ? workspace : undefined, files: new OrdinaryWorkspaceFiles(), topicForDirectory: (resource, path) => topics.readForDirectory(resource, path) }) : undefined
+  const main = mainFiles ? createHostMoteMainReader({ configurationPath, spatial, files: mainFiles }) : undefined
+  const dialogue = main ? createHostMoteDialogue({ main, spatial, store: new MoteDialogueStore(join(original.root, 'dialogue.sqlite')), clientForHost: () => executionReader ?? client }) : undefined
+  async function bindMain(id: string, existing?: core.AgentMuxAgentSession) {
+    const executor = (await client.listHostExecutors()).executors.find(e => e.executorId === 'saved-chat')!
+    const session = existing ?? (await client.createHostAgentWithDelivery({ agentSessionId: id, createOperationId: `create-${id}`,
+      executorId: 'saved-chat', executorRevision: executor.configRevision, workspacePath: topic.physicalDirectoryPath! })).session
+    const tabId = `${id}-tab`, regionId = `${id}-region`, groupId = 'main-group'
+    const state = (await spatial.read())!
+    await spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph,
+      tabs: [...state.graph.tabs, { tabId, zoneId, workspaceId: workspace.id, name: null, regionIds: [regionId] }],
+      regions: [...state.graph.regions, { tabId, regionId, kind: 'agent', agentSessionId: id, runId: session.run.runId, execution: { hostId: mainHostId, cwd: topic.physicalDirectoryPath! } }],
+      layouts: { ...state.graph.layouts, [workspace.id]: createWorkspaceLayout(groupId, [...state.graph.tabs.map(tab => tab.tabId), tabId]) },
+      tabLayouts: { ...state.graph.tabLayouts, [tabId]: createWorkbenchViewLayout(regionId) } } })
+    const reference = { hostId: mainHostId, sessionId: id, displayWorkspaceId: workspace.id, groupId, tabId, regionId }
+    const save = async () => { await writeFile(join(topic.physicalDirectoryPath!, 'MOTE.md'), '---\n' + JSON.stringify({ version: 1, defaults: { executorId: 'saved-chat', conversation: reference, conversationRevision: `role-${id}` } }) + '\n---\n') }
+    if (main?.withRole) await main.withRole(target, save); else await save()
+    return session
+  }
+  if (mainMode === 'bound') await bindMain('original-main')
   const desktopAgents = mode === 'headless'
     ? createHostMoteChatAgents({ resources: createMoteChatResources({ topics, catalog: async () => spatialCatalog(graph), configuration: target => readMoteResourceConfiguration(configurationPath, target) }), clients })
     : (await import('../../../../apps/desktop/src/main/mote-chat-agents.js')).createMoteChatAgents({ config: () => config, catalog: async () => spatialCatalog(graph), topics, clients })
-  const wire = signedRoomAdapter(nativeProvider !== 'claude' ? 'feishu' : 'signed-room'), application = { domain: nativeProvider !== 'claude' ? 'open.feishu.cn' : 'signed.example', appId: nativeProvider !== 'claude' ? feishuConfig.application.appId : 'original-mote-app' }
+  const wire = signedRoomAdapter(nativeProvider !== 'claude' && publicationMode === 'feishu' ? 'feishu' : 'signed-room'), application = { domain: nativeProvider !== 'claude' && publicationMode === 'feishu' ? 'open.feishu.cn' : 'signed.example', appId: nativeProvider !== 'claude' && publicationMode === 'feishu' ? feishuConfig.application.appId : 'original-mote-app' }
   const creator = { application, idType: 'email', userId: 'creator@example.test' }, guest = { ...creator, userId: 'guest@example.test' }
+  const lanePerson = { ...creator, userId: 'lane-member@example.test' }
   const verify = wire.adapter.ingress!.verify
-  const adapter: ConnectionAdapter = { ...wire.adapter, ...(feishu ? { publication: new FeishuAdapter({ http: feishu.http }).publication } : {}),
+  const adapter: ConnectionAdapter = { ...wire.adapter, ...(feishu ? { publication: new FeishuAdapter({ http: feishu.http }).publication, ...(mainMode ? { api: new FeishuAdapter({ http: feishu.http }).api } : {}) } : {}),
     ingress: { ...wire.adapter.ingress!, verify: async (...args) => {
       const verified = await verify(...args), native = JSON.parse(args[1]) as DirectMessage
       if (!['direct', 'group'].includes(native.nativeKind) || verified.kind === 'action') throw new Error('Missing signed native conversation kind')
@@ -144,6 +205,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     } },
     profile: { get: async () => ({ connectionId: 'original-bot', connectionRevision: 1, application, language: null, state: 'observed', profile: null,
       metadata: null, creator: { idType: creator.idType, userId: creator.userId }, botId: null, onlineVersionId: null, reviewingVersionId: null, version: null }) } }
+  let connectionOwner: ReturnType<typeof createHostConnectionOwner> | undefined
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: core.AgentMuxControlServer, sdk: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
   const prepare = vi.fn<MoteChatAgentPort['prepare']>(async input => {
     wire.trace.push('prepare')
@@ -152,17 +214,46 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     return desktopAgents.prepare(input)
   })
   const agents = { ...desktopAgents, prepare }
+  if (execution === 'remote') {
+    hosting = await rpcOwnerFixture([], core); cleanup.push(hosting.close)
+    const executionOwner = () => ({ ...hostedTestOwner(client), runtimeId: 'fixture-execution-runtime', ownerInstanceId: 'fixture-execution-owner' })
+    const hostingOwner = () => ({ ...hostedTestOwner(hosting.client as core.AgentMuxClient), runtimeId: 'fixture-hosting-runtime', ownerInstanceId: hostingOwnerInstanceId })
+    const authority = createConnectionExternalInputAuthority({ executionHostId: 'local', runtimeId: () => executionOwner().runtimeId,
+      ingress: async () => services.ingress!, clients: () => hostingReader ? [{ hostId: 'original-hosting', client: hostingReader }] : [] })
+    const executionRuntime = new AgentMuxHostedRuntimeService(client, original.store.path, executionOwner, undefined, authority)
+    cleanup.push(() => executionRuntime.dispose())
+    const executionServer = new core.AgentMuxControlServer({ socketPath: join(original.root, 'execution.sock'), coreClients: clients, hostedRuntime: () => executionRuntime })
+    await executionServer.start(); executionEndpoint = { transport: 'unix', path: executionServer.path }; cleanup.push(() => executionServer.stop())
+    const executionRpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: executionServer.path } }); cleanup.push(() => executionRpc.dispose())
+    executionReader = await connectHostedAgentMux({ rpc: executionRpc, expectedRuntimeId: executionOwner().runtimeId,
+      forwardRpc: async (method, params, context) => { wire.trace.push('remote-start:' + method); try { const result = await executionRpc.call(method, params, context); wire.trace.push('remote-done:' + method); return result } catch (error) { wire.trace.push('remote-error:' + method + ':' + (error as core.AgentMuxError).code); throw error } } })
+    await executionReader.connect()
+    const retainedReader = executionReader; cleanup.push(() => retainedReader.dispose())
+    hostingRuntime = new AgentMuxHostedRuntimeService(hosting.client as core.AgentMuxClient, hosting.store.path, hostingOwner)
+    cleanup.push(() => hostingRuntime!.dispose())
+  }
+  if (!hostingRuntime) {
+    hostingRuntime = new AgentMuxHostedRuntimeService(client, original.store.path, () => ({ ...hostedTestOwner(client), runtimeId: 'fixture-original-core', ownerInstanceId: hostingOwnerInstanceId }))
+    cleanup.push(() => hostingRuntime!.dispose())
+  }
+  const servingClients = () => executionReader ? [{ hostId: 'local', client: hosting.client }, { hostId: mainHostId, client: executionReader }] : clients()
   async function open() {
-    services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [adapter],
-      bindings: { spatial, checkpoint }, moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady, member: createHostMoteMembership(spatial) },
+    if (mainMode) {
+      connectionOwner = createHostConnectionOwner({ directory: join(original.root, 'connectors'), adapters: [adapter], spatial, moteMain: () => main, ...(executionReader ? { clients: () => [{ hostId: mainHostId, client: executionReader! }, { hostId: 'same-runtime-alias', client: executionReader! }] } : {}),
+        moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady, member: createHostMoteMembership(spatial) } })
+      await connectionOwner.start({ client: hosting.client, ownerIdentity: () => execution === 'remote' ? { runtimeId: 'fixture-hosting-runtime', ownerInstanceId: hostingOwnerInstanceId } : { runtimeId: 'fixture-original-core', ownerInstanceId: hostingOwnerInstanceId } } as core.AgentMuxHeadlessRuntime)
+      services = await connectionOwner.services()
+    } else services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [adapter],
+      bindings: { spatial, checkpoint }, moteChat: { ...(main ? { main: () => main } : {}), agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady, member: createHostMoteMembership(spatial) },
       publication: createPublicationConversationPort(clients), ingress: { core: host => host === 'local' ? original.client : undefined } })
-    server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, spatialState: spatial, coreClients: clients })
+    server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, ...(dialogue ? { moteDialogue: dialogue } : {}), spatialState: spatial, coreClients: servingClients, ...(hostingRuntime ? { hostedRuntime: () => hostingRuntime! } : {}) })
     await server.start()
     sdk = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    if (executionReader) hostingReader = await connectHostedAgentMux({ rpc: sdk, expectedRuntimeId: 'fixture-hosting-runtime', forwardRpc: (method, params, context) => sdk.call(method, params, context) })
   }
-  async function close() { await sdk?.dispose(); await server?.stop(); services?.close() }
+  async function close() { await hostingReader?.dispose(); hostingReader = undefined; await sdk?.dispose(); await server?.stop(); if (connectionOwner) await connectionOwner.close(); else await services?.close() }
   await open(); cleanup.push(close)
-  const cliRaw = async (command: 'configure' | 'allocate' | 'history' | 'diagnose' | 'events' | 'review', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
+  const cliRaw = async (command: 'configure' | 'allocate' | 'history' | 'diagnose' | 'events' | 'review' | 'reply' | 'inspect', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
     const overrides = credentials ? { AGENTMUX_AGENT_SESSION_ID: credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: credentials.capability } : {}
     return await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'space', 'mote', 'chat', command, '--input', '-'], objectCliEnvironment(original.root, overrides), JSON.stringify(input))
   }
@@ -182,13 +273,27 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const submissionErrors: Array<{ code?: string; message: string }> = []
   const submission = vi.spyOn(client, 'submitAgentMessage').mockImplementation(async (...args) => { wire.trace.push('core-submit');
     try { return await submit(...args) } catch (error) { submissionErrors.push({ code: (error as core.AgentMuxError).code, message: String(error) }); throw error } })
-  const message = (id: string, actor = creator): DirectMessage => ({ deliveryKey: `event/${id}`, recordKey: `message/${id}`, roomKey: `private/${actor.userId}`, person: actor.userId,
+  // Dedicated-lane journeys use an invited member with an existing individual allowance.
+  // Creator journeys exercise the actual logical Main path instead of a former routing assumption.
+  if (!mainMode) new MoteChatStore(services.database!).savePerson({ key: JSON.stringify([target.spaceId, connectionApplicationScope(application), application.appId, lanePerson.idType, lanePerson.userId]),
+    spaceId: target.spaceId, person: { actor: lanePerson, creator: false, revision: 1, total: Number.MAX_SAFE_INTEGER, used: 0, remaining: Number.MAX_SAFE_INTEGER } })
+  const message = (id: string, actor = mainMode ? creator : lanePerson): DirectMessage => ({ deliveryKey: `event/${id}`, recordKey: `message/${id}`, roomKey: `private/${actor.userId}`, person: actor.userId,
     text: `Original external question ${id}`, addressing: 'broadcast', nativeKind: 'direct' })
   const records = async () => (await services.ingress!.list({ connectionId: 'original-bot', limit: 100 })).ingresses as ConnectionIngressMessage[]
   async function claimed(id: string) {
     let record: ConnectionIngressMessage | undefined
-    await vi.waitFor(async () => { record = (await records()).find(r => r.externalMessageId === `message/${id}`); expect(record?.state).toBe('claimed') }, { timeout: 4_000 })
+    await vi.waitFor(async () => { record = (await records()).find(r => r.externalMessageId === `message/${id}`); expect(record?.state, JSON.stringify(record)).toBe('claimed') }, { timeout: 4_000 })
     return record!
+  }
+  async function shareMain(bindingId = 'ordinary-main-sharing', routeHostId = mainHostId) {
+    await reply('original-main', 'existing-source-' + bindingId, 'Existing Main source before this explicit sharing')
+    const session = (await client.readAgentSession('original-main'))!, source = session.nativeHandle
+    if (source?.kind !== 'provider') throw Error('Original Main native source missing')
+    const result = await sdk.call('connection.bind', { operationId: 'bind-' + bindingId, bindingId, connectionId: 'original-bot', expectedConnectionRevision: 1,
+      externalConversationId: 'external-group/' + bindingId, executionHostId: routeHostId, agentSessionId: session.agentSessionId,
+      expectedSource: { providerId: source.providerId, nativeSessionId: source.sessionId }, scope: { input: 'all-messages', publication: 'future-shared-conversation' } })
+    if (result.state !== 'applied') throw Error('Original sharing intent not applied: ' + JSON.stringify(result))
+    return result.binding
   }
   async function reply(agentSessionId: string, id: string, text: string) {
     const session = await original.client.readAgentSession(agentSessionId), source = session!.nativeHandle!
@@ -197,7 +302,14 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     if (!source.transcriptPath) throw new Error('Original native path is missing')
     await appendFile(source.transcriptPath, nativeProvider === 'grok' ? [grokChunk(source.sessionId, text, id), grokDone(source.sessionId, id)].map(row => JSON.stringify(row)).join('\n') + '\n' : JSON.stringify({ sessionId: source.sessionId, uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n')
   }
-  return { ...original, feishu, agents, config, configurationPath, graph, spatial, workspace, get services() { return services }, get sdk() { return sdk }, topic, target, creator, guest, wire, message, records, claimed, reply, start, prepare, submission,
+  return { ...original, shareMain, coldExecutionOwnerObservation() {
+      if (!executionReader) throw Error('No original remote execution reader')
+      let ready = false
+      const originalOwner = executionReader.runtimeOwnerIdentity.bind(executionReader), originalRead = executionReader.readAgentSession.bind(executionReader)
+      const owner = vi.spyOn(executionReader, 'runtimeOwnerIdentity').mockImplementation(() => ready ? originalOwner() : null)
+      const read = vi.spyOn(executionReader, 'readAgentSession').mockImplementation(async (...args) => { const session = await originalRead(...args); ready = true; return session })
+      return { owner, read }
+    }, replaceHostingOwner() { hostingOwnerInstanceId += '-replacement' }, get executionEndpoint() { return executionEndpoint }, main, bindMain, endRun(runId: string) { const run = runs.get(runId)!; runs.set(runId, { ...run, state: { type: 'exited', code: 0, signal: null } }) }, feishu, agents, config, configurationPath, graph, spatial, workspace, get services() { return services }, get sdk() { return sdk }, get endpoint() { return { transport: 'unix' as const, path: server.path } }, topic, target, creator, lanePerson, guest, wire, message, records, claimed, reply, start, prepare, submission,
     cli, cliRaw, publicationRefresh, credentials(index: number) { const env = start.mock.calls[index]![0].env!; return { agentSessionId: env.AGENTMUX_AGENT_SESSION_ID!, capability: env.AGENTMUX_AGENT_CAPABILITY! } },
     submissionErrors, async restart() { await close(); await open(); await vi.waitFor(() => expect(wire.endpoint).toBeDefined()) } }
 }

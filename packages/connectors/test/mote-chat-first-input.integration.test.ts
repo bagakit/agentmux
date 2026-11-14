@@ -63,7 +63,7 @@ it('submits the original private input before native history exists and publishe
   expect(new PublicationStore(f.services.database!).coverage(binding).gaps).toContainEqual(expect.objectContaining({ reason: 'start-cut-unconfirmed', code: 'PUBLICATION_CAPTURED_START_UNCONFIRMED' }))
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
   expect(f.wire.effects).toHaveLength(1)
-  expect((await f.services.moteChat!.audience({ target: f.target })).people).toMatchObject([{ used: 1, remaining: 0 }])
+  expect((await f.services.moteChat!.audience({ target: f.target })).people.filter(person => person.used > 0)).toMatchObject([{ used: 1, remaining: 0 }])
 }, 20_000)
 
 it('keeps publication failure independent of input and automatically recovers the first reply from the original beginning', async () => {

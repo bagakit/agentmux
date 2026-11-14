@@ -69,7 +69,7 @@ it('reads frozen runtime and one bounded generation publication window through t
   const admitted = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
   expect(admitted.incoming!.rows[0]!.input).toMatchObject({ status: 'admitted', runtime: { target: 'original', state: 'running' } }); expect(runtime).toHaveBeenCalledOnce()
   const serialized = JSON.stringify([report, failed, effects, unavailable, admitted])
-  for (const value of [f.root, f.creator.userId, first.body, first.ingressId, first.externalMessageId, first.externalConversationId, binding.bindingId,
+  for (const value of [f.root, f.lanePerson.userId, first.body, first.ingressId, first.externalMessageId, first.externalConversationId, binding.bindingId,
     generation.generation.generationId, generation.generation.agentSessionId, generation.generation.createOperationId, first.input!.expectedRun.runId,
     'PRIVATE_OPERATION', 'PRIVATE_PROJECTION', 'PRIVATE_CONFIRMED', 'PRIVATE_FEEDBACK', 'PRIVATE_PLATFORM_ID', 'PRIVATE_GAP', 'PRIVATE_CURSOR', 'PRIVATE_NATIVE_CAUSE', 'PRIVATE_NATIVE', 'PRIVATE_RECORD', 'PRIVATE_PUBLICATION_EXCEPTION']) expect(serialized).not.toContain(value)
   store.saveGeneration({ ...generation, generation: { ...generation.generation, target: { ...generation.generation.target, zoneId: 'other-private-zone' } } })
@@ -103,7 +103,7 @@ it('diagnoses retained private preparation through authenticated CLI without gra
       { state: 'claimed', preparation: 'ready', input: { observation: 'observed' } }
     ] } })
   const serialized = JSON.stringify(report)
-  for (const secret of [f.root, f.creator.userId, f.guest.userId, f.message('retained-guest', f.guest).text,
+  for (const secret of [f.root, f.lanePerson.userId, f.guest.userId, f.message('retained-guest', f.guest).text,
     record.ingressId, record.externalMessageId, record.externalConversationId, generation.generation.agentSessionId, generation.generation.createOperationId]) expect(serialized).not.toContain(secret)
   const agent = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.root, 'public.sock') }, credentials: f.credentials(0) })
   try {

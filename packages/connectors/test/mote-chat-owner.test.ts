@@ -15,6 +15,7 @@ const context = { actor: { kind: 'user' as const, id: 'original-user' } }
 const application = { domain: 'chat.example', appId: 'original-app' }
 const creator = { application, idType: 'open_id', userId: 'creator' }
 const guest = { ...creator, userId: 'guest' }
+const lanePerson = { ...creator, userId: 'lane-person' }
 const target = { spaceId: 'original-mote', zoneId: 'original-home', expectedResource: { hostId: 'local', workspaceId: 'mote-files', workspacePath: 'mote-home' } }
 async function fixture(limit = 4) {
   const root = await mkdtemp(join(tmpdir(), 'mote-chat-owner-')), databasePath = join(root, 'connections.sqlite')
@@ -45,7 +46,7 @@ async function fixture(limit = 4) {
   const input: MoteChatConfigure = { operationId: 'enable-chat', target, expectedRevision: null, expectedConnectionRevision: 1,
     values: { enabled: true, connection: { connectionId: connection.connectionId, application }, conversationIdleMs: 100, strangerMessageLimit: limit } }
   await host.configure(input, context)
-  const incoming = (id: string, actor = creator, externalConversationId = `chat-${actor.userId}`): MoteChatIncoming => ({ conversationKind: 'direct',
+  const incoming = (id: string, actor = lanePerson, externalConversationId = `chat-${actor.userId}`): MoteChatIncoming => ({ conversationKind: 'direct',
     ingressId: `ingress-${id}`, connectionId: connection.connectionId, application, externalMessageId: id, externalConversationId, actor })
   const f = { root, databasePath, connections, connection, profile, input, agents, assertTarget, host, options, prepared, created, incoming,
     time(value: number) { clock = value }, restart() { return new MoteChatHost(options) } }
@@ -125,8 +126,7 @@ it('shows a zero-allowance guest without a launch, preserves used on allocation 
   const audience = (await f.host.audience({ target })).people
   expect(audience.find(p => p.actor.userId === guest.userId)).toMatchObject({ total: 3, used: 1, remaining: 2 })
   expect(audience.find(p => p.actor.userId === 'new-person')).toMatchObject({ total: 8, used: 1, remaining: 7 })
-  await f.host.prepareIncoming(f.incoming('creator-message'))
-  expect((await f.host.audience({ target })).people.find(p => p.creator)).toMatchObject({ actor: creator, total: null, used: 1, remaining: null })
+  await expect(f.host.prepareIncoming(f.incoming('creator-message', creator))).rejects.toMatchObject({ code: 'MOTE_CHAT_MAIN_UNCONFIRMED' })
 })
 
 it('does not write an allowance after the original management authorization is revoked during target verification', async () => {
@@ -153,7 +153,7 @@ it('reuses at the exact interval, rolls strictly above it, keeps older reply aut
   expect(second.agentSessionId).not.toBe(first.agentSessionId)
   expect(f.host.publicationAuthority(first.bindingId, 1).authorized).toBe(true)
   expect(f.host.readCurrent(first.bindingId)?.state).toBe('active')
-  expect(f.host.hasAdmission('ingress-first', first.bindingId, creator)).toBe(true)
+  expect(f.host.hasAdmission('ingress-first', first.bindingId, lanePerson)).toBe(true)
   const refs = [first, second]
   for (const [index, at] of [312, 413, 514].entries()) { f.time(at); refs.push((await f.host.prepareIncoming(f.incoming(`roll-${index}`)))!) }
   const last = f.prepared.at(-1)!
@@ -211,7 +211,7 @@ it('uses durable accepted activity when an extra observation fails and isolates 
   expect(combined.publicationAuthority(unrelated.bindingId, 1).authorized).toBe(true)
   expect(f.host.listBindings({ agentSessionId: binding.agentSessionId })).toMatchObject([{ bindingId: binding.bindingId, state: 'paused' }])
   expect(f.host.listActive({ agentSessionId: binding.agentSessionId })).toEqual([])
-  expect(f.host.hasAdmission('ingress-first', binding.bindingId, creator)).toBe(false)
+  expect(f.host.hasAdmission('ingress-first', binding.bindingId, lanePerson)).toBe(false)
   expect((await f.host.history({ target })).generations).toHaveLength(2)
   expect(f.agents.create).toHaveBeenCalledTimes(2)
 })
@@ -227,7 +227,7 @@ it('keeps a known private audience from borrowing a manual binding while paused 
   expect(combined.findActiveAudience(audience)?.bindingId).toBe(binding.bindingId)
   expect(find).not.toHaveBeenCalled()
   f.agents.create = vi.fn(async () => { throw new Error('Original creation not confirmed') })
-  await expect(f.host.prepareIncoming(f.incoming('pending', creator, 'pending-private'))).rejects.toThrow('Original creation not confirmed')
+  await expect(f.host.prepareIncoming(f.incoming('pending', lanePerson, 'pending-private'))).rejects.toThrow('Original creation not confirmed')
   expect(combined.findActiveAudience({ application, externalConversationId: 'pending-private' })).toBeNull()
   expect(find).not.toHaveBeenCalled()
   await f.host.configure({ ...f.input, operationId: 'pause-known-audience', expectedRevision: 1, values: { ...f.input.values, enabled: false } }, context)
@@ -309,7 +309,7 @@ it('creates and replies through an exact Core Session without requiring a presen
   await expect(creating).resolves.toMatchObject({ agentSessionId: expect.any(String) })
   const binding = (await creating)!
   expect(binding.regionAnchor).toBeUndefined()
-  expect(f.host.hasAdmission('ingress-background', binding.bindingId, creator)).toBe(true)
+  expect(f.host.hasAdmission('ingress-background', binding.bindingId, lanePerson)).toBe(true)
   expect(f.host.publicationAuthority(binding.bindingId, 1).authorized).toBe(true)
 })
 
@@ -352,4 +352,20 @@ it('derives native API identity from current private-chat lane and selected poli
   expect(f.host.apiBinding(next!.bindingId)).toBeNull()
   expect(f.host.readExact(first!.bindingId, 1)).toEqual(first)
   expect(f.agents.create).toHaveBeenCalledTimes(2)
+})
+
+it('keeps a stored legacy creator admission on its original private Agent without consulting Main', async () => {
+  const f = await fixture()
+  const original = (await f.host.prepareIncoming(f.incoming('legacy-seed', guest)))!
+  const row = f.host.store.generationBySession(original.agentSessionId)!
+  const incoming = f.incoming('legacy-creator', creator)
+  // A pre-existing schema snapshot: the creator already had this dedicated
+  // generation before new messages began addressing the logical Main.
+  f.host.store.saveGeneration({ ...row, generation: { ...row.generation, actor: creator, externalConversationId: incoming.externalConversationId },
+    binding: { ...row.binding!, externalConversationId: incoming.externalConversationId }, grant: { ...row.grant!, actor: creator, externalConversationId: incoming.externalConversationId } })
+  f.host.store.saveAdmission({ ingressId: incoming.ingressId, application, externalMessageId: incoming.externalMessageId,
+    actor: creator, externalConversationId: incoming.externalConversationId, generationId: row.generation.generationId })
+  expect(await f.restart().prepareIncoming(incoming)).toMatchObject({ agentSessionId: original.agentSessionId, externalConversationId: incoming.externalConversationId })
+  expect(f.agents.create).toHaveBeenCalledOnce(); expect(f.agents.prepare).toHaveBeenCalledOnce()
+  await expect(f.host.prepareIncoming(f.incoming('new-creator', creator))).rejects.toMatchObject({ code: 'MOTE_CHAT_MAIN_UNCONFIRMED' })
 })

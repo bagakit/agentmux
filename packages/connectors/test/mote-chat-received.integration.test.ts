@@ -69,7 +69,7 @@ it('queues the exact ready direct received before Core submission without native
   expect(diagnosis.code, diagnosis.stdout + diagnosis.stderr).toBe(0)
   const safe = JSON.parse(diagnosis.stdout).result
   expect(safe.publications[0].effects).toContainEqual({ kind: 'query-feedback', effect: 'upsert', state: 'confirmed', receipt: { state: 'confirmed', reason: null }, resourceUpload: null })
-  for (const privateValue of [record.body, record.ingressId, record.externalMessageId, record.externalConversationId, record.input!.agentSessionId, record.input!.expectedRun.runId, f.root, f.creator.userId]) expect(JSON.stringify(safe)).not.toContain(privateValue)
+  for (const privateValue of [record.body, record.ingressId, record.externalMessageId, record.externalConversationId, record.input!.agentSessionId, record.input!.expectedRun.runId, f.root, f.lanePerson.userId]) expect(JSON.stringify(safe)).not.toContain(privateValue)
 }, 30000)
 
 it('reopens a claimed direct input with the same unknown received request and inspects rather than replaying it or creating another Agent', async () => {
@@ -88,7 +88,7 @@ it('reopens a claimed direct input with the same unknown received request and in
   await new Promise(resolve => setImmediate(resolve))
   expect(f.feedback(record.ingressId)).toHaveLength(1); expect(f.feedback(record.ingressId)[0]!.prepared).toEqual(frozen)
   expect(f.posts()).toHaveLength(1); expect(f.start).toHaveBeenCalledOnce(); expect(f.submission).toHaveBeenCalledOnce(); expect(f.inner.kernel.input).toHaveBeenCalledOnce()
-  expect((await f.services.moteChat!.audience({ target: f.target })).people).toMatchObject([{ used: 1, remaining: 0 }])
+  expect((await f.services.moteChat!.audience({ target: f.target })).people.filter(person => person.used > 0)).toMatchObject([{ used: 1, remaining: 0 }])
 }, 15000)
 
 it('keeps each generation on its exact original message and refuses new feedback after route shutdown or foreign quota rejection', async () => {
@@ -104,7 +104,7 @@ it('keeps each generation on its exact original message and refuses new feedback
   expect(await f.wire.post(f.message('foreign', f.guest))).toBe(202)
   await vi.waitFor(async () => expect((await f.records()).find(record => record.externalMessageId === 'message/foreign')).toMatchObject({ state: 'refused', code: 'MOTE_CHAT_QUOTA_EXHAUSTED' }))
   await f.sdk.call('space.mote.chat.configure', { operationId: 'disable-original-chat', target: f.target, expectedRevision: 1, expectedConnectionRevision: 1,
-    values: { enabled: false, connection: { connectionId: 'original-bot', application: f.creator.application }, conversationIdleMs: 1, strangerMessageLimit: 0 } })
+    values: { enabled: false, connection: { connectionId: 'original-bot', application: f.lanePerson.application }, conversationIdleMs: 1, strangerMessageLimit: 0 } })
   expect(await f.wire.post(f.message('paused'))).toBe(202)
   await vi.waitFor(async () => expect((await f.records()).find(record => record.externalMessageId === 'message/paused')?.state).toBe('refused'))
   expect(f.posts()).toHaveLength(2); expect(f.start).toHaveBeenCalledTimes(2)
@@ -152,5 +152,5 @@ it('retains received across the claimed-before-Core crash seam without resubmitt
   expect(f.feedback(record.ingressId)[0]).toEqual(operation)
   expect(f.posts()).toHaveLength(1); expect(f.submission).toHaveBeenCalledOnce(); expect(f.start).toHaveBeenCalledOnce()
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
-  expect((await f.services.moteChat!.audience({ target: f.target })).people).toMatchObject([{ used: 1, remaining: 0 }])
+  expect((await f.services.moteChat!.audience({ target: f.target })).people.filter(person => person.used > 0)).toMatchObject([{ used: 1, remaining: 0 }])
 }, 15000)
