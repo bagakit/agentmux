@@ -1,6 +1,7 @@
 import { workReferenceHostId } from '../lib/agent-work-mode'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { documentKey, titleWorkbenchSurface, type WorkbenchTab } from '../lib/workbench-tabs'
+import { documentKey, titleWorkbenchSurface, workbenchSurfaces, type WorkbenchTab } from '../lib/workbench-tabs'
+import { surveyBrowserControl } from '../lib/survey-workface'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { useWorkbenchTabNameMetadata, useWorkbenchTabRecord, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { useNoteFileName } from '../lib/note-source-name'
@@ -15,7 +16,7 @@ const FileIcon = semanticIconComponent('file.text')
 const CloseIcon = semanticIconComponent('action.close')
 
 /** The same Tab naming owner as the workbench, scoped to this Tab's Sessions. */
-export function SurveyTabColumn({ tab, selected, onSelect, onClose }: { tab: WorkbenchTab; selected: boolean; onSelect(): void; onClose(title: string): void }) {
+export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedBrowserRegionIds }: { tab: WorkbenchTab; selected: boolean; onSelect(): void; onClose(title: string): void; unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined }) {
   const sessions = useWorkbenchTabSessions(tab)
   const metadata = useWorkbenchTabNameMetadata(tab)
   const names = useWorkbenchTabRecord('agentNames', tab)
@@ -28,14 +29,16 @@ export function SurveyTabColumn({ tab, selected, onSelect, onClose }: { tab: Wor
   const marks = workbenchTabMarks(tab, tabMarkAgentFactsFor(sessions, config?.executors, config?.appearance.agentAvatars, config ? workReferenceHostId(config.hosts) : null))
   const Icon = surface.kind === 'file' ? document && parseNoteFile(document).status === 'valid' ? NoteIcon : FileIcon : BrowserIcon
   const customPrimary = surface.kind === 'browser' || surface.kind === 'file'
+  const unknown = workbenchSurfaces(tab).some(region => region.kind === 'browser' && surveyBrowserControl(region, Boolean(unconfirmedBrowserRegionIds?.has(region.regionId))) === 'unknown')
+  const status = unknown ? 'Page status unavailable · open this Tab to check' : undefined
   return <div className="survey-tab-cell"><button type="button" className="survey-tab-column" data-survey-tab-id={tab.id} aria-label={`Show survey tab: ${title}`}
-    aria-current={selected ? 'true' : undefined} title={title} onClick={onSelect}>
+    aria-current={selected ? 'true' : undefined} aria-description={status} title={status ? `${title}\n${status}` : title} onClick={onSelect}>
     <span className="survey-tab-column__marks" aria-hidden="true">
       {customPrimary ? <span className="survey-page-favicon"><Icon size={16} />{surface.kind === 'browser' && surface.faviconDataUrl
         ? <img key={surface.faviconDataUrl} src={surface.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span> : null}
       <WorkbenchTabMarks marks={customPrimary ? marks.filter(mark => mark.regionId !== surface.regionId) : marks} />
     </span>
-    <span>{title}</span>
+    <span className="survey-tab-label"><span>{title}</span>{unknown ? <span className="survey-status-dot" aria-hidden="true" /> : null}</span>
   </button><button type="button" className="survey-tab-close" aria-label={`Close survey tab: ${title}`} title={`Close ${title}`}
     onClick={() => onClose(title)}><CloseIcon size={12} /></button></div>
 }

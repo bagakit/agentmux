@@ -19,6 +19,8 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 
 
 /** The selected Item's actions read the original owners; Radix owns disclosure and focus. */
@@ -42,6 +44,8 @@ export type SurveyItemOptionsProps = {
   onOpenWorkspace(workspaceId: string): void
   onNewNote?: () => void
   onNewAgent?: () => void
+  onNewBrowser?: () => void
+  onNewTab?: () => void
   onClose?: () => void
   grouping?: SurveyItemGrouping | undefined
 }
@@ -53,7 +57,7 @@ export function SurveyItemOptions(props: SurveyItemOptionsProps) {
   useEffect(() => { if (!visible) setOpen(false) }, [visible])
   useEffect(() => setOpen(false), [zone?.zoneId])
   return <Menu.Root modal={false} open={visible && open} onOpenChange={value => { if (value) setGrouping(props.grouping); setOpen(value) }}>
-    <Menu.Trigger asChild><button type="button" className={`survey-item-options ${rowAction ? '' : zone ? 'survey-tab-view' : 'survey-icon-button'}`} data-row-action={rowAction || undefined} data-compact={compact || undefined} aria-label={rowAction ? `Options for ${props.title}` : 'Exploration options'} title="Exploration options">{rowAction ? <ThemeActionAdjustIcon size={14} aria-hidden="true" /> : <ThemeActionMoreIcon size={16} aria-hidden="true" />}{zone && !compact && !rowAction ? <span>Organize</span> : null}</button></Menu.Trigger>
+    <Menu.Trigger asChild><button type="button" className={`survey-item-options ${rowAction ? '' : zone ? 'survey-tab-view' : 'survey-icon-button'}`} data-row-action={rowAction || undefined} data-compact={compact || undefined} aria-label={rowAction ? `Options for ${props.title}` : 'Exploration options'} title="Exploration options"><ThemeActionMoreIcon size={rowAction ? 14 : 16} aria-hidden="true" />{zone && !compact && !rowAction ? <span>Organize</span> : null}</button></Menu.Trigger>
     <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu survey-topic-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
       <SurveyItemMenuItems {...props} grouping={grouping} primitives={Menu} />
@@ -91,13 +95,15 @@ export function SurveyItemContextMenu({ children, returnFocus, ...props }: Surve
   </ContextMenu.Root>
 }
 
-function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onClose, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
+function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onNewBrowser, onNewTab, onClose, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
   const displayPath = usePathDisplay()
   return <>
       <M.Label className="survey-topic-menu__label">{title}</M.Label>
-      {onNewNote ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewNote)}><ThemeActionCreateNoteIcon size={14} /><span>New Note</span></M.Item> : null}
+      {onNewBrowser ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewBrowser)}><ThemeObjectBrowserIcon size={14} /><span>New Browser</span></M.Item> : null}
+      {onNewNote ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewNote)}><ThemeActionCreateNoteIcon size={14} /><span>New Note in Recall</span></M.Item> : null}
       {onNewAgent ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewAgent)}><ThemeObjectAgentIcon size={14} /><span>New Agent</span></M.Item> : null}
-      {onNewNote || onNewAgent ? <M.Separator className="tab-context-menu__separator" /> : null}
+      {onNewTab ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewTab)}><ThemeObjectLauncherIcon size={14} /><span>New tab…</span></M.Item> : null}
+      {onNewBrowser || onNewNote || onNewAgent || onNewTab ? <M.Separator className="tab-context-menu__separator" /> : null}
       {zone && onRename ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRename)}><ThemeActionEditIcon size={14} /><span>Rename exploration</span></M.Item> : null}
       {zone && onClose ? <M.Item className="tab-context-menu__item" onSelect={() => run(onClose)}><ThemeActionCloseIcon size={14} /><span>Close in Survey</span></M.Item> : null}
       {grouping ? <M.Sub><M.SubTrigger className="tab-context-menu__item"><span className="survey-topic-menu__indicator" /><span>Move to group</span><ThemeNavigationDisclosureIcon size={12} /></M.SubTrigger>

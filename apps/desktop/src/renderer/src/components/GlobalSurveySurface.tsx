@@ -237,8 +237,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const browsers = surfaces.filter(surface => surface.kind === 'browser')
     const operators = new Map<string, SelectorPresenceAgent>()
     const sessionIndex = sessionPresentationById(sessions)
-    const labels = browsers.map(browser => {
-      const control = surveyBrowserControl(browser, Boolean(unconfirmedBrowserRegionIds?.has(browser.regionId)))
+    const controls = browsers.map(browser => surveyBrowserControl(browser, Boolean(unconfirmedBrowserRegionIds?.has(browser.regionId))))
+    const labels = browsers.map((browser, index) => {
+      const control = controls[index]!
       const operation = browser.activity?.operation
       const operator = control === 'agent' && operation?.browserId === browser.browserId && operation.finishedAt === undefined && ['preparing', 'running', 'waiting'].includes(operation.phase) ? operation.operator : undefined
       if (operator && operator.id !== 'agent:unknown') {
@@ -256,12 +257,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const agents = surfaces.filter(surface => surface.kind === 'agent').length
     const description = browsers.length === 1 && !agents ? labels[0] : `${browsers.length ? `${browsers.length} browsers` : `${surfaces.length} regions`}${agents ? ` · ${agents} agents` : ''}${browsers.length ? ` · ${kinds.size === 1 ? labels[0] : 'Mixed control'}` : ''}`
     const detail = labels.map((label, index) => `${browsers[index]!.regionId}: ${label}`).join('\n')
-    const unknown = labels.some(label => label.startsWith('Control unknown'))
-    const operating = labels.some(label => label.startsWith('Agent operating'))
+    const unknown = controls.includes('unknown') && (tabsByZone.get(zone.zoneId)?.length ?? 0) < 2
+    const operating = controls.includes('agent')
     // Normal manual control is availability, not activity; keep its facts in Details.
-    const Icon = unknown ? ThemeStatusUnknownIcon : operating && operators.size === 0 ? ThemeObjectAgentIcon : null
-    return { summary: operators.size || Icon ? <span title={detail} aria-label={description}>
+    const Icon = operating && operators.size === 0 ? ThemeObjectAgentIcon : null
+    const hint = [description, controls.includes('unknown') ? 'Control unknown · open affected page to check' : null, ...[...operators.values()].map(operator => operator.label)].filter(Boolean).join(' · ')
+    return { summary: operators.size || Icon || unknown ? <span title={hint} aria-label={description}>
       <SelectorPresence agents={[...operators.values()]} />
+      {unknown ? <span className="survey-status-dot" role="img" aria-label="Page status unavailable · open page to check" title="Page status unavailable · open page to check" /> : null}
       {Icon ? <Icon size={12} aria-hidden="true" /> : null}
     </span> : null,
       details: <span>{description}{detail ? `\n${detail}` : ''}</span> }
@@ -516,7 +519,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       ...(zone ? {
         onRename: () => { setSidebarCollapsed(false); editItemName(zone, true) },
         onClose: () => closeItem(zone.zoneId),
-        onNewNote: () => newItemNote(zone.zoneId), onNewAgent: () => newItemAgent(zone.zoneId)
+        onNewNote: () => newItemNote(zone.zoneId), onNewAgent: () => newItemAgent(zone.zoneId),
+        onNewBrowser: () => { void newItemTab(zone.zoneId, 'browser') }, onNewTab: () => { void newItemTab(zone.zoneId, 'tab') }
       } : {})
     }
   }
@@ -579,13 +583,11 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             const itemTabs = [...new Set(itemReferences(zone.zoneId).map(reference => reference.tabId))]
             const itemOptions = itemOptionsFor(zone, status.details)
             return <SurveyZoneItem dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
-              visible={visible && !controlsCoverPage}
               showTitle={sidebarCollapsed || itemTabs.length < 2 || Boolean(explorationNames[zone.zoneId]?.trim())}
-              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn key={tabId} tab={tabs[tabId]!} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
+              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
               onCloseSingleTab={itemTabs.length === 1 ? () => closeItemTab(zone.zoneId, itemTabs[0]!, itemTitle(zone)) : undefined}
               options={<SurveyItemOptions {...itemOptions} rowAction compact />}
-              onNewBrowser={zoneId => { void newItemTab(zoneId, 'browser') }} onNewTab={zoneId => { void newItemTab(zoneId, 'tab') }}
-              onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextZoneId(zone.zoneId) }} onNewNote={newItemNote} onNewAgent={newItemAgent} activity={status.summary} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
+              onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextZoneId(zone.zoneId) }} activity={status.summary} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
               onRename={async (name, revision) => { const applied = await useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision); if (!applied) setError('The exploration source or name revision is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
         }} />
         </SurveyItemContextMenu>

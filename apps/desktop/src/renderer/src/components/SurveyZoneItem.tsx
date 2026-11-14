@@ -1,33 +1,25 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import * as Menu from '@radix-ui/react-dropdown-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { AgentMuxZoneFact } from '@agentmux/core/control'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { currentDisplayNameRevision } from '../store'
-import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
-const ThemeActionCreateNoteIcon = semanticIconComponent('action.create-note')
-const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
-const ThemeActionAddIcon = semanticIconComponent('action.create')
-const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
-const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
 export type SurveyItemNameDraft = { value: string; focusOnMount: boolean; revision: { revision: number }; selection: { start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null }
 
 /** Both navigation and shortcuts address this row’s original Zone. */
-export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing = false, visible = true, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onNewNote, onNewAgent, onNewBrowser, onNewTab, onCloseSingleTab, onContextMenu }: {
+export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing = false, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onCloseSingleTab, onContextMenu }: {
   zone: AgentMuxZoneFact
   title: string
   glyph: ReactNode
   selected: boolean
   activity: ReactNode
   editing?: boolean
-  visible?: boolean
   showTitle?: boolean
   tabColumns?: ReactNode
   options?: ReactNode
@@ -35,10 +27,6 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
   nameDraft?: SurveyItemNameDraft | undefined
   onRename?: (name: string, expectedNameRevision: number) => Promise<boolean>
   onEdit?: (editing: boolean) => void
-  onNewNote?(zoneId: string): void
-  onNewAgent?(zoneId: string): void
-  onNewBrowser?(zoneId: string): void
-  onNewTab?(zoneId: string): void
   onCloseSingleTab?: (() => void) | undefined
   onContextMenu?(button: HTMLElement): void
   onSelect(zoneId: string): void
@@ -47,8 +35,6 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
   const draft = nameDraft ?? localDraft.current
   const [, redraw] = useState(0)
   const setDraft = (value: string) => { draft.value = value; redraw(version => version + 1) }
-  const [createOpen, setCreateOpen] = useState(false)
-  useEffect(() => { if (!visible || editing) setCreateOpen(false) }, [visible, editing])
   const saving = useRef(false), editGeneration = useRef(0)
   useEffect(() => { ++editGeneration.current; if (editing && !nameDraft) { setDraft(title); draft.revision = { revision: currentDisplayNameRevision('zone', zone.zoneId) } } return () => { ++editGeneration.current; if (!nameDraft) draft.revision = { revision: 0 } } }, [editing, zone.zoneId, nameDraft])
   const beginEdit = () => { ++editGeneration.current; setDraft(title); onEdit?.(true) }
@@ -67,7 +53,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
       <span className="survey-item-meta"><span className="survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span></span>
     </button>
   const compact = !showTitle && Boolean(tabColumns) && !editing
-  const row = <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected} data-headerless={compact}
+  const row = <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected} data-headerless={compact} data-multi-tab={Boolean(tabColumns)}
     role={compact ? 'group' : undefined} aria-label={compact ? title : undefined}
     onClick={event => { if (compact && event.target === event.currentTarget) onSelect(zone.zoneId) }} onKeyDown={event => {
       if (!compact) return
@@ -95,16 +81,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
     </form> : compact ? null : item}
     {!editing ? tabColumns : null}
     {compact ? <span className="survey-item-compact-activity survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span> : null}
-    {!editing ? <div className="survey-item-shortcuts" aria-label={`Create from ${title}`}>
-      <Menu.Root modal={false} open={visible && createOpen} onOpenChange={setCreateOpen}>
-        <Menu.Trigger asChild><button type="button" aria-label={`Add to ${title}`} title="Add to exploration"><ThemeActionAddIcon size={14} /></button></Menu.Trigger>
-        <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu survey-item-create-menu" align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
-          {onNewBrowser ? <Menu.Item className="tab-context-menu__item" onSelect={() => onNewBrowser(zone.zoneId)}><ThemeObjectBrowserIcon size={14} /><span>New Browser</span></Menu.Item> : null}
-          {onNewNote ? <Menu.Item className="tab-context-menu__item" onSelect={() => onNewNote(zone.zoneId)}><ThemeActionCreateNoteIcon size={14} /><span>New Note in Recall</span></Menu.Item> : null}
-          {onNewAgent ? <Menu.Item className="tab-context-menu__item" onSelect={() => onNewAgent(zone.zoneId)}><ThemeObjectAgentIcon size={14} /><span>New Agent</span></Menu.Item> : null}
-          {onNewTab ? <><Menu.Separator className="tab-context-menu__separator" /><Menu.Item className="tab-context-menu__item" onSelect={() => onNewTab(zone.zoneId)}><ThemeObjectLauncherIcon size={14} /><span>New tab…</span></Menu.Item></> : null}
-        </Menu.Content></DocumentOverlayPortal>
-      </Menu.Root>
+    {!editing ? <div className="survey-item-shortcuts" aria-label={`Actions for ${title}`}>
       {options}
       {onCloseSingleTab ? <button type="button" className="survey-item-tab-close" aria-label={`Close survey tab: ${title}`} title={`Close ${title}`} onClick={onCloseSingleTab}><ThemeActionCloseIcon size={12} /></button> : null}
     </div> : null}
