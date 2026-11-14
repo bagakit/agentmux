@@ -4891,7 +4891,7 @@ export class AgentMuxClient {
     const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
     const dispatch = await this.messageQueue.openDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
       async (messages) => {
-        const localRuntime = messages[0]?.senderRuntimeId && (await this.agentMessageAuthority()).runtimeId
+        const localRuntime = messages[0]?.senderRuntimeId && this.requireCreationAuthority().runtimeId
         if (localRuntime && messages[0]!.senderRuntimeId !== localRuntime) throw new AgentMuxError('Only the original Runtime source can open this Dispatch.', 'DISPATCH_PARTICIPANT_MISMATCH')
         await this.assertDispatchAdmission(input.capability, author, caller.run, messages)
       })
@@ -4916,7 +4916,7 @@ export class AgentMuxClient {
       sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId, kind: input.kind },
     async (messages) => {
       const actorRuntime = input.kind === 'cleanup' ? messages[0]!.senderRuntimeId : messages[0]!.recipientRuntimeId
-      if (actorRuntime && actorRuntime !== (await this.agentMessageAuthority()).runtimeId) throw new AgentMuxError('This Dispatch action belongs to the other exact Runtime participant.', 'DISPATCH_PARTICIPANT_MISMATCH')
+      if (actorRuntime && actorRuntime !== this.requireCreationAuthority().runtimeId) throw new AgentMuxError('This Dispatch action belongs to the other exact Runtime participant.', 'DISPATCH_PARTICIPANT_MISMATCH')
       await this.assertDispatchAdmission(input.capability, author, caller.run, messages, true)
     })
     this.publisher.publish({ type: 'dispatch-changed', sourceMessageId: dispatch.sourceMessageId,
@@ -4968,7 +4968,7 @@ export class AgentMuxClient {
   }
 
   private async localMessageParticipant(envelope: Pick<AgentMuxMessageEnvelope, 'senderSessionId' | 'recipientSessionId' | 'senderRuntimeId' | 'recipientRuntimeId'>, agentSessionId: string): Promise<boolean> {
-    const runtimeId = envelope.senderRuntimeId || envelope.recipientRuntimeId ? (await this.agentMessageAuthority()).runtimeId : undefined
+    const runtimeId = envelope.senderRuntimeId || envelope.recipientRuntimeId ? this.requireCreationAuthority().runtimeId : undefined
     return envelope.senderSessionId === agentSessionId && (envelope.senderRuntimeId === undefined || envelope.senderRuntimeId === runtimeId) ||
       envelope.recipientSessionId === agentSessionId && (envelope.recipientRuntimeId === undefined || envelope.recipientRuntimeId === runtimeId)
   }
@@ -4990,7 +4990,7 @@ export class AgentMuxClient {
         'An Agent can only browse its own original messages.', 'MESSAGE_PARTICIPANT_MISMATCH')
       this.messageReadUsed = true
       void this.observeMessageReads()?.refresh()
-      const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
+      const runtimeId = caller ? this.creationAuthority?.runtimeId ?? null : undefined
       const page = await this.messageQueue.listMessages(input, async () => {
         if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
       }, runtimeId)
@@ -5041,7 +5041,7 @@ export class AgentMuxClient {
         'An Agent can only browse its own original events.', 'MESSAGE_PARTICIPANT_MISMATCH')
       this.messageReadUsed = true
       void this.observeMessageReads()?.refresh()
-      const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
+      const runtimeId = caller ? this.creationAuthority?.runtimeId ?? null : undefined
       return this.messageQueue.listMessageEvents(query, async () => {
         if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
       }, runtimeId)
@@ -5065,7 +5065,7 @@ export class AgentMuxClient {
       const caller = input.caller
       if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
         'An Agent can only list its own Dispatch participation.', 'DISPATCH_PARTICIPANT_MISMATCH')
-      const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
+      const runtimeId = caller ? this.creationAuthority?.runtimeId ?? null : undefined
       return this.messageQueue.listDispatches(input, async () => {
         if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
       }, runtimeId)
@@ -5073,7 +5073,11 @@ export class AgentMuxClient {
   }
 
   private async dispatchIdentityDiagnostics(messages: readonly AgentMuxMessageEnvelope[]): Promise<readonly DispatchIdentityDiagnostic[]> {
-    const runtimeId = messages.some(message => message.senderRuntimeId || message.recipientRuntimeId) ? (await this.agentMessageAuthority()).runtimeId : undefined
+    const runtimeId = this.creationAuthority?.runtimeId
+    if (runtimeId === undefined && messages.some(message => message.senderRuntimeId || message.recipientRuntimeId)) return messages.flatMap(message => [
+      { agentSessionId: message.senderSessionId!, runId: message.senderRunId! }, { agentSessionId: message.recipientSessionId!, runId: message.recipientRunId! }
+    ].filter(participant => participant.agentSessionId && participant.runId).map(participant => ({ ...participant, code: 'DISPATCH_IDENTITY_UNAVAILABLE' as const,
+      message: 'The original local Runtime identity is unavailable. Recorded communication remains readable; restore that same Runtime owner before attributing a participant.' })))
     const participants = new Map<string, Set<string>>()
     for (const message of messages) for (const [id, runId, participantRuntimeId] of [
       [message.senderSessionId, message.senderRunId, message.senderRuntimeId], [message.recipientSessionId, message.recipientRunId, message.recipientRuntimeId]
@@ -5099,7 +5103,7 @@ export class AgentMuxClient {
     capability: string, author: string, expectedRun: AgentMuxRunRef,
     messages: readonly AgentMuxMessageEnvelope[], semanticActor = false
   ): Promise<void> {
-    const runtimeId = messages.some(message => message.senderRuntimeId || message.recipientRuntimeId) ? (await this.agentMessageAuthority()).runtimeId : undefined
+    const runtimeId = messages.some(message => message.senderRuntimeId || message.recipientRuntimeId) ? this.requireCreationAuthority().runtimeId : undefined
     if (runtimeId && messages.some(message => !((message.senderSessionId === author && message.senderRuntimeId === runtimeId) || (message.recipientSessionId === author && message.recipientRuntimeId === runtimeId)))) throw new AgentMuxError('The current caller is not this original Runtime-qualified participant.', 'DISPATCH_PARTICIPANT_MISMATCH')
     // Admission runs inside the existing journal lock. The SessionStore is a separate authority,
     // not an atomic transaction with this journal; no Provider probe or Session write is added.

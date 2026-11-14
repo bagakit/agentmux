@@ -1531,7 +1531,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Browse the original journal without constructing bodies, delivery batches or consumer cursors. */
-  async listMessages(input: AgentMuxMessageQuery, reauthorize: () => Promise<void>, participantRuntimeId?: string): Promise<AgentMuxMessagePage> {
+  async listMessages(input: AgentMuxMessageQuery, reauthorize: () => Promise<void>, participantRuntimeId?: string | null): Promise<AgentMuxMessagePage> {
     const participantSessionId = nonEmpty(input.participantSessionId, 'Message participant Session id')
     if (input.direction !== 'incoming' && input.direction !== 'outgoing') throw new AgentMuxError(
       'Message direction must be incoming or outgoing.', 'INVALID_CONTROL_REQUEST')
@@ -1695,7 +1695,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Read exact original event metadata from both sides without decoding any message body. */
-  async listMessageEvents(input: AgentMuxMessageEventsQuery, reauthorize: () => Promise<void>, participantRuntimeId?: string): Promise<AgentMuxMessageEventsPage> {
+  async listMessageEvents(input: AgentMuxMessageEventsQuery, reauthorize: () => Promise<void>, participantRuntimeId?: string | null): Promise<AgentMuxMessageEventsPage> {
     input = parseMessageEventsQuery(input)
     const participant = input.participantSessionId, after = input.afterSequence ?? 0, limit = input.limit ?? 50
     const backward = input.latest === true || input.beforeSequence !== undefined
@@ -1987,7 +1987,7 @@ export class DurableAgentMuxMessageQueue {
 
   async listDispatches(
     input: { readonly participantSessionId: string; readonly afterSourceMessageId?: string; readonly limit?: number },
-    reauthorize: () => Promise<void>, participantRuntimeId?: string
+    reauthorize: () => Promise<void>, participantRuntimeId?: string | null
   ): Promise<DispatchPage> {
     const participantSessionId = nonEmpty(input.participantSessionId, 'Dispatch participant Session id')
     const limit = input.limit ?? 50

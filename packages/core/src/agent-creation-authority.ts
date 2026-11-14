@@ -80,7 +80,8 @@ export class AgentMuxCreationAuthority {
   private readonly identityPath: string
   private readonly trustDirectory: string
   private readonly messageTrustDirectory: string
-  private readonly runtimeId: string
+  /** Original Runtime address, available independently of lazy signing material. */
+  readonly runtimeId: string
   constructor(options: { stateDirectory: string; runtimeId: string }) {
     this.identityPath = join(options.stateDirectory, 'agent-creation-identity.json')
     this.trustDirectory = join(options.stateDirectory, 'agent-creation-trusted-sources')
