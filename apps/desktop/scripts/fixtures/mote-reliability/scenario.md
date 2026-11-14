@@ -10,4 +10,4 @@ CDP pointer actions open Profile and its actual Quick mode. Capture actual unkno
 
 Independent visual reviewer opens complete PNGs, checks hierarchy, branding, density, state honesty, actions/scroll/focus and draft retention, then records required corrections and final delivery verdict.
 
-For changes to the heartbeat badge, add `MOTE_HEARTBEAT_ICON=1` to capture the original launcher and Discussion in one process. Check the authored metronome at 13 px beside the bundled low-poly avatar and at 14 px in the header in both themes. Pause and attention stay distinct from the Agent status dot. A new original input receipt moves the pendulum once. Inspect the rest, swing and settled frames and the static reduced-motion appearance.
+For changes to the care perimeter, add `MOTE_HEARTBEAT_ICON=1` to capture the original 34 px launcher and 14 px Discussion symbol in one process. Check the low-poly face, ring coverage and independent status dot in both themes. Pause and attention have their own shaped segments. An original confirmed delivery lights the ring once. Inspect the rest, moving crest, settled and reduced-motion frames.
