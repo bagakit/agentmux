@@ -40,7 +40,9 @@ describe('Runtime-scoped Agent creation authority', () => {
     await other.identity()
     const replacement = await readFile(join(f.targetDirectory, '..', 'replacement', 'agent-creation-identity.json'))
     await writeFile(join(f.targetDirectory, 'agent-creation-identity.json'), replacement)
-    await expect(f.target.trust(input, { kind: 'user', id: 'user' })).rejects.toMatchObject({ code: 'AGENT_CREATION_TARGET_MISMATCH' })
+    // The original protected custody now detects replacement before a new key
+    // can become the target's current authority. No trust pin is published.
+    await expect(f.target.trust(input, { kind: 'user', id: 'user' })).rejects.toMatchObject({ code: 'AGENT_CREATION_AUTHORITY_INVALID' })
     expect(await f.target.listTrusted()).toEqual([])
     expect(await readFile(join(f.targetDirectory, 'agent-creation-identity.json'))).toEqual(replacement)
   })
@@ -53,7 +55,8 @@ describe('Runtime-scoped Agent creation authority', () => {
     expect(identities.every(identity => JSON.stringify(identity) === JSON.stringify(identities[0]))).toBe(true)
     expect(Object.keys(identities[0]!).sort()).toEqual(['fingerprint', 'publicKey', 'runtimeId'])
     expect((await stat(join(f.sourceDirectory, 'agent-creation-identity.json'))).mode & 0o777).toBe(0o600)
-    expect(await readdir(f.sourceDirectory)).toEqual(['agent-creation-identity.json'])
+    expect((await stat(join(f.sourceDirectory, 'agent-creation-identity.json.original'))).mode & 0o777).toBe(0o600)
+    expect(await readdir(f.sourceDirectory)).toEqual(['agent-creation-identity.json', 'agent-creation-identity.json.original'])
   })
 
   it('requires an explicit user pin and preserves verified source and delegator across reloads', async () => {
