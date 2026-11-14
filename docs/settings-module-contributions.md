@@ -22,7 +22,12 @@ export const featureSettingsModule = {
 } as const satisfies SettingsModule
 ```
 
-模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有目录中的组身份，具体设置结构沿[设置分区合同](design/behavior/settings-and-observation.md#分区资源与配置生效)。组顺序由 `settings-catalog.ts` 的唯一 `SETTINGS_GROUPS` 表达，注册数组决定组内次序；所有导航投影沿同一目录。Work、Know、Mote 各模块保持原偏好和管理 owner；Club 与 Note 的导航标题不改变既有 `mote`／`notes` 分区 ID。支持选中动作的图标由模块 `selectionAnimation` 显式声明，不从组名推断，以免移动模块时丢失反馈。管理入口本身不生成 AppConfig 或新 CLI；只有新增实际偏好字段才补现 Main scalar 与公开调用者。Mods 的模块组 ID 是 `toolkit`，入口为 Toolkit Library。Remote 组织 Hosts 环境、Remote execution 双端执行工作与 Mobile 设备接入；Conversation Channels 以 InApp、Lark 和 Discord 组织 App 内对话配置入口与各平台外部应用管理，准确范围见[设置行为合同](design/behavior/settings-and-observation.md#设置页的信息架构)。分组不建立另一套配置或授权 owner，不复制共享编辑表单或将只读参考包装成可写偏好。
+模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。注册时守住以下约束：
+
+- `overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一。导航标题可以与 ID 不同，例如 Club 与 Note 的标题不改变既有 `mote`／`notes` 分区 ID；Mods 组的 ID 是 `toolkit`，入口为 Toolkit Library。
+- 组使用现有目录中的组身份。组顺序由 `settings-catalog.ts` 的唯一 `SETTINGS_GROUPS` 表达，注册数组决定组内次序，所有导航投影沿同一目录。各组实际包含哪些页面见[设置目录](settings-catalog.md)，产品分组与范围见[设置行为合同](design/behavior/settings-and-observation.md#设置页的信息架构)，具体设置结构沿[设置分区合同](design/behavior/settings-and-observation.md#分区资源与配置生效)。
+- 分组和管理入口不建立另一套配置或授权 owner：模块保持原偏好和管理 owner，不复制共享编辑表单，不把只读参考包装成可写偏好。管理入口本身不生成 AppConfig 或新 CLI；只有新增实际偏好字段才补 Main scalar 与公开调用者。
+- 支持选中动作的图标由模块 `selectionAnimation` 显式声明，不从组名推断，以免移动模块时丢失反馈。
 
 `archetype` 是必填的呈现类型：`preference`、`library`、`console` 或 `reference`。按真实内容选择；资源库和只读参考不必为了评估添加表单控件。字段定义见 [SettingsModule](../apps/desktop/src/renderer/src/components/settings/settings-catalog.ts)，各类型的阅读目标与测量判据由[呈现合同](design/presentation/settings-and-observation.md#分区层级与通用反馈)持有。
 
