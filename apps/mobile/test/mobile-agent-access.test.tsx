@@ -48,7 +48,7 @@ describe('original spatial Agent remains readable before SDK inventory hydration
     expect(rows).toHaveLength(2)
     await act(async () => rows[1]!.click())
     expect(f.open).toHaveBeenLastCalledWith('sid-second', expect.objectContaining({ context: expect.objectContaining({ regionId: 'region-second' }) }))
-    expect(rows[1]!.textContent).toContain('状态未确认')
+    expect(rows[1]!.textContent).toContain('元信息未确认')
     expect(f.rpc.mock.calls.map(([method]) => method)).toEqual(['space.ls'])
   })
   it('retains a Focus presentation row without substituting a fabricated SDK Session', async () => {

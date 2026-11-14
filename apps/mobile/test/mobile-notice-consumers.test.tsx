@@ -90,7 +90,7 @@ it('dismisses the actual unreadable device-storage warning while preserving orig
   expect(f.submit).not.toHaveBeenCalled()
 })
 
-it('closes an original unknown upload warning without deleting its reference, inspecting or retrying its exact operation', async () => {
+it('closes and reopens original unknown upload details without deleting its reference, inspecting or retrying its exact operation', async () => {
   const f = fixture(), controls = createRef<MobileAttachmentControls>(), insert = vi.fn(), pick = vi.fn()
   const original: MobileFileUpload = { runtimeId: 'original-runtime', phase: 'unknown', issue: '原上传回执未知',
     identity: { hostId: 'host-original', agentSessionId: 'session-original', expectedRun: { runId: 'run-original' },
@@ -99,13 +99,17 @@ it('closes an original unknown upload warning without deleting its reference, in
   f.client.forwardRpc = vi.fn()
   const view = await mount(<MobileNoticeProvider><MobileNoticeRestore /><MobileAttachments client={f.client} session={f.sessions.get('session-original')!}
     connected controls={controls} insert={insert} pickFile={pick} promptOperationId={null} confirmedPrompt={null} /></MobileNoticeProvider>)
-  await click(button(view.element.querySelector('.mobile-notice')!, '收起提醒'))
-  expect([...view.element.querySelectorAll('.mobile-notice')].map(node => node.textContent).join('')).not.toContain('原上传回执未知')
-  expect(view.element.querySelector('details.mobile-attachment-details')?.hasAttribute('open')).toBe(false)
-  expect(button(view.element, '核对 evidence.png 原上传')).toBeDefined()
+  const details = view.element.querySelector<HTMLDetailsElement>('details.mobile-attachment-details')!
+  expect(details.open).toBe(false)
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  expect(details.textContent).toContain('原上传回执未知')
+  expect(details.textContent).toContain(original.identity.operationId)
+  await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')) })
+  expect(details.open).toBe(false)
+  expect(button(view.element, '核对 evidence.png 上传')).toBeDefined()
   expect(view.element.querySelector('[aria-label="移除 evidence.png 本地引用"]')).toBeNull()
-  await click(button(view.element, '恢复已收起提醒'))
-  expect(view.element.textContent).toContain('原上传回执未知')
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  expect(details.textContent).toContain('原上传回执未知')
   expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([original])
   expect(f.client.forwardRpc).not.toHaveBeenCalled(); expect(insert).not.toHaveBeenCalled(); expect(pick).not.toHaveBeenCalled()
 })

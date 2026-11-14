@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { fixture, mount, mounted, session } from './conversation-fixture'
+import { fixture, mount, mounted, session, click } from './conversation-fixture'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
@@ -20,6 +20,7 @@ it.each(['exact', 'wrong-SID'] as const)('reads the recorded peer speaker throug
   const message = view.element.querySelector('[data-message-id="captured:original-peer-message"]')!
   expect(message).not.toBeNull()
   expect(message.querySelector('.log-turn__who')?.textContent).toBe(result === 'exact' ? 'Claude' : 'Agent')
+  await click(message.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!)
   expect(message.querySelector('.log-turn__sender-id')?.textContent).toContain('peer')
   expect(message.textContent).not.toContain('Gemini')
   pointRead.mockClear(); fullRead.mockClear()

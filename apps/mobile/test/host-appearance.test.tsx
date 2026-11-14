@@ -33,7 +33,7 @@ function Harness({ client, connected = true }: { client: AgentMuxHostedClient | 
   return <><textarea defaultValue="Original composer draft" aria-label="Composer" /><button aria-label="Copy"><SemanticIcon name="action.copy" /></button>
     <p role="status">{appearance.issue}</p><output>{appearance.terminalPalette?.background}</output><BrandIcon icon={appearance.appIcon} /></>
 }
-const until = async (ready: () => boolean) => { for (let i = 0; i < 100 && !ready(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) }); expect(ready()).toBe(true) }
+const until = async (ready: () => boolean) => { for (let i = 0; i < 100 && !ready(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) }); expect(ready(), container.textContent ?? '').toBe(true) }
 async function actualHost() {
   const f = await configOwnerFixture()
   const directory = await mkdtemp(join(tmpdir(), 'mobile-theme-'))
@@ -263,8 +263,9 @@ it('actual MobileApp keeps its workface usable while reporting an unavailable ap
   const client = { agentSessions: () => [], onEvent: () => () => {} } as unknown as AgentMuxHostedClient
   await act(async () => root.render(<MobileApp client={client} connection={{ state: 'connected', message: 'Retained transport' }}
     platform={createBrowserPlatform({ overlayContainer: () => container })} />))
-  await until(() => Boolean(container.querySelector('.mobile-service-notice')?.textContent?.includes('这个 Mac 尚未提供主题同步')))
-  expect(container.querySelector('.mobile-service-notice')?.textContent).toContain('暂用上次的主题和 App 图标')
+  const appearanceNotice = () => [...container.querySelectorAll('.mobile-service-notice')].find(node => node.textContent?.includes('这个 Mac 尚未提供主题同步'))
+  await until(() => Boolean(appearanceNotice()))
+  expect(appearanceNotice()?.textContent).toContain('暂用上次的主题和 App 图标')
   expect(container.querySelector('[aria-label="手机设置与连接"]')).not.toBeNull()
   expect(window.matchMedia).toHaveBeenCalledTimes(1)
 })
