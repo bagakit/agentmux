@@ -32,6 +32,7 @@ console.info = (...args) => {
 }
 const sources = new Map<string, BrowserPng>(), deliveries: any[] = []
 let deliveryGate: Promise<void> | null = null
+let releaseAlternate: (() => void) | null = null
 async function waitFor<T>(label: string, read: () => Promise<T>): Promise<NonNullable<T>> {
   const started = performance.now()
   while (performance.now() - started < 10000) {
@@ -158,6 +159,15 @@ async function waitOpen(background: CaptureBackground, before: Set<BrowserWindow
       expectedCrop ? 'only the explicit same-capture Retake receives its crop' : 'every fresh capture starts without initialCrop')
     const actualSource = await overlay.webContents.executeJavaScript(`document.querySelector('img').src`)
     assert.ok(actualSource === sources.get(background + ':' + infos[index].displayId)!.dataUrl, 'the actual editor image is the requested frozen source')
+    await overlay.webContents.executeJavaScript("window.proofSnapshots=[]; window.captureSurface.onEvent(event=>{if(event.kind==='snapshot')window.proofSnapshots.push(event)})")
+  }
+  await waitFor('the alternate producer is held until the selected surface is shown', async () => releaseAlternate)
+  releaseAlternate!(); releaseAlternate = null
+  const other = background === 'included' ? 'excluded' : 'included'
+  for (const [index, overlay] of overlays.entries()) {
+    const snapshot = await waitFor('the shown surface receives its alternate snapshot', async () => await overlay.webContents.executeJavaScript('window.proofSnapshots[0]'))
+    assert.equal(snapshot.background, other, 'the deferred snapshot preserves the exact alternate background')
+    assert.equal(snapshot.frame.image?.dataUrl, sources.get(other + ':' + infos[index].displayId)!.dataUrl, 'the deferred snapshot preserves the exact alternate pixels')
   }
   current.webContents.debugger.attach('1.3')
   current.webContents.on('console-message', event => process.stdout.write('renderer: '+event.message+'\n'))
@@ -195,6 +205,7 @@ async function run() {
   surface = new CaptureSurface({ native: () => ({ captureDisplays: async ({ includeHostWindows = false } = {}) => {
     const background: CaptureBackground = includeHostWindows ? 'included' : 'excluded', capturedAt = Date.now()
     receipt.grabs.push({ includeHostWindows, opacity: host.getOpacity(), capturedAt, observedMs: performance.now() })
+    if (receipt.grabs.length % 2 === 0) await new Promise<void>(resolve => { releaseAlternate = resolve })
     return { state: 'captured' as const, capturedAt, timing: { contentMs: 1, windowListMs: 1, responseSerializationMs: 1, totalMs: 3, lazyConnectionMs: 1, socketReadMs: 1, jsonParseMs: 1, requestMs: 4, validationMs: 1 }, displays: displays.map(display => {
       const image = sources.get(background + ':' + display.id)!
       return { displayId: display.id, frame: display.bounds, scale: 1, safeTop: 0, timing: { captureMs: 1, pngMs: 1, base64Ms: 0, totalMs: 2 },

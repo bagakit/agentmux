@@ -21,7 +21,7 @@ const mutations = [
     expected: 'the visible host keeps its exact prior opacity while editing', reached: native => native.grabs.length === 2 && native.cases.length === 1 },
   { id: 'swapped-background-sources', from: "for (const update of updates) send(update.overlay, { kind: 'snapshot', requestId: active.requestId, revision, background: mode, frame: update.frame })",
     to: "for (const update of updates) send(update.overlay, { kind: 'snapshot', requestId: active.requestId, revision, background: mode === 'included' ? 'excluded' : 'included', frame: update.frame })",
-    expected: 'the actual editor image is the requested frozen source', reached: native => native.grabs.length === 2 && native.cases.length === 1 },
+    expected: 'the deferred snapshot preserves the exact alternate background', reached: native => native.grabs.length === 2 && native.cases.length === 1 },
   { id: 'cross-request-recall', edits: [
     { from: '      const initialCrop = this.continued(frame, active.session.continuation)',
       to: '      const initialCrop = this.continued(frame, active.session.continuation ?? (this as any).recall)' },
