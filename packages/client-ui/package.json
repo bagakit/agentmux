@@ -24,11 +24,17 @@
       "browser": "./src/components/*.tsx",
       "import": "./dist/components/*.js"
     },
+    "./components/SelectionField": {
+      "types": "./src/components/SelectionField.tsx",
+      "browser": "./src/components/SelectionField.tsx",
+      "import": "./dist/components/SelectionField.js"
+    },
     "./components/SearchChoiceDialog": {
       "types": "./src/components/SearchChoiceDialog.tsx",
       "browser": "./src/components/SearchChoiceDialog.tsx",
       "import": "./dist/components/SearchChoiceDialog.js"
     },
+    "./styles/selection-field.css": "./src/styles/selection-field.css",
     "./styles/search-choice.css": "./src/styles/search-choice.css",
     "./patterns/agent-work-location": {
       "types": "./src/patterns/agent-work-location.tsx",

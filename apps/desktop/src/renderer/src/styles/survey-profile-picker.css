@@ -1,7 +1,7 @@
 .survey-profile-picker__trigger { min-height: 34px; padding: var(--sp-2) var(--sp-3); border-color: var(--line-soft); background: var(--wash-1); border-radius: var(--radius); }
 .survey-profile-picker__trigger .selection-field__choice > span:last-child { font-weight: 550; }
 .survey-profile-picker__trigger .profile-mark { flex: none; }
-.survey-profile-picker__menu.selection-field__menu[data-searchable] { width: max(var(--radix-dropdown-menu-trigger-width), 320px); max-height: min(460px, var(--radix-dropdown-menu-content-available-height)); padding: var(--sp-2); }
+.survey-profile-picker__menu.selection-field__menu[data-searchable] { width: max(var(--choice-anchor-width), 320px); max-height: min(460px, var(--choice-available-height)); padding: var(--sp-2); }
 .survey-profile-picker__menu .selection-field__search { margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) var(--sp-2); padding: var(--sp-3); }
 .survey-profile-picker__menu .selection-field__option { align-items: flex-start; padding: var(--sp-3); }
 .survey-profile-picker__menu .selection-field__mark { padding-top: 3px; }
