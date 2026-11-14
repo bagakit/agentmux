@@ -9,7 +9,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
-const sessions = Array.from({ length: 26 }, (_, index) => ({ ...composerSession(`retained-${index}`),
+const sessions = Array.from({ length: 26 }, (_, index) => ({ ...composerSession(`retained-${index}`), hostId: index === 25 ? 'local' : 'remote', control: { ...composerSession(`retained-${index}`).control, hostId: index === 25 ? 'local' : 'remote' },
+  workPlacement: { agentHostId: index === 25 ? 'local' : 'remote', resourceHostId: index === 25 ? 'remote' : 'local' },
   toolExecution: { bindingId: `binding-${index}`, resourceHostId: index === 25 ? 'remote' : 'local', workspacePath: '/original/project' } }))
 let config: AppConfig
 let width = 600
@@ -17,7 +18,7 @@ let resize: () => void
 beforeEach(() => {
   width = 600
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ width } as DOMRect))
-  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback } observe() {} disconnect() {} })
+  vi.stubGlobal('ResizeObserver', class { constructor(private callback: ResizeObserverCallback) {} observe(target: Element) { if (target.classList.contains('remote-execution-settings')) resize = () => this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this as unknown as ResizeObserver) } unobserve() {} disconnect() {} })
   config = { ...composerConfig, hosts: [{ id: 'local', kind: 'local', label: 'Studio' }, { id: 'remote', kind: 'ssh', label: 'Studio', hostname: 'controlled.invalid' }],
     workspaces: [{ id: 'local-project', name: 'Local unrelated project', hostId: 'local', path: '/original/project', kind: 'folder' },
       { id: 'remote-project', name: 'Unique resource project', hostId: 'remote', path: '/original/project', kind: 'folder' }] }
@@ -90,7 +91,7 @@ describe('Remote execution reading and navigation', () => {
     await act(async () => useAppStore.setState({ sessions: sessions.slice(0, 25) }))
     await pane(true)
     expect(dom.container.querySelector('[data-remote-open]')).toBeNull()
-    expect(dom.container.textContent).toContain('Binding not observed')
+    expect(dom.container.textContent).toContain('Work not observed')
     await dom.click('.remote-execution-back')
     expect(dom.container.querySelector<HTMLElement>('.remote-execution-library')!.hidden).toBe(false)
     expect(document.activeElement).toBe(dom.container.querySelector('input[type="search"]'))
@@ -106,15 +107,18 @@ describe('Remote execution reading and navigation', () => {
     expect(rows[0]!.textContent).not.toContain('Local unrelated project')
   })
 
-  it('More options shows the full selected Host ID and absolute path outside the native select', async () => {
+  it('the shared mode field shows the full chosen Host and absolute path outside its selection menu', async () => {
     config = { ...config, workspaces: config.workspaces.map(project => project.id !== 'remote-project' ? project : { ...project,
       name: 'An exceptionally long project name for the resource workstation', path: '/original/project/with/a/long/unambiguous/resource/location' }) }
     await pane()
-    await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.remote-execution-advanced')!.open = true; const files = dom.container.querySelector<HTMLSelectElement>('[aria-label="Project folder"]')!; files.value = 'remote-project'; files.dispatchEvent(new Event('change', { bubbles: true })); const agent = dom.container.querySelector<HTMLSelectElement>('[aria-label="Agent runs on"]')!; agent.value = 'local'; agent.dispatchEvent(new Event('change', { bubbles: true })) })
-    const target = dom.container.querySelector('[aria-label="Project identity"]')!
+    await act(async () => dom.container.querySelector<HTMLInputElement>('input[value="remote-project"]')!.click())
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Project for this arrangement"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+    await act(async () => document.querySelector<HTMLElement>('[role=menuitemradio][data-value="remote-project"]')!.click())
+    const target = dom.container.querySelector('.agent-work-end')!
     expect(target.textContent).toContain('An exceptionally long project name for the resource workstation')
-    expect([...target.querySelectorAll('code')].map(node => node.textContent)).toEqual(['remote', '/original/project/with/a/long/unambiguous/resource/location'])
-    expect(dom.container.querySelector<HTMLButtonElement>('[data-remote-prepare]')!.disabled).toBe(false)
+    expect(target.textContent).toContain('Studio · remote')
+    expect(target.querySelector('code')!.textContent).toBe('/original/project/with/a/long/unambiguous/resource/location')
+    expect(dom.container.querySelector<HTMLButtonElement>('.agent-work-setup__actions .primary-button')!.disabled).toBe(false)
     width = 1000; await act(async () => resize())
     await dom.click('[data-resource-row="retained-25"]')
     expect(dom.container.querySelector<HTMLElement>('.remote-execution-library')!.hidden).toBe(false)

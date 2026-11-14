@@ -48,6 +48,12 @@ async function graph(id: string) {
   return node
 }
 
+async function showSessions() {
+  const disclosure = [...editor().querySelectorAll<HTMLDetailsElement>('.remote-host-section')].find(node => node.querySelector('summary')!.textContent!.startsWith('Session references'))!
+  expect(disclosure).toBeDefined()
+  await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+}
+
 it('graph: an actual topology node selects the exact Host overview without moving focus into its editor', async () => {
   await show()
   const node = await graph(J)
@@ -110,7 +116,7 @@ it('session-navigation: existing Agent and Terminal rows on same-path Hosts navi
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   const releasePresentation = installDesktopPresentationOwner(() => ({ loading: false, overlays: { settings: true, quickSwitcher: false }, floating: null }))
   try {
-  await show(); await graph(H)
+  await show(); await graph(H); await showSessions()
   expect([...dom.container.querySelectorAll<HTMLElement>('[data-host-session]')].map(node => node.dataset.hostSession)).toEqual([agent.id, shell.id])
   expect(dom.container.querySelector('[data-host-session] [data-semantic-icon="action.open-external"]')).toBeNull()
   for (const session of [agent, shell]) {
@@ -121,7 +127,7 @@ it('session-navigation: existing Agent and Terminal rows on same-path Hosts navi
     expect(useAppStore.getState().tabs[`tab-${session.id}`]!.layout.activeRegionId).toBe(`region-${session.id}`)
   }
   expect(onClose).toHaveBeenCalledTimes(2)
-  await graph(J)
+  await graph(J); await showSessions()
   expect([...dom.container.querySelectorAll<HTMLElement>('[data-host-session]')].map(node => node.dataset.hostSession)).toEqual([other.id])
   expect(useAppStore.getState().sessions).toEqual([agent, shell, other])
   expect(Object.keys(useAppStore.getState().tabs)).toEqual(tabs.map(tab => tab.id))
@@ -137,7 +143,7 @@ it('session-navigation: a retained Session can create its original projection be
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   const release = installDesktopPresentationOwner(() => ({ loading: false, overlays: { settings: true, quickSwitcher: false }, floating: null }))
   try {
-    await show(); await graph(H); await dom.click(`[data-host-session="${session.id}"]`)
+    await show(); await graph(H); await showSessions(); await dom.click(`[data-host-session="${session.id}"]`)
     expect(onClose).toHaveBeenCalledOnce()
     const state = useAppStore.getState(), selection = state.workbenchSpaceSelection
     expect(selection?.tabId).toBeTypeOf('string')
@@ -160,7 +166,7 @@ it.each(['missing resource', 'ambiguous occurrence'])('session-navigation: %s re
   useAppStore.setState(state)
   const release = installDesktopPresentationOwner(() => ({ loading: false, overlays: { settings: true, quickSwitcher: false }, floating: null }))
   try {
-    await show(); await graph(H); await dom.click(`[data-host-session="${session.id}"]`)
+    await show(); await graph(H); await showSessions(); await dom.click(`[data-host-session="${session.id}"]`)
     expect(onClose, 'Remote keeps context after owner navigation refusal').not.toHaveBeenCalled()
     expect(editor().dataset.resourceEditor).toBe(H)
     expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
@@ -185,13 +191,13 @@ it('Agent configuration Refresh uses original local detection and exact remote d
   expect(local).toHaveBeenCalledWith('codex', 'local')
   expect(remote).not.toHaveBeenCalled()
   local.mockClear(); detect.mockClear()
-  await act(async () => [...editor().querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Refresh')!.click())
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('[aria-label="Executors on this environment"] button')].find(node => !node.closest('[hidden],[inert]') && node.textContent === 'Refresh')!.click())
   expect(detect).toHaveBeenCalledExactlyOnceWith('local')
   expect(local).toHaveBeenCalledExactlyOnceWith('codex', 'local')
   await leaf(J, 'agents')
   expect(remote).toHaveBeenCalledWith(J)
   remote.mockClear(); detect.mockClear()
-  await act(async () => [...editor().querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Refresh')!.click())
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('[aria-label="Executors on this environment"] button')].find(node => !node.closest('[hidden],[inert]') && node.textContent === 'Refresh')!.click())
   expect(detect).toHaveBeenCalledExactlyOnceWith(J)
   expect(remote).toHaveBeenCalledExactlyOnceWith(J)
 })
@@ -261,14 +267,17 @@ it('route: the mounted workbench labels the exact configured user, port and bind
   useAppStore.setState({ config })
   await show(); await graph(H)
   const node = dom.container.querySelector(`[data-host-node="${H}"]`)!
-  expect(node.querySelector('[data-route-user]')?.textContent, 'Configured SSH user stays on its exact Host node').toBe('developer')
-  expect(node.querySelector('[data-route-port]')?.textContent).toBe('2222')
-  expect(node.querySelector('[data-route-runtime]')?.textContent).toBe('controlled-bound-runtime')
+  await act(async () => node.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  const detail = () => document.querySelector('[role="tooltip"]')!
+  expect(detail().querySelector('[data-route-user]')?.textContent, 'Configured SSH user is readable on the exact Host focus').toBe('developer')
+  expect(detail().querySelector('[data-route-port]')?.textContent).toBe('2222')
+  expect(detail().querySelector('[data-route-runtime]')?.textContent).toBe('controlled-bound-runtime')
+  await graph(J)
   const adjacent = dom.container.querySelector(`[data-host-node="${J}"]`)!
-  expect(adjacent.querySelector('[data-route-user]')?.textContent).toBe('SSH config')
-  expect(adjacent.querySelector('[data-route-port]')?.textContent).toBe('SSH config')
-  expect(adjacent.querySelector('[data-route-runtime]')?.textContent).toBe('Unconfirmed')
-  expect(dom.container.querySelector('[data-host-node="local"] [data-route-port]')?.textContent).toBe('Not applicable')
+  await act(async () => adjacent.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  expect(detail().querySelector('[data-route-user]')?.textContent).toBe('SSH config')
+  expect(detail().querySelector('[data-route-port]')?.textContent).toBe('SSH config')
+  expect(detail().querySelector('[data-route-runtime]')?.textContent).toBe('Unconfirmed')
   expect(dom.container.querySelector('.react-flow__background')).toBeNull()
   expect(onSave).not.toHaveBeenCalled()
 })

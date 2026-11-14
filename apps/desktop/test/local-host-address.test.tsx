@@ -34,7 +34,7 @@ it('reads this local Owner once and renders its preferred LAN address without pr
   expect(network).toHaveBeenCalledOnce()
   expect(network.mock.calls[0]![0]).toEqual(config.hosts[0])
   expect(localNode().querySelector('.remote-host-node__address')?.textContent).toBe('192.168.40.12')
-  expect(localNode().querySelector('[data-route-user]')?.textContent).toBe('en0')
+  expect(localNode().querySelector('.remote-host-node__context')?.textContent).toContain('en0')
   expect(localNode().textContent).not.toContain('192.168.99.1')
   await show()
   const zoom = dom.container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!
