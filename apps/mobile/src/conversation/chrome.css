@@ -200,3 +200,5 @@
 .mobile-session-diagnostic > details, .mobile-session-diagnostic__source > details { margin-block: var(--sp-3); font-size: var(--fs-meta); }
 .mobile-session-diagnostic details > summary { min-height: 44px; align-content: center; color: var(--text-2); }
 .mobile-app .mobile-conversation-history-state { color: var(--text-2); font-size: var(--fs-micro); white-space: nowrap; }
+
+.mobile-app[data-short] .mobile-session-toolbar { min-height: 44px; padding-block: 0; }

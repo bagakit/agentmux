@@ -12,7 +12,7 @@
   --mobile-muted: var(--text-3);
   --mobile-accent: var(--green);
   --mobile-border: var(--line-soft);
-  --mobile-control-surface: 36px;
+  --mobile-control-surface: 32px;
   --mobile-safe-left: env(safe-area-inset-left, 0px);
   --mobile-safe-right: env(safe-area-inset-right, 0px);
   --text-muted: var(--text-3);
@@ -32,8 +32,8 @@
   --sp-6: 16px;
   --sp-7: 24px;
   --sp-8: 32px;
-  --mobile-gutter: var(--sp-6);
-  --mobile-row: 64px;
+  --mobile-gutter: var(--sp-5);
+  --mobile-row: 52px;
   --mobile-menu-row: 48px;
   --mobile-tab-bar: 56px;
   --dur-fast: 120ms;
@@ -240,7 +240,7 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-home-settings strong { font-size: var(--fs-lead); font-weight: 500; }
 .mobile-home-settings small, .mobile-menu-row small { display: block; color: var(--text-3); overflow-wrap: anywhere; font-size: var(--fs-meta); margin-top: 2px; }
 .mobile-home-settings input { accent-color: var(--green); width: 18px; height: 18px; }
-.mobile-menu-row { width: 100%; border-top: 0; border-left: 0; border-right: 0; color: var(--text); background: transparent; text-align: left; font: inherit; cursor: pointer; min-height: 48px; padding: 6px 0; gap: 10px; font-size: var(--fs-body); }
+.mobile-menu-row { width: 100%; border-top: 0; border-left: 0; border-right: 0; color: var(--text); background: transparent; text-align: left; font: inherit; cursor: pointer; min-height: var(--mobile-menu-row); padding: 6px 0; gap: 10px; font-size: var(--fs-body); }
 .mobile-menu-row[aria-current='page'] { color: var(--green); background: var(--surface-1); border-radius: var(--mobile-radius-sm); padding-inline: 8px; }
 .mobile-mote-profile { color: var(--text); font-size: var(--fs-body); }
 .mobile-mote-profile__defaults { display: grid; grid-template-columns: minmax(82px, 1fr) minmax(0, 1.8fr); gap: 14px 12px; margin: 18px 0; }
@@ -583,4 +583,8 @@ button:disabled { opacity: .5; cursor: default; }
 /* The original More owner stays mounted while its position child is in front. */
 .mobile-sheet--underlay, .mobile-sheet-backdrop--underlay { visibility: hidden; pointer-events: none; }
 
+/* A document has one rhythm; Mobile does not accumulate Desktop heading and block gaps. */
+.mobile-app .md-document { gap: var(--sp-4); }
+.mobile-app .md-document .md-heading { margin-top: var(--sp-4); }
+.mobile-app .md-document > :first-child { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) { .mobile-app { transition: none; } }

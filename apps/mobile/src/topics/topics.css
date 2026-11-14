@@ -21,7 +21,7 @@
 .mobile-topics input, .mobile-topics textarea, .mobile-topics select { min-height: 44px; border: 1px solid var(--line-soft); border-radius: var(--mobile-radius-sm); background: var(--surface-1); color: var(--text); padding: var(--sp-4); font: inherit; font-size: 16px; }
 .mobile-topics-search input { flex: 1; min-width: 0; }
 .mobile-topics-list { list-style: none; margin: var(--sp-4) 0; padding: 0; }
-.mobile-topics-list button { width: 100%; text-align: left; display: grid; gap: var(--sp-2); background: transparent; border: 0; border-radius: var(--mobile-radius-sm); padding: 8px 0; min-height: 48px; }
+.mobile-topics-list button { width: 100%; text-align: left; display: grid; gap: var(--sp-2); background: transparent; border: 0; border-radius: var(--mobile-radius-sm); padding: 8px 0; min-height: var(--mobile-row); }
 .mobile-topics-list button[aria-current="page"] { background: var(--surface-2); }
 .mobile-topics-list strong { font-size: var(--fs-body); font-weight: 600; overflow-wrap: anywhere; }
 .mobile-topics small, .mobile-topics-empty { color: var(--text-3); font-size: var(--fs-meta); }
@@ -61,10 +61,10 @@
 @media (prefers-reduced-motion: reduce) { .mobile-topics-category > svg { transition: none; } }
 
 /* Grouped tree: categories and Topics on one surface, matching the directory list. */
-.mobile-app .mobile-topics-tree { margin-block: var(--sp-4); padding: 4px 0; border-radius: var(--mobile-radius-group); background: var(--mobile-group); }
+.mobile-app .mobile-topics-tree { margin-block: var(--sp-4); padding: 2px 0; border-radius: var(--mobile-radius-group); background: var(--mobile-group); }
 .mobile-app .mobile-topics-tree > li { margin: 0; }
 .mobile-app .mobile-topics-tree > li + li { border-top: 1px solid var(--mobile-hairline); }
-.mobile-app .mobile-topics-tree button.mobile-topics-category, .mobile-app .mobile-topics-tree button.mobile-topics-topic { min-height: 52px; padding: 8px 14px; border-radius: 0; font-size: var(--fs-lead); font-weight: 600; }
+.mobile-app .mobile-topics-tree button.mobile-topics-category, .mobile-app .mobile-topics-tree button.mobile-topics-topic { min-height: var(--mobile-row); padding: 6px 10px; border-radius: 0; font-size: var(--fs-lead); font-weight: 600; }
 .mobile-app .mobile-topics-tree button.mobile-topics-topic { font-size: var(--fs-body); font-weight: 550; }
 .mobile-app .mobile-topics-tree button:active { background: var(--mobile-group-press); }
 
