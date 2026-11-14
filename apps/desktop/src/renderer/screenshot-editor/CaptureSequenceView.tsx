@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { BROWSER_PNG_MAX_BYTES, BROWSER_PNG_MAX_DIMENSION, BROWSER_PNG_MAX_PIXELS } from '@agentmux/browser/model/page'
 import type { BrowserPng } from '../../shared/contracts'
 import type { CaptureSequenceApi, CaptureSequenceInput, GifKeyframe, SequenceFrame, SequenceSnapshot } from '../../shared/capture-sequence'
 import { inspectGif, writeGifMetadata } from '../../shared/gif-metadata'
@@ -19,21 +20,41 @@ function png(canvas: HTMLCanvasElement): BrowserPng {
 /** Compose only confirmed overlaps; no guessed join is exported. */
 export async function stitchFrames(frames: SequenceFrame[]): Promise<BrowserPng> {
   if (!frames.length) throw new Error('Capture at least one frame.')
-  let previous = await pixels(frames[0]!.image), height = previous.canvas.height
-  const parts = [{ canvas: previous.canvas, shift: height }]
-  for (const frame of frames.slice(1)) {
-    const next = await pixels(frame.image), { shift } = matchScroll(previous.pixels, next.pixels)
-    parts.push({ canvas: next.canvas, shift }); height += shift; previous = next
+  const width = frames[0]!.image.width
+  const parts: HTMLCanvasElement[] = []
+  let previous: PixelFrame | undefined
+  let height = 0
+  for (const frame of frames) {
+    const next = await pixels(frame.image)
+    const shift = previous ? matchScroll(previous, next.pixels).shift : next.canvas.height
+    previous = next.pixels
+    height += shift
+    if (width > BROWSER_PNG_MAX_DIMENSION || height > BROWSER_PNG_MAX_DIMENSION || width * height > BROWSER_PNG_MAX_PIXELS)
+      throw new Error('This screenshot exceeds the PNG dimension limit. Undo the last frame or retake a smaller region.')
+    if (shift === next.canvas.height) parts.push(next.canvas)
+    else {
+      // Keep only the new rows of overlapping viewports until the final height is known.
+      if (shift > 0) {
+        const strip = document.createElement('canvas')
+        strip.width = width; strip.height = shift
+        strip.getContext('2d')!.drawImage(next.canvas, 0, shift - next.canvas.height)
+        parts.push(strip)
+      }
+      next.canvas.width = 0
+    }
   }
-  const canvas = document.createElement('canvas'); canvas.width = previous.canvas.width; canvas.height = height
-  const context = canvas.getContext('2d')
-  if (!context || canvas.width * height > 64 * 1024 * 1024) throw new Error('This long image exceeds the 64 megapixel canvas budget. Undo the last frame and finish the existing image.')
+  const canvas = document.createElement('canvas')
+  canvas.width = width; canvas.height = height
+  const context = canvas.getContext('2d')!
   let y = 0
   for (const part of parts) {
-    if (part.shift) { context.drawImage(part.canvas, 0, part.canvas.height - part.shift, part.canvas.width, part.shift, 0, y, part.canvas.width, part.shift); y += part.shift }
-    part.canvas.width = 0; part.canvas.height = 0
+    context.drawImage(part, 0, y)
+    y += part.height
+    part.width = 0
   }
-  return png(canvas)
+  const result = png(canvas)
+  if (result.byteLength > BROWSER_PNG_MAX_BYTES) throw new Error('This screenshot exceeds the PNG file size limit. Undo the last frame or retake a smaller region.')
+  return result
 }
 
 type Decoder = { tracks: { ready: Promise<void>; selectedTrack: { frameCount: number } }; decode(input: { frameIndex: number }): Promise<{ image: VideoFrame }>; close(): void }

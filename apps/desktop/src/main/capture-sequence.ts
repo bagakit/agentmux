@@ -167,7 +167,6 @@ export class CaptureSequenceOwner {
     record.inflight = (async () => {
       const input = record.input!, window = record.window!
       if (record.ending) throw new Error('This original capture has ended.')
-      if (input.frames.reduce((size, frame) => size + frame.image.byteLength, 0) >= MAX_FRAME_BYTES) throw new Error('Captured PNG frames reached the 64 MB review budget. Finish this sequence or undo frames before capturing more.')
       const windowId = Number(window.getMediaSourceId().split(':')[1])
       if (!Number.isSafeInteger(windowId) || windowId <= 0) throw new Error('The exact capture control window could not be excluded. Existing frames are kept.')
       const automaticScroll = input.mode === 'scroll' && ['recording', 'stopping'].includes(record.receipt.state)
@@ -196,13 +195,16 @@ export class CaptureSequenceOwner {
         try { shift = previous.dataUrl === image.dataUrl ? 0 : matchScroll(pixels(previous), pixels(image)).shift }
         catch (error) {
           if (!(error instanceof ScrollOverlapError)) throw error
-          record.receipt.issue = input.issue = message(error)
-          await this.persist(record)
+          if (input.issue !== message(error)) {
+            record.receipt.issue = input.issue = message(error)
+            await this.persist(record)
+          }
           return
         }
         if (input.issue || record.receipt.issue) { input.issue = record.receipt.issue = null; await this.persist(record) }
         if (shift === 0) return
       }
+      if (input.frames.reduce((size, frame) => size + frame.image.byteLength, image.byteLength) > MAX_FRAME_BYTES) throw new Error('Captured PNG frames reached the 64 MB review budget. Finish this sequence or undo frames before capturing more.')
       const capturedAt = Date.now(), last = input.frames.at(-1)
       if (last) last.delayMs = Math.max(10, Math.round((capturedAt - last.capturedAt) / 10) * 10)
       input.frames.push({ image, capturedAt, delayMs: Math.max(10, Math.round(100 / record.fps) * 10) })
