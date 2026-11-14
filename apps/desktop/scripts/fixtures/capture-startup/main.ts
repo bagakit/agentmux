@@ -147,6 +147,8 @@ async function capture(iteration: number) {
   assert.ok(row.grabs.every((grab: any) => grab.displayProducerMs.every((value: any, index: number) => value.delayMs === 200 + index * 40 && value.totalMs >= value.delayMs)),
     'each display has its own real producer delay')
   assert.ok(row.timing.presentedMs.length === count && row.timing.presentedMs.every((value: unknown) => typeof value === 'number' && Number.isFinite(value)))
+  assert.ok(row.timing.shownMs + 1 >= Math.max(...row.timing.presentedMs), 'the native show follows the selected canvas presentation, never a blank early shell')
+  assert.ok(row.timing.shownMs <= observedShownMs + 20 && actualShownMs + 20 >= row.timing.shownMs, 'independent visibility and the exact DOM observation bracket the production show')
   if (variant === 'baseline') assert.ok(row.grabs.length === 2 && actualShownMs >= row.grabs[1].returnedMs, 'the old path shows only after both exposures')
   else {
     assert.equal(row.grabs[1].returnedMs, undefined, 'the alternate producer is still pending after the selected show')
