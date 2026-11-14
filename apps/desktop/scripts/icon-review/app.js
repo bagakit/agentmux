@@ -218,10 +218,10 @@ function renderMoteFamily() {
   const roles=[
     {id:'agent',label:'Agent',note:'普通执行会话。当前方头与双眼留白，保持静止。',role:'object.agent',markup:size=>semantic('object.agent',size)},
     {id:'mote',label:'Mote',note:'持久搭档身份。保留单侧抬起、偏置双眼的原轮廓。',role:'object.mote',markup:size=>semantic('object.mote',size)},
-    {id:main.id,label:'Mote 主对话',note:main.description,candidate:true,markup:size=>drawingMarkup(main.shapes,size)}
+    {id:main.id,label:main.label,note:main.description,candidate:true,markup:size=>drawingMarkup(main.shapes,size)}
   ];
   const promotions=futureDesigns.filter(item=>['mote-promotion-b','mote-promotion-b2'].includes(item.id));
-  return `<section class="mote-family" aria-label="Mote 图标家族"><p class="eyebrow">IDENTITY / ROLE / ACTION</p><h2>Mote，与它一起工作的角色</h2><p class="mote-family-intro">先分清身份、主对话角色与晋升动作，再比较小尺寸。当前图形随主题；候选尚未进入产品。</p><div class="mote-goal-reference" aria-label="Goal 角色造型参照"><img src="${escape(goalReference.url)}" alt="Goal 伙伴抬手时的双角侧脸"><span aria-hidden="true">${drawingMarkup(main.shapes,64)}</span><div><h3>Goal 伙伴与双角 Mote</h3><p>从同一侧看，两只角一高一低，侧眼沿面颊微微上扬。</p></div></div><div class="mote-family-grid">${roles.map(moteFamilyCard).join('')}</div>
+  return `<section class="mote-family" aria-label="Mote 图标家族"><p class="eyebrow">IDENTITY / ROLE / ACTION</p><h2>Mote，与它一起工作的角色</h2><p class="mote-family-intro">先分清身份、主对话角色与晋升动作，再比较小尺寸。当前图形随主题；候选尚未进入产品。</p><div class="mote-goal-reference" aria-label="Goal 角色造型参照"><img src="${escape(goalReference.url)}" alt="Goal 伙伴抬手时的双角侧脸"><span aria-hidden="true">${drawingMarkup(main.shapes,64)}</span><div><h3>Goal 伙伴与 ${escape(main.label)}</h3><p>双角取自 Goal 伙伴，向右转的脸上保留了 Agent 和 Mote 的标志性双眼。</p></div></div><div class="mote-family-grid">${roles.map(moteFamilyCard).join('')}</div>
     <section class="mote-agent-comparison" aria-label="Agent 体量比较"><div><h3>方头 Agent，收小一点</h3><p>候选将默认绘图收至 92%，图标槽与点击区域不变。先比较视觉重量，尚未修改默认。</p></div><div class="mote-agent-pairs">${[14,16,24].map(size=>`<span><span>${drawingMarkup(data.glyphs['agent-unit'],size)}${drawingMarkup(compact,size)}</span><small>${size}px · 原 / 候选</small></span>`).join('')}</div></section>
     <section class="mote-promotion-family" aria-label="晋升图标候选"><div class="mote-family-subhead"><h3>合作，成为伙伴</h3><p>晋升是动作，不是新角色。B 是已认可方向，B2 是精修建议。</p></div><div class="mote-promotion-grid">${promotions.map(item=>moteFamilyCard({id:item.id,label:item.label,note:item.description,candidate:true,markup:size=>drawingMarkup(item.shapes,size)})).join('')}</div></section></section>`;
 }
