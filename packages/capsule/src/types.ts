@@ -195,7 +195,33 @@ export interface CapsulePresentationPort {
     context?: CapsuleCallContext,
   ): Promise<CapsuleOpenResult | null>
 }
+/** Bound one wire allocation; consecutive chunks never impose a total asset-size limit. */
+export const CAPSULE_ASSET_CHUNK_BYTES = 256 * 1024
+export interface CapsuleAssetReadParams {
+  capsuleId: string
+  expectedRevision: number
+  expectedInstanceId: string
+  path: string
+  offset: number
+  length: number
+  assetStamp?: string
+  accept?: string
+  head?: boolean
+}
+export interface CapsuleAssetReadResult {
+  capsuleId: string
+  revision: number
+  instanceId: string
+  status: 200 | 400 | 403 | 404
+  contentType: string
+  totalBytes: number
+  offset: number
+  bytesBase64: string
+  assetStamp: string | null
+  eof: boolean
+}
 export interface CapsuleParamsMap {
+  'capsule.asset.read': CapsuleAssetReadParams
   'capsule.ls': Record<string, never>
   'capsule.inspect': { capsuleId: string }
   'capsule.resolve': { capsuleId: string }
@@ -239,6 +265,7 @@ export interface CapsuleParamsMap {
   }
 }
 export interface CapsuleResultMap {
+  'capsule.asset.read': CapsuleAssetReadResult
   'capsule.ls': { capsules: CapsuleInspection[]; issues: CapsuleIssue[] }
   'capsule.inspect': CapsuleInspection
   'capsule.resolve': { capsuleId: string; endpoint: CapsuleEndpoint }
@@ -257,6 +284,7 @@ export interface CapsuleResultMap {
 }
 export type CapsuleMethod = keyof CapsuleParamsMap
 export const CAPSULE_METHODS = {
+  'capsule.asset.read': 'short',
   'capsule.ls': 'short',
   'capsule.inspect': 'short',
   'capsule.resolve': 'short',

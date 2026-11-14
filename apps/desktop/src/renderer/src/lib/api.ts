@@ -437,6 +437,7 @@ const mockApi: AgentMuxDesktopApi = {
     scope: 'renderer-v8-isolate', heap: null, unavailable: 'Renderer process observation requires the desktop app.' } }),
   capsuleReplies: { confirm: async () => { throw Object.assign(new Error('Confirm Capsule answers in the original Desktop App. This preview did not submit input.'), { code: 'CONTROL_UNAVAILABLE' }) } },
   capsules: { call: async () => { throw Object.assign(new Error('Capsule requires its original Desktop Host. Pages and operations are retained; this preview did not perform the request.'), { code: 'CONTROL_UNAVAILABLE' }) } },
+  capsulePages: { call: async () => { throw Object.assign(new Error('The original Capsule Browser requires Desktop. Its page and drafts are retained.'), { code: 'CONTROL_UNAVAILABLE' }) } },
   agentLearning: {
     call: async () => { throw Object.assign(new Error('Learning requires its original Host. The source, draft and operation are retained.'), { code: 'CONTROL_UNAVAILABLE' }) },
     confirm: async () => { throw Object.assign(new Error('Learning confirmation requires the actual trusted App action. No task was delivered.'), { code: 'CONTROL_UNAVAILABLE' }) }

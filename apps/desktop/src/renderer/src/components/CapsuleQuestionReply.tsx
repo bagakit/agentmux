@@ -29,8 +29,8 @@ function inputObservationLabel(delivery: CapsuleInputObservation | undefined): s
 }
 
 /** The form holds editable bytes only. Original requests, drafts, answers and delivery stay with Capsule/Core. */
-export function CapsuleQuestionReply({ browserId, visible = true, interaction, onUpdated }: {
-  browserId?: string; visible?: boolean; interaction: CapsuleInteraction; onUpdated(value: CapsuleInteraction): void
+export function CapsuleQuestionReply({ browserId, visible = true, interaction, onUpdated, remote }: {
+  browserId?: string; visible?: boolean; remote?: import('../../../shared/contracts').CapsuleRemoteSource | undefined; interaction: CapsuleInteraction; onUpdated(value: CapsuleInteraction): void
 }) {
   const [current, setCurrent] = useState(interaction)
   const { editor, issue, retainedOperationId, read, update, flush } = useCapsuleQuestionEditor(browserId, interaction)
@@ -69,7 +69,7 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
     if (!begin(held)) return
     await observeCapsuleQuestionAttempt(held, async () => {
       let dispatched = false
-      try { await flush(); if (!stillPending(held)) return; dispatched = true; finish(held, (await api.capsules.call(held.method, held.params)).interaction) }
+      try { await flush(); if (!stillPending(held)) return; dispatched = true; finish(held, (await (remote && browserId ? api.capsulePages.call(browserId, held.method, held.params) : api.capsules.call(held.method, held.params))).interaction) }
       catch (error) { annotate(held, !dispatched || definitelyNotApplied(error)
         ? `The draft was not saved. Your text is retained. ${presentError(error)}`
         : `Draft save is unconfirmed. Your text is retained. ${presentError(error)}`, !dispatched || definitelyNotApplied(error)) }
@@ -105,13 +105,13 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
     if (issue || !held || inspecting) return
     setInspecting(true)
     try {
-      const { operation } = await api.capsules.call('capsule.operation.inspect', { operationId: held.params.operationId })
+      const { operation } = await (remote && browserId ? api.capsulePages.call(browserId, 'capsule.operation.inspect', { operationId: held.params.operationId }) : api.capsules.call('capsule.operation.inspect', { operationId: held.params.operationId }))
       if (!operation || operation.status === 'pending') { annotate(held, 'Checked just now. Nothing was sent again.'); return }
       if (operation.operationId !== held.params.operationId || operation.method !== held.method || operation.capsuleId !== held.params.capsuleId) {
         annotate(held, 'The original operation identity could not be confirmed. Your answer and operation are retained.'); return
       }
       if (operation.status === 'failed') {
-        const latest = await api.capsules.call('capsule.interaction.inspect', { capsuleId: current.capsuleId, interactionId: current.interactionId })
+        const latest = await (remote && browserId ? api.capsulePages.call(browserId, 'capsule.interaction.inspect', { capsuleId: current.capsuleId, interactionId: current.interactionId }) : api.capsules.call('capsule.interaction.inspect', { capsuleId: current.capsuleId, interactionId: current.interactionId }))
         accept(latest.interaction)
         update(saved => sameAttempt(saved.attempt, held) ? { ...saved, attempt: null, autoSave: false,
           baseline: { value: latest.interaction.answer ?? latest.interaction.draft, revision: latest.interaction.revision },
@@ -154,21 +154,22 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
         onChange={event => { const value = event.target.value; if (!issue) update(saved => ({ ...saved, answer: value, autoSave: true })) }} rows={3} />
     </label>
     {current.target ? <details className="capsule-question__recipient"><summary>Send to original Agent <code>{current.target.agentSessionId}</code></summary>
-      <dl><dt>Host</dt><dd><code>{current.target.hostId}</code></dd><dt>Session</dt><dd><code>{current.target.agentSessionId}</code></dd></dl></details>
+      <dl>{remote ? <><dt>Original node</dt><dd><code>{remote.hostId}</code></dd></> : null}<dt>{remote ? 'Recipient Host on that node' : 'Host'}</dt><dd><code>{current.target.hostId}</code></dd><dt>Session</dt><dd><code>{current.target.agentSessionId}</code></dd></dl></details>
       : <p className="capsule-question__notice">No original Agent recipient is bound. The request and draft remain available.</p>}
     {current.status === 'answered' && answer !== current.answer && answer !== current.draft ? <details><summary>Your later unsent text</summary><p className="capsule-question__retained">{answer}</p></details> : null}
     <div className="capsule-question__actions">
       {current.status === 'pending' ? <>
         <span role="status">{attempt?.pending ? 'Saving original operation…' : dirty ? 'Unsaved draft' : 'Draft saved'}</span>
         <button type="button" className="small-button capsule-question__save" disabled={Boolean(issue) || !dirty || Boolean(attempt)} onClick={() => void saveDraft()}>Save draft</button>
-        <button type="button" className="primary-button capsule-question__confirm" disabled={Boolean(issue) || Boolean(attempt) || !current.target || !answer.trim()}
-          onClick={() => void confirm()}>Confirm answer</button>
+        {!remote ? <button type="button" className="primary-button capsule-question__confirm" disabled={Boolean(issue) || Boolean(attempt) || !current.target || !answer.trim()}
+          onClick={() => void confirm()}>Confirm answer</button> : null}
       </> : <span role="status">Answer saved{delivery ? ` · ${inputObservationLabel(delivery)}` : ''}</span>}
-      {current.status === 'answered' && current.reply?.phase === 'prepared' && (delivery?.status === 'unknown' || delivery?.status === 'unavailable') ?
+      {!remote && current.status === 'answered' && current.reply?.phase === 'prepared' && (delivery?.status === 'unknown' || delivery?.status === 'unavailable') ?
         <button type="button" className="small-button" disabled={Boolean(issue) || attempt?.pending || inspecting} onClick={() => void confirm(true)}>Continue saved confirmation</button> : null}
       {attempt && !attempt.pending ? <button type="button" className="primary-button capsule-question__confirm" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? 'Inspecting…' : 'Inspect original operation'}</button> : inspectSavedReply ?
         <button type="button" className={settled ? 'small-button' : 'primary-button capsule-question__confirm'} disabled={inspecting} onClick={() => void inspectRestored()}>Inspect original operation</button> : null}
     </div>
+    {remote ? <p className="capsule-question__notice">Drafts are saved on the original node. Confirm this answer in that node’s trusted App; this remote page cannot authorize Agent input.</p> : null}
     {issue ? <p className="capsule-question__notice" role="status">{issue}</p> : null}
     {notice ? <p className="capsule-question__notice" role="status">{notice}</p> : null}
     {attempt || current.reply || retainedOperationId ? <details><summary>Original operation</summary><code>{retainedOperationId ?? attempt?.params.operationId ?? current.reply?.operationId}</code>

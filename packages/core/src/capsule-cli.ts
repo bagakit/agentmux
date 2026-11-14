@@ -5,6 +5,7 @@ import type { AgentMuxCliCommand } from './agentmux-cli-commands.js'
 import { CAPSULE_RUNTIME_METHODS, parseCapsuleRuntimeParams, type CapsuleRuntimeMethod } from './capsule-runtime.js'
 
 const descriptions = {
+  'capsule.asset.read': 'Read one bounded byte span of an exact Capsule asset from its original service instance.',
   'capsule.ls': 'List durable local pages and their actual content/service observations.',
   'capsule.inspect': 'Inspect one exact original Capsule without opening a Browser.',
   'capsule.resolve': 'Read the original Capsule endpoint and service availability.',
@@ -23,6 +24,7 @@ const descriptions = {
 } satisfies Record<CapsuleMethod, string>
 
 const inputs = {
+  'capsule.asset.read': '{capsuleId,expectedRevision,expectedInstanceId,path,offset,length,assetStamp?,accept?,head?}',
   'capsule.ls': '{}',
   'capsule.inspect': '{capsuleId}',
   'capsule.resolve': '{capsuleId}',

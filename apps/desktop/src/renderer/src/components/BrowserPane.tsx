@@ -1639,7 +1639,7 @@ function BrowserPaneContent({
       <div className="browser-profile-service" ref={setProfileNoticeHost} />
       {find?.key === key ? <BrowserFindBar key={tab.browserId} browserId={tab.browserId} navigationId={tab.navigationId} loading={tab.loading}
         agentControlled={tab.control?.owner === 'agent'} focusRequest={find.request} onClose={() => setFind(null)} /> : null}
-      {tab.capsuleId ? <CapsuleInteractionChrome key={tab.capsuleId} browserId={tab.id} capsuleId={tab.capsuleId} active={tab.capsuleActive === true} visible={visible} toolbarHost={capsuleToolbarHost} /> : null}
+      {tab.capsuleId ? <CapsuleInteractionChrome key={tab.capsuleId} browserId={tab.id} capsuleId={tab.capsuleId} remote={tab.capsuleRemote} active={tab.capsuleActive === true} visible={visible} toolbarHost={capsuleToolbarHost} /> : null}
       {bookmarkSaving ? <p className="browser-bookmark-result" role="status">
         <ThemeStatusLoadingIcon size={12} animation="spin" aria-hidden="true" /><span>Saving bookmark…</span>
       </p> : null}

@@ -16,6 +16,7 @@ export type BrowserColdDescriptor = {
   /** Container provenance survives navigation; it does not grant the current document a bridge. */
   capsuleId?: string
   capsuleOrigin?: string
+  capsuleRemote?: import('../shared/contracts.js').CapsuleRemoteSource
   /** Original presentation requests associated by Main; membership is not completion evidence. */
   capsuleOpenOperationIds?: string[]
   /** Resolved by the original Host when acquiring this exact cold owner; never persisted here. */
@@ -41,6 +42,7 @@ export function browserColdDescriptor(graph: AgentMuxSpatialGraph | null, id: st
     (data.capsuleId !== undefined && (typeof data.capsuleId !== 'string' || !data.capsuleId.trim())) ||
     (data.capsuleId !== undefined && (typeof data.capsuleOrigin !== 'string' || !isCapsuleOrigin(data.capsuleOrigin))) ||
     (data.capsuleOrigin !== undefined && data.capsuleId === undefined) ||
+    (data.capsuleRemote !== undefined && (!data.capsuleId || !isCapsuleRemoteSource(data.capsuleRemote))) ||
     (data.capsuleOpenOperationIds !== undefined && (data.capsuleId === undefined || !Array.isArray(data.capsuleOpenOperationIds) ||
       data.capsuleOpenOperationIds.some(id => typeof id !== 'string' || !id.trim()) || new Set(data.capsuleOpenOperationIds).size !== data.capsuleOpenOperationIds.length)) ||
     (data.capsuleId !== undefined && (data.mode === 'private' || data.profileId != null)) ||
@@ -70,9 +72,16 @@ export function browserColdDescriptor(graph: AgentMuxSpatialGraph | null, id: st
     title: privateMode ? 'Private page' : typeof data.title === 'string' ? data.title : '', mode: privateMode ? 'private' : 'normal',
     ...(!privateMode && data.profileId ? { profileId: data.profileId as string } : {}),
     ...(data.capsuleId ? { capsuleId: data.capsuleId as string, capsuleOrigin: data.capsuleOrigin as string } : {}),
+    ...(data.capsuleRemote ? { capsuleRemote: structuredClone(data.capsuleRemote) as NonNullable<BrowserColdDescriptor['capsuleRemote']> } : {}),
     ...(Array.isArray(data.capsuleOpenOperationIds) ? { capsuleOpenOperationIds: [...data.capsuleOpenOperationIds] as string[] } : {}),
     ...(data.viewport !== undefined ? { viewport: cloneBrowserViewport(data.viewport as BrowserViewport) } : {}),
     ...(source ? { source } : {}), ...(agent === undefined ? {} : { agent }), ...(warning ? { warning } : {}) }
+}
+
+export function isCapsuleRemoteSource(value: unknown): value is import('../shared/contracts.js').CapsuleRemoteSource {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).every(key => key === 'hostId' || key === 'runtimeId') &&
+    ['hostId', 'runtimeId'].every(key => typeof Reflect.get(value, key) === 'string' && Reflect.get(value, key).trim() && !/[\0\r\n]/u.test(Reflect.get(value, key))))
 }
 
 function isCapsuleOrigin(value: string): boolean {

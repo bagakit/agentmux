@@ -1,4 +1,5 @@
 import type { BrowserTaskParallelList, BrowserTaskParallelInput, BrowserTaskParallelInspection, BrowserTaskParallelSummary, BrowserTaskParallelContinuationInput, BrowserTaskParallelContinuationReceipt } from '@agentmux/core/control'
+import { createHash } from 'node:crypto'
 import type { BrowserTaskParallelHost } from './browser-task-parallel.js'
 import type { BrowserTaskParallelExecution } from '../shared/browser-task-parallel.js'
 import { browserUploadPort, browserDownloadPort } from './browser-page-files.js'
@@ -11,7 +12,7 @@ import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserT
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
-import type { BrowserColdDescriptor } from './browser-cold-descriptor.js'
+import { isCapsuleRemoteSource, type BrowserColdDescriptor } from './browser-cold-descriptor.js'
 import { parseBrowserControlHandoff, type BrowserAgent, type BrowserAgentAuthority } from './browser-agent-authority.js'
 import type { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import { browserPageMemory } from '../shared/browser-page-memory.js'
@@ -125,7 +126,7 @@ import {
 
 type BrowserStorage =
   | { mode: 'normal'; profileId: string; partition: string }
-  | { mode: 'normal'; profileId: null; partition: string; capsule: CapsuleInspection; capsuleOrigin: string; capsuleOpenOperationIds: string[] }
+  | { mode: 'normal'; profileId: null; partition: string; capsule: CapsuleInspection; capsuleOrigin: string; capsuleRemote?: import('../shared/contracts.js').CapsuleRemoteSource; capsuleOpenOperationIds: string[] }
   | { mode: 'private'; profileId: null; partition: string; session: Session }
 
 type NativeChildCloseObserver = { resolve(closed: boolean): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> | null }
@@ -370,7 +371,7 @@ type ReleasedBrowser = {
   cleanupOnly?: true
 }
 
-type BrowserCreationFacts = Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'> & { history?: BrowserHistory }
+type BrowserCreationFacts = Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleRemote' | 'capsuleOpenOperationIds'> & { history?: BrowserHistory }
 
 type ClosingBrowserView = Pick<ReleasedBrowser, 'id' | 'workspaceId' | 'storage' | 'requestedUrl' | 'viewport'> & { view: WebContentsView }
 const NATIVE_CLOSE_WARNING = 'Native page cleanup is unconfirmed. Its resource ownership is retained.'
@@ -624,7 +625,7 @@ export class BrowserViewManager {
 
   private objectLink(entry: Pick<BrowserEntry, 'storage'>, url: string): string | undefined {
     return 'capsule' in entry.storage ? browserObjectLink({ url,
-      capsuleId: entry.storage.capsule.record.capsuleId, capsuleOrigin: entry.storage.capsuleOrigin }) : undefined
+      capsuleId: entry.storage.capsule.record.capsuleId, capsuleOrigin: entry.storage.capsuleOrigin, ...(entry.storage.capsuleRemote ? { capsuleRemote: entry.storage.capsuleRemote } : {}) }) : undefined
   }
 
   private projectTarget(entry: BrowserEntry): AgentMuxBrowserTarget {
@@ -979,11 +980,16 @@ export class BrowserViewManager {
   }
 
   /** Page SDK admission is an observation of this exact native document, never a URL capability. */
-  capsuleDocument(sender: WebContents, frame: WebFrameMain | null): { record: CapsuleRecord; browserId: string; navigationId: string; instanceId: string } | null {
+  capsuleDocument(sender: WebContents, frame: WebFrameMain | null): { record: CapsuleRecord; browserId: string; navigationId: string; instanceId: string; remote?: import('../shared/contracts.js').CapsuleRemoteSource; origin: string } | null {
     const entry = this.entriesByContents.get(sender)
     if (!entry || entry.view.webContents !== sender || !('capsule' in entry.storage) || entry.storage.capsule.record.mode !== 'injected' ||
       !this.isCapsuleDocument(entry, frame)) return null
-    return { record: entry.storage.capsule.record, browserId: entry.id, navigationId: entry.navigationId, instanceId: entry.capsuleResponse!.instanceId }
+    return { record: entry.storage.capsule.record, browserId: entry.id, navigationId: entry.navigationId, instanceId: entry.capsuleResponse!.instanceId, origin: entry.storage.capsuleOrigin, ...(entry.storage.capsuleRemote ? { remote: entry.storage.capsuleRemote } : {}) }
+  }
+
+  capsuleRemote(browserId: string) {
+    const entry = this.entries.get(browserId) ?? this.releasedEntries.get(browserId)
+    return entry && 'capsule' in entry.storage ? entry.storage.capsuleRemote : undefined
   }
 
   capsuleId(browserId: string): string | null {
@@ -1679,7 +1685,7 @@ export class BrowserViewManager {
     const existing = this.entries.get(id)
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, workspaceId)
-      if (saved?.capsule && (!('capsule' in existing.storage) || existing.storage.capsule.record.capsuleId !== saved.capsule.record.capsuleId)) {
+      if (saved?.capsule && (!('capsule' in existing.storage) || existing.storage.capsule.record.capsuleId !== saved.capsule.record.capsuleId || existing.storage.capsuleRemote?.runtimeId !== saved.capsuleRemote?.runtimeId)) {
         throw new Error('This Browser belongs to another container. Its original page is retained; open the Capsule in a separate Browser.')
       }
       if (existing.releaseAttempt?.pending) await this.prepareForConsumption(id)
@@ -1690,7 +1696,7 @@ export class BrowserViewManager {
     }
     const released = this.releasedEntries.get(id)
     if (released) {
-      if (saved?.capsule && (!('capsule' in released.storage) || released.storage.capsule.record.capsuleId !== saved.capsule.record.capsuleId)) {
+      if (saved?.capsule && (!('capsule' in released.storage) || released.storage.capsule.record.capsuleId !== saved.capsule.record.capsuleId || released.storage.capsuleRemote?.runtimeId !== saved.capsuleRemote?.runtimeId)) {
         throw new Error('This Browser belongs to another container. Its original page is retained; open the Capsule in a separate Browser.')
       }
       await this.restore(id, { workspaceId, ...(mode === undefined ? {} : { mode }) })
@@ -1704,13 +1710,16 @@ export class BrowserViewManager {
       storage = { mode: 'private', profileId: null, partition, session: session.fromPartition(partition) }
     } else if (saved?.capsule) {
       const endpoint = saved.capsule.endpoint
-      const origin = endpoint.status === 'available' ? new URL(endpoint.url).origin : saved.capsuleOrigin
-      if (!origin || origin !== new URL(`http://127.0.0.1:${saved.capsule.record.port}`).origin ||
+      const origin = saved.capsuleRemote ? saved.capsuleOrigin : endpoint.status === 'available' ? new URL(endpoint.url).origin : saved.capsuleOrigin
+      if (!origin || (saved.capsuleRemote ? !isCapsuleRemoteSource(saved.capsuleRemote) || !/^http:\/\/127\.0\.0\.1:[0-9]+$/u.test(origin) : origin !== new URL(`http://127.0.0.1:${saved.capsule.record.port}`).origin) ||
         (saved.capsuleOrigin !== undefined && saved.capsuleOrigin !== origin)) {
         throw new Error('The original Capsule origin is unconfirmed. Its Browser identity is retained; retry the original Host.')
       }
-      storage = { mode: 'normal', profileId: null, partition: `persist:agentmux-capsule:${saved.capsule.record.capsuleId}`,
-        capsule: saved.capsule, capsuleOrigin: origin, capsuleOpenOperationIds: [...new Set(saved.capsuleOpenOperationIds ?? [])] }
+      // Chromium folds persistent partition directory names to lower case. Hash exact
+      // owner IDs so case-distinct Runtime/Capsule identities cannot share site data.
+      // The original local partition is intentionally unchanged, preserving existing data.
+      storage = { mode: 'normal', profileId: null, partition: saved.capsuleRemote ? `persist:agentmux-remote-capsule:${createHash('sha256').update(JSON.stringify([saved.capsuleRemote.runtimeId, saved.capsule.record.capsuleId])).digest('hex')}` : `persist:agentmux-capsule:${saved.capsule.record.capsuleId}`,
+        capsule: saved.capsule, capsuleOrigin: origin, ...(saved.capsuleRemote ? { capsuleRemote: structuredClone(saved.capsuleRemote) } : {}), capsuleOpenOperationIds: [...new Set(saved.capsuleOpenOperationIds ?? [])] }
     } else {
       const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
       const routing = this.profiles.prepareSession?.(profileId)
@@ -2077,7 +2086,7 @@ export class BrowserViewManager {
     id: string, url: string, storage: BrowserStorage, view: WebContentsView,
     viewport: BrowserViewport = 'responsive', workspaceId: string | null = null,
     retiredInputShield?: BrowserNativeInputShield,
-    saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'>,
+    saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleRemote' | 'capsuleOpenOperationIds'>,
     native?: ReleasedBrowser['nativeChild'] & { originalRequest?: true }
   ): BrowserEntry {
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
@@ -2363,7 +2372,7 @@ export class BrowserViewManager {
     const entry = this.require(id), storage = entry.storage
     this.requireHumanInput(entry)
     if (!('capsule' in storage) || storage.capsule.record.capsuleId !== inspection.record.capsuleId ||
-      new URL(`http://127.0.0.1:${inspection.record.port}`).origin !== storage.capsuleOrigin) {
+      (!storage.capsuleRemote && new URL(`http://127.0.0.1:${inspection.record.port}`).origin !== storage.capsuleOrigin)) {
       throw new Error('The original Capsule container could not be confirmed. Its page and address are retained.')
     }
     if (storage.capsule.record.mode === inspection.record.mode) {
@@ -5456,7 +5465,7 @@ export class BrowserViewManager {
       ...(entry.zoomFactor === undefined ? {} : { zoomFactor: entry.zoomFactor }),
       profileId: entry.storage.profileId,
       ...('capsule' in entry.storage ? { capsuleId: entry.storage.capsule.record.capsuleId,
-        capsuleOrigin: entry.storage.capsuleOrigin, capsuleOpenOperationIds: [...entry.storage.capsuleOpenOperationIds],
+        capsuleOrigin: entry.storage.capsuleOrigin, ...(entry.storage.capsuleRemote ? { capsuleRemote: structuredClone(entry.storage.capsuleRemote) } : {}), capsuleOpenOperationIds: [...entry.storage.capsuleOpenOperationIds],
         capsuleActive: this.isCapsuleDocument(entry, contents.mainFrame) } : {}),
       url,
       ...(objectLink ? { objectLink } : {}),

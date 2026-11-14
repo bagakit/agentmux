@@ -148,6 +148,7 @@ const api: AgentMuxPreloadApi = {
     }
   },
   capsules: { call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsules:call', method, params)) },
+  capsulePages: { call: async (browserId, method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsules:page', browserId, method, params)) },
   capsuleRuntime: { call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsules:call', method, params)) },
   capsuleReplies: { confirm: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsules:reply', input)) },
   agentLearning: {

@@ -21,20 +21,23 @@ function parameters(action: unknown, value: unknown): { action: CapsuleDocumentA
 export function capsuleDocumentIpc(options: {
   browsers: Pick<BrowserViewManager, 'capsuleDocument' | 'capsuleDocumentContents'>
   capsules: CapsulePort
+  remoteCapsules?(source: import('../shared/contracts.js').CapsuleRemoteSource, capsuleId: string): Promise<CapsulePort>
   theme(): CapsulePageTheme
 }) {
   const admit = async (sender: WebContents, frame: IpcMainInvokeEvent['senderFrame']) => {
     const binding = options.browsers.capsuleDocument(sender, frame)
     if (!binding) throw new AgentMuxError('This document has no current Capsule capability. The page remains readable.', 'CONTROL_PERMISSION_DENIED')
-    const { record, endpoint } = await options.capsules.call('capsule.inspect', { capsuleId: binding.record.capsuleId })
+    const client = binding.remote ? await options.remoteCapsules?.(binding.remote, binding.record.capsuleId) : options.capsules
+    if (!client) throw new AgentMuxError('The original remote Capsule transport is unavailable. Its page is retained.', 'CONTROL_UNAVAILABLE')
+    const { record, endpoint } = await client.call('capsule.inspect', { capsuleId: binding.record.capsuleId })
     const current = options.browsers.capsuleDocument(sender, frame)
     if (!current || current.browserId !== binding.browserId || current.navigationId !== binding.navigationId ||
       record.capsuleId !== binding.record.capsuleId || record.mode !== 'injected' ||
       !isDeepStrictEqual(record.target, binding.record.target) || endpoint.status !== 'available' ||
       endpoint.instanceId !== current.instanceId || binding.instanceId !== current.instanceId ||
-      new URL(endpoint.url).origin !== new URL(sender.getURL()).origin)
+      !isDeepStrictEqual(current.remote, binding.remote) || (binding.remote ? current.origin : new URL(endpoint.url).origin) !== new URL(sender.getURL()).origin)
       throw new AgentMuxError('The original Capsule document or its current capability changed. Read the original page; retry only from its current document.', 'CONTROL_PERMISSION_DENIED')
-    return record
+    return { record, client }
   }
   const projectedTheme = (record: CapsuleRecord) => record.theme === 'follow' ? options.theme() : null
   return {
@@ -45,20 +48,20 @@ export function capsuleDocumentIpc(options: {
     },
     async call(event: IpcMainInvokeEvent, actionValue: unknown, value: unknown) {
       const { action, params } = parameters(actionValue, value)
-      const record = await admit(event.sender, event.senderFrame)
+      const { record, client } = await admit(event.sender, event.senderFrame)
       const capsuleId = record.capsuleId
       switch (action) {
         // A question can be answered only when the page has a recipient Agent.
         case 'capabilities': return { version: 1, theme: record.theme === 'follow', interaction: Boolean(record.target), humanReply: false }
         case 'theme': return projectedTheme(record)
-        case 'request': return (await options.capsules.call('capsule.interaction.request', { capsuleId,
+        case 'request': return (await client.call('capsule.interaction.request', { capsuleId,
           ...params } as never)).interaction
-        case 'read': return (await options.capsules.call('capsule.interaction.inspect', { capsuleId,
+        case 'read': return (await client.call('capsule.interaction.inspect', { capsuleId,
           ...params } as never)).interaction
-        case 'saveDraft': return (await options.capsules.call('capsule.interaction.draft', { capsuleId,
+        case 'saveDraft': return (await client.call('capsule.interaction.draft', { capsuleId,
           ...params } as never)).interaction
         case 'inspectOperation': {
-          const { operation } = await options.capsules.call('capsule.operation.inspect', params as never)
+          const { operation } = await client.call('capsule.operation.inspect', params as never)
           if (operation && operation.capsuleId !== capsuleId) throw new AgentMuxError('The original operation belongs to another Capsule.', 'CONTROL_PERMISSION_DENIED')
           return operation
         }
@@ -68,7 +71,7 @@ export function capsuleDocumentIpc(options: {
       const sender = options.browsers.capsuleDocumentContents(browserId)
       if (!sender) return
       try {
-        const record = await admit(sender, sender.mainFrame)
+        const { record } = await admit(sender, sender.mainFrame)
         if (options.browsers.capsuleDocumentContents(browserId) === sender) sender.send('capsule:theme', projectedTheme(record))
       } catch {
         // Clear only this optional projection; a lost capability cannot remove page content.

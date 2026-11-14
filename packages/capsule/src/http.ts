@@ -1,30 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { mintObjectId } from '@agentmux/identity'
-import { extname } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { CapsuleEndpoint, CapsuleInjectionPort, CapsuleIssue, CapsuleRecord } from './types.js'
-import { errorCode, safeFile } from './storage.js'
-const mime: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.htm': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.ico': 'image/x-icon',
-  '.webp': 'image/webp',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.wasm': 'application/wasm',
-  '.txt': 'text/plain; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.pdf': 'application/pdf',
-}
+import { errorCode } from './storage.js'
+import { openCapsuleAsset } from './assets.js'
 export function endpointIssue(capsuleId: string, code: string, message: string): CapsuleIssue {
   return {
     capsuleId,
@@ -133,52 +112,14 @@ export class CapsuleHttp {
       res.end()
       return
     }
-    let pathname: string
-    try {
-      const raw = (req.url ?? '/').split('?')[0] ?? '/'
-      pathname = decodeURIComponent(raw)
-      if (
-        !pathname.startsWith('/') ||
-        pathname.includes('\\') ||
-        pathname.includes('\0') ||
-        pathname.split('/').some((x) => x === '..')
-      )
-        throw Error()
-    } catch {
-      res.writeHead(400)
-      res.end('Invalid Capsule path.')
+    const asset = await openCapsuleAsset(record, req.url ?? '/', req.headers.accept)
+    if (asset.status !== 200) {
+      res.writeHead(asset.status)
+      res.end(asset.message)
       return
     }
-    let relative = pathname.slice(1)
-    if (!relative) relative = record.entry
-    else if (relative.endsWith('/')) relative += 'index.html'
-    let file: Awaited<ReturnType<typeof safeFile>>
+    const { file, pathname, contentType: type } = asset
     try {
-      file = await safeFile(record.contentRoot, relative)
-    } catch (error) {
-      // Only navigation-shaped SPA paths fall back. Missing asset requests remain honest 404s.
-      if (
-        errorCode(error) === 'ENOENT' &&
-        record.routing === 'spa' &&
-        !extname(relative) &&
-        (!req.headers.accept || req.headers.accept.includes('text/html'))
-      ) {
-        try {
-          relative = record.entry
-          file = await safeFile(record.contentRoot, relative)
-        } catch {
-          res.writeHead(404)
-          res.end('Capsule entry is unavailable.')
-          return
-        }
-      } else {
-        res.writeHead(errorCode(error) === 'ENOENT' ? 404 : 403)
-        res.end('Capsule file is unavailable.')
-        return
-      }
-    }
-    try {
-      const type = mime[extname(relative).toLowerCase()] ?? 'application/octet-stream'
       res.setHeader('Content-Type', type)
       res.setHeader('X-AgentMux-Capsule-Instance', this.instanceId)
       res.setHeader('X-Content-Type-Options', 'nosniff')

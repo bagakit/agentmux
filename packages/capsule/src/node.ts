@@ -51,6 +51,7 @@ import {
   writeJson,
 } from './storage.js'
 import { CapsuleHttp, endpointIssue } from './http.js'
+import { readCapsuleAsset } from './assets.js'
 export { CapsuleError } from './storage.js'
 export interface NodeCapsuleOptions {
   stateDirectory: string
@@ -266,6 +267,7 @@ export class NodeCapsuleOwner implements CapsulePort {
     // behind the external operation they are being asked to inspect.
     if (
       [
+        'capsule.asset.read',
         'capsule.ls',
         'capsule.inspect',
         'capsule.resolve',
@@ -784,6 +786,14 @@ export class NodeCapsuleOwner implements CapsulePort {
     const p = params as unknown as Record<string, any>
     let result: unknown
     switch (method) {
+      case 'capsule.asset.read': {
+        const record = (await this.readRecord(p.capsuleId)).record
+        const endpoint = this.services.get(record.capsuleId)?.observation()
+        if (record.revision !== p.expectedRevision || endpoint?.status !== 'available' || endpoint.instanceId !== p.expectedInstanceId)
+          throw new CapsuleError('CAPSULE_ASSET_SOURCE_CHANGED', 'The original Capsule revision or service instance changed. Resolve this same Capsule again.')
+        result = await readCapsuleAsset(record, endpoint.instanceId, params as CapsuleParamsMap['capsule.asset.read'], context?.signal)
+        break
+      }
       case 'capsule.ls': {
         const entries = await this.recordEntries()
         result = {

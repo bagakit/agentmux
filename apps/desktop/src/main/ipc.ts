@@ -22,6 +22,8 @@ import { hostGoalRecord } from '@agentmux/host/goal-projection'
 import { sessionRecoveryOperationResult } from './session-recovery-operation'
 import { registerMoteChatIpc } from './mote-chat-ipc.js'
 import { callCapsuleFromApp } from './capsule-ipc.js'
+import { createRemoteCapsulePresentation } from './remote-capsule-presentation.js'
+import { capsulePageChrome } from './capsule-page-chrome.js'
 import { capsulePresentation, resolveCapsuleColdDocument, createCapsuleBrowserDocument } from './capsule-presentation.js'
 import { capsuleDocumentIpc } from './capsule-document-ipc.js'
 import { CapsuleReplyAuthority } from './capsule-reply-authority.js'
@@ -595,7 +597,31 @@ export async function registerIpc(args: {
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
   })
-  const capsuleDocuments = capsuleDocumentIpc({ browsers, capsules: capsuleClient, theme: () => {
+  const capsulePresentationPorts = {
+    graph: async () => (await spatialState.read())?.graph ?? null,
+    current: (id: string) => browsers.target(id), ensure: (id: string) => ensureBrowser(id),
+    recordOpen: (id: string, capsuleId: string, operationId: string) => browsers.recordCapsuleOpen(id, capsuleId, operationId),
+    execute: (request: AgentMuxControlRequest, signal?: AbortSignal) => executeControl(request, undefined, signal),
+    observe: async (signal?: AbortSignal) => {
+      const result = await controlBridge.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: mintObjectId(), operation: 'inspect.client' }, signal)
+      if (result.operation !== 'inspect.client') throw new Error('The original Workbench observation is unconfirmed.')
+      return result.observation
+    }, original: args.runtime.callOriginalCore.bind(args.runtime)
+  }
+  const remoteCapsules = createRemoteCapsulePresentation({ ...capsulePresentationPorts,
+    acquire: (target, signal) => args.runtime.capsuleHost(target, signal) })
+  const capsulePages = capsulePageChrome({ local: capsuleClient, remote: (source, id) => remoteCapsules.client(source, id),
+    source: async id => {
+      const current = browsers.capsuleId(id)
+      const remote = browsers.capsuleRemote(id)
+      if (current) return { capsuleId: current, ...(remote ? { remote } : {}) }
+      const saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
+      if (!saved.capsuleId) throw new Error('This saved Browser has no original Capsule owner. Its page is retained.')
+      return { capsuleId: saved.capsuleId, ...(saved.capsuleRemote ? { remote: saved.capsuleRemote } : {}) }
+    } })
+  const capsuleDocuments = capsuleDocumentIpc({ browsers, capsules: capsuleClient,
+    remoteCapsules: (source, id) => remoteCapsules.client(source, id), theme: () => {
     const theme = themeBootstrap(configOwner.current.appearance, nativeTheme.shouldUseDarkColors)
     return { mode: theme.mode, tokens: theme.variables }
   } })
@@ -624,7 +650,8 @@ export async function registerIpc(args: {
       if (expectedProfileId !== undefined && (saved.mode !== 'normal' || saved.profileId !== expectedProfileId || saved.capsuleId)) throw new Error('The saved task target Profile changed during preparation. Its original data is retained.')
       workspace(config, saved.workspaceId)
     }
-    if (saved.capsuleId) saved = resolveCapsuleColdDocument(saved, await capsuleClient.call('capsule.inspect', { capsuleId: saved.capsuleId }))
+    if (saved.capsuleRemote) saved = await remoteCapsules.restore(saved)
+    else if (saved.capsuleId) saved = resolveCapsuleColdDocument(saved, await capsuleClient.call('capsule.inspect', { capsuleId: saved.capsuleId }))
     return saved
   }, input)
   browsers.prepareTaskTarget = async (id, profileId) => { await ensureBrowser(id, undefined, profileId) }
@@ -929,6 +956,8 @@ export async function registerIpc(args: {
   handleWithEvent('capsules:call', async (event, method: unknown, value: unknown) => {
     return sessionInputOperationResult(() => callCapsuleFromApp(args.runtime.callOriginalCore.bind(args.runtime), method, value))
   })
+  handleWithEvent('capsules:page', async (event, browserId: string, method: unknown, value: unknown) =>
+    sessionInputOperationResult(() => capsulePages.call(browserId, method, value)))
   handleWithEvent('capsules:reply', async (event, value: unknown) => {
     return sessionInputOperationResult(() => capsuleReplies.confirm(value))
   })
@@ -2104,6 +2133,11 @@ export async function registerIpc(args: {
   handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport, capsuleId?: string, capsuleOpenOperationId?: string) => {
     const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, workspaceId)
     if (capsuleId !== undefined) {
+      const remote = await remoteCapsules.document(url, capsuleId)
+      if (remote) {
+        if (mode === 'private' || rememberedProfileId !== undefined) throw new Error('A Capsule retains its original isolated storage.')
+        return await browsers.create(id, url, verifiedWorkspaceId, undefined, 'normal', viewport, { ...remote, ...(capsuleOpenOperationId ? { capsuleOpenOperationIds: [capsuleOpenOperationId] } : {}) })
+      }
       return await createCapsuleBrowserDocument({ inspect: capsuleId => capsuleClient.call('capsule.inspect', { capsuleId }), browsers },
         { id, url, workspaceId: verifiedWorkspaceId, rememberedProfileId, mode, viewport, capsuleId, operationId: capsuleOpenOperationId })
     }
@@ -2117,7 +2151,8 @@ export async function registerIpc(args: {
   handle('browser:reload', async (id: string) => {
     await ensureBrowser(id)
     const capsuleId = browsers.capsuleId(id)
-    return capsuleId ? await browsers.reloadCapsule(id, await capsuleClient.call('capsule.inspect', { capsuleId }))
+    const remote = browsers.capsuleRemote(id)
+    return capsuleId ? await browsers.reloadCapsule(id, remote ? await remoteCapsules.inspect(remote, capsuleId) : await capsuleClient.call('capsule.inspect', { capsuleId }))
       : await browsers.reload(id)
   })
   handle('browser:zoom', (id: unknown, step: unknown) => {
@@ -2572,17 +2607,7 @@ export async function registerIpc(args: {
     exposedMethods: desktopRpcMethods(),
     executionBindings,
     forwardingPeer: { authoritySocketPath: defaultAgentMuxControlSocketPath() },
-    capsules: capsulePresentation({ inspect: id => capsuleClient.call('capsule.inspect', { capsuleId: id }),
-      graph: async () => (await spatialState.read())?.graph ?? null,
-      current: id => browsers.target(id), ensure: id => ensureBrowser(id),
-      recordOpen: (id, capsuleId, operationId) => browsers.recordCapsuleOpen(id, capsuleId, operationId),
-      execute: (request, signal) => executeControl(request, undefined, signal),
-      observe: async signal => {
-        const result = await controlBridge.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-          requestId: mintObjectId(), operation: 'inspect.client' }, signal)
-        if (result.operation !== 'inspect.client') throw new Error('The original Workbench observation is unconfirmed.')
-        return result.observation
-      }, original: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context) }),
+    capsules: capsulePresentation({ ...capsulePresentationPorts, inspect: id => capsuleClient.call('capsule.inspect', { capsuleId: id }) }),
     capsuleInput: capsuleReplies,
     agentLearning: agentLearningAuthority,
     inputContextCaptures,
@@ -2725,6 +2750,7 @@ export async function registerIpc(args: {
       { owner: 'browser-agent-retirement', dispose: releaseRetiredBrowserAgents },
       { owner: 'capsule-appearance', dispose: () => { disposeCapsuleAppearance(); nativeTheme.removeListener('updated', updateCapsuleThemes); browsers.capsuleDocumentReady = undefined } },
       { owner: 'capsule-document-ipc', dispose: disposeCapsuleDocument },
+      { owner: 'remote-capsule-carriers', dispose: () => remoteCapsules.dispose() },
       { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },
       { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },

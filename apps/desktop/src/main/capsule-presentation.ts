@@ -29,6 +29,8 @@ export async function createCapsuleBrowserDocument(ports: { inspect(capsuleId: s
 type OpenParams = CapsuleParamsMap['capsule.open']
 export interface CapsulePresentationPorts {
   inspect(capsuleId: string): Promise<CapsuleInspection>
+  /** Main's byte carrier location; the result still reports the original Capsule endpoint. */
+  presentationUrl?(inspection: CapsuleInspection): string
   graph(): Promise<AgentMuxSpatialGraph | null>
   current(browserId: string): { url: string } | null
   ensure(browserId: string): Promise<BrowserSnapshot>
@@ -47,14 +49,15 @@ export function capsulePresentation(ports: CapsulePresentationPorts): NonNullabl
     if (inspection.endpoint.status !== 'available') return unavailable(inspection.endpoint.issue.message)
     context?.signal?.throwIfAborted()
     const graph = await ports.graph()
-    const origin = new URL(inspection.endpoint.url).origin
+    const presentationUrl = ports.presentationUrl?.(inspection) ?? inspection.endpoint.url
+    const origin = new URL(presentationUrl).origin
     const candidates = graph?.regions.flatMap(region => {
       if (region.kind !== 'browser' || !region.browserId) return []
       try {
         const saved = browserColdDescriptor(graph, region.browserId)
         if (saved.capsuleId !== params.capsuleId) return []
         const current = ports.current(region.browserId)
-        if (new URL(current?.url ?? saved.url).origin !== (current ? origin : saved.capsuleOrigin)) return []
+        if (saved.capsuleOrigin !== origin || new URL(current?.url ?? saved.url).origin !== origin) return []
         return [{ region, saved }]
       } catch { return [] }
     }) ?? []
@@ -81,7 +84,7 @@ export function capsulePresentation(ports: CapsulePresentationPorts): NonNullabl
         }
       }
       const request = parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: params.operationId,
-        operation: 'open.browser', url: inspection.endpoint.url, capsuleId: params.capsuleId, destination,
+        operation: 'open.browser', url: presentationUrl, capsuleId: params.capsuleId, destination,
         ...(context?.caller?.agentSessionId ? { caller: { hostId: context.caller.hostId, agentSessionId: context.caller.agentSessionId } } : {}) })
       const result = await ports.execute(request, context?.signal)
       if (result.operation !== 'open.browser' || !result.region.browserId) throw new AgentMuxError('The original Browser owner returned another operation.', 'CONTROL_PROTOCOL_ERROR')

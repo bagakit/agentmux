@@ -2531,6 +2531,26 @@ export class RuntimeController {
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
   }
 
+  /** Trusted Desktop acquisition freezes this configured transport and its original Runtime instance.
+   * The remote Unix/paired transport supplies its own authenticated principal; no page or local uid
+   * is promoted into a remote human confirmation. This port intentionally excludes capsule.input. */
+  async capsuleHost(target: { hostId: string; runtimeId: string }, signal?: AbortSignal): Promise<import('@agentmux/core/capsule').CapsulePort> {
+    const client = this.configuredClient(target.hostId)
+    const assertCurrent = () => {
+      if (this.configuredClient(target.hostId) !== client) throw new AgentMuxError('The original Capsule Host route changed. Its saved Browser and data are retained.', 'RUNTIME_OWNER_MISMATCH')
+    }
+    const { owner } = await callOriginalDesktopHost(client, 'runtime.owner.identity', { expectedRuntimeId: target.runtimeId },
+      { transport: 'unix', ...(signal ? { signal } : {}) })
+    signal?.throwIfAborted(); assertCurrent()
+    const expectedOwner = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+    return { call: async (method, params, context) => {
+      assertCurrent(); context?.signal?.throwIfAborted()
+      const result = await callOriginalDesktopHost<import('@agentmux/core/capsule').CapsuleMethod>(client, method, params, { transport: 'unix', ...(context?.signal ? { signal: context.signal } : {}) }, expectedOwner)
+      assertCurrent(); context?.signal?.throwIfAborted()
+      return result as never
+    } }
+  }
+
   async watchGoalChanges(handlers: AgentMuxRpcSubscriptionOptions<'goal.watch'>): Promise<AgentMuxRpcSubscription> {
     return await subscribeOriginalDesktopHost(this.configuredClient('local'), 'goal.watch', {}, handlers)
   }

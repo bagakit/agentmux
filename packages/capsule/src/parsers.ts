@@ -1,5 +1,5 @@
 import { isObjectId } from '@agentmux/identity'
-import { CAPSULE_METHODS, type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from './types.js'
+import { CAPSULE_METHODS, CAPSULE_ASSET_CHUNK_BYTES, type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from './types.js'
 
 type Obj = Record<string, unknown>
 export class CapsuleValidationError extends TypeError {
@@ -190,6 +190,9 @@ export function parseCapsuleParams<M extends CapsuleMethod>(method: M, v: unknow
   if (!isCapsuleMethod(method)) fail('method')
   let keys: string[]
   switch (method) {
+    case 'capsule.asset.read':
+      keys = ['capsuleId', 'expectedRevision', 'expectedInstanceId', 'path', 'offset', 'length', 'assetStamp', 'accept', 'head']
+      break
     case 'capsule.ls':
     case 'capsule.config.inspect':
       keys = []
@@ -246,6 +249,15 @@ export function parseCapsuleParams<M extends CapsuleMethod>(method: M, v: unknow
   if (keys.includes('interactionId')) id(r.interactionId, 'params.interactionId')
   if (keys.includes('operationId')) str(r.operationId, 'params.operationId')
   if (keys.includes('expectedRevision')) num(r.expectedRevision, 'params.expectedRevision', 1)
+  if (method === 'capsule.asset.read') {
+    id(r.expectedInstanceId, 'params.expectedInstanceId')
+    str(r.path, 'params.path')
+    num(r.offset, 'params.offset')
+    if (num(r.length, 'params.length', 1) > CAPSULE_ASSET_CHUNK_BYTES) fail('params.length')
+    opt(r, 'assetStamp', (v, p) => { if (!/^[a-f0-9]{64}$/u.test(str(v, p))) fail(p) }, 'params')
+    opt(r, 'accept', (v, p) => { if (typeof v !== 'string') fail(p) }, 'params')
+    opt(r, 'head', bool, 'params')
+  }
   if (method === 'capsule.create') {
     path(r.sourcePath, 'params.sourcePath')
     opt(r, 'title', str, 'params')
@@ -472,6 +484,25 @@ export function parseCapsuleResult<M extends CapsuleMethod>(
   if (!isCapsuleMethod(method)) fail('method')
   let r: Obj
   switch (method) {
+    case 'capsule.asset.read': {
+      r = obj(v, ['capsuleId', 'revision', 'instanceId', 'status', 'contentType', 'totalBytes', 'offset', 'bytesBase64', 'assetStamp', 'eof'], 'result')
+      id(r.capsuleId, 'result.capsuleId'); id(r.instanceId, 'result.instanceId')
+      num(r.revision, 'result.revision', 1); num(r.totalBytes, 'result.totalBytes'); num(r.offset, 'result.offset')
+      if (![200, 400, 403, 404].includes(r.status as number)) fail('result.status')
+      if (/[\r\n]/u.test(str(r.contentType, 'result.contentType'))) fail('result.contentType')
+      const bytes = str(r.bytesBase64, 'result.bytesBase64', true)
+      if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(bytes)) fail('result.bytesBase64')
+      const length = bytes.length / 4 * 3 - (bytes.endsWith('==') ? 2 : bytes.endsWith('=') ? 1 : 0)
+      if (length > CAPSULE_ASSET_CHUNK_BYTES || (r.status === 200 && length > Math.max(0, (r.totalBytes as number) - (r.offset as number)))) fail('result.bytesBase64')
+      if (r.assetStamp !== null && !/^[a-f0-9]{64}$/u.test(str(r.assetStamp, 'result.assetStamp'))) fail('result.assetStamp')
+      bool(r.eof, 'result.eof')
+      if (input) {
+        const q = input as CapsuleParamsMap['capsule.asset.read']
+        if (r.revision !== q.expectedRevision || r.instanceId !== q.expectedInstanceId ||
+          r.status === 200 && (r.offset !== q.offset || length > q.length || r.assetStamp === null) || q.head && length !== 0) fail('result.source')
+      }
+      break
+    }
     case 'capsule.ls':
       r = obj(v, ['capsules', 'issues'], 'result')
       array(r.capsules, 'result.capsules', (v, p) => inspection(v, p))

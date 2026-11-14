@@ -1293,6 +1293,9 @@ export type BrowserFindInPageResult =
   | { status: 'found'; navigationId: string; activeMatchOrdinal: number; matches: number }
   | { status: 'unconfirmed'; navigationId: string }
 
+/** Durable original remote owner; a locator alone never grants document authority. */
+export type CapsuleRemoteSource = { hostId: string; runtimeId: string }
+
 export type BrowserSnapshot = {
   id: string
   source?: import('@agentmux/core').AgentMuxBrowserSource
@@ -1300,6 +1303,7 @@ export type BrowserSnapshot = {
   /** Durable container provenance, independent of current document authority. */
   capsuleId?: string
   capsuleOrigin?: string
+  capsuleRemote?: CapsuleRemoteSource
   capsuleOpenOperationIds?: string[]
   /** Native current-document observation only; never persisted or used as page IPC authorization. */
   capsuleActive?: boolean
@@ -1595,6 +1599,9 @@ export type ThemeFileExportResult = { status: 'saved'; path: string } | { status
 
 export type AgentMuxDesktopApi = {
   capsules: import('@agentmux/core/capsule').CapsulePort
+  /** Trusted App chrome addresses an exact Browser's original Capsule, never a page-supplied Host. */
+  capsulePages: { call<M extends import('@agentmux/core/capsule').CapsuleMethod>(browserId: string, method: M,
+    params: import('@agentmux/core/capsule').CapsuleParamsMap[M]): Promise<import('@agentmux/core/capsule').CapsuleResultMap[M]> }
   agentLearning: {
     call<M extends import('@agentmux/core/agent-learning').AgentLearningMethod>(method: M, input: import('@agentmux/core/agent-learning').AgentLearningParamsMap[M]): Promise<import('@agentmux/core/agent-learning').AgentLearningResultMap[M]>
     confirm(input: import('@agentmux/core/agent-learning').AgentLearningConfirm): Promise<import('@agentmux/core/agent-learning').AgentLearningResultMap['agent.learning.confirm']>
