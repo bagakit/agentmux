@@ -21,6 +21,8 @@ export type BrowserMenuCommands = {
   follow(address: string): Action
   download(address: string): Action
   atHit(action: (x: number, y: number) => void): Action
+  copyVideoFrame: Action
+  saveVideoFrame: Action
   search(text: string): Action
   back: Action
   forward: Action
@@ -71,10 +73,10 @@ export function browserPageMenu(contents: WebContents, hit: ContextMenuParams, o
     const hasVideoFrame = mediaType === 'video' && !hit.mediaFlags.inError
     groups.push([
       ...(srcURL ? [{ label: `Copy ${media} Address`, run: owner.copyAddress(srcURL) }] : []),
-      ...(hasVideoFrame ? [{ label: 'Copy Video Frame', run: owner.atHit((x, y) => contents.copyVideoFrameAt(x, y)) }] : []),
+      ...(hasVideoFrame ? [{ label: 'Copy Video Frame', run: owner.copyVideoFrame }] : []),
       ...(canOpen(srcURL) ? [{ label: `Open ${media} in New Tab`, run: openInTab(srcURL) }] : []),
       ...(isDownloadAddress(srcURL) ? [{ label: `Save ${media} As…`, enabled: hit.mediaFlags.canSave, run: owner.download(srcURL) }] : []),
-      ...(hasVideoFrame ? [{ label: 'Save Video Frame As…', run: owner.atHit((x, y) => contents.saveVideoFrameAs(x, y)) }] : [])
+      ...(hasVideoFrame ? [{ label: 'Save Video Frame As…', run: owner.saveVideoFrame }] : [])
     ])
   }
   if (!linkURL && mediaType === 'none' && !isEditable && !selectionText && pageURL) {

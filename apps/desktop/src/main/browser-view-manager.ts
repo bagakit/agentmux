@@ -5491,6 +5491,8 @@ export class BrowserViewManager {
       follow: address => () => this.navigate(entry.id, address),
       download: address => () => contents.downloadURL(address),
       atHit,
+      copyVideoFrame: atHit((x, y) => frame.copyVideoFrameAt(x, y)),
+      saveVideoFrame: atHit((x, y) => frame.saveVideoFrameAs(x, y)),
       search: text => () => this.openContextPage(entry, browserSearchUrl(text), { destination: 'tab' }, current),
       back: () => this.back(entry.id),
       forward: () => this.forward(entry.id),
