@@ -15,6 +15,7 @@ import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { useAppStore } from '../store'
 import type { DemandProjection, DemandRecord } from '../lib/global-demand-board'
 import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
+import { GoalPlanReadingPlacement } from './GoalPlanReadingPlacement'
 import { GoalPlanThread } from './GoalPlanThread'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
 import { GoalPlanRequest } from './GoalPlanRequest'
@@ -198,6 +199,26 @@ function NodeExecutor({ item, compact = false }: { item: GoalPlanNodeView; compa
   </span>
 }
 
+function GoalPlanNodeButton({ item, expanded, readingId, dependencyNames, onToggle }: {
+  item: GoalPlanNodeView; expanded: boolean; readingId: string; dependencyNames: string[]
+  onToggle(trigger: HTMLButtonElement): void
+}) {
+  const description = useId()
+  return <button type="button" className="goal-plan-node__head" aria-label={item.node.title} aria-describedby={description}
+    data-goal-review-delivery={item.state === 'review' && item.delegation?.report ? item.node.id : undefined}
+    aria-expanded={expanded} aria-controls={expanded ? readingId : undefined} onClick={event => onToggle(event.currentTarget)}>
+    <span className="goal-plan-node__heading"><GoalPlanMark item={item} /><span className="goal-plan-node__title">{item.node.title}</span></span>
+    <span className="goal-plan-node__metadata" id={description}>
+      {!item.wholeGoal ? <span className="goal-plan-node__state" {...(item.unknown.length ? { 'data-goal-plan-unknown': item.unknown.join(' ') } : {})}>
+        {item.state === 'ready' ? 'Ready' : item.state === 'waiting' ? 'Waiting' : goalPlanStateLabel(item)}</span> : null}
+      <NodeExecutor item={item} compact />
+    </span>
+    {dependencyNames.length ? <span className={`goal-plan-node__depends${item.state === 'waiting' ? ' goal-plan-node__depends--waiting' : ''}`}>
+      Depends on · <DependencyNames names={dependencyNames} />
+    </span> : null}
+  </button>
+}
+
 function DependencyNames({ names }: { names: string[] }) {
   return <>{names.map((name, index) => <Fragment key={index}>{index ? ', ' : ''}<span className="goal-plan-dependency">{name}</span></Fragment>)}</>
 }
@@ -266,7 +287,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
   const retainedReviews = useAppStore(state => state.goalEditDrafts[demand.id]?.planReviews)
   const [reviewNotices, setReviewNotices] = useState<Record<string, Pick<GoalPlanReviewDraft, 'pending' | 'issue' | 'reread'>>>({})
   const canvas = useRef<HTMLDivElement>(null)
-  const reading = useRef<HTMLDivElement>(null), readingId = useId(), arrowId = useId()
+  const inlineReader = useRef<HTMLLIElement>(null), readingId = useId(), arrowId = useId()
   const readingHeading = useRef<HTMLHeadingElement>(null)
   const { edges, width, height, scrollable } = useEdges(canvas, projection)
   useGoalPlanPath(canvas, projection.nodes, edges, open)
@@ -278,16 +299,16 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
   useLayoutEffect(() => {
     const viewport = canvas.current
     const card = open && viewport?.querySelector(`[data-goal-plan-node="${CSS.escape(open)}"]`)
-    if (!viewport || !card) return
+    if (!selection?.trigger || !viewport || !card) return
     const bounds = viewport.getBoundingClientRect(), selected = card.getBoundingClientRect()
     if (selected.bottom > bounds.bottom) viewport.scrollTop += selected.bottom - bounds.bottom
     else if (selected.top < bounds.top) viewport.scrollTop += selected.top - bounds.top
     if (selected.right > bounds.right) viewport.scrollLeft += selected.right - bounds.right
     else if (selected.left < bounds.left) viewport.scrollLeft += selected.left - bounds.left
-  }, [open])
+  }, [open, selection?.trigger])
   useLayoutEffect(() => {
     if (!selection?.trigger) return
-    reading.current?.scrollIntoView?.({ block: 'nearest' })
+    readingHeading.current?.scrollIntoView?.({ block: 'nearest' })
     readingHeading.current?.focus({ preventScroll: true })
   }, [selection])
   function select(target: GoalPlanReadingTarget, trigger: HTMLButtonElement) { setSelection({ target, trigger }) }
@@ -360,18 +381,13 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
           <ol className="goal-plan__nodes">
             {column.map(item => {
               const state = item.wholeGoal ? 'goal' : item.state ?? 'unavailable', expanded = open === item.node.id
-              return <li key={item.node.id} className={`goal-plan-node${!open && item.node.id === highlight ? ' goal-plan-node--next' : ''}`}
+              return <Fragment key={item.node.id}><li className={`goal-plan-node${!open && item.node.id === highlight ? ' goal-plan-node--next' : ''}`}
                 data-goal-plan-node={item.node.id} data-goal-plan-origin={item.wholeGoal ? item.node.id : undefined} data-goal-plan-state={state} {...(item.node.dependsOn.length ? { 'data-goal-plan-depends': item.node.dependsOn.join(' ') } : {})}>
-                <button type="button" className="goal-plan-node__head" data-goal-review-delivery={item.state === 'review' && item.delegation?.report ? item.node.id : undefined} aria-expanded={expanded} aria-controls={expanded ? readingId : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
-                  <GoalPlanMark item={item} />
-                  <span className="goal-plan-node__title">{item.node.title}</span>
-                </button>
-                {!item.wholeGoal ? <span className="goal-plan-node__state" {...(item.unknown.length ? { 'data-goal-plan-unknown': item.unknown.join(' ') } : {})}>{item.state === 'ready' ? 'Ready' : item.state === 'waiting' ? 'Waiting' : goalPlanStateLabel(item)}</span> : null}
-                {item.node.dependsOn.length ? <span className={`goal-plan-node__depends${item.state === 'waiting' ? ' goal-plan-node__depends--waiting' : ''}`}>
-                  Depends on · <DependencyNames names={item.node.dependsOn.map(id => byId.get(id)!.node.title)} />
-                </span> : null}
-                <NodeExecutor item={item} compact />
+                <GoalPlanNodeButton item={item} expanded={expanded} readingId={readingId}
+                  dependencyNames={item.node.dependsOn.map(id => byId.get(id)!.node.title)} onToggle={trigger => toggleNode(item, trigger)} />
               </li>
+                {expanded && selection?.trigger ? <li ref={inlineReader} className="goal-plan-node__reader-slot" data-goal-reader-for={item.node.id} /> : null}
+              </Fragment>
             })}
           </ol>
         </li>)}
@@ -381,16 +397,8 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
       </ol>
     </div>
     {scrollable ? <p className="goal-plan__scroll-hint">Scroll to explore the full plan</p> : null}
-      <details className="goal-plan__assignments"><summary>Assignments</summary>
-        <nav aria-label="Task assignments">
-        {projection.nodes.map(item => <button key={item.node.id} type="button"
-          aria-current={open === item.node.id ? 'true' : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
-          <GoalPlanMark item={item} /><strong>{item.node.title}</strong>
-          <span className="goal-plan__assignment-fact"><NodeExecutor item={item} compact /><span>{goalPlanStateLabel(item)}</span></span>
-        </button>)}
-      </nav></details>
-    <GoalExecutionTimeline demand={demand} nodes={projection.nodes} selected={open ? selectedTarget ?? null : null} onSelect={select} />
-    {selected ? <div className="goal-plan__reading" ref={reading} id={readingId}>
+    {selected ? <GoalPlanReadingPlacement canvas={canvas} inline={inlineReader} target={selected.node.id} explicit={Boolean(selection?.trigger)}>
+      <div className="goal-plan__reading" id={readingId}>
       <div className="goal-plan__reading-header"><GoalPlanMark item={selected} /><h3 ref={readingHeading} tabIndex={-1}>{selected.node.title}</h3>
         {!historical && !selected.wholeGoal ? <span className="goal-plan__reading-status" data-goal-plan-state={selected.state ?? undefined}>{goalPlanStateLabel(selected)}</span> : null}
         <Button type="button" onClick={() => closeNode(selected.node.id)}>Back to node</Button></div>
@@ -408,7 +416,16 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
           clearGoalPlanReviewDraft(request.goalId, request.review.nodeId, request.review.delegationOperationId, request.review.operationId)
           setReviewNotices(previous => { if (!previous[reviewNoticeKey]) return previous; const { [reviewNoticeKey]: _notice, ...retained } = previous; return retained })
         }} /> : null}
-    </div> : null}
+    </div></GoalPlanReadingPlacement> : null}
+      <details className="goal-plan__assignments"><summary>Assignments</summary>
+        <nav aria-label="Task assignments">
+        {projection.nodes.map(item => <button key={item.node.id} type="button"
+          aria-current={open === item.node.id ? 'true' : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
+          <GoalPlanMark item={item} /><strong>{item.node.title}</strong>
+          <span className="goal-plan__assignment-fact"><NodeExecutor item={item} compact /><span>{goalPlanStateLabel(item)}</span></span>
+        </button>)}
+      </nav></details>
+    <GoalExecutionTimeline demand={demand} nodes={projection.nodes} selected={open ? selectedTarget ?? null : null} onSelect={select} />
     </div>
     </div>
   </section>

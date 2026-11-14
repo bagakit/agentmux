@@ -47,20 +47,26 @@
 .goal-plan__boundary[data-goal-finish-state="Succeeded"] { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); color: var(--green); }
 .goal-plan__boundary[data-goal-finish-state="Closed with gaps"], .goal-plan__boundary[data-goal-finish-state="Unverified"] { color: var(--amber-text); }
 .goal-plan__nodes { display: grid; align-content: start; gap: var(--sp-4); margin: 0; padding: 0; list-style: none; }
-.goal-plan-node { position: relative; display: grid; box-sizing: border-box; width: 100%; gap: var(--sp-1); padding: var(--sp-4); border-radius: var(--radius-lg); background: var(--surface-0); color: var(--text-2);
+.goal-plan-node { position: relative; display: grid; box-sizing: border-box; width: 100%; min-width: 0; border-radius: var(--radius-lg); background: var(--surface-0); color: var(--text-2);
   box-shadow: inset 0 0 0 1px var(--line), 0 2px 5px color-mix(in srgb, var(--line) 22%, transparent); transition: background-color 170ms var(--goal-motion-ease), box-shadow 170ms var(--goal-motion-ease); }
 .goal-plan-node:hover { background: var(--surface-3, var(--surface-2)); }
 /* The one next step has a static mint surface; motion only follows actual changes. */
 .goal-plan-node--next { background: color-mix(in srgb, var(--green) 14%, var(--surface-2)); color: var(--text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 22%, transparent); }
-.goal-plan-node__head { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; padding: 0; border: 0; background: none; color: var(--text); font: 600 var(--fs-body)/1.35 var(--font-sans); text-align: start; cursor: pointer; }
+.goal-plan-node__head { display: grid; align-content: center; gap: var(--sp-2); width: 100%; min-width: 0; padding: var(--sp-4); border-radius: inherit; border: 0; background: none; color: var(--text); font: 600 var(--fs-body)/1.35 var(--font-sans); text-align: start; cursor: pointer; }
 .goal-plan-node__head:focus-visible { outline: 2px solid var(--focus-ring, var(--green)); outline-offset: 3px; border-radius: var(--radius-sm); }
+.goal-plan-node__heading { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2); align-items: baseline; }
+.goal-plan-node__heading > .goal-plan-node__mark { align-self: start; }
+.goal-plan-node__metadata { display: grid; align-content: start; gap: var(--sp-1); min-width: 0; padding-inline-start: calc(18px + var(--sp-2)); color: var(--text-2); font-weight: 400; }
+.goal-plan-node__metadata > :is(.goal-plan-node__state, .goal-plan-node__who) { padding-inline-start: 0; text-align: start; }
+.goal-plan-node__head .goal-plan-node__depends { padding-inline-start: calc(18px + var(--sp-2)); font-weight: 400; }
 .goal-plan-node__title { min-width: 0; overflow-wrap: anywhere; }
 .goal-plan-node__state, .goal-plan-node__who { padding-inline-start: calc(18px + var(--sp-3)); font-size: var(--fs-meta); line-height: 1.4; }
 .goal-plan-node__who { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); min-width: 0; color: var(--text-3); overflow-wrap: anywhere; }
 .goal-plan-node__name { min-width: 0; color: var(--text-2); }
 .goal-plan-node__role { color: var(--text-3); }
-.goal-plan-node__who--open { font-style: italic; }
+.goal-plan-node__who--open { font-style: normal; }
+.goal-plan-node__who--open[data-claim-open] { color: var(--green-text); }
 .goal-plan-node__place { flex-basis: 100%; padding-inline-start: calc(11px + var(--sp-1)); color: var(--text-3); }
 .goal-plan-node__depends { display: none; padding-inline-start: calc(18px + var(--sp-3)); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; }
 
@@ -124,9 +130,16 @@
 .goal-plan__canvas { border: 1px solid var(--line); border-radius: var(--radius-lg); }
 .goal-plan__stage { display: grid; align-content: start; min-width: 0; }
 .goal-plan__stage > .goal-plan__scroll-hint { margin: var(--sp-2) 0; }
-.goal-plan__stage > .goal-plan__reading { margin-block-start: var(--sp-6); padding: var(--sp-5) 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--surface-0); }
-.goal-plan__stage > .goal-plan__reading .goal-plan__reading-header { margin-block-end: var(--sp-3); }
-.goal-plan__stage > .goal-plan__reading .goal-plan__reading-header h3 { font-size: var(--fs-title); }
+.goal-plan__reader-dock .goal-plan__reading { margin-block-start: var(--sp-3); padding: var(--sp-4); border-radius: var(--radius-lg); background: var(--surface-0); }
+.goal-plan__reader-dock:empty, .goal-plan-node__reader-slot:empty { display: none; }
+.goal-plan-node__reader-slot { min-width: 0; list-style: none; }
+@container goal-plan (max-width: 640px) {
+  .goal-plan__canvas { --goal-plan-inline-reading: 1; }
+  .goal-plan__canvas:has(.goal-plan-node__reader-slot:not(:empty)) { max-height: none; }
+  .goal-plan-node__reader-slot .goal-plan__reading { padding: var(--sp-4); border-radius: var(--radius-lg); background: var(--surface-0); }
+}
+.goal-plan__reader-dock .goal-plan__reading .goal-plan__reading-header { margin-block-end: var(--sp-3); }
+.goal-plan__reader-dock .goal-plan__reading .goal-plan__reading-header h3 { font-size: var(--fs-title); }
 .goal-plan__stage > .goal-execution-time { margin-top: var(--sp-3); }
 .goal-plan__assignments { min-width: 0; }
 .goals-document .goal-plan__assignments > summary { width: fit-content; padding: var(--sp-3) 0; color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
@@ -185,7 +198,8 @@
   .goal-plan__boundary:first-child::before { top: 100%; }
   .goal-plan__boundary:last-child::before { bottom: 100%; }
 }
-.goal-plan-node[data-goal-plan-origin] { padding: var(--sp-5); background: color-mix(in srgb, var(--green) 7%, var(--surface-0)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 32%, var(--line)); }
+.goal-plan-node[data-goal-plan-origin] > .goal-plan-node__head { padding: var(--sp-5); }
+.goal-plan-node[data-goal-plan-origin] { background: color-mix(in srgb, var(--green) 7%, var(--surface-0)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 32%, var(--line)); }
 
 .goals-document .goal-plan > .goals-section-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-2); }
 .goals-document .goal-plan > .goals-section-heading h2 { font-size: var(--fs-title); }
