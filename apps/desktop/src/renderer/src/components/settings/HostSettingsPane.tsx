@@ -312,9 +312,9 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   {check?.observedAt ? <time dateTime={new Date(check.observedAt).toISOString()}>{new Date(check.observedAt).toLocaleString()}</time> : null}
                   {check?.state === 'error' ? <button type="button" className="small-button remote-overview__connection-action" onClick={() => selectHostPanel(host.id, 'connection')}>Review connection</button> : null}
                   {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
-                <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'service')] ?? false} onToggle={event => toggleSection(host.id, 'service', event.currentTarget.open)}>
+                <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'service')] ?? true} onToggle={event => toggleSection(host.id, 'service', event.currentTarget.open)}>
                   <summary>Service status<span>Runtime identity and resources</span></summary>
-                  <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && Boolean(sectionsOpen[sectionKey(host.id, 'service')]) && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
+                  <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && (sectionsOpen[sectionKey(host.id, 'service')] ?? true) && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
                 </details>
                 <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'shared')] ?? false} onToggle={event => toggleSection(host.id, 'shared', event.currentTarget.open)}>
                   <summary>Shared folders<span>Published by this node</span></summary>

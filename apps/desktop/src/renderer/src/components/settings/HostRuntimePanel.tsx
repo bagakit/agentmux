@@ -13,7 +13,7 @@ import './host-runtime-panel.css'
 const RefreshIcon = semanticIconComponent('action.refresh')
 const InfoIcon = semanticIconComponent('status.info')
 const NATIVE_CAPABILITIES = [['orderedOutputBytes', 'Ordered output'], ['boundedReplay', 'Bounded replay'], ['recoverableInput', 'Recoverable input'], ['resize', 'Resize'], ['interrupt', 'Interrupt'], ['completeStop', 'Complete stop']] as const
-type State = { target: string; nodeReply?: NodeResources; nodeError?: string | undefined; frames?: NodeSampleFrame[]; current?: HostRuntimeObservation; confirmed?: HostRuntimeObservation; error?: string | undefined; busy?: boolean | undefined }
+type State = { target: string; nodeReply?: NodeResources; nodeError?: string | undefined; nodeNotice?: string | undefined; nodePrivate?: boolean; nodeBusy?: boolean; frames?: NodeSampleFrame[]; current?: HostRuntimeObservation; confirmed?: HostRuntimeObservation; error?: string | undefined; busy?: boolean | undefined }
 function route({ label: _label, ...host }: HostConfig) { return host }
 function keep<T>(current: HostRuntimeSource<T>, previous?: HostRuntimeSource<T>): HostRuntimeSource<T> {
   return current.state === 'available' || previous?.state !== 'available' ? current : previous
@@ -52,43 +52,72 @@ export function HostRuntimePanel({ host, committed, active, ownerTarget }: { hos
   useEffect(() => {
     if (!active || !saved || !visible) return
     const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined, localRuntimeId: string | undefined
-    const observe = async () => {
-      setState(previous => ({ ...(previous.target === target ? previous : { target }), busy: true, error: undefined }))
+    let timer: ReturnType<typeof setTimeout> | undefined, runtimeId = ownerTarget?.expectedRuntimeId ?? (host.kind === 'ssh' ? host.runtimeId : undefined)
+    let runtimePending = false, nodePending = false
+    const pending = () => {
+      if (!controller.signal.aborted) setState(previous => ({ ...(previous.target === target ? previous : { target }), busy: runtimePending && nodePending, nodeBusy: nodePending }))
+    }
+    const readRuntime = async () => {
       try {
-        const runtime = api.hosts.inspect(committed!, { signal: controller.signal })
-        const node = ownerTarget ? api.nodePublishing.owner(ownerTarget, 'settings.node.resources', {}, controller.signal)
-          : host.kind === 'ssh' ? api.nodePublishing.call('node.resources', { hostId: host.id, ...(host.runtimeId ? { expectedRuntimeId: host.runtimeId } : {}) }, controller.signal)
-          : (async () => {
-            if (!localRuntimeId) {
-              const original = await api.nodePublishing.call('node.inspect', { hostId: host.id }, controller.signal)
-              localRuntimeId = original.node.runtimeId
-            }
-            return api.nodePublishing.owner({ hostId: host.id, expectedRuntimeId: localRuntimeId }, 'settings.node.resources', {}, controller.signal)
-          })()
-        const [runtimeRead, nodeRead] = await Promise.allSettled([runtime, node])
+        const observation = await api.hosts.inspect(committed!, { signal: controller.signal })
         if (controller.signal.aborted) return
         setState(previous => {
-          const next: State = { ...(previous.target === target ? previous : { target }), busy: false }
-          if (runtimeRead.status === 'fulfilled') {
-            const observation = runtimeRead.value
-            if (observation.routeHostId === host.id && configValuesEqual(observation.configuration, committed)) {
-              next.current = observation; next.confirmed = confirmed(observation, next.confirmed); next.error = undefined
-            } else next.error = 'The observation belongs to another Host. Refresh this connection.'
-          } else next.error = runtimeRead.reason instanceof Error ? runtimeRead.reason.message : String(runtimeRead.reason)
-          if (nodeRead.status === 'fulfilled') {
-            const reply = nodeRead.value
-            if ((ownerTarget?.expectedRuntimeId ?? (host.kind === 'ssh' ? host.runtimeId : localRuntimeId)) && reply.node.runtimeId !== (ownerTarget?.expectedRuntimeId ?? (host.kind === 'ssh' ? host.runtimeId : localRuntimeId))) next.nodeError = 'Resource identity differs from this saved Runtime. The original connection is kept.'
-            else {
-              next.nodeReply = reply; next.nodeError = undefined
-              if (reply.status === 'withheld') next.frames = []
-              else if (reply.status === 'available') next.frames = appendNodeSample(next.frames ?? [], reply.sample)
-              else next.frames = [...(next.frames ?? []), { at: Date.now(), sample: null }].slice(-120)
-            }
-          } else { next.nodeError = nodeRead.reason instanceof Error ? nodeRead.reason.message : String(nodeRead.reason); next.frames = [...(next.frames ?? []), { at: Date.now(), sample: null }].slice(-120) }
+          const next: State = { ...(previous.target === target ? previous : { target }) }
+          if (observation.routeHostId === host.id && configValuesEqual(observation.configuration, committed)) {
+            next.current = observation; next.confirmed = confirmed(observation, next.confirmed); next.error = undefined
+          } else next.error = 'The observation belongs to another Host. Refresh this connection.'
           return next
         })
-      } finally { if (!controller.signal.aborted) timer = setTimeout(() => void observe(), 5000) }
+      } catch (error) {
+        if (!controller.signal.aborted) setState(previous => ({ ...(previous.target === target ? previous : { target }), error: error instanceof Error ? error.message : String(error) }))
+      }
+    }
+    const readNode = async () => {
+      let privateIssue: string | undefined
+      try {
+        if (!runtimeId) {
+          const original = await api.nodePublishing.call('node.inspect', { hostId: host.id }, controller.signal)
+          runtimeId = original.node.runtimeId
+        }
+        let reply: NodeResources
+        try {
+          reply = await api.nodePublishing.owner(ownerTarget ?? { hostId: host.id, expectedRuntimeId: runtimeId }, 'settings.node.resources', {}, controller.signal)
+        } catch (error) {
+          controller.signal.throwIfAborted()
+          privateIssue = error instanceof Error ? error.message : String(error)
+          // Published observation is an existing independent capability. A denied
+          // private source cannot remove it or promote its original caller.
+          reply = await api.nodePublishing.call('node.resources', { hostId: host.id, expectedRuntimeId: runtimeId }, controller.signal)
+        }
+        if (controller.signal.aborted) return
+        setState(previous => {
+          const next: State = { ...(previous.target === target ? previous : { target }) }
+          if (reply.node.runtimeId !== runtimeId) {
+            next.nodeError = 'Resource identity differs from this saved Runtime. The original connection is kept.'
+            next.frames = [...(next.frames ?? []), { at: Date.now(), sample: null }].slice(-120)
+          } else {
+            next.nodeReply = reply; next.nodeError = undefined
+            next.nodePrivate = privateIssue === undefined
+            next.nodeNotice = privateIssue ? `Private service read unavailable: ${privateIssue}. ${reply.status === 'withheld' ? 'Published resources are not shared by this node.' : 'Showing the node’s published measurements.'}` : undefined
+            if (previous.nodePrivate !== undefined && previous.nodePrivate !== next.nodePrivate) next.frames = []
+            if (reply.status === 'withheld') next.frames = []
+            else if (reply.status === 'available') next.frames = appendNodeSample(next.frames ?? [], reply.sample)
+            else next.frames = [...(next.frames ?? []), { at: Date.now(), sample: null }].slice(-120)
+          }
+          return next
+        })
+      } catch (error) {
+        if (!controller.signal.aborted) setState(previous => ({ ...(previous.target === target ? previous : { target }), nodeError: privateIssue ? `Private service read unavailable: ${privateIssue}. Published resources unavailable: ${error instanceof Error ? error.message : String(error)}` : error instanceof Error ? error.message : String(error), frames: [...(previous.target === target ? previous.frames ?? [] : []), { at: Date.now(), sample: null }].slice(-120) }))
+      }
+    }
+    // One clock, at most one in-flight read per source. A slow optional source
+    // does not queue duplicates or stop the other original source from sampling.
+    const observe = () => {
+      if (controller.signal.aborted) return
+      if (!runtimePending) { runtimePending = true; void readRuntime().finally(() => { runtimePending = false; pending() }) }
+      if (!nodePending) { nodePending = true; void readNode().finally(() => { nodePending = false; pending() }) }
+      pending()
+      timer = setTimeout(observe, 5000)
     }
     void observe()
     return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer) }
@@ -108,14 +137,17 @@ export function HostRuntimePanel({ host, committed, active, ownerTarget }: { hos
     </header>
     {failed ? <p className="host-runtime__issue" role="status" data-diagnostics><InfoIcon size={13} /><span>{failed} {retained ? 'Last confirmed values are kept below.' : 'Refresh to read this original connection again.'}</span></p> : null}
     {saved ? <>
-      <HostNodeResources reply={state.target === target ? state.nodeReply : undefined} frames={state.target === target ? state.frames ?? [] : []} error={state.target === target ? state.nodeError : undefined} busy={busy} active={active && visible} privateOwner={Boolean(ownerTarget) || host.kind === 'local'} />
+      {state.target === target && state.nodeNotice ? <p className="host-runtime__issue" role="status">{state.nodeNotice}</p> : null}
+      <HostNodeResources reply={state.target === target ? state.nodeReply : undefined} frames={state.target === target ? state.frames ?? [] : []} error={state.target === target ? state.nodeError : undefined} busy={state.target === target && state.nodeBusy === true} active={active && visible} privateOwner={state.target !== target || state.nodePrivate !== false} />
+      <section className="host-runtime__workload" aria-label="Native workload measurements"><header><strong>Native workload</strong><span>Original Run Runtime</span></header>
       <div className="host-runtime__resources" aria-label="Retained Runtime resources">
         <div><span>Running Runs</span><strong>{resources?.runningRuns ?? '—'}</strong><small>{resources ? `${resources.runCount} retained in total` : 'Not observed'}</small></div>
         <div><span>Attachments</span><strong>{resources?.attachments ?? '—'}</strong><small>Service readers</small></div>
         <div><span>Retained output</span><strong>{resources ? bytes(resources.retainedOutputBytes) : '—'}</strong><small>In-memory payload</small></div>
       </div>
       <SourceIssue source={current?.resources} retained={retained?.resources} />
-      {resources ? <p className="host-runtime__sample">Resource sample {time(resources.observedAt)} · {resources.terminatedRuns} ended Runs · {resources.terminatedUnattachedRuns} ended without readers</p> : null}
+      {resources ? <p className="host-runtime__sample">Resource sample {time(resources.observedAt)} · {resources.terminatedRuns} ended Runs · {resources.terminatedUnattachedRuns} ended without readers. Retained output is in-memory payload, not disk I/O.</p> : null}
+      </section>
       <div className="host-runtime__environment"><span>Agent service</span><strong>{owner ? owner.availability === 'connected' ? 'Identity confirmed' : 'Connection not verified' : 'Identity not verified'}</strong>
         <span>{diagnostic ? `${diagnostic.platform} · ${diagnostic.arch} · Node ${diagnostic.nodeVersion}` : 'Platform not observed'}</span></div>
       <SourceIssue source={current?.owner} retained={retained?.owner} /><SourceIssue source={current?.diagnostics} retained={retained?.diagnostics} />
