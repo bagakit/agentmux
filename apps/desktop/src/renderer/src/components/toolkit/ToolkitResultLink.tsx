@@ -2,6 +2,7 @@ import { Textarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { isSystemWebUrl } from '../../../../shared/system-web-url'
 import { useAppStore } from '../../store'
 
@@ -49,7 +50,7 @@ export function OpenInSurveyButton({ url, className = 'small-button', note }: { 
 /** Presentation only: its owner chooses whether Copy uses this URL or refreshes a result. */
 export function ToolkitResultLink({ label, url, copy, disabled = false }: { label: string; url: string; copy(url: string): void; disabled?: boolean }) {
   return <div className="toolkit-result__link">
-    <button type="button" className="small-button" aria-label={`Copy ${label || 'link'}`} disabled={disabled} onClick={() => copy(url)}><ThemeActionCopyIcon size={13} /> Copy link</button>
+    <Button type="button" aria-label={`Copy ${label || 'link'}`} disabled={disabled} onClick={() => copy(url)}><ThemeActionCopyIcon size={13} /> Copy link</Button>
     {!disabled ? <OpenInSurveyButton url={url} /> : null}
     <details>
       <summary>View full link</summary>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { ConnectionRecord, ConnectionReceiverRecoveryOperation, GroupDiagnosis, RoomBinding } from '@agentmux/core/connections'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { retainConnectorRoomIntent, clearConnectorRoomIntent, useAppStore } from '../store'
@@ -67,14 +68,14 @@ export function ConnectorReceiverControl({ binding, connection, observed, hostin
   if (render) {
     const online = receiver?.state === 'ready' && observed?.value?.transport.state === 'ready'
     const primaryAction = canStart ? 'new' : retained && !complete && !online ? 'inspect' : null
-    const primary = primaryAction ? <button type="button" className="primary-button" disabled={busy} data-receiver-action={primaryAction === 'new' ? 'recover' : 'inspect'} onClick={() => void run(primaryAction)}>{primaryAction === 'new' ? 'Reconnect bot' : automatic || receiver?.nextAttemptAt !== undefined ? 'Check progress' : 'Check recovery'}</button> : null
+    const primary = primaryAction ? <Button type="button" variant="primary" disabled={busy} data-receiver-action={primaryAction === 'new' ? 'recover' : 'inspect'} onClick={() => void run(primaryAction)}>{primaryAction === 'new' ? 'Reconnect bot' : automatic || receiver?.nextAttemptAt !== undefined ? 'Check progress' : 'Check recovery'}</Button> : null
     const diagnostics = canStart || retained ? <div data-receiver-control>
       {status ? <small role="status">{status}</small> : null}
       {busy ? <small role="status">Checking the saved receiver…</small> : null}
       {issue ? <small role="status">{issue}</small> : null}
       {localIssue ? <small role="status">This request is kept here; its local copy is not durable.</small> : null}
       {retained ? <div className="agent-connector-fields"><code>{retained.input.operationId}</code><div className="agent-connector-row">
-        {primaryAction !== 'inspect' && !complete ? <button type="button" className="small-button" disabled={busy} data-receiver-action="inspect" onClick={() => void run('inspect')}>Check recovery</button> : null}
+        {primaryAction !== 'inspect' && !complete ? <Button type="button" disabled={busy} data-receiver-action="inspect" onClick={() => void run('inspect')}>Check recovery</Button> : null}
         {!canStart && !automatic && !complete ? <button type="button" className="agent-connector-text-action" disabled={busy} data-receiver-action="continue" onClick={() => void run('continue')}>Continue this request</button> : null}
       </div></div> : null}
     </div> : null
@@ -85,8 +86,8 @@ export function ConnectorReceiverControl({ binding, connection, observed, hostin
   return <div className="connector-traffic-summary__receiver" data-receiver-control>
     {status ? <small role="status">{status}</small> : null}
     <div className="agent-connector-row">
-      {canStart ? <button type="button" className="small-button" disabled={busy} data-receiver-action="recover" onClick={() => void run('new')}>Reconnect bot</button> : null}
-      {retained && !complete ? <><button type="button" className="small-button" disabled={busy} data-receiver-action="inspect" onClick={() => void run('inspect')}>Check recovery</button>
+      {canStart ? <Button type="button" disabled={busy} data-receiver-action="recover" onClick={() => void run('new')}>Reconnect bot</Button> : null}
+      {retained && !complete ? <><Button type="button" disabled={busy} data-receiver-action="inspect" onClick={() => void run('inspect')}>Check recovery</Button>
         {!canStart && !automatic ? <button type="button" className="agent-connector-text-action" disabled={busy} data-receiver-action="continue" onClick={() => void run('continue')}>Continue recovery</button> : null}</> : null}
     </div>
     {busy ? <small role="status">Checking original receiver…</small> : null}

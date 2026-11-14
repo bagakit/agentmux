@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ConnectionProfileObservation, ConnectionProfileOperation } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 
 export function ProfileManagementLink({ url }: { url?: string | undefined }) {
   const [issue, setIssue] = useState(''), epoch = useRef(0)
   useEffect(() => { epoch.current++; setIssue(''); return () => { epoch.current++ } }, [url])
-  return url ? <><button type="button" className="small-button" onClick={() => {
+  return url ? <><Button type="button" onClick={() => {
     const current = ++epoch.current
     void api.ui.openExternal(url).catch(error => { if (epoch.current === current) setIssue(presentError(error)) })
-  }}>Manage on platform</button>{issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}</> : null
+  }}>Manage on platform</Button>{issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}</> : null
 }
 
 /** Original write receipt and separate current observations. Never declares publication. */

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { RoomBindingInspection, RoomBindingMappingDifference, RoomBindingOperation } from '@agentmux/core/connections'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ConnectorEntityIdentity, ConnectorIdentityField } from './ConnectorEntityIdentity'
 
 const StatusIcon = semanticIconComponent('object.link')
@@ -40,7 +41,7 @@ export function ConnectorBindingRecovery({ operationId, operation, inspection, r
       <p>{differences.length ? differences.map(difference => differenceLabels[difference]).join(' · ') : 'This group and conversation already have a saved connection.'}</p>
     </div>)}</div> : null}
     <div className="agent-connector-link-actions connector-binding-recovery__actions">
-      {refused ? <button type="button" className="primary-button" disabled={busy} onClick={onReview}>Review group selection</button> : canContinue ? <button type="button" className="primary-button" disabled={busy} onClick={onContinue}>Continue setup</button> : null}
+      {refused ? <Button type="button" variant="primary" disabled={busy} onClick={onReview}>Review group selection</Button> : canContinue ? <Button type="button" variant="primary" disabled={busy} onClick={onContinue}>Continue setup</Button> : null}
       <button type="button" className={refused || canContinue ? 'small-button' : 'primary-button'} disabled={busy} onClick={onInspect}>Check status</button>
     </div>
     <details className="agent-connector-disclosure connector-binding-recovery__receipt"><summary>Setup receipt details</summary><div className="connector-setup-section__body">

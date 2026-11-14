@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ConnectionRecord, RoomBinding } from '@agentmux/core/connections'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import type { GroupDiagnosis } from '../lib/group-diagnosis'
@@ -33,8 +34,8 @@ export function ConnectorConnectionOverview({ binding, connection, report, hosti
   const Icon = model.state === 'online' ? OnlineIcon : model.state === 'unknown' ? UnknownIcon : LinkIcon
   const surface = (receiver: { primary: ReactNode; diagnostics: ReactNode; feedback?: ReactNode }) => {
     const primary = model.primary
-    const button = primary !== 'check' ? <button className="primary-button" type="button" disabled={busy || primary === 'source' && !hostingTarget} data-source-recovery-action={primary === 'source' ? 'recover' : undefined} onClick={() => primary === 'source' ? void recoverSource() : onNavigate?.(primary)}>{busy ? 'Requesting…' : model.actionLabel}</button> :
-      receiver.primary ?? <button className="primary-button" type="button" onClick={() => model.state === 'stopped' && compact && onNavigate ? onNavigate('overview') : onCheck()}>{model.state === 'stopped' && compact ? 'Open recovery' : model.actionLabel}</button>
+    const button = primary !== 'check' ? <Button variant="primary" type="button" disabled={busy || primary === 'source' && !hostingTarget} data-source-recovery-action={primary === 'source' ? 'recover' : undefined} onClick={() => primary === 'source' ? void recoverSource() : onNavigate?.(primary)}>{busy ? 'Requesting…' : model.actionLabel}</Button> :
+      receiver.primary ?? <Button variant="primary" type="button" onClick={() => model.state === 'stopped' && compact && onNavigate ? onNavigate('overview') : onCheck()}>{model.state === 'stopped' && compact ? 'Open recovery' : model.actionLabel}</Button>
     const overview = <section className={'connector-connection-overview' + (compact ? ' connector-connection-overview--compact' : '')} data-receiving-state={model.state}>
       {!compact && model.state === 'unknown' ? <small className="connector-connection-overview__caption">Bot connection</small> : null}
       <h3><span className="connector-connection-overview__symbol"><Icon size={compact ? 17 : 25} /></span><span>{model.title}</span></h3>
@@ -46,7 +47,7 @@ export function ConnectorConnectionOverview({ binding, connection, report, hosti
     </section>
     // Diagnostics always offer the publication owner's own recovery while the source needs it,
     // independently of the receiving socket that decides the card's primary action.
-    const sourceAction = model.sourceRecovery ? <button className="primary-button" type="button" disabled={busy || !hostingTarget} data-source-recovery-action="recover" onClick={() => void recoverSource()}>{busy ? 'Requesting…' : 'Try sync now'}</button> : null
+    const sourceAction = model.sourceRecovery ? <Button variant="primary" type="button" disabled={busy || !hostingTarget} data-source-recovery-action="recover" onClick={() => void recoverSource()}>{busy ? 'Requesting…' : 'Try sync now'}</Button> : null
     return render ? render({ overview, diagnostics: receiver.diagnostics, action: button, sourceAction, feedback: <>{receiver.feedback}{feedback ? <small role="status">{feedback}</small> : null}</> }) : overview
   }
   // Compact lists do not inspect every bot's retained operation. Its honest entry

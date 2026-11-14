@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ConnectionDelivery, ConnectionDeliveryContinuation, ConnectionDeliveryRetrySource, RoomBinding } from '@agentmux/core/connections'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { deliveryMatches, groupTarget } from '../lib/group-diagnosis'
@@ -68,7 +69,7 @@ export function ConnectorDeliveryRetryControl({ delivery, binding, hostingTarget
     }
     finally { flight.current = false; if (accepts(originalKey)) setBusy(false) }
   }
-  const retryButton = newSource ? <button className="small-button" type="button" data-delivery-action="retry" disabled={busy} onClick={() => void run('new')}>{retained ? 'Retry latest failure' : source?.kind === 'content-upload' ? 'Retry upload' : 'Retry message'}</button> : null
+  const retryButton = newSource ? <Button type="button" data-delivery-action="retry" disabled={busy} onClick={() => void run('new')}>{retained ? 'Retry latest failure' : source?.kind === 'content-upload' ? 'Retry upload' : 'Retry message'}</Button> : null
   return <div className="agent-connector-fields" data-delivery-retry>
     {retained ? <small role="status">{accepted ? 'Retry accepted · platform result is separate' : 'Original retry result unconfirmed'}</small> : !source ? <small>Original platform result only; no retry source confirmed.</small> : null}
     <div className="agent-connector-row">

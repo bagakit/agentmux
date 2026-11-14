@@ -5,6 +5,7 @@ import { parseCapsuleRpcResult, type CapsuleOpenResult } from '@agentmux/core/ca
 import type { ToolkitCapsuleReference, ToolkitExecution } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { deliveryFailure } from '@agentmux/core/delivery-attempt'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../../lib/api'
 
 type Source = { toolId: string; execution: ToolkitExecution }
@@ -58,13 +59,13 @@ export function ToolkitCapsuleResults({ references, source }: { references: read
       const execution = page.source.execution
       return <div className="toolkit-capsules__row" key={page.capsuleId} data-toolkit-capsule={page.capsuleId}>
         <div className="toolkit-capsules__main"><span><strong>{page.label || 'Capsule page'}</strong><small>Persistent page · availability checked when opened</small></span>
-          <button type="button" className="small-button" disabled={locked} onClick={() => void open(page, page.source)}>{attempt?.phase === 'pending' ? 'Opening…' : 'Open page'}</button>
-          <button type="button" className="small-button" onClick={() => { void api.ui.writeClipboardText(formatAmuxObjectLink({ kind: 'capsule', capsuleId: page.capsuleId })).then(() => { if (mounted.current) setCopies(current => ({ ...current, [page.capsuleId]: 'Capsule link copied.' })) }, error => { if (mounted.current) setCopies(current => ({ ...current, [page.capsuleId]: presentError(error) })) }) }}>Copy Capsule link</button>
+          <Button type="button" disabled={locked} onClick={() => void open(page, page.source)}>{attempt?.phase === 'pending' ? 'Opening…' : 'Open page'}</Button>
+          <Button type="button" onClick={() => { void api.ui.writeClipboardText(formatAmuxObjectLink({ kind: 'capsule', capsuleId: page.capsuleId })).then(() => { if (mounted.current) setCopies(current => ({ ...current, [page.capsuleId]: 'Capsule link copied.' })) }, error => { if (mounted.current) setCopies(current => ({ ...current, [page.capsuleId]: presentError(error) })) }) }}>Copy Capsule link</Button>
         </div>
         {copies[page.capsuleId] ? <p role="status">{copies[page.capsuleId]}</p> : null}
         {attempt ? <div className="toolkit-capsules__receipt" role={attempt.phase === 'unknown' || attempt.phase === 'failed' ? 'alert' : 'status'}>
           <span>{attempt.phase === 'pending' ? 'Waiting for the original open…' : attempt.message}</span>
-          {attempt.phase === 'unknown' ? <button type="button" className="small-button" onClick={() => void inspect(attempt)}>Check original open</button> : null}
+          {attempt.phase === 'unknown' ? <Button type="button" onClick={() => void inspect(attempt)}>Check original open</Button> : null}
           {attempt.phase === 'unknown' || attempt.phase === 'failed' ? <small>Operation <code>{attempt.operationId}</code> · execution <code>{attempt.source.execution.executionId}</code></small> : null}
         </div> : null}
         <details className="toolkit-result__details"><summary>Page and result source</summary><dl>

@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ToolkitToolConfiguration } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { resolvePerformancePreferences, resolveMobileConnectionPreferences } from '../../../../shared/toolkit-preferences'
 import { useAppStore } from '../../store'
 import { PerformancePanel } from '../performance/PerformancePanel'
@@ -31,7 +32,7 @@ const Overflow = memo(function Overflow({ tools, selection }: { tools: readonly 
   const [visible, setVisible] = useState(false)
   const changed = useCallback((value: boolean) => setVisible(value), [])
   return <ToolkitPopover {...selection} toolId={chosen?.id ?? OVERFLOW_SELECTION} name={chosen ? `More tools · ${chosen.name}` : 'More tools'} icon={<ThemeActionMoreIcon size={14} aria-hidden="true" />} onVisibleChange={changed} focusKey={chosen?.id ?? 'library'}>
-    {close => chosen ? <><button type="button" className="small-button toolkit-overflow__back" onClick={() => selection.onSelectTool(OVERFLOW_SELECTION)}><ThemeNavigationBackIcon size={13} /> Back to tools</button><UserToolkitResult key={chosen.id} definition={chosen} active={visible} close={close} /></> : <>
+    {close => chosen ? <><Button type="button" className="toolkit-overflow__back" onClick={() => selection.onSelectTool(OVERFLOW_SELECTION)}><ThemeNavigationBackIcon size={13} /> Back to tools</Button><UserToolkitResult key={chosen.id} definition={chosen} active={visible} close={close} /></> : <>
       <header className="performance-header"><div className="performance-title"><h2>More tools</h2></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label="Close tool list" onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
       <div className="performance-body toolkit-overflow__list">{tools.map(tool => <button type="button" className="toolkit-overflow__item" key={tool.id} onClick={() => selection.onSelectTool(tool.id)}><ToolkitIcon icon={tool.icon} size={16} /><span>{tool.name}</span></button>)}</div>
     </>}

@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicPhysicalPath } from '@agentmux/host/mote-model'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { isKnowledgeTopicInBindings } from '@agentmux/host/topic-categories'
 import { useScratchTopics } from '../hooks/useScratchTopics'
@@ -41,7 +42,7 @@ export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenP
     actions={!selectedTopicId || topic && rootPath !== null ? actions : null}
     explorer={{ rootPath: rootPath ?? '', rootLabel: fileTopic?.title ?? workspace.name, revealRequest, onOpenPath, onOpenTerminal }}
     fileIssue={selectedTopicId && rootPath === null ? <div className="surface-inline-error" role="status">The selected object's file root is not confirmed. Its original workface is kept.
-      {scratch ? <button type="button" className="icon-button" aria-label="Retry directory discovery" title="Retry directory discovery" onClick={() => void useAppStore.getState().refreshScratchTopics(scratch.id, true)}><ThemeActionRefreshIcon size={13} /></button> : null}</div> : undefined}>
+      {scratch ? <IconButton type="button" aria-label="Retry directory discovery" title="Retry directory discovery" onClick={() => void useAppStore.getState().refreshScratchTopics(scratch.id, true)}><ThemeActionRefreshIcon size={13} /></IconButton> : null}</div> : undefined}>
     {content}
   </WorkspaceFilesFrame>
   return presentation.showTopics ? frame(<TopicNavigationPanel workspace={workspace} topic={topic} selectedTopicId={selectedTopicId} initialView={initialView}

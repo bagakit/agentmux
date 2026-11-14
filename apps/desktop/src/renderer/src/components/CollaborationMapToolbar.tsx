@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { InputGroup, TextInput } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import * as Menu from './HoverDropdownMenu'
 import { FocusViewSwitch } from './FocusViewSwitch'
 import { TopRowLeadingChrome } from './TopRowChrome'
@@ -23,9 +25,9 @@ export function CollaborationMapToolbar({ active, agents, selectedKinds, onToggl
     <div className="collaboration-map__tools">
       <MapSearch agents={agents} active={active} onLocate={onLocate} />
       <Menu.Root open={active && filtersOpen} onOpenChange={setFiltersOpen}>
-        <Menu.Trigger asChild><button type="button" className="small-button collaboration-map__filter" aria-label="Filter map relations" title="Filter map relations" data-active={selectedKinds.size !== kinds.length || undefined}>
+        <Menu.Trigger asChild><Button type="button" className="collaboration-map__filter" aria-label="Filter map relations" title="Filter map relations" data-active={selectedKinds.size !== kinds.length || undefined}>
           <SemanticIcon name="action.filter" size={14} /><span>Relations</span>{selectedKinds.size !== kinds.length ? <small>{selectedKinds.size}</small> : null}
-        </button></Menu.Trigger>
+        </Button></Menu.Trigger>
         <Menu.Portal><Menu.Content className="tab-context-menu collaboration-filter-menu" align="end" sideOffset={6} collisionPadding={8}>
           <Menu.Label className="tab-context-menu__hint">Show relations</Menu.Label>
           {kinds.map(kind => <Menu.CheckboxItem key={kind} className="tab-context-menu__item" data-kind={kind} checked={selectedKinds.has(kind)} onCheckedChange={() => onToggleKind(kind)} onSelect={event => event.preventDefault()}>
@@ -34,10 +36,10 @@ export function CollaborationMapToolbar({ active, agents, selectedKinds, onToggl
           </Menu.CheckboxItem>)}
         </Menu.Content></Menu.Portal>
       </Menu.Root>
-      <button type="button" className="small-button collaboration-map__sources" aria-label="Map sources" title={status} aria-expanded={sourcesOpen} data-issue={issues > 0 || undefined} onClick={onSources}>
+      <Button type="button" className="collaboration-map__sources" aria-label="Map sources" title={status} aria-expanded={sourcesOpen} data-issue={issues > 0 || undefined} onClick={onSources}>
         <SemanticIcon name={issues ? 'status.warning' : 'object.inbox'} size={14} /><span>Sources</span>{issues ? <small>{issues}</small> : loading ? <span className="collaboration-map__reading" role="status" aria-label="Reading sources" /> : null}
-      </button>
-      <button type="button" className="icon-button" aria-label="Refresh graph sources" title="Refresh graph sources" onClick={onRefresh}><SemanticIcon name="action.refresh" size={14} /></button>
+      </Button>
+      <IconButton type="button" aria-label="Refresh graph sources" title="Refresh graph sources" onClick={onRefresh}><SemanticIcon name="action.refresh" size={14} /></IconButton>
     </div>
   </header>
 }

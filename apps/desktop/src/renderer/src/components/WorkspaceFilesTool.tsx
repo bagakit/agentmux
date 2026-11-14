@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState } from 'react'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { selectedKnowledgeSources } from '../lib/topic-knowledge-actions'
 import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -21,13 +22,13 @@ export function WorkspaceFilesTool(props: WorkspaceFileActions & {
   const selectedTopicId = useAppStore(state => topicId ?? (state.workbenchSpaceSelection?.workspaceId === workspace.id ? state.workbenchSpaceSelection.topicId : null))
   const mote = useMoteWorkfaceScope(workspace.id, topicId, visible)
   const [capture, setCapture] = useState<ReturnType<typeof selectedKnowledgeSources>>(null)
-  const collect = <button type="button" className="icon-button" aria-label="Collect sources in a knowledge topic" title="Collect sources in a knowledge topic" onClick={() => {
+  const collect = <IconButton type="button" aria-label="Collect sources in a knowledge topic" title="Collect sources in a knowledge topic" onClick={() => {
     try {
       const target = selectedKnowledgeSources(workspace.id)
       if (!target) throw new Error('Choose a file, page or discussion to collect its reference in a knowledge topic.')
       setCapture(target)
     } catch (error) { useAppStore.getState().reportError(error) }
-  }}><CollectSourcesIcon size={13} /></button>
+  }}><CollectSourcesIcon size={13} /></IconButton>
   return <>
     {capture ? <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} /> : null}
     {mote ? <MoteFilesTool {...props} scope={mote} /> : isScratch || selectedTopicId ?

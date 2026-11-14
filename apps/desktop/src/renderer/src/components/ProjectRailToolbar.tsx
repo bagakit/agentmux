@@ -1,4 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { SettingsPageId } from './SettingsPanel'
 
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
@@ -21,8 +22,8 @@ function SettingsButton({
   onOpenSettings: (section: SettingsPageId) => void
 }) {
   return (
-    <button
-      className="icon-button project-rail-toolbar__button"
+    <IconButton
+      className="project-rail-toolbar__button"
       type="button"
       aria-label="Settings"
       title="Settings"
@@ -30,14 +31,14 @@ function SettingsButton({
       onClick={() => onOpenSettings('overview')}
     >
       <ThemeObjectSettingsIcon size={13} />
-    </button>
+    </IconButton>
   )
 }
 
 function ShortcutHelpButton({ onOpenSettings }: { onOpenSettings: (section: SettingsPageId) => void }) {
-  return <button type="button" className="icon-button project-rail-toolbar__button"
+  return <IconButton type="button" className="project-rail-toolbar__button"
     aria-label="Keyboard shortcuts" title="Keyboard shortcuts" data-shortcut-help-open
-    onClick={() => onOpenSettings('keyboard-shortcuts')}><ThemeObjectKeyboardIcon size={13} /></button>
+    onClick={() => onOpenSettings('keyboard-shortcuts')}><ThemeObjectKeyboardIcon size={13} /></IconButton>
 }
 
 export function ProjectRailToolbar({
