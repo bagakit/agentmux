@@ -23,7 +23,7 @@ const mutations = [
     before: "onChange={(event) => draft.setField('copyPathsAsAbsolute', event.target.checked)}", after: 'onChange={undefined}' },
   { label: 'sound-discards-original-checked-draft', file: notifications, before: 'checked={sound}', after: 'checked={false}' },
   { label: 'sound-off-revokes-independent-editing', file: notifications,
-    before: 'type="checkbox" name="sound"', after: 'type="checkbox" name="sound" disabled={mode === \'off\'}' }
+    before: 'name="sound"', after: 'name="sound" disabled={mode === \'off\'}' }
 ]
 const sources = [row, toggle, general, notifications, 'apps/desktop/src/renderer/src/components/SettingsPanel.tsx',
   'apps/desktop/src/renderer/src/components/settings/modules/general.tsx', 'apps/desktop/src/renderer/src/components/settings/modules/notifications.tsx',

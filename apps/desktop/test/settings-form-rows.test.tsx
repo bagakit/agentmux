@@ -38,7 +38,7 @@ it.each(cases)('$section keeps its original native field and exact save expectat
   expect(checkbox.name).toBe(fieldName); expect(row.htmlFor).toBe(checkbox.id); expect(checkbox.id).not.toBe('')
   expect(document.getElementById(checkbox.getAttribute('aria-labelledby')!)?.textContent).toBe(name)
   expect(document.getElementById(checkbox.getAttribute('aria-describedby')!)?.textContent).toBe(description)
-  expect(checkbox.labels?.[0]).toBe(row); expect(checkbox.getAttribute('role')).toBeNull()
+  expect(checkbox.labels?.[0]).toBe(row); expect(checkbox.getAttribute('role')).toBe('switch')
   expect(checkbox.hasAttribute('aria-invalid')).toBe(false); expect(save.disabled).toBe(true)
   await act(async () => row.querySelector('strong')!.click())
   expect(checkbox.checked).toBe(true); expect(f.uiSave).not.toHaveBeenCalled(); expect(save.disabled).toBe(false)

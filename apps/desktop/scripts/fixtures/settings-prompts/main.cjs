@@ -4,7 +4,8 @@ const assert = require('node:assert/strict')
 const { pathToFileURL } = require('node:url')
 const { app, BrowserWindow, ipcMain } = require('electron')
 const [html, ownerBundle, privateRoot, evidence, mode] = process.argv.slice(2)
-for (const key of ['home', 'userData', 'sessionData']) {
+const privatePaths = ['home', 'appData', 'userData', 'sessionData']
+for (const key of privatePaths) {
   const directory = path.join(privateRoot, key)
   fs.mkdirSync(directory, { recursive: true }); app.setPath(key, directory)
 }
@@ -12,10 +13,11 @@ const result = { pid: process.pid, mode, captureOnly: true, aestheticReview: 'no
 let win
 app.whenReady().then(async () => {
   try {
+    for (const key of privatePaths) assert.equal(app.getPath(key), path.join(privateRoot, key), `Electron ${key} is isolated`)
     const { ConfigStore, ConfigOwner, DEFAULT_CONFIG } = await import(pathToFileURL(ownerBundle).href)
     const store = new ConfigStore(path.join(privateRoot, 'userData', 'config.json'))
     const initial = !fs.existsSync(store.filePath)
-    assert.equal(initial, ['control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts', 'message-tool-settings', 'appearance-preview', 'appearance-preview-glyphs', 'session-continuity-settings', 'session-continuity-delivery'].includes(mode), 'Restart must reuse durable config, never seed again')
+    assert.equal(initial, ['control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts', 'message-tool-settings', 'settings-inputs-workflows', 'appearance-preview', 'appearance-preview-glyphs', 'session-continuity-settings', 'session-continuity-delivery'].includes(mode), 'Restart must reuse durable config, never seed again')
     let current = initial ? await store.save({ ...structuredClone(DEFAULT_CONFIG), composerShortcuts: [
       { id: 'explain', label: 'Explain simply', keyword: 'eli5', body: '用大白话说说这次做了什么，指出关键变化、验证结果与还没确认的部分。', states: ['done', 'error'] },
       { id: 'review', label: 'Review changes', keyword: 'review', providerId: 'codex', states: ['waiting', 'done'], body: Array.from({ length: 10 }, (_, i) => `${i + 1}. Review the current changes for correctness, scope, readability and recovery. Explain concrete risks, cite the relevant code and propose the smallest complete fix.`).join('\n') },
@@ -94,6 +96,15 @@ app.whenReady().then(async () => {
     await until('window.promptsProbe?.ready && !!document.querySelector(".window-status-bar [aria-label=Settings]")')
     await read('window.promptsProbe.beginSurface()')
     await click(q('.window-status-bar [aria-label="Settings"]')); await section('prompts')
+    if (mode === 'settings-inputs-workflows') {
+      await require('../settings-inputs-workflows/scenario.cjs').run({ win, read, q, button, until, settle, click, type, scene, capture, result })
+      result.disk = JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
+      assert.deepEqual(result.disk, owner.current)
+      result.surface = await read('window.promptsProbe.surface()')
+      assert.equal(result.surface.exact, true, 'Settings inputs preserve the original work surface')
+      result.completed = true
+      return
+    }
     if (mode === 'session-continuity-settings' || mode === 'session-continuity-delivery') {
       await require('../session-continuity-settings/scenario.cjs').run({ win, read, q, until, settle, click, type, scene, capture, owner, result, mode, ownerBundle, privateRoot, root: path.resolve(__dirname, '../../../../..') })
       result.completed = true

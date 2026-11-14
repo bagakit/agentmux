@@ -83,7 +83,7 @@ export async function qualify(directory, materialsOnly = false, preview = false,
     await build({ configFile: false, root: fixture, base: './', logLevel: 'warn', resolve: config.resolve, worker: { format: 'es' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
       plugins: [{ name: 'bind-proof-source', enforce: 'pre', async transform(code, id) {
         const filename = id.split('?')[0]
-        if (/\.(png|svg|jpe?g|webp|woff2?|ttf)$/.test(filename)) {
+        if (/\.(png|svg|jpe?g|webp|avif|woff2?|ttf)$/.test(filename)) {
           if (filename.startsWith(root + '/')) { const bytes = await fs.readFile(filename); receipt.assets.push({ file: path.relative(root, filename), bytes: bytes.length, sha256: hash(bytes) }) }
         } else {
           const consumed = await consumedSource(filename, code)
