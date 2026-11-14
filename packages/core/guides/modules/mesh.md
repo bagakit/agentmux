@@ -27,7 +27,7 @@ may confirm the same already saved bytes, without replaying an old configuration
 
 To manage one saved remote Core, keep the CLI connected to your original entry
 Core and add `--host HOST --expected-runtime RUNTIME` when reading or managing Mesh on that Host.
-JSON-RPC accepts the same optional `target:{hostId,expectedRuntimeId}`; CLI JSON
+JSON-RPC accepts the same optional `target:{hostId,expectedRuntimeId}`. To keep a previously observed Core process, include its `expectedOwnerInstanceId` in that target. CLI JSON
 can contain it instead of those two flags, never both. The entry authenticates
 its real local caller and freezes that saved operator route. The receiving Core
 independently authorizes the operator carrier and its exact Runtime/instance;
@@ -65,7 +65,7 @@ A minimal outbound participant can be constructed without reading source:
 For Desktop pairing, open Mesh and choose **Join this device to a network**.
 Paste the gateway’s saved connection code to see its network, public peer identity
 and advertised dial addresses. Add it and save. Copy this device’s saved code back
-to the gateway operator, who adds that peer and saves on the gateway. A gateway
+to the gateway operator. On a managing Mac, the operator chooses the saved gateway under **Device to manage**, adds that peer and saves on the gateway. A gateway
 can dial its own upstream while keeping its dedicated listener and published addresses.
 The CLI reads the same public code with `amux mesh code`; `amux mesh code read CODE`
 previews it offline. Reading and sharing a code leaves both configurations untouched.
