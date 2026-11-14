@@ -22,9 +22,9 @@ async function input(label: string, value: string) { await act(async () => { con
 function inspectOnly() { return vi.spyOn(api.mesh, 'call').mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? observation() : settings) as never) }
 it('the original Settings section exposes Mesh and a real editor; saved connection identities keep their original route', async () => {
   inspectOnly(); expect(hostsSettingsModule.id).toBe('hosts'); expect(hostsSettingsModule.title).toBe('Mesh')
-  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} />)
-  await ready(); expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Network')
-  expect(dom.container.textContent).toContain('Saved connections')
+  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={{section:'hosts',field:'mesh-configuration'}} />)
+  await ready(); expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Gateway')
+  expect(dom.container.textContent).toContain('Connections')
 })
 it('actual editor submits the original fence once and retains text authored after the save started', async () => {
   let finish!: (value: unknown) => void
@@ -180,7 +180,7 @@ it('hiding a pending route read releases its observer and allows an explicit fre
 
 it('unavailable setup offers recovery and the original saved connections without an invented empty network or dead link form', async () => {
   const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Object.assign(Error('Original owner did not answer'), { code: 'MESH_OWNER_UNAVAILABLE' }))
-  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} />)
+  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={{section:'hosts',field:'mesh-configuration'}} />)
   await settled(() => Boolean(dom.container.querySelector('.mesh-availability details')))
   expect(dom.container.textContent).toContain('Couldn’t read Mesh settings.')
   expect(dom.container.textContent).not.toContain('Reading your network settings…')
@@ -189,7 +189,7 @@ it('unavailable setup offers recovery and the original saved connections without
   expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(true)
   await dom.click('.mesh-recovery-actions button:last-child')
   expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(false)
-  expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Saved connections')
+  expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Connections')
   expect(call.mock.calls.some(row => row[0] === 'settings.mesh.configure')).toBe(false)
 })
 
@@ -202,7 +202,7 @@ it('independent authenticated network observations survive an unavailable settin
   })
   await dom.render(<Editor active />)
   await settled(() => Boolean(dom.container.querySelector('.mesh-availability details')))
-  await settled(() => Boolean(dom.container.querySelector('.mesh-peer-list')))
+  await settled(() => Boolean(dom.container.querySelector('[data-mesh-object="peer"]')))
   expect(dom.container.textContent).toContain('Couldn’t read Mesh settings.')
   expect(dom.container.textContent).toContain('other-peer')
   expect(dom.container.textContent).toContain('Authenticated')
