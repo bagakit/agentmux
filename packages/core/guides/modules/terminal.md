@@ -41,6 +41,34 @@ inspect the same destination and original owner instead of opening another termi
 probe commands. Navigation and input eligibility remain separate from creation. For a new
 split/Tab, read amux space --skill first and choose from the actual visible geometry.
 
+After an unknown initial opening, keep its original operation ID and read:
+
+amux terminal creation inspect --host HOST --operation-id ORIGINAL_OP [--runtime ORIGINAL_RUNTIME]
+
+This reads the execution Core's original admission, even while Native is offline.
+It never prepares, activates, starts or retires a process. The original admission
+Runtime and last positive Run fact are separate from the current Native observation;
+an unavailable observation does not certify current liveness. Disk confirmation is
+also separate, and a cold read cannot reconstruct the previous writer's sync ACK.
+The private preparation, environment and credentials are never returned. This read
+uses the same person/device boundary as terminal ls/inspect; managed open admission
+and raw read permission remain separate. A permission refusal means that identity
+cannot use the read, not that the CLI command is missing.
+
+If the original creation needs an explicit permanent Native fence, read
+terminal creation retire --help, then use its exact already-admitted key:
+
+amux terminal creation retire --host HOST --operation-id ORIGINAL_OP --runtime ORIGINAL_RUNTIME
+
+This person/device action never stops a retained Run or submits Start. Native must
+already be connected before a new retirement is admitted. The original immutable
+retirement admission is shared by SDK and CLI. Reentry, lost ACK, missing members
+and Core restart only observe it; they never authorize another retirement. Native
+not_applied describes only that failed Start, while retired is the permanent fence.
+Unknown stays unknown. A retained result keeps its original healthy Run. Read the
+original creation inspect for the request, Native result and separate save confirmation.
+Pending Agent lifecycle keys are excluded before retirement, even without a Run.
+
 For an existing raw Terminal, read terminal recover --help. Recovery uses the exact
 execution Host, persistent Native Runtime, original Run and cwd. It reenters one
 durable Core intent, including after the client or Core process restarts. Unknown

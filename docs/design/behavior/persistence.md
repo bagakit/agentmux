@@ -59,3 +59,7 @@ Core 的 Hook 回执确认与辅助工作历史投影分别表达。合并保存
 每项保存能力必须有真实产品消费者、定向变异及跨进程读回证据。真实隔离正常退出和异常终止覆盖原 Tab／Group／Region、焦点、分割、草稿、队列和编辑内容；不能由测试额外写盘、重新种数据或另起空 Session 代签。热路径成本核对无关 Session 事件不放大用户状态保存。
 
 保存异常沿原 owner 留存有界诊断，包含阶段、来源、确认状态和必要的对象／revision 引用，不记录草稿、消息正文或凭据。恢复后能核查失败发生在哪一步；告示消失、目录存在或进程仍活着不证明历史保存成功。诊断不能成为健康能力的新门禁。
+
+显式初始创建退休沿同一 Terminal recovery owner 保存薄单调 witness：原 per-key 短锁负责协调，另一个 O_EXCL 文件在原 fd 写入、同步并确认父目录；不 rename 正在 flock 的稳定 inode。首次独占且确认的创建者才可派发一次 retirement；空、残缺或已存在 witness 不重新授予施效资格。Agent key 角色不保存在此 witness 中，而是从原 Agent Store 精确核对；共享空锁只串行本次准入，不复制生命周期账本。
+
+原 Agent Store 的私有机器创建 key集合与完整性标记归原 Session/reservation/退休顶层，随其生命周期交出；不进入公开 history或cloneSession投影，不新增角色catalog、表或历史迁移。canonical事实在普通更新保留，调用者incoming不得自签新增key或升级完整性；无原完整事实及unbound Run来源保持unknown。
