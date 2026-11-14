@@ -386,7 +386,10 @@ async function run() {
 void run().catch(async error => {
   receipt.failure = { name: error.name, message: error.message, stack: error.stack }
   process.stderr.write(JSON.stringify(receipt.failure) + '\n')
-  try { if (current && !current.isDestroyed()) { receipt.failure.dom = await evaluate('document.body.innerText'); receipt.failure.events = await evaluate('window.captureEvents'); await shot('failure') } } catch {}
+  try { if (current && !current.isDestroyed()) {
+    receipt.failure.dom = await evaluate('document.body.innerText'); receipt.failure.events = await evaluate('window.captureEvents')
+    await Promise.race([shot('failure'), new Promise(resolve => setTimeout(resolve, 2000))])
+  } } catch {}
 }).finally(async () => {
   surface?.dispose(); editor?.dispose()
   for (const window of BrowserWindow.getAllWindows()) window.destroy()
