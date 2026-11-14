@@ -2493,23 +2493,33 @@ async function reconcileNoteRead(workspaceId: string, path: string, lifetime: nu
 }
 
 /** Prefer an actual complete Source read when mapped; legacy unbudgeted reading remains usable. */
+/** Warm documents own the binding. Cold clean Views retain only its original UserState pointer. */
+function originalFileReadSource(state: AppState, workspaceId: string, path: string): FileDocument['readSource'] {
+  const current = state.documents[documentKey(workspaceId, path)]?.readSource
+  if (current) return current
+  if (!Object.keys(state.sourceFilesInputs.readSources ?? {}).length) return undefined
+  const bindings = new Map<string, NonNullable<FileDocument['readSource']>>()
+  for (const occurrence of fileViewOccurrences(state.tabs)) {
+    if (occurrence.workspaceId !== workspaceId || occurrence.path !== path) continue
+    const pointer = state.sourceFilesInputs.readSources?.[occurrence.pointerKey]
+    if (pointer?.workspaceId === workspaceId && pointer.path === path) bindings.set(JSON.stringify(pointer.source), pointer.source)
+  }
+  if (bindings.size > 1) throw new Error('These original File Views retain different Source bindings. Their workfaces are kept; choose the exact original View before reading.')
+  return bindings.values().next().value
+}
 async function readWorkspaceFileDocument(workspaceId: string, path: string, originalSource?: FileDocument['readSource']): Promise<import('../../shared/contracts').WorkspaceFileReadResult> {
+  originalSource ??= originalFileReadSource(useAppStore.getState(), workspaceId, path)
   if (originalSource) {
     const observed = await api.sourceFiles.call(originalSource.target, 'file.read', originalSource.query)
     if (!observed.result.resource || ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => observed.result.resource![key as keyof typeof originalSource.resource] !== originalSource.resource[key as keyof typeof originalSource.resource])) return {
       status: 'error', code: 'FILE_SOURCE_MAPPING_CHANGED', message: 'The captured original Source file mapping changed. Its request and buffer remain retained.'
     }
     if (observed.result.result.status === 'unknown') return { status: 'error', code: observed.result.result.code, message: observed.result.result.message }
-    return observed.result.result.status === 'read' ? { status: 'read', document: { ...observed.result.result.document, path, readSource: originalSource } } : observed.result.result
+    const originalMain = useAppStore.getState().documents[documentKey(workspaceId, path)]?.legacyMainNote ?? useAppStore.getState().legacyMainNoteReferences[documentKey(workspaceId, path)]
+    return observed.result.result.status === 'read' ? { status: 'read', document: { ...observed.result.result.document, path, readSource: originalSource,
+      ...(originalMain ? { legacyMainNote: originalMain } : {}) } } : observed.result.result
   }
   const input = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
-  const existing = useAppStore.getState().documents[documentKey(workspaceId, path)]?.readSource
-  if (existing && input && fileSaveTails.has(documentKey(workspaceId, path)) && JSON.stringify(existing.target) !== JSON.stringify(input.target)) return {
-    status: 'error', code: 'FILE_SOURCE_SELECTION_CHANGED', message: 'The original Source save is still settling. Its binding, request and body are retained; the later Source was not attached.'
-  }
-  if (existing && (!input || !sourceFilesWorkspaceMatches(input.workspace, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)))) return {
-    status: 'error', code: 'FILE_SOURCE_SELECTION_CHANGED', message: 'The original Source directory is no longer selected. Its body and original binding are retained.'
-  }
   if (input?.locator && sourceFilesWorkspaceMatches(input.workspace, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId))) {
     try {
       const read = await api.sourceFiles.call(input.target, 'file.read', sourceFilesQuery(input.locator, path))
@@ -2530,9 +2540,14 @@ async function readWorkspaceFileDocument(workspaceId: string, path: string, orig
       if (read.result.result.status !== 'unknown' && read.result.result.status !== 'error') return read.result.result
     } catch { /* This optional provenance observation cannot remove the existing reader. */ }
     const legacy = await api.files.read(workspaceId, path)
+    if (originalFileReadSource(useAppStore.getState(), workspaceId, path)) return { status: 'error', code: 'FILE_SOURCE_BINDING_CHANGED',
+      message: 'This File View became Source-bound while its earlier reader was waiting. The original Source body and binding are kept.' }
     return legacy.status === 'read' ? { ...legacy, document: withoutFileReadIdentity(legacy.document) } : legacy
   }
-  return await api.files.read(workspaceId, path)
+  const legacy = await api.files.read(workspaceId, path)
+  if (originalFileReadSource(useAppStore.getState(), workspaceId, path)) return { status: 'error', code: 'FILE_SOURCE_BINDING_CHANGED',
+    message: 'This File View became Source-bound while its earlier reader was waiting. The original Source body and binding are kept.' }
+  return legacy
 }
 
 async function writeWorkspaceFileDocument(workspaceId: string, input: import('../../shared/contracts').WorkspaceFileWriteInput, source?: FileDocument['readSource']): Promise<import('../../shared/contracts').WorkspaceFileWriteResult> {
@@ -4557,6 +4572,17 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
   }
 }
 
+type FileViewOccurrence = { pointerKey: string; key: string; workspaceId: string; path: string }
+let fileOccurrenceTabs: AppState['tabs'] | undefined
+let fileOccurrences: FileViewOccurrence[] = []
+/** A single topology-derived projection; stable body input never scans unrelated Tabs. */
+function fileViewOccurrences(tabs: AppState['tabs']): readonly FileViewOccurrence[] {
+  if (tabs === fileOccurrenceTabs) return fileOccurrences
+  fileOccurrenceTabs = tabs
+  fileOccurrences = Object.values(tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface => surface.kind === 'file' ?
+    [{ pointerKey: tab.id + '\0' + surface.regionId, key: documentKey(surface.workspaceId, surface.path), workspaceId: surface.workspaceId, path: surface.path }] : []))
+  return fileOccurrences
+}
 let previousPersistedInputs: ReturnType<typeof selectPersistedInputs> | null = null
 let previousPersistedProjection: PersistedAppState | null = null
 
@@ -4569,13 +4595,24 @@ function partializeAppState(state: AppState): PersistedAppState {
   }
   const { tabs, layouts, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
   const legacyMainNoteReferences = { ...state.legacyMainNoteReferences }
-  const referenceKeys = new Set(Object.values(state.tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface => surface.kind === 'file' ? [documentKey(surface.workspaceId, surface.path)] : [])))
+  const referenceKeys = new Set<string>()
+  let hasSourcePointers = Boolean(Object.keys(state.sourceFilesInputs.readSources ?? {}).length)
   for (const [key, document] of Object.entries(documents)) {
     if (document.legacyMainNote) legacyMainNoteReferences[key] = document.legacyMainNote
+    if (document.readSource) hasSourcePointers = true
     if (dirtyDocuments[key] || hasRecoverableFileBuffer(document, documentIssues[key])) referenceKeys.add(key)
+  }
+  const readSources: NonNullable<SourceFilesInputs['readSources']> = {}
+  if (hasSourcePointers || Object.keys(legacyMainNoteReferences).length) for (const occurrence of fileViewOccurrences(state.tabs)) {
+    referenceKeys.add(occurrence.key)
+    const previous = state.sourceFilesInputs.readSources?.[occurrence.pointerKey]
+    const source = documents[occurrence.key]?.readSource ??
+      (previous?.workspaceId === occurrence.workspaceId && previous.path === occurrence.path ? previous.source : undefined)
+    if (source) readSources[occurrence.pointerKey] = { workspaceId: occurrence.workspaceId, path: occurrence.path, source }
   }
   const projection: PersistedAppState = {
     ...presentation,
+    sourceFilesInputs: { ...presentation.sourceFilesInputs, readSources },
     // Only original metadata pointers for retained workfaces; no reconstructible clean body copies.
     legacyMainNoteReferences: Object.fromEntries(Object.entries(legacyMainNoteReferences).filter(([key]) => referenceKeys.has(key))),
     recallNotebookId: presentation.recallNotebookId, recallNoteId: presentation.recallNoteId,

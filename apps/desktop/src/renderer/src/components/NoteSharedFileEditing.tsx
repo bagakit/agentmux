@@ -21,7 +21,7 @@ import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 
 type EditorOwner = { focusedEditor: Editor | null; focusedAttachments?: NoteEditorAttachments | undefined; focusEditor(editor: Editor, attachments?: NoteEditorAttachments): void }
 type Observation = ReturnType<typeof useNoteCanvasObservation>
-type Scope = { include?: NoteInclude; target: NoteFileTarget; read?: FileReadParams | undefined; occurrence: string; active: boolean; knowledge: NoteKnowledge; onOpen(source: NoteSource, blockId: string): void; onOpenOriginal?(target: NoteFileTarget, blockId?: string, signal?: AbortSignal): Promise<void> }
+type Scope = { origin?: NoteFileTarget; include?: NoteInclude; target: NoteFileTarget; read?: FileReadParams | undefined; occurrence: string; active: boolean; knowledge: NoteKnowledge; onOpen(source: NoteSource, blockId: string): void; onOpenOriginal?(target: NoteFileTarget, blockId?: string, signal?: AbortSignal): Promise<void> }
 /** One graph observation for all includes on this Note; typing never rescans the workspace. */
 export function NoteSharedFileEditing({ children, hasIncludes, ...scope }: Scope & { children: ReactNode; hasIncludes: boolean }) {
   const graph = useNoteCanvasObservation(scope.active && hasIncludes, false)
@@ -34,7 +34,7 @@ export function NoteSharedFileEditing({ children, hasIncludes, ...scope }: Scope
   const trail = useMemo(() => [scope.target.noteId], [scope.target.noteId])
   const confirmedIncludes = useMemo(() => graph.snapshot?.graph.observations.flatMap(value => value.status === 'read' && value.kind === 'shared-block' && value.fileIdentity === 'confirmed' ? [{ noteId: value.noteId, workspaceId: value.resource.workspaceId, path: value.resource.path, revision: value.revision }] : []) ?? [], [graph.snapshot])
   const knowledge = useMemo(() => ({ ...scope.knowledge, confirmedIncludes }), [scope.knowledge, confirmedIncludes])
-  return <SharedScope {...scope} knowledge={knowledge} owner={{ focusedEditor: focused?.editor ?? null, focusedAttachments: focused?.attachments, focusEditor }} graph={graph} trail={trail}>{children}</SharedScope>
+  return <SharedScope {...scope} origin={scope.target} knowledge={knowledge} owner={{ focusedEditor: focused?.editor ?? null, focusedAttachments: focused?.attachments, focusEditor }} graph={graph} trail={trail}>{children}</SharedScope>
 }
 function SharedScope({ children, graph, trail, owner, ...scope }: Scope & { children: ReactNode; graph: Observation; trail: readonly string[]; owner: EditorOwner }) {
   const current = useRef(scope); current.current = scope
@@ -52,10 +52,10 @@ function SharedScope({ children, graph, trail, owner, ...scope }: Scope & { chil
     renderInclude: (include: NoteInclude, remove: () => void, readOnly = false) => <SharedFile readOnly={readOnly} remove={remove} include={include} scope={scope} graph={graph} trail={trail} owner={owner} />,
     async copyBlock(editor: import('@tiptap/core').Editor, position: number) {
       const state = current.current
-      if (state.include) { writeNoteShareClipboard(editor.view.dom.ownerDocument, { version: 1, source: state.target, block: { path: [], fingerprint: '' }, include: state.include }, editor.getText()); return 'Copied shared content · paste to reuse' }
+      if (state.include) { writeNoteShareClipboard(editor.view.dom.ownerDocument, { version: 1, source: state.target, block: { path: [], fingerprint: '' }, include: state.include }, editor.getText(), state.origin); return 'Copied shared content · paste to reuse' }
       if (!state.read) throw Error('The original Note file mapping is unconfirmed. Your content is kept; restore this file position and retry.')
       const copy = copyNoteBlock(editor, position, state.target, state.read)
-      writeNoteShareClipboard(editor.view.dom.ownerDocument, copy, editor.state.doc.nodeAt(position)?.textContent ?? 'Shared Note content')
+      writeNoteShareClipboard(editor.view.dom.ownerDocument, copy, editor.state.doc.nodeAt(position)?.textContent ?? 'Shared Note content', state.origin)
       const type = noteNodeAtPath(editor.getJSON(), copy.block.path)?.type
       return type === 'table' ? 'Copied whole table · paste to share' : type === 'taskItem' ? 'Copied task item · paste to share' : 'Copied · paste to share'
     },
@@ -134,7 +134,7 @@ function SharedFile({ include, scope, graph, trail, owner, remove, readOnly }: {
   if (!target || !original || read?.status !== 'valid' || read.note.noteId !== include.noteId || read.note.kind !== 'shared-block') return <p className="note-shared-notice" role="status">{graph.issue ?? (graph.snapshot?.graph.duplicateNoteIds.includes(include.noteId) ? 'Multiple files have this shared identity. The original reference is kept.' : graph.busy ? 'Reading shared sources…' : fileIssue && 'message' in fileIssue ? fileIssue.message : 'The original shared content is not confirmed. Its reference is kept.')} <button type="button" className="note-text-button" onClick={graph.refresh}>Check shared sources</button></p>
   const source = graph.snapshot ? noteSharedRelations(graph.snapshot, include.noteId, read.note.origin, { target: scope.target, referenceId: include.referenceId }).uses.some(use => use.current && use.source) : false
   return <SharedFrame source={source} attention={saving || dirty} status={saving ? 'Saving…' : dirty ? 'Unsaved changes' : undefined}
-    marker={scope.onOpenOriginal && <NoteSharedDetails note={read.note} target={target} host={scope.target} include={include} graph={graph} active={scope.active} onOpen={scope.onOpenOriginal} />}
+    marker={scope.onOpenOriginal && <NoteSharedDetails origin={scope.origin} note={read.note} target={target} host={scope.target} include={include} graph={graph} active={scope.active} onOpen={scope.onOpenOriginal} />}
     actions={!readOnly && dirty && <button type="button" className="note-text-button" onClick={() => void useAppStore.getState().saveNoteFile(target)} disabled={saving}>Save</button>}>
     {original.noteEditing?.shareCleanupIssue && <p className="note-knowledge-notice" role="status">{original.noteEditing.shareCleanupIssue.message}</p>}
     {original.noteEditing?.shareUndo ? <p className="note-knowledge-notice" role="status">{saving ? 'Saving this shared-reference removal…' : fileIssue && 'message' in fileIssue ? fileIssue.message : noteShareUndoRecoveryMessage(original.noteEditing)}

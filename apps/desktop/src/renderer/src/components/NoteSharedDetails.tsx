@@ -13,11 +13,11 @@ import type { useNoteCanvasObservation } from '../lib/use-note-canvas-observatio
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { NoteUseContextReader, NoteUseLocations } from './NoteUseLocations'
 
-type Props = { note: NoteDocument; target: NoteFileTarget; host: NoteFileTarget; include: NoteInclude; active: boolean;
+type Props = { origin?: NoteFileTarget | undefined; note: NoteDocument; target: NoteFileTarget; host: NoteFileTarget; include: NoteInclude; active: boolean;
   graph: ReturnType<typeof useNoteCanvasObservation>; onOpen(target: NoteFileTarget, blockId?: string, signal?: AbortSignal): Promise<void> }
 
 /** One nearby reader of the saved graph; it never writes a Note or creates a shared entity. */
-export function NoteSharedDetails({ note, target, host, include, graph, active, onOpen }: Props) {
+export function NoteSharedDetails({ origin, note, target, host, include, graph, active, onOpen }: Props) {
   const [open, setOpen] = useState(false), [anchor, setAnchor] = useState<HTMLButtonElement | null>(null), [content, setContent] = useState<HTMLDivElement | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const currentlyOpen = useRef(false); currentlyOpen.current = open && active
@@ -61,7 +61,7 @@ export function NoteSharedDetails({ note, target, host, include, graph, active, 
   function copy(shared: boolean) {
     if (!anchor) return
     try {
-      if (shared) writeNoteShareClipboard(anchor.ownerDocument, { version: 1, source: target, block: { path: [], fingerprint: '' }, include: { ...include, path: target.path, workspaceId: target.workspaceId } }, note.title ?? 'Shared content')
+      if (shared) writeNoteShareClipboard(anchor.ownerDocument, { version: 1, source: target, block: { path: [], fingerprint: '' }, include: { ...include, path: target.path, workspaceId: target.workspaceId } }, note.title ?? 'Shared content', origin)
       else {
         const owner = anchor.ownerDocument, attrs = { referenceId: mintObjectId(), text: noteWikiQueryForLabel(note.title ?? 'Shared content'), target: { noteId: note.noteId } }
         const span = owner.createElement('span'); span.dataset.noteLink = JSON.stringify(attrs); span.textContent = `[[${attrs.text}]]`

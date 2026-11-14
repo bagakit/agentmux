@@ -20,7 +20,13 @@ function matchingPendingCopy(copy: NoteShareCopy): PendingNoteShare | undefined 
     return other.block.blockId && copy.block.blockId ? other.block.blockId === copy.block.blockId : other.block.fingerprint === copy.block.fingerprint && JSON.stringify(other.block.path) === JSON.stringify(copy.block.path)
   })
 }
+export function assertMainNoteShareCopy(source: NoteFileTarget): void {
+  const state = useAppStore.getState(), key = source.workspaceId + '\0' + source.path
+  if (state.documents[key]?.readSource || state.retainedDocumentDrafts[key]?.some(document => document.readSource))
+    throw Error('A shared reference is not confirmed for this Source. Its content remains editable; use ordinary text copy instead.')
+}
 export function copyNoteBlock(editor: Editor, position: number, source: NoteFileTarget, read: FileReadParams): NoteShareCopy {
+  assertMainNoteShareCopy(source)
   let at = editor.state.doc.resolve(position)
   // A cell owns one paragraph flow; share the whole table rather than replacing
   // that flow with an invalid include. List items similarly own their first paragraph.
@@ -36,7 +42,12 @@ export function copyNoteBlock(editor: Editor, position: number, source: NoteFile
   if (!copy.include) copy.proposalId = matchingPendingCopy(copy)?.include.noteId ?? mintObjectId()
   return copy
 }
-export function writeNoteShareClipboard(owner: Document, copy: NoteShareCopy, text: string): void {
+export function writeNoteShareClipboard(owner: Document, copy: NoteShareCopy, text: string, origin?: NoteFileTarget): void {
+  assertMainNoteShareCopy(copy.source)
+  if (origin) {
+    if (!useAppStore.getState().documents[origin.workspaceId + '\0' + origin.path]) throw Error('The original Note workface is no longer available. Keep its content and choose the original file before copying a shared reference.')
+    assertMainNoteShareCopy(origin)
+  }
   const encoded = JSON.stringify(copy)
   const listener = (event: ClipboardEvent) => {
     event.preventDefault(); event.clipboardData?.setData(MIME, encoded); event.clipboardData?.setData('text/plain', text)
@@ -63,6 +74,7 @@ export function readNoteShareClipboard(event: ClipboardEvent, owner: Document): 
   } catch { return null }
 }
 export function stageNoteShare(key: string, copy: NoteShareCopy): NoteInclude {
+  assertMainNoteShareCopy(copy.source)
   const referenceId = mintObjectId()
   // A clipboard can outlive its first promotion. Only the exact original identity can
   // turn that old locator into a reuse; matching prose or a nearby position cannot.

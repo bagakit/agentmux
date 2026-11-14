@@ -22,7 +22,8 @@ export type SourceFilesInput = {
 export type SourceFilesPending = Mutation & { target: SpaceMountSourceTarget; workspace: SourceFilesInput['workspace']; observed?: FileMutationEffect; issue?: string | undefined }
 export type SourceFileCreation = { workspace: SourceFilesInput['workspace']; target: SpaceMountSourceTarget; request: import('@agentmux/core/files').FileCreateParams; issue?: string }
 export type SourceFolderRequest = { workspace: SourceFilesInput['workspace']; target: SpaceMountSourceTarget; packet: FolderDirectoryRegistration; issue?: string }
-export type SourceFilesInputs = { selections: Record<string, SourceFilesInput>; pending: Record<string, SourceFilesPending>; creations: Record<string, SourceFileCreation>; folderRequests: Record<string, SourceFolderRequest> }
+export type SourceFileReadPointer = { workspaceId: string; path: string; source: NonNullable<import('../../../shared/contracts').FileDocument['readSource']> }
+export type SourceFilesInputs = { selections: Record<string, SourceFilesInput>; pending: Record<string, SourceFilesPending>; creations: Record<string, SourceFileCreation>; folderRequests: Record<string, SourceFolderRequest>; readSources?: Record<string, SourceFileReadPointer> }
 export const emptySourceFilesInputs = (): SourceFilesInputs => ({ selections: {}, pending: {}, creations: {}, folderRequests: {} })
 function mutationConfirmed(receipt: import('@agentmux/core/files').FilePathMutationReceipt | import('@agentmux/core/files').FileMoveReceipt | import('@agentmux/core/files').FileDeleteReceipt): boolean {
   return receipt.durability === 'confirmed' && receipt.filesystem !== 'unknown' &&
