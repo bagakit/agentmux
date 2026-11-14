@@ -1,5 +1,5 @@
 import { MobileNotice } from '../notices/MobileNotice'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
@@ -17,9 +17,8 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
   const model = useMoteQuickDraft(target, client, visible, onSaved), { draft, read } = model
   const [copyIssue, setCopyIssue] = useState('')
   const presence = draft.values.presence ?? DEFAULT_MOTE_PRESENCE
-  const [minutes, setMinutes] = useState(String(presence.intervalMs / 60000))
-  const [intervalIssue, setIntervalIssue] = useState('')
-  useEffect(() => { setMinutes(String(presence.intervalMs / 60000)); setIntervalIssue('') }, [presence.intervalMs])
+  const minutes = draft.invalidHeartbeatInput ?? String(presence.intervalMs / 60000)
+  const intervalIssue = draft.invalidHeartbeatInput === undefined ? null : HEARTBEAT_MINUTES_ISSUE
   const rollover = draft.values.conversationRollover
   const rolloverKind = draft.conversationRolloverEditor?.kind ?? rollover?.kind ?? 'keep-current'
   const rolloverMinutes = draft.conversationRolloverEditor?.minutes ?? (rollover?.kind === 'idle' ? String(rollover.idleMs / 60000) : '')
@@ -50,7 +49,7 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
       if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault()
     }} onSubmit={event => { event.preventDefault()
       if (moteMinutesToMs(minutes, { wholeMinutes: true }) === null) {
-        setIntervalIssue(HEARTBEAT_MINUTES_ISSUE)
+        if (draft.invalidHeartbeatInput === undefined) model.editHeartbeatMinutes(minutes)
         event.currentTarget.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')?.focus()
         return
       }
@@ -87,13 +86,8 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
         <FormRow layout="stacked" label="心跳间隔（分钟）"
           description="默认每 30 分钟核对目标、工作 thread 和未完成承诺；没有新进展时可保持安静。修改间隔不会恢复已经暂停的安排。"
           error={intervalIssue} invalid={Boolean(intervalIssue)}>
-          {field => <TextInput {...field} name="heartbeatMinutes" type="number" inputMode="numeric" min="1" step="1" required value={minutes} onChange={event => {
-            const value = event.target.value; setMinutes(value)
-            const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
-            if (intervalMs !== null) {
-              setIntervalIssue(''); model.edit({ ...draft.values, presence: { ...presence, intervalMs } })
-            } else setIntervalIssue(HEARTBEAT_MINUTES_ISSUE)
-          }} />}
+          {field => <TextInput {...field} name="heartbeatMinutes" type="number" inputMode="numeric" min="1" step="1" required value={minutes}
+            onChange={event => model.editHeartbeatMinutes(event.target.value)} />}
         </FormRow>
         <p data-mote-maintenance-status={maintenance?.status ?? 'unread'}>{maintenanceLabel}</p>
         {maintenance?.issue && <p role="status">{maintenance.issue}</p>}

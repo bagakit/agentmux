@@ -1,4 +1,4 @@
-import { parseMotePreferencesTarget, parseMoteQuickDefaults, parseMoteQuickBaseline, parseMotePreferencesSaveParams,
+import { moteMinutesToMs, parseMotePreferencesTarget, parseMoteQuickDefaults, parseMoteQuickBaseline, parseMotePreferencesSaveParams,
   parseMotePreferencesSaveResult, sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickDefaults,
   type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from '@agentmux/core/mote-preferences'
 import { isLocalNetworkHost } from '@agentmux/relay/offer'
@@ -9,7 +9,7 @@ export type MoteQuickAttempt = { input: MoteQuickPreferencesSaveParams; ownerIns
 export type MoteMaintenanceAttempt = { input: ScheduleMutation; ownerInstanceId: string; phase: 'sending' | 'unknown' | 'confirmed' | 'observed' | 'not-sent'; result: ScheduleReceipt | ScheduleResultMap['schedule.inspect'] | null; issue: string | null }
 export type MoteRolloverEditor = { kind: 'keep-current' | 'idle'; minutes: string }
 export type MoteQuickDraft = { scope: MoteQuickScope; values: MoteQuickDefaults; baseline: MoteQuickBaseline | null;
-  attempts: MoteQuickAttempt[]; blockedAttemptId: string | null; maintenanceAttempts?: MoteMaintenanceAttempt[]; conversationRolloverEditor?: MoteRolloverEditor }
+  attempts: MoteQuickAttempt[]; blockedAttemptId: string | null; maintenanceAttempts?: MoteMaintenanceAttempt[]; conversationRolloverEditor?: MoteRolloverEditor; invalidHeartbeatInput?: string }
 export type MoteQuickDraftCommit = { recordId: string | null; applied: boolean; draft: MoteQuickDraft | null; conflict: MoteQuickDraft | null }
 export class MoteQuickDraftInvalidError extends Error {}
 export class MoteQuickDraftCapacityError extends MoteQuickDraftInvalidError {}
@@ -35,12 +35,15 @@ export function moteQuickDraftKey(scope: MoteQuickScope): string {
   return JSON.stringify([scope.origin, scope.runtimeId, scope.deviceHostId, t.spaceId, t.zoneId, r.hostId, r.workspaceId, r.workspacePath])
 }
 export function parseMoteQuickDraft(value: unknown): MoteQuickDraft {
-  const v = object(value, ['scope', 'values', 'baseline', 'attempts', 'blockedAttemptId', ...(Object.hasOwn(value ?? {}, 'maintenanceAttempts') ? ['maintenanceAttempts'] : []), ...(Object.hasOwn(value ?? {}, 'conversationRolloverEditor') ? ['conversationRolloverEditor'] : [])]), scope = parseMoteQuickScope(v.scope)
+  const v = object(value, ['scope', 'values', 'baseline', 'attempts', 'blockedAttemptId', ...(Object.hasOwn(value ?? {}, 'maintenanceAttempts') ? ['maintenanceAttempts'] : []), ...(Object.hasOwn(value ?? {}, 'conversationRolloverEditor') ? ['conversationRolloverEditor'] : []),
+    ...(Object.hasOwn(value ?? {}, 'invalidHeartbeatInput') ? ['invalidHeartbeatInput'] : [])]), scope = parseMoteQuickScope(v.scope)
   try {
     if (v.conversationRolloverEditor !== undefined) {
       const editor = object(v.conversationRolloverEditor, ['kind', 'minutes'])
       if (!['keep-current', 'idle'].includes(String(editor.kind)) || typeof editor.minutes !== 'string' || editor.minutes.length > 64) invalid()
     }
+    if (Object.hasOwn(v, 'invalidHeartbeatInput') && (typeof v.invalidHeartbeatInput !== 'string' ||
+      moteMinutesToMs(v.invalidHeartbeatInput, { wholeMinutes: true }) !== null)) invalid()
     parseMoteQuickDefaults(v.values)
     if (v.baseline !== null) parseMoteQuickBaseline(v.baseline, scope.target)
     if (!Array.isArray(v.attempts)) invalid()

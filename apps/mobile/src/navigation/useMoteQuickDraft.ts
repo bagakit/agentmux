@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
-import { moteQuickBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
+import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, moteQuickBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
   mergeMoteQuickChoices, sameMotePreferencesTarget, sameMoteDefaultConversation, type MotePreferencesTarget, type MoteQuickChoices, type MoteQuickPreferencesReadResult, type MoteQuickDefaults, type MotePreferencesDestination } from '@agentmux/core/mote-preferences'
 import { getDeviceWorkface, DeviceWorkfaceRecordChangedError, type DeviceWorkfaceStore } from '../recovery/device-workface'
 import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickScope, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError,
@@ -36,7 +36,10 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   const [draft, setDraft] = useState<Editable>(() => saved ? restore(saved) : { scope: connection(client, owner, target)?.scope ?? null,
     values: {}, baseline: null, attempts: [], blockedAttemptId: null })
   const current = useRef(draft), durable = useRef(saved), queue = useRef<Promise<unknown>>(Promise.resolve()), mounted = useRef(true)
-  const flight = useRef(false), adopting = useRef(false), changed = useRef(!!saved), conflicted = useRef(false)
+  // A raw invalid input can be stored before the first canonical preference read.
+  const awaitingInitialValues = saved?.invalidHeartbeatInput !== undefined && saved.baseline === null &&
+    Object.keys(saved.values).length === 0 && saved.conversationRolloverEditor === undefined
+  const flight = useRef(false), adopting = useRef(false), changed = useRef(!!saved && !awaitingInitialValues), conflicted = useRef(false)
   const reloadDirty = useRef(false), reloadRevision = useRef(0), reloadCopies = useRef(false)
   useMobileWebUpdateSafetyOwner(() => reloadCopies.current ? '本页保留了 Mote 配置冲突副本；请先复制保全并关闭编辑器，再更新网页。'
     : reloadDirty.current || flight.current || adopting.current ? 'Mote 配置草稿或保存操作尚未确认；请保存或复制保全后再更新网页。' : null)
@@ -77,6 +80,17 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   function edit(values: MoteQuickDefaults, conversationRolloverEditor?: MoteRolloverEditor) {
     changed.current = true
     void retain({ ...current.current, values, ...(conversationRolloverEditor ? { conversationRolloverEditor } : {}) })
+  }
+  function editHeartbeatMinutes(value: string) {
+    const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
+    if (intervalMs === null) {
+      void retain({ ...current.current, invalidHeartbeatInput: value })
+      return
+    }
+    const { invalidHeartbeatInput: _invalid, ...draft } = current.current
+    const presence = draft.values.presence ?? DEFAULT_MOTE_PRESENCE
+    changed.current = true
+    void retain({ ...draft, values: { ...draft.values, presence: { ...presence, intervalMs } } })
   }
   async function inspect() {
     const source = connection(latest.current.client, owner, target), epoch = ++readEpoch.current, original = latest.current.client
@@ -245,6 +259,6 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     if (!canonical) { setNotice('设备上的配置还没确认，本页选择仍可复制。'); return }
     durable.current = canonical; conflicted.current = false; display(restore(canonical)); setNotice('已采用设备上的配置，本页的另一份选择仍可复制。')
   }
-  return { draft, read, destination, setDestination, edit, inspect, adopt, save, chooseStored, busy, adoptionBusy, notice, storageIssue, memoryOnly,
+  return { draft, read, destination, setDestination, edit, editHeartbeatMinutes, inspect, adopt, save, chooseStored, busy, adoptionBusy, notice, storageIssue, memoryOnly,
     conflict: conflicted.current, copies, resumeMaintenance }
 }
