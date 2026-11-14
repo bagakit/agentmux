@@ -148,7 +148,7 @@ it('the accepted query owns its original Zone Tab Region and expected Agent unti
   await view.render(render(undefined, 'next-tab', 'next-region'))
   expect(view.element.textContent, 'Pending selectors cannot filter the accepted original query into a false empty view').toContain('A Agent')
   await click(await waitForElement(view.element, '.mobile-agent-row__open')); expect(open).not.toHaveBeenCalled()
-  expect(requests.filter(r => r.method === 'space.inspect')).toEqual([{ method: 'space.inspect', params: { target: { tabId: 'next-tab' }, presentation: true } }])
+  expect(requests.filter(r => r.method === 'space.inspect')).toEqual([{ method: 'space.inspect', params: { target: { tabId: 'next-tab' }, presentation: 'status' } }])
   await act(async () => pending.resolve({ catalog: { ...a.catalog, tabs: [] } }))
   expect(view.element.textContent).toContain('此 Topic 暂无讨论')
   expect(open).not.toHaveBeenCalled()
