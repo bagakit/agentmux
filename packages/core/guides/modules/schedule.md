@@ -45,6 +45,12 @@ milliseconds. Continue with the same window and returned nextCursor. Occurrence 
 input delivery, and native outcome are distinct. A receipt includes its original Run
 and a bounded excerpt of the frozen user-facing input, when available. Unconfirmed coverage leaves the
 original records available for a later read. History never starts or redelivers an input.
+For a calendar overview supply `bucketStarts` with the ascending UTC start of each visible
+period, beginning at `from` (up to 168 starts across 43 days). Each page counts up to 256
+original input records by bucket, delivery and native state. It returns nonempty buckets
+with counts, first/last occurrence times and the shared short original input label, if any. Follow the original cursor with the same
+boundaries and add the counts across pages. A partial or unconfirmed read cannot certify
+a total. Read the original period without bucketStarts for individual receipts and recaps.
 
 Read amux schedule create --help for the complete current schema. The first creation of the original
 operation fixes nextCheckAt as its absolute deadline. Repeating the same operationId, restarting the owner
