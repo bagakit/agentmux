@@ -250,7 +250,7 @@
 .mesh-geography__marks { position: absolute; inset: 0; }
 .mesh-geography__marks line { stroke: var(--text-3); stroke-width: 1; }
 .mesh-geography__marks circle, .mesh-geography__pin { fill: var(--blue); stroke: var(--surface-0); stroke-width: 2; }
-.mesh-geographic-node .react-flow__handle { opacity: 0; }
+.mesh-explorer__canvas[data-geographic] .react-flow__handle { opacity: 0; }
 .mesh-explorer .mesh-geographic-node .mesh-explorer-node, .mesh-geographic-node .mesh-saved-client {
   background: var(--surface-1);
   border: 1px solid var(--line-strong);
@@ -274,3 +274,5 @@
 }
 .mesh-explorer__canvas[data-geographic][data-narrow] .mesh-explorer-node strong { font-size: 21px; }
 .mesh-explorer__canvas[data-geographic][data-narrow] .mesh-explorer-node__state { font-size: 15px; }
+
+.mesh-geography__marks [data-approximate] circle { fill: var(--surface-1); stroke-dasharray: 2 2; }

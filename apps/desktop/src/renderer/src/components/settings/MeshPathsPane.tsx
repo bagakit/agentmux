@@ -2,10 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
-import type { MeshMapLocations } from '../../../../shared/mesh-map-locations'
+import { meshPeerLocationKey, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
 import { api } from '../../lib/api'
+import { useMeshDeviceLocations } from './use-mesh-device-locations'
 import { MeshNetworkMap } from './MeshNetworkMap'
-import { MeshLocationsPanel } from './MeshLocationsPanel'
+import { MeshLocationsPanel, type MapAnnotationTarget } from './MeshLocationsPanel'
+import { meshPeerLabel, meshTopologyModel } from './mesh-topology'
+import { useAppStore } from '../../store'
 import './mesh-paths.css'
 
 /** The mesh-paths discovery address opens the continuous Mesh overview, never a second network owner. */
@@ -16,7 +19,8 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
   onGateway: () => void
   onDevice: (hostId: string) => void
 }) {
-  const [editingLocation, editLocation] = useState<string>()
+  const [editingLocation, editLocation] = useState<MapAnnotationTarget>()
+  const peerLocations = useAppStore(state => state.config?.meshPeerMapLocations)
   const locationEditor = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (active && editingLocation !== undefined) locationEditor.current?.scrollIntoView({ block: 'nearest' })
@@ -42,19 +46,30 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
     }).catch(cause => { if (!controller.signal.aborted) setSettingsIssue(cause instanceof Error ? cause.message : String(cause)) })
     return () => { controller.abort(); setBusy(false) }
   }, [active, visible, revision])
+  const [geographicVisible, setGeographicVisible] = useState(true)
+  const observedLocations = useMeshDeviceLocations(hosts, active && visible && geographicVisible, revision, snapshot?.network?.networkId)
   const sameOwner = !snapshot || snapshot.owner.runtimeId === settings?.owner.runtimeId
     && snapshot.owner.ownerInstanceId === settings.owner.ownerInstanceId
   const savedTargets = sameOwner ? settings?.configuration.peers : undefined
   const savedIssue = settingsIssue || (settings && !sameOwner ? 'The saved settings belong to another Core instance.' : '')
   const savedHosts = useMemo(() => hosts.filter(host => host.kind === 'ssh'), [hosts])
-  const actions = <><Button type="button" aria-expanded={editingLocation !== undefined} onClick={() => editLocation('local')}>Device locations</Button>
+  const networkId = snapshot?.network?.networkId
+  const targets = useMemo((): MapAnnotationTarget[] => [
+    ...hosts.map(host => ({ field: 'meshMapLocations' as const, key: host.id, label: host.label })),
+    ...(networkId ? meshTopologyModel(snapshot).peers.filter(peer => !peer.own).map(peer => ({
+      field: 'meshPeerMapLocations' as const, key: meshPeerLocationKey(networkId, peer.id), label: meshPeerLabel(peer),
+    })) : []),
+  ], [hosts, snapshot, networkId])
+  const editHost = (id: string) => editLocation(targets.find(t => t.field === 'meshMapLocations' && t.key === id))
+  const editPeer = (id: string) => editLocation(targets.find(t => t.field === 'meshPeerMapLocations' && networkId && t.key === meshPeerLocationKey(networkId, id)))
+  const actions = <><Button type="button" aria-expanded={editingLocation !== undefined} onClick={() => editHost('local')}>Device locations</Button>
     <Button type="button" disabled={busy} onClick={() => setRevision(value => value + 1)}>{busy ? 'Reading…' : 'Refresh network'}</Button></>
   return <section className="mesh-paths-pane" aria-label="Mesh network overview" data-settings-field="mesh-paths">
     {issue ? <div className="mesh-paths-issue" role="status"><strong>Network observation unavailable.</strong><p>{snapshot ? 'Showing the last confirmed network.' : 'Current network state is unknown.'}</p><details><summary>Read details</summary><p>{issue}</p></details></div> : null}
     <div ref={locationEditor} hidden={editingLocation === undefined}>
-      <MeshLocationsPanel hosts={hosts} locations={locations} editing={editingLocation} onEdit={editLocation} />
+      <MeshLocationsPanel targets={targets} peerLocations={peerLocations} locations={locations} editing={editingLocation} onEdit={editLocation} />
     </div>
-    <MeshNetworkMap snapshot={snapshot} active={active && visible} actions={actions} localClient
-      hosts={savedHosts} locations={locations} onLocation={editLocation} onDevice={onDevice} onGateway={onGateway} savedTargets={savedTargets} savedIssue={savedIssue} reading={busy && !snapshot} stale={Boolean(issue && snapshot)} />
+    <MeshNetworkMap onGeographicViewChange={setGeographicVisible} observedLocations={observedLocations} snapshot={snapshot} active={active && visible} actions={actions} localClient
+      hosts={savedHosts} locations={locations} onLocation={editHost} onPeerLocation={editPeer} peerLocations={peerLocations} onDevice={onDevice} onGateway={onGateway} savedTargets={savedTargets} savedIssue={savedIssue} reading={busy && !snapshot} stale={Boolean(issue && snapshot)} />
   </section>
 }

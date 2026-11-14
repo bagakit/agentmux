@@ -87,7 +87,9 @@ export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points
   return { placements, marks, unknown: unplaced.length, tray, bounds }
 }
 
-export function MeshGeography({ marks, unknown, tray }: Pick<ReturnType<typeof placeGeographicNodes>, 'marks' | 'unknown' | 'tray'>) {
+export function MeshGeography({ marks, unknown, tray, locations }: Pick<ReturnType<typeof placeGeographicNodes>, 'marks' | 'unknown' | 'tray'> & {
+  locations: ReadonlyMap<string, { source: string }>
+}) {
   return <ViewportPortal>
     <div className="mesh-geography" aria-hidden="true" style={{ width: WORLD_WIDTH }}>
       <MeshAtlas />
@@ -95,7 +97,7 @@ export function MeshGeography({ marks, unknown, tray }: Pick<ReturnType<typeof p
         <strong>Location unknown</strong><span>{unknown}</span>
       </div> : null}
       <svg className="mesh-geography__marks" width={WORLD_WIDTH} height={WORLD_HEIGHT} overflow="visible">
-        {marks.map(({ id, point, label }) => <g key={id} data-geographic-point={id}>
+        {marks.map(({ id, point, label }) => <g key={id} data-geographic-point={id} data-approximate={locations.get(id)?.source === 'public-egress' || undefined}>
           <line x1={point.x} y1={point.y} x2={label.x} y2={label.y} />
           <circle cx={point.x} cy={point.y} r="5" />
         </g>)}
