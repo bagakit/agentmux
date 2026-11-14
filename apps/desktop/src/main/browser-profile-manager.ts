@@ -1,3 +1,5 @@
+import { BrowserProfileCookieFiles } from './browser-profile-cookie-files.js'
+import { openProfileCookieFileNative } from './browser-profile-cookie-file-native.js'
 import { BrowserProfileBookmarks } from './browser-profile-bookmarks.js'
 import { emptyBookmarks } from './browser-profile-bookmark-record.js'
 import { BrowserProfileExtensions } from './browser-profile-extensions.js'
@@ -96,6 +98,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   readonly sessions: BrowserProfileSessions
   readonly extensions: BrowserProfileExtensions
   readonly bookmarks: BrowserProfileBookmarks
+  readonly cookieFiles: BrowserProfileCookieFiles
 
   constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions, private readonly sessionRoot: () => string = () => app.getPath('sessionData'),
     private readonly purgeOptions: { now?: () => number; assertExclusiveDataOwner?: () => Promise<void> } = {}) {
@@ -110,6 +113,13 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       environment: profileId => (this.profiles.get(profileId) ?? this.archivedProfiles.get(profileId)?.profile)?.environment,
       defaultLanguage: () => app.getLocale(),
       openContents: () => webContents.getAllWebContents()
+    })
+    this.cookieFiles=new BrowserProfileCookieFiles({
+      track:job=>this.trackMutation(job),
+      profile:profileId=>{this.resolvePartition(profileId);return this.profiles.get(profileId)!},
+      native:(profileId,signal)=>{this.resolvePartition(profileId);return openProfileCookieFileNative(this.sessions.nativeSession(profileId),signal)},
+      read:async profileId=>{this.assertInitialized();const snapshot=await this.store.read();this.adopt(snapshot);if(!snapshot.profiles.some(p=>p.id===profileId)&&!snapshot.trash.some(r=>r.profile.id===profileId))throw new Error('The original retained Browser Profile is unavailable.');return structuredClone(snapshot.cookieFileRecords?.[profileId]??[])},
+      change:(profileId,action)=>{this.resolvePartition(profileId);return this.configuration(profileId,async()=>{const snapshot=await this.store.changeCookieFiles(profileId,action);this.adopt(snapshot);return structuredClone(snapshot.cookieFileRecords?.[profileId]??[])})}
     })
     this.bookmarks = new BrowserProfileBookmarks({
       read: async profileId => { const { snapshot } = await this.store.inspectProfile(profileId); this.adopt(snapshot); return structuredClone(snapshot.bookmarks?.[profileId] ?? emptyBookmarks()) },
@@ -678,6 +688,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise
     this.disposed = true
+    this.cookieFiles.dispose()
     this.sourceTokens.clear()
     this.disposePromise = (async () => {
       for (const window of this.importWindows) {

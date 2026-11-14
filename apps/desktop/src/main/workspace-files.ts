@@ -1068,11 +1068,11 @@ export class WorkspaceFiles {
   }
 
   /** Publish a new binary file through the same atomic, root-confined owner as editor saves. */
-  async writeBytes(workspace: WorkspaceRecord, input: { path: string; bytes: Uint8Array }): Promise<WorkspaceFileWriteResult> {
+  async writeBytes(workspace: WorkspaceRecord, input: { path: string; bytes: Uint8Array; createMode?: 0o600 }): Promise<WorkspaceFileWriteResult> {
     if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > WORKSPACE_FILE_MAX_BYTES) {
       return { status: 'error', code: 'WORKSPACE_FILE_BYTE_LIMIT', message: 'Workspace file exceeds the byte transfer budget.' }
     }
-    return await this.writeContent(workspace, { path: input.path, content: Buffer.from(input.bytes), expectedRevision: null, exclusive: true })
+    return await this.writeContent(workspace, { path: input.path, content: Buffer.from(input.bytes), expectedRevision: null, exclusive: true, ...(input.createMode === undefined ? {} : { createMode: input.createMode }) })
   }
 
   /** Strict root confinement; unlike Explorer reads, a byte transfer cannot follow an outside link. */

@@ -1,4 +1,6 @@
 import { registerBrowserTaskParallelIpc } from './browser-task-parallel-ipc.js'
+import { createProfileCookieFileIo } from './browser-profile-cookie-file-io.js'
+import { confirmProfileCookieFile } from './browser-profile-cookie-file-confirmation.js'
 import { parseBrowserTaskControlPayload } from '@agentmux/core/control'
 import { createBrowserProfileBookmarkOpener } from './browser-profile-bookmark-open.js'
 import { desktopRpcMethods } from './desktop-rpc-exposure.js'
@@ -479,6 +481,12 @@ export async function registerIpc(args: {
   // workspace's host differently.
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
+  browserProfiles.cookieFiles.setFileOwner(createProfileCookieFileIo({files,workspace:resource=>{
+    const actual=workspace(config,resource.workspaceId)
+    if(actual.hostId!==resource.hostId||actual.path!==resource.workspacePath)throw new Error('The exact Cookie Workspace file resource changed.')
+    return actual
+  },revealLocal:path=>shell.showItemInFolder(path)}))
+  browserProfiles.cookieFiles.setConfirmationHandler((request,signal)=>confirmProfileCookieFile(request,signal,args.window,browserProfiles.listProfiles().find(p=>p.id===request.profileId)))
   browserProfiles.extensions.setConfirmationHandler(async ({ kind, review, localSourcePath }) => {
     const profile = browserProfiles.listProfiles().find(profile => profile.id === review.profileId)
     if (!profile || profile.revision !== review.expectedRevision || args.window.isDestroyed()) return false

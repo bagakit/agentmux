@@ -1,10 +1,11 @@
-import { isDeepStrictEqual } from 'node:util'
+import { browserProfileCookieFileRecordSchema, type BrowserProfileCookieFileRecord } from './browser-profile-cookie-file-record.js'
 import { browserProfileBookmarksSchema, emptyBookmarks, type BrowserProfileBookmarksState } from './browser-profile-bookmark-record.js'
 import { browserProfileExtensionRecordSchema, browserProfileExtensionReceiptSchema, browserProfileExtensionPendingSchema, type BrowserProfileExtensionPending, type BrowserProfileExtensionRecord, type BrowserProfileExtensionReceipt } from './browser-profile-extension-record.js'
 import { parseBrowserProxyEdit, parseBrowserProxyAsset, type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileView, type BrowserProfileView, type BrowserProfileQuery, parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
 import { parseBrowserProxyProbe, type BrowserProxyProbe, type BrowserProxyProbeHistory } from '@agentmux/core/control'
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, isAbsolute } from 'node:path'
 import { app } from 'electron'
@@ -93,6 +94,7 @@ const profileRecordSchema = z
       try { parseBrowserProfileEnvironment(value); return true } catch { return false }
     }, 'Browser Profile environment is invalid').optional(),
     // Stored only when Agents are turned off, so an untouched Profile keeps the global switch's answer.
+    cookieFileRecords: z.array(browserProfileCookieFileRecordSchema).optional(),
     bookmarks: browserProfileBookmarksSchema.optional(),
     extensions: z.array(browserProfileExtensionRecordSchema).optional(),
     extensionReceipts: z.array(browserProfileExtensionReceiptSchema).optional(),
@@ -247,7 +249,7 @@ export type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 /** The whole committed list after one write; the manager replaces its cache with it. */
-export type BrowserProfileSnapshot = { bookmarks?: Record<string, BrowserProfileBookmarksState>; extensionPending?: Record<string, BrowserProfileExtensionPending[]>; extensions?: Record<string, BrowserProfileExtensionRecord[]>; extensionReceipts?: Record<string, BrowserProfileExtensionReceipt[]>; proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; purgeReceipts?: import('@agentmux/core/control').BrowserProfilePurgeReceipt[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
+export type BrowserProfileSnapshot = { cookieFileRecords?: Record<string,BrowserProfileCookieFileRecord[]>; bookmarks?: Record<string, BrowserProfileBookmarksState>; extensionPending?: Record<string, BrowserProfileExtensionPending[]>; extensions?: Record<string, BrowserProfileExtensionRecord[]>; extensionReceipts?: Record<string, BrowserProfileExtensionReceipt[]>; proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; purgeReceipts?: import('@agentmux/core/control').BrowserProfilePurgeReceipt[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
 
 function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
   if (source === null) return null
@@ -257,11 +259,12 @@ function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null
 
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
   const retained = [...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)]
+  const cookieFileRecords=Object.fromEntries(retained.filter(profile=>profile.cookieFileRecords?.length).map(profile=>[profile.id,structuredClone(profile.cookieFileRecords!)]))
   const bookmarks = Object.fromEntries(retained.filter(profile => profile.bookmarks).map(profile => [profile.id, structuredClone(profile.bookmarks!)]))
   const extensions = Object.fromEntries(retained.filter(profile => profile.extensions?.length).map(profile => [profile.id, structuredClone(profile.extensions!)]))
   const extensionPending = Object.fromEntries(retained.filter(profile => profile.extensionPending?.length).map(profile => [profile.id, structuredClone(profile.extensionPending!)]))
   const extensionReceipts = Object.fromEntries(retained.filter(profile => profile.extensionReceipts?.length).map(profile => [profile.id, structuredClone(profile.extensionReceipts!)]))
-  return { ...(Object.keys(bookmarks).length ? { bookmarks } : {}), ...(Object.keys(extensionPending).length ? { extensionPending } : {}), purgeReceipts: structuredClone(metadata.purgeReceipts ?? []), ...(Object.keys(extensions).length ? { extensions } : {}), ...(Object.keys(extensionReceipts).length ? { extensionReceipts } : {}), proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
+  return { ...(Object.keys(cookieFileRecords).length?{cookieFileRecords}:{}), ...(Object.keys(bookmarks).length ? { bookmarks } : {}), ...(Object.keys(extensionPending).length ? { extensionPending } : {}), purgeReceipts: structuredClone(metadata.purgeReceipts ?? []), ...(Object.keys(extensions).length ? { extensions } : {}), ...(Object.keys(extensionReceipts).length ? { extensionReceipts } : {}), proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
     views: structuredClone(metadata.views ?? []), revision: metadata.revision ?? 0, sequence: metadata.sequence ?? metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
     profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
@@ -487,6 +490,18 @@ export class BrowserProfileStore {
       if (current.extensionPending?.some(value => value.operationId === intent.operationId) || current.extensionReceipts?.some(value => value.operationId === intent.operationId)) throw new Error('This original extension operation already has a durable intent or receipt.')
       const updated = { ...current, extensionPending: [...(current.extensionPending ?? []), intent] }
       return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? updated : profile) }, false, undefined, true)
+    })
+  }
+
+  /** Original Profile transaction owns safe Cookie operation records; no Cookie values are stored. */
+  changeCookieFiles(profileId:string,action:(records:BrowserProfileCookieFileRecord[])=>BrowserProfileCookieFileRecord[]):Promise<BrowserProfileSnapshot>{
+    return this.enqueue(async()=>{
+      const metadata=await this.readMetadata(),current=metadata.profiles.find(profile=>profile.id===profileId)
+      if(!current)throw new Error('The original Browser Profile is unavailable.')
+      const records=z.array(browserProfileCookieFileRecordSchema).parse(action(structuredClone(current.cookieFileRecords??[])))
+      if(records.some(r=>r.receipt.profileId!==profileId)||new Set(records.map(r=>r.receipt.operationId)).size!==records.length)throw new Error('Cookie file operation identities do not match the original Profile.')
+      const updated={...current,revision:profileConfigurationRevision(current),cookieFileRecords:records}
+      return this.commit({...metadata,profiles:metadata.profiles.map(profile=>profile.id===profileId?updated:profile)},false,undefined,true)
     })
   }
 

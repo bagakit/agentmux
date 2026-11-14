@@ -15,10 +15,15 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { extensions?: BrowserProfileManager['extensions']; bookmarks?: BrowserProfileManager['bookmarks'] }
+  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { extensions?: BrowserProfileManager['extensions']; bookmarks?: BrowserProfileManager['bookmarks']; cookieFiles?:BrowserProfileManager['cookieFiles'] }
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile' | 'assertUnused'>
   openBookmark?: (request: BrowserProfileBookmarkOpen, url: string) => Promise<void>
   network: BrowserProfileNetworkControl
+}
+
+function cookieFileOwner(ports:BrowserProfileControlPorts):BrowserProfileManager['cookieFiles']{
+  if(!ports.profiles.cookieFiles)throw new AgentMuxError('Cookie file exchange is unavailable in this Browser host. Original Profiles remain available.','HOST_CAPABILITY_UNAVAILABLE')
+  return ports.profiles.cookieFiles
 }
 
 function bookmarkOwner(ports: BrowserProfileControlPorts): BrowserProfileManager['bookmarks'] {
@@ -56,6 +61,12 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
   await ports.profiles.initialize()
   if (request.operation === 'browser.profile.proxy.ls' || request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.trash.ls') await ports.profiles.refresh()
   switch (request.operation) {
+    case 'browser.profile.cookie-file.prepare-import':return {operation:request.operation,review:await cookieFileOwner(ports).prepareImport(request.profileId,request.operationId,request.source,request.scope)}
+    case 'browser.profile.cookie-file.import':return {operation:request.operation,receipt:await cookieFileOwner(ports).import(request.profileId,request.reviewId)}
+    case 'browser.profile.cookie-file.export':return {operation:request.operation,receipt:await cookieFileOwner(ports).export(request.profileId,request.operationId,request.destination,request.scope)}
+    case 'browser.profile.cookie-file.inspect':return {operation:request.operation,...await cookieFileOwner(ports).inspect(request.profileId,request.operationId,request.offset,request.limit)}
+    case 'browser.profile.cookie-file.discard':return {operation:request.operation,...await cookieFileOwner(ports).discard(request.profileId,request.reviewId)}
+    case 'browser.profile.cookie-file.reveal':return {operation:request.operation,...await cookieFileOwner(ports).reveal(request.profileId,request.operationId)}
     case 'browser.profile.bookmark.ls': return { operation: request.operation, ...await bookmarkOwner(ports).list(request.profileId, request.folderId, request.operationId) }
     case 'browser.profile.bookmark.edit': return { operation: request.operation, ...await bookmarkOwner(ports).edit(request.profileId, request.expectedRevision, request.operationId, request.change) }
     case 'browser.profile.bookmark.import': return { operation: request.operation, ...await bookmarkOwner(ports).import(request.profileId, request.folderId, request.expectedRevision, request.operationId, request.sourcePath) }
