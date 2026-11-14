@@ -35,13 +35,22 @@ const empty = new Map<string, NodeRead>()
 export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boolean, refresh: number, estimateLocal: boolean, networkId?: string | null) {
   const links = useAppStore(state => state.meshDeviceLinks.saved)
   const key = JSON.stringify([hosts.map(clusterHostKey), links])
-  const [observed, setObserved] = useState<{ key: string; replies: ReadonlyMap<string, NodeRead> }>()
+  const [observed, setObserved] = useState<{ key: string; refresh: number; localRead: boolean; replies: ReadonlyMap<string, NodeRead> }>()
   const [localEstimate, setLocalEstimate] = useState<MeshDeviceLocation | null>(null)
   useEffect(() => {
     if (!active) return
     const cancel = new AbortController(), replies = new Map<string, NodeRead>()
+    let localRead = false
     let next = 0
-    const update = () => setObserved({ key, replies: new Map(replies) })
+    const update = () => {
+      const snapshot = new Map(replies), localComplete = localRead
+      setObserved(previous => {
+        const previousLocal = previous?.key === key ? previous.replies.get(SAVED_CLIENT_ID) : undefined
+        const current = previousLocal && !snapshot.has(SAVED_CLIENT_ID)
+          ? new Map(snapshot).set(SAVED_CLIENT_ID, previousLocal) : snapshot
+        return { key, refresh, localRead: localComplete, replies: current }
+      })
+    }
     const read = async () => {
       while (!cancel.signal.aborted && next < hosts.length) {
         const host = hosts[next++]!
@@ -53,12 +62,8 @@ export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boo
             replies.set(host.kind === 'local' ? SAVED_CLIENT_ID : savedHostId(host.id), reply)
           }
         } catch { if (cancel.signal.aborted) return }
+        if (host.kind === 'local') localRead = true
         update()
-        if (host.kind === 'local' && estimateLocal && !replies.get(SAVED_CLIENT_ID)?.location) {
-          void api.ui.estimateLocalMapLocation?.().then(location => {
-            if (!cancel.signal.aborted) setLocalEstimate(location)
-          }).catch(() => {})
-        }
       }
     }
     for (let index = 0; index < Math.min(hosts.length, 3); index++) void read()
@@ -78,8 +83,18 @@ export function useMeshDeviceLocations(hosts: readonly HostConfig[], active: boo
       }
     })()
     return () => cancel.abort()
-  }, [active, key, refresh, estimateLocal])
+  }, [active, key, refresh])
   const replies = observed?.key === key ? observed.replies : empty
+  const needsEstimate = active && estimateLocal && observed?.key === key && observed.refresh === refresh
+    && observed.localRead && !replies.get(SAVED_CLIENT_ID)?.location
+  useEffect(() => {
+    if (!needsEstimate) return
+    let current = true
+    void api.ui.estimateLocalMapLocation?.().then(location => {
+      if (current) setLocalEstimate(location)
+    }).catch(() => {})
+    return () => { current = false }
+  }, [needsEstimate, key, refresh])
   return useMemo(() => {
     const points = mapPoints(replies, networkId)
     if (estimateLocal && localEstimate && !points.has(SAVED_CLIENT_ID)) points.set(SAVED_CLIENT_ID, localEstimate)
