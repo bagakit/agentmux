@@ -125,6 +125,7 @@ async function run() {
   let observed
   try{observed=await(switchPorts?switchPorts.observe(channel,args,async()=>handler(event,...args)):handler(event,...args));if(close)close.ack='confirmed'}catch(error){if(close)close.ack='failed';throw error}
   if(channel==='browser:create'&&rejectSurveyWrites)rejectedSurveyBrowserId=observed.id
+  if(channel==='browser:choosePageMenu')(receipt.pageMenuChoices??=[]).push({choice:args[1],accepted:observed})
   if(['browser:listProfiles','browser:readProfiles'].includes(channel)&&loseProfileDirectoryAck)throw new Error('Private fixture lost the original Profile directory read ACK')
   if(channel==='browser:probeProfileNetwork'&&holdProbeAck){receipt.originalProbeReply=observed;const lose=await new Promise<boolean>(resolve=>{releaseProbeAck=resolve});holdProbeAck=false;if(lose)throw new Error('Private fixture lost the original probe ACK; inspect the same operation')}
   return observed
@@ -140,8 +141,9 @@ async function run() {
  assert.ok(await evaluate('Boolean(document.querySelector(".surface-navigation"))'),'Full production App must mount')
  if(selectedCase==='context-menu'){
   assert.ok(completeObserver)
-  receipt.boundary='One private production App, preload, BrowserViewManager and compiled CLI. Chromium receives real pointer events. The fixture observes the built Menu without displaying the OS popup and supplies the window focus observation.'
-  await contextMenuCase({window,observation:completeObserver,evaluate,result,cli,receipt,workspaceId,pageUrl})
+  receipt.boundary='Two private production Desktop App processes with original BrowserViewManager, Renderer, preload and CLI. Chromium receives guest and chrome pointer and key events. The fixture supplies the native window focus observation and never operates the current user App.'
+  await contextMenuCase({phase,directory,window,observation:completeObserver,evaluate,result,cli,receipt,workspaceId,pageUrl,
+   runId:sessionId=>core?.agentSession(sessionId)?.run?.runId})
   receipt.businessPassed=true;receipt.passed=true;return
  }
  if(selectedCase==='complete'){

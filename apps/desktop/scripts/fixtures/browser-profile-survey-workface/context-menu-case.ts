@@ -1,16 +1,42 @@
 import assert from 'node:assert/strict'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
-import { Menu, session, webContents, type BrowserWindow, type ContextMenuParams, type WebContentsView } from 'electron'
+import type { SplitDirection } from '@agentmux/layout'
+import { session, webContents, type BrowserWindow, type ContextMenuParams, type WebContentsView } from 'electron'
 import { browserProfilePartition } from '../../../src/main/browser-profile-store'
 import { nativeInput, nativeUntil } from './native-input'
 import type { CompletePorts } from './complete-ports'
+import { persistentTask } from './persistent-task'
 
 type Reference = { regionId: string; browserId: string }
 
-export async function contextMenuCase({ window, observation, evaluate, result, cli, receipt, workspaceId, pageUrl }: {
-  window: BrowserWindow; observation: CompletePorts; workspaceId: string; pageUrl: string; receipt: any
+function adjacent(node: any, parent: string, child: string, direction: SplitDirection): boolean {
+  if (node?.type !== 'split') return false
+  const [before, after] = direction === 'up' || direction === 'left' ? [child, parent] : [parent, child]
+  const axis = direction === 'up' || direction === 'down' ? 'vertical' : 'horizontal'
+  return node.direction === axis && node.first.regionId === before && node.second.regionId === after ||
+    adjacent(node.first, parent, child, direction) || adjacent(node.second, parent, child, direction)
+}
+
+export async function contextMenuCase({ phase, directory, window, observation, evaluate, result, cli, receipt, workspaceId, pageUrl, runId }: {
+  phase: string; directory: string; window: BrowserWindow; observation: CompletePorts; workspaceId: string; pageUrl: string; receipt: any
+  runId(sessionId: string): string | undefined
   evaluate(expression: string): Promise<any>; result(args: string[]): Promise<any>; cli(args: string[]): Promise<any>
 }) {
+  const facts = () => evaluate('profileSurveyNative.read()')
+  const retained = join(directory, 'context-menu-retained.json')
+  if (phase === 'restart') {
+    const prior = JSON.parse(await readFile(retained, 'utf8'))
+    const current = await facts()
+    assert.deepEqual(persistentTask(current.tabs[prior.taskTab.id]), prior.taskTab)
+    assert.deepEqual(current.launcherDrafts, prior.launcherDrafts)
+    assert.equal(runId(prior.agent.agentSessionId), prior.agent.runId)
+    assert.deepEqual((await result(['space', 'survey-list'])).pageReferences, prior.survey)
+    receipt.recoveredIdentity = prior
+    receipt.cases.push({ kind: 'context-menu-original-workface-recovered', passed: true })
+    return
+  }
   const origin = new URL(pageUrl).origin, sourceUrl = origin + '/context-menu'
   const label = 'Context environment'
   const created = await result(['browser', 'profile', 'create', '--label', label, '--operation-id', 'context-menu-profile'])
@@ -19,11 +45,17 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
   const profileSession = session.fromPartition(browserProfilePartition(profile.id))
   await profileSession.cookies.set({ url: origin, name: 'amux-survey-login', value: 'selected-profile', httpOnly: true })
   const prepared = await evaluate(`profileSurveyNative.prepareTask(${JSON.stringify(workspaceId)})`)
-  const launcher = Object.values(prepared.tabs).flatMap((tab: any) => Object.values(tab.regions))
-    .find((region: any) => region.kind === 'launcher' && region.workspaceId === workspaceId) as { regionId: string } | undefined
+  const taskTab = Object.values(prepared.tabs).find((tab: any) => Object.values(tab.regions)
+    .some((region: any) => region.kind === 'launcher' && region.workspaceId === workspaceId)) as any
+  const launcher = Object.values(taskTab?.regions ?? {}).find((region: any) =>
+    region.kind === 'launcher' && region.workspaceId === workspaceId) as { regionId: string } | undefined
   assert.ok(launcher)
+  const graph = await result(['space', 'ls', '--presentation'])
+  const zone = graph.catalog.zones.find((candidate: any) => candidate.workspaceId === workspaceId)
+  assert.ok(zone)
+  const agent = await result(['agent', 'open', '--executor', 'proof', '--execution-workspace', workspaceId,
+    '--zone', zone.zoneId, '--tab', taskTab.id, '--region', launcher.regionId, '--split', 'left'])
   const source = await result(['browser', 'open', '--url', sourceUrl, '--right-of', launcher.regionId])
-  const facts = () => evaluate('profileSurveyNative.read()')
   const focusReply = await cli(['space', 'focus', '--region', source.region.regionId, '--input', 'target'])
   assert.equal(focusReply.value.ok, true)
   const focus = focusReply.value.result
@@ -38,30 +70,54 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
   assert.notEqual(contents.session, profileSession)
   await contents.session.cookies.set({ url: origin, name: 'amux-survey-login', value: 'source-profile', httpOnly: true })
   const before = await facts(), membership = await result(['space', 'survey-list'])
-  const display = { input: [] as unknown[], hits: [] as unknown[], frameChild: null as Reference | null }
+  const display = { input: [] as unknown[], hits: [] as unknown[], gestures: [] as unknown[], frameChild: null as Reference | null }
   receipt.contextMenu = display
   const site = nativeInput(contents, display.input)
   await site.fill('[aria-label="Page draft"]', 'Keep the source page draft')
   site.release()
 
-  let menu: Menu | undefined
   let hit: ContextMenuParams | undefined
-  const popup = Menu.prototype.popup, windowFocused = window.isFocused, focusedContents = webContents.getFocusedWebContents
+  const windowFocused = window.isFocused, focusedContents = webContents.getFocusedWebContents
   const observe = (_event: Electron.Event, params: ContextMenuParams) => { hit = params }
   contents.on('context-menu', observe)
-  // An inactive private Electron window avoids touching the person's input. The
-  // fixture observes the real Chromium hit and dispatches the actual built item.
-  Menu.prototype.popup = function (options) { if (options?.window === window) menu = this }
+  // The App remains private. Actual guest and chrome inputs dispatch through Chromium.
   window.isFocused = () => true
   webContents.getFocusedWebContents = () => contents
+  const chrome = nativeInput(window.webContents, display.input)
+  const menu = '[role="menu"][aria-label="Browser page menu"][data-state="open"]'
+  const capture = async (name: string) => {
+    const measured = await evaluate(`(() => {
+      const menu = document.querySelector(${JSON.stringify(menu)}), r = menu.getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: innerWidth, height: innerHeight };
+    })()`)
+    assert.ok(measured.left >= 0 && measured.top >= 0 && measured.right <= measured.width && measured.bottom <= measured.height)
+    const file = `first-context-menu-${name}.png`
+    await writeFile(join(directory, file), (await window.capturePage()).toPNG())
+    receipt.frames.push({ file, measured })
+  }
   const openHit = async (embedded: boolean, id: string) => {
-    menu = undefined; hit = undefined
+    hit = undefined
+    if (!sourceView.getVisible() || (await facts()).workbenchSpaceSelection?.regionId !== source.region.regionId) {
+      const focus = await cli(['space', 'focus', '--region', source.region.regionId, '--input', 'preserve'])
+      assert.equal(focus.value.ok, true)
+      const focused = focus.value.result
+      assert.equal(focused.navigation.selection.space.regionId, source.region.regionId)
+      assert.equal(focused.presentation.state, 'main-visible')
+      await nativeUntil(async () => sourceView.getVisible() && (await facts()).workbenchSpaceSelection?.regionId === source.region.regionId,
+        'the original page is the selected visible Region again')
+    }
     const point = await nativeUntil(() => contents.executeJavaScript(`(() => {
       const frame = ${embedded} ? document.getElementById('context-frame') : null;
-      const target = (frame ? frame.contentDocument : document)?.getElementById(${JSON.stringify(id)});
+      const owner = frame ? frame.contentDocument : document;
+      const target = owner?.getElementById(${JSON.stringify(id)});
       if (!target) return null;
-      const offset = frame?.getBoundingClientRect(), rect = target.getBoundingClientRect();
-      return { x: rect.x + rect.width / 2 + (offset?.x ?? 0), y: rect.y + rect.height / 2 + (offset?.y ?? 0) };
+      const offset = frame?.getBoundingClientRect();
+      for (const rect of target.getClientRects()) {
+        const x = (Math.max(0, rect.left) + Math.min(owner.defaultView.innerWidth, rect.right)) / 2;
+        const y = rect.top + rect.height / 2;
+        if (target.contains(owner.elementFromPoint(x, y))) return { x: x + (offset?.x ?? 0), y: y + (offset?.y ?? 0) };
+      }
+      return null;
     })()`) as Promise<{ x: number; y: number } | null>, 'visible link inside the original Chromium document')
     const zoom = contents.getZoomFactor(), at = { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) }
     contents.focus()
@@ -69,20 +125,44 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
     await pause(60)
     contents.sendInputEvent({ type: 'mouseDown', button: 'right', clickCount: 1, ...at })
     contents.sendInputEvent({ type: 'mouseUp', button: 'right', clickCount: 1, ...at })
-    await nativeUntil(() => Boolean(menu && hit), 'the original hit and its Electron menu')
+    try {
+      await nativeUntil(async () => hit && await evaluate(`document.querySelector(${JSON.stringify(menu)})?.checkVisibility()`), 'the original hit and its real workbench menu: ' + id)
+    } finally {
+      const observed = hit as ContextMenuParams | undefined
+      display.gestures.push({ target: id, at, guest: sourceView.getBounds(), visible: sourceView.getVisible(),
+        hit: observed && { x: observed.x, y: observed.y, linkURL: observed.linkURL, isEditable: observed.isEditable,
+          hasSelection: observed.selectionText.length > 0, frameUrl: observed.frameURL } })
+    }
     const nativeHit = hit! as ContextMenuParams
     assert.ok(nativeHit.frame)
     assert.equal(nativeHit.frame === contents.mainFrame, !embedded)
-    return { nativeHit, nativeMenu: menu! as Menu }
+    return nativeHit
   }
+  const menuLabels = () => evaluate(`[...document.querySelectorAll(${JSON.stringify(menu + ' [role="menuitem"]')})].map(item=>item.getAttribute('aria-label') || item.textContent.trim())`)
   const selectLink = async (embedded: boolean, address: string, itemLabel: string, submenu?: string) => {
-    const { nativeHit, nativeMenu } = await openHit(embedded, embedded ? 'frame-link' : 'main-link')
+    const existing = new Set(observation.childrenOf(source.region.browserId).map(event => event.browser.id))
+    const nativeHit = await openHit(embedded, embedded ? 'frame-link' : 'main-link')
     assert.equal(nativeHit.linkURL, address)
-    const item = (submenu ? nativeMenu.items.find(item => item.label === submenu)?.submenu : nativeMenu)?.items.find(item => item.label === itemLabel)
-    assert.ok(item?.enabled)
-    display.hits.push({ frame: nativeHit.frame.url, url: nativeHit.linkURL, menu: nativeMenu.items.map(item => item.label), selection: itemLabel })
-    item.click()
-    const child = await nativeUntil(() => observation.childrenOf(source.region.browserId).find(event => event.browser.url === address), 'exact native Browser event')
+    display.hits.push({ frame: nativeHit.frame.url, url: nativeHit.linkURL, menu: await menuLabels(), selection: itemLabel })
+    if (submenu) {
+      await chrome.click(menu + ' [aria-haspopup="menu"]', submenu)
+      await nativeUntil(() => evaluate(`[...document.querySelectorAll('[role="menu"][data-state="open"]')].length === 2`), 'the original Profile submenu')
+      await capture('profiles')
+      await evaluate(`(() => {
+        window.profileMenuInput = [];
+        const note = e => { const target = e.target; window.profileMenuInput.push({ type: e.type, x: e.clientX, y: e.clientY,
+          tag: target?.tagName, text: target?.textContent?.trim().slice(0, 80), role: target?.getAttribute?.('role'),
+          menu: Boolean(target?.closest?.('[role=menu]')) }); };
+        for (const name of ['pointerover', 'pointerdown', 'pointerup', 'focusin', 'click']) document.addEventListener(name, note, true);
+      })()`)
+    }
+    if (itemLabel.startsWith('Split ')) await chrome.click(`${menu} [aria-label="${itemLabel}"]`)
+    else await chrome.click((submenu ? '[role="menu"][data-state="open"]' : menu) + ' [role="menuitem"]', itemLabel)
+    const child = await nativeUntil(() => observation.childrenOf(source.region.browserId).find(event => event.browser.url === address && !existing.has(event.browser.id)), 'exact native Browser event for ' + itemLabel).catch(async error => {
+      receipt.guestFailure = { visible: sourceView.getVisible(), pointer: await evaluate('window.profileMenuInput'), children: observation.childrenOf(source.region.browserId),
+        scope: (await facts()).workbenchSpaceSelection }
+      throw error
+    })
     const view = await nativeUntil(() => {
       const view = observation.native(child.browser.id) as WebContentsView | null
       return view && !view.webContents.isLoading() && view.webContents.getURL() === address ? view : null
@@ -90,18 +170,41 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
     return { child, view, reference: { regionId: child.browser.id, browserId: child.browser.id } }
   }
   try {
-    const { nativeMenu, nativeHit } = await openHit(true, 'frame-background')
+    const nativeHit = await openHit(true, 'frame-background')
     assert.equal(nativeHit.linkURL, '')
-    const reloadFrame = nativeMenu.items.find(item => item.label === 'Reload Frame')
-    assert.ok(reloadFrame?.enabled)
     await contents.executeJavaScript(`document.querySelector('iframe').contentDocument.body.dataset.beforeReload = 'original-frame'`)
-    reloadFrame.click()
+    await chrome.click(menu + ' [role="menuitem"]', 'Reload Frame')
     await nativeUntil(() => contents.executeJavaScript(`(() => {
       const loaded = document.querySelector('iframe')?.contentDocument;
       return Boolean(loaded?.getElementById('frame-background') && !loaded.body.dataset.beforeReload);
     })()`), 'the actual embedded document reloads without replacing its host')
     assert.equal(await contents.executeJavaScript('document.querySelector("input").value'), 'Keep the source page draft')
     receipt.cases.push({ kind: 'context-menu-original-frame-reload', passed: true, frame: nativeHit.frameURL })
+    for (const [theme, width] of [['dark', 1280], ['light', 1000]] as const) {
+      await evaluate(`profileSurveyNative.appearance(${JSON.stringify(theme)})`)
+      window.setContentSize(width, 820)
+      await openHit(false, 'main-link')
+      assert.ok((await menuLabels()).includes('Split Left') && (await menuLabels()).includes('Split Down'))
+      await capture(theme)
+      await chrome.key('Escape', 'Escape', 27)
+      await nativeUntil(async () => !(await evaluate(`document.querySelector(${JSON.stringify(menu)})?.checkVisibility()`)), 'Escape dismisses the exact menu')
+    }
+    window.setContentSize(1280, 900)
+    for (const [direction, label] of [['left', 'Split Left'], ['down', 'Split Down'], ['up', 'Split Up'], ['right', 'Split Right']] as const) {
+      const split = await selectLink(false, pageUrl + '?context=main#main-target', label)
+      const splitTab = await nativeUntil(async () => {
+        const current = await facts(), tab = current.tabs[taskTab.id]
+        return tab?.regions[split.reference.regionId]?.browserId === split.reference.browserId ? tab : null
+      }, 'exact linked child in the original Task')
+      assert.ok(adjacent(splitTab.layout.root, source.region.regionId, split.reference.regionId, direction),
+        `The selected ${label} opens into the original Browser's specified side`)
+      assert.equal(split.view.webContents.session, contents.session)
+      receipt.cases.push({ kind: 'context-menu-directional-split', passed: true, direction, origin: source.region, child: split.reference })
+      if (direction !== 'right') {
+        await chrome.click(`[data-workbench-region-id="${split.reference.regionId}"] [aria-label="Close split"]`)
+        await nativeUntil(async () => !(await facts()).tabs[taskTab.id].regions[split.reference.regionId], 'only the private test split has closed')
+      }
+    }
     const ordinary = await selectLink(false, pageUrl + '?context=main#main-target', 'Open Link in New Tab')
     assert.equal(ordinary.view.webContents.session, contents.session)
     assert.equal(await ordinary.view.webContents.executeJavaScript('document.querySelector("#identity").textContent'), 'source-profile')
@@ -116,7 +219,7 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
     }, 'exact foreground Tab in the original workface')
     assert.notEqual(selected.tab.id, focus.navigation.selection.space.tabId)
     assert.equal(selected.tab.workspaceId, workspaceId)
-    assert.equal(observation.childrenOf(source.region.browserId).length, 2)
+    assert.equal(observation.childrenOf(source.region.browserId).length, 6)
     assert.equal(contents.getURL(), sourceUrl)
     assert.equal(await contents.executeJavaScript('document.querySelector("input").value'), 'Keep the source page draft')
     assert.deepEqual(selected.current.launcherDrafts, before.launcherDrafts)
@@ -125,8 +228,14 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
     assert.deepEqual(collected.pageReferences, [...membership.pageReferences, explicit.reference], 'Only the explicit context Profile page is admitted')
     assert.deepEqual(collected.collectedZoneIds, membership.collectedZoneIds)
     receipt.cases.push({ kind: 'context-menu-profile-admission', passed: true, ordinary: ordinary.reference, explicit: explicit.reference })
+    await evaluate('profileSurveyNative.checkpoint()')
+    const current = await facts()
+    receipt.savedIdentity = { taskTab: persistentTask(current.tabs[taskTab.id]), launcherDrafts: current.launcherDrafts,
+      agent: agent.agent, survey: collected.pageReferences }
+    await writeFile(retained, JSON.stringify(receipt.savedIdentity))
   } finally {
+    chrome.release()
     contents.removeListener('context-menu', observe)
-    Menu.prototype.popup = popup; window.isFocused = windowFocused; webContents.getFocusedWebContents = focusedContents
+    window.isFocused = windowFocused; webContents.getFocusedWebContents = focusedContents
   }
 }

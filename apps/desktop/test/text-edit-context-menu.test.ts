@@ -25,6 +25,8 @@ vi.mock('electron', () => ({
 }))
 import { installTextEditContextMenu } from '../src/main/text-edit-context-menu.js'
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
+import { BrowserPageMenuPresentation } from '../src/main/browser-page-menu-presentation.js'
+import type { BrowserPageMenuEvent } from '../src/shared/browser-page-menu.js'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 
 const doms: Array<{ window: DomWindow }> = [], disposers: Array<() => void> = [], roots: string[] = []
@@ -36,6 +38,7 @@ class Frame {
   readonly dom = { window: new DomWindow({ url: 'https://generic.invalid/' }) }
   constructor() { this.dom.window.document.body.innerHTML = '<input id="original"><input id="other"><textarea id="textarea"></textarea><div id="editable" tabindex="0">editable text</div><p id="text">Selected plain text</p>'; doms.push(this.dom) }
   isDestroyed() { return this.destroyed }
+  get url() { return this.dom.window.location.href }
   executeJavaScript(code: string): Promise<unknown> { return this.evaluateHook ? this.evaluateHook(code) : Promise.resolve(this.dom.window.eval(code)) }
   input(id = 'original') { return this.dom.window.document.getElementById(id) as unknown as HTMLInputElement }
 }
@@ -50,11 +53,12 @@ class Contents extends EventEmitter {
   setWindowOpenHandler() {}; enableDeviceEmulation() {}; disableDeviceEmulation() {}; executeJavaScriptInIsolatedWorld() { return Promise.resolve(true) }
   async loadURL(url: string) { this.url = url; this.emit('did-start-navigation', { isMainFrame: true, frame: this.mainFrame, url }); this.emit('did-finish-load') }
   close() { this.destroyed = true; this.emit('destroyed') }
+  focus() { native.focused = this }
   copy() { this.commands.push('copy') }; cut() { this.commands.push('cut') }; paste() { this.commands.push('paste') }; selectAll() { this.commands.push('selectAll') }
 }
 class Window extends EventEmitter {
   destroyed = false; visible = true; minimized = false; focused = true
-  webContents = { send: vi.fn(), isDestroyed: () => false, commands: [] as string[],
+  webContents = { send: vi.fn(), isDestroyed: () => false, commands: [] as string[], focus() { native.focused = this },
     copy() { this.commands.push('copy') }, cut() { this.commands.push('cut') }, paste() { this.commands.push('paste') }, selectAll() { this.commands.push('selectAll') } }
   contentView = { addChildView: vi.fn(), removeChildView: vi.fn() }
   getContentBounds() { return { x: 0, y: 0, width: 500, height: 400 } }
@@ -211,6 +215,58 @@ describe('actual native edit-menu Source with real local DOM identity scripts', 
 })
 
 describe('actual definition-external consumers', () => {
+  it('dispatches a workbench split choice once from the original link and rejects late choices', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'agentmux-page-menu-test-')); roots.push(root)
+    const window = new Window(), manager = new BrowserViewManager(window as never,
+      { defaultProfileId: () => 'profile', resolvePartition: () => 'persist:page-menu' }, new BrowserRefLedgerStore(join(root, 'refs.json')),
+      { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
+    disposers.push(() => manager.dispose())
+    const document = { windowId: 'window', documentGeneration: 'document' }, events: BrowserPageMenuEvent[] = []
+    const presentation = new BrowserPageMenuPresentation(() => document, event => events.push(event))
+    manager.pageMenus = presentation
+    const linkURL = 'https://generic.invalid/menu-result?exact=1#destination'
+    await manager.create('browser', 'https://generic.invalid/original', 'workspace')
+    manager.setBounds('browser', { x: 40, y: 50, width: 500, height: 400 })
+    const contents: Contents = native.contents[0]
+    const openLink = async (selectionText = '') => {
+      contents.focus()
+      contents.emit('context-menu', {}, params(contents.mainFrame, { isEditable: false, mediaType: 'none', linkURL, selectionText }))
+      await flush()
+      const event = events.at(-1)
+      if (event?.kind !== 'opened') throw new Error('The original Browser link did not open its workbench menu')
+      const item = event.items.find(row => row.kind === 'split')
+      if (item?.kind !== 'split') throw new Error('No actual Browser split action')
+      return { event, item }
+    }
+    const { event, item } = await openLink()
+    expect(event).toMatchObject({ document, x: 61, y: 84 })
+    expect(native.focused).toBe(window.webContents)
+    expect(native.menus).toHaveLength(0)
+    expect(presentation.choose(event.id, { kind: 'select', itemId: item.directions.up })).toBe(true)
+    expect(presentation.choose(event.id, { kind: 'select', itemId: item.directions.up })).toBe(false)
+    expect(native.focused).toBe(contents)
+    await vi.waitFor(() => expect(window.webContents.send.mock.calls.some(([, action]) =>
+      action.type === 'native-opened' && action.browser.url === linkURL && action.opening.splitDirection === 'up')).toBe(true))
+    const changed = await openLink()
+    contents.mainFrame.dom.window.history.replaceState({}, '', '?another-context')
+    expect(presentation.choose(changed.event.id, { kind: 'select', itemId: changed.item.directions.left })).toBe(false)
+    const next = await openLink()
+    contents.emit('did-start-navigation', { isMainFrame: true, frame: contents.mainFrame })
+    expect(presentation.choose(next.event.id, { kind: 'select', itemId: next.item.directions.left })).toBe(false)
+    expect(native.contents).toHaveLength(2)
+    const page = contents.mainFrame.dom.window.document
+    const range = page.createRange()
+    range.selectNodeContents(page.getElementById('text')!)
+    page.getSelection()!.addRange(range)
+    const selected = await openLink('Selected plain text')
+    const copy = selected.event.items.find(row => row.kind === 'action' && row.label === 'Copy')
+    if (copy?.kind !== 'action') throw new Error('The original link menu lost Copy for its selected text')
+    expect(native.menus).toHaveLength(0)
+    expect(presentation.choose(selected.event.id, { kind: 'select', itemId: copy.id })).toBe(true)
+    await flush()
+    expect(contents.commands).toEqual(['copy'])
+    expect(native.focused).toBe(contents)
+  })
   it('executes the exact renderer-host registration call from current Main Source', () => {
     const source = readFileSync(process.env.AGENTMUX_TEXT_EDIT_MUTATION_ROOT
       ? join(process.env.AGENTMUX_TEXT_EDIT_MUTATION_ROOT, 'apps/desktop/src/main/index.ts')

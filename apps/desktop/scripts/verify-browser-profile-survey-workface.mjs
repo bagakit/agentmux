@@ -36,7 +36,9 @@ const mutationCases = { 'surface-windows': {
 }, 'context-menu': {
   'omit-context-profile-admission': { file: 'apps/desktop/src/renderer/src/lib/browser-native-opening.ts',
     before: "if (event.opening?.collectInSurvey || (fromSurveyPage && destination !== 'region')) {",
-    after: "if (fromSurveyPage && destination !== 'region') {" }
+    after: "if (fromSurveyPage && destination !== 'region') {" },
+  'ignore-workbench-menu-direction': { file: 'apps/desktop/src/renderer/src/lib/browser-child-projection.ts',
+    before: "event.opening?.splitDirection ?? 'right'", after: "'right'" }
 } }
 const mutations = mutationCases[selectedCase] ?? {}
 assert.ok(mutation === null || Object.hasOwn(mutations, mutation), 'Only an exact production mutation for the selected case is supported')
@@ -54,7 +56,7 @@ const receipt = { schema: 'agentmux.browser-profile-survey-workface.proof.v1', p
   mutation: mutation ? { name: mutation, applied: [] } : null,
   independentVisualReview: 'not-performed', physicalInputQualified: false, launches: [],
   boundary: 'Actual BrowserPane/Store and production sandbox preload/registerIpc/BrowserViewManager/RuntimeController, real isolated Core Sessions and stock Electron, public RPC and current-source CLI. A second private process reads the first process saved data. No user App, Browser, Run, clipboard, credentials or upstream model is used.' }
-if (selectedCase === 'context-menu') receipt.boundary = 'One private production App, Store, preload and BrowserViewManager. Real Chromium pointer hits build the Menu. The fixture intercepts the OS popup and supplies the window focus observation. No user App, Browser, Run, clipboard or credentials are used.'
+if (selectedCase === 'context-menu') receipt.boundary = 'Two private production App processes. Original guest hits drive the real workbench menu, Renderer placement and persistent Core/Browser state. Window focus observation is supplied by the fixture. No user App, Browser, Run, clipboard or credentials are used.'
 await mkdir(output, { recursive: true }); await mkdir(dist, { recursive: true })
 async function bind(file) {
   const absolute = resolve(file), name = relative(root, absolute), bytes = await readFile(absolute), digest = hash(bytes)
@@ -230,8 +232,12 @@ try {
   const first = await execute('first')
   assert.equal(first.businessPassed, true, 'Boot or gallery rendering cannot qualify admission')
   if (selectedCase === 'context-menu') {
-    assert.ok(first.cases.some(item => item.kind === 'context-menu-profile-admission' && item.passed), 'The native Menu and Store must complete the exact Profile admission oracle')
-    assert.ok(first.cases.some(item => item.kind === 'context-menu-original-frame-reload' && item.passed), 'The native Menu must reload the embedded document without reloading its host')
+    for (const kind of ['context-menu-profile-admission', 'context-menu-original-frame-reload', 'context-menu-directional-split'])
+      assert.ok(first.cases.some(item => item.kind === kind && item.passed), 'The original workbench menu must complete ' + kind)
+    const restart = await execute('restart')
+    assert.notEqual(first.pid, restart.pid)
+    assert.deepEqual(restart.recoveredIdentity, first.savedIdentity)
+    assert.ok(restart.cases.some(item => item.kind === 'context-menu-original-workface-recovered' && item.passed))
   } else {
     const restart = await execute('restart')
     assert.notEqual(first.pid, restart.pid, 'Recovery uses a second physical process')

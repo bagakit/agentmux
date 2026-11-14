@@ -22,11 +22,12 @@ const definitions = [
   { id: 'browser-context-frame', path: bvm, before: 'if (!frame.reload()) throw', after: 'if (!contents.mainFrame.reload()) throw', test: 'reloads only the original embedded frame even when it shares the page address' },
   { id: 'wrong-host-target', path: helper, before: "{ run: () => contents.cut(), label: 'Cut'", after: "{ run: () => ownerWindow().webContents.cut(), label: 'Cut'", test: 'targets original contents for all four native commands' },
   { id: 'disabled-action', path: helper, before: '        if (chosen || ended || !item.enabled) return', after: '        if (chosen || ended) return', test: 'derives disabled actions from real editFlags' },
-  { id: 'same-frame-target', path: helper, before: 'if (!sameTarget || ended || !current() || commands && !commands.isCurrent()) { finish(); notice(); return }', after: 'if (ended || !current() || commands && !commands.isCurrent()) { finish(); notice(); return }', test: 'same frame changed input invalidates' },
+  { id: 'same-frame-target', path: helper, before: 'if (!sameTarget || ended || !focused(window) || !current() || commands && !commands.isCurrent())', after: 'if (ended || !focused(window) || !current() || commands && !commands.isCurrent())', test: 'same frame changed input invalidates' },
+  { id: 'workbench-hit-stale', path: helper, before: ' || !commands?.isCurrent()', after: '', test: 'dispatches a workbench split choice once from the original link and rejects late choices' },
   { id: 'native-owner', path: helper, before: ' && owner.isCurrent()', after: '', test: 'changed owner invalidates the old menu' },
   { id: 'navigation-cancel', path: helper, before: '      if (event.isMainFrame || ancestors.some(original => original.frame === event.frame)) finish()', after: '      // mutated: original navigation no longer cancels its menu', test: 'navigation cancels before a delayed local identity result' },
   { id: 'focused-frame', path: helper, before: ' && contents.focusedFrame === frame', after: '', test: 'rechecks actual native frame focus after awaiting' },
-  { id: 'window-focus', path: helper, before: ' && window.isFocused()', after: '', test: 'lost OS window focus during identity await' },
+  { id: 'window-focus', path: helper, before: 'live(window) && window.isFocused() && webContents.getFocusedWebContents()', after: 'live(window) && webContents.getFocusedWebContents()', test: 'lost OS window focus during identity await' },
   { id: 'pending-input-press', path: helper, before: "      if (input.type === 'mouseDown' || input.type === 'keyDown' || input.type === 'rawKeyDown') finish()", after: '      // mutated: later press cannot cancel an awaiting capture', test: 'before deferred capture cannot relabel another input' }
 ]
 const onlyIndex = process.argv.indexOf('--only')
