@@ -107,23 +107,36 @@ async function hostedFixture(protocol: 'ordinary' | 'interrupt' | 'stale-adverti
   const service = new AgentMuxHostedRuntimeService(core, store.path, () => hostedTestOwner(core))
   const calls: Array<{ method: string; params: unknown }> = []
   const wire = (value: unknown) => JSON.parse(JSON.stringify(value))
+  const pending = new Set<Promise<unknown>>()
+  async function tracked<T>(operation: Promise<T>): Promise<T> {
+    pending.add(operation)
+    try { return await operation } finally { pending.delete(operation) }
+  }
   const port = {
-    call: async (method: string, params: unknown, options?: { signal?: AbortSignal }) => {
+    call: (method: string, params: unknown, options?: { signal?: AbortSignal }) => tracked((async () => {
       calls.push({ method, params: wire(params) })
       try { return wire(await service.call(method, wire(params), options)) }
       catch (error) {
         if (error instanceof AgentMuxError) throw Object.assign(new Error(error.message), wire({ code: error.code, detail: error.detail, controlFailure: error.controlFailure }))
         throw error
       }
-    },
-    subscribe: async (method: string, params: unknown, handlers: { onInitial(value: unknown): void; onEvent(value: unknown): void; signal?: AbortSignal }) => {
+    })()),
+    subscribe: (method: string, params: unknown, handlers: { onInitial(value: unknown): void; onEvent(value: unknown): void; signal?: AbortSignal }) => tracked((async () => {
       const stream = await service.subscribe(method, params, event => handlers.onEvent(wire(event)), handlers.signal ? { signal: handlers.signal } : {})
       handlers.onInitial(wire(stream.initial)); await stream.start?.()
       return { dispose: async () => await stream.dispose() }
-    }
+    })())
   } as unknown as AgentMuxHostedRpcPort
   const client = await connectHostedAgentMux({ rpc: port })
-  disposers.push(async () => { await client.dispose(); await service.dispose(); await core.dispose(); screen.dispose(); await rm(root, { recursive: true }) })
+  disposers.push(async () => {
+    await client.dispose(); await service.dispose()
+    while (pending.size) await Promise.allSettled([...pending])
+    await core.dispose()
+    // Core releases business ownership without waiting for diagnostic IO. This
+    // fixture also owns the directory, so release its exact writer before rm.
+    await inner.startupDiagnostics.dispose()
+    screen.dispose(); await rm(root, { recursive: true })
+  })
   return { core, client, input, writes, stop, submit, calls, loseAck: () => { lostAck = true } }
 }
 async function originalSurface(f: { client: Awaited<ReturnType<typeof hostedFixture>>['client'] }, id = 'original') {
