@@ -179,8 +179,8 @@ export class AgentWorkspaceDirectory {
     return await this.proveDirectory(join(this.stateDirectory, 'agent-workspaces'), join(stateRealpath, 'agent-workspaces'), expected)
   }
 
-  private async proveLeaf(location: AgentWorkspaceDirectoryLocation, expected?: Identity): Promise<DirectoryProof> {
-    const root = await this.proveRoot()
+  private async proveLeaf(location: AgentWorkspaceDirectoryLocation, expected?: Identity, expectedRoot?: Identity): Promise<DirectoryProof> {
+    const root = await this.proveRoot(expectedRoot)
     return await this.proveDirectory(location.agentWorkspace.workspacePath,
       join(root.realpath, basename(location.agentWorkspace.workspacePath)), expected)
   }
@@ -293,7 +293,7 @@ export class AgentWorkspaceDirectory {
       throw refuse('The retained provisioned marker is absent or still pending; no leaf was created.')
     }
     await this.proveRoot(before.value.root)
-    const leaf = await this.proveLeaf(location, before.value.leaf!)
+    const leaf = await this.proveLeaf(location, before.value.leaf!, before.value.root)
     const after = await this.readMarker(location)
     if (!after || after.raw !== before.raw) throw refuse('The workspace identity marker changed during validation.')
     return leaf.realpath
