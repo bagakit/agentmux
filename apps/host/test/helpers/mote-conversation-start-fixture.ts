@@ -47,7 +47,8 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
  configurationPath=join(h.root,'configuration.json');await writeFile(configurationPath,JSON.stringify({workspaces:[workspace],executors:{saved:{label:'Saved',providerId,command:providerId,args:[],env:{},injectAgentMuxGuide:false}}}))
  const content=createHostContent({configurationPath,spatial}),main=createHostMoteMainReader({configurationPath,spatial,files:content.files!}),store=new MoteDialogueStore(join(h.root,'dialogue.sqlite'))
  const dialogue=createHostMoteDialogue({main,spatial,store,clientForHost:()=>h.client})
- const quick=new HostMoteQuickPreferences({main,files:content.files!,prepareMainSource:dialogue.prepareMainSource,recordMainSource:dialogue.recordMainSource,catalog:async()=>spatialCatalog((await spatial.read())!.graph),executors:()=>readConfiguredExecutorChoices(configurationPath)})
+ const quickPorts={main,files:content.files!,prepareMainSource:dialogue.prepareMainSource,recordMainSource:dialogue.recordMainSource,catalog:async()=>spatialCatalog((await spatial.read())!.graph),executors:()=>readConfiguredExecutorChoices(configurationPath)}
+ const quick=new HostMoteQuickPreferences(quickPorts)
  const createSpatial=createHostSpatialAgentControl({configurationPath,spatial,runtime:()=>({client:h.client}) as never})
  const startedNativeRuns=new Set<string>()
  const creator:typeof createSpatial=async(request,context)=>{
@@ -87,5 +88,5 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
   return {snapshot:await main.readCurrentMoteMain(target),session:await h.client.readAgentSession(reference.sessionId),hook}
  }
  const setup=(operationId:string,advance=true)=>rpc.call(advance?'space.mote.dialogue.setup.advance':'space.mote.dialogue.setup.inspect',{target,creation:{hostId:'local',operationId}})
- return {h,spatial,store,main,dialogue,quick,options,server,rpc,target,path,start,setup,qualifyMainIdle,close:async()=>{for(const close of closes.splice(0).reverse())await close()}}
+ return {h,spatial,store,main,dialogue,quick,quickPorts,options,server,rpc,target,path,start,setup,qualifyMainIdle,close:async()=>{for(const close of closes.splice(0).reverse())await close()}}
 }
