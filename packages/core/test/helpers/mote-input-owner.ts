@@ -41,9 +41,12 @@ class MoteClient extends AgentMuxClient {
 export const moteInputTestOwnerModule = { AgentMuxClient: MoteClient, AgentMuxFileAgentSessionStore }
 const jsonl = (rows: unknown[]) => rows.map((value) => JSON.stringify(value)).join('\n') + '\n'
 
-export async function createMoteInputFixture(options: { directoryAddress?: boolean } = {}) {
+export async function createMoteInputFixture(options: {
+  directoryAddress?: boolean
+  clientOptions?: (root: string) => Omit<AgentMuxClientOptions, 'store'>
+} = {}) {
   const cleanup: Array<() => Promise<unknown>> = []
-  const f = await rpcOwnerFixture(['member', 'primary', 'stranger'], moteInputTestOwnerModule)
+  const f = await rpcOwnerFixture(['member', 'primary', 'stranger'], moteInputTestOwnerModule, undefined, options.clientOptions)
   cleanup.push(f.close)
   const errors: unknown[] = []
   f.client.onEvent((event) => {

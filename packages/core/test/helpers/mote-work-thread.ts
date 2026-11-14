@@ -5,6 +5,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { vi } from 'vitest'
 import { defineRun } from '@ctxmux/sdk'
 import { AgentMuxControlServer } from '../../src/public-rpc-server.js'
+import { AgentMuxRpcService } from '../../src/public-rpc-service.js'
+import { openDemandStore } from '@agentmux/demand'
+import { GoalDelegationOwner } from '../../../../apps/host/src/goal-delegation-owner.js'
 import { connectAgentMuxRpc } from '../../src/public-rpc-client.js'
 import { MoteDialogueStore } from '../../src/mote-dialogue-store.js'
 import type { AgentMuxClient } from '../../src/client.js'
@@ -14,10 +17,11 @@ import { createHostSpatialAgentControl } from '../../../../apps/host/src/spatial
 import { createMoteInputFixture, moteInputTestSource } from './mote-input-owner.js'
 import { runSourceObjectCli } from './source-object-cli.js'
 import { objectCliEnvironment } from './object-cli-rpc.js'
+import { fixtureHostExecutorOptions } from '../../../../apps/host/test/helpers/configured-executor-owner.js'
 
 /** Synthetic Runtime/native I/O only; creation, authorization, messages, Dispatch, Host and RPC are real owners. */
 export async function createMoteWorkThreadFixture() {
-  const f = await createMoteInputFixture(), cleanup: Array<() => Promise<unknown>> = [f.close]
+  const f = await createMoteInputFixture({ clientOptions: root => fixtureHostExecutorOptions(() => join(root, 'configuration.json'))(root) }), cleanup: Array<() => Promise<unknown>> = [f.close]
   try {
     const configurationPath = join(f.root, 'configuration.json'), configuration = JSON.parse(await readFile(configurationPath, 'utf8'))
     await writeFile(join(dirname(f.motePath), 'SOUL.md'), '# SOUL\nSynthetic persistent Mote identity.\n')
@@ -51,8 +55,21 @@ export async function createMoteWorkThreadFixture() {
     const content = createHostContent({ configurationPath, spatial: f.spatial })
     const main = createHostMoteMainReader({ configurationPath, spatial: f.spatial, files: content.files! })
     const dialogue = createHostMoteDialogue({ main, spatial: f.spatial, store: new MoteDialogueStore(join(f.root, 'work-dialogue.sqlite')), clientForHost: () => f.client })
+    const demands = openDemandStore({ root: join(f.root, 'goals') })
+    const coreRpc = new AgentMuxRpcService({ coreClients: f.coreClients })
+    const goalDelegations = new GoalDelegationOwner(demands, {
+      agentCreation: async (_hostId, sessionId) => f.client.inspectAgentCreation(sessionId),
+      resolveGoalAgent: async sessionId => ({ hostId: 'local', status: await f.client.statusAgent(sessionId) })
+    }, undefined, {
+      call: async (_hostId, method, params, context) => coreRpc.call(method, params, context),
+      readDispatch: async (_hostId, sourceMessageId) => ({ ...await f.client.readDispatch({ sourceMessageId }), hostId: 'local' }),
+      observeRun: async (_hostId, runId) => {
+        const { run } = await f.client.runtimeSubject({ kind: 'terminal-run', runId })
+        return { runId: run.runId, state: run.state }
+      }
+    })
     const server = new AgentMuxControlServer({ socketPath: join(f.root, 'work-dialogue.sock'), coreClients: f.coreClients,
-      spatialState: f.spatial, moteDialogue: dialogue,
+      spatialState: f.spatial, moteDialogue: dialogue, goalDelegations,
       spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: f.spatial, runtime: () => ({ client: f.client }) as any }) })
     await server.start(); cleanup.push(() => server.stop())
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
@@ -64,7 +81,7 @@ export async function createMoteWorkThreadFixture() {
       return JSON.parse(result.stdout).result
     }
     return { root: f.root, client: f.client as AgentMuxClient, inner: f.inner, writes: f.writes,
-      target, main, dialogue, rpc, cli, launches,
+      target, main, dialogue, rpc, cli, launches, demands, motePath: f.motePath, spatial: f.spatial,
       close: async () => { for (const close of cleanup.reverse()) await close() } }
   } catch (error) { for (const close of cleanup.reverse()) await close(); throw error }
 }
