@@ -49,16 +49,19 @@ try {
     const fixtureHashes = {}
     for (const path of ['packages/core/test/providers/gemini-hook-binding.native.test.ts',
       'packages/core/test/fixtures/gemini-hook-native-host.mjs', 'packages/core/scripts/verify-gemini-hook-binding.mjs']) fixtureHashes[path] = sha(await readFile(join(root, path)))
-    const owners = ['providers/gemini', 'providers/shared', 'hook-server', 'managed-hook-runtime', 'managed-hook-installer', 'hook-config-merge']
+    const owners = [['providers', 'gemini/provider'], ...['providers/shared', 'hook-server', 'managed-hook-runtime',
+      'managed-hook-installer', 'hook-config-merge'].map(name => ['core', name])]
     const compiled = {}
-    for (const owner of owners) {
-      const sourcePath = join(root, 'packages/core/src', owner + '.ts'), artifactPath = join(root, 'packages/core/dist', owner + '.js')
-      const source = await readFile(sourcePath, 'utf8'), artifact = await readFile(artifactPath, 'utf8')
-      const emitted = ts.transpileModule(source, { fileName: sourcePath, compilerOptions: { ...compiler,
+    for (const [pkg, owner] of owners) {
+      const source = 'packages/' + pkg + '/src/' + owner + '.ts'
+      const artifact = 'packages/' + pkg + '/dist/' + owner + '.js'
+      const sourcePath = join(root, source), artifactPath = join(root, artifact)
+      const sourceText = await readFile(sourcePath, 'utf8'), artifactText = await readFile(artifactPath, 'utf8')
+      const emitted = ts.transpileModule(sourceText, { fileName: sourcePath, compilerOptions: { ...compiler,
         module: ts.ModuleKind.ESNext, sourceMap: false, inlineSourceMap: false, declaration: false } }).outputText
-      assert.equal(artifact.replace(/\n?\/\/# sourceMappingURL=.*$/u, '\n'), emitted,
+      assert.equal(artifactText.replace(/\n?\/\/# sourceMappingURL=.*$/u, '\n'), emitted,
         'Current compiled owner is required before this native proof: ' + owner)
-      compiled[owner] = { sourceSHA256: sha(source), artifactSHA256: sha(artifact) }
+      compiled[owner] = { source, artifact, sourceSHA256: sha(sourceText), artifactSHA256: sha(artifactText) }
     }
     const config = join(privateRoot, 'native.config.mts'), reportPath = join(evidence, 'vitest.json')
     await writeFile(config, `export default ${JSON.stringify({ root, cacheDir: join(privateRoot, 'cache'), test: {
@@ -81,17 +84,17 @@ try {
     for (const pid of receipt.nativeHostPids) assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
     assert.equal(sha(await readFile(native.module)), native.moduleSHA256, 'Installed native artifact changed during proof')
     assert.equal(sha(await readFile(join(root, workerPath))), workerSHA256, 'The bundled Hook worker changed during proof')
-    for (const [owner, identity] of Object.entries(compiled)) {
-      assert.equal(sha(await readFile(join(root, 'packages/core/src', owner + '.ts'))), identity.sourceSHA256)
-      assert.equal(sha(await readFile(join(root, 'packages/core/dist', owner + '.js'))), identity.artifactSHA256)
+    for (const identity of Object.values(compiled)) {
+      assert.equal(sha(await readFile(join(root, identity.source))), identity.sourceSHA256)
+      assert.equal(sha(await readFile(join(root, identity.artifact))), identity.artifactSHA256)
     }
     for (const [path, identity] of Object.entries(fixtureHashes)) assert.equal(sha(await readFile(join(root, path))), identity,
       'Native proof fixture changed during execution: ' + path)
     const inputs = { [cli]: native.cliSHA256, [manifestPath]: native.manifestSHA256, [native.module]: native.moduleSHA256,
       [workerPath]: workerSHA256, ...fixtureHashes }
-    for (const [owner, identity] of Object.entries(compiled)) {
-      inputs['packages/core/src/' + owner + '.ts'] = identity.sourceSHA256
-      inputs['packages/core/dist/' + owner + '.js'] = identity.artifactSHA256
+    for (const identity of Object.values(compiled)) {
+      inputs[identity.source] = identity.sourceSHA256
+      inputs[identity.artifact] = identity.artifactSHA256
     }
     await writeFile(join(evidence, 'positive.json'), JSON.stringify({ schema: 'agentmux.gemini-installed-hook-proof.v1', native,
       nativeBinaryPath: cli, nativeBinarySHA256: native.cliSHA256, inputs, compiled, fixtureHashes,

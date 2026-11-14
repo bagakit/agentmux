@@ -9,8 +9,8 @@ const changes: Record<string, [string, string, string]> = {
   'volatile-shell-command': ['packages/core/src/providers/shared.ts',
     'return `/bin/sh -c ${shellQuote(script)} amux-hook`',
     'return `ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ${shellQuote(process.execPath)} /private/retired-install/worker.mjs`'],
-  'shell-runtime-unretained': ['packages/core/src/providers/gemini.ts', '  retainedRuntime: true,', '  retainedRuntime: false,'],
-  'native-timeout-unit': ['packages/core/src/providers/gemini.ts', "hookCommandTimeout('gemini', 'milliseconds')", "hookCommandTimeout('gemini')"],
+  'shell-runtime-unretained': ['packages/providers/src/gemini/provider.ts', '    retainedRuntime: true,', '    retainedRuntime: false,'],
+  'native-timeout-unit': ['packages/providers/src/gemini/provider.ts', "hookCommandTimeout('gemini', 'milliseconds')", "hookCommandTimeout('gemini')"],
   'key-overwrites-callbacks': ['packages/providers/src/antigravity/provider.ts', "merge: { kind: 'json-managed-events' as const, key: 'agentmux-status' }", "merge: { kind: 'json-owned-key' as const, key: 'agentmux-status' }"],
   'forget-native-container': ['packages/core/src/hook-config-merge.ts', 'retainPrevious, strategy.key)', 'retainPrevious)'],
   'conflate-container-ownership': ['packages/core/src/managed-hook-installer.ts',
@@ -23,8 +23,8 @@ export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), {
     const path = relative(base.root!, id.split('?')[0]!)
     const owners = new Set([
       ...['providers/shared', 'managed-hook-installer', 'hook-config-merge',
-        ...['gemini', 'cursor', 'copilot', 'droid'].map(name => 'providers/' + name)].map(name => 'packages/core/src/' + name + '.ts'),
-      'packages/providers/src/antigravity/provider.ts'
+        ...['cursor', 'droid'].map(name => 'providers/' + name)].map(name => 'packages/core/src/' + name + '.ts'),
+      ...['antigravity', 'gemini', 'copilot'].map(id => 'packages/providers/src/' + id + '/provider.ts')
     ])
     if (!owners.has(path)) return
     let code = source

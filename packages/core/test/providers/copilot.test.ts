@@ -4,11 +4,12 @@ const canonicalHookLifecycleEvent = (name: string) => {
   const rule = lifecycleProvider.hook.rules.find(rule => rule.events.includes(name) && !rule.matches && !rule.toolNames)
   return declaredHookLifecycleEvent(name, rule?.lifecycleEvent, lifecycleProvider.hook.lifecycle)
 }
+const COPILOT_HOOKS = lifecycleProvider.hook
 const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
 import { fixtureEpoch, fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { COPILOT_HOOK_EVENTS, COPILOT_HOOKS, createCopilotManagedHookPlan } from '../../src/providers/copilot.js'
+import { COPILOT_HOOK_EVENTS } from '@agentmux/providers/copilot/provider'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import type { AgentSemanticState } from '../../src/types.js'
@@ -132,9 +133,9 @@ describe('Copilot provider', () => {
     it('COPILOT_HOME 被尊重，空串等于没设', () => {
       // 逐字实现它自己的解析：`configDir ?? COPILOT_HOME ?? join(homedir(), '.copilot')`，
       // 且它自己的判断是 `if (t === undefined || t === "")`——空串必须回落，否则会写到根目录下的 hooks。
-      expect(createCopilotManagedHookPlan({ COPILOT_HOME: fixturePath("tmp/ch") }).mutations[0]!.path)
+      expect(copilot.planManagedHooks!({ workspacePath: fixturePath("repo"), env: { COPILOT_HOME: fixturePath("tmp/ch") } })!.mutations[0]!.path)
         .toBe(fixturePath("tmp/ch/hooks/agentmux.json"))
-      expect(createCopilotManagedHookPlan({ COPILOT_HOME: '   ' }).mutations[0]!.path)
+      expect(copilot.planManagedHooks!({ workspacePath: fixturePath("repo"), env: { COPILOT_HOME: '   ' } })!.mutations[0]!.path)
         .toContain("/.copilot/hooks/agentmux.json")
     })
 

@@ -254,7 +254,7 @@ describe('块注释里没有困住任何真声明', () => {
     expect(scanned.length).toBeGreaterThan(500)
     const paths = new Set(scanned.map(({ path }) => path))
     // 出事的那个文件必须在扫描范围内——它是这条守卫存在的原因。
-    expect(paths.has('packages/core/src/providers/copilot.ts')).toBe(true)
+    expect(paths.has('packages/providers/src/copilot/provider.ts')).toBe(true)
     // 两个 workspace 都要覆盖：这条规则约束的是全仓源码组织，不是 desktop 一家。
     expect(paths.has('apps/desktop/src/main/config-store.ts')).toBe(true)
     // .tsx 也在内——renderer 的组件几乎全是 .tsx，漏掉它等于漏掉半个 desktop。

@@ -9,7 +9,7 @@ const GEMINI_HOOK_DIALECT = lifecycleProvider.hook.lifecycle ?? {}
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { GEMINI_HOOK_EVENTS, createGeminiManagedHookPlan } from '../../src/providers/gemini.js'
+import { GEMINI_HOOK_EVENTS } from '@agentmux/providers/gemini/provider'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { renderMergedHookContent } from '../../src/hook-config-merge.js'
 import { AgentMuxError } from '../../src/errors.js'
@@ -220,7 +220,9 @@ describe('Gemini provider', () => {
     })
 
     it('home 可注入，便于在测试里不碰真实 home', () => {
-      expect(createGeminiManagedHookPlan(fixturePath("tmp/fake-home")).mutations[0]!.path)
+      expect(new AgentProviderRegistry().get('gemini').planManagedHooks!({
+        workspacePath: fixturePath("repo"), env: { GEMINI_CLI_HOME: fixturePath("tmp/fake-home") }
+      })!.mutations[0]!.path)
         .toBe(fixturePath("tmp/fake-home/.gemini/settings.json"))
     })
   })
