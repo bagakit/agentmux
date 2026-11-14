@@ -69,15 +69,13 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
         'The structured and terminal launch choices belong to their original conversation. Keep this original Session and its execution choice.',
         'AGENT_ACP_RESUME_SOURCE_UNCONFIRMED')
       if (!acp) return { plan }
-      if (context.kind === 'fork' || context.prompt?.trim()) throw new AgentMuxError(
-        'This structured launch currently accepts an empty create or resume request. Its original input and Session are retained.',
-        'AGENT_ACP_LAUNCH_INPUT_UNSUPPORTED')
+      if (context.kind === 'fork') throw new AgentMuxError('The original ACP conversation has no confirmed fork capability.', 'AGENT_FORK_UNSUPPORTED')
       const origin = original
       if (context.kind === 'resume' && (origin?.nativeHandle.kind !== 'provider' || origin.nativeHandle.providerId !== 'antigravity')) throw new AgentMuxError(
         'This resume target has no confirmed original Antigravity ACP execution context.', 'AGENT_ACP_RESUME_SOURCE_UNCONFIRMED')
       const actor = { protocolId: ANTIGRAVITY_ACP_ACTOR_PROTOCOL, actorId: mintObjectId(), lifecycleOperationId,
-        token: randomBytes(32).toString('hex'), launch: { command: plan.command, args: [...(origin?.args ?? plan.args)] } }
-      return { nativeActor: actor, managedHooks: false, plan: { ...plan, command: process.execPath,
+        token: randomBytes(32).toString('hex'), launch: { command: plan.command, args: [...context.invocationArgs] } }
+      return { nativeActor: actor, managedHooks: false, promptDelivery: 'post-launch', plan: { ...plan, command: process.execPath,
         args: [fileURLToPath(new URL('./antigravity-acp-owner.js', import.meta.url)), JSON.stringify({ ...actor.launch, cwd: context.workspacePath,
           ...(origin ? { resumeSessionId: origin.nativeHandle.sessionId } : {}) })],
         env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [ACP_ACTOR_TOKEN]: actor.token, [ACP_ACTOR_ID]: actor.actorId, [ACP_ACTOR_LIFECYCLE]: lifecycleOperationId } } }

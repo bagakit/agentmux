@@ -519,8 +519,8 @@ export class AgentSessionRunLifecycle {
         ? { plan: await this.ports.executors.prepareToolExecutionLaunch!(provider, plan, current.toolExecution, current.workspacePath, current.agentSessionId, { lifecycleOperationId, capability: invocationCapability }) }
         : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: 'resume', workspacePath: current.workspacePath,
           ...(current.launchOptions ? { launchOptions: current.launchOptions } : {}), ...(prompt === undefined ? {} : { prompt }),
-          originalResume: { nativeHandle: current.nativeHandle, ...(originalLaunchOptions ? { launchOptions: originalLaunchOptions } : {}),
-            args: [...(input.args ?? []), ...provider.resolveLaunchArgv(current.launchOptions ?? {})] } })
+          invocationArgs: [...(input.args ?? []), ...provider.resolveLaunchArgv(current.launchOptions ?? {})],
+          originalResume: { nativeHandle: current.nativeHandle, ...(originalLaunchOptions ? { launchOptions: originalLaunchOptions } : {}) } })
       if (managedLaunch) plan = managedLaunch.plan
       if (managedLaunch?.promptDelivery === 'post-launch' && prompt) {
         deferredResumePrompt = frozenMessage ? '' : prompt

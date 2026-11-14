@@ -162,8 +162,12 @@ export class AgentSessionRecoveryReconciler {
   observeInitialInput(session: AgentMuxStoredAgentSession): void {
     if (this.signal.aborted) return
     const input = session.initialInput
-    const controlled = Boolean(session.nativeActor?.initializationControl)
-    const retained = controlled ? Object.values(session.continuityOperations ?? {}).filter(operation => operation.launchInput?.delivery === 'post-launch' &&
+    const actor = session.nativeActor
+    const provider = this.ports.providers.providers.get(session.providerId)
+    const managed = actor && provider.managedAcp?.protocolId === actor.protocolId
+    if (managed && !session.nativeHandle) return
+    const controlled = Boolean(actor?.initializationControl)
+    const retained = controlled || managed ? Object.values(session.continuityOperations ?? {}).filter(operation => operation.launchInput?.delivery === 'post-launch' &&
       operation.launchInput.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(operation.launchInput.state)) : []
     const initial = session.creation?.resolution?.initialInputContinuation !== 'held' && (controlled || input?.delivery === 'post-launch') && input?.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(input.state)
     // Empty creation still has a Provider-confirmed native identity. Publishing

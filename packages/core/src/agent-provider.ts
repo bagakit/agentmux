@@ -252,7 +252,7 @@ export type AgentProvider = {
   /** Original executable has already been probed; this final plan also enters original lifecycle preparation. */
   prepareToolExecutionLaunch?: import('./agent-tool-execution.js').PrepareAgentToolExecutionLaunch
   prepareExecutionHelper?: import('./agent-execution-helper.js').AgentExecutionHelperLaunch
-  prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; workspacePath: string; prompt?: string; launchOptions?: import('./agent-launch-option.js').LaunchOptionSelection; originalResume?: { nativeHandle: AgentNativeSessionHandle; launchOptions?: import('./agent-launch-option.js').LaunchOptionSelection; args: readonly string[] } }): Promise<AgentProviderManagedLaunch>
+  prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; workspacePath: string; invocationArgs: readonly string[]; prompt?: string; launchOptions?: import('./agent-launch-option.js').LaunchOptionSelection; originalResume?: { nativeHandle: AgentNativeSessionHandle; launchOptions?: import('./agent-launch-option.js').LaunchOptionSelection } }): Promise<AgentProviderManagedLaunch>
   /** Encode replies from an exact Provider-read record; no caller-supplied display text. */
   planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
   /** Qualify this exact operation, independently of healthy terminal input.

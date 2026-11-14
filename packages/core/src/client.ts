@@ -6345,7 +6345,7 @@ export class AgentMuxClient {
         'This original structured ACP launch has no split tool execution channel.', 'AGENT_ACP_TOOL_EXECUTION_UNAVAILABLE')
       const managedLaunch = input.toolExecution
         ? { plan: await this.prepareToolExecutionLaunch(provider, plan, input.toolExecution, input.workspacePath, agentSessionId, { lifecycleOperationId, capability: invocationCapability }) }
-        : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: forkSource ? 'fork' : nativeResumeSource ? 'resume' : 'create', workspacePath: input.workspacePath, prompt: launchPrompt, ...(input.launchOptions ? { launchOptions: input.launchOptions } : {}) })
+        : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: forkSource ? 'fork' : nativeResumeSource ? 'resume' : 'create', workspacePath: input.workspacePath, invocationArgs: launchContext.args, prompt: launchPrompt, ...(input.launchOptions ? { launchOptions: input.launchOptions } : {}) })
       if (managedLaunch) plan = managedLaunch.plan
       const initialInput: AgentMuxContinuityLaunchInput | undefined = composed.text.trim() ? {
         ...optionalInputEpoch(input.inputEpoch),
@@ -8594,19 +8594,8 @@ export class AgentMuxClient {
           input.expectedCompletionId === undefined ? 'AGENT_TURN_END_UNCONFIRMED' : 'AGENT_COMPLETION_CHANGED')
       }
     }
-    const actor = this.registry.findByRun(session.run)?.nativeActor
-    const acp = actor && provider.managedAcp?.protocolId === actor.protocolId ? provider.managedAcp : undefined
-    const managedPlan = acp && actor && (() => {
-      if (admissionIntent.kind === 'manual-actor') this.assertTerminalInputCarrier(session)
-      if (!acp.prepareInput || session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== provider.id) {
-        throw new AgentMuxError('The original ACP conversation has no confirmed prompt endpoint.', 'AGENT_NATIVE_INPUT_UNAVAILABLE',
-          undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
-      }
-      if (message.inputImages?.length) throw new AgentMuxError('This ACP input endpoint accepts text. The original input is retained.',
-        'AGENT_ACP_PROMPT_CONTENT_UNSUPPORTED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
-      return { kind: 'native-rpc' as const, operation: 'submit' as const, protocolId: actor.protocolId, actorId: actor.actorId,
-        threadId: session.nativeHandle.sessionId, sourceId: nativeInputSourceId({ providerId: provider.id, nativeSessionId: session.nativeHandle.sessionId }) }
-    })()
+    if (admissionIntent.kind === 'manual-actor') this.assertTerminalInputCarrier(session)
+    const managedPlan = this.managedAcpPromptPlan(provider, session, message)
     const savedCarrier = inputControl?.handoff?.carrier
     if (managedPlan && savedCarrier && (savedCarrier.kind !== 'native' || savedCarrier.plan.operation !== 'submit')) throw new AgentMuxError(
       'The original input has another frozen carrier.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
@@ -10814,6 +10803,9 @@ export class AgentMuxClient {
     if (!record && input.state === 'prepared' && run.state.type === 'running') {
       // Read the fence only on the dispatch path. Existing receipts can still settle.
       if (current.creation?.createOperationId && await this.store.readCreationCancellation(current.creation.createOperationId)) return current
+      const provider = this.providers.get(current.providerId)
+      const actor = current.nativeActor
+      if (actor && provider.managedAcp?.protocolId === actor.protocolId && !current.nativeHandle) return current
       let nativeSource: { providerId: string; nativeSessionId: string } | undefined
       if (current.nativeActor?.initializationControl) {
         // Opening this existing read-only observer does not create a claim. Failure,
@@ -10827,7 +10819,7 @@ export class AgentMuxClient {
             handle?.kind !== 'provider' || handle.providerId !== current.providerId || handle.sessionId !== initialization.native.sessionId) return current
         nativeSource = { providerId: handle.providerId, nativeSessionId: handle.sessionId }
       }
-      await this.deliverPostLaunchPrompt(this.providers.get(current.providerId), current, run, input.lifecycleOperationId,
+      await this.deliverPostLaunchPrompt(provider, current, run, input.lifecycleOperationId,
         input.prompt, input.message, input.key.submissionId, nativeSource, async () => { await assertCurrent?.(); await this.assertCreationInputCurrent(session, run) }, input.inputEpoch)
       record = await this.inspectAgentPromptSubmission(input.key)
     }
@@ -10883,7 +10875,8 @@ export class AgentMuxClient {
       const renderObservation = new AbortController()
       let waitingForStartup = false
       await this.serializeAgentInput(session, async (current, live, diagnostic) => {
-        const initializationWait = !nativeSource && await this.initialInputWait(current, live,
+        const managedPlan = this.managedAcpPromptPlan(provider, current, message)
+        const initializationWait = !managedPlan && !nativeSource && await this.initialInputWait(current, live,
           { kind: 'session-conversation', expectedRun: current.run, ...optionalInputEpoch(inputEpoch) }, this.requireAgentSession(current.agentSessionId).initialInput?.key?.expectedRun.runId === live.runId ? 'initial-input' : 'resumed-input', renderObservation.signal)
         if (initializationWait) {
           waitingForStartup = true
@@ -10897,7 +10890,7 @@ export class AgentMuxClient {
           live,
           originalSubmissionId ?? `launch-prompt:${lifecycleOperationId}`,
           text,
-          provider.planPromptInput(text),
+          managedPlan ?? provider.planPromptInput(text),
           originalKey ? { expectedRun: session.run, afterSubmissionId: null, ...optionalInputEpoch(inputEpoch) } : agentPromptCondition(session),
           undefined,
           undefined,
@@ -11465,6 +11458,19 @@ export class AgentMuxClient {
       releaseAdmission()
       return await diagnostic.measure('native-input', () => completion)
     } finally { releaseAdmission() }
+  }
+
+  private managedAcpPromptPlan(provider: AgentProvider, session: AgentMuxAgentSession, message: AgentPromptMessageContent): import('./types.js').AgentNativePromptInputPlan | undefined {
+    const actor = this.registry.findByRun(session.run)?.nativeActor
+    const managed = provider.managedAcp
+    if (!actor || managed?.protocolId !== actor.protocolId) return undefined
+    if (!managed.prepareInput || session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== provider.id) throw new AgentMuxError(
+      'The original ACP conversation has no confirmed prompt endpoint.', 'AGENT_NATIVE_INPUT_UNAVAILABLE',
+      undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    if (message.inputImages?.length) throw new AgentMuxError('This ACP input endpoint accepts text. The original input is retained.',
+      'AGENT_ACP_PROMPT_CONTENT_UNSUPPORTED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    return { kind: 'native-rpc', operation: 'submit', protocolId: actor.protocolId, actorId: actor.actorId,
+      threadId: session.nativeHandle.sessionId, sourceId: nativeInputSourceId({ providerId: provider.id, nativeSessionId: session.nativeHandle.sessionId }) }
   }
 
   private assertTerminalInputCarrier(session: AgentMuxAgentSession): void {
