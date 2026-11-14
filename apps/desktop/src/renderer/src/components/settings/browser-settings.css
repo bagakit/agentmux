@@ -26,6 +26,8 @@
 .settings-browser .browser-resources__notice { margin: 0; line-height: 1.6; }
 .settings-browser .browser-resources > .settings-group-note { margin-block: var(--sp-4); }
 .settings-browser .external-browser-connections > .settings-group-note { max-width: 78ch; line-height: 1.65; }
+.settings-browser .external-browser-connections__link { align-items: center; flex-wrap: nowrap; padding-inline-end: var(--sp-1); }
+.settings-browser .external-browser-connections__link > button { flex: none; }
 .settings-browser .external-browser-connections__actions { gap: var(--sp-3); margin-top: var(--sp-4); }
 .browser-new-page-placement { display: grid; gap: var(--sp-3); min-width: 0; }
 .browser-new-page-placement__row { display: grid; grid-template-columns: minmax(64px, .5fr) minmax(0, 1fr); align-items: center; gap: var(--sp-4); }

@@ -15,7 +15,7 @@
 .browser-agent-control-settings .browser-agent-preview__options { padding-inline: var(--sp-4); gap: var(--sp-3) var(--sp-4); }
 .browser-agent-control-settings .browser-agent-preview__options label { font-size: var(--fs-meta); }
 .browser-agent-control-settings .browser-agent-preview__caption { min-height: 0; padding: var(--sp-4); font-size: var(--fs-meta); line-height: 1.6; }
-.browser-agent-control-settings :is(input, select, summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+.browser-agent-control-settings :is(input[type="range"], input[type="color"], summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 @container agent-control-settings (max-width: 639px) {
   .browser-agent-control-settings .browser-agent-preview { position: static; }
   .browser-agent-control-settings .browser-agent-control__layout { gap: var(--sp-5); }

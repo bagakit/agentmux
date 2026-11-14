@@ -1,3 +1,4 @@
+import { NativeSelect, Switch } from '@agentmux/client-ui/input'
 import { useId } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Button } from '@agentmux/client-ui/components/Button'
@@ -29,7 +30,7 @@ export function BrowserAgentControlSettingsPane({ preferences, active, onSave }:
   function toggle(key: 'showCursor' | 'showCursorLabel' | 'showDiscussion' | 'pointerTween' | 'clickRipple' | 'glowEnabled', title: string, note?: string) {
     return <label className="browser-agent-control__toggle" data-settings-field={key} data-settings-preview-label={title}>
       <span><strong>{title}</strong>{note ? <small>{note}</small> : null}</span>
-      <input type="checkbox" checked={value[key]} onChange={event => draft.setField(key, event.target.checked)} />
+      <Switch checked={value[key]} onChange={event => draft.setField(key, event.target.checked)} />
     </label>
   }
   function slider(key: NumericPreference, title: string, unit: string) {
@@ -60,11 +61,11 @@ export function BrowserAgentControlSettingsPane({ preferences, active, onSave }:
           {toggle('glowEnabled', 'Highlight page edges', 'A steady fine edge marks agent control. The soft inner glow can blend and animate.')}
           <div className="browser-agent-control__pair">
             <label className="browser-agent-control__color" data-settings-field="glowColor" data-settings-preview-label="Glow color"><span>Color</span><span><input aria-label="Glow color" type="color" value={value.glowColor} onChange={event => draft.setField('glowColor', event.target.value)} /><code>{value.glowColor.toUpperCase()}</code></span></label>
-            <label data-settings-field="glowBlend" data-settings-preview-label="Glow blend"><span>Blend</span><select aria-label="Glow blend" value={value.glowBlend} onChange={event => draft.setField('glowBlend', event.target.value as BrowserAgentControlPreferences['glowBlend'])}>{BROWSER_AGENT_GLOW_BLENDS.map(blend => <option key={blend} value={blend}>{blend[0]!.toUpperCase() + blend.slice(1)}</option>)}</select></label>
+            <label data-settings-field="glowBlend" data-settings-preview-label="Glow blend"><span>Blend</span><NativeSelect aria-label="Glow blend" value={value.glowBlend} onChange={event => draft.setField('glowBlend', event.target.value as BrowserAgentControlPreferences['glowBlend'])}>{BROWSER_AGENT_GLOW_BLENDS.map(blend => <option key={blend} value={blend}>{blend[0]!.toUpperCase() + blend.slice(1)}</option>)}</NativeSelect></label>
           </div>
           {slider('glowWidth', 'Width', ' px')}
           {slider('glowOpacity', 'Intensity', '%')}
-          <label className="browser-agent-control__select" data-settings-field="glowAnimation" data-settings-preview-label="Glow animation"><span>Animation</span><select aria-label="Glow animation" value={value.glowAnimation} onChange={event => draft.setField('glowAnimation', event.target.value as BrowserAgentControlPreferences['glowAnimation'])}>{BROWSER_AGENT_GLOW_ANIMATIONS.map(animation => <option key={animation} value={animation}>{animation === 'none' ? 'Static' : animation[0]!.toUpperCase() + animation.slice(1)}</option>)}</select></label>
+          <label className="browser-agent-control__select" data-settings-field="glowAnimation" data-settings-preview-label="Glow animation"><span>Animation</span><NativeSelect aria-label="Glow animation" value={value.glowAnimation} onChange={event => draft.setField('glowAnimation', event.target.value as BrowserAgentControlPreferences['glowAnimation'])}>{BROWSER_AGENT_GLOW_ANIMATIONS.map(animation => <option key={animation} value={animation}>{animation === 'none' ? 'Static' : animation[0]!.toUpperCase() + animation.slice(1)}</option>)}</NativeSelect></label>
           {previewButton('glow', 'Inner glow')}
         </section>
         <details className="browser-agent-control__advanced" data-settings-preview-group="fine-tuning">

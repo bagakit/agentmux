@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { TextInput } from '@agentmux/client-ui/input'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { InputGroup, NativeSelect, SearchInput, Switch, TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { formatAmuxObjectLink } from '@agentmux/core/sharing'
@@ -15,10 +15,11 @@ import '../../styles/settings-capsule.css'
 const configFields = ({ contentRoot, defaultStorageMode, defaultMode, defaultTheme }: CapsuleConfig) => ({ contentRoot, defaultStorageMode, defaultMode, defaultTheme })
 const pageFields = (page: CapsuleRecord) => ({ title: page.title, sourcePath: page.sourcePath, mode: page.mode, theme: page.theme, entry: page.entry, routing: page.routing })
 
-function Field({ label, hint, children, id }: { label: string; hint?: string; children: ReactNode; id?: string }) {
-  return <label className="capsule-settings__field" {...(id ? { 'data-settings-field': id } : {})}>
-    <span><strong>{label}</strong>{hint ? <small>{hint}</small> : null}</span>{children}
-  </label>
+function Field({ label, hint, children, id, controlId }: { label: string; hint?: string; children: ReactNode; id?: string; controlId?: string }) {
+  const caption = <><strong>{label}</strong>{hint ? <small>{hint}</small> : null}</>
+  return controlId
+    ? <div className="capsule-settings__field" data-settings-field={id}><label htmlFor={controlId}>{caption}</label>{children}</div>
+    : <label className="capsule-settings__field" data-settings-field={id}><span>{caption}</span>{children}</label>
 }
 
 function ResultNotice({ state }: { state: { attempt: { params: { operationId: string }; phase: string; message: string } | null; validation: string; inspect(): Promise<void> } }) {
@@ -32,13 +33,14 @@ function ResultNotice({ state }: { state: { attempt: { params: { operationId: st
 }
 
 function ModeSelect({ value, change, label }: { value: 'isolated' | 'injected'; change(value: 'isolated' | 'injected'): void; label: string }) {
-  return <select aria-label={label} value={value} onChange={event => change(event.target.value as 'isolated' | 'injected')}>
+  return <NativeSelect aria-label={label} value={value} onChange={event => change(event.target.value as 'isolated' | 'injected')}>
     <option value="isolated">Isolated</option><option value="injected">Injected</option>
-  </select>
+  </NativeSelect>
 }
 
 function CapsuleDefaults({ config, onConfirmed, refresh }: { config: CapsuleConfig; onConfirmed(config: CapsuleConfig): void; refresh(): void }) {
   const draft = useCapsuleDraft(configFields(config), config.revision)
+  const contentRootId = useId()
   const edit = useRef(0), choosing = useRef(false)
   const [directoryIssue, setDirectoryIssue] = useState('')
   const submitted = useRef(draft.value)
@@ -63,11 +65,17 @@ function CapsuleDefaults({ config, onConfirmed, refresh }: { config: CapsuleConf
   }
   return <section className="settings-group capsule-settings__defaults" aria-label="Capsule defaults">
     <header><span>New page defaults</span><small>Existing pages keep their modes, permissions and locations.</small></header>
-    <Field label="Content management" id="capsule-storage"><select aria-label="Default Capsule content management" value={draft.value.defaultStorageMode} onChange={event => draft.set('defaultStorageMode', event.target.value as 'managed' | 'path')}><option value="managed">Managed by AgentMux</option><option value="path">Use a configured path</option></select></Field>
+    <Field label="Content management" id="capsule-storage"><NativeSelect aria-label="Default Capsule content management" value={draft.value.defaultStorageMode} onChange={event => draft.set('defaultStorageMode', event.target.value as 'managed' | 'path')}><option value="managed">Managed by AgentMux</option><option value="path">Use a configured path</option></NativeSelect></Field>
     <Field label="Run mode" hint="Injected pages can use explicitly granted App capabilities." id="capsule-mode"><ModeSelect label="Default Capsule run mode" value={draft.value.defaultMode} change={value => draft.set('defaultMode', value)} /></Field>
-    <Field label="Follow App theme" hint="Applies to new injected pages with theme access; this does not grant messaging." id="capsule-theme"><input aria-label="Follow App theme for new Capsules" type="checkbox" checked={draft.value.defaultTheme === 'follow'} onChange={event => draft.set('defaultTheme', event.target.checked ? 'follow' : 'none')} /></Field>
-    <div className="capsule-settings__root" data-settings-field="capsule-root"><Field label="New managed content location" hint="Changing this location keeps existing pages at their original absolute paths."><TextInput aria-label="New Capsule content root" value={draft.value.contentRoot} onChange={event => { ++edit.current; draft.set('contentRoot', event.target.value) }} /></Field>
-      <div className="capsule-settings__actions"><Button type="button" onClick={() => void choose()}>Choose directory</Button><span className="capsule-settings__path" title={config.contentRoot}>Saved: {config.contentRoot}</span></div>
+    <Field label="Follow App theme" hint="Applies to new injected pages with theme access; this does not grant messaging." id="capsule-theme"><Switch aria-label="Follow App theme for new Capsules" checked={draft.value.defaultTheme === 'follow'} onChange={event => draft.set('defaultTheme', event.target.checked ? 'follow' : 'none')} /></Field>
+    <div className="capsule-settings__root" data-settings-field="capsule-root">
+      <Field label="New managed content location" hint="Changing this location keeps existing pages at their original absolute paths." controlId={contentRootId}>
+        <InputGroup className="capsule-settings__directory">
+          <TextInput id={contentRootId} aria-label="New Capsule content root" value={draft.value.contentRoot} onChange={event => { ++edit.current; draft.set('contentRoot', event.target.value) }} />
+          <Button type="button" onClick={() => void choose()}>Choose directory</Button>
+        </InputGroup>
+      </Field>
+      <p className="capsule-settings__path" title={config.contentRoot}>Saved: {config.contentRoot}</p>
       {directoryIssue ? <p role="alert" className="capsule-settings__issue">{directoryIssue}</p> : null}
     </div>
     {draft.changed ? <p className="capsule-settings__receipt" role="status">Saved defaults changed. Your edits still use revision {draft.revision}. <Button type="button" onClick={draft.rebase}>Keep edits on current revision</Button></p> : null}
@@ -78,6 +86,7 @@ function CapsuleDefaults({ config, onConfirmed, refresh }: { config: CapsuleConf
 
 function CapsuleImport({ config, created }: { config: CapsuleConfig; created(page: CapsuleInspection): void }) {
   const [value, setValue] = useState({ title: '', sourcePath: '', storageMode: config.defaultStorageMode, mode: config.defaultMode, theme: config.defaultTheme, entry: 'index.html', routing: 'file' as 'file' | 'spa' })
+  const sourceDirectoryId = useId()
   const [directoryIssue, setDirectoryIssue] = useState(''), generation = useRef(0)
   const mutation = useCapsuleMutation('capsule.create', (result, input) => {
     created(result)
@@ -93,13 +102,17 @@ function CapsuleImport({ config, created }: { config: CapsuleConfig; created(pag
   return <details className="capsule-settings__import" data-settings-field="capsule-import"><summary>Import a page directory</summary>
     <div className="capsule-settings__import-fields">
       <Field label="Page name" hint="Optional; the directory name is used when empty."><TextInput aria-label="New Capsule name" value={value.title} onChange={event => setValue(current => ({ ...current, title: event.target.value }))} /></Field>
-      <Field label="Source directory"><TextInput aria-label="Capsule source directory" value={value.sourcePath} onChange={event => { ++generation.current; setValue(current => ({ ...current, sourcePath: event.target.value })) }} /></Field>
-      <Button type="button" onClick={() => void choose()}>Choose source directory</Button>
-      <Field label="Content management"><select aria-label="New Capsule content management" value={value.storageMode} onChange={event => setValue(current => ({ ...current, storageMode: event.target.value as 'managed' | 'path' }))}><option value="managed">Managed copy</option><option value="path">Keep source path</option></select></Field>
+      <Field label="Source directory" controlId={sourceDirectoryId}>
+        <InputGroup className="capsule-settings__directory">
+          <TextInput id={sourceDirectoryId} aria-label="Capsule source directory" value={value.sourcePath} onChange={event => { ++generation.current; setValue(current => ({ ...current, sourcePath: event.target.value })) }} />
+          <Button type="button" onClick={() => void choose()}>Choose source directory</Button>
+        </InputGroup>
+      </Field>
+      <Field label="Content management"><NativeSelect aria-label="New Capsule content management" value={value.storageMode} onChange={event => setValue(current => ({ ...current, storageMode: event.target.value as 'managed' | 'path' }))}><option value="managed">Managed copy</option><option value="path">Keep source path</option></NativeSelect></Field>
       <Field label="Run mode"><ModeSelect label="New Capsule run mode" value={value.mode} change={mode => setValue(current => ({ ...current, mode }))} /></Field>
-      <Field label="Follow App theme" hint="Only used by injected pages with theme access."><input aria-label="New Capsule follows App theme" type="checkbox" checked={value.theme === 'follow'} onChange={event => setValue(current => ({ ...current, theme: event.target.checked ? 'follow' : 'none' }))} /></Field>
+      <Field label="Follow App theme" hint="Only used by injected pages with theme access."><Switch aria-label="New Capsule follows App theme" checked={value.theme === 'follow'} onChange={event => setValue(current => ({ ...current, theme: event.target.checked ? 'follow' : 'none' }))} /></Field>
       <Field label="Entry file"><TextInput aria-label="New Capsule entry file" value={value.entry} onChange={event => setValue(current => ({ ...current, entry: event.target.value }))} /></Field>
-      <Field label="Client-side routing"><input aria-label="New Capsule is a SPA" type="checkbox" checked={value.routing === 'spa'} onChange={event => setValue(current => ({ ...current, routing: event.target.checked ? 'spa' : 'file' }))} /></Field>
+      <Field label="Client-side routing"><Switch aria-label="New Capsule is a SPA" checked={value.routing === 'spa'} onChange={event => setValue(current => ({ ...current, routing: event.target.checked ? 'spa' : 'file' }))} /></Field>
       <p className="capsule-settings__hint">Serves HTML, static assets and existing builds. Importing does not run a build or start a backend.</p>
       {directoryIssue ? <p className="capsule-settings__issue" role="alert">{directoryIssue}</p> : null}
       <div className="capsule-settings__actions"><Button type="button" variant="primary" disabled={!value.sourcePath.trim() || mutation.locked} onClick={() => { const { title, ...content } = value; void mutation.submit({ operationId: mintObjectId(), ...content, ...(title.trim() ? { title } : {}) }) }}>Import page</Button></div>
@@ -134,11 +147,11 @@ function CapsuleDetails({ page, update, refresh, active }: { page: CapsuleInspec
     {copyNotice ? <p role="status" className="capsule-settings__hint">{copyNotice}</p> : null}
     <Field label="Page name"><TextInput aria-label="Capsule page name" value={draft.value.title} onChange={event => draft.set('title', event.target.value)} /></Field>
     <Field label="Run mode" hint="Changing mode keeps the page and original requests; it does not authorize arbitrary App access."><ModeSelect label="Capsule page run mode" value={draft.value.mode} change={value => draft.set('mode', value)} /></Field>
-    <Field label="Follow App theme"><input aria-label="Capsule page follows App theme" type="checkbox" checked={draft.value.theme === 'follow'} onChange={event => draft.set('theme', event.target.checked ? 'follow' : 'none')} /></Field>
+    <Field label="Follow App theme"><Switch aria-label="Capsule page follows App theme" checked={draft.value.theme === 'follow'} onChange={event => draft.set('theme', event.target.checked ? 'follow' : 'none')} /></Field>
     <details><summary>Content and source</summary><dl><dt>Page ID</dt><dd><code>{record.capsuleId}</code></dd><dt>Published content</dt><dd>{record.contentRoot}</dd><dt>Source</dt><dd>{record.sourcePath}</dd><dt>Service</dt><dd>{page.endpoint.status === 'available' ? page.endpoint.url : page.endpoint.issue.message}</dd>{record.source ? <><dt>Original tool / execution</dt><dd>{record.source.toolId ?? 'Not supplied'} / {record.source.executionId ?? 'Not supplied'}</dd></> : null}</dl>
       <Field label="Source directory" hint={record.storageMode === 'managed' ? 'Publishing a new source copies it into this page’s managed content.' : 'A new source changes this page’s configured content path.'}><TextInput aria-label="Capsule page source directory" value={draft.value.sourcePath} onChange={event => draft.set('sourcePath', event.target.value)} /></Field>
       <Field label="Entry file"><TextInput aria-label="Capsule page entry file" value={draft.value.entry} onChange={event => draft.set('entry', event.target.value)} /></Field>
-      <Field label="Client-side routing"><input aria-label="Capsule page is a SPA" type="checkbox" checked={draft.value.routing === 'spa'} onChange={event => draft.set('routing', event.target.checked ? 'spa' : 'file')} /></Field>
+      <Field label="Client-side routing"><Switch aria-label="Capsule page is a SPA" checked={draft.value.routing === 'spa'} onChange={event => draft.set('routing', event.target.checked ? 'spa' : 'file')} /></Field>
     </details>
     {draft.changed ? <p role="status" className="capsule-settings__receipt">The saved page changed; your edits are kept. <Button type="button" onClick={draft.rebase}>Keep edits on current revision</Button></p> : null}
     <div className="capsule-settings__actions"><span>{draft.dirty ? 'Unsaved page changes' : 'Saved page settings'}</span><Button type="button" onClick={refresh}>Read current page</Button><Button type="button" variant="primary" disabled={!draft.dirty || mutation.locked} onClick={() => { submitted.current = draft.value; void mutation.submit({ capsuleId: record.capsuleId, operationId: mintObjectId(), expectedRevision: draft.revision, changes: Object.fromEntries(Object.entries(draft.value).filter(([key, value]) => value !== draft.base[key as keyof typeof draft.base])) }) }}>Save page</Button></div>
@@ -189,7 +202,7 @@ export function CapsuleSettingsPane({ active = true }: { active?: boolean }) {
     <section className="settings-group" data-settings-field="capsule-pages" aria-label="Capsule pages"><header><span>Pages</span><Button type="button" onClick={() => void loadPages()}>Refresh pages</Button></header>
       {config ? <CapsuleImport config={config} created={value => { confirmedPage(value); select(value.record.capsuleId) }} /> : null}
       {pagesIssue ? <p role="alert" className="capsule-settings__issue">Page directory is incomplete: {pagesIssue}</p> : null}
-      {pages.length ? <><TextInput aria-label="Find Capsule pages" placeholder="Find a page" value={filter} onChange={event => setFilter(event.target.value)} />
+      {pages.length ? <><SearchInput aria-label="Find Capsule pages" clearLabel="Clear Capsule search" placeholder="Find a page" value={filter} onValueChange={setFilter} />
         <ul className="capsule-settings__pages">{visible.map(item => <li key={item.record.capsuleId}><button type="button" aria-pressed={selected === item.record.capsuleId} onClick={() => select(item.record.capsuleId)}><span><strong>{item.record.title}</strong><small>{item.record.storageMode === 'managed' ? 'Managed' : 'Path'} · {item.record.mode === 'isolated' ? 'Isolated' : 'Injected'}</small></span><span>{runtime?.phase === 'running' ? item.content.status === 'available' && item.endpoint.status === 'available' ? 'Available' : 'Needs attention' : runtime?.desired === 'stopped' ? 'Service stopped' : 'Last observed'}</span></button></li>)}</ul>
         {!visible.length ? <p className="capsule-settings__hint">No pages match this search.</p> : null}</> : <p className="capsule-settings__hint">{pagesIssue ? 'Your last known pages are kept; retry the original directory.' : runtime?.phase !== 'running' ? 'Read the page service to view your saved pages.' : readPages ? 'No registered pages. Import a directory or use amux capsule --skill to create a persistent page.' : 'Reading registered pages…'}</p>}
     </section>

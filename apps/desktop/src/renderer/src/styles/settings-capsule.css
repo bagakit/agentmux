@@ -1,11 +1,13 @@
 .capsule-settings { container-type: inline-size; }
 .capsule-settings__field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: var(--sp-4); margin-block: var(--sp-3); }
-.capsule-settings__field > span { display: grid; gap: var(--sp-1); }
+.capsule-settings__field > :is(span, label) { display: grid; gap: var(--sp-1); }
 .capsule-settings strong { color: var(--text); font-size: var(--fs-body); font-weight: 500; }
 .capsule-settings small, .capsule-settings__hint, .capsule-settings__path { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
-.capsule-settings__field :is(input:not([type='checkbox']), select) { width: 100%; min-width: 0; box-sizing: border-box; }
-.capsule-settings select { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
-.capsule-settings input[type='checkbox'] { justify-self: start; margin: 0; accent-color: var(--green); }
+.capsule-settings__field > .ui-input { width: 100%; }
+.capsule-settings__directory { align-items: center; padding-inline-end: var(--sp-1); }
+.capsule-settings__directory > .ui-input { flex: 1; }
+.capsule-settings__directory > button { flex: none; max-width: 55%; text-wrap: wrap; }
+.capsule-settings__field > .ui-switch { justify-self: start; }
 .capsule-settings__root { margin-top: var(--sp-5); }
 .capsule-settings__root .capsule-settings__field { grid-template-columns: minmax(0, 1fr); }
 .capsule-settings__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
@@ -23,7 +25,7 @@
 .capsule-settings__pages button[aria-pressed='true'] { background: var(--surface-3); color: var(--text); }
 .capsule-settings__pages button > span:first-child { display: grid; flex: 1; min-width: 0; gap: var(--sp-1); overflow-wrap: anywhere; }
 .capsule-settings__pages button > span:last-child { flex: none; font-size: var(--fs-meta); }
-.capsule-settings :is(button, select, summary):focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.capsule-settings :is(button, summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .capsule-settings__detail { padding-top: var(--sp-4); border-top: 1px solid var(--line); }
 .capsule-settings__detail > header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
 .capsule-settings__detail > header > div:first-child { flex: 1; min-width: 0; }

@@ -1,3 +1,4 @@
+import { NativeSelect } from '@agentmux/client-ui/input'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@agentmux/client-ui/components/Button'
@@ -69,10 +70,10 @@ export function BrowserAgentControlPreview({ preferences, active, dirty, preview
       </div></div>
     </header>
     <div className="browser-agent-preview__options">
-      <label>State <select aria-label="Simulation state" value={phase} onChange={event => setPhase(event.target.value as PreviewPhase)}>
+      <label>State <NativeSelect aria-label="Simulation state" value={phase} onChange={event => setPhase(event.target.value as PreviewPhase)}>
         <option value="running">Agent operating</option><option value="observing">Observing page</option><option value="script">Running script</option><option value="navigating">Navigating</option><option value="waiting">Agent waiting</option><option value="completed">Completed</option><option value="human">User control</option>
-      </select></label>
-      <label>Page <select aria-label="Simulation page" value={background} onChange={event => setBackground(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>
+      </NativeSelect></label>
+      <label>Page <NativeSelect aria-label="Simulation page" value={background} onChange={event => setBackground(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></NativeSelect></label>
     </div>
     <div className="browser-agent-preview__stage" data-background={background} ref={stage}>
       <div className="browser-agent-preview__browserbar"><span className="browser-agent-preview__address">example.test / workspace</span>

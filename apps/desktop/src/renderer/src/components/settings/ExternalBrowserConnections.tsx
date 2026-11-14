@@ -1,4 +1,4 @@
-import { TextInput } from '@agentmux/client-ui/input'
+import { InputGroup, TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
@@ -44,10 +44,10 @@ export function ExternalBrowserConnections({ targets: catalog, observedIds }: {
       })}><ThemeObjectLinkIcon size={13} /> Connect extension</button>
     </div>
     {!workspaceId ? <p className="settings-group-note">Choose a Workspace to connect an external tab.</p> : null}
-    {pairing ? <div className="external-browser-connections__link">
+    {pairing ? <InputGroup className="external-browser-connections__link">
       <TextInput type="password" aria-label="Private extension connection link" readOnly value={pairing.link} autoComplete="off" />
       <button className="small-button" disabled={busy} onClick={() => void perform(async () => { if (Date.now() >= pairing.expiresAt) { setPairing(null); setNotice('This connection link expired. Create another connection link.'); return } await api.ui.writeClipboardText(pairing.link); setNotice('Connection link copied. Paste it in the AgentMux extension.') })}><ThemeActionCopyIcon size={13} /> Copy</button>
-    </div> : null}
+    </InputGroup> : null}
     {targets.length ? <ul className="external-browser-connections__targets">{targets.map(row => <li key={row.id}>
       <div><strong>{row.title || 'Shared tab'}</strong><small>{observedIds.has(row.id) ? row.status : 'Previously observed'} · {row.id}</small>
         <small>{workspaces?.find(workspace => workspace.id === row.workspaceId)?.name || row.workspaceId || 'Workspace unconfirmed'}</small>{row.warning ? <p>{row.warning}</p> : null}</div>

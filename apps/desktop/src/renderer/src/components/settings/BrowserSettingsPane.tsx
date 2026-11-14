@@ -1,9 +1,9 @@
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { SelectionField } from '../SelectionField'
 import { BROWSER_NEW_PAGE_DESTINATIONS, resolveBrowserNewPagePlacement, type BrowserNewPageDestination } from '../../../../shared/browser-new-page-placement'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { AppLinkSchemeChoice, BrowserConfig } from '../../../../shared/contracts'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { RetainedBrowserUploads } from './RetainedBrowserUploads'
@@ -49,6 +49,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   onSave: (value: BrowserPreferences, expected: BrowserPreferences) => Promise<void>
   onForget: (scheme: string, expected: AppLinkSchemeChoice) => Promise<void>
 }) {
+  const exitCheckHintId = useId()
   const saved: BrowserPreferences = { agentAutomation: browser.agentAutomation === true, automaticMemoryRelease: browser.automaticMemoryRelease !== false, exitCheckUrl: browser.exitCheckUrl ?? '',
     newPageSpace: resolveBrowserNewPagePlacement(browser.newPagePlacement, 'space'),
     newPageFocus: resolveBrowserNewPagePlacement(browser.newPagePlacement, 'focus'),
@@ -83,8 +84,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
       <section className="settings-group" data-settings-field="agent-automation">
         <header><span>Agent automation</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">
-          <input
-            type="checkbox"
+          <Switch
             checked={draft.value.agentAutomation}
             onChange={(event) => draft.setField('agentAutomation', event.target.checked)}
           />
@@ -97,7 +97,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
       </section>
       <section className="settings-group browser-resources__policy" data-settings-field="automatic-memory-release">
         <header><span>Idle pages</span><small>Saved: {saved.automaticMemoryRelease ? 'Automatic' : 'Manual'}</small></header>
-        <label><input type="checkbox" checked={draft.value.automaticMemoryRelease} onChange={event => draft.setField('automaticMemoryRelease', event.target.checked)} />
+        <label><Switch checked={draft.value.automaticMemoryRelease} onChange={event => draft.setField('automaticMemoryRelease', event.target.checked)} />
           <span><strong>Automatically release safe idle pages</strong><small>Reduce memory use while keeping each page in its original workspace.</small></span></label>
         <details className="browser-resources__help"><summary>What happens when I return?</summary><p>The page reloads in place. Forms and arbitrary page state are not restored; protected pages stay in use. Saving this preference does not release a page immediately.</p></details>
       </section>
@@ -105,8 +105,8 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
         <header><span>Exit check</span><small>{saved.exitCheckUrl ? 'Saved: ' + saved.exitCheckUrl : 'Off'}</small></header>
         <label className="browser-start-settings__field"><span>Check address</span>
           <TextInput aria-label="Exit check address" type="url" inputMode="url" placeholder="https://" value={draft.value.exitCheckUrl}
-            aria-invalid={!validExitCheckUrl(draft.value.exitCheckUrl.trim())} onChange={event => draft.setField('exitCheckUrl', event.target.value)} /></label>
-        <p className="settings-browser__permission-note">{validExitCheckUrl(draft.value.exitCheckUrl.trim())
+            aria-describedby={exitCheckHintId} aria-invalid={!validExitCheckUrl(draft.value.exitCheckUrl.trim())} onChange={event => draft.setField('exitCheckUrl', event.target.value)} /></label>
+        <p id={exitCheckHintId} className="settings-browser__permission-note">{validExitCheckUrl(draft.value.exitCheckUrl.trim())
           ? 'Check in Settings › Browser Profiles sends one request to this address through that Profile, to see where its route reaches. A service that answers with just your address shows it.'
           : 'Use an https:// address without a user name or password.'}</p>
       </section>
