@@ -44,6 +44,7 @@ export class AgentMuxClientEventPublisher {
   private readonly statusListeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
   private readonly conversationSourceListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
   private readonly runListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
+  private readonly sessionListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
   private publishingDiagnostic = false
   get hasEventListeners(): boolean { return this.listeners.size > 0 || this.runListeners.size > 0 }
 
@@ -71,6 +72,13 @@ export class AgentMuxClientEventPublisher {
     return () => { listeners.delete(listener); if (!listeners.size) this.runListeners.delete(runId) }
   }
 
+  /** Exact Session metadata only; unrelated Sessions and ordered bytes never visit these readers. */
+  onSessionEvent<Result>(agentSessionId: string, listener: AgentMuxClientEventListener<Result>): () => void {
+    const listeners = this.sessionListeners.get(agentSessionId) ?? new Map()
+    listeners.set(listener, {}); this.sessionListeners.set(agentSessionId, listeners)
+    return () => { listeners.delete(listener); if (!listeners.size) this.sessionListeners.delete(agentSessionId) }
+  }
+
   /** Original Conversation source notifications, indexed before dispatch to unrelated Consumers. */
   onConversationSourceEvent<Result>(agentSessionId: string, listener: AgentMuxClientEventListener<Result>): () => void {
     const listeners = this.conversationSourceListeners.get(agentSessionId) ?? new Map()
@@ -83,6 +91,7 @@ export class AgentMuxClientEventPublisher {
     this.statusListeners.clear()
     this.conversationSourceListeners.clear()
     this.runListeners.clear()
+    this.sessionListeners.clear()
   }
 
   publish(event: AgentMuxClientEvent): void {
@@ -91,6 +100,7 @@ export class AgentMuxClientEventPublisher {
     this.deliver(event, listeners)
     const runId = 'run' in event && event.run ? event.run.runId : undefined
     if (runId) this.deliver(event, [...(this.runListeners.get(runId) ?? [])])
+    if (event.type === 'agent-session') this.deliver(event, [...(this.sessionListeners.get(event.session.agentSessionId) ?? [])])
     const sourceSession = conversationSourceSession(event)
     if (sourceSession) this.deliver(event, [...(this.conversationSourceListeners.get(sourceSession) ?? [])])
   }
@@ -121,6 +131,7 @@ export class AgentMuxClientEventPublisher {
       this.statusListeners.delete(listener)
       const runId = 'run' in event && event.run ? event.run.runId : undefined
       if (runId) { const scoped = this.runListeners.get(runId); scoped?.delete(listener); if (!scoped?.size) this.runListeners.delete(runId) }
+      if (event.type === 'agent-session') { const sid = event.session.agentSessionId, scoped = this.sessionListeners.get(sid); scoped?.delete(listener); if (!scoped?.size) this.sessionListeners.delete(sid) }
       const sourceSession = conversationSourceSession(event)
       if (sourceSession) { const scoped = this.conversationSourceListeners.get(sourceSession); scoped?.delete(listener); if (!scoped?.size) this.conversationSourceListeners.delete(sourceSession) }
       failures.push(failure)

@@ -9,6 +9,7 @@ import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversationChanges, readGrokSessionHistoryRecord } from './grok-native-history.js'
 import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
+import { readGrokInputInitialization } from './grok-input-initialization.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -195,6 +196,7 @@ export function createGrokProvider(defineAgentProvider: ProviderFactory): AgentP
     readSessionHistoryRecord: readGrokSessionHistoryRecord,
     observeSessionHistory: observeGrokSessionHistory,
     readConversationChanges: readGrokConversationChanges,
+    readInputInitialization: readGrokInputInitialization,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? ['--', prompt] : [])
     ]

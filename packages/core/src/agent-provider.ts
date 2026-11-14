@@ -136,6 +136,17 @@ export type AgentProviderPromptExecutionContext = {
   signal?: AbortSignal
 }
 
+/** Initialization diagnostics narrow only saved startup delivery. They never grant input. */
+export type AgentProviderInputInitialization = {
+  state: 'pending' | 'unknown'
+  reason: 'directory-trust' | 'authentication' | 'native-input-unconfirmed' | 'inspection-unavailable'
+}
+export type AgentProviderInputInitializationContext = AgentProviderPromptExecutionContext & {
+  agentSessionId: string
+  run: Readonly<import('./types.js').AgentMuxRunRef>
+  purpose: 'initial-input' | 'resumed-input' | 'conversation-start'
+}
+
 /** Read-only native body acknowledgement; it does not observe terminal presentation. */
 export type AgentProviderPromptPayloadConsumption = {
   prepare(context: AgentProviderPromptExecutionContext, text: string): Promise<Pick<import('./types.js').AgentPromptPayloadConsumption, 'sourceId' | 'baselineId'>>
@@ -239,6 +250,8 @@ export type AgentProvider = {
   verifyPromptExecutionTransport?(context: AgentProviderPromptExecutionContext): Promise<boolean>
   preparePromptExecutionTransport?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal }): Promise<AgentProviderPreparedPromptTransport | null>
   readPromptExecutionEvidence?(context: AgentProviderPromptExecutionContext): Promise<AgentPromptExecutionEvidence | null>
+  /** Optional read-only explanation while the original native start remains unconfirmed. */
+  readInputInitialization?(context: AgentProviderInputInitializationContext): Promise<AgentProviderInputInitialization>
   /** null is unknown, never unsupported. Retain original activity time; this read does not renew it. */
   readResumedTurnInterruption?(context: AgentProviderResumedTurnInterruptionContext): Promise<AgentPromptExecutionEvidence | null>
   observeSessionStatus?(context: AgentProviderSessionStatusObservationContext): Promise<{ dispose(): void }>
@@ -298,6 +311,7 @@ export type AgentProviderDefinition = {
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
   preparePromptExecutionTransport?: AgentProvider['preparePromptExecutionTransport']
   readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
+  readInputInitialization?: (context: AgentProviderInputInitializationContext) => Promise<AgentProviderInputInitialization>
   readResumedTurnInterruption?: AgentProvider['readResumedTurnInterruption']
   observeSessionStatus?: (context: AgentProviderSessionStatusObservationContext) => Promise<{ dispose(): void }>
   interaction?: AgentTerminalInteractionProtocol
@@ -514,6 +528,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
     ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
     ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
+    ...(definition.readInputInitialization ? { readInputInitialization: definition.readInputInitialization } : {}),
     ...(definition.readResumedTurnInterruption ? { readResumedTurnInterruption: definition.readResumedTurnInterruption } : {}),
     ...(definition.observeTerminalFrontend ? { observeTerminalFrontend: definition.observeTerminalFrontend } : {}),
     ...(definition.reconnectTerminalFrontend ? { reconnectTerminalFrontend: definition.reconnectTerminalFrontend } : {}),

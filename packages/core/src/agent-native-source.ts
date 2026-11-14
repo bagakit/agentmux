@@ -2,6 +2,15 @@ import { sameNativeHandle, sameRun } from './agent-session-identity.js'
 import type { AgentMuxAgentSession, AgentNativeSessionHandle, AgentProviderNativeSessionDiscovery } from './types.js'
 
 type NativeTarget = Pick<AgentMuxAgentSession, 'run' | 'nativeHandle' | 'nativeBinding'>
+const NATIVE_STARTED_BINDING_SOURCES: ReadonlySet<NonNullable<AgentMuxAgentSession['nativeBinding']>['source']> = new Set(['native-hook', 'process-witness', 'user-confirmed'])
+
+/** This Run already confirmed its main native conversation. A later optional
+ * history observation cannot turn that positive start fact into initialization. */
+export function hasCurrentNativeMainBinding(session: NativeTarget & Pick<AgentMuxAgentSession, 'providerId'>): boolean {
+  return session.nativeHandle?.kind === 'provider' && session.nativeHandle.providerId === session.providerId && session.nativeBinding !== undefined &&
+    sameRun(session.nativeBinding.run, session.run) &&
+    NATIVE_STARTED_BINDING_SOURCES.has(session.nativeBinding.source)
+}
 
 /** A user's durable semantic target is independent of the terminal's selected conversation. */
 export function hasSelectedNativeTarget(session: NativeTarget): boolean {

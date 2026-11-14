@@ -3,6 +3,7 @@ import { parseTerminalCreationRetire, parseTerminalCreationInspect, type Termina
 import { parseTerminalControl, parseTerminalControlInspect, parseTerminalControlResult, terminalInputBytes, type TerminalControlRequest, type TerminalControlReceipt, type TerminalControlInspect, type TerminalStopResult } from './terminal-control.js'
 import { parseRunControlActor, type RunControlContext } from './run-control-context.js'
 import { captureExecutorInvocation, readExecutorInvocation } from './agent-executor-invocation.js'
+import { readContinuityExecutor } from './agent-session-recovery/executor.js'
 import { RunControlOperations } from './run-control-operations.js'
 import { parsePostureSet, parsePostureInspect, postureControlDigest, type PostureInspect, type PostureInspection, type PostureReceipt } from './agent-posture.js'
 import type { AgentMuxAgentCreateInput, AgentMuxHostAgentCreateInput, AgentMuxTerminalCreateInput, AgentMuxAgentPromptInput, AgentMuxSessionQuestionReplyInput, AgentMuxAgentMessageInput, AgentMuxAgentInteractionInput, AgentMuxAgentPostureInput, AgentMuxAgentRespawnInput, AgentMuxAgentAttachment, AgentMuxClientOptions, AgentMuxAgentRuntimeStatus } from './client-contract.js'
@@ -91,7 +92,7 @@ import {
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath, matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import { captureAgentNativeSessionIdentity } from './agent-native-session-capture.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
-import { hasSelectedNativeTarget, nativeTargetSourceUnconfirmed, resolveNativeSessionWitness } from './agent-native-source.js'
+import { hasCurrentNativeMainBinding, hasSelectedNativeTarget, nativeTargetSourceUnconfirmed, resolveNativeSessionWitness } from './agent-native-source.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { nativeCatalogIssue } from './providers/native-session-catalog-files.js'
@@ -246,7 +247,6 @@ const unobservedTimestamp = 0
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
-const NATIVE_STARTED_BINDING_SOURCES: ReadonlySet<NonNullable<AgentMuxStoredAgentSession['nativeBinding']>['source']> = new Set(['native-hook', 'process-witness', 'user-confirmed'])
 // A local event annotation, never serialized or retained as another Session fact owner.
 const localSessionObservation = Symbol('local-session-observation')
 type LocalSessionObservation = 'terminalOutputChannel' | 'terminalCapability'
@@ -7336,11 +7336,10 @@ export class AgentMuxClient {
     if (provider.prepareNativeInput && session.nativeHandle?.kind === 'provider') return false
     const frontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
     if (frontend && sameRun(frontend.run, session.run) && frontend.initialization?.phase === 'ready') return false
-    // A current main conversation witness can establish that setup ended. A receipt from an
-    // arbitrary Hook, a selected resume target, or an explicitly unknown source cannot do so.
-    if (session.nativeBinding && sameRun(session.nativeBinding.run, session.run) &&
-        NATIVE_STARTED_BINDING_SOURCES.has(session.nativeBinding.source) &&
-        !(session.nativeSourceObservation && sameRun(session.nativeSourceObservation.run, session.run))) return false
+    // A later failed history observation cannot revoke this Run's confirmed start.
+    // A bare receipt/selected resume target still supplies no such positive fact.
+    if (hasCurrentNativeMainBinding(session) && !(session.nativeSourceObservation &&
+        sameRun(session.nativeSourceObservation.run, session.run) && session.nativeSourceObservation.state !== 'unknown')) return false
     return Boolean(provider.hook.nativeSessionTransition ||
       session.creation?.createdRun && sameRun(session.creation.createdRun, session.run) ||
       session.continuity?.newRun && sameRun(session.continuity.newRun, session.run) ||
@@ -7348,6 +7347,68 @@ export class AgentMuxClient {
       // reattachment receipt. The original exact resume remains its start fact.
       Object.values(session.continuityOperations ?? {}).some(operation =>
         operation.agentSessionId === session.agentSessionId && operation.newRun && sameRun(operation.newRun, session.run)))
+  }
+
+  /** Explain only this original startup wait. Native channel/binding facts remain the
+   * admission owner; an optional configuration read can never manufacture readiness. */
+  private async initialInputWait(session: AgentMuxAgentSession, run: CtxmuxAdapterRun,
+    intent: AgentInputJournalIntent['admissionIntent'], purpose: import('./agent-provider.js').AgentProviderInputInitializationContext['purpose'],
+    signal?: AbortSignal): Promise<import('./agent-input-wait.js').AgentInputWaitReason | null> {
+    if (!this.nativeSessionStarting(session, intent)) return null
+    const provider = this.providers.get(session.providerId)
+    if (!provider.readInputInitialization) return { phase: 'session', reason: 'native-session-starting', wake: 'session-restored' }
+    const diagnostic = new AbortController()
+    const observationSignal = signal ? AbortSignal.any([signal, diagnostic.signal]) : diagnostic.signal
+    const unsubscribe = this.publisher.onSessionEvent(session.agentSessionId, event => {
+      if (event.type === 'agent-session' && (!sameRun(event.session.run, session.run) ||
+          !this.nativeSessionStarting(event.session, intent))) diagnostic.abort(new AgentMuxError(
+        'The original Session input qualification changed; only its optional diagnostic reader was cancelled.', 'AGENT_INPUT_QUALIFICATION_CHANGED'))
+    })
+    let observed: import('./agent-provider.js').AgentProviderInputInitialization
+    try {
+      observed = await observePromptInput(observationSignal, async () => {
+        const launch = this.providerLaunch(session, run)
+        const stored = await this.store.readMetadata(session.agentSessionId)
+        if (!stored || !sameRun(stored.run, session.run)) throw new AgentMuxError('Original initialization source changed.', 'STALE_AGENT_SESSION')
+        let env: Readonly<Record<string, string | undefined>> | undefined
+        const resumed = Object.values(stored.continuityOperations ?? {}).find(operation => operation.kind === 'resumed' && operation.newRun?.runId === run.runId)
+          ?? (stored.continuity?.kind === 'resumed' && stored.continuity.newRun?.runId === run.runId ? stored.continuity : undefined)
+        const executor = resumed && readContinuityExecutor(stored.continuityExecutors, resumed.intentOperationId ?? resumed.operationId)
+        if (executor?.source === 'sdk') env = executor.options.env
+        else {
+          // Current same-named configuration cannot stand in for an original resume.
+          if (resumed && executor?.source !== 'creation') throw new AgentMuxError('Original resume environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+          if (stored.creation?.executorRevision) {
+            const original = await this.hostExecutorOwner?.resolve(stored.executorId)
+            if (!original || original.descriptor.configRevision !== stored.creation.executorRevision || original.config.providerId !== stored.providerId) throw new AgentMuxError(
+              'Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+            env = original.config.env
+          } else {
+            if (!stored.creation?.executorInvocationDigest) throw new AgentMuxError('Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+            env = (await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(stored, {}, stored.agentSessionId)).env
+          }
+        }
+        observationSignal.throwIfAborted()
+        return await provider.readInputInitialization!({ ...launch, ...(env ? { env } : {}), workspacePath: session.workspacePath,
+          agentSessionId: session.agentSessionId, run: { ...session.run }, purpose, ...(run.pid === null ? {} : { processId: run.pid }),
+          ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}), signal: observationSignal })
+      })
+    } catch {
+      signal?.throwIfAborted()
+      observed = { state: 'unknown', reason: 'inspection-unavailable' }
+    } finally { unsubscribe() }
+    signal?.throwIfAborted()
+    const current = await this.registry.refresh(session.agentSessionId, session.run), live = await this.kernel.status(run.runId)
+    this.assertAgentRun(current, live)
+    if (!sameRun(current.run, session.run) || live.pid !== run.pid || live.state.type !== 'running') throw new AgentMuxError(
+      'The original initialization Run changed. Its saved input and operation are retained.', 'STALE_AGENT_SESSION')
+    if (!this.nativeSessionStarting(current, intent)) return null
+    // This is the existing durable wait/inspection surface, not another readiness store.
+    const failure = deliveryFailure(new AgentMuxError(
+      `The original native initialization is ${observed.state} (${observed.reason}). Keep this input and operation. Handle any required trust or login in the original terminal; this original input rechecks when native start is confirmed. Ordinary terminal input remains available.`,
+      'AGENT_INITIAL_INPUT_UNCONFIRMED'))
+    return { phase: 'service', reason: 'observation-failed', wake: 'session-restored', failure,
+      observation: { phase: 'native-initialization' } }
   }
 
   private activateHookBinding(runId: string, binding: AgentHookBinding): void {
@@ -7520,8 +7581,10 @@ export class AgentMuxClient {
           if (receipt) await this.publishInputReceipt(receipt)
           return
         }
-        if (!context.continueGate && this.nativeSessionStarting(current, saved.intent.admissionIntent)) {
-          await waiting({ phase: 'session', reason: 'native-session-starting', wake: 'session-restored' })
+        const initializationWait = this.nativeSessionStarting(current, saved.intent.admissionIntent) && await this.initialInputWait(current, await this.kernel.status(current.run.runId),
+          saved.intent.admissionIntent, 'conversation-start', context.controller.signal)
+        if (initializationWait) {
+          await waiting(initializationWait)
           const receipt = await this.inspectAgentInput({ key })
           if (receipt) await this.publishInputReceipt(receipt)
           return
@@ -10056,8 +10119,13 @@ export class AgentMuxClient {
       const renderObservation = new AbortController()
       let waitingForStartup = false
       await this.serializeAgentInput(session, async (current, live, diagnostic) => {
-        if (!nativeSource && this.nativeSessionStarting(current, { kind: 'session-conversation', expectedRun: current.run })) {
+        const initializationWait = !nativeSource && await this.initialInputWait(current, live,
+          { kind: 'session-conversation', expectedRun: current.run }, this.requireAgentSession(current.agentSessionId).initialInput?.key?.expectedRun.runId === live.runId ? 'initial-input' : 'resumed-input', renderObservation.signal)
+        if (initializationWait) {
           waitingForStartup = true
+          if ('failure' in initializationWait && initializationWait.failure) this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
+            code: initializationWait.failure.code ?? 'AGENT_INITIAL_INPUT_UNCONFIRMED', message: initializationWait.failure.message,
+            evidence: { source: 'agentmux', observedAt: Date.now(), run: { ...current.run } } })
           return
         }
         await this.promptSubmission.submitInputPlan(

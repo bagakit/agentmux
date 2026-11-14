@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentProviderRegistry, type AgentProviderPromptExecutionContext, type AgentProviderPreparedPromptTransport } from './agent-provider.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
-import { hasSelectedNativeTarget } from './agent-native-source.js'
+import { hasCurrentNativeMainBinding, hasSelectedNativeTarget } from './agent-native-source.js'
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
@@ -776,7 +776,8 @@ export class AgentPromptSubmissionCoordinator {
           current.nativeBinding && !sameRun(current.nativeBinding.run, current.run) ||
           !selected && (current.observedNativeHandle && !sameNativeHandle(current.observedNativeHandle, handle) ||
             current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run) &&
-              !(control?.onlyIfUnclaimed && control.requiredNativeSource && current.nativeSourceObservation.state === 'unknown'))) return undefined
+              !(current.nativeSourceObservation.state === 'unknown' && (hasCurrentNativeMainBinding(current) ||
+                control?.onlyIfUnclaimed && control.requiredNativeSource)))) return undefined
       const source = { providerId: handle.providerId, nativeSessionId: handle.sessionId }
       if (control?.requiredNativeSource && !isDeepStrictEqual(source, control.requiredNativeSource)) return undefined
       return source

@@ -3960,7 +3960,7 @@ export class AgentMuxRpcService {
       const created=await owners[0]!.client.inspectAgentCreation(record.agentSessionId)
       if(created.kind!=='agent'||created.creation?.createOperationId!==record.requestId)throw new AgentMuxError('The original created Main is unconfirmed. Its Query is retained.','CONTROL_UNAVAILABLE')
       const key=await this.spatial.claimMoteMainInput(record.requestId,field,{kind:'prompt',agentSessionId:record.agentSessionId,expectedRun:created.run,submissionId:body.operationId})
-      return await this.moteMainInput('space.mote.dialogue.input.submit',{target:intent.target,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,input:{...body,agentSessionId:key.agentSessionId,expectedRun:key.expectedRun,admissionIntent:{kind:'manual-actor'},execution:'immediate'}},context)
+      return await this.moteMainInput('space.mote.dialogue.input.submit',{target:intent.target,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,input:{...body,agentSessionId:key.agentSessionId,expectedRun:key.expectedRun,admissionIntent:{kind:'session-conversation'},execution:'immediate'}},context)
     }
     const retainIssue = (cause: unknown) => { result.issue=[result.issue,cause instanceof Error?cause.message:String(cause)].filter(Boolean).join('\n') }
     if(intent.handover&&intent.baseline.defaults.conversation) {
