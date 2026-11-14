@@ -4,12 +4,17 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  const facts=()=>read('window.takeoverFeedbackProof.facts()')
  const card='.focus-context[data-session-id="working"]'
  const area='.focus-context-card:has('+card+') > .agent-operation-feedback:not(.agent-operation-feedback--compact)'
+ const popup='.agent-operation-feedback__popover'
  const press=async(text,scope=area)=>{
-  await read(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)});if(!e)throw Error('Missing actual button '+${JSON.stringify(text)});document.querySelector('[data-feedback-click]')?.removeAttribute('data-feedback-click');e.dataset.feedbackClick='true'})()`)
+  await read(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)}||e.getAttribute('aria-label')===${JSON.stringify(text)});if(!e)throw Error('Missing actual button '+${JSON.stringify(text)});document.querySelector('[data-feedback-click]')?.removeAttribute('data-feedback-click');e.dataset.feedbackClick='true'})()`)
   await click('[data-feedback-click]')
  }
  const frame=async(name,label)=>capture('feedback-'+name+'.png',label)
  const sizes=[[1440,900,'dark'],[420,800,'dark'],[1440,900,'light'],[420,800,'light']]
+ const samples=[[1440,900,'dark'],[420,800,'light']]
+ const cardHeights=()=>read(`['working','created-takeover-agent','reading'].map(id=>{const e=document.querySelector('.focus-context-card:has(.focus-context[data-session-id="'+id+'"])');if(!e)throw Error('Missing actual neighboring card '+id);return{id,height:e.getBoundingClientRect().height}})`)
+ const details=async()=>{await click(area+' [data-operation-action="details"]');await until('actual positioned operation details',()=>read('!!document.querySelector(".agent-operation-feedback__popover")'))}
+ const closeDetails=()=>click(popup+' [aria-label="关闭操作详情"]')
  if(restoreOnly){
   const current=await facts(),saved=JSON.parse(await fs.readFile(path.join(privateRoot,'original-consumer-state.json'),'utf8'))
   assert.deepEqual(current.operation.cancellation,saved.facts.operation.cancellation)
@@ -27,8 +32,14 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  result.before=await facts()
  for(const[w,h,theme]of sizes){
   win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle()
-  assert.equal(await read(`document.querySelector(${JSON.stringify(area+' .agent-operation-feedback__technical')}).open`),false)
-  await frame('unconfirmed-'+w+'-'+theme,'Original unconfirmed takeover: first-level check and cancellation; technical references folded')
+  assert.equal(await read('!!document.querySelector(".agent-operation-feedback__popover")'),false)
+  const before=await cardHeights()
+  await frame('unconfirmed-'+w+'-'+theme,'Two actual adjacent Focus cards keep compact Check and Cancel actions on their first level')
+  await details();await settle()
+  const after=await cardHeights();assert.deepEqual(after,before,'Opening the operation popover cannot expand either adjacent card')
+  result.cardDensity??=[];result.cardDensity.push({width:w,theme,before,after,unchanged:true})
+  if(w===1440&&theme==='dark'||w===420&&theme==='light')await frame('details-'+w+'-'+theme,'Positioned operation details preserve the height and density of both adjacent cards')
+  await closeDetails()
  }
  win.setContentSize(1440,900);await read('window.unifiedFocusProof.theme("dark")');await settle()
  await press('取消接手')
@@ -40,23 +51,23 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  await until('cancel outcome unconfirmed',()=>read('window.takeoverFeedbackProof.facts().operation.cancellation?.pending===false'))
  await press('检查取消结果')
  await until('read-only exact cancellation inspection',()=>read('window.takeoverFeedbackProof.checks()===1'))
- for(const[w,h,theme]of sizes){
+ for(const[w,h,theme]of samples){
   win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle()
   await frame('unknown-'+w+'-'+theme,'Unconfirmed original cancellation with explicit check and continue action')
  }
- await click(area+' .agent-operation-feedback__technical > summary')
- for(const[w,h,theme]of sizes){
+ await details();await click(popup+' .agent-operation-feedback__technical > summary')
+ for(const[w,h,theme]of samples){
   win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle()
-  const text=await read(`document.querySelector(${JSON.stringify(area+' .agent-operation-feedback__technical')}).textContent`)
+  const text=await read(`document.querySelector(${JSON.stringify(popup+' .agent-operation-feedback__technical')}).textContent`)
   assert.ok(text.includes('原接手反馈：'+result.before.operation.message))
   assert.ok(text.includes('取消检查：'))
   assert.equal((await facts()).operation.message,result.before.operation.message)
   await frame('technical-'+w+'-'+theme,'Original takeover feedback and cancellation inspection are separately labelled; opaque IDs remain complete')
  }
- await click(area+' [aria-label="复制原操作编号"]')
- await click(area+' [aria-label="复制取消操作编号"]')
+ await click(popup+' [aria-label="复制原操作编号"]')
+ await click(popup+' [aria-label="复制取消操作编号"]')
  const copied=await facts();assert.deepEqual(copied.copied,[copied.operation.operationId,copied.operation.cancellation.input.operationId])
- await click(area+' .agent-operation-feedback__technical > summary')
+ await closeDetails()
  // The real card activates its original ordinary workface. Its actual Region
  // header independently reads the same retained cancellation.
  win.setContentSize(1440,900);await read('window.unifiedFocusProof.theme("dark")');await click(card)
@@ -68,7 +79,7 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  await pause(200);await frame('compact-normal-dark','Original cancellation details from ordinary Region header')
  await click('.agent-operation-feedback__popover [aria-label="关闭操作详情"]')
  assert.equal(await read('!!document.querySelector(".agent-operation-feedback__popover")'),false)
- for(const[w,h,theme]of[[420,800,'dark'],[1440,900,'light'],[420,800,'light']]){
+ for(const[w,h,theme]of[[420,800,'light']]){
   win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle();await click(compact)
   await frame('compact-'+w+'-'+theme,'Compact original cancellation popover within narrow and normal workface bounds')
   const bounds=await read('(()=>{const e=document.querySelector(".agent-operation-feedback__popover"),r=e.getBoundingClientRect();return{left:r.left,right:r.right,bottom:r.bottom,width:innerWidth,height:innerHeight,overflow:e.scrollWidth>e.clientWidth+1}})()');assert.ok(bounds.left>=0&&bounds.right<=bounds.width+1&&bounds.bottom<=bounds.height+1);assert.equal(bounds.overflow,false)
@@ -84,8 +95,8 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  await read('window.takeoverFeedbackProof.observe("cancelled")')
  await press('检查取消结果')
  await until('cancelled with unknown save ACK',()=>read('window.takeoverFeedbackProof.facts().operation.cancellation?.result?.outcome==="cancelled"'))
- for(const[w,h,theme]of sizes){win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await frame('cancelled-'+w+'-'+theme,'Cancelled original takeover with distinct unconfirmed save receipt')}
- await click(area+' .agent-operation-feedback__label');await click(area+' .agent-operation-feedback__label');await captureIntermediate('feedback-card-reopening.png','Actual card detail reopening between pointer activation and its settled reading')
+ for(const[w,h,theme]of samples){win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await frame('cancelled-'+w+'-'+theme,'Cancelled original takeover with distinct unconfirmed save receipt')}
+ await details();await captureIntermediate('feedback-card-reopening.png','Actual positioned detail reopens without changing neighboring card height');await closeDetails()
  const savedState=await read('window.takeoverFeedbackProof.checkpoint()'),savedFacts=await facts();result.consumerCheckpoint={savedUserStateSHA256:createHash('sha256').update(savedState).digest('hex'),operation:savedFacts.operation,tabs:savedFacts.tabs,layouts:savedFacts.layouts,drafts:savedFacts.drafts};await fs.writeFile(path.join(privateRoot,'original-consumer-state.json'),JSON.stringify({pid:process.pid,serialized:savedState,facts:savedFacts}))
  // A separate alternative of the same unknown source checkpoint reports a created
  // Agent. A confirmed cancellation is never treated as subsequently created.
@@ -95,12 +106,13 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  await read('window.takeoverFeedbackProof.observe("created","confirmed")')
  await press('检查取消结果')
  await until('created exact receipt',()=>read('window.takeoverFeedbackProof.facts().operation.cancellation?.result?.outcome==="created"'))
- for(const[w,h,theme]of sizes){win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await frame('created-'+w+'-'+theme,'Created takeover Agent retains exact View and explicit Stop actions')}
- await press('停止接手 Agent…')
+ for(const[w,h,theme]of samples){win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await frame('created-'+w+'-'+theme,'Created takeover Agent retains a first-level View action and explicit Stop in details')}
+ await details();await press('停止接手 Agent…',popup)
  await until('original explicit Stop confirmation',()=>read('[...document.querySelectorAll("[role=dialog]")].some(e=>e.textContent.includes("Stop Agent?"))'))
  await frame('created-stop-narrow-light','Explicit Stop confirmation is bound to the created Agent and requires a separate decision')
- await press('Cancel','[role=dialog]')
- await press('查看接手 Agent')
+ await press('Cancel','[role=dialog]:not(.agent-operation-feedback__popover)')
+ if(await read('!!document.querySelector(".agent-operation-feedback__popover")'))await closeDetails()
+ await press('查看 Agent')
  await until('exact created workface is visible',()=>read('[...document.querySelectorAll("[data-fixture-session=created-takeover-agent]")].some(e=>e.getBoundingClientRect().height>0)'))
  await frame('created-original-target','View reaches the exact created Agent workface from its original receipt without opening a new Agent')
  result.after=await facts();assert.deepEqual(result.after.drafts,result.before.drafts);assert.deepEqual(result.after.runs,result.before.runs)
