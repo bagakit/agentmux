@@ -16,6 +16,7 @@ export type MeshNetworkConfiguration = Pick<RelayMeshConfiguration, 'networkId' 
 }
 export type MeshPublicIdentity = { peerId: string; publicKey: string; epoch: number }
 export type MeshOwner = { runtimeId: string; ownerInstanceId: string }
+export type MeshOwnerTarget = { hostId: string; expectedRuntimeId: string }
 export type MeshSaveOperation = { operationId: string; expectedRevision: string; revision: string; status: 'confirmed' | 'unknown'; updatedAt: number; cause?: { code: string; message: string } }
 export type MeshNetworkSettings = { owner: MeshOwner; identity: MeshPublicIdentity | null; revision: string; configuration: MeshNetworkConfiguration; operation: MeshSaveOperation | null }
 export type MeshApplyObservation = { state: 'disabled' | 'starting' | 'active' | 'unavailable'; issue?: { code: string; message: string } }
@@ -34,10 +35,10 @@ export type MeshNetworkLink = { offer: ConnectionOffer; url: string; observation
 export const MESH_NETWORK_METHODS = { 'settings.mesh.inspect': 'short', 'settings.mesh.configure': 'long', 'mesh.inspect': 'short', 'mesh.link': 'short' } as const
 export type MeshNetworkMethod = keyof typeof MESH_NETWORK_METHODS
 export type MeshNetworkParams = {
-  'settings.mesh.inspect': { operationId?: string }
-  'settings.mesh.configure': { expectedRevision: string; operationId: string; configuration: MeshNetworkConfiguration }
-  'mesh.inspect': Record<string, never>
-  'mesh.link': { offer: ConnectionOffer }
+  'settings.mesh.inspect': { target?: MeshOwnerTarget; operationId?: string }
+  'settings.mesh.configure': { target?: MeshOwnerTarget; expectedRevision: string; operationId: string; configuration: MeshNetworkConfiguration }
+  'mesh.inspect': { target?: MeshOwnerTarget }
+  'mesh.link': { target?: MeshOwnerTarget; offer: ConnectionOffer }
 }
 export type MeshNetworkResults = {
   'settings.mesh.inspect': MeshNetworkSettings
@@ -88,11 +89,17 @@ export function parseMeshNetworkConfiguration(value: unknown): MeshNetworkConfig
   return { role: p.role as MeshNetworkConfiguration['role'], endpointAccess: { allowedClientKeys }, networkId: rpcString(p.networkId, 'Mesh network'), members, peers, advertisedIngress, publishers, ...(listen ? { listen } : {}) }
 }
 export function parseMeshNetworkParams<M extends MeshNetworkMethod>(method: M, value: unknown): MeshNetworkParams[M] {
-  const p = rpcRecord(value, method === 'settings.mesh.configure' ? ['expectedRevision', 'operationId', 'configuration'] : method === 'settings.mesh.inspect' ? ['operationId'] : method === 'mesh.link' ? ['offer'] : [])
-  if (method === 'settings.mesh.configure') return { expectedRevision: rpcString(p.expectedRevision, 'Original Mesh revision'), operationId: rpcString(p.operationId, 'Original Mesh save'), configuration: parseMeshNetworkConfiguration(p.configuration) } as MeshNetworkParams[M]
-  if (method === 'settings.mesh.inspect') return (p.operationId === undefined ? {} : { operationId: rpcString(p.operationId, 'Original Mesh save') }) as MeshNetworkParams[M]
-  if (method === 'mesh.link') return { offer: parseConnectionOffer(p.offer) } as MeshNetworkParams[M]
-  return {} as MeshNetworkParams[M]
+  const p = rpcRecord(value, ['target', ...(method === 'settings.mesh.configure' ? ['expectedRevision', 'operationId', 'configuration'] : method === 'settings.mesh.inspect' ? ['operationId'] : method === 'mesh.link' ? ['offer'] : [])])
+  let target: MeshOwnerTarget | undefined
+  if (p.target !== undefined) {
+    const route = rpcRecord(p.target, ['hostId', 'expectedRuntimeId'])
+    target = { hostId: rpcString(route.hostId, 'Exact saved Mesh Host'), expectedRuntimeId: rpcString(route.expectedRuntimeId, 'Expected original Mesh Runtime') }
+  }
+  const selected = target ? { target } : {}
+  if (method === 'settings.mesh.configure') return { ...selected, expectedRevision: rpcString(p.expectedRevision, 'Original Mesh revision'), operationId: rpcString(p.operationId, 'Original Mesh save'), configuration: parseMeshNetworkConfiguration(p.configuration) } as MeshNetworkParams[M]
+  if (method === 'settings.mesh.inspect') return { ...selected, ...(p.operationId === undefined ? {} : { operationId: rpcString(p.operationId, 'Original Mesh save') }) } as MeshNetworkParams[M]
+  if (method === 'mesh.link') return { ...selected, offer: parseConnectionOffer(p.offer) } as MeshNetworkParams[M]
+  return selected as MeshNetworkParams[M]
 }
 function settings(value: unknown): MeshNetworkSettings {
   const p = rpcRecord(value, ['owner', 'identity', 'revision', 'configuration', 'operation'])
@@ -100,11 +107,17 @@ function settings(value: unknown): MeshNetworkSettings {
   if (p.operation !== null) { const o = rpcRecord(p.operation, ['operationId', 'expectedRevision', 'revision', 'status', 'updatedAt', 'cause']); if (o.status !== 'confirmed' && o.status !== 'unknown' || o.status === 'confirmed' && o.cause !== undefined) invalid(); operation = { operationId: rpcString(o.operationId, 'Mesh save'), expectedRevision: rpcString(o.expectedRevision, 'Mesh previous revision'), revision: rpcString(o.revision, 'Mesh saved revision'), status: o.status as MeshSaveOperation['status'], updatedAt: count(o.updatedAt), ...(o.cause === undefined ? {} : { cause: issue(o.cause) }) } }
   return { owner: owner(p.owner), identity: identity(p.identity), revision: rpcString(p.revision, 'Mesh revision'), configuration: parseMeshNetworkConfiguration(p.configuration), operation }
 }
-export function parseMeshNetworkResult<M extends MeshNetworkMethod>(method: M, value: unknown, input: MeshNetworkParams[M]): MeshNetworkResults[M] {
+export function parseMeshNetworkResult<M extends MeshNetworkMethod>(method: M, value: unknown, input: MeshNetworkParams[M], expectedOwner?: MeshOwner): MeshNetworkResults[M] {
   try {
+    const originalOwner = (value: unknown): MeshOwner => {
+      const result = owner(value)
+      if (input.target && result.runtimeId !== input.target.expectedRuntimeId || expectedOwner && (result.runtimeId !== expectedOwner.runtimeId || result.ownerInstanceId !== expectedOwner.ownerInstanceId)) invalid()
+      return result
+    }
     if (method === 'settings.mesh.inspect' || method === 'settings.mesh.configure') {
       const outer = method === 'settings.mesh.configure' ? rpcRecord(value, ['settings', 'diskDurability']) : null
       const result = settings(outer ? outer.settings : value), expected = input as MeshNetworkParams['settings.mesh.inspect'] & Partial<MeshNetworkParams['settings.mesh.configure']>
+      originalOwner(result.owner)
       if (expected.operationId && result.operation?.operationId !== expected.operationId && !(method === 'settings.mesh.inspect' && result.operation === null)) invalid()
       if (method === 'settings.mesh.configure') {
         if (!result.operation || result.operation.expectedRevision !== expected.expectedRevision || !['confirmed', 'unknown'].includes(outer!.diskDurability as string) || outer!.diskDurability !== result.operation.status) invalid()
@@ -122,7 +135,7 @@ export function parseMeshNetworkResult<M extends MeshNetworkMethod>(method: M, v
       let endpoint: MeshEndpointObservation
       if (ep.state === 'available') { if (ep.issue !== undefined) invalid(); endpoint = { state: ep.state, offer: parseConnectionOffer(ep.offer) } }
       else { if (ep.state !== 'not-provided' && ep.state !== 'starting' && ep.state !== 'unavailable' || ep.offer !== undefined) invalid(); endpoint = { state: ep.state as 'not-provided' | 'starting' | 'unavailable', ...(ep.issue === undefined ? {} : { issue: issue(ep.issue) }) } }
-      return { owner: owner(p.owner), identity: identity(p.identity), desiredRevision: p.desiredRevision === null ? null : rpcString(p.desiredRevision, 'Desired Mesh revision'), activeRevision: p.activeRevision === null ? null : rpcString(p.activeRevision, 'Active Mesh revision'), source: p.source, apply: { state: a.state, ...(a.issue === undefined ? {} : { issue: issue(a.issue) }) }, gateway: parseAgentMuxRelayInspection({ gateway: p.gateway }).gateway, network: p.network === null ? null : parseRelayMeshObservation(p.network), endpoint, observedAt: count(p.observedAt), coverage: { configuredOrigins, observedOrigins, complete: c.complete } } as MeshNetworkResults[M]
+      return { owner: originalOwner(p.owner), identity: identity(p.identity), desiredRevision: p.desiredRevision === null ? null : rpcString(p.desiredRevision, 'Desired Mesh revision'), activeRevision: p.activeRevision === null ? null : rpcString(p.activeRevision, 'Active Mesh revision'), source: p.source, apply: { state: a.state, ...(a.issue === undefined ? {} : { issue: issue(a.issue) }) }, gateway: parseAgentMuxRelayInspection({ gateway: p.gateway }).gateway, network: p.network === null ? null : parseRelayMeshObservation(p.network), endpoint, observedAt: count(p.observedAt), coverage: { configuredOrigins, observedOrigins, complete: c.complete } } as MeshNetworkResults[M]
     }
     const p = rpcRecord(value, ['offer', 'url', 'observation']), o = rpcRecord(p.observation, ['owner', 'identity', 'activeRevision', 'observedAt', 'route', 'ingress'])
     const offer = parseConnectionOffer(p.offer), original = (input as MeshNetworkParams['mesh.link']).offer, publicIdentity = identity(o.identity)
@@ -131,6 +144,6 @@ export function parseMeshNetworkResult<M extends MeshNetworkMethod>(method: M, v
     if (route.path.at(-1) !== route.originPeerId || !publicIdentity || offer.serverId !== original.serverId || offer.daemonPublicKeyB64 !== original.daemonPublicKeyB64 || route.serverId !== original.serverId || route.path[0] !== publicIdentity.peerId || !isDeepStrictEqual(offer.relay, ingress)) invalid()
     const url = rpcString(p.url, 'Complete Mesh offer URL'), parsed = new URL(url)
     if (!isDeepStrictEqual(parseConnectionOfferUrl(url), offer) || parsed.host !== ingress.endpoint || parsed.protocol !== (ingress.useTls ? 'https:' : 'http:')) invalid()
-    return { offer, url, observation: { owner: owner(o.owner), identity: publicIdentity, activeRevision: rpcString(o.activeRevision, 'Active Mesh revision'), observedAt: count(o.observedAt), route, ingress } } as MeshNetworkResults[M]
+    return { offer, url, observation: { owner: originalOwner(o.owner), identity: publicIdentity, activeRevision: rpcString(o.activeRevision, 'Active Mesh revision'), observedAt: count(o.observedAt), route, ingress } } as MeshNetworkResults[M]
   } catch { return invalid() }
 }

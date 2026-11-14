@@ -874,6 +874,53 @@ export class AgentMuxRpcService {
     } }
   }
 
+  /** Only these original operator methods borrow a saved carrier; no executor is exposed. */
+  private async callSelectedOperator<M extends MeshNetworkMethod | 'settings.node.inspect' | 'settings.node.configure'>(
+    target: { hostId: string; expectedRuntimeId: string }, method: M, input: AgentMuxRpcParams<M>,
+    context: AgentMuxRpcCallContext, reauthorize: () => Promise<unknown>,
+    validate: (value: AgentMuxRpcResult<M>, owner: { runtimeId: string; ownerInstanceId: string }) => AgentMuxRpcResult<M>
+  ): Promise<AgentMuxRpcResult<M>> {
+    let dispatched = false
+    try {
+      const readConfiguration = () => {
+        const saved = this.ports.hostConfiguration?.(target.hostId)
+        if (!saved) return null
+        const { label: _label, ...route } = saved
+        return structuredClone(route)
+      }
+      const configuration = readConfiguration()
+      if (!configuration) throw new AgentMuxError('Select one original saved operator Host.', 'UNKNOWN_HOST')
+      const routes = (await this.clients(target.hostId, { signal: context.signal })).filter(route => route.hostId === target.hostId)
+      if (routes.length !== 1) throw new AgentMuxError('Select one original saved operator Host.', 'UNKNOWN_HOST')
+      const client = routes[0]!.client
+      const assertCurrent = async () => {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await reauthorize()
+        const current = (await this.clients(target.hostId)).filter(route => route.hostId === target.hostId)
+        if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, readConfiguration())) throw new AgentMuxError('The original operator route changed. Keep the target and read it again.', 'RUNTIME_OWNER_MISMATCH')
+      }
+      // A authenticates its original caller; B authenticates this saved operator
+      // carrier independently. A's capability is never presented as B's Session.
+      const call = <T extends M | 'runtime.owner.identity'>(name: T, value: AgentMuxRpcParams<T>, originalContext: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<T>> => {
+        if (this.ports.callOriginalCore) return this.ports.callOriginalCore(target.hostId, name, value, originalContext)
+        if (client.forwardRpc) return client.forwardRpc(name, value, originalContext)
+        throw new AgentMuxError('The original operator transport is unavailable.', 'CONTROL_UNAVAILABLE')
+      }
+      await assertCurrent()
+      const readContext = context.signal ? { signal: context.signal } : {}
+      const { owner } = await call('runtime.owner.identity', { expectedRuntimeId: target.expectedRuntimeId }, readContext)
+      await assertCurrent()
+      if (owner.runtimeId !== target.expectedRuntimeId) throw new AgentMuxError('The original operator Runtime changed before dispatch.', 'RUNTIME_OWNER_MISMATCH')
+      dispatched = true
+      const result = validate(await call(method, input, { ...readContext, runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } }), owner)
+      // An obtained original save ACK remains evidence even if its observing route
+      // later changes. Genuine transport loss still keeps the operation unknown.
+      if (method !== 'settings.mesh.configure') await assertCurrent()
+      return result
+    } catch (error) {
+      if (method === 'settings.mesh.configure' && !dispatched) throw meshConfigurationNotApplied(error)
+      throw error
+    }
+  }
   private async authenticated(context: AgentMuxRpcCallContext, exactOnly = false) {
     if (!context.caller) return undefined
     const caller = rpcRecord(context.caller, ['agentSessionId', 'capability'])
@@ -1869,27 +1916,37 @@ export class AgentMuxRpcService {
         hostId => this.call('node.inspect', { hostId }, { ...(context.signal ? { signal: context.signal } : {}) }), context.signal) as AgentMuxRpcResult<M>
     }
     if (isMeshNetworkMethod(method)) {
-      const meshMethod = method
+      const meshMethod = method as MeshNetworkMethod
       let input: import('./mesh-network.js').MeshNetworkParams[typeof meshMethod]
       try { input = parseMeshNetworkParams(meshMethod, params) } catch (error) { if (meshMethod === 'settings.mesh.configure') throw meshConfigurationNotApplied(error); throw error }
       const current = async () => {
         const caller = await this.authenticated(context, true)
-        if (meshMethod.startsWith('settings.mesh.')) {
+        if (meshMethod.startsWith('settings.mesh.') || input.target && input.target.hostId !== 'local') {
           if (caller && caller.hostId !== 'local' || context.principal?.kind !== 'user' || !context.principal.id.trim() || context.routeDelegation) throw new AgentMuxError('Mesh settings require the original user operator transport and verified local caller.', 'CONTROL_PERMISSION_DENIED')
         } else if (context.routeDelegation || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Mesh observations require the original authenticated user or device.', 'CONTROL_PERMISSION_DENIED')
         context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
       }
       try {
         await current()
-        if (!this.ports.callOriginalCore && !this.ports.meshNetwork) throw new AgentMuxError('This original Core has no composed Mesh owner. Existing services remain available.', 'MESH_OWNER_UNAVAILABLE')
+        if ((!input.target || input.target.hostId === 'local') && !this.ports.callOriginalCore && !this.ports.meshNetwork) throw new AgentMuxError('This original Core has no composed Mesh owner. Existing services remain available.', 'MESH_OWNER_UNAVAILABLE')
       } catch (error) { if (meshMethod === 'settings.mesh.configure') throw meshConfigurationNotApplied(error); throw error }
-      // Desktop borrows this original Core; its presentation server has no durable
-      // network owner. Keep the original actor/fence and do not reclassify a lost
-      // remote write acknowledgement as a local, pre-dispatch refusal.
+      const { target } = input
+      const original = { ...input }; delete original.target
+      if (target && target.hostId !== 'local') return await this.callSelectedOperator(target, meshMethod, original, context, current,
+        (result, owner) => parseMeshNetworkResult(meshMethod, result, input, owner)) as AgentMuxRpcResult<M>
+      // Presentation services borrow their original local Core, preserving actor,
+      // target and fence. Managed callers do not enter the separate runtime domain.
       if (this.ports.callOriginalCore) return parseMeshNetworkResult(meshMethod,
         await this.ports.callOriginalCore<MeshNetworkMethod>('local', meshMethod, input, context), input) as AgentMuxRpcResult<M>
-      return parseMeshNetworkResult(meshMethod, await this.ports.meshNetwork!.call(meshMethod, input, current), input) as AgentMuxRpcResult<M>
+      if (target) {
+        try {
+          const observed = await this.ports.meshNetwork!.call('mesh.inspect', {}, current)
+          if (observed.owner.runtimeId !== target.expectedRuntimeId) throw new AgentMuxError('The original local Mesh Runtime differs from this target.', 'RUNTIME_OWNER_MISMATCH')
+        } catch (error) { if (meshMethod === 'settings.mesh.configure') throw meshConfigurationNotApplied(error); throw error }
+      }
+      return parseMeshNetworkResult(meshMethod, await this.ports.meshNetwork!.call(meshMethod, original, current), input) as AgentMuxRpcResult<M>
     }
+
     if (isNodePublishingMethod(method)) {
       const nodeMethod: NodePublishingMethod = method
       const input = parseNodePublishingParams(nodeMethod, params)
@@ -1908,37 +1965,11 @@ export class AgentMuxRpcService {
           if (target && this.ports.nodePublishing) await this.ports.nodePublishing.call('node.inspect', { hostId: 'local', expectedRuntimeId: target.expectedRuntimeId }, context.signal)
           if (this.ports.nodePublishing) return parseNodePublishingResult(policyMethod, await this.ports.nodePublishing.call(policyMethod, original, context.signal), policyInput) as AgentMuxRpcResult<M>
         } else {
-          const readConfiguration = () => {
-            const saved = this.ports.hostConfiguration?.(target.hostId)
-            if (!saved) return null
-            const { label: _label, ...route } = saved
-            return structuredClone(route)
-          }
-          const configuration = readConfiguration()
-          const routes = (await this.clients()).filter(route => route.hostId === target.hostId)
-          if (!configuration || routes.length !== 1) throw new AgentMuxError('Select one original saved operator Host for this Node policy operation.', 'UNKNOWN_HOST')
-          const client = routes[0]!.client
-          const assertCurrent = async () => {
-            context.signal?.throwIfAborted(); await context.assertCurrent?.()
-            if (caller) await this.authenticated(context)
-            const current = (await this.clients()).filter(route => route.hostId === target.hostId)
-            if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, readConfiguration())) throw new AgentMuxError('The original Node policy route changed. Keep the target and read it again.', 'RUNTIME_OWNER_MISMATCH')
-          }
-          // Only this policy operation borrows the saved carrier. Its receiving
-          // Core independently authenticates that operator; A's capability is not B's.
-          const call = <T extends 'runtime.owner.identity' | 'settings.node.inspect' | 'settings.node.configure'>(method: T, value: AgentMuxRpcParams<T>, readContext: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<T>> => {
-            if (this.ports.callOriginalCore) return this.ports.callOriginalCore(target.hostId, method, value, readContext)
-            if (client.forwardRpc) return client.forwardRpc(method, value, readContext)
-            throw new AgentMuxError('The original Node operator transport is unavailable.', 'CONTROL_UNAVAILABLE')
-          }
-          const readContext = context.signal ? { signal: context.signal } : {}
-          const { owner } = await call('runtime.owner.identity', { expectedRuntimeId: target.expectedRuntimeId }, readContext)
-          await assertCurrent()
-          if (owner.runtimeId !== target.expectedRuntimeId) throw new AgentMuxError('The original Node Runtime changed before policy inspection.', 'RUNTIME_OWNER_MISMATCH')
-          const result = await call(policyMethod, original, { ...readContext, runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
-          await assertCurrent()
-          if (result.node.runtimeId !== owner.runtimeId || result.node.ownerInstanceId !== owner.ownerInstanceId) throw new AgentMuxError('The original Node owner instance changed during policy inspection. Read this target again.', 'RUNTIME_OWNER_MISMATCH')
-          return parseNodePublishingResult(policyMethod, result, policyInput) as AgentMuxRpcResult<M>
+          return await this.callSelectedOperator(target, policyMethod, original, context,
+            async () => { if (caller) await this.authenticated(context) }, (result, owner) => {
+              if (result.node.runtimeId !== owner.runtimeId || result.node.ownerInstanceId !== owner.ownerInstanceId) throw new AgentMuxError('The original Node owner instance changed during policy inspection. Read this target again.', 'RUNTIME_OWNER_MISMATCH')
+              return parseNodePublishingResult(policyMethod, result, policyInput)
+            }) as AgentMuxRpcResult<M>
         }
       }
       const hostId = ownerMethod ? 'local' : (input as import('./node-publishing.js').NodeRoute).hostId

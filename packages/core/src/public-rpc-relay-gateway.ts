@@ -302,7 +302,7 @@ export class CoreRelayGateway implements MeshNetworkPort {
       const offer = parseConnectionOffer({ ...original, relay: ingress }), url = connectionOfferUrl(`${ingress.useTls ? 'https' : 'http'}://${ingress.endpoint}/`, offer)
       result = { offer, url, observation: { owner: this.meshState!.owner, identity, activeRevision: this.activeRevision, observedAt: Date.now(), route, ingress } }
     }
-    await current()
+    if (method !== 'settings.mesh.configure') await current()
     return parseMeshNetworkResult(method, result, input)
   }
   async stop(): Promise<void> {
