@@ -21,6 +21,9 @@ const keys = [workspaceAgentOrderKey(agent(targetSid)), workspaceAgentOrderKey(a
 beforeEach(async () => {
   vi.restoreAllMocks(); localStorage.clear(); useAppStore.setState(original, true)
   fixture = await startWorkfaceFixture()
+  vi.spyOn(api.sessions, 'messageEvents').mockImplementation(async subject => ({ hostId: subject.hostId, participantSessionId: subject.agentSessionId,
+    afterSequence: 0, latest: true, beforeSequence: null, throughSequence: 0, incarnation: 'original-journal', messageId: null, broadcastOperationId: null,
+    events: [], nextAfterSequence: null, nextBeforeSequence: null }))
   useAppStore.setState({ sessions: [{ ...agent(neighborSid), createdAt: _tailFixtureEpoch(0, 0, 20) }, { ...agent(targetSid), createdAt: _tailFixtureEpoch(0, 0, 10) }], workspaceAgentOrder: {} })
   await prepareRendererUpdate(); fixture.flush.mockClear()
 })
@@ -33,6 +36,16 @@ async function order(input?: unknown, code = 0, displayWorkspaceId = 'resource')
 }
 
 describe('Workspace Agent list preference through actual compiled public CLI and Store', () => {
+  it('reports actual derivation/A2A order and expands a child-only CLI move to its original complete group', async () => {
+    const child = { ...agent('derived-child'), createdAt: 30, creation: { createOperationId: 'original-child-create', initialPrompt: 'confirmed' as const,
+      createdBy: { agentSessionId: targetSid, run: agent(targetSid).control.run, owner: { kind: 'local' as const } } } }
+    useAppStore.setState(state => ({ sessions: [...state.sessions, child] }))
+    expect((await order()).effectiveOrder).toEqual([reference(targetSid), reference('derived-child'), reference(neighborSid)])
+    expect(await order({ order: [reference(neighborSid), reference('derived-child')] })).toMatchObject({
+      storedOrder: [reference(neighborSid), reference(targetSid), reference('derived-child')],
+      effectiveOrder: [reference(neighborSid), reference(targetSid), reference('derived-child')] })
+    fixture.noLifecycle()
+  })
   it('admits exact external Zone members through the original public Workspace order owner without moving or stopping them', async () => {
     const scratch = { ...config.workspaces[0]!, id: '__scratch__', name: 'Topics', path: config.workspaces[0]!.path + '/scratch' }
     const id = 'launcher:original-mote', directoryPath = scratchTopicDirectoryName(id), path = scratch.path + '/' + directoryPath

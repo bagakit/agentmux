@@ -3,7 +3,7 @@ import type { AgentMuxPermissionRequest } from '@agentmux/core'
 import { parseConnectionResult } from '@agentmux/core/connections'
 import { parseAgentMuxSpatialGraph, type AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { mountThemeRuntime } from '@agentmux/client-ui/theme'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { fixturePath } from '../../lib/fixture-values.mjs'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
@@ -19,6 +19,7 @@ import type { ProviderCatalogObservation, RuntimeSnapshot, SessionSnapshot } fro
 import '../../../src/renderer/src/styles/index.css'
 
 const phase = new URL(location.href).searchParams.get('phase')
+const relationsScenario = new URL(location.href).searchParams.has('relations')
 if (!['seed', 'restore'].includes(phase ?? '')) throw new Error('Original private phase required')
 const config = await api.config.get(), snapshot = await api.sessions.snapshot()
 mountThemeRuntime(window, { appAppearance: 'dark', ...(config.appearance.themeId !== undefined ? { themeId: config.appearance.themeId } : {}),
@@ -52,6 +53,33 @@ const tab = { ...splitTab, layout: { ...splitTab.layout, root: { ...splitTab.lay
   activeRegionId: 'private-retained-region' } }
 const clipboard: string[] = [], controls: unknown[] = []
 const restarts: { control: unknown; operationId: string; observeOnly: boolean }[] = []
+const reopens: unknown[] = []
+if (relationsScenario) {
+  for (const [child, parent] of [[sessions[1]!, sessions[0]!], [sessions[2]!, sessions[1]!]] as const) child.creation = {
+    createOperationId: `private-create-${child.id}`, initialPrompt: 'confirmed',
+    createdBy: { agentSessionId: parent.control.agentSessionId, run: parent.control.run, owner: { kind: 'local' } }
+  }
+  let retained = true
+  const source = { hostId: 'local', agentSessionId: 'closed-original', state: 'retired' as const, retiredAt: 100,
+    history: { providerId: base.providerId, executorId: base.executorId, workspacePath: workspace.path, createdAt: now - 60000,
+      creation: { createOperationId: 'private-closed-create', initialPrompt: 'confirmed' as const,
+        createdBy: { agentSessionId: 'alpha', run: sessions[0]!.control.run, owner: { kind: 'local' as const } } },
+      nativeHandle: { kind: 'provider' as const, providerId: base.providerId, sessionId: 'private-native-closed' } } }
+  api.sessions.historySources = (async (options?: { observation: true }) => {
+    const sources = retained ? [source] : []
+    return options ? { sources, warnings: [] } : sources
+  }) as typeof api.sessions.historySources
+  api.sessions.messageEvents = async subject => ({ hostId: subject.hostId, participantSessionId: subject.agentSessionId,
+    afterSequence: 0, latest: true, beforeSequence: null, throughSequence: 1, incarnation: 'private-journal', messageId: null, broadcastOperationId: null,
+    events: subject.agentSessionId === 'alpha' ? [{ sequence: 1, kind: 'message', at: now,
+      messages: [{ messageId: 'private-original-message', senderSessionId: 'alpha', recipientSessionId: 'offline', threadId: 'private-thread', replyTo: null }] }] : [], nextAfterSequence: null, nextBeforeSequence: null })
+  api.sessions.reopen = async (reference, retiredAt, operationId) => {
+    if (reference.hostId !== source.hostId || reference.agentSessionId !== source.agentSessionId || retiredAt !== source.retiredAt) throw new Error('Private restore identity mismatch')
+    reopens.push({ reference, retiredAt, operationId }); retained = false
+    return { ...sessions[0]!, id: source.agentSessionId, label: '恢复原会话与保留上下文',
+      nativeSessionId: source.history.nativeHandle.sessionId, control: { kind: 'agent', ...reference, run: { runId: 'private-resumed-original' } } }
+  }
+}
 let failedAgent: string | null = null
 api.ui.writeClipboardText = async text => { clipboard.push(text) }
 api.sessions.stop = async control => {
@@ -139,6 +167,7 @@ function Scene() {
 const scene = {
   ready: true, phase, seedCount: phase === 'seed' ? 1 : 0, workspaceId: workspace.id, originalOrder,
   showSpace() { useAppStore.getState().setMainSurface('workbench') },
+  setTheme(appAppearance: 'dark' | 'light') { return updateThemeSelection({ appAppearance }) },
   flush: () => prepareRendererUpdate('quit'),
   addHostCollision() {
     const original = sessions.find(session => session.id === 'gamma')!
@@ -160,7 +189,7 @@ const scene = {
   facts() { const state = useAppStore.getState(); return {
     order: [...document.querySelectorAll<HTMLElement>('.workspace-agent-list-item')].map(node => node.dataset.agentKey),
     cards: [...document.querySelectorAll<HTMLElement>('.workspace-agent-list-item button.focus-context')].map(node => ({ id: node.dataset.sessionId, state: node.dataset.state, text: node.textContent })),
-    preference: state.workspaceAgentOrder, clipboard: [...clipboard], controls: structuredClone(controls), restarts: structuredClone(restarts),
+    preference: state.workspaceAgentOrder, clipboard: [...clipboard], controls: structuredClone(controls), restarts: structuredClone(restarts), reopens: structuredClone(reopens),
     sessions: state.sessions.map(session => ({ id: session.id, control: session.control, runUnobserved: session.runUnobserved === true })),
     tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts,
     originalWorkface: state.tabs === original.tabs && state.layouts === original.layouts,
