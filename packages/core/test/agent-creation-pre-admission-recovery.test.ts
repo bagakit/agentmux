@@ -225,8 +225,8 @@ it('rechecks the physical leaf after the final prepared-create admission and bef
   let release!: () => void, entered!: () => void
   const held = new Promise<void>(resolve => { release = resolve })
   const admission = new Promise<void>(resolve => { entered = resolve })
-  vi.spyOn(f.inner.registry, 'prepareCreate').mockImplementation(async (...args: any[]) => {
-    const result = await prepare(...args)
+  vi.spyOn(f.inner.registry, 'prepareCreate').mockImplementation(async (reservation: any, preparedCreation: any) => {
+    const result = await prepare(reservation, preparedCreation)
     entered(); await held
     return result
   })

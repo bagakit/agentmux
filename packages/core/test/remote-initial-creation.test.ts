@@ -106,7 +106,7 @@ async function holdProviderPreparation(f: Awaited<ReturnType<typeof fixture>>, s
   const admission = new Promise<void>(resolve => { entered = resolve })
   if (stage === 'probe') {
     const original = f.probe.getMockImplementation()!
-    f.probe.mockImplementation(async (...args: any[]) => { entered(); await held; return await original(...args) })
+    f.probe.mockImplementation(async (providerId, commandOverride, context) => { entered(); await held; return await original(providerId, commandOverride, context) })
   } else {
     const original = claudePolicy.prepareClaudeExecutionPolicy
     vi.spyOn(claudePolicy, 'prepareClaudeExecutionPolicy').mockImplementation(async input => { entered(); await held; return await original(input) })
@@ -224,9 +224,9 @@ describe('remote initial creation admission', () => {
       const receipt = await target.sdk.createHostAgentWithDelivery(request)
       const timeline = await f.target.sessionTimeline(receipt.session.agentSessionId)
       const system = timeline.items.filter(item => item.kind === 'system_message').map(item => item.content).join('\n\n')
-      expect(system).toContain(optionalContext[0].text)
-      expect(system).toContain(optionalContext[1].omittedText)
-      expect(system).not.toContain(optionalContext[1].text)
+      expect(system).toContain(optionalContext[0]!.text)
+      expect(system).toContain(optionalContext[1]!.omittedText)
+      expect(system).not.toContain(optionalContext[1]!.text)
       expect(timeline.items.filter(item => item.kind === 'user_message').map(item => item.content).join()).toContain(f.input.prompt!)
       expect((await target.sdk.createHostAgentWithDelivery(request)).session.run).toEqual(receipt.session.run)
       for (const changed of [
