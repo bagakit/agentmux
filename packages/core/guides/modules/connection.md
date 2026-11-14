@@ -267,6 +267,37 @@ filling it with new profile data or resending it. Application creation, profile 
 default save retain separate receipts; missing original File acknowledgement remains unknown.
 
 For private Mote chat use space mote chat configure/inspect/history/audience/allocate/diagnose --input FILE|-.
+New ordinary private messages from the bot's exact creator enter the Mote's logical Main.
+Guests keep their independent private lanes. Without Main, the original message waits for setup;
+no separate creator Agent is created. Existing admitted messages keep their original recipient.
+Main's input-only relationship does not publish its ordinary output or grant a native API identity.
+This original Connector owner also checks its own ordinary sharing relationships, including paused
+ones that can resume and prior dedicated chat lanes. MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE means this
+Main cannot receive a new private input under that owner's existing external audience. Find Main's
+exact original Host/Session in the Mote dialogue/details, then at the original hosting endpoint use
+connection binding ls --session SID to list this owner’s same-Session relationships across Host routes.
+Inspect the exact relationship and its saved executionRuntimeId; Host aliases can name the same Runtime. The person must
+explicitly resolve that sharing before retrying the same ingress. Never detach, stop Main or create
+a replacement automatically. This is the original owner's scope, not a global export inventory;
+independently authorized exports owned elsewhere keep their own authorization. New input privacy
+qualification does not revoke a previously saved legitimate reply or its original receipts.
+A Main input carries a trusted original ingressId and explicit reply instructions. To reply, use
+space mote chat reply --input - with {operationId,ingressId,body}. Only that original recipient
+Session, including its confirmed native semantic recovery, can send this reply, after Core confirms
+that this exact input was delivered. A saved claim with no original delivery receipt is insufficient.
+The Host derives
+the original application, person and conversation from its own claim; text cannot change them.
+The saved reply operation and each external fragment have separate receipts. Keep operationId
+after an unknown result and read space mote chat inspect --input - with {operationId}; inspection
+does not send again. Repeating the exact reply returns that original operation, and changed content
+cannot reuse it. This reply operation publishes only the supplied body and creates no ordinary Main publication. A reply grants no settings or approval authority.
+When Main executes on another semantic Host, normal input still reaches that original Main.
+The trusted input and original ingress diagnosis show reply-route-unconfirmed when the execution
+endpoint has no confirmed route back to the Connector owner. Keep the original ingress reference;
+do not guess a recipient or owner. Cross-Host authority reads do not authorize replies. Automatic selection of the original Connector endpoint across Hosts is not implemented.
+An explicit call to that original hosting endpoint may use its existing authentication of the
+original recipient capability and semantic recovery, plus the exact original Core delivery proof.
+An unconfirmed default return route does not revoke that explicit qualified call.
 A person or device controls chat policy and per-person total allowances. A chat Agent may read only
 its own retained lane with space mote chat history; copy the original target from its first context.
 The person, the device and the Mote's own Agents read what its chat application received, across
