@@ -1,45 +1,17 @@
 import { homedir } from 'node:os'
 import { realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join, resolve } from 'node:path'
-import type { NativeProviderError } from '../provider-error.js'
-
-type CatalogContext = { workspacePath?: string; env: Readonly<NodeJS.ProcessEnv>; signal: AbortSignal }
-type CatalogIssue = { code: string; message: string }
-type NativeResumeSource = {
-  nativeHandle: { kind: 'provider'; providerId: string; sessionId: string; transcriptPath?: string }
-  workspacePath: string
-  revision: string
-}
-type CodexCandidate = {
-  source: NativeResumeSource & { nativeHandle: { providerId: 'codex'; transcriptPath: string } }
-  title?: string
-  createdAt?: number
-  updatedAt: number
-}
-type CatalogReader = {
-  readFirst(): Promise<Record<string, unknown> | null>
-  readNext(): Promise<{ value: Record<string, unknown> } | null>
-}
-type ResumeContext = CatalogContext & { source: NativeResumeSource }
-type RecoveryContext = CatalogContext & { workspacePath: string; transcriptPath?: string; source: { providerId: string; nativeSessionId: string } }
+import type { CatalogCandidate, CatalogContext, CatalogIssue, NativeCatalogServices, RecoveryContext, ResumeContext } from '../native-catalog-services.js'
 
 export function createCodexNativeCatalog({ AgentMuxError, normalizeNativeSessionId, assertNativeCatalogPath,
-  nativeCatalogFiles, nativeCatalogIssue, readNativeCatalogFile }: {
-  AgentMuxError: NativeProviderError
-  normalizeNativeSessionId: (value: unknown) => string | undefined
-  assertNativeCatalogPath: (path: string, roots: readonly string[]) => Promise<void>
-  nativeCatalogFiles: (root: string, context: CatalogContext, issues: CatalogIssue[], accepts: (name: string) => boolean) => AsyncGenerator<string>
-  nativeCatalogIssue: (error: unknown) => CatalogIssue
-  readNativeCatalogFile: <T>(providerId: string, path: string, context: CatalogContext,
-    read: (reader: CatalogReader) => Promise<T>) => Promise<{ value: T; revision: string; updatedAt: number }>
-}) {
+  nativeCatalogFiles, nativeCatalogIssue, readNativeCatalogFile }: NativeCatalogServices) {
   function home(context: CatalogContext): string {
     const configured = context.env.CODEX_HOME ?? process.env.CODEX_HOME
     return configured ? resolve(configured) : join(context.env.HOME ?? homedir(), '.codex')
   }
   const roots = (context: CatalogContext): string[] => [join(home(context), 'sessions'), join(home(context), 'archived_sessions')]
 
-  async function candidate(path: string, context: CatalogContext): Promise<CodexCandidate | null> {
+  async function candidate(path: string, context: CatalogContext): Promise<CatalogCandidate<'codex'> | null> {
     path = await realpath(path)
     const metadata = await readNativeCatalogFile('codex', path, context, async reader => await reader.readFirst())
     const record = metadata.value, payload = record?.payload as Record<string, unknown> | undefined
@@ -63,7 +35,7 @@ export function createCodexNativeCatalog({ AgentMuxError, normalizeNativeSession
   }
 
   async function listCodexNativeSessions(context: CatalogContext) {
-    const catalog = { providerId: 'codex' as const, availability: 'available' as const, sessions: [] as CodexCandidate[], issues: [] as CatalogIssue[] }
+    const catalog = { providerId: 'codex' as const, availability: 'available' as const, sessions: [] as CatalogCandidate<'codex'>[], issues: [] as CatalogIssue[] }
     const titles = new Map<string, string>()
     try {
       await readNativeCatalogFile('codex', join(home(context), 'session_index.jsonl'), context, async reader => {

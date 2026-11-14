@@ -1,10 +1,9 @@
+import { listClaudeNativeSessions, assertClaudeNativeResumeSource, claudeRecoveryFiles, discoverClaudeNativeSession } from './claude-native-sources.js'
 import { inspectClaudeHookSettings, prepareClaudeOwnedWorkspaceTrust, readClaudeInputInitialization } from './claude-native-settings.js'
 import { prepareClaudeToolExecutionLaunch } from './claude-tool-execution-launch.js'
 import { prepareClaudeExecutionHelper } from './claude-execution-helper.js'
 import { CLAUDE_USAGE_CAPABILITY } from '@agentmux/providers/claude/usage'
-import { listClaudeNativeSessions, assertClaudeNativeResumeSource, claudeRecoveryFiles } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
-import { discoverClaudeNativeSession } from './claude-native-session.js'
 import { prepareClaudeNativeInput } from './claude-native-input.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,

@@ -207,6 +207,18 @@
     "./claude/input-initialization": {
       "types": "./dist/claude/input-initialization.d.ts",
       "import": "./dist/claude/input-initialization.js"
+    },
+    "./claude/native-catalog": {
+      "types": "./dist/claude/native-catalog.d.ts",
+      "import": "./dist/claude/native-catalog.js"
+    },
+    "./claude/native-registry": {
+      "types": "./dist/claude/native-registry.d.ts",
+      "import": "./dist/claude/native-registry.js"
+    },
+    "./claude/native-session": {
+      "types": "./dist/claude/native-session.d.ts",
+      "import": "./dist/claude/native-session.js"
     }
   },
   "files": [

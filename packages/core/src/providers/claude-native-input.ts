@@ -9,7 +9,7 @@ import { nativeProcessBirth, nativeProcessUnixSocketOwners, nativeUnixSocketPeer
 import { normalizeNativeTranscriptPath } from '../agent-native-locator.js'
 import { nativeInputSourceId } from '../native-input-correlation.js'
 import { runProcess } from '../process-runner.js'
-import { locateClaudeNativeSessions } from './claude-native-session.js'
+import { locateClaudeNativeSessions } from './claude-native-sources.js'
 
 const PROTOCOL_ID = 'claude-uds-user-v1'
 const unavailable = () => new AgentMuxError('The exact native conversation input source is unconfirmed. The Agent, original permission request and terminal remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
