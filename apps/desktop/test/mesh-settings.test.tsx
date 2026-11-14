@@ -23,8 +23,11 @@ function inspectOnly() { return vi.spyOn(api.mesh, 'call').mockImplementation(as
 it('the original Settings section exposes Mesh and a real editor; saved connection identities keep their original route', async () => {
   inspectOnly(); expect(hostsSettingsModule.id).toBe('hosts'); expect(hostsSettingsModule.title).toBe('Mesh')
   await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={{section:'hosts',field:'mesh-configuration'}} />)
-  await ready(); expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Gateway')
-  expect(dom.container.textContent).toContain('Connections')
+  await ready(); expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('network')
+  expect(dom.container.querySelector('.mesh-editor-navigation')?.textContent).toContain('Gateway settings')
+  await dom.click('.mesh-editor-navigation button')
+  expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Overview')
+  expect(dom.container.querySelector('[aria-label="Saved devices"]')).not.toBeNull()
 })
 it('actual editor submits the original fence once and retains text authored after the save started', async () => {
   let finish!: (value: unknown) => void
@@ -135,8 +138,8 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     await dom.click('.mesh-network-heading button');await settled(()=>Boolean(dom.container.querySelector('.mesh-conflict')));expect(dom.container.textContent).toContain('Your edit is retained')
     expect(calls.filter(row=>row.method==='settings.mesh.configure')).toHaveLength(writesBefore+1)
     expect(initialA.owner.runtimeId).not.toBe(initialB.owner.runtimeId)
-    const {writeFile}=await import('node:fs/promises');await writeFile(resolve('.local/state/mesh-network-access/ui-joined-behavior.json'),JSON.stringify({passed:true,scope:'Actual production Mesh editor→Renderer protocol wrapper→registered fixed Main IPC→original Unix Core→official private Native owners. Controlled peer endpoints only; no user Runtime touched.',originalOwners:[initialA.owner,initialB.owner],privateRoots:cores.map(c=>c.directory),privatePids:cores.flatMap(c=>c.pids),authenticatedOutboundOnly:initialB.identity.peerId,gatewayPeer:initialA.identity.peerId,casRejectedWithoutReplay:true,originalPinsRetained:true,originalHostEndpoint:originalBEndpoint.endpoint.offer.serverId,originalEncryptionKey:originalBEndpoint.endpoint.offer.daemonPublicKeyB64,guiLinkUsedByOriginalDevice:true,deviceSettingsDenied:true,methodCounts:Object.fromEntries(['settings.mesh.inspect','settings.mesh.configure','mesh.inspect'].map(method=>[method,calls.filter(c=>c.method===method).length]))},null,2))
-  } finally { await dom.render(<div/>);for(const owner of owners)owner.dispose();vi.restoreAllMocks();for(const core of cores.reverse())await core.close(); const {access,writeFile}=await import('node:fs/promises'); const roots=await Promise.all(cores.map(async c=>({path:c.directory,absent:await access(c.directory).then(()=>false,()=>true)}))); const pids=cores.flatMap(c=>c.pids).map(pid=>{let exited=false;try{process.kill(pid,0)}catch(error){exited=(error as NodeJS.ErrnoException).code==='ESRCH'}return{pid,exited}});await writeFile(resolve('.local/state/mesh-network-access/ui-joined-cleanup.json'),JSON.stringify({passed:roots.every(r=>r.absent)&&pids.every(p=>p.exited),roots,pids},null,2));expect(roots.every(r=>r.absent)&&pids.every(p=>p.exited)).toBe(true) }
+    const {writeFile}=await import('node:fs/promises');await writeFile(resolve(process.env.AGENTMUX_MESH_UI_EVIDENCE ?? '.local/state/mesh-network-access', 'ui-joined-behavior.json'),JSON.stringify({passed:true,scope:'Actual production Mesh editor→Renderer protocol wrapper→registered fixed Main IPC→original Unix Core→official private Native owners. Controlled peer endpoints only; no user Runtime touched.',originalOwners:[initialA.owner,initialB.owner],privateRoots:cores.map(c=>c.directory),privatePids:cores.flatMap(c=>c.pids),authenticatedOutboundOnly:initialB.identity.peerId,gatewayPeer:initialA.identity.peerId,casRejectedWithoutReplay:true,originalPinsRetained:true,originalHostEndpoint:originalBEndpoint.endpoint.offer.serverId,originalEncryptionKey:originalBEndpoint.endpoint.offer.daemonPublicKeyB64,guiLinkUsedByOriginalDevice:true,deviceSettingsDenied:true,methodCounts:Object.fromEntries(['settings.mesh.inspect','settings.mesh.configure','mesh.inspect'].map(method=>[method,calls.filter(c=>c.method===method).length]))},null,2))
+  } finally { await dom.render(<div/>);for(const owner of owners)owner.dispose();vi.restoreAllMocks();for(const core of cores.reverse())await core.close(); const {access,writeFile}=await import('node:fs/promises'); const roots=await Promise.all(cores.map(async c=>({path:c.directory,absent:await access(c.directory).then(()=>false,()=>true)}))); const pids=cores.flatMap(c=>c.pids).map(pid=>{let exited=false;try{process.kill(pid,0)}catch(error){exited=(error as NodeJS.ErrnoException).code==='ESRCH'}return{pid,exited}});await writeFile(resolve(process.env.AGENTMUX_MESH_UI_EVIDENCE ?? '.local/state/mesh-network-access', 'ui-joined-cleanup.json'),JSON.stringify({passed:roots.every(r=>r.absent)&&pids.every(p=>p.exited),roots,pids},null,2));expect(roots.every(r=>r.absent)&&pids.every(p=>p.exited)).toBe(true) }
 },90000)
 it('late original endpoint link cannot appear beside later offer input', async () => {
   let finish!: (value: unknown) => void
@@ -189,7 +192,8 @@ it('unavailable setup offers recovery and the original saved connections without
   expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(true)
   await dom.click('.mesh-recovery-actions button:last-child')
   expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(false)
-  expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Connections')
+  expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('connections')
+  expect(dom.container.querySelector('.mesh-editor-navigation')?.textContent).toContain('Device connections')
   expect(call.mock.calls.some(row => row[0] === 'settings.mesh.configure')).toBe(false)
 })
 

@@ -3,8 +3,18 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Root } from 'react-dom/client'
 import type { MeshNetworkInspection } from '@agentmux/core/mesh-network'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { ReactFlowProvider, useReactFlow, useStoreApi, type ReactFlowInstance, type ReactFlowProps } from '@xyflow/react'
 import { MeshNetworkMap } from '../src/renderer/src/components/settings/MeshNetworkMap'
 import { meshTopologyModel } from '../src/renderer/src/components/settings/mesh-topology'
+const flowTrace = vi.hoisted(() => ({ instances: [] as ReactFlowInstance[] }))
+// Keep the installed production graph and its actual onInit instance; observe, never replace fitView.
+vi.mock('@xyflow/react', async original => {
+  const loaded = await original<typeof import('@xyflow/react') & { default?: typeof import('@xyflow/react') }>(), React = await import('react')
+  const actual = loaded.ReactFlowProvider ? loaded : loaded.default!
+  return { ...actual, ReactFlowProvider: actual.ReactFlowProvider, useReactFlow: actual.useReactFlow, useStoreApi: actual.useStoreApi,
+    Handle: actual.Handle, Position: actual.Position, useNodesState: actual.useNodesState,
+    ReactFlow: (props: ReactFlowProps) => React.createElement(actual.ReactFlow, { ...props, onInit: instance => { flowTrace.instances.push(instance); props.onInit?.(instance) } }) }
+})
 const ids = ['peer-original', 'peer-gateway', 'peer-destination']
 function observation(): MeshNetworkInspection {
   const record = (index: number, peers: number[]) => ({ version: 1 as const, networkId: 'work-machines', originPeerId: ids[index]!, epoch: 7, revision: 5, signature: 'fixture-signed', advertisedIngress: index === 1 ? [{ endpoint: 'gateway.internal:8444', useTls: false }] : [], neighbors: peers.map(n => ({ peerId: ids[n]!, peerEpoch: 7, connectionId: [index,n].sort().join('-'), rttMs: 11 })), publishers: index === 2 ? [{ serverId: 'original-endpoint', generation: 'publisher-original' }] : [] })
@@ -23,11 +33,40 @@ class LayoutWorker {
   reply() { this.onmessage?.({ data: { id: this.input!.id, positions: Object.fromEntries(this.input!.input.nodes.map((n,i) => [n.id,{x:i*240,y:40}])) } }) }
 }
 let container: HTMLDivElement, root: Root
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('Worker', LayoutWorker); LayoutWorker.instances = []; container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container) })
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('Worker', LayoutWorker); LayoutWorker.instances = []; flowTrace.instances = []; container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container) })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 async function render(snapshot = observation(), active = true) { await act(async () => root.render(<MeshNetworkMap snapshot={snapshot} active={active} />)) }
 async function click(selector: string) { await act(async () => { const element = container.querySelector<HTMLElement>(selector); expect(element, selector).not.toBeNull(); element!.click() }) }
 async function search(value: string) { await act(async () => { const input = container.querySelector<HTMLInputElement>('input')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true})) }) }
+
+it('explicit path actions fit the resized viewport once while subsequent observations preserve that viewport and every node position', async () => {
+  let flow: ReturnType<typeof useReactFlow> | undefined, store: ReturnType<typeof useStoreApi> | undefined
+  function ReadOriginalFlow() { flow = useReactFlow(); store = useStoreApi(); return null }
+  const snapshot = observation()
+  const show = async (value: MeshNetworkInspection) => { await act(async () => root.render(<ReactFlowProvider><ReadOriginalFlow /><MeshNetworkMap snapshot={value} /></ReactFlowProvider>)) }
+  const frames = async () => { await act(async () => { await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => done())))) }) }
+  await show(snapshot); await act(async () => LayoutWorker.instances[0]!.reply()); await frames(); await frames()
+  await act(async () => { await new Promise(done => setTimeout(done, 10)) })
+  expect(flow!.viewportInitialized).toBe(true)
+  expect(store!.getState().nodes).toHaveLength(3)
+  expect(flowTrace.instances).toHaveLength(1)
+  await act(async () => { await flow!.setViewport({ x: 81, y: 42, zoom: .75 }) })
+  const viewportWrites = vi.spyOn(flowTrace.instances[0]!, 'fitView')
+  const fits = () => viewportWrites.mock.calls.length
+  const positions = store!.getState().nodes.map(node => ({ id: node.id, position: node.position }))
+  await click('[data-mesh-object="route"]'); await frames()
+  expect(fits()).toBe(1)
+  const held = flow!.getViewport()
+  await show({ ...snapshot, observedAt: 2000 }); await frames()
+  expect(fits()).toBe(1); expect(flow!.getViewport()).toEqual(held)
+  expect(store!.getState().nodes.map(node => ({ id: node.id, position: node.position }))).toEqual(positions)
+  await click('[aria-label="Network scope"] button:nth-child(2)'); await frames(); expect(fits()).toBe(2)
+  await click('[aria-label="Network scope"] button:nth-child(2)'); await frames(); expect(fits()).toBe(3)
+  const focused = flow!.getViewport()
+  await show({ ...snapshot, observedAt: 3000 }); await frames()
+  expect(fits()).toBe(3); expect(flow!.getViewport()).toEqual(focused)
+  expect(store!.getState().nodes.every(node => positions.some(before => before.id === node.id && JSON.stringify(before.position) === JSON.stringify(node.position)))).toBe(true)
+})
 
 it('actual map consumer draws only reciprocal generation-matched links, retaining one-sided peers without declaring them healthy', async () => {
   const snapshot = observation(); snapshot.network!.records[1]!.neighbors[0]!.connectionId = 'other-generation'
@@ -47,6 +86,9 @@ it('available routes and adopted circuits keep distinct exact paths through the 
   expect(container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain('ADOPTED CIRCUIT')
   await click('[aria-label="Network view"] button:nth-child(2)')
   expect(container.querySelector('[data-mesh-object="circuit"]')?.getAttribute('aria-pressed')).toBe('true')
+  expect(container.querySelectorAll('.mesh-explorer__directory')).toHaveLength(1)
+  expect(container.querySelector('.mesh-explorer__workspace > .mesh-explorer__directory [data-mesh-object="circuit"]')).not.toBeNull()
+  expect(container.querySelector<HTMLElement>('.mesh-explorer__graph')?.hidden).toBe(true)
   await click('[aria-label="Network scope"] button:nth-child(2)')
   expect(container.querySelector('[aria-label="Selected endpoint network path"]')!.children).toHaveLength(3)
 })
@@ -71,7 +113,7 @@ it('status polling preserves geometry and selection; hiding stops only its layou
   await render(snapshot, false); expect(LayoutWorker.instances.every(worker => worker.terminated)).toBe(true)
   await render({ ...snapshot, owner: { ...snapshot.owner, ownerInstanceId: 'restarted-original-owner' } })
   expect(container.querySelector('[data-mesh-object="route"]')?.getAttribute('aria-pressed')).toBe('false')
-  expect(container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain('Follow the path')
+  expect(container.querySelector('[aria-label="Selected network object"]')).toBeNull()
 })
 
 it('a disappeared selected circuit remains an explicitly unobserved identity rather than silently selecting another path', async () => {
@@ -101,6 +143,8 @@ it('an actual original Core mesh observation reaches the production explorer and
     expect(container.querySelector('.mesh-explorer__header')?.textContent).toContain('1 reciprocal link')
     await click('[data-mesh-object="peer"]:not([aria-pressed=true])')
     await click('.mesh-peer-list li:nth-child(2) button')
+    await click('.mesh-explorer__identity summary')
+    expect(container.querySelector<HTMLDetailsElement>('.mesh-explorer__identity')?.open).toBe(true)
     expect(container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain(savedB.identity.peerId)
     expect(container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain('Authenticated')
     expect(container.textContent).toContain(actual.owner.runtimeId)
