@@ -8,7 +8,7 @@ import { WorkflowToolRow } from './WorkflowToolRow'
 import { workflowPresentation } from './presentation'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
-const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeObjectWorkflowIcon = semanticIconComponent('object.workflow')
 
 
 function safeId(value: string): string {
@@ -68,7 +68,7 @@ export function WorkflowCard({
         onClick={() => setExpandedValue(!expandedValue)}
       >
         <ThemeNavigationDisclosureIcon className="wf-chev" size={14} aria-hidden="true" />
-        <ThemeObjectBranchIcon className="wf-ico" size={12} aria-hidden="true" />
+        <ThemeObjectWorkflowIcon className="wf-ico" size={12} aria-hidden="true" />
         <span className="wf-head__name">Workflow <em>{workflow.name}</em></span>
         <span className="wf-chip">
           <WorkflowStatusGlyph status={workflow.status} size={12} />

@@ -40,6 +40,10 @@ export function DeferredConversationProcess({ record, readDetail, renderDetail, 
   const title = header.kind === 'captured' ? header.item.toolName ?? header.item.title
     : tool?.kind === 'tool-call' ? tool.name : header.item.title ?? (header.parts.some(part => part.kind === 'reasoning') ? 'Reasoning' : 'Recorded activity')
   const collaboration = header.kind === 'native' ? header.collaboration : undefined
+  const icon = header.kind === 'captured'
+    ? header.item.kind === 'tool_call' ? 'conversation.tool-call' : header.item.kind === 'permission' ? 'status.permission' : 'object.activity'
+    : collaboration ? 'object.collaboration' : tool ? 'conversation.tool-call'
+      : header.parts.some(part => part.kind === 'tool-result') ? 'conversation.tool-result' : 'object.activity'
   // The same row an eager step draws: its recorded time, and status read in the details when unrecorded.
   const time = header.kind === 'native' ? recordTime(header.item) : recordTime({ startedAt: header.item.createdAt, completedAt: header.item.updatedAt })
   const status = header.kind === 'captured' ? header.item.status : collaboration?.kind === 'operation'
@@ -49,7 +53,7 @@ export function DeferredConversationProcess({ record, readDetail, renderDetail, 
     data-deferred-process-id={record.rawId}>
     <RecordedToolRow className="log-row" observation={{ id: record.rawId, title, source: header.kind === 'native' ? NATIVE_CONVERSATION_SOURCE : 'Captured record', persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
-      hidden={disclosure?.stepGroup?.headerHidden ?? false} missingStatusInDetails icon={<SemanticIcon name="conversation.tool-call" size={12} />} expanded={expanded} controls={disclosure?.stepGroup?.controls ?? bodyId}
+      hidden={disclosure?.stepGroup?.headerHidden ?? false} missingStatusInDetails icon={<SemanticIcon name={icon} size={12} />} expanded={expanded} controls={disclosure?.stepGroup?.controls ?? bodyId}
       onToggle={() => { setOpen(!expanded); disclosure?.onStepExpandedChange(key, !expanded) }} />
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {loading ? <p role="status">Reading original process details…</p> : null}

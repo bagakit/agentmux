@@ -26,6 +26,20 @@ export const MOTE_COMPANION_PARTS = {
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
+  "workflow-route": {
+    shapes: [["rect", {"x":"3","y":"4","width":"6","height":"6","rx":"1.5"}], ["rect", {"x":"15","y":"14","width":"6","height":"6","rx":"1.5"}], ["path", {"d":"M9 7h6a3 3 0 0 1 3 3v4"}]],
+    design: {
+      rest: "两枚工作节点沿折线路径衔接，轮廓与留白在小尺寸保持清楚；区别于Git分支。",
+      motion: { kind: "still", animation: "none", description: "对象轮廓与连接保持静止，当前活动由独立状态槽表达。", trigger: "原Workflow对象或目的地显示；不表示当前执行、阶段数或进度。" }
+    }
+  },
+  "agent-unit": {
+    shapes: [["rect", {"x":"4","y":"5","width":"16","height":"15","rx":"4"}], ["path", {"d":"M9 11v1 M15 11v1 M9 16h6"}]],
+    design: {
+      rest: "安定圆角主体内两枚短眼孔与短基线，在12–16px保留Agent角色而减少天线和耳片碎部。",
+      motion: { kind: "still", animation: "none", description: "角色对象保持完整静止，不借眼孔表达在线或产出。", trigger: "通用Agent引用或未知Provider的原fallback槽；Provider品牌与Mote身份保持各自原选择。" }
+    }
+  },
   "settings-preferences": {
     shapes: [["path", {"d": "M3 7h18 M3 17h18"}], ["path", {"d": "M8 4v6 M16 14v6"}]],
     design: { rest: "Quiet controls with two distinct adjustment points.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
