@@ -27,7 +27,8 @@ const changes = {
   'drag-announces-pause': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', "if (quiet.current.pause) quiet.current.pause = false; else if (!released.current) announce('Paused')", "if (!released.current) announce('Paused')"],
   'drag-shows-disc': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'facts.paused && !facts.ended && !failure && !drag ?', 'facts.paused && !facts.ended && !failure ?'],
   'drag-shows-pause': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'const playingShown = drag ? drag.resume : playing', 'const playingShown = playing'],
-  'drag-lands-on-key-release': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'onKeyUp={() => { if (!pressed.current) onLand() }}', 'onKeyUp={onLand}']
+  'drag-lands-on-key-release': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'onKeyUp={() => { if (!pressed.current) onLand() }}', 'onKeyUp={onLand}'],
+  'press-keeps-old-value': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'if (pressedAt) onScrub(pressedAt.time)', 'void pressedAt']
 } as const
 
 export default defineConfig({ ...original,

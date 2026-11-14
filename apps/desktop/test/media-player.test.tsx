@@ -589,6 +589,22 @@ describe('mounted player', () => {
     expect(announced()).toBe('')
   })
 
+  it('a press lands on the pointed time even on the thumb itself, which a native range only grabs', async () => {
+    for (const kind of ['video', 'audio'] as const) {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease(kind)} name={`${kind}.mp4`} onRetry={() => {}} />)
+      const { state } = await engine(media(), { paused: true, duration: 600 })
+      layout()
+      timeline().style.setProperty('--media-thumb', '12px')
+      // happy-dom's range never moves on a press, like Chromium's when the press is on the thumb.
+      await act(async () => { timeline().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1, clientX: 499.1 })) })
+      expect(timeline().value, kind).toBe('498')
+      await press('pointerup')
+      expect(state.seeks, kind).toHaveLength(1)
+      expect(state.seeks[0], kind).toBeCloseTo(298.8, 6)
+      await act(async () => root.render(<></>))
+    }
+  })
+
   it('a paused video stays paused after a drag; a key let go mid-drag does not end it, and a cancelled pointer lands like a release', async () => {
     await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     const { state } = await engine(media(), { paused: true, duration: 600 })
