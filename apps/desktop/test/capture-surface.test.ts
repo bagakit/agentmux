@@ -71,7 +71,7 @@ function makePorts() {
     recordTiming: vi.fn(async (_timing: CaptureSurfaceTiming) => {}) }
 }
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
   electron.handlers.clear(); electron.windows = []; electron.workbench = []; electron.screenListeners.clear(); electron.appListeners.clear(); electron.saves = []
   electron.focus.mockClear(); electron.focused = null; electron.cursor = { x: -1, y: 0 }; electron.loadWindow = undefined
   electron.displays = [{ id: 1, bounds: main, scaleFactor: 2 }, { id: 7, bounds: side, scaleFactor: 1 }]
@@ -300,6 +300,29 @@ it.each([['selected', false], ['deferred', true]] as const)('Esc during the %s p
 
 it.each([['selected', false], ['deferred', true]] as const)('Esc during the %s producer keeps public excluded replacement native work sequential', async (_phase, deferred) => {
   await assertReplacementWaitsForProducer(true, deferred)
+})
+
+it.each([false, true])('capture_busy waits for the actual lease before the selected background becomes ready: public=%s', async publicCapture => {
+  const busy = Object.assign(new Error('another display producer still owns the lease'), { code: 'capture_busy' })
+  const captureDisplays = vi.fn().mockRejectedValueOnce(busy).mockResolvedValue(frames())
+  ports.native.mockReturnValue({ captureDisplays })
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  const outcome = publicCapture ? surface.captureSelection(false) : surface.present(session())
+  void outcome.catch(() => {})
+  await vi.advanceTimersByTimeAsync(0)
+  expect(captureDisplays, 'busy is not a selected-source failure or a reason to substitute another exposure').toHaveBeenCalledOnce()
+  await vi.advanceTimersByTimeAsync(24)
+  expect(captureDisplays).toHaveBeenCalledOnce()
+  await vi.advanceTimersByTimeAsync(1)
+  expect(captureDisplays.mock.calls.slice(0, 2), 'the same selected exposure retries before the normal alternate begins').toEqual([
+    [{ includeHostWindows: !publicCapture }], [{ includeHostWindows: !publicCapture }]
+  ])
+  expect(captureDisplays, 'the third call is the ordinary alternate after the selected retry succeeds').toHaveBeenCalledTimes(3)
+  const window = electron.windows[0]!, input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(window), 'load') as CaptureSurfaceInput
+  expect(input.background).toBe(publicCapture ? 'excluded' : 'included')
+  expect(input.backgrounds[input.background].status).toBe('ready')
+  await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(window), 'cancel', { requestId: input.requestId })
+  expect(await outcome).toEqual({ state: 'cancelled' })
 })
 
 it('cancel releases an early load and a late result cannot grab, revive or replace the next capture', async () => {
