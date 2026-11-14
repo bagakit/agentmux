@@ -2,7 +2,10 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { durableWriteFile } from '@agentmux/core'
+import { durableWriteFile, restoreMissingRecoveryFile } from '@agentmux/core'
+import type { RecoverySource, RecoveryRestoreMember } from '@agentmux/core'
+import { captureWorkbenchRecoveryFiles, inspectWorkbenchRecoveryFiles } from './workbench-recovery-source.js'
+import { confirmExistingWorkbenchRecoveryMember, prepareWorkbenchRecoveryMembers, readWorkbenchRecoveryMember, recoveryUnavailable } from './workbench-recovery-restore.js'
 import { parseAppWindowOperation, parseAppWindowTarget, type AppWindowOperation, type AppWindowTarget } from '@agentmux/core/control'
 import type { WindowGeometry } from './window-geometry.js'
 
@@ -44,12 +47,59 @@ export function parseStoredWorkbenchWindows(value: unknown): StoredWorkbenchWind
 /** Only native presentation intent/geometry and original operation receipts live here. */
 export class WorkbenchWindowStore {
   private tail: Promise<void> = Promise.resolve()
-  constructor(private readonly path: string) {}
+  private documentOpened = false
+  private readonly openedOperations = new Set<string>()
+  private readonly recoveryGaps = new Set<string>()
+  constructor(readonly path: string) {}
+
+  retainRecoveryGaps(memberIds: readonly string[]): void { for (const id of memberIds) if (id === 'document' || /^operations\/[a-f0-9]{64}\.json$/u.test(id)) this.recoveryGaps.add(id) }
+
+  recoverySource(): RecoverySource & { inspect(): Promise<string> } {
+    const id = 'desktop.windows'
+    const files = [{ id: 'document', target: this.path }], namespaces = [{ id: 'operations', directory: join(dirname(this.path), 'workbench-window-operations'),
+      accepts: (name: string) => /^[a-f0-9]{64}\.json$/u.test(name) }]
+    return { id, ownedPaths: [this.path, namespaces[0]!.directory], inspect: () => inspectWorkbenchRecoveryFiles(files, namespaces), capture: async directory => {
+      await this.tail.catch(() => {})
+      // Observe the original frontier; export IO cannot enter or ACK its tail.
+      return await captureWorkbenchRecoveryFiles(id, directory, files, namespaces)
+    }, prepareRestore: (members, directory) => prepareWorkbenchRecoveryMembers(members, directory, member => this.prepareRecoveryMember(member)),
+    restoreMissing: member => {
+      const operation = this.tail.catch(() => {}).then(async () => {
+        await this.prepareRecoveryMember(member, false)
+        const existing = await confirmExistingWorkbenchRecoveryMember(member, this.recoveryTarget(member))
+        if (existing) return existing
+        if (member.id === 'document' ? this.documentOpened : this.openedOperations.has(member.id)) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
+        return await restoreMissingRecoveryFile(member.file, this.recoveryTarget(member), member.sha256)
+      })
+      this.tail = operation.then(() => {})
+      void this.tail.catch(() => {})
+      return operation
+    } }
+  }
+
+  private recoveryTarget(member: RecoveryRestoreMember): string {
+    if (member.id === 'document') return this.path
+    if (!/^operations\/[a-f0-9]{64}\.json$/u.test(member.id)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    return join(dirname(this.path), 'workbench-window-operations', member.id.slice('operations/'.length))
+  }
+  private async prepareRecoveryMember(member: RecoveryRestoreMember, protectCurrent = true): Promise<string> {
+    const opened = () => member.id === 'document' ? this.documentOpened : this.openedOperations.has(member.id)
+    if (protectCurrent && opened()) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
+    const raw = await readWorkbenchRecoveryMember(member, this.recoveryTarget(member))
+    if (member.id === 'document') parseStoredWorkbenchWindows(JSON.parse(raw))
+    else {
+      const operation = parseAppWindowOperation(JSON.parse(raw))
+      if (this.operationPath(operation.input.operationId) !== member.target) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    }
+    if (protectCurrent && opened()) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
+    return raw
+  }
 
   async load(): Promise<WorkbenchWindowLoad> {
+    this.documentOpened = true
     try { return { state: parseStoredWorkbenchWindows(JSON.parse(await readFile(this.path, 'utf8'))), issue: null, writable: true } }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: { mainWindowId: mintObjectId(), windows: [] }, issue: null, writable: true }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !this.recoveryGaps.has('document')) return { state: { mainWindowId: mintObjectId(), windows: [] }, issue: null, writable: true }
       // Keep the original corrupt/unreadable bytes. This presentation failure must
       // neither replace the original workbench nor block its healthy Agents.
       return { state: { mainWindowId: mintObjectId(), windows: [] }, writable: false,
@@ -58,17 +108,20 @@ export class WorkbenchWindowStore {
   }
 
   async save(state: StoredWorkbenchWindows): Promise<void> {
+    this.documentOpened = true
+    if (this.recoveryGaps.has('document') && !(await this.load()).writable) throw recoveryUnavailable('DESKTOP_RECOVERY_SOURCE_UNCONFIRMED')
     const validated = parseStoredWorkbenchWindows({ schema: 'agentmux.workbench-windows.v1', ...state })
     await this.enqueue(this.path, { schema: 'agentmux.workbench-windows.v1', ...validated })
   }
 
   async operation(operationId: string): Promise<AppWindowOperation | null> {
+    this.openedOperations.add('operations/' + createHash('sha256').update(operationId).digest('hex') + '.json')
     try {
       const operation = parseAppWindowOperation(JSON.parse(await readFile(this.operationPath(operationId), 'utf8')))
       if (operation.input.operationId !== operationId) throw new Error('Stored receipt does not match the original operation.')
       return operation
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !this.recoveryGaps.has('operations/' + createHash('sha256').update(operationId).digest('hex') + '.json')) return null
       // Unknown journal bytes cannot authorize repeating a native side effect.
       throw new Error(`Original window operation could not be read; reconcile the same operation. ${String(error)}`)
     }
@@ -76,6 +129,8 @@ export class WorkbenchWindowStore {
 
   async saveOperation(operation: AppWindowOperation): Promise<void> {
     const validated = parseAppWindowOperation(operation)
+    this.openedOperations.add('operations/' + createHash('sha256').update(validated.input.operationId).digest('hex') + '.json')
+    if (this.recoveryGaps.has('operations/' + createHash('sha256').update(validated.input.operationId).digest('hex') + '.json')) await this.operation(validated.input.operationId)
     await this.enqueue(this.operationPath(validated.input.operationId), validated)
   }
 

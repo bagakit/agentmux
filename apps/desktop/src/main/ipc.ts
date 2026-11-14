@@ -6,7 +6,8 @@ import { registerSourceFilesIpc } from './source-files-ipc.js'
 import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
 import { createSpaceObjectAvatarResolver } from './space-object-avatar-target.js'
 import { isObjectAvatarMethod } from '@agentmux/core/object-avatar'
-import { createDesktopWorkbenchCloseOwner } from './workbench-close-owner.js'
+import { createDesktopWorkbenchClosePorts, WorkbenchCloseOwner } from './workbench-close-owner.js'
+import { DesktopStorageRecoveryExports } from './storage-recovery-exports.js'
 import { parseSpaceCloseParams, spaceCloseDigest, SPACE_CLOSE_METHODS, type SpaceCloseMethod, type SpaceCloseContext } from '@agentmux/core'
 import { configureChannelHeader, configureGoalsCommonActions, executeSettingsPreferencesControl } from './settings-preferences-control.js'
 import { isSettingsPreferenceMethod } from '@agentmux/core'
@@ -357,6 +358,8 @@ export async function registerIpc(args: {
   runtime: RuntimeController
   applicationAccess: AgentMuxApplicationAccessOwner
   workbenchUserState: WorkbenchUserStateStore
+  workbenchCloseOwner?: WorkbenchCloseOwner
+  storageRecoveryExports?: DesktopStorageRecoveryExports
 
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
@@ -802,10 +805,13 @@ export async function registerIpc(args: {
       }
     }
   }
-  const workbenchClose = createDesktopWorkbenchCloseOwner({ store: workbenchUserState, bridge: controlBridge, runtime: args.runtime,
+  const workbenchClose = args.workbenchCloseOwner ?? new WorkbenchCloseOwner(workbenchUserState)
+  const releaseClosePorts = workbenchClose.bindPorts(createDesktopWorkbenchClosePorts({ bridge: controlBridge, runtime: args.runtime,
     authority: () => ({ ownerId: spaceCloseDigest(workbenchUserState.path), endpoint: `unix:${desktopBusinessSocketPath()}`,
       documentGeneration: spaceCloseDigest(args.runtime.rendererGeneration(contents)) }),
-    closeBrowser: closeBrowserResource })
+    closeBrowser: closeBrowserResource }))
+  const storageRecoveryExports = args.storageRecoveryExports ?? new DesktopStorageRecoveryExports(workbenchUserState.path + '.recovery-exports',
+    () => [workbenchUserState.recoverySource(), args.workbenchWindows.recoverySource(), workbenchClose.recoverySource()])
   contents.on('render-process-gone', releaseRendererResources)
   contents.on('did-start-navigation', releaseNavigatedHtmlPreviews)
   const currentRendererCaptureTarget = () => {
@@ -1449,6 +1455,8 @@ export async function registerIpc(args: {
     return callUserRpc(method, parseGoalDelegationParams(method, input))
   })
   handle('demands:list', async () => readDesktopGoals(args.runtime))
+  handleWithEvent('demands:inputEpoch', async (event, input: import('@agentmux/core').AgentMuxRpcParams<'goal.input.epoch'>) =>
+    await callUserRpc('goal.input.epoch', input))
   handleWithEvent('demands:inspectDispatch', async (event, reference: GoalDispatchReference) => { assertGoalDispatchReference(reference)
     return (await callUserRpc('goal.inspect', { goalId: reference.goalId })).goal?.dispatches?.find(item => item.operationId === reference.operationId) ?? null
   })
@@ -1641,6 +1649,8 @@ export async function registerIpc(args: {
     return await workbenchClose.call(method, parseSpaceCloseParams(method, value), context)
   }))
   handleWithEvent('ui:readWorkbenchState', () => workbenchUserState.read())
+  handleWithEvent('ui:readStorageRecovery', () => args.runtime.readStorageRecovery())
+  handleWithEvent('ui:createStorageBackup', (_event, owner: import('@agentmux/core').AgentMuxRuntimeFence) => args.runtime.createStorageBackup(owner))
   handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))
   handleWithEvent('ui:writeWorkbenchState', (event, request: import('../shared/workbench-user-state').WorkbenchUserStateWrite) =>
     workbenchUserState.writeFromRenderer(event.senderFrame!, request, () => isAppDocumentSender(event, contents, args.appDocumentSources())))
@@ -2019,10 +2029,10 @@ export async function registerIpc(args: {
       if (hostId === target.hostId && agentSessionId === target.agentSessionId) typingBursts.delete(key)
     }
   }
-  handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
+  handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource,inputEpoch?:string) => {
     if (taskSource?.kind === 'goal') throw new AgentMuxError('Goal continuation requires its original explicit Goal Start.', 'INVALID_CONTROL_REQUEST')
     endInputBursts(target)
-    return (await callUserRpc('agent.progress.create', { target, intervalMs, prompt, ...(taskSource ? { taskSource } : {}), operationId: mintObjectId() })).loop
+    return (await callUserRpc('agent.progress.create', { target, intervalMs, prompt,...(inputEpoch===undefined?{}:{inputEpoch}), ...(taskSource ? { taskSource } : {}), operationId: mintObjectId() })).loop
   })
   handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedLoop: import('@agentmux/core').ContinuousProgressLoop, operationId: string) => {
     endInputBursts(target)
@@ -2120,6 +2130,8 @@ export async function registerIpc(args: {
       const loop = goalContinuation ? goal.goalContinuations.find(loop => loop.loopId === goalContinuation.loopId) : undefined
       if (goalContinuation && (!loop || loop.creationOperationId !== operationId || loop.initialDelivery?.prompt !== prompt || loop.hostId !== session.hostId || loop.agentSessionId !== session.agentSessionId || loop.initialDelivery.condition.expectedRun.runId !== session.run.runId)) throw new AgentMuxError('The original Goal input or target is unconfirmed. Inspect its retained Host request.', 'CONTROL_REQUEST_CONFLICT')
       await executeGoal({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.start', requestId: operationId, demandId: goalId, sessionId: session.agentSessionId,
+        ...(goalDispatch ? goalDispatch.inputEpoch === undefined ? {} : { inputEpoch: goalDispatch.inputEpoch }
+          : condition.inputEpoch === undefined ? {} : { inputEpoch: condition.inputEpoch }),
         ...(loop?.taskSource?.kind === 'goal' ? { continuation: { intervalMs: loop.intervalMs, alignmentRevision: loop.taskSource.alignmentRevision } } : {}) })
     } else {
       pauseUserProgress(session, 'Paused for your message.')
@@ -2173,17 +2185,18 @@ export async function registerIpc(args: {
     sessionReopenResult(() => args.runtime.reconcileRetiredSession(reference, expectedRetiredAt, operationId, config)))
   handle('sessions:reopen', async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
     sessionReopenResult(() => args.runtime.reopenRetiredSession(reference, expectedRetiredAt, operationId, config)))
-  handleWithEvent('sessions:resume', async (event, session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) => {
-    return await args.runtime.resumeSession(session, prompt, operationId, config, agentMuxNote)
+  handleWithEvent('sessions:resume', async (event, session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string, inputEpoch?: string) => {
+    return await args.runtime.resumeSession(session, prompt, operationId, config, agentMuxNote, inputEpoch)
   })
   handle('sessions:interrupt', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you interrupted the Agent.'); await args.runtime.interrupt(session) })
   handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => (
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
   ))
   handle('sessions:observeStorage', async (session: SessionControl) => await args.runtime.observeStorage(session))
+  handle('sessions:readInputEpoch', (hostId: string) => args.runtime.readInputEpoch(hostId))
   handle('sessions:controlContinuity', async (hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput) => await sessionObservationResult(() => args.runtime.controlContinuity(hostId, input)))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
-  handleWithEvent('sessions:recover', async (event, session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })) => { return await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)) })
+  handleWithEvent('sessions:recover', async (event, session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input' | 'inputEpoch'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })) => { return await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)) })
   handleWithEvent('sessions:restart', async (event, session: AgentSessionControl, operationId: string, observeOnly?: boolean) => {
     if (!observeOnly) pauseUserProgress(session, 'Paused because you restarted this Agent. Resume explicitly when ready.')
     return await sessionObservationResult(() => args.runtime.restartSession(session, config, operationId, observeOnly))
@@ -2717,6 +2730,7 @@ export async function registerIpc(args: {
       { captureSelection: () => captureSurface.captureSelection(BrowserWindow.getFocusedWindow() === null) }),
     images: screenshotPins,
     windows: args.workbenchWindows,
+    storageRecoveryExports,
     sequences: captureSequences,
     captures: createAppCapturePort(appCaptureSource, appRecordings),
     deliveryAttempts,
@@ -2839,6 +2853,8 @@ export async function registerIpc(args: {
       { owner: 'control-listener', dispose: () => { ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl) } },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
+      { owner: 'close-ports', dispose: releaseClosePorts },
+      ...args.storageRecoveryExports ? [] : [{ owner: 'storage-recovery-exports', dispose: () => storageRecoveryExports.dispose() }],
       { owner: 'execution-binding-reader', dispose: () => executionBindingTransport.dispose() },
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },

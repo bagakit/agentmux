@@ -14,7 +14,7 @@ export function GoalWorkArea({ demand, plan, overview, onRevealResults, active =
   const rawIntent = useAppStore(state => state.goalFiniteStartIntents[demand.id])
   const intent = readGoalFiniteStartIntent(rawIntent, demand.id)
   const fact = goalNextStepFact(current, rawIntent)
-  const pending = intent ?? current.dispatches?.find(item => item.execution === 'finite' && item.stage !== 'confirmed')
+  const pending = (intent?.phase === 'selecting-access' ? undefined : intent) ?? current.dispatches?.find(item => item.execution === 'finite' && item.stage !== 'confirmed')
   const hasWork = goalHasOriginalWork(current, rawIntent)
   const finitePrimary = primary && (fact.source.kind === 'goal' || Boolean(pending && fact.source.kind === 'start' && fact.source.operationId === pending.operationId))
   const finite = <GoalFiniteStartControl demand={current} active={active} embedded primary={finitePrimary} conclusion={pending && fact.source.kind === 'start' && fact.source.operationId === pending.operationId ? fact.text : undefined} />

@@ -554,6 +554,7 @@ const mockApi: AgentMuxDesktopApi = {
   goals: { execute: async () => { throw new Error('Goal operations require the original background Host.') },
     handoffDiscussion: async () => { throw new Error('Saved Goal discussions require their original Desktop and Core owners.') } },
   demands: {
+    inputEpoch: async input => ({ runtimeId: input.agentReference.execution.runtimeId, inputEpoch: null }),
     delegation: async () => { throw new Error('Original delegation facts and collection require the Desktop Goal and Core owners.') },
     onObservationIssue: () => () => {},
     onChanged: () => () => {},
@@ -892,6 +893,8 @@ const mockApi: AgentMuxDesktopApi = {
     readFileViewReading: async () => null,
     writeFileViewReading: async () => null,
     readWorkbenchState: async () => null,
+    readStorageRecovery: async () => { throw new Error('Storage recovery status requires the original Desktop Host.') },
+    createStorageBackup: async () => { throw new Error('Backup creation requires the original Desktop Host.') },
     importWorkbenchState: async value => value,
     writeWorkbenchState: async () => null,
     requestStorageFlush: async () => {},
@@ -1000,6 +1003,9 @@ const mockApi: AgentMuxDesktopApi = {
     cancel: async () => { throw new Error('Cancelling an arrangement requires the connected background Host. Its state is unconfirmed.') }
   },
   sessions: {
+    // This mock owns only the preview's ephemeral creation namespace. Live
+    // Desktop uses the typed preload/Main/Core reader below.
+    readInputEpoch: async () => null,
     owner: async () => { throw new Error('The original Agent Runtime identity requires its connected desktop Host. Its existing work remains available.') },
     takeovers: async () => { throw new Error('Recorded Takeover destinations require the original desktop Core. The Agent and its source remain available.') },
     dispatches: async () => { throw new Error('Original supervised collaboration records require the connected desktop Host. The Session and existing records remain available.') },

@@ -201,6 +201,7 @@ async function nameTakeover(source: TakeoverSource, report: AgentMuxSpaceMutatio
       return { ...report, outcome: 'retired', agent: { ...report.agent, runId: created.run.runId,
         retirement: { source: created.source, observedAt: created.observedAt } } }
     }
+    if (created && created.kind !== 'agent') throw new Error('The original creation has no confirmed Session. Its request and inherited name are retained; check the same operation again.')
     if (currentDisplayNameRevision('agent-session', agentSessionId) > 0) return report
     const createdAt = observed?.createdAt ?? created!.createdAt
     const time = new Date(createdAt), pad = (value: number) => String(value).padStart(2, '0')

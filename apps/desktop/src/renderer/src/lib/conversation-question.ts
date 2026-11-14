@@ -57,7 +57,8 @@ export async function sendConversationQuestionReply(control: AgentSessionControl
   }
   await submitQuestionReply({ sessionId: control.agentSessionId, get,
     create: () => ({ hostId: control.hostId, phase: 'sending', input: { ...structuredClone(input), ...(moteSource ? { moteSource: structuredClone(moteSource) } : {}),
-      expectedRun: { ...control.run }, afterSubmissionId: session.promptSubmissionPredecessor ?? null, operationId: mintObjectId() } }),
+      expectedRun: { ...control.run }, afterSubmissionId: session.promptSubmissionPredecessor ?? null,
+      ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), operationId: mintObjectId() } }),
     retain: (next, expected) => retainConversationQuestionReply(control.agentSessionId, key, next, expected),
     submit: original => { assertOwner(); return api.sessions.replyQuestion(control, original) }
   })

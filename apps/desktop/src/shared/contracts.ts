@@ -850,6 +850,9 @@ export type AgentLaunchInput = {
   forkSource?: AgentMuxAgentCreateInput['forkSource']
   nativeResumeSource?: AgentMuxAgentCreateInput['nativeResumeSource']
   prompt?: string
+  /** Namespace epoch frozen by the original new-create producer, never filled on retry. */
+  inputEpoch?: string
+  inputRuntimeId?: string
   /** Host-generated content, kept separate from the original request. */
   agentMuxNote?: string
   /** Core-authenticated author of the original creation prompt. */
@@ -1078,6 +1081,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       forkedFrom?: AgentMuxAgentSession['forkedFrom']
       /** Core-owned admission identity. null is confirmed empty; undefined is unknown. */
       promptSubmissionPredecessor?: string | null | undefined
+      inputEpoch?: string
       /** Core-confirmed refusal of the original complete input, never a later invocation failure. */
       promptInputNotApplied?: import('@agentmux/core/prompt-condition').AgentPromptNotApplied | undefined
       /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
@@ -1236,6 +1240,7 @@ export type RuntimeSnapshot = {
 }
 
 export type AgentSessionRecoveryCandidate = {
+  inputEpoch?: string
   workPlacement?: AgentWorkPlacement
   toolExecution?: NonNullable<AgentMuxAgentSession['toolExecution']>
   agentSessionId: string
@@ -1904,6 +1909,7 @@ export type AgentMuxDesktopApi = {
     handoffDiscussion(input: import('@agentmux/host/goal-discussion-bindings').GoalDiscussionHandoff): Promise<import('@agentmux/host/goal-discussion-bindings').GoalDiscussionBindingReceipt>
   }
   demands: {
+    inputEpoch(input: AgentMuxRpcParams<'goal.input.epoch'>): Promise<AgentMuxRpcResult<'goal.input.epoch'>>
     delegation<M extends 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue'>(method: M, input: import('@agentmux/core/goal-delegation').GoalDelegationParamsMap[M]): Promise<import('@agentmux/core/goal-delegation').GoalDelegationResult>
     onObservationIssue(listener: (message: string) => void): () => void
     onChanged(listener: (goalIds: string[], snapshot: boolean) => void): () => void
@@ -1930,6 +1936,8 @@ export type AgentMuxDesktopApi = {
     readFileViewReading(owner: import('./workbench-user-state').FileViewReadingOwner): Promise<import('./workbench-user-state').FileViewReadingRecord | null>
     writeFileViewReading(record: import('./workbench-user-state').FileViewReadingRecord): Promise<import('./workbench-user-state').FileViewReadingReceipt | null>
     readWorkbenchState(): Promise<string | null>
+    readStorageRecovery(): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
+    createStorageBackup(owner: import('@agentmux/core').AgentMuxRuntimeFence): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
     importWorkbenchState(value: string): Promise<string>
     writeWorkbenchState(value: string): Promise<import('./workbench-user-state').WorkbenchUserStateReceipt | null>
     /** Await the native user-state owner queue after Renderer batches settle. */
@@ -2060,6 +2068,7 @@ export type AgentMuxDesktopApi = {
     nativeHistoryResource(input: NativeAgentHistoryResourceInput): Promise<NativeAgentHistoryResourceResult>
     observeStorage(session: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation>
     launchAgent(input: AgentLaunchInput, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
+    readInputEpoch(hostId: string): Promise<string | null>
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
     owner(hostId: string, expectedRuntimeId?: string): Promise<AgentMuxRpcResult<'runtime.owner.identity'>>
@@ -2121,7 +2130,7 @@ export type AgentMuxDesktopApi = {
     setPosture(session: AgentSessionControl, modeId: string, operationId: string): Promise<import('@agentmux/core').PostureReceipt>
     reopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
     reconcileReopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
-    resume(session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string): Promise<SessionSnapshot>
+    resume(session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string, inputEpoch?: string): Promise<SessionSnapshot>
     restart(session: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<SessionRestartResult>
     interrupt(session: SessionControl | AgentInputTarget): Promise<void>
     resize(
@@ -2137,7 +2146,7 @@ export type AgentMuxDesktopApi = {
     // Transport loss remains an error and never authorizes resume.
     // Returns the Core continuity disposition; the renderer rebinds only an attached/resumed
     // Agent or a newly restarted raw Terminal.
-    recover(session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })): Promise<SessionRecoveryResult>
+    recover(session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input' | 'inputEpoch'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })): Promise<SessionRecoveryResult>
     /**
      * Stop one exact Run. An Agent Stop answers with the Core receipt; a retry with the same
      * `operationId` continues that same Stop. A Terminal Stop retains its original operation ID

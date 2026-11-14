@@ -4,7 +4,10 @@ import type { SpaceObjectImageTarget } from '@agentmux/core/object-avatar'
 import { createHash } from 'node:crypto'
 import { mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
-import { durableWriteFile, DurableWriteError } from '@agentmux/core'
+import { durableWriteFile, DurableWriteError, restoreMissingRecoveryFile } from '@agentmux/core'
+import type { RecoverySource, RecoveryRestoreMember } from '@agentmux/core'
+import { captureWorkbenchRecoveryFiles, inspectWorkbenchRecoveryFiles } from './workbench-recovery-source.js'
+import { confirmExistingWorkbenchRecoveryMember, holdRecoveredWorkbenchDocument, prepareWorkbenchRecoveryMembers, readWorkbenchRecoveryMember, recoveryUnavailable } from './workbench-recovery-restore.js'
 
 import type { WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
 import type { WorkbenchUserStateWrite, WorkbenchUserStateWriteReceipt } from '../shared/workbench-user-state.js'
@@ -46,6 +49,9 @@ async function syncDirectory(path: string): Promise<void> {
  */
 export class WorkbenchUserStateStore {
   private tail: Promise<void> = Promise.resolve()
+  private rootOpened = false
+  private readonly openedAuxiliary = new Set<string>()
+  private readonly recoveryGaps = new Map<string, string>()
   private rendererWriter: object | null = null
   private rendererRevision = 0
   private rendererValue: string | null = null
@@ -71,7 +77,75 @@ export class WorkbenchUserStateStore {
 
   observe(): WorkbenchUserStateObservation { return structuredClone(this.observation) }
 
+  retainRecoveryGaps(memberIds: readonly string[], reason: string): void {
+    for (const id of memberIds) if (id === 'document' || /^(?:object-avatar-requests|file-view-reading)\/[a-f0-9]{64}\.json$/u.test(id)) this.recoveryGaps.set(id, reason)
+  }
+
+  recoverySource(): RecoverySource & { inspect(): Promise<string> } {
+    const id = 'desktop.user-state'
+    const files = [{ id: 'document', target: this.path }], namespaces = [
+      { id: 'object-avatar-requests', directory: this.path + '.object-avatar-requests', accepts: (name: string) => /^[a-f0-9]{64}\.json$/u.test(name) },
+      { id: 'file-view-reading', directory: this.path + '.file-view-reading', accepts: (name: string) => /^[a-f0-9]{64}\.json$/u.test(name) }
+    ]
+    return { id, ownedPaths: [this.path, ...namespaces.map(value => value.directory)], inspect: () => inspectWorkbenchRecoveryFiles(files, namespaces), capture: async directory => {
+      await this.queue(async () => {})
+      const root = await captureWorkbenchRecoveryFiles(id, directory, files)
+      // Independent atomic members have their own cuts; a stalled auxiliary
+      // request must never hold the original root document's writer queue.
+      const auxiliary = await captureWorkbenchRecoveryFiles(id, directory, [], namespaces)
+      return { revision: digest(root.revision + auxiliary.revision), members: [...root.members, ...auxiliary.members], gaps: [...root.gaps, ...auxiliary.gaps] }
+    }, prepareRestore: (members, directory) => prepareWorkbenchRecoveryMembers(members, directory, member => this.prepareRecoveryMember(member)),
+    restoreMissing: member => this.restoreRecoveryMember(member) }
+  }
+
+  private recoveryTarget(member: RecoveryRestoreMember): string {
+    if (member.id === 'document') return this.path
+    if (!/^(?:object-avatar-requests|file-view-reading)\/[a-f0-9]{64}\.json$/u.test(member.id)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    const [kind, name] = member.id.split('/')
+    return join(this.path + '.' + kind, name!)
+  }
+  private async prepareRecoveryMember(member: RecoveryRestoreMember, protectCurrent = true): Promise<string> {
+    if (protectCurrent && (member.id === 'document' ? this.rootOpened : this.openedAuxiliary.has(member.id))) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
+    const raw = await readWorkbenchRecoveryMember(member, this.recoveryTarget(member))
+    let value = raw
+    if (member.id === 'document') value = holdRecoveredWorkbenchDocument(raw)
+    else if (member.id.startsWith('file-view-reading/')) {
+      const record = JSON.parse(raw), key = fileViewReadingOwnerKey(record?.owner)
+      if (record?.schema !== 'agentmux.file-view-reading.v1' || !isFileViewReadingPosition(record.position) || member.id !== 'file-view-reading/' + digest(key) + '.json') throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    } else {
+      const records: unknown = JSON.parse(raw)
+      if (!Array.isArray(records)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+      const operations = new Set<string>()
+      for (const item of records) {
+        const request = objectAvatarRequest(item?.request)
+        if (member.id !== 'object-avatar-requests/' + digest(objectAvatarRequestKey(request.target)) + '.json' ||
+          !Number.isSafeInteger(item?.createdAt) || item.createdAt < 0 || Object.keys(item).some(key => !['request', 'createdAt'].includes(key)) || operations.has(request.operationId)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+        operations.add(request.operationId)
+      }
+    }
+    if (protectCurrent && (member.id === 'document' ? this.rootOpened : this.openedAuxiliary.has(member.id))) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
+    return value
+  }
+  private async restoreRecoveryMember(member: RecoveryRestoreMember): Promise<'restored' | 'same' | 'conflict'> {
+    // Re-check inside this original member's queue; preparation does not reserve
+    // user input or grant permission to overwrite a later admitted image.
+    const restore = async () => {
+      const prepared = await this.prepareRecoveryMember(member, false)
+      if (prepared !== await readWorkbenchRecoveryMember(member, this.recoveryTarget(member))) throw recoveryUnavailable('DESKTOP_RECOVERY_PREPARATION_REQUIRED')
+      const existing = await confirmExistingWorkbenchRecoveryMember(member, this.recoveryTarget(member))
+      if (existing) return existing
+      if (member.id === 'document' ? this.rootOpened : this.openedAuxiliary.has(member.id)) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
+      return await restoreMissingRecoveryFile(member.file, this.recoveryTarget(member), member.sha256)
+    }
+    if (member.id === 'document') return await this.queue(restore)
+    const hash = member.id.slice(member.id.indexOf('/') + 1, -'.json'.length)
+    return member.id.startsWith('object-avatar-requests/') ? await this.avatarMemberQueue(hash, restore) : await this.readingMemberQueue(hash, restore)
+  }
+
   private avatarRequestQueue<T>(key: string, action: () => Promise<T>): Promise<T> {
+    return this.avatarMemberQueue(digest(key), action)
+  }
+  private avatarMemberQueue<T>(key: string, action: () => Promise<T>): Promise<T> {
     const result = (this.avatarRequestTails.get(key) ?? Promise.resolve()).then(action)
     const settled = result.then(() => {}, () => {})
     this.avatarRequestTails.set(key, settled)
@@ -82,7 +156,7 @@ export class WorkbenchUserStateStore {
   private async readAvatarRequests(key: string): Promise<ObjectAvatarRequestRecord[]> {
     let raw: string
     try { raw = await (this.io.read ?? readFile)(this.avatarRequestsPath(key), 'utf8') }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') { if (this.recoveryGaps.has('object-avatar-requests/' + digest(key) + '.json')) throw recoveryUnavailable('DESKTOP_RECOVERY_SOURCE_UNCONFIRMED'); return [] }; throw error }
     const value: unknown = JSON.parse(raw)
     if (!Array.isArray(value)) throw new Error('The original avatar save requests are unreadable. Their bytes and current draft are retained.')
     const records = value.map(item => {
@@ -97,6 +171,7 @@ export class WorkbenchUserStateStore {
   /** Exact avatar request member; ordinary root/draft writes never encode PNG bodies. */
   async readObjectAvatarRequests(target: SpaceObjectImageTarget): Promise<ObjectAvatarRequestRecord[]> {
     const key = objectAvatarRequestKey(target)
+    this.openedAuxiliary.add('object-avatar-requests/' + digest(key) + '.json')
     return this.avatarRequestQueue(key, () => this.readAvatarRequests(key))
   }
   private async writeAvatarRequests(key: string, records: ObjectAvatarRequestRecord[]) {
@@ -107,6 +182,7 @@ export class WorkbenchUserStateStore {
   }
   async keepObjectAvatarRequest(raw: ObjectAvatarAssetRequest): Promise<void> {
     const request = objectAvatarRequest(raw), key = objectAvatarRequestKey(request.target)
+    this.openedAuxiliary.add('object-avatar-requests/' + digest(key) + '.json')
     await this.avatarRequestQueue(key, async () => {
       const records = await this.readAvatarRequests(key), original = records.find(value => value.request.operationId === request.operationId)
       if (original) {
@@ -118,6 +194,7 @@ export class WorkbenchUserStateStore {
   }
   async retireObjectAvatarRequest(raw: ObjectAvatarAssetRequest): Promise<void> {
     const request = objectAvatarRequest(raw), key = objectAvatarRequestKey(request.target)
+    this.openedAuxiliary.add('object-avatar-requests/' + digest(key) + '.json')
     await this.avatarRequestQueue(key, async () => {
       const records = await this.readAvatarRequests(key), original = records.find(value => value.request.operationId === request.operationId)
       if (!original) return
@@ -135,7 +212,7 @@ export class WorkbenchUserStateStore {
     try {
       let raw: string
       try { raw = await (this.io.read ?? readFile)(this.readingPath(captured), 'utf8') }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') { this.readingReady.add(key); return null }; throw error }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') { if (this.recoveryGaps.has('file-view-reading/' + digest(key) + '.json')) throw recoveryUnavailable('DESKTOP_RECOVERY_SOURCE_UNCONFIRMED'); this.readingReady.add(key); return null }; throw error }
       const value = JSON.parse(raw)
       if (value?.schema !== 'agentmux.file-view-reading.v1' || fileViewReadingOwnerKey(value.owner) !== key || !isFileViewReadingPosition(value.position)) throw new Error('The saved reading preference could not be confirmed. Its original bytes are retained.')
       this.readingReady.add(key)
@@ -146,12 +223,14 @@ export class WorkbenchUserStateStore {
   /** One physical member: neither the root document nor unrelated drafts are read or encoded. */
   async readFileViewReading(owner: FileViewReadingOwner): Promise<FileViewReadingRecord | null> {
     const captured = captureFileViewReadingOwner(owner)
+    this.openedAuxiliary.add('file-view-reading/' + digest(fileViewReadingOwnerKey(captured)) + '.json')
     return this.readingQueue(fileViewReadingOwnerKey(captured), () => this.readReadingCurrent(captured))
   }
 
   /** Same native owner/ordered queue and durable receipt, with an exact-member write boundary. */
   async writeFileViewReading(record: FileViewReadingRecord): Promise<FileViewReadingReceipt> {
     const encoded = encodeFileViewReading(record), owner = captureFileViewReadingOwner(record.owner)
+    this.openedAuxiliary.add('file-view-reading/' + digest(fileViewReadingOwnerKey(owner)) + '.json')
     return this.readingQueue(fileViewReadingOwnerKey(owner), async () => {
       const path = this.readingPath(owner)
       try {
@@ -176,6 +255,9 @@ export class WorkbenchUserStateStore {
   }
 
   private readingQueue<T>(key: string, action: () => Promise<T>): Promise<T> {
+    return this.readingMemberQueue(digest(key), action)
+  }
+  private readingMemberQueue<T>(key: string, action: () => Promise<T>): Promise<T> {
     const result = (this.readingTails.get(key) ?? Promise.resolve()).then(action)
     const tail = result.then(() => {}, () => {}).finally(() => { if (this.readingTails.get(key) === tail) this.readingTails.delete(key) })
     this.readingTails.set(key, tail)
@@ -247,6 +329,7 @@ export class WorkbenchUserStateStore {
     try { value = await (this.io.read ?? readFile)(this.path, 'utf8') }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if (this.recoveryGaps.has('document')) throw recoveryUnavailable('DESKTOP_RECOVERY_SOURCE_UNCONFIRMED')
       Object.assign(this.observation, { availability: 'missing', contentDigest: null, sizeBytes: null,
         diskDurability: 'unconfirmed', confirmedAt: null })
       return null
@@ -261,6 +344,7 @@ export class WorkbenchUserStateStore {
   }
 
   read(): Promise<string | null> {
+    this.rootOpened = true
     return this.queue(async () => {
       try { return await this.readCurrent() }
       catch (error) { await this.failed('read', error); throw error }
@@ -283,6 +367,7 @@ export class WorkbenchUserStateStore {
 
   /** The native absence check and first import are one owner-serialized operation. */
   importIfAbsent(value: string): Promise<string> {
+    this.rootOpened = true
     return this.queue(async () => {
       let current: string | null
       try { current = await this.readCurrent() }
@@ -301,6 +386,7 @@ export class WorkbenchUserStateStore {
   }
 
   write(value: string): Promise<WorkbenchUserStateReceipt> {
+    this.rootOpened = true
     return this.queue(async () => {
       try { validate(value) }
       catch (error) { await this.failed('write', error, true); throw error }
@@ -313,6 +399,7 @@ export class WorkbenchUserStateStore {
   /** Admit before joining IO. A delayed old IPC cannot overwrite a newer admitted document.
    * One physical writer and one latest pending image remain bounded even when IO is stuck. */
   writeFromRenderer(writer: object, request: WorkbenchUserStateWrite, current: () => boolean): Promise<WorkbenchUserStateWriteReceipt> {
+    this.rootOpened = true
     const superseded = () => Object.assign(new Error('A newer original Desktop input replaced this save request. Current input is retained.'),
       { code: 'WORKBENCH_USER_STATE_SUPERSEDED' })
     if (!current() || !request || !Number.isSafeInteger(request.writeRevision) || request.writeRevision < 1) return Promise.reject(superseded())

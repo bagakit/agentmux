@@ -109,8 +109,16 @@ export function useScheduleOperation(draftKey: string, accept: (record: Continuo
     const original = useLauncherState.getState().drafts[draftKey]?.schedule?.pending
     if (flight.current?.key === draftKey) return null
     if (original && !sameRequest(original, request)) { setError('An original arrangement request remains unconfirmed. Inspect that request before submitting another.'); return null }
-    const token = { key: draftKey }; flight.current = token; setBusyKey(draftKey); setError(undefined); remember(request)
+    const token = { key: draftKey }; flight.current = token; setBusyKey(draftKey); setError(undefined)
+    if(original)request=original
     try {
+      if(!original&&request.action==='create'&&request.params.inputEpoch===undefined){
+        let inputEpoch:string|undefined
+        try{inputEpoch=await api.sessions.readInputEpoch(request.params.target.hostId)??undefined}catch{/* Keep this exact original request with missing qualification; never guess or renew it on retry. */}
+        request={...request,params:{...request.params,...(inputEpoch===undefined?{}:{inputEpoch})}}
+      }
+      if(!isCurrent())return null
+      remember(request)
       await checkpointLauncherState()
       const receipt = request.action === 'create' ? await api.schedule.create(request.params)
         : await api.schedule[request.action](request.params)

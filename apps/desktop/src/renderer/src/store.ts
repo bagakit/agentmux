@@ -54,7 +54,7 @@ import { emptyApplicationAccess, restoredApplicationAccess, type ApplicationAcce
 import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
 import { isSessionRecoveryReplyUnconfirmed } from '../../shared/session-recovery-result'
 import { handoffSavedGoalDiscussions } from './lib/goal-discussion-handoff'
-import { readGoalFiniteStartIntent, restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
+import { readGoalFiniteStartIntent, restoredGoalFiniteStartIntents, type GoalFiniteStartInput } from './lib/goal-finite-start'
 import type { GoalEditDrafts } from './lib/goal-edit-drafts'
 import { goalDiscussionRequestKey, originalGoalDiscussionRequest, type GoalDiscussionRequest, type GoalDiscussionTaskMode } from './lib/goal-discussion-request'
 import { observeNotifications } from './lib/notification-observation'
@@ -843,6 +843,8 @@ export type AgentSteerQueueEntry = {
   moteSource?: import('@agentmux/core').AgentInputMoteSource
   inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
   operationId: string
+  /** Frozen at the original producer birth, before any later Session refresh. */
+  inputEpoch?: string
   /** The first accepted local intent time; absent means it was never recorded. */
   enqueuedAt?: number
   runId?: string
@@ -894,6 +896,7 @@ export type AgentSteerQueueEntry = {
   /** Original recovery+input request, frozen before the first RPC; unknown replies never become PTY permission. */
   resumeInputIntent?: {
     control: Extract<SessionSnapshot, { kind: 'agent' }>['control']
+    inputEpoch?: string
     input: NonNullable<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput['input']>
   }
   /** Actual Core carrier receipt; launch carriage is separate from Native consumption or terminal ACK. */
@@ -918,17 +921,17 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
   if (!direct || session?.kind !== 'agent') return
   // Browser tasks address the conversation, even when a click dispatches them
   // immediately. They must not answer native trust/login or question screens.
-  if (recipient) return { expectedRun: { ...recipient.run }, admissionIntent: { kind: 'session-conversation' } }
+  if (recipient) return { expectedRun: { ...recipient.run }, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'session-conversation' } }
   if (session.pendingInteraction) return interactionNativeComposerBinding(session)
   return initialNativeComposerBinding(session) ??
     // Main role routing is frozen separately; this new human Send still uses the current terminal.
-    { expectedRun: { ...session.control.run }, admissionIntent: { kind: 'manual-actor' } }
+    { expectedRun: { ...session.control.run }, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'manual-actor' } }
 }
 
 function originalMemberComposerBinding(session: SessionSnapshot | undefined, origin?: 'manual'): AgentSteerQueueEntry['directInputBinding'] {
   if (origin !== 'manual' || session?.kind !== 'agent' || session.processState !== 'running') return
   if (session.pendingInteraction) return interactionNativeComposerBinding(session)
-  return initialNativeComposerBinding(session) ?? { expectedRun: { ...session.control.run }, admissionIntent: { kind: 'manual-actor' as const } }
+  return initialNativeComposerBinding(session) ?? { expectedRun: { ...session.control.run }, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'manual-actor' as const } }
 }
 
 function originalInputRoute(entry: Pick<AgentSteerQueueEntry, 'originalMember' | 'directInputControl'>): AgentSessionControl | AgentInputTarget {
@@ -1836,7 +1839,7 @@ export type AppState = GitReadingActions & {
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
   reopenRetiredSession(source: SessionHistoryDescriptor, operationId?: string, observeOnly?: boolean, reveal?: () => boolean): Promise<SessionSnapshot | undefined>
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
-  recoverSession(sessionId: string, operationId?: string, options?: { moteMain?: MoteMainInputSelection; focusTask?: AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]; preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open'; input?: NonNullable<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput['input']>; inputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control'] }): Promise<SessionSnapshot | undefined>
+  recoverSession(sessionId: string, operationId?: string, options?: { inputEpoch?: string; moteMain?: MoteMainInputSelection; focusTask?: AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]; preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open'; input?: NonNullable<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput['input']>; inputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control'] }): Promise<SessionSnapshot | undefined>
   restartSession(control: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<import('../../shared/contracts').SessionRestartResult>
   /** Never silent: every result other than `stopped` names what happened and the action that works. */
   stopSession(sessionId: string): Promise<SessionStopOutcome>
@@ -2137,6 +2140,7 @@ export function recoveryCandidateSession(
   return {
     id: candidate.agentSessionId,
     kind: 'agent',
+    ...(candidate.inputEpoch === undefined ? {} : { inputEpoch: candidate.inputEpoch }),
     providerId: candidate.providerId,
     executorId: candidate.executorId,
     ...(candidate.nativeSessionId === undefined ? {} : { nativeSessionId: candidate.nativeSessionId }),
@@ -5098,7 +5102,7 @@ async function requestWorkbenchStorageFlush(includeSpatial = true, includeFileVi
     } catch (error) { failure ??= { error } }
     if (failure) throw failure.error
     if (current() && failureRevision === workbenchSaveFailureRevision &&
-        (__AGENTMUX_WEB_PREVIEW__ || desktopUserDocument.unreadFragments().length === 0) &&
+        (__AGENTMUX_WEB_PREVIEW__ || !desktopUserDocument.pending() && !desktopUserDocument.hasReadFailure()) &&
         (includeSpatial || useAppStore.getState().workbenchSaveWarningOwner === 'local-storage')) {
       useAppStore.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
     }
@@ -5402,29 +5406,32 @@ export async function clearGoalAgentSelectionDraft(goalId: string, role: GoalAge
   useAppStore.setState(state => { if (state.goalAgentSelectionDrafts[key] !== expected) return state; const goalAgentSelectionDrafts = { ...state.goalAgentSelectionDrafts }; delete goalAgentSelectionDrafts[key]; return { goalAgentSelectionDrafts } })
   await saveWorkbenchSelection(false)
 }
-export async function retainGoalFiniteStartIntent(intent: GoalFiniteStartIntent, expected: unknown): Promise<AgentMuxSpatialSave> {
+export async function retainGoalFiniteStartIntent(intent: GoalFiniteStartInput, expected: unknown): Promise<AgentMuxSpatialSave> {
   const raw = useAppStore.getState().goalFiniteStartIntents[intent.goalId], original = readGoalFiniteStartIntent(raw, intent.goalId)
   if (raw !== expected && raw !== intent) throw new Error('The original Goal Start input changed. Your newer private input is retained.')
   const goal = useAppStore.getState().demands[intent.goalId]
-  const rejected = original && goal?.dispatches?.find(value => value.operationId === original.operationId && value.stage === 'rejected')
+  const rejected = original && original.phase !== 'selecting-access' ? goal?.dispatches?.find(value => value.operationId === original.operationId && value.stage === 'rejected') : undefined
   const nextReference = intent.agentReference ?? intent.sessionId
   const replacesRejection = original?.agentReference && nextReference && rejected?.stage === 'rejected' &&
-    raw === expected && original.operationId !== intent.operationId && intent.phase === 'not-attempted' && intent.expectedUpdatedAt === goal?.updatedAt &&
+    original.phase !== 'selecting-access' && raw === expected && original.operationId !== intent.operationId && (intent.phase === 'not-attempted' || intent.phase === 'selecting-access') && intent.expectedUpdatedAt === goal?.updatedAt &&
     rejected.expectedUpdatedAt === original.expectedUpdatedAt &&
     demandAgentReferenceKey(rejected.target) === demandAgentReferenceKey(original.agentReference) &&
     goal?.assigneeSessionIds?.some(value => demandAgentReferenceKey(value) === demandAgentReferenceKey(nextReference))
   if (!readGoalFiniteStartIntent(intent, intent.goalId) || raw !== undefined && !replacesRejection && (!original ||
-      JSON.stringify([original.operationId, original.agentReference ?? original.sessionId, original.access]) !==
-      JSON.stringify([intent.operationId, intent.agentReference ?? intent.sessionId, intent.access]) ||
-      original.expectedUpdatedAt !== intent.expectedUpdatedAt && (original.phase !== 'not-attempted' || intent.phase !== 'not-attempted')))
+      (original.phase === 'selecting-access' ? intent.phase !== 'selecting-access' && (intent.phase !== 'not-attempted' ||
+        demandAgentReferenceKey(original.agentReference) !== demandAgentReferenceKey(intent.agentReference ?? intent.sessionId))
+        : intent.phase === 'selecting-access' || JSON.stringify([original.operationId, original.agentReference ?? original.sessionId, original.access, original.inputEpoch]) !==
+          JSON.stringify([intent.operationId, intent.agentReference ?? intent.sessionId, intent.access, intent.inputEpoch]) ||
+          original.expectedUpdatedAt !== intent.expectedUpdatedAt && (original.phase !== 'not-attempted' || intent.phase !== 'not-attempted'))))
     throw new Error('The original Goal Start request cannot be replaced. Keep its operation and input; the Agent is retained.')
   useAppStore.setState(state => ({ goalFiniteStartIntents: { ...state.goalFiniteStartIntents, [intent.goalId]: intent } }))
   return await saveWorkbenchSelection(false)
 }
-export async function clearGoalFiniteStartIntent(goalId: string, operationId: string, expected: unknown): Promise<{ cleared: boolean; save: AgentMuxSpatialSave }> {
+export async function clearGoalFiniteStartIntent(goalId: string, operationId: string | undefined, expected: unknown): Promise<{ cleared: boolean; save: AgentMuxSpatialSave }> {
   let cleared = false
   useAppStore.setState(state => {
-    if (state.goalFiniteStartIntents[goalId] !== expected || readGoalFiniteStartIntent(expected, goalId)?.operationId !== operationId) return state
+    const original = readGoalFiniteStartIntent(expected, goalId)
+    if (state.goalFiniteStartIntents[goalId] !== expected || !original || original.operationId !== operationId) return state
     const goalFiniteStartIntents = { ...state.goalFiniteStartIntents }; delete goalFiniteStartIntents[goalId]
     cleared = true
     return { goalFiniteStartIntents }
@@ -5738,9 +5745,12 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     (onRejected ?? useAppStore.getState().reportError)(new Error(`The active message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Archive queued messages before adding another. Your draft is kept.`))
     return false
   }
+  const inputEpoch = options?.goalContinuation ? options.goalContinuation.condition.inputEpoch
+    : options?.goalPmo ? options.goalPmo.inputEpoch : options?.goalDispatch ? options.goalDispatch.inputEpoch : session.inputEpoch
   const entry: AgentSteerQueueEntry = {
     ...(focusTask ? { focusTask } : {}),
     operationId,
+    ...(inputEpoch === undefined ? {} : { inputEpoch }),
     promptCondition: options?.goalContinuation ? validateAgentPromptCondition(options.goalContinuation.condition) : null,
     ...(directInputBinding ? { directInputBinding, runId: directInputBinding.expectedRun.runId } : {}),
     ...(directInputBinding || options?.originalSession ? { directInputControl: structuredClone(browserRecipient ?? session.control) } : {}),
@@ -7854,7 +7864,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
         survey: { collectedZoneIds: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true),
           organization: state.surveyOrganization, pageReferences: state.surveyPageReferences, pinnedReferences: surveyPinnedReferences(state), ...(state.surveyPinReadRecovery ? { pinIssue: state.surveyPinReadRecovery.issue } : {}), selection: surveySelectionPresentation(state.surveyZoneSelection) },
-        persistence: { userStatePending: persistentWorkbenchStorage.pending() || desktopUserDocument.unreadFragments().length > 0 || auxiliaryUserDataPending(),
+        persistence: { userStatePending: (__AGENTMUX_WEB_PREVIEW__ ? persistentWorkbenchStorage.pending() : desktopUserDocument.pending()) || auxiliaryUserDataPending(),
           userStateContentDigest: (() => {
             const encoded = desktopUserDocument.encodeProjection({ state: partializeAppState(state), version: 1 })
             return encoded === null ? null : bytesToHex(sha256(utf8ToBytes(encoded)))
@@ -7972,7 +7982,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return {
           agentSessionId: session.id,
           ...(session.promptSubmissionPredecessor === undefined ? {} : { promptCondition: {
-            expectedRun: { ...session.control.run }, afterSubmissionId: session.promptSubmissionPredecessor } }),
+            expectedRun: { ...session.control.run }, afterSubmissionId: session.promptSubmissionPredecessor, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }) } }),
           projectId: project?.id ?? null,
           projectName: project?.name ?? null,
           workspacePath: session.workspacePath,
@@ -8272,7 +8282,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const receipt = await api.sessions.stop(session.control, request.requestId)
         return { operation: request.operation, agentSessionId: session.id, ...(receipt && 'agentSessionId' in receipt ? { receipt } : {}) }
       }
-      const resumed = await api.sessions.resume(session.control, request.text, request.requestId)
+      const resumed = await api.sessions.resume(session.control, request.text, request.requestId, undefined, request.inputEpoch)
       if (resumed.kind !== 'agent' || resumed.id !== session.id) {
         throw controlFailure('LAUNCH_RESULT_MISMATCH', 'Explicit resume returned another Agent Session.')
       }
@@ -11574,10 +11584,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const launchNote = agentMuxNote ?? state.agentComposerNotes[regionId]
     const createOperationId = pmo?.intent.creationOperationId === undefined ? mintObjectId() : await goalPmoOperation(pmo.intent, 'create')
     const sessionId = pmo?.intent.creationOperationId === undefined ? mintObjectId() : await api.sessions.resolveCreationSessionId(workspace.hostId, createOperationId)
+    const retainedBirth = get().pendingAgentLaunches[sessionId]?.request
+    const inputEpoch = retainedBirth?.createOperationId === createOperationId && retainedBirth.hostId === executionHostId
+      ? retainedBirth.inputEpoch : pmo?.intent.creationOperationId !== undefined ? pmo.intent.inputEpoch : await api.sessions.readInputEpoch(executionHostId) ?? undefined
     let reachRequest: AgentLaunchInput | undefined = sourceStart ? {
       executorId, executorRevision: sourceStart.executor.configRevision, hostId: executionHostId,
       workspacePath: sourceStart.selection.coordinator.homeDirectory, agentSessionId: sessionId, createOperationId,
-      launcher: { tabId, regionId }, toolWorkspace: toolWorkspace!, prompt,
+      launcher: { tabId, regionId }, toolWorkspace: toolWorkspace!, prompt, inputRuntimeId: sourceStart.selection.coordinator.runtimeId, ...(inputEpoch === undefined ? {} : { inputEpoch }),
       sourceCoordinator: { hostId: executionHostId, runtimeId: sourceStart.selection.coordinator.runtimeId,
         resourceRuntimeId: sourceStart.selection.target.reference.runtimeId, workingDirectory: 'device-home' },
       ...(launchOptions === undefined ? {} : { launchOptions }), ...(launchNote === undefined ? {} : { agentMuxNote: launchNote })
@@ -11593,10 +11606,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (reachInput) reachRequest = reachInput.request
     const live = get(), liveTargetTab = launcher ? live.tabs[tabId] : targetTab
     const liveLayout = live.layouts[displayWorkspaceId!]
-    if (pmo && (!liveTargetTab || launcher && liveTargetTab.regions[regionId] !== launcherSurface ||
+    if (!liveTargetTab || launcher && liveTargetTab.regions[regionId] !== launcherSurface ||
       !liveLayout || !findGroup(liveLayout, tabGroupId) || launcher && !findGroup(liveLayout, tabGroupId)!.tabOrder.includes(tabId) ||
-      !workbenchViewCloseAllowsView(live.closingWorkbenchViews, tabId))) {
-      throw new Error('The original PMO display position changed before creation. The Goal and original request are kept.')
+      !workbenchViewCloseAllowsView(live.closingWorkbenchViews, tabId)) {
+      throw new Error('The original launch position changed before dispatch. Your draft is retained; choose its current location before launching again.')
     }
     const priorFailure = lifecycleNotification(state.notificationEvents, { regionId })
     const pendingSurface: AgentWorkbenchSurface = {
@@ -11606,12 +11619,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       workspaceId: workspace.id,
       sessionId
     }
-    const replacedTab = replaceWorkbenchRegion(pmo ? liveTargetTab! : targetTab, regionId, pendingSurface)
+    const replacedTab = replaceWorkbenchRegion(liveTargetTab!, regionId, pendingSurface)
     const pendingTab = scratchTopicId ? { ...replacedTab, topicId: scratchTopicId } : replacedTab
     // 没有 launcher 归属时这条 Tab 是新建的，必须真的挂进某个分组。挂不上就抛：原先用 addTab
     // 的静默回落，Tab 记录进了 state.tabs 而不在任何 tabOrder 里——永不显示、永不可关，且用户
     // 点了「启动」看不到任何反馈（实测抛出的是 null，多出一条孤儿记录）。
-    const nextLayout = launcher ? pmo ? liveLayout! : layout : addTabOrThrow(pmo ? liveLayout! : layout, tabGroupId, tabId)
+    const nextLayout = launcher ? liveLayout! : addTabOrThrow(liveLayout!, tabGroupId, tabId)
     set((current) => ({
       tabs: { ...current.tabs, [tabId]: pendingTab },
       layouts: {
@@ -11620,7 +11633,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       },
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
-        [sessionId]: { events: [], overflowed: false, request: reachRequest ?? { executorId, hostId: workspace.hostId, workspacePath: workspace.path, createOperationId, prompt,
+        [sessionId]: { events: [], overflowed: false, request: reachRequest ?? { executorId, hostId: workspace.hostId, workspacePath: workspace.path, createOperationId, prompt, ...(inputEpoch === undefined ? {} : { inputEpoch }),
           ...(launcher ? { launcher: { tabId, regionId }, executionWorkspaceId: workspace.id } : {}),
           ...(launchOptions ? { launchOptions } : {}),
           ...(toolWorkspace ? { toolWorkspace, executionWorkspaceId: workspace.id, executorRevision: executor!.executorRevision! } : {}),
@@ -11659,7 +11672,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         workspacePath: workspace.path,
         ...(scratchTopicId ? { scratchTopicId } : {}),
         ...(launchOptions && Object.keys(launchOptions).length > 0 ? { launchOptions } : {}),
-        prompt,
+        prompt, ...(inputEpoch === undefined ? {} : { inputEpoch }),
         ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }),
         agentSessionId: sessionId,
         createOperationId
@@ -13035,8 +13048,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         state.sessions.find(item => item.id === sessionId) !== session ||
         state.agentSteerInFlight[sessionId] === operationId) return state
       const { error: _error, errorCode: _code, logId: _log, preparationWait: _wait,
-        preparationInputNotApplied: _safe, awaitingExplicitSend: _pause, ...original } = entry
-      const next: AgentSteerQueueEntry = { ...original, operationId: newOperationId, enqueuedAt: Date.now(),
+        preparationInputNotApplied: _safe, awaitingExplicitSend: _pause, inputEpoch: _oldEpoch, ...original } = entry
+      const next: AgentSteerQueueEntry = { ...original, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), operationId: newOperationId, enqueuedAt: Date.now(),
         promptCondition: null, status: 'queued', awaitingExplicitSend: true }
       changed = true
       return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: current.flatMap(item =>
@@ -13362,7 +13375,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 }) } }))
               deliveryAttempt.stage = 'session-recovery'
               const resumeInputIntent = entry.resumeInputIntent ?? (entry.freshComposerIntent && entry.promptCondition === null
-                ? { control: structuredClone(entry.browserRecipient ?? entry.browserInput?.control ?? session.control), input: { submissionId: entry.operationId, prompt: entry.text,
+                ? { control: structuredClone(entry.browserRecipient ?? entry.browserInput?.control ?? session.control), ...(entry.inputEpoch === undefined ? {} : { inputEpoch: entry.inputEpoch }), input: { submissionId: entry.operationId, prompt: entry.text,
                     ...(entry.browserInput ? { inputContextCapture: entry.browserInput.capture.reference } : {}),
                     ...(entry.agentMuxNote === undefined ? {} : { agentMuxNote: entry.agentMuxNote }),
                     ...(entry.origin === 'manual' ? { authorHuman: true } : {}), sourceChannel: entry.sourceChannel ?? 'message-tool' } } : undefined)
@@ -13370,7 +13383,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 [sessionId]: current.agentSteerQueues[sessionId]!.map(item => item.operationId === entry.operationId
                   ? { ...item, resumeInputIntent, inputIntakeStarted: true as const } : item) } }))
               const recovered = await get().recoverSession(sessionId, entry.operationId, { trigger: 'input',
-                ...(resumeInputIntent ? { input: resumeInputIntent.input, inputControl: resumeInputIntent.control, ...(entry.moteMain ? { moteMain: entry.moteMain } : {}), ...(entry.focusTask ? { focusTask: entry.focusTask } : {}), ...(entry.inputImages?.length ? { inputImages: entry.inputImages } : {}) } : {}) })
+                ...(resumeInputIntent ? { input: resumeInputIntent.input, inputControl: resumeInputIntent.control, ...(resumeInputIntent.inputEpoch === undefined ? {} : { inputEpoch: resumeInputIntent.inputEpoch }), ...(entry.moteMain ? { moteMain: entry.moteMain } : {}), ...(entry.focusTask ? { focusTask: entry.focusTask } : {}), ...(entry.inputImages?.length ? { inputImages: entry.inputImages } : {}) } : {}) })
               if (!recovered || recovered.kind !== 'agent' || recovered.processState !== 'running') {
                 throw new Error(get().sessions.find(item => item.id === sessionId)?.status.detail ??
                   'Session restoration did not produce a running Agent. Your message is kept.')
@@ -13441,7 +13454,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 return
               }
               const condition = validateAgentPromptCondition({ expectedRun: fresh.control.run,
-                afterSubmissionId: fresh.promptSubmissionPredecessor })
+                afterSubmissionId: fresh.promptSubmissionPredecessor, ...(pending.inputEpoch === undefined ? {} : { inputEpoch: pending.inputEpoch }) })
               if (!explicitAttempt && (!steerQueueCanDrainNow(fresh) || fresh.status.state === 'disconnected')) return
               if (!explicitAttempt && fresh.status.state === 'working') return
               const execution = explicitAttempt ? (pending.execution ?? 'default') : 'default'
@@ -13830,6 +13843,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       try {
         const canonical = await api.sessions.creation(reference.hostId, reference.agentSessionId)
         if (canonical.kind === 'retired-agent') throw new Error('The original Session is still closed. Keep its recovery request and check the same operation; no replacement was started.')
+        if (canonical.kind !== 'agent') throw new Error('The original creation has no confirmed Session. Keep its recovery request and check the same operation; no replacement was started.')
         if (canonical.agentSessionId !== reference.agentSessionId || canonical.hostId !== reference.hostId ||
           (source.history && (canonical.providerId !== source.history.providerId ||
             canonical.executorId !== source.history.executorId || canonical.workspacePath !== source.history.workspacePath)) ||
@@ -13909,6 +13923,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // operation; resolving today's configuration cannot reproduce that original intent.
         const created = await api.sessions.creation(input.hostId, input.agentSessionId!)
         if (created.kind === 'retired-agent') throw new Error('The original resume target was closed. Its operation and history are retained; explicitly recover that Session to continue.')
+        if (created.kind !== 'agent') throw new Error('The original creation has no confirmed Session. Its resume request and native conversation are retained; check the same operation again.')
         if (created.creation?.createOperationId !== input.createOperationId) {
           throw new Error('This saved Session belongs to another creation operation. Keep the original resume identity and inspect its receipt.')
         }
@@ -13929,6 +13944,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       session = result.session ?? recoveryCandidateSession({
         agentSessionId: created.agentSessionId, hostId: input.hostId, workspacePath: created.workspacePath,
         providerId: created.providerId, executorId: created.executorId,
+        ...(created.inputEpoch === undefined ? {} : { inputEpoch: created.inputEpoch }),
         capabilities,
         label: source.title ?? created.executorId, createdAt: created.createdAt, updatedAt: created.updatedAt,
         run: created.run, nativeSessionId: source.source.nativeHandle.sessionId,
@@ -13972,7 +13988,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? resolution.operationId : undefined
     const recoveryOperationId = operationId ?? retryResolution ?? mintObjectId()
     const request = { trigger: options?.trigger ?? 'manual' as const, ...(options?.timingOverride ? { timingOverride: options.timingOverride } : {}),
-      ...(options?.input ? { input: structuredClone(options.input) } : {}), ...(options?.moteMain ? { moteMain: structuredClone(options.moteMain) } : {}), ...(options?.focusTask ? { focusTask: structuredClone(options.focusTask) } : {}), ...(options?.inputImages?.length ? { inputImages: structuredClone(options.inputImages) } : {}) }
+      ...(options?.input ? { input: structuredClone(options.input), ...(options.inputEpoch === undefined ? {} : { inputEpoch: options.inputEpoch }) } : {}), ...(options?.moteMain ? { moteMain: structuredClone(options.moteMain) } : {}), ...(options?.focusTask ? { focusTask: structuredClone(options.focusTask) } : {}), ...(options?.inputImages?.length ? { inputImages: structuredClone(options.inputImages) } : {}) }
     const recoverOriginal = () => api.sessions.recover(structuredClone(recoveryControl), current.workspacePath,
       recoveryOperationId, structuredClone(request))
     try {

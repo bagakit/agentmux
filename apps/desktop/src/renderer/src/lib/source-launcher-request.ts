@@ -27,7 +27,7 @@ export async function sendSourceLauncherRequest(input: MountedAgentOpenInput, co
   let dispatched = false
   store.retainSpaceMountAgentOpen(key, current => {
     if (current && current.request !== input.request) return current
-    const retained = { ...(current ?? input), submitted: true }; delete retained.issue
+    const retained = { ...(current ?? input), submitted: true }; if (input.submitted) delete retained.issue
     return retained
   })
   try {
@@ -36,7 +36,12 @@ export async function sendSourceLauncherRequest(input: MountedAgentOpenInput, co
     dispatched = true
     const receipt = await api.spaceMounts.call('open', { hostId: input.target.hostId, reference: input.target.reference, request: input.request })
     if (receipt.operationId !== input.request.operationId) throw Error('This receipt belongs to another original operation. Keep the original request and check its owner.')
-    store.retainSpaceMountAgentOpen(key, current => current?.request === input.request ? { ...current, receipt } : current)
+    store.retainSpaceMountAgentOpen(key, current => {
+      if (current?.request !== input.request) return current
+      const confirmed = { ...current, receipt }
+      if (receipt.agent && (receipt.outcome === 'opened' || receipt.outcome === 'partial')) delete confirmed.issue
+      return confirmed
+    })
     const retained = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)
     if (retained?.request === input.request) void applyOriginalLaunchNames({ kind: 'source', input: retained })
     return receipt

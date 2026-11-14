@@ -52,7 +52,7 @@ export function sourceCoordinatorInput(value: unknown, key: string): SourceCoord
       typeof names.agentName !== 'string' || typeof names.tabName !== 'string' || typeof raw.submitted !== 'boolean' || typeof link.submitted !== 'boolean' ||
       project.repoPath !== undefined && typeof project.repoPath !== 'string' ||
       raw.issue !== undefined && typeof raw.issue !== 'string' || link.issue !== undefined && typeof link.issue !== 'string' ||
-      request.prompt !== undefined && typeof request.prompt !== 'string') return unavailable()
+      request.prompt !== undefined && typeof request.prompt !== 'string' || request.inputEpoch !== undefined && (typeof request.inputEpoch !== 'string' || !request.inputEpoch)) return unavailable()
   const input = raw as SourceCoordinatorInput
   if (sourceCoordinatorInputKey(input.request) !== key) return unavailable()
   if (raw.acknowledged !== undefined && (!object(raw.acknowledged) || !object(raw.acknowledged.target) ||

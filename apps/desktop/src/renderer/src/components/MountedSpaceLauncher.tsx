@@ -7,6 +7,7 @@ import { checkpointMountedSpaceInputs, useAppStore } from '../store'
 import { mountedAgentOpenInput, mountedAgentOpenKey, mountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSlot } from '../lib/space-mount-launch'
 import type { SpaceMountHostChoices, SpaceMountRecord } from '../../../shared/space-mount'
 import { ExecutionRouteLink } from './AgentExecutionRelation'
+import { newSourceAgentInput } from '../lib/new-source-agent-input'
 
 /** The original Space accepts this business request; this Window owns only its unsent selection and frozen intent. */
 type MountedSpaceLauncherProps = {
@@ -30,7 +31,7 @@ function MountedSpaceLauncherContent({ target, project, slot, mountKey, active, 
   const routeTarget = selection?.agentTarget, routeKey = JSON.stringify(routeTarget), choiceKey = JSON.stringify(routeTarget ? ['route', routeTarget] : ['host', agentHostId])
   const inventory = routeTarget ? routedInventory?.inventory : directInventory
   const [inFlight, setInFlight] = useState(() => new Map<string, symbol>()), producer = useRef(inFlight)
-  const busy = Boolean(original && inFlight.has(original.request.operationId))
+  const busy = inFlight.size > 0
   const [issue, setIssue] = useState<string>(), [inspection, setInspection] = useState<AgentMuxRpcResult<'space.inspect'>>()
   const inspectionReader = useRef<AbortController | undefined>(undefined)
   useEffect(() => {
@@ -68,7 +69,7 @@ function MountedSpaceLauncherContent({ target, project, slot, mountKey, active, 
     if (producer.current.has(operationId) || input.submitted && !continueOriginal) return
     const token = Symbol(operationId), pending = new Map(producer.current)
     pending.set(operationId, token); producer.current = pending; setInFlight(pending); setIssue(undefined)
-    const store = useAppStore.getState(), retained = { ...input, submitted: true }; delete retained.issue
+    const store = useAppStore.getState(), retained = { ...input, submitted: true }; if (input.submitted) delete retained.issue
     let dispatched = false
     try {
       store.retainSpaceMountAgentOpen(key, current => current && current.request !== input.request ? current : retained)
@@ -77,7 +78,12 @@ function MountedSpaceLauncherContent({ target, project, slot, mountKey, active, 
       dispatched = true
       const receipt = await api.spaceMounts.call('open', { hostId: input.target.hostId, reference: input.target.reference, request: input.request })
       if (receipt.operationId !== input.request.operationId) throw Error('The response belongs to another original task. Keep the original request and check its source.')
-      store.retainSpaceMountAgentOpen(key, current => current?.request === input.request ? { ...current, receipt } : current)
+      store.retainSpaceMountAgentOpen(key, current => {
+        if (current?.request !== input.request) return current
+        const confirmed = { ...current, receipt }
+        if (receipt.agent && (receipt.outcome === 'opened' || receipt.outcome === 'partial')) delete confirmed.issue
+        return confirmed
+      })
     } catch (cause) {
       const message = `${dispatched ? 'The original task result is unknown.' : input.submitted ? 'The original task was not continued. Its earlier result remains unconfirmed.' : 'The task was not sent.'} ${presentError(cause)}`
       try {
@@ -93,10 +99,21 @@ function MountedSpaceLauncherContent({ target, project, slot, mountKey, active, 
   }
   async function create() {
     if (original || !canStart || !projectTarget || !inventory) return
-    const input: MountedAgentOpenInput = { kind: 'agent-open', target: projectTarget, slot, submitted: false,
-      request: { operationId: crypto.randomUUID(), content: { kind: 'new-agent', executorId, agentTarget: routeTarget ? routedInventory!.agentTarget : { hostId: agentHostId, runtimeId: inventory.runtimeId }, ...(prompt ? { prompt } : {}) },
-        destination: { spaceId: target.reference.spaceId, zoneId: projectTarget.zoneId, newTab: true }, focus: false } }
-    await send(input)
+    const birth = `new:${key}`
+    if (producer.current.has(birth)) return
+    const token = Symbol(birth), pending = new Map(producer.current)
+    pending.set(birth, token); producer.current = pending; setInFlight(pending); setIssue(undefined)
+    try {
+      const agentTarget = structuredClone(routeTarget ? routedInventory!.agentTarget : { hostId: agentHostId, runtimeId: inventory.runtimeId })
+      const sourceInput = await newSourceAgentInput(projectTarget, agentTarget)
+      const input: MountedAgentOpenInput = { kind: 'agent-open', target: projectTarget, slot, submitted: false, ...(sourceInput.issue ? { issue: sourceInput.issue } : {}),
+        request: { operationId: crypto.randomUUID(), content: { kind: 'new-agent', executorId, agentTarget, ...sourceInput.fields, ...(prompt ? { prompt } : {}) },
+          destination: { spaceId: target.reference.spaceId, zoneId: projectTarget.zoneId, newTab: true }, focus: false } }
+      await send(input)
+    } catch (cause) { setIssue(presentError(cause)) }
+    finally {
+      if (producer.current.get(birth) === token) { const remaining = new Map(producer.current); remaining.delete(birth); producer.current = remaining; setInFlight(remaining) }
+    }
   }
   async function inspect() {
     if (!original) return
@@ -115,7 +132,7 @@ function MountedSpaceLauncherContent({ target, project, slot, mountKey, active, 
   const completed = !retired && (original?.receipt?.outcome === 'opened' || observedReport?.outcome === 'opened')
   const terminalObservation = completed || retired
   const targetMatches = routeTarget ? JSON.stringify(routedInventory?.agentTarget) === routeKey : directInventory?.routeHostId === agentHostId
-  const canStart = active && !unreadable && !!projectTarget && targetMatches && Boolean(executor)
+  const canStart = active && !busy && !unreadable && !!projectTarget && targetMatches && Boolean(executor)
   return <div className="mounted-space-launcher" aria-label="New work in original Space">
     <div className="mounted-space-launcher__project"><small>Project device · original Space</small><code>{project?.directoryPath ?? 'Original project directory unobserved'}</code></div>
     <div className="mounted-space-launcher__fields">

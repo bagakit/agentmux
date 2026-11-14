@@ -10,13 +10,16 @@ import { readLoadedPackageIdentity } from './client-observation.js'
 
 import { RendererUpdates } from './renderer-updates.js'
 import { readFile, rename, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { app, BrowserWindow, crashReporter, dialog, Menu, nativeTheme, shell, webContents } from 'electron'
 import { resolveTheme } from '@agentmux/client-ui/theme'
-import { AgentMuxFileAgentSessionStore, prepareProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
+import { AgentMuxFileAgentSessionStore, defaultAgentMuxControlSocketPath, prepareProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { WorkbenchUserStateStore } from './workbench-user-state.js'
+import { WorkbenchCloseOwner } from './workbench-close-owner.js'
+import { DesktopStorageRecoveryExports } from './storage-recovery-exports.js'
+import { recoverWorkbenchBeforeLoad } from './workbench-recovery-bootstrap.js'
 import { applicationMenuTemplate } from './application-menu.js'
 import { ZoomCommands } from './zoom-commands.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
@@ -107,6 +110,16 @@ function startPrimaryInstance(): void {
   const clientIncidents = new ClientIncidentArchive(join(app.getPath('userData'), 'client-incidents'))
   // One application lifetime owns writes across Window/IPC reconstruction.
   const workbenchUserState = new WorkbenchUserStateStore(join(app.getPath('userData'), 'workbench-user-state.json'))
+  const workbenchWindowStore = new WorkbenchWindowStore(join(app.getPath('userData'), 'workbench-windows.json'))
+  const workbenchCloseOwner = new WorkbenchCloseOwner(workbenchUserState)
+  const storageRecoveryExports = new DesktopStorageRecoveryExports(workbenchUserState.path + '.recovery-exports',
+    () => [workbenchUserState.recoverySource(), workbenchWindowStore.recoverySource(), workbenchCloseOwner.recoverySource()])
+  // Observe original sources once before any default document/window load.
+  let recoveryBootstrap: Promise<import('./workbench-recovery-bootstrap.js').WorkbenchRecoveryBootstrap> | undefined
+  const recoverWorkbench = () => recoveryBootstrap ??= recoverWorkbenchBeforeLoad({
+    storePath: desktopAgentSessionStorePath(), stateDirectory: dirname(desktopAgentSessionStorePath()),
+    socketPath: defaultAgentMuxControlSocketPath(), desktopSocketPath: `${defaultAgentMuxControlSocketPath()}.desktop`,
+    user: workbenchUserState, windows: workbenchWindowStore, close: workbenchCloseOwner, exports: storageRecoveryExports })
   const performanceScene = new PerformanceSceneOwner(join(app.getPath('userData'), 'performance-scene.json'))
   const appMemory = new AppMemoryEvidenceOwner(join(app.getPath('userData'), 'app-memory-evidence.json'))
   void app.whenReady().then(() => appMemory.start()).catch(error => console.error('Application memory observation failed:', error))
@@ -155,6 +168,7 @@ function startPrimaryInstance(): void {
         { owner: 'renderer-updates', dispose: () => rendererUpdates?.dispose() },
         { owner: 'workbench-windows', dispose: () => workbenchWindows?.dispose() },
         { owner: 'desktop-ipc', dispose: () => disposeRegisteredIpc?.() },
+        { owner: 'storage-recovery-exports', dispose: () => storageRecoveryExports.dispose() },
         { owner: 'application-access', dispose: () => applicationAccess.dispose() },
         { owner: 'runtime', dispose: () => runtime.dispose() }
       ], 'Desktop owner disposal failed')
@@ -192,6 +206,7 @@ function startPrimaryInstance(): void {
     }))
 
   async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
+    await recoverWorkbench()
     const initialConfig = await configStore.get()
     const windowCreationStartedAtMs = Date.now()
     // The window reopens where it was last left. Only a first launch (or a corrupt record) falls back
@@ -212,7 +227,7 @@ function startPrimaryInstance(): void {
       webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
     })
     workbenchWindow = window
-    const windows = new WorkbenchWindows(window, new WorkbenchWindowStore(join(app.getPath('userData'), 'workbench-windows.json')), liveVisibleAreas)
+    const windows = new WorkbenchWindows(window, workbenchWindowStore, liveVisibleAreas)
     workbenchWindows = windows
     recoverInterface = registerRendererCrashRecovery(window, dialog, () => app.quit(), () => ownerDisposal !== null)
     installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })
@@ -285,7 +300,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
+    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, workbenchCloseOwner, storageRecoveryExports, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })

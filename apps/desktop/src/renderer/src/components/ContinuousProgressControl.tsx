@@ -174,7 +174,10 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
       intervalMs: Number(interval) * 60_000, prompt, operationId: mintObjectId()
     } : undefined)
     if (!request) {
-      const created = await run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined))
+      let inputEpoch:string|undefined
+      try{inputEpoch=await api.sessions.readInputEpoch(target.hostId)??undefined}catch{/* Preserve the original request without guessing a storage cut. The final owner decides input. */}
+      if(current.current!==captured)return
+      const created = await run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined,inputEpoch))
       if (created && current.current === captured) {
         editBasis.current = created
         if (editVersion.current === version) { edited.current = false; useLauncherState.getState().setProgressDraft(draftKey, undefined) }

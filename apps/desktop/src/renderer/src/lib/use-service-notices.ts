@@ -19,6 +19,8 @@ export type ServiceNoticeItem = {
   notice: RenderableServiceNotice
   /** Compact owner-supplied explanation; the original facts remain in Details. */
   summary?: RenderableServiceNotice['notice']
+  /** Owner-formatted complete text for the existing notification Details/copy surface. */
+  detail?: string
   action?: { label: string; run(): void }
 }
 

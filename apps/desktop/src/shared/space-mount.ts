@@ -20,7 +20,7 @@ export type SpaceMountHostChoices = { runtimeId: string; hosts: Array<{ hostId: 
 export type SpaceMountMethods = {
   resources: { input: { hostId: string }; result: SpaceMountResources }
   hostChoices: { input: SpaceMountSourceTarget; result: SpaceMountHostChoices }
-  describe: { input: SpaceMountSourceTarget; result: import('@agentmux/core/agent-open-contract').AgentOpenDescription }
+  describe: { input: SpaceMountSourceTarget & Pick<import('@agentmux/core/agent-open-contract').AgentOpenParams['agent.open.describe'], 'execution' | 'executionOnly'>; result: import('@agentmux/core/agent-open-contract').AgentOpenDescription }
   routeChoices: { input: SpaceMountSourceTarget; result: import('@agentmux/core/host-route').HostRouteChoices }
   routeExecutors: { input: SpaceMountSourceTarget & { agentTarget: import('@agentmux/core/host-route').HostRouteAgentTarget; executorId?: string }; result: import('@agentmux/core/host-route').HostRouteExecutors }
   register: { input: { hostId: string; registration: FolderSpaceRegisterInput }; result: FolderSpaceReceipt }

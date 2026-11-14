@@ -25,6 +25,7 @@ import { registerNotificationReader, type ObservedNotificationEntry, type Notifi
 import type { AgentMuxClientNotificationSubject } from '@agentmux/core/control'
 import { useMoteHeartbeatNoticeReadings } from '../lib/mote-heartbeat-reading'
 import { moteHeartbeatNotice } from '../lib/mote-heartbeat-notice'
+import { useStorageRecoveryNotice } from '../lib/use-storage-recovery-notice'
 
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeNavigationCollapseIcon = semanticIconComponent('action.close')
@@ -88,6 +89,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const sending = useAppStore((state) => state.agentSteerInFlight)
   const workbenchSaveWarning = useAppStore(state => state.workbenchSaveWarning)
   const retryWorkbenchSave = useAppStore(state => state.retryWorkbenchSave)
+  const recoveryNotice = useStorageRecoveryNotice()
   const nameSaveUnconfirmed = useAppStore(state => state.nameSaveUnconfirmed)
   const confirmNameSave = useAppStore(state => state.confirmNameSave)
   const nameEditFailure = useAppStore(state => state.nameEditFailure)
@@ -217,6 +219,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       mode: 'The current name and your running Agent remain available.',
       restore: nameEditFailure.message }
   }, action: { label: 'Review current name', run: () => { void reviewNameEdit() } } })
+  if (recoveryNotice) storage.push(recoveryNotice)
   const storageInbox = useServiceNotices('global:workbench-save', storage, true)
   const navigationInbox = useServiceNotices('global:desktop-navigation', desktopNavigationNotice ? [{
     id: 'desktop-navigation', notice: { kind: 'indeterminate', notice: {
@@ -334,9 +337,9 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         id: JSON.stringify([inbox.scope, item.id]), noticeId: item.id, category: group, subject: subject(item), kind: item.notice.kind,
         title: item.summary?.step ?? item.notice.notice.step,
         impact: item.summary?.mode ?? item.notice.notice.mode,
-        get detail() { return [item.notice.notice.step, item.notice.notice.mode, item.notice.notice.restore].join('\n') },
+        get detail() { return item.detail ?? [item.notice.notice.step, item.notice.notice.mode, item.notice.notice.restore].join('\n') },
         observation: { source: sources[inboxes.indexOf(inbox)]!, subject: sourceSubjects(inbox.scope, item),
-          get version() { return JSON.stringify([serviceNoticeFingerprint(item), item.notice, item.summary]) }, ...(item.observedAt === undefined ? {} : { observedAt: item.observedAt }) },
+          get version() { return JSON.stringify([serviceNoticeFingerprint(item), item.notice, item.summary, ...(item.detail === undefined ? [] : [item.detail])]) }, ...(item.observedAt === undefined ? {} : { observedAt: item.observedAt }) },
         unread: unreadIds.has(item.id), onRead: () => inbox.acknowledge([item]), timestamp: notificationTimestamp(item.observedAt),
         action: item.action ? navigationAction({ ...item.action, label: actionLabel ?? item.action.label }) : undefined
       })
@@ -373,7 +376,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         action: navigationAction({ label: 'View Session', run: () => selectSession(session.id) }),
         actions: <SessionRunEndedActions key={key} session={session} /> })
     }
-    append(storageInbox, 'operations', item => ({ key: JSON.stringify(['storage', item.id]), label: item.id === 'workbench-save' ? 'Workbench storage' : 'Name change' }))
+    append(storageInbox, 'operations', item => ({ key: JSON.stringify(['storage', item.id]), label: item.id === 'workbench-save' ? 'Workbench storage' : item.id === 'storage-recovery' ? 'Backups' : 'Name change' }))
     append(chromeInbox, 'system', system('window', 'Application window'))
     append(navigationInbox, 'operations', system('navigation', 'Workspace navigation'))
     append(currentErrorInbox, 'operations', item => ({ key: JSON.stringify(['workflow', item.id]), label: 'Original operation', context: 'Object not recorded' }))

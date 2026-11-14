@@ -1,5 +1,6 @@
 import { parseSpaceMemberRoute } from '@agentmux/core/space-member-codec'
 import { parseHostRouteAgentTarget } from '@agentmux/core/host-route'
+import { parseAgentOpenDescribe } from '@agentmux/core/agent-open-contract'
 import { parseNameControlParams } from '@agentmux/core/name-control'
 import type { AppConfig } from '../shared/contracts.js'
 import type { IpcMainInvokeEvent } from 'electron'
@@ -66,7 +67,12 @@ export function registerSpaceMountIpc(ports: {
       return method === 'agentNameInspect' ? await ports.runtime.inspectOriginalAgentName(target, parseNameControlParams('agent.name.inspect', p.name), signal)
         : await ports.runtime.changeOriginalAgentName(target, parseNameControlParams('agent.name.change', p.name), signal)
     }
-    if (method === 'describe') { const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId']); return await ports.runtime.describeMountedSpace(sourceTarget(p), signal) }
+    if (method === 'describe') {
+      const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId', 'execution', 'executionOnly']), target = sourceTarget(p)
+      const input = parseAgentOpenDescribe({ expectedRuntimeId: 'expectedRuntimeId' in target ? target.expectedRuntimeId : target.reference.runtimeId,
+        ...(p.execution === undefined ? {} : { execution: p.execution }), ...(p.executionOnly === undefined ? {} : { executionOnly: p.executionOnly }) })
+      return await ports.runtime.describeMountedSpace(target, signal, { ...(input.execution === undefined ? {} : { execution: input.execution }), ...(input.executionOnly === undefined ? {} : { executionOnly: input.executionOnly }) })
+    }
     if (method === 'hostChoices') { const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId']); return await ports.runtime.mountedSpaceHostChoices(sourceTarget(p),signal) }
     if (method === 'routeChoices' || method === 'routeExecutors') {
       const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId', ...(method === 'routeExecutors' ? ['agentTarget', 'executorId'] : [])])

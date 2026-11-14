@@ -11,6 +11,7 @@ export type QuestionReplyIntent = ConversationQuestionInput & {
   operationId: string
   expectedRun: { runId: string }
   afterSubmissionId: string | null
+  inputEpoch?: string
 }
 export type QuestionReplyPhase = 'sending' | 'unknown' | 'submitted' | 'rejected' | 'confirmed'
 export type QuestionReplyState = { phase: QuestionReplyPhase; answers: QuestionReplyIntent['answers']; original?: QuestionReplyAttempt & { hostId?: string; runtimeId?: string | null }; diagnostic?: { code: string; message: string } | undefined }

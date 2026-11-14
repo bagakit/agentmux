@@ -78,7 +78,7 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
             <ChevronIcon size={12} className="notification-item__disclosure" aria-hidden="true" />
           </summary>
           {expanded ? <div className="notification-item__original" tabIndex={0} aria-label={`Complete details: ${heading}`}>
-            {title !== summary && !detail.includes(title) ? <p>{title}</p> : null}
+            {title !== heading && title !== summary && !detail.includes(title) ? <p>{title}</p> : null}
             {summary && !detail.includes(summary) ? <p>{summary}</p> : null}
             {impact && !detail.includes(impact) ? <p>{impact}</p> : null}
             {children ?? <p>{detail}</p>}

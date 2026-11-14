@@ -47,7 +47,7 @@ export function readGoalSourceCreationDraft(value: unknown, goalId: string, role
     if (draft.kind === 'goal-source-create') {
       if (value.acknowledged !== undefined || value.association !== undefined || !originalOpen(value.request, draft.target, draft.operationId)) return
       const content = value.request.content
-      if (content.kind !== 'new-agent' || !only(content, ['kind', 'executorId', 'agentTarget', 'launchOptions', 'agentMuxNote', 'cols', 'rows']) ||
+      if (content.kind !== 'new-agent' || !only(content, ['kind', 'executorId', 'agentTarget', 'launchOptions', 'agentMuxNote', 'inputEpoch', 'inputRuntimeId', 'cols', 'rows']) ||
           !text(content.executorId) || !object(content.agentTarget) ||
           !only(content.agentTarget, ['hostId', 'runtimeId', 'adoptedRoute']) || !text(content.agentTarget.hostId) || !text(content.agentTarget.runtimeId) ||
           !optionalText(content.agentMuxNote)) return
@@ -56,9 +56,9 @@ export function readGoalSourceCreationDraft(value: unknown, goalId: string, role
       if (value.receipt !== undefined && (!object(value.receipt) || value.receipt.operationId !== draft.operationId)) return
     } else if (draft.kind === 'goal-coordinator-create') {
       const request = value.request
-      if (value.receipt !== undefined || !only(request, ['executorId', 'executorRevision', 'hostId', 'workspacePath', 'agentSessionId', 'createOperationId', 'toolWorkspace', 'sourceCoordinator', 'launchOptions', 'agentMuxNote', 'cols', 'rows']) ||
+      if (value.receipt !== undefined || !only(request, ['executorId', 'executorRevision', 'hostId', 'workspacePath', 'agentSessionId', 'createOperationId', 'toolWorkspace', 'sourceCoordinator', 'launchOptions', 'agentMuxNote', 'inputEpoch', 'inputRuntimeId', 'cols', 'rows']) ||
           ![request.executorId, request.executorRevision, request.agentSessionId, request.workspacePath].every(text) || request.hostId !== 'local' || request.createOperationId !== draft.operationId ||
-          !optionalText(request.agentMuxNote) || !object(request.toolWorkspace) || !only(request.toolWorkspace, ['id', 'hostId', 'path']) ||
+          !optionalText(request.agentMuxNote) || !optionalText(request.inputEpoch) || !optionalText(request.inputRuntimeId) || !object(request.toolWorkspace) || !only(request.toolWorkspace, ['id', 'hostId', 'path']) ||
           request.toolWorkspace.id !== draft.project.id || request.toolWorkspace.hostId !== draft.project.hostId || request.toolWorkspace.path !== draft.project.path ||
           !object(request.sourceCoordinator) || !only(request.sourceCoordinator, ['hostId', 'runtimeId', 'resourceRuntimeId', 'workingDirectory']) ||
           request.sourceCoordinator.hostId !== request.hostId || !text(request.sourceCoordinator.runtimeId) ||

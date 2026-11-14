@@ -58,6 +58,7 @@ import { useSourceLauncher } from '../hooks/useSourceLauncher'
 import { SourceLauncherRequest } from './SourceLauncherRequest'
 import { mountedAgentOpenInput, mountedAgentOpenKey, type MountedAgentOpenInput } from '../lib/space-mount-launch'
 import { ordinarySourceLauncherRequests, sendSourceLauncherRequest } from '../lib/source-launcher-request'
+import { newSourceAgentInput } from '../lib/new-source-agent-input'
 import { SourceCoordinatorRequests } from './SourceCoordinatorRequests'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -430,16 +431,20 @@ export function NewTabSurface({
         { ...launchOptionSelection }, { ...names }, undefined, undefined, { selection: source, executor: selected })
     }
     const sourceOwned = source && source.kind !== 'source-coordinator' ? source : undefined
-    const input: MountedAgentOpenInput = original ?? { kind: 'agent-open', target: source!.target,
-      slot: { kind: 'region', ...slot }, submitted: false, origin: { kind: 'ordinary-launcher', launcherId: warmLauncherId({ tabGroupId, regionId: slot.regionId }), project: source!.project, names: { ...names } },
-      request: { operationId: crypto.randomUUID(), content: { kind: 'new-agent', executorId: displayedExecutorId, agentTarget: sourceOwned!.agentTarget,
-        prompt: expandSemanticReferences(prompt), launchOptions: { ...launchOptionSelection },
-        ...(useAppStore.getState().agentComposerNotes[slot.regionId] === undefined ? {} : { agentMuxNote: useAppStore.getState().agentComposerNotes[slot.regionId] }) },
-        destination: { spaceId: source!.target.reference.spaceId, zoneId: source!.target.zoneId, newTab: true }, focus: false } }
-    const key = mountedAgentOpenKey(input.target, input.slot), token = Symbol(key)
+    const key = mountedAgentOpenKey(original?.target ?? source!.target, original?.slot ?? { kind: 'region', ...slot }), token = Symbol(key)
     if (sourceBusy.current.has(key)) return
     sourceBusy.current.set(key, token)
-    try { await sendSourceLauncherRequest(input, !!original?.submitted) }
+    try {
+      const note = useAppStore.getState().agentComposerNotes[slot.regionId]
+      const sourceInput = original ? undefined : await newSourceAgentInput(sourceOwned!.target, sourceOwned!.agentTarget)
+      const input: MountedAgentOpenInput = original ?? { kind: 'agent-open', target: source!.target, ...(sourceInput?.issue ? { issue: sourceInput.issue } : {}),
+        slot: { kind: 'region', ...slot }, submitted: false, origin: { kind: 'ordinary-launcher', launcherId: warmLauncherId({ tabGroupId, regionId: slot.regionId }), project: source!.project, names: { ...names } },
+        request: { operationId: crypto.randomUUID(), content: { kind: 'new-agent', executorId: displayedExecutorId, agentTarget: sourceOwned!.agentTarget, ...sourceInput?.fields,
+          prompt: expandSemanticReferences(prompt), launchOptions: { ...launchOptionSelection },
+          ...(note === undefined ? {} : { agentMuxNote: note }) },
+          destination: { spaceId: source!.target.reference.spaceId, zoneId: source!.target.zoneId, newTab: true }, focus: false } }
+      await sendSourceLauncherRequest(input, !!original?.submitted)
+    }
     finally { if (sourceBusy.current.get(key) === token) sourceBusy.current.delete(key) }
   }
 

@@ -299,10 +299,18 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
         await api.workspaces.add({ hostId: row.candidate.hostId, path: row.candidate.workspacePath })
       }
       if ('native' in row.candidate) {
-        const operation = nativeOperations.current[key] ??= structuredClone({ request: {
-          agentSessionId: mintObjectId(), createOperationId: mintObjectId(), hostId: row.candidate.hostId,
-          executorId: row.candidate.executorId, workspacePath: row.candidate.workspacePath,
-          nativeResumeSource: row.candidate.native.source }, source: row.candidate.native, capabilities: row.candidate.capabilities, attempted: false })
+        if (!nativeOperations.current[key]) {
+          // Only an unmanaged import creates a new SID. Managed conversations
+          // keep their original recovery qualification without a new namespace.
+          const inputEpoch = row.candidate.native.managed ? undefined : await api.sessions.readInputEpoch(row.candidate.hostId) ?? undefined
+          if (!stillSelected()) return
+          nativeOperations.current[key] ??= structuredClone({ request: {
+            agentSessionId: mintObjectId(), createOperationId: mintObjectId(), hostId: row.candidate.hostId,
+            executorId: row.candidate.executorId, workspacePath: row.candidate.workspacePath,
+            ...(inputEpoch === undefined ? {} : { inputEpoch }), nativeResumeSource: row.candidate.native.source },
+            source: row.candidate.native, capabilities: row.candidate.capabilities, attempted: false })
+        }
+        const operation = nativeOperations.current[key]!
         const retry = operation.attempted
         operation.attempted = true
         const recovered = await resumeNativeSession(operation.request, operation.source, operation.capabilities, stillSelected, retry)

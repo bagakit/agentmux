@@ -414,14 +414,14 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
         agent = { ...agentFact({ ...history, agentSessionId: created.agentSessionId, run: created.run }, hostId),
           retirement: { source: created.source, observedAt: created.observedAt } }
         creationConfirmed = true
-      } else {
+      } else if (created.kind === 'agent') {
         agent = agentFact(created, hostId)
         creationConfirmed = created.creation?.persistence !== 'unconfirmed' && !created.creation?.failure
         // Repair only the original reserved projection from the existing Core receipt.
         // This read never repeats creation, input or lifecycle recovery.
         const afterRead = currentLocation()
         if (binding.recovery && afterRead.atTarget && !afterRead.snapshot) await ports.attach(binding.regionId, { created, projectionFailures: [] })
-      }
+      } else throw new Error('The original creation has no confirmed Session. Keep its request and workface; check the same operation again.')
     }
     catch (error) {
       issues.push(issue('creation-read', 'AGENT_CREATION_UNKNOWN', `Current creation check: ${error instanceof Error ? error.message : String(error)}`))
@@ -595,6 +595,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         if (!parent.capabilities.providerFork?.current) failure('AGENT_FORK_UNSUPPORTED', 'This Provider does not support forking its current conversation.')
         const inspected = await ports.creation(parent.control.hostId, parent.control.agentSessionId)
         if (inspected.kind === 'retired-agent') failure('AGENT_SESSION_RETIRED', 'The original fork source is closed. Its history and workface are retained; explicitly reopen it before forking this Session.')
+        if (inspected.kind !== 'agent') failure('AGENT_CREATION_UNKNOWN', 'The original fork source has no confirmed Session. Its request, workface and draft are retained; check the same original operation again.')
         forkParent = inspected
         // Core owns server-local Session identity; the Desktop snapshot owns the route to that server.
         forkExecutionHostId = parent.control.hostId
@@ -772,6 +773,8 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         ...(request.content.kind === 'new-agent' && request.content.nativeResumeSource ? { nativeResumeSource: request.content.nativeResumeSource } : {}),
         ...(!forkParent && topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: topicId } : {}),
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
+        ...(request.content.inputEpoch === undefined ? {} : { inputEpoch: request.content.inputEpoch }),
+        ...(request.content.inputRuntimeId === undefined ? {} : { inputRuntimeId: request.content.inputRuntimeId }),
         ...(options?.agentMuxNote === undefined ? {} : { agentMuxNote: options.agentMuxNote }),
         ...(request.caller ? { creationCaller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}),
         ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })

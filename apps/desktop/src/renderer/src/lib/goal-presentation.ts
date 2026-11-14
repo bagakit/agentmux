@@ -45,7 +45,8 @@ function retainedGoalInputHere(value: unknown, goalId: string): boolean {
 /** Reading budget only; these retained objects do not grant input or completion. */
 export function goalHasOriginalWork(demand: Pick<DemandRecord, 'id' | 'dispatches' | 'delegations' | 'patrols' | 'responsibility'>, retainedStart?: unknown): boolean {
   return Boolean(demand.dispatches?.some(item => item.execution === 'finite') || demand.delegations?.length ||
-    retainedGoalInputHere(retainedStart, demand.id) || demand.patrols?.some(item => item.purpose !== 'plan') || demand.responsibility?.executions.length)
+    readGoalFiniteStartIntent(retainedStart, demand.id)?.phase !== 'selecting-access' && retainedGoalInputHere(retainedStart, demand.id) ||
+    demand.patrols?.some(item => item.purpose !== 'plan') || demand.responsibility?.executions.length)
 }
 
 /** Display the owner facts. Business status is not an acknowledgement. */
@@ -55,7 +56,8 @@ export function goalNextStep(demand: GoalNextStepInput): string {
 
 /** One branch decides both the sentence and its stage, so they cannot drift apart. */
 export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unknown): GoalNextStepFact {
-  const retainedStart = readGoalFiniteStartIntent(retainedInput, demand.id)
+  const retained = readGoalFiniteStartIntent(retainedInput, demand.id)
+  const retainedStart = retained?.phase === 'selecting-access' ? undefined : retained
   const { alignment, grounding } = demand
   const resultSource: GoalNextStepSource = { kind: 'results', submissionId: grounding?.submissionId ?? null, revision: alignment?.revision ?? null }
   const definitionSource: GoalNextStepSource = { kind: 'definition', revision: alignment?.revision ?? null }
@@ -65,7 +67,8 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   }
   if (demand.status === 'done' && !grounding) return { stage: 'attention', text: 'Results not verified', source: resultSource }
   if (demand.status !== 'done') {
-    if (retainedGoalInputHere(retainedInput, demand.id) && !retainedStart) return { stage: 'unknown', text: 'Original task input unreadable · Retained', source: { kind: 'goal' } }
+    if (retained?.phase === 'selecting-access') return { stage: 'attention', text: 'Choose task connections · No task submitted', source: { kind: 'goal' } }
+    if (retainedGoalInputHere(retainedInput, demand.id) && !retained) return { stage: 'unknown', text: 'Original task input unreadable · Retained', source: { kind: 'goal' } }
     const currentStart = goalStartNextRow(demand)
     const retainedReference = retainedStart?.agentReference
     const retainedRecord = retainedReference && demand.dispatches?.find(value => value.operationId === retainedStart?.operationId &&

@@ -49,6 +49,7 @@ export function windowContainsOccurrence(target: AppWindowTarget, occurrence: {
 
 /** One Main presentation owner. Its children contain no second application or runtime. */
 export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
+  recoverySource(): ReturnType<WorkbenchWindowStore['recoverySource']> { return this.store.recoverySource() }
   private mainId: string = mintObjectId()
   private mainGeneration: string = mintObjectId()
   private rendererAvailable = false

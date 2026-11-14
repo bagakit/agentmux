@@ -28,7 +28,11 @@ export function useSourceLauncher(selection: LauncherSourceExecution | undefined
     setDescription(undefined); setContractIssue(undefined)
     if (!active || !selection) return
     const controller = new AbortController(), source = { hostId: selection.target.hostId, expectedRuntimeId: selection.target.reference.runtimeId }
-    void api.spaceMounts.call('describe', source, controller.signal).then(value => { if (!controller.signal.aborted) setDescription({ key: sourceKey, value }) })
+    void api.spaceMounts.call('describe', source, controller.signal).then(value => {
+      if (controller.signal.aborted) return
+      if (value.sourceIssue) { setContractIssue({ key: sourceKey, message: value.sourceIssue.message }); return }
+      setDescription({ key: sourceKey, value })
+    })
       .catch(error => { if (!controller.signal.aborted) setContractIssue({ key: sourceKey, message: presentError(error) }) })
     return () => controller.abort()
   }, [active, sourceKey, refresh])

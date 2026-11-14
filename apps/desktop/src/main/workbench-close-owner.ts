@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto'
 import { mkdir, open, opendir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { AgentMuxError, durableWriteFile, mintObjectId, parseSpaceCloseParams, parseSpaceClosePlan, parseSpaceCloseProjection,
+import { AgentMuxError, durableWriteFile, restoreMissingRecoveryFile, mintObjectId, parseSpaceCloseParams, parseSpaceClosePlan, parseSpaceCloseProjection,
   parseSpaceCloseReceipt, parseSpaceCloseActor, parseSpaceCloseListParams, parseSpaceCloseCommitResult, parseTerminalControlResult, spaceCloseDecisions, spaceCloseDigest,
   type SpaceCloseApply, type SpaceCloseContext, type SpaceCloseMethod, type SpaceCloseParams, type SpaceClosePort,
   type SpaceClosePrepare, type SpaceCloseListParams, type SpaceCloseList, type SpaceCloseSummary, type SpaceCloseResults, type SpaceCloseProjection, type SpaceCloseReceipt, type SpaceCloseResource,
   type SpaceCloseResourceResult, type SpaceClosePlan, type SpaceCloseCommitResult } from '@agentmux/core'
 import type { WorkbenchUserStateStore } from './workbench-user-state.js'
+import type { RecoverySource, RecoveryRestoreMember } from '@agentmux/core'
+import { captureWorkbenchRecoveryFiles, inspectWorkbenchRecoveryFiles } from './workbench-recovery-source.js'
+import { confirmExistingWorkbenchRecoveryMember, prepareWorkbenchRecoveryMembers, readWorkbenchRecoveryMember, recoveryUnavailable } from './workbench-recovery-restore.js'
 
 export type WorkbenchClosePorts = {
   authority(): SpaceClosePlan['authority']
@@ -37,7 +40,101 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
   private readonly live = new Map<string, { record: SpaceCloseReceipt; references: number; applying: boolean }>()
   private readonly directory: string
   private readonly ownerId: string
-  constructor(store: Pick<WorkbenchUserStateStore, 'path'>, private readonly ports: WorkbenchClosePorts) { this.directory = store.path + '.close-operations'; this.ownerId = spaceCloseDigest(store.path) }
+  private boundPorts: WorkbenchClosePorts | undefined
+  private restoration: Promise<void> = Promise.resolve()
+  constructor(store: Pick<WorkbenchUserStateStore, 'path'>, ports?: WorkbenchClosePorts) { this.directory = store.path + '.close-operations'; this.ownerId = spaceCloseDigest(store.path); this.boundPorts = ports }
+  private get ports(): WorkbenchClosePorts { if (!this.boundPorts) throw unavailable('The original workface owner is not bound.'); return this.boundPorts }
+  bindPorts(ports: WorkbenchClosePorts): () => void {
+    this.boundPorts = ports
+    return () => { if (this.boundPorts === ports) this.boundPorts = undefined }
+  }
+  retainRecoveryGaps(memberIds: readonly string[]): void {
+    for (const id of memberIds) { const match = /^operations\/([a-f0-9]{64})\.json(?:\.(?:prepare|apply))?$/u.exec(id); if (match) { this.knownMembers.add(match[1]!); this.namespaceObserved = true } }
+  }
+  recoverySource(): RecoverySource & { inspect(): Promise<string> } {
+    const id = 'desktop.close-operations'
+    const namespaces = [{ id: 'operations', directory: this.directory,
+      accepts: (name: string) => /^[a-f0-9]{64}\.json(?:\.(?:prepare|apply))?$/u.test(name) }]
+    return { id, ownedPaths: [this.directory], inspect: () => inspectWorkbenchRecoveryFiles([], namespaces), capture: async directory => {
+      await Promise.allSettled([...this.writes.values()])
+      const result = await captureWorkbenchRecoveryFiles(id, directory, [], namespaces)
+      if (this.namespaceObserved && result.members.length === 0 && result.gaps.length === 0)
+        result.gaps.push({ sourceId: id, memberId: 'operations', code: 'RECOVERY_KNOWN_NAMESPACE_EMPTY' })
+      return result
+    }, prepareRestore: (members, directory) => this.prepareRecoveryMembers(members, directory), restoreMissing: member => {
+      const operation = this.restoration.then(async () => {
+        const target = this.recoveryTarget(member), raw = await readWorkbenchRecoveryMember(member, target)
+        if (member.id.endsWith('.json')) {
+          const record = parseSpaceCloseReceipt(JSON.parse(raw))
+          if (record.phase === 'prepared' && record.outcome !== 'unknown') throw recoveryUnavailable('DESKTOP_RECOVERY_PREPARATION_REQUIRED')
+          if (target !== this.path(record.operationId)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+        } else await this.validateRecoveryMarker(member, raw)
+        const existing = await confirmExistingWorkbenchRecoveryMember(member, target)
+        if (existing) return existing
+        if (this.boundPorts) throw recoveryUnavailable('DESKTOP_CLOSE_OWNER_ACTIVE')
+        return await restoreMissingRecoveryFile(member.file, target, member.sha256)
+      })
+      this.restoration = operation.then(() => {}, () => {})
+      return operation
+    } }
+  }
+  private recoveryTarget(member: RecoveryRestoreMember): string {
+    if (!/^operations\/[a-f0-9]{64}\.json(?:\.(?:prepare|apply))?$/u.test(member.id)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    return join(this.directory, member.id.slice('operations/'.length))
+  }
+  private async validateRecoveryMarker(member: RecoveryRestoreMember, raw: string, records?: Map<string, SpaceCloseReceipt>): Promise<void> {
+    const target = this.recoveryTarget(member), base = target.replace(/\.(?:prepare|apply)$/u, '')
+    let record = records?.get(base)
+    if (!record) {
+      try { record = parseSpaceCloseReceipt(JSON.parse(await readFile(base, 'utf8'))) }
+      catch { throw recoveryUnavailable('DESKTOP_RECOVERY_CLOSE_COHORT_REQUIRED') }
+    }
+    const value = JSON.parse(raw)
+    if (this.path(record.operationId) !== base || value?.planDigest !== record.planDigest) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    if (member.id.endsWith('.prepare')) {
+      if (!same(value.request, record.request) || !same(value.preparedBy, record.preparedBy) || value.preparedAt !== record.preparedAt) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    } else {
+      const approvedBy = parseSpaceCloseActor(value.approvedBy)
+      if (approvedBy.kind === 'agent' || !Array.isArray(value.decisions) || spaceCloseDigest(value.decisions.map(spaceCloseDigest).sort()) !== spaceCloseDigest(spaceCloseDecisions(record.plan).map(spaceCloseDigest).sort()) ||
+          record.approvedBy && !same(record.approvedBy, approvedBy)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    }
+  }
+  private async prepareRecoveryMembers(members: RecoveryRestoreMember[], directory: string) {
+    const records = new Map<string, SpaceCloseReceipt>()
+    const raw = new Map<string, string>()
+    const ordered = [...members].sort((a, b) => Number(!a.id.endsWith('.json')) - Number(!b.id.endsWith('.json')) || a.id.localeCompare(b.id))
+    return await prepareWorkbenchRecoveryMembers(ordered, directory, async member => {
+      if (this.boundPorts) throw recoveryUnavailable('DESKTOP_CLOSE_OWNER_ACTIVE')
+      // A marker may precede its ledger in the selected list. Validate the whole
+      // selected cohort before preparing any restored record as an operation.
+      if (!raw.size) for (const value of members) raw.set(value.id, await readWorkbenchRecoveryMember(value, this.recoveryTarget(value)))
+      if (!records.size) for (const value of members.filter(value => value.id.endsWith('.json'))) {
+        const record = parseSpaceCloseReceipt(JSON.parse(raw.get(value.id)!)), target = this.recoveryTarget(value)
+        if (target !== this.path(record.operationId) || this.observed.has(record.operationId) || this.live.has(record.operationId) || this.writes.has(record.operationId)) throw recoveryUnavailable('DESKTOP_CLOSE_OWNER_ACTIVE')
+        records.set(target, record)
+      }
+      for (const [target, record] of records) {
+        const prepareId = 'operations/' + hash(record.operationId) + '.json.prepare'
+        let marker = raw.get(prepareId)
+        if (marker === undefined) {
+          try { marker = await readFile(target + '.prepare', 'utf8') }
+          catch { throw recoveryUnavailable('DESKTOP_RECOVERY_CLOSE_COHORT_REQUIRED') }
+        }
+        const admitted = JSON.parse(marker)
+        if (admitted?.planDigest !== record.planDigest || !same(admitted.request, record.request) || !same(admitted.preparedBy, record.preparedBy) || admitted.preparedAt !== record.preparedAt) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+      }
+      let value = raw.get(member.id)!
+      if (member.id.endsWith('.json')) {
+        const record = records.get(this.recoveryTarget(member))!
+        // Historical preparation cannot refute a later missing apply claim.
+        // This original intent remains inspectable, never dispatchable again.
+        if (record.phase === 'prepared') value = JSON.stringify(parseSpaceCloseReceipt({ ...record, outcome: 'unknown', diskDurability: 'unconfirmed',
+          issue: 'Restored historical close preparation; later apply facts are unconfirmed. Inspect this original operation without applying again.' })) + '\n'
+      } else await this.validateRecoveryMarker(member, value, records)
+      if (this.boundPorts) throw recoveryUnavailable('DESKTOP_CLOSE_OWNER_ACTIVE')
+      return value
+    })
+  }
   private path(id: string): string { return join(this.directory, hash(id) + '.json') }
   private retain(record: SpaceCloseReceipt) {
     let entry = this.live.get(record.operationId)
@@ -315,20 +412,24 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
   }
 }
 
+/** Business composition for callers that already have the original live ports. */
+export function createDesktopWorkbenchCloseOwner(input: Parameters<typeof createDesktopWorkbenchClosePorts>[0] & { store: Pick<WorkbenchUserStateStore, 'path'> }): WorkbenchCloseOwner {
+  return new WorkbenchCloseOwner(input.store, createDesktopWorkbenchClosePorts(input))
+}
+
 /** Production composition: the Renderer owns topology/drafts, each original resource owns its effect. */
-export function createDesktopWorkbenchCloseOwner(input: {
-  store: Pick<WorkbenchUserStateStore, 'path'>
+export function createDesktopWorkbenchClosePorts(input: {
   bridge: import('./control-ipc-bridge.js').DesktopControlIpcBridge
   authority(): SpaceClosePlan['authority']
   runtime: Pick<import('./runtime-controller.js').RuntimeController, 'prepareWorkbenchCloseTerminal' | 'callOriginalCore'>
   closeBrowser(browserId: string): Promise<void>
-}): WorkbenchCloseOwner {
+}): WorkbenchClosePorts {
   const renderer = async (request: import('../shared/workbench-close-control.js').WorkbenchCloseRendererRequest) => {
     const result = await input.bridge.execute(request)
     if (result.operation !== request.operation || result.requestId !== request.requestId) throw unavailable('The original workface returned another close reply.')
     return result
   }
-  return new WorkbenchCloseOwner(input.store, {
+  return {
     authority: input.authority,
     capture: async request => {
       const result = await renderer({ operation: 'workbench.close.capture', requestId: mintObjectId(), input: request })
@@ -387,5 +488,5 @@ export function createDesktopWorkbenchCloseOwner(input: {
       if (context.actor.kind === 'device' && !same(receipt.actor, context.actor)) throw unavailable('The original device was not preserved by the child observation.')
       return { receipt: { ...receipt, target: { ...receipt.target, hostId: resource.control.hostId } } }
     }
-  })
+  }
 }

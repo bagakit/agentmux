@@ -328,6 +328,7 @@ function projectSession(
         : {}),
       ...(subject.agentSession.creation ? { creation: structuredClone(subject.agentSession.creation) } : {}),
       ...(subject.agentSession.forkedFrom ? { forkedFrom: structuredClone(subject.agentSession.forkedFrom) } : {}),
+      ...(subject.agentSession.inputEpoch === undefined ? {} : { inputEpoch: subject.agentSession.inputEpoch }),
       promptSubmissionPredecessor: agentPromptPredecessor(subject.agentSession),
       promptInputNotApplied: agentPromptNotApplied(subject.agentSession),
       ...(subject.agentSession.terminalOutputChannel
@@ -977,6 +978,7 @@ export class RuntimeController {
         if (projected.has(session.agentSessionId)) return []
         return [{
           agentSessionId: session.agentSessionId,
+          ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }),
           hostId,
           workspacePath: session.workspacePath,
           providerId: session.providerId,
@@ -1166,6 +1168,16 @@ export class RuntimeController {
     }
   }
 
+  /** Read only the original semantic namespace; no Native connection or fresh creation. */
+  async readInputEpoch(hostId: string): Promise<string | null> {
+    const client = this.configuredClient(hostId)
+    const inputEpoch = 'runtimeOwnerIdentity' in client
+      ? (await callOriginalDesktopHost(client, 'agent.input.epoch', { hostId: 'local' }, { transport: 'unix' })).inputEpoch
+      : await client.readAgentInputEpoch() ?? null
+    if (this.configuredClient(hostId) !== client) throw new AgentMuxError('The original creation Host changed during namespace observation. Keep the draft and choose its original target again.', 'RUNTIME_OWNER_MISMATCH')
+    return inputEpoch
+  }
+
   private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent, executionBindings?: Pick<AgentExecutionBindingService, 'create'>): Promise<AgentLaunchResult> {
     return await this.trackHostOperation(request.hostId, async () => {
       const client = await this.connectedClient(request.hostId, 'creation')
@@ -1233,6 +1245,8 @@ export class RuntimeController {
           ...(agentMuxNote ? { agentMuxNote } : {}),
           ...(preparedTopic ? { optionalContext: preparedTopic.optionalContext } : {}),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+          ...(request.inputEpoch === undefined ? {} : { inputEpoch: request.inputEpoch }),
+          ...(request.inputRuntimeId === undefined ? {} : { inputRuntimeId: request.inputRuntimeId }),
           ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
           ...(request.nativeResumeSource === undefined ? {} : { nativeResumeSource: request.nativeResumeSource }),
           ...(request.cols === undefined ? {} : { cols: request.cols }), ...(request.rows === undefined ? {} : { rows: request.rows })
@@ -1305,6 +1319,8 @@ export class RuntimeController {
           ...(request.forkSource === undefined ? {} : { forkSource: request.forkSource }),
           ...(request.nativeResumeSource === undefined ? {} : { nativeResumeSource: request.nativeResumeSource }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+          ...(request.inputEpoch === undefined ? {} : { inputEpoch: request.inputEpoch }),
+          ...(request.inputRuntimeId === undefined ? {} : { inputRuntimeId: request.inputRuntimeId }),
           ...(request.initialMessage ? { initialMessage: request.initialMessage } : {}),
           ...(request.creationCaller ? { creationCaller: request.creationCaller } : {}),
           ...(request.cols === undefined ? {} : { cols: request.cols }),
@@ -2255,7 +2271,8 @@ export class RuntimeController {
     prompt: string,
     operationId: string,
     config: AppConfig,
-    agentMuxNote?: string
+    agentMuxNote?: string,
+    inputEpoch?: string
   ): Promise<SessionSnapshot> {
     return await this.trackHostOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId, 'runtime')
@@ -2268,6 +2285,7 @@ export class RuntimeController {
         agentSessionId: control.agentSessionId,
         operationId,
         prompt,
+        ...(inputEpoch === undefined ? {} : { inputEpoch }),
         ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
         ...executor
       })
@@ -2387,7 +2405,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath?: string,
     operationId: string = mintObjectId(),
-    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
+    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input' | 'inputEpoch'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
   ): Promise<SessionRecoveryResult> {
     return await this.trackHostOperation(
       control.hostId,
@@ -2400,7 +2418,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath: string | undefined,
     operationId: string,
-    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
+    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input' | 'inputEpoch'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId, 'runtime')
     if (request?.moteMain) {
@@ -2411,7 +2429,7 @@ export class RuntimeController {
         ...request.moteMain, recovery: { operationId }, input: {
           ...(request.focusTask ? { focusTask: parseFocusTaskReference(request.focusTask) } : {}),
           agentSessionId: control.agentSessionId, operationId: original.submissionId, prompt: original.prompt,
-          expectedRun: control.run, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate',
+          expectedRun: control.run, ...(request.inputEpoch === undefined ? {} : { inputEpoch: request.inputEpoch }), admissionIntent: { kind: 'manual-actor' }, execution: 'immediate',
           ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}),
           ...(request.inputImages?.length ? { inputImages: [...request.inputImages] } : {}),
           ...(original.inputContextCapture ? { capturedContext: { reference: original.inputContextCapture,
@@ -2458,7 +2476,7 @@ export class RuntimeController {
       const result = await client.ensureAgentContinuity({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
-        operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {})
+        operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input, ...(request.inputEpoch === undefined ? {} : { inputEpoch: request.inputEpoch }) } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {})
       })
       if (result.kind === 'reattachable' || result.kind === 'resumed') {
         const session = await this.sessionByTarget(client,
@@ -2476,7 +2494,7 @@ export class RuntimeController {
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
-      operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {}),
+      operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input, ...(request.inputEpoch === undefined ? {} : { inputEpoch: request.inputEpoch }) } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {}),
       ...this.sessionExecutorOptions(control.hostId, client, config, stored)
     })
     if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
@@ -2745,6 +2763,36 @@ export class RuntimeController {
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
   }
 
+  async readStorageRecovery(): Promise<import('../shared/storage-recovery').DesktopStorageRecoveryRead> {
+    const client = this.configuredClient('local'), controller = new AbortController()
+    const deadline = setTimeout(() => controller.abort(new Error('Reading the original backup status is overdue. Existing work remains available.')), 15_000)
+    try {
+      const context = { transport: 'unix' as const, signal: controller.signal }
+      const { owner } = await callOriginalDesktopHost(client, 'runtime.owner.identity', {}, context)
+      const fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+      const result = await callOriginalDesktopHost(client, 'storage.recovery.status', {}, context, fence)
+      if (this.configuredClient('local') !== client) throw new AgentMuxError('The original backup Host changed. Its last observed recovery point is retained.', 'RUNTIME_OWNER_MISMATCH')
+      return { owner: fence, status: result.status }
+    } finally { clearTimeout(deadline) }
+  }
+
+  async createStorageBackup(owner: import('@agentmux/core').AgentMuxRuntimeFence): Promise<import('../shared/storage-recovery').DesktopStorageRecoveryRead> {
+    if (!owner || typeof owner !== 'object' || Object.keys(owner).some(key => !['runtimeId', 'ownerInstanceId'].includes(key)) ||
+      typeof owner.runtimeId !== 'string' || !owner.runtimeId.trim() || typeof owner.ownerInstanceId !== 'string' || !owner.ownerInstanceId.trim())
+      throw new AgentMuxError('Select the original observed backup Host before retrying.', 'INVALID_CONTROL_REQUEST')
+    owner = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+    const client = this.configuredClient('local'), controller = new AbortController()
+    const deadline = setTimeout(() => controller.abort(new Error('Creating the original backup is still unconfirmed. Check this same Host; current work remains available.')), 60_000)
+    try {
+      const context = { transport: 'unix' as const, signal: controller.signal }
+      // The Core fence qualifies this exact operation. No alternate Host, Run or input is selected.
+      await callOriginalDesktopHost(client, 'storage.backup.create', {}, context, owner)
+      const result = await callOriginalDesktopHost(client, 'storage.recovery.status', {}, context, owner)
+      if (this.configuredClient('local') !== client) throw new AgentMuxError('The original backup Host changed. Its operation and recovery points are retained.', 'RUNTIME_OWNER_MISMATCH')
+      return { owner, status: result.status }
+    } finally { clearTimeout(deadline) }
+  }
+
   async subscribeOriginalCore<M extends import('@agentmux/core').AgentMuxRpcStreamMethod>(hostId: string, method: M,
     params: import('@agentmux/core').AgentMuxRpcStreamParams<M>, handlers: import('@agentmux/core').AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext) {
     if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
@@ -2899,9 +2947,9 @@ export class RuntimeController {
     if (owner.runtimeId !== expectedRuntimeId) throw new AgentMuxError('The mounted Space belongs to another original Runtime.', 'RUNTIME_OWNER_MISMATCH')
     return { rpc: carrier.rpc, context: { ...(signal ? { signal } : {}), runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } } }
   }
-  async describeMountedSpace(target: SpaceMountSourceTarget, signal?: AbortSignal) {
+  async describeMountedSpace(target: SpaceMountSourceTarget, signal?: AbortSignal, birth?: Pick<import('@agentmux/core/agent-open-contract').AgentOpenParams['agent.open.describe'], 'execution' | 'executionOnly'>) {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
-    return await rpc.call('agent.open.describe', { expectedRuntimeId: 'expectedRuntimeId' in target ? target.expectedRuntimeId : target.reference.runtimeId }, context)
+    return await rpc.call('agent.open.describe', { expectedRuntimeId: 'expectedRuntimeId' in target ? target.expectedRuntimeId : target.reference.runtimeId, ...birth }, context)
   }
   async mountedSpaceExecutors(target: SpaceMountSourceTarget, agentHostId: string, signal?: AbortSignal, executorId?: string) {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)

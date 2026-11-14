@@ -16,6 +16,7 @@ import { useSourceLauncher } from '../hooks/useSourceLauncher'
 import { SourceAgentTargetSetup } from './SourceAgentTargetSetup'
 import { SelectionField } from './SelectionField'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
+import { newSourceAgentInput } from '../lib/new-source-agent-input'
 
 /** A Goal owns only its private intent. Main owns independent C; Source owns C/L
  * admission. Neither operation borrows a Launcher slot or changes navigation. */
@@ -107,7 +108,9 @@ export function GoalSourceCreation({ goalId, role, config, selection, onSelectio
         if (dispatching.kind !== 'goal-source-create') return
         const receipt = await api.spaceMounts.call('open', { hostId: frozen.target.hostId, reference: frozen.target.reference, request: frozen.request })
         if (receipt.operationId !== frozen.operationId) throw Error('The creation returned another operation. The original request is retained.')
-        const completed = await retain({ ...dispatching, receipt }, dispatching)
+        const confirmed = { ...dispatching, receipt }
+        if (receipt.agent && (receipt.outcome === 'opened' || receipt.outcome === 'partial')) delete confirmed.issue
+        const completed = await retain(confirmed, dispatching)
         await locate(completed, receipt)
       } else {
         if (!frozen.acknowledged) {
@@ -149,18 +152,26 @@ export function GoalSourceCreation({ goalId, role, config, selection, onSelectio
     } catch (cause) { if (generation === readGeneration.current) setIssue(presentError(cause)) }
     finally { if (generation === readGeneration.current) setReading(false) }
   }
-  function create() {
-    if (!selection || !launcher.ready || !launcher.selected) return
-    const operationId = `goal-agent-create-${mintObjectId()}`, executorId = launcher.selected.executorId, executorRevision = launcher.selected.configRevision
-    const scope = { goalId, role, operationId, submitted: false, project: selection.project, target: selection.target }
-    void send(selection.kind === 'source-coordinator' ? { ...scope, kind: 'goal-coordinator-create',
-      request: { executorId, executorRevision, hostId: selection.coordinator.hostId, workspacePath: selection.coordinator.homeDirectory,
-        agentSessionId: mintObjectId(), createOperationId: operationId, toolWorkspace: { id: selection.project.id, hostId: selection.project.hostId, path: selection.project.path },
-        sourceCoordinator: { hostId: selection.coordinator.hostId, runtimeId: selection.coordinator.runtimeId,
-          resourceRuntimeId: selection.target.reference.runtimeId, workingDirectory: 'device-home' } },
-      association: { operationId: `goal-agent-link-${mintObjectId()}`, submitted: false } }
-      : { ...scope, kind: 'goal-source-create', request: { operationId, content: { kind: 'new-agent', executorId, agentTarget: selection.agentTarget },
-        destination: { spaceId: selection.target.reference.spaceId, zoneId: selection.target.zoneId, newTab: true }, focus: false } })
+  async function create() {
+    if (producing.current || disabled || !selection || !launcher.ready || !launcher.selected) return
+    producing.current = true; onBusy(true)
+    try {
+      const inputEpoch = selection.kind === 'source-coordinator' ? await api.sessions.readInputEpoch(selection.coordinator.hostId) ?? undefined : undefined
+      const sourceInput = selection.kind !== 'source-coordinator' ? await newSourceAgentInput(selection.target, selection.agentTarget) : undefined
+      const operationId = `goal-agent-create-${mintObjectId()}`, executorId = launcher.selected.executorId, executorRevision = launcher.selected.configRevision
+      const scope = { goalId, role, operationId, submitted: false, project: selection.project, target: selection.target }
+      producing.current = false
+      await send(selection.kind === 'source-coordinator' ? { ...scope, kind: 'goal-coordinator-create',
+        request: { executorId, executorRevision, hostId: selection.coordinator.hostId, workspacePath: selection.coordinator.homeDirectory,
+          inputRuntimeId: selection.coordinator.runtimeId, ...(inputEpoch === undefined ? {} : { inputEpoch }),
+          agentSessionId: mintObjectId(), createOperationId: operationId, toolWorkspace: { id: selection.project.id, hostId: selection.project.hostId, path: selection.project.path },
+          sourceCoordinator: { hostId: selection.coordinator.hostId, runtimeId: selection.coordinator.runtimeId,
+            resourceRuntimeId: selection.target.reference.runtimeId, workingDirectory: 'device-home' } },
+        association: { operationId: `goal-agent-link-${mintObjectId()}`, submitted: false } }
+        : { ...scope, ...(sourceInput?.issue ? { issue: sourceInput.issue } : {}), kind: 'goal-source-create', request: { operationId, content: { kind: 'new-agent', executorId, agentTarget: selection.agentTarget, ...sourceInput?.fields },
+          destination: { spaceId: selection.target.reference.spaceId, zoneId: selection.target.zoneId, newTab: true }, focus: false } })
+    } catch (cause) { setIssue(presentError(cause)) }
+    finally { producing.current = false; onBusy(false) }
   }
   const receipt = draft?.kind === 'goal-source-create' ? draft.receipt : draft?.association.receipt
   const outcome = (observed ?? receipt)?.outcome, complete = outcome === 'opened' || outcome === 'retired'

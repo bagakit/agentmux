@@ -21,6 +21,7 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
   const root = createWorkbenchUserStorage(port, original)
   let document: Document | undefined, hydration: Promise<void> | undefined
   const ready = new Set<DesktopFragmentName>(), loading = new Map<DesktopFragmentName, Promise<unknown>>()
+  const failedLoads = new Set<DesktopFragmentName>()
   const imports = new Map<DesktopFragmentName, [string, string][]>()
   const listeners = new Set<() => void>()
   const notify = () => { for (const listener of listeners) listener() }
@@ -88,8 +89,34 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
       return JSON.stringify({ ...document, ...projection,
         ...(Object.hasOwn(document, 'desktopFragments') ? { desktopFragments: document.desktopFragments } : {}) })
     },
-    unreadFragments: () => names.filter(name => !ready.has(name)),
+    /** Pending original input, independent of whether a settings reader consumed it.
+     * Native opaque members remain in this document; unread legacy bytes need
+     * the original load/import ACK before they can leave browser custody. */
+    pending(): boolean {
+      if (batch.pending() || imports.size > 0 || !document) return true
+      try {
+        const native = fragments()
+        let source: Storage | undefined
+        for (const name of names) {
+          if (ready.has(name) || Object.hasOwn(native, name)) continue
+          source ??= original()
+          if (name === 'moteAvatarSaveDrafts') {
+            const count = source.length
+            if (!Number.isSafeInteger(count) || count < 0) return true
+            for (let index = 0; index < count; index++) {
+              const key = source.key(index)
+              if (key === null) return true
+              if (key.startsWith(DESKTOP_FRAGMENT_KEYS.moteAvatarSaveDrafts) && source.getItem(key) !== null) return true
+            }
+            if (source.length !== count) return true
+          } else if (source.getItem(DESKTOP_FRAGMENT_KEYS[name]) !== null) return true
+        }
+        return false
+      } catch { return true } // Unknown browser/native custody never means absence.
+    },
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
+    /** Read diagnostics do not turn already durable opaque bytes into unsaved input. */
+    hasReadFailure: () => failedLoads.size > 0,
     isReady: (name: DesktopFragmentName) => ready.has(name),
     async load<N extends DesktopFragmentName>(name: N, validate: (value: DesktopFragmentValues[N]) => void): Promise<DesktopFragmentValues[N]> {
       if (ready.has(name)) return read(name)
@@ -138,9 +165,10 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
           for (const [key, raw] of imports.get(name)!) if (original().getItem(key) === raw) original().removeItem(key)
           imports.delete(name)
         }
+        failedLoads.delete(name)
         ready.add(name); notify()
         return value
-      })().finally(() => { loading.delete(name) })
+      })().catch(error => { failedLoads.add(name); throw error }).finally(() => { loading.delete(name) })
       loading.set(name, work)
       return await work
     },

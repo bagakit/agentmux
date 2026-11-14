@@ -444,6 +444,7 @@ const api: AgentMuxPreloadApi = {
   goals: { execute: request => ipcRenderer.invoke('goals:execute', request),
     handoffDiscussion: input => ipcRenderer.invoke('goals:handoffDiscussion', input) },
   demands: {
+    inputEpoch: input => ipcRenderer.invoke('demands:inputEpoch', input),
     delegation: (method, input) => ipcRenderer.invoke('demands:delegation', method, input),
     onObservationIssue(listener) {
       const wrapped = (_event: Electron.IpcRendererEvent, message: string) => listener(message)
@@ -509,6 +510,8 @@ const api: AgentMuxPreloadApi = {
     readFileViewReading: owner => ipcRenderer.invoke('ui:readFileViewReading', owner).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingRecord | null>),
     writeFileViewReading: record => ipcRenderer.invoke('ui:writeFileViewReading', record).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingReceipt | null>),
     readWorkbenchState: () => ipcRenderer.invoke('ui:readWorkbenchState'),
+    readStorageRecovery: () => ipcRenderer.invoke('ui:readStorageRecovery'),
+    createStorageBackup: owner => ipcRenderer.invoke('ui:createStorageBackup', owner),
     importWorkbenchState: value => ipcRenderer.invoke('ui:importWorkbenchState', value),
     writeWorkbenchState: async value => {
       const writeRevision = ++workbenchWriteRevision
@@ -622,7 +625,7 @@ const api: AgentMuxPreloadApi = {
     goals: goalId => ipcRenderer.invoke('continuousProgress:goals', goalId),
     goalAction: (goalId, loopId, action, revision, operationId, caller) => ipcRenderer.invoke('continuousProgress:goalAction', goalId, loopId, action, revision, operationId, caller),
     list: (target: ContinuousProgressTarget) => ipcRenderer.invoke('continuousProgress:list', target),
-    create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt, taskSource),
+    create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource,inputEpoch?:string) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt, taskSource,inputEpoch),
     update: async input => {
       const result: import('../shared/continuous-progress').ProgressUpdateResult = await ipcRenderer.invoke('continuousProgress:update', input)
       if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code })
@@ -640,6 +643,7 @@ const api: AgentMuxPreloadApi = {
     cancel: (params: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => ipcRenderer.invoke('schedule:cancel', params)
   },
   sessions: {
+    readInputEpoch: hostId => ipcRenderer.invoke('sessions:readInputEpoch', hostId),
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
     owner: (hostId, expectedRuntimeId) => ipcRenderer.invoke('sessions:owner', hostId, expectedRuntimeId),
     takeovers: input => ipcRenderer.invoke('sessions:takeovers', input),
@@ -760,8 +764,8 @@ const api: AgentMuxPreloadApi = {
       unwrapSessionReopenResult(await ipcRenderer.invoke('sessions:reconcile-reopen', reference, expectedRetiredAt, operationId)),
     reopen: async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
       unwrapSessionReopenResult(await ipcRenderer.invoke('sessions:reopen', reference, expectedRetiredAt, operationId)),
-    resume: (session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) =>
-      ipcRenderer.invoke('sessions:resume', session, prompt, operationId, agentMuxNote),
+    resume: (session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string, inputEpoch?: string) =>
+      ipcRenderer.invoke('sessions:resume', session, prompt, operationId, agentMuxNote, inputEpoch),
     restart: (session: AgentSessionControl, operationId: string, observeOnly?: boolean) =>
       withStopTimeout(ipcRenderer.invoke('sessions:restart', session, operationId, observeOnly), undefined, sessionRestartTimeoutError)
         .catch(error => sessionObservationResult(() => Promise.reject(error))),
@@ -771,7 +775,7 @@ const api: AgentMuxPreloadApi = {
     observeStorage: (session: SessionControl) => ipcRenderer.invoke('sessions:observeStorage', session),
     controlContinuity: (hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput) => ipcRenderer.invoke('sessions:controlContinuity', hostId, input),
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
-    recover: (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) =>
+    recover: (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input' | 'inputEpoch'>) =>
       ipcRenderer.invoke('sessions:recover', session, workspacePath, operationId, request),
     // 唯一带超时的那条：等 Runtime 收尾必须有上限，否则一次没回执的握手会把关闭按钮永久锁死。
     // 理由与取值见 shared/session-stop-timeout.ts。
