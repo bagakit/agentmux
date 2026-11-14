@@ -2,6 +2,7 @@ import { projectHostGoal, publicGoalRecord } from '@agentmux/host/goal-projectio
 import type { AgentMuxRpcGoal, ContinuousProgressLoop } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { SessionHistoryDescriptor } from '../../../src/shared/contracts'
+import { applyGoalDelegationResult } from '../../../src/renderer/src/lib/goal-delegation-work'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
@@ -27,6 +28,19 @@ export function goalRealWorkSynthetic(render: () => void) {
         }
         throw new Error('Private synthetic save receipt is unavailable. The original draft and operation are kept.')
       }
+    },
+    readBoard(input: { inventory: AgentMuxRpcGoal[]; observations: Record<string, DelegationResult> }) {
+      const goals = input.inventory.map(goal => ({ ...publicGoalRecord(goal), source: 'default-topic' as const }))
+      api.demands.delegation = async (method, params) => {
+        const observation = input.observations[params.goalId]
+        if (!observation || !['goal.delegations', 'goal.plan'].includes(method)) throw new Error('Read-only board replay has no such Goal observation.')
+        return structuredClone(observation)
+      }
+      useAppStore.setState({ demands: Object.fromEntries(goals.map(goal => [goal.id, goal])), selectedDemandId: null,
+        loading: false, mainSurface: 'board', activeWorkspaceId: null,
+        goalFiniteStartIntents: {}, goalDiscussionRequests: {}, goalEditDrafts: {} })
+      for (const observation of Object.values(input.observations)) applyGoalDelegationResult(observation)
+      render()
     },
     /** Explicit private product-fixture input; original user Goal replay uses its separate source port. */
     restoreProductSnapshot(input: Pick<ReturnType<typeof useAppStore.getState>, 'config' | 'sessions' | 'tabs' | 'layouts'> & { goal: DemandRecord }) {
