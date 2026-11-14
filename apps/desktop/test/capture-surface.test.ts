@@ -536,6 +536,20 @@ it('the public selection reports a failed native grab as failed with its code', 
   expect(await surface.captureSelection(false)).toEqual({ state: 'failed', error: { code: 'permission_denied', message: 'Screen recording is not allowed' } })
 })
 
+it('a public selection refuses an included background switch and still delivers its excluded selection', async () => {
+  const pending = surface.captureSelection(false)
+  await vi.advanceTimersByTimeAsync(0)
+  const window = electron.windows[0]!, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
+  const handler = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!, input = await handler(event, 'load')
+  expect(input.background).toBe('excluded')
+  await handler(event, 'select', { requestId: input.requestId })
+  await handler(event, 'switch-background', { requestId: input.requestId, background: 'included' })
+  expect(window.webContents.send, 'Main refuses the substitution without closing the usable surface').toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT,
+    { kind: 'notice', message: 'This public capture requires its original excluded screenshot background.' })
+  await handler(event, 'finish', { requestId: input.requestId, background: 'excluded', image: result, selection })
+  expect(await pending).toMatchObject({ state: 'captured', engine: 'fixture-engine', selectionRect: { x: 1, y: 1, width: 2, height: 1 } })
+})
+
 it('a public selection whose excluded exposure is unavailable fails instead of offering included pixels', async () => {
   electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
   ports.native.mockReturnValue({ captureDisplays: vi.fn()
@@ -665,7 +679,9 @@ it('a failed requested exposure preserves the original mode and offers the other
   await vi.advanceTimersByTimeAsync(0)
   expect(electron.windows, 'the healthy exposure still opens its overlays').toHaveLength(2)
   const window = electron.windows[0]!, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
-  const input = await expect(electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'load'), 'the healthy exposure keeps its original overlays loadable').resolves.toMatchObject({ background: 'included' })
+  const loading = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'load')
+  await expect(loading, 'the healthy exposure keeps its original overlays loadable').resolves.toMatchObject({ background: 'included' })
+  const input = await loading
   expect(input.background, 'a failed source never silently replaces the requested exposure').toBe('included')
   expect(await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'select', { requestId: input.requestId })).toBe(false)
   await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'switch-background', { requestId: input.requestId, background: 'excluded' })
