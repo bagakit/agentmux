@@ -222,3 +222,25 @@ association L is not this local creation C or a grant to the Agent.
 The older `agent rename` retains its receiving-client display-override semantics
 and original records. It is not silently redirected to another Core. Local label
 saves do not claim Provider-native title synchronization or Agent health.
+
+## Keep an original Agent as a Mote
+
+After the user explicitly chooses to establish a lasting collaborator, the original
+person/device may call `agent promote apply --input FILE|-`. Inspect the leaf help
+and retain the exact target Host/Session, source display occurrence, title and
+operationId. A managed Agent may inspect its own original result; it cannot assign
+itself a Mote main role. Promotion creates a separate Mote data home and associates
+only that same Session. Original history, Run, execution cwd and project workface
+remain. It does not copy a repository, start another Agent, send input or enable
+standing maintenance. An Agent already in a Topic/Mote keeps that original organization.
+
+Use `agent promote inspect --input FILE|-` with the exact target to discover the
+original operation. Partial or unknown results retain their complete original
+request. Inspect before explicitly continuing the same apply and operationId;
+never mint a new operation to replace an unknown result. `settings inspect
+promotion.enabled` reads the global switch for new promotions; its default is true.
+The original person/device may change it through Settings → Promotion or the
+public Settings owner. Disabling it retains existing Motes and original promotion
+inspection/continuation. A saved personality does not prove that an existing
+Session has read it; continue the original context and discover Mote guidance
+through the original main/member binding when actually working there.

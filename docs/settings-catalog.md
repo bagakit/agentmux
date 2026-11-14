@@ -54,7 +54,7 @@ AppConfig 偏好的 GUI 与 CLI 写入都经过唯一 [Main ConfigOwner](../apps
 | 页面 | 内容与作用范围 | CLI 范围 | 原 owner |
 | --- | --- | --- | --- |
 | Club | 全局目录视图与头像尺寸；打开原 Club 管理准确 Mote 的名称、头像、角色、Profile 与 SOUL。目录偏好不改 Mote 身份，也不是本人 My Profile。 | `amux settings inspect moteDirectoryView`、`amux settings inspect moteDirectoryAvatarSize` 查询全局目录偏好；准确 Mote 的内容继续沿原对象管理。 | [设置入口](../apps/desktop/src/renderer/src/components/settings/modules/mote.tsx)、[Main scalar](../apps/desktop/src/main/settings/modules/general.ts)、[Mote 身份与协作合同](design/behavior/motes-and-coordination.md) |
-| Promotion | 从准确 Topic 的原菜单明确晋升为 Mote，保留原 Agent、对话与知识；已晋升对象的 Profile、Quick mode 和连接仍在原 Club 中逐个配置。 | 复用 `amux topic promote inspect`、`amux topic promote apply` 的原 Topic 与 operationId；Mote 配置沿 `amux space mote preferences read`、`amux space mote preferences save`，不新增全局晋升规则。 | [设置入口](../apps/desktop/src/renderer/src/components/settings/TopicDirectorySettingsPane.tsx)、[原晋升](../apps/desktop/src/renderer/src/components/TopicPromotionDialog.tsx)、[Mote 偏好](../packages/core/src/mote-preferences.ts) |
+| Promotion | 允许新晋升的开关，以及从准确 Agent／Topic 建立 Mote 的入口说明。Mote 有自己的资料空间，原合作与工作面连续；已有对象的 Profile、Quick mode 和连接沿 Club 配置。 | `amux settings inspect/set promotion.enabled`；普通 Agent 使用 `amux agent promote inspect/apply --input FILE`，Topic 继续原 `topic promote inspect/apply`；都保原 operationId，关闭只限制新受理。 | [设置入口](../apps/desktop/src/renderer/src/components/settings/TopicDirectorySettingsPane.tsx)、[Agent 晋升](../apps/host/src/agent-promotion.ts)、[Topic 晋升](../apps/host/src/topic-promotion.ts)、[开关合同](design/behavior/companions-from-work.md#promotion-配置与允许开关) |
 
 ## Work
 

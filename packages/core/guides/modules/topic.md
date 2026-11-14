@@ -89,3 +89,10 @@ After a partial or unknown result, inspect with the original `--operation-id`;
 explicitly apply that same operation to continue. Do not generate another operation
 or create a replacement Mote. A complete receipt confirms personality, directory
 and spatial registration together. Knowledge commands keep using the original Topic ID.
+
+New Topic promotions also honor the original `promotion.enabled` setting. Disabled
+admission refuses only the new promotion; existing Agents, Motes and original
+partial-operation inspection/explicit continuation remain available. Promotion
+configuration is in Settings → Promotion. For starting from an ordinary Agent,
+read `agent --skill` and `agent promote --help`; that path establishes its own
+Mote data home without converting the original project or Topic.
