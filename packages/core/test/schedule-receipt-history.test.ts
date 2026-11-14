@@ -94,7 +94,9 @@ async function fixture(kind: 'memory' | 'file', initialPrompt?: string) {
   const manager = new ContinuousProgressLoopManager(sessions as never, tick, () => 180_000,
     async () => { throw Error('History never probes Runtime activity.') }, runtime)
   releases.push(() => manager.stop())
-  return { manager, source: sessions, tick, future, ownRead, loop, root, path, client, async addSummaryInputs() {
+  return { manager, source: sessions, tick, future, ownRead, loop, root, path, client, async recordMinuteInputs(from: number, count: number) {
+    for (let index = 0; index < count; index++) current = await input(current, 'minute-' + index, updated, from + index * 60_000)
+  }, async addSummaryInputs() {
     current = await input(current, 'second-confirmed', updated, 140_000)
     current = await input(current, 'unconfirmed-delivery', updated, 141_000, frozen(updated).message, false)
   }, async corruptMessage() {
@@ -188,6 +190,35 @@ it.each(['memory', 'file'] as const)('%s public history summarizes only the same
     expect(cli.code, cli.stderr).toBe(0)
     expect(JSON.parse(cli.stdout).result).toEqual(partial)
   }
+})
+
+it('one-minute inputs across a day return exact hourly totals in bounded pages', async () => {
+  const f = await fixture('memory')
+  const from = scope.to + 60_000
+  const hours = Array.from({ length: 24 }, (_, hour) => from + hour * 3_600_000)
+  await f.recordMinuteInputs(from, 1440)
+  await f.manager.start()
+  const query: ScheduleHistoryQuery = { scheduleId: scope.scheduleId, from, to: from + 86_400_000, bucketStarts: hours }
+  const counts = new Map<number, number>()
+  let pages = 0
+  do {
+    const page = await f.manager.call('schedule.history', query, person)
+    expect(page.coverage).toBe('recorded-inputs')
+    expect(page.entries).toEqual([])
+    let occurrences = 0
+    for (const bucket of page.buckets!) {
+      expect(bucket.groups).toHaveLength(1)
+      const count = bucket.groups[0]!.count
+      counts.set(bucket.from, (counts.get(bucket.from) ?? 0) + count)
+      occurrences += count
+    }
+    expect(occurrences).toBe(page.nextCursor ? 256 : 160)
+    pages++
+    if (page.nextCursor) query.cursor = page.nextCursor
+    else delete query.cursor
+  } while (query.cursor && pages < 7)
+  expect(pages).toBe(6)
+  expect(hours.map(hour => counts.get(hour))).toEqual(Array(24).fill(60))
 })
 
 it('bucket labels preserve just a bounded first line of the original input across later edits', async () => {
