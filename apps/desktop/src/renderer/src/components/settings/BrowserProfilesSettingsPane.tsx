@@ -7,7 +7,7 @@ import { Switch, TextInput } from '@agentmux/client-ui/input'
 import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
-import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { SettingsNavigation } from '../SettingsNavigation'
 import type { BrowserProfileSite, BrowserProfileSummary, BrowserProfileFolder } from '../../../../shared/contracts'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipCounts, type BrowserProfileCookieSkipReason } from '../../../../shared/browser-profile-import-skip'
@@ -15,7 +15,7 @@ import { api } from '../../lib/api'
 import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
 import { browserProfileEnvironmentDescription } from '../../lib/browser-profile-presentation'
 import { useAppStore } from '../../store'
-import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop-presentation'
+import { awaitDesktopPresentation, desktopElementVisible, readDesktopOverlays } from '../../lib/desktop-presentation'
 import { tabGroupForTab, workbenchSurfaces } from '../../lib/workbench-tabs'
 import { PROFILE_HUES, ProfileMark, profileTone, assignProfileHues } from '../ProfileMark'
 import { BrowserProfileLibrary } from './BrowserProfileLibrary'
@@ -261,6 +261,15 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
   const moreButton = useRef<HTMLButtonElement>(null)
   const huesGroup = useRef<HTMLDivElement>(null)
   const cancelDelete = useRef<HTMLButtonElement>(null)
+  const accessFocus = useRef<HTMLInputElement | null>(null)
+  useLayoutEffect(() => {
+    if (busy !== null) return
+    const control = accessFocus.current
+    accessFocus.current = null
+    if (control && control.ownerDocument.activeElement === control.ownerDocument.body && desktopElementVisible(control)) {
+      control.focus({ preventScroll: true })
+    }
+  }, [busy])
   // Opening the color picker or the delete confirmation moves focus into it; closing returns it.
   useEffect(() => { if (hues) huesGroup.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus() }, [hues])
   useEffect(() => { if (confirm) cancelDelete.current?.focus() }, [confirm])
@@ -364,7 +373,11 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
         <h4>Agents</h4>
         <label className="browser-automation-toggle browser-profile-editor__agents">
           <Switch checked={profile.agentAccess !== false} disabled={busy !== null}
-            onChange={event => void commit({ agentAccess: event.target.checked })} />
+            onChange={event => {
+              const control = event.currentTarget
+              accessFocus.current = control.matches(':focus-visible') ? control : null
+              void commit({ agentAccess: control.checked })
+            }} />
           <span>
             <strong>Let agents use Browsers in this Profile</strong>
             <small>{!automation ? 'Agent browser automation is off in Settings › Browser, so no agent uses any Profile right now.'
