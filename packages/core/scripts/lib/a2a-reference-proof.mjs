@@ -21,7 +21,7 @@ export function nativeSourceConditions(records, targetFile) {
     if (item.mutation) {
       assert.equal(item.file, targetFile)
       assert.equal(nativeMutationTarget(item.mutation), targetFile)
-      assert.ok(idleInputOwners.includes(item.file.slice(coreSource.length))); assert.notEqual(item.sha256, item.originalSHA256)
+      assert.ok(idleInputOwners.includes(item.file)); assert.notEqual(item.sha256, item.originalSHA256)
     } else assert.equal(item.sha256, item.originalSHA256)
     const condition = { sourceSHA256: item.originalSHA256,
       ...(item.file === targetFile ? {} : { compilerSHA256: item.sha256, bytes: item.bytes }) }

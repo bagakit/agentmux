@@ -7,7 +7,7 @@ import { expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { nativeProcessFiles } from '../src/agent-native-process.js'
 import { locateAppServerNativeSession } from '../src/providers/app-server.js'
-import { codexMainNativeRecord } from '../src/providers/codex-native-record-role.js'
+import { codexMainNativeRecord } from '@agentmux/providers/codex/native-record-role'
 
 it.each([
   { name: 'legacy CLI', payloads: [{ source: 'cli' }], main: true },

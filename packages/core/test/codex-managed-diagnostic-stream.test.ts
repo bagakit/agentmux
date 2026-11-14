@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
-import { codexDiagnosticStream, formatCodexManagedDiagnostic } from '../src/providers/codex-managed-diagnostics.js'
+import { codexDiagnosticStream, formatCodexManagedDiagnostic } from '@agentmux/providers/codex/managed-diagnostics'
 
 async function masked(chunks: Buffer[], credentials: string[]) {
   const stream = codexDiagnosticStream(credentials), output: Buffer[] = []

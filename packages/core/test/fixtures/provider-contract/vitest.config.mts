@@ -5,7 +5,10 @@ import { createHash } from 'node:crypto'
 import { mutations } from './mutations.mjs'
 const root = resolve(import.meta.dirname, '../../../../..')
 export default defineConfig({ root, cacheDir: resolve(root, '.local/cache/provider-contract'),
-  resolve: { alias: { '@agentmux/providers/app-server/native-read': resolve(root, 'packages/providers/src/app-server/native-read.ts') } },
+  resolve: { alias: {
+    '@agentmux/providers/app-server/native-read': resolve(root, 'packages/providers/src/app-server/native-read.ts'),
+    '@agentmux/providers/codex/hook-activation': resolve(root, 'packages/providers/src/codex/hook-activation.ts')
+  } },
   plugins: [{ name: 'provider-contract-actual-source', enforce: 'pre', transform(source, id) {
     const name = process.env.AMX_PROVIDER_MUTATION
     const mutation = name ? mutations[name as keyof typeof mutations] : undefined

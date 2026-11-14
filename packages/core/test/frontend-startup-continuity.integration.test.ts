@@ -9,7 +9,7 @@ import { offlineEndpoint } from './helpers/codex-offline-endpoint.js'
 import { privateCodexConfigArgs } from './helpers/private-codex-config.js'
 import { runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { nativeProcessTcpListeners } from '../src/agent-native-process.js'
-import { connectCodexNativeActor } from '../src/providers/codex-native-rpc.js'
+import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
 import { initialNativeComposerBinding } from '../../../apps/desktop/src/renderer/src/lib/initial-native-composer-binding.js'
 
 const core = await import(/* @vite-ignore */ process.env.AGENTMUX_NATIVE_STARTUP_CORE_ENTRY!)

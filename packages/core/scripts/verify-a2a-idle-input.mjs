@@ -19,7 +19,7 @@ const mutations = ['native-queue-becomes-steer', 'native-idle-target-is-omitted'
   'native-queue-receipt-is-unchecked', 'notification-identity-is-not-restored',
   'independent-idle-notification-is-blocked', 'independent-idle-completion-is-consumed',
   'controlled-notice-reservation-spills-to-other-key', 'uncontrolled-notice-reservation-spills-to-other-key']
-const owners = idleInputOwners.map(file => 'packages/core/src/' + file)
+const owners = idleInputOwners
 const inputs = [...owners, ...tests, ...regressions, config, 'packages/core/test/fixtures/a2a-idle-input-proof.mjs', 'packages/core/scripts/verify-a2a-idle-input.mjs',
   'packages/core/scripts/lib/a2a-reference-proof.mjs', 'packages/core/test/helpers/public-rpc-owner.ts',
   'packages/core/test/helpers/fixture-values.ts', 'test/fixture-values.mjs', 'test/fixture-epoch.cjs']

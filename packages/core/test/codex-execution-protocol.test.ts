@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCodexNativeExecutorLaunchSpec, parseCodexExecutionMessage, parseCodexExecutionServerMessage } from '../src/providers/codex-execution-protocol.js'
+import { buildCodexNativeExecutorLaunchSpec, parseCodexExecutionMessage, parseCodexExecutionServerMessage } from '@agentmux/providers/codex/execution-protocol'
 
 const sandbox = { permissions: { type: 'disabled' }, cwd: 'file:///workspace', workspaceRoots: ['file:///workspace'], windowsSandboxLevel: 'disabled' }
 function request(method: string, params: Record<string, unknown>, id: string | number = 7) {

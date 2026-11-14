@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { parse } from 'smol-toml'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { CODEX_HOOK_EVENTS, codexHookTrustBypassed, withCodexLaunchHooks } from '../src/providers/codex-launch-hooks.js'
-import { inspectCodexHookActivation } from '../src/providers/codex-hook-activation.js'
+import { CODEX_HOOK_EVENTS, codexHookTrustBypassed } from '@agentmux/providers/codex/launch-hooks'
+import { withCodexLaunchHooks, inspectCodexHookActivation } from '../src/providers/codex-hook-services.js'
 import { prepareCodexManagedLaunch } from '../src/providers/codex-native-input.js'
 
 const roots: string[] = []

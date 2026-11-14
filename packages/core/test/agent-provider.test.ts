@@ -1,4 +1,4 @@
-import { codexManagedHooks, withCodexLaunchHooks } from '../src/providers/codex-launch-hooks.js'
+import { codexManagedHooks, withCodexLaunchHooks } from '../src/providers/codex-hook-services.js'
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'

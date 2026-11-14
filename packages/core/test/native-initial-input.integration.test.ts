@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 import { offlineEndpoint } from './helpers/codex-offline-endpoint.js'
 import { nativeProcessTcpListeners } from '../src/agent-native-process.js'
-import { connectCodexNativeActor } from '../src/providers/codex-native-rpc.js'
+import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
 
 const core = await import(/* @vite-ignore */ process.env.AGENTMUX_NATIVE_INITIAL_ENTRY!)
 const native = process.env.AGENTMUX_TEST_CODEX_EXECUTABLE!

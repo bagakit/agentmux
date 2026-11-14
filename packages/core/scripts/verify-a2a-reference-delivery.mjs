@@ -17,7 +17,7 @@ const compiled = await runA2aProof({
   frozenSupport: ['test/fixture-values.mjs', 'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/helpers/fixture-values.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'], tests: [...journal, ...native],
   environment: ({ label, evidence, dist, url }) => ({ AGENTMUX_TEST_REFERENCE_FACTS: join(evidence, label + '-native-facts.jsonl'), AGENTMUX_TEST_REFERENCE_CORE: url('index.js'), AGENTMUX_TEST_REFERENCE_CLI: join(dist, 'agentmux.js') }),
   sourceInputs: ['packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/src/client.ts', 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/agent-global-message-queue.ts',
-    ...idleInputOwners.map(file => 'packages/core/src/' + file), 'packages/core/test/fixtures/a2a-idle-input-proof.mjs',
+    ...idleInputOwners, 'packages/core/test/fixtures/a2a-idle-input-proof.mjs',
     'packages/core/src/agent-message-journal.ts', 'packages/core/src/agent-message-query.ts', 'packages/core/src/agent-message-notification.ts',
     'packages/core/src/agent-message-notifications.ts', 'packages/core/src/agent-provider.ts', 'packages/core/src/providers/codex-native-input.ts', 'packages/core/src/native-input-adoption.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/prompt-submission-record.ts',
     'packages/core/src/agent-messaging-guidance.ts', 'packages/core/src/agentmux-cli-module-skills.ts', 'packages/core/src/agentmux-cli-help.ts', 'packages/core/src/agent-message-render.ts', 'packages/core/src/agentmux-cli-commands.ts',

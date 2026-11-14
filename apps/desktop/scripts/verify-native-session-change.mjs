@@ -119,7 +119,7 @@ try{
   await fs.writeFile(path.join(evidence,name+'-metafile.json'),JSON.stringify(built.metafile))
  }
  for(const file of ['apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/desktop-host.ts','packages/core/src/hosted-client.ts'])assert.ok(receipt.nodeBundles.main.inputs.includes(file),'Actual Main/Hosted consumer '+file)
- for(const file of ['packages/core/src/client.ts','packages/core/src/agent-native-session-confirmation.ts','packages/providers/src/app-server/native-session.ts','packages/core/src/providers/codex-native-record-role.ts'])assert.ok(receipt.nodeBundles.owner.inputs.includes(file),'Actual Core/Provider owner '+file)
+ for(const file of ['packages/core/src/client.ts','packages/core/src/agent-native-session-confirmation.ts','packages/providers/src/app-server/native-session.ts','packages/providers/src/codex/native-record-role.ts'])assert.ok(receipt.nodeBundles.owner.inputs.includes(file),'Actual Core/Provider owner '+file)
  receipt.packageManifests=Object.fromEntries(manifests)
  await fs.copyFile(path.join(fixture,'native-cli.mjs'),path.join(privateRoot,'native-cli.mjs'))
  await fs.mkdir(path.join(privateRoot,'native-codex'))

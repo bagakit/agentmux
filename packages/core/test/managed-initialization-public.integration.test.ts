@@ -150,9 +150,9 @@ if(args.includes('app-server')){
   expect(turns.filter(value => value.params.input.some((part: any) => part.text?.includes('UNKNOWN_INPUT_ONCE')))).toHaveLength(1)
   expect(turns.filter(value => value.params.input.some((part: any) => part.text?.includes('FRESH_INPUT_AFTER_LATE_PREFLIGHT')))).toHaveLength(1)
   if (process.env.AGENTMUX_INITIALIZATION_PUBLIC_EVIDENCE) {
-    const paths = ['src/providers/codex-managed-run.ts', 'src/providers/codex-native-rpc.ts', 'dist/providers/codex-managed-run.js',
-      'dist/providers/codex-native-rpc.js', 'dist/agentmux.js', 'dist/hosted-runtime-service.js', 'test/fixtures/frontend-recovery-owner.mjs']
-    const artifacts = await Promise.all(paths.map(async path => ({ path, sha256: createHash('sha256').update(await readFile(resolve(import.meta.dirname, '..', path))).digest('hex') })))
+    const paths = ['core/src/providers/codex-managed-run.ts', 'providers/src/codex/native-rpc.ts', 'core/dist/providers/codex-managed-run.js',
+      'providers/dist/codex/native-rpc.js', 'core/dist/agentmux.js', 'core/dist/hosted-runtime-service.js', 'core/test/fixtures/frontend-recovery-owner.mjs']
+    const artifacts = await Promise.all(paths.map(async path => ({ path, sha256: createHash('sha256').update(await readFile(resolve(import.meta.dirname, '../..', path))).digest('hex') })))
     await appendFile(process.env.AGENTMUX_INITIALIZATION_PUBLIC_EVIDENCE, JSON.stringify({ schema: 'agentmux.initialization-public-proof.v1', artifacts,
       original: { agentSessionId: original.agentSessionId, runId: original.run.runId, pid: before.run.pid, backendPid: backend.pid,
         actorId: originalActor.actorId, lifecycleOperationId: originalActor.lifecycleOperationId },
@@ -258,9 +258,9 @@ if(args.includes('app-server')){
   const loadedCommand = await promisify(execFile)('ps', ['-p', String(ready.run.pid), '-o', 'args='])
   expect(loadedCommand.stdout).toContain(resolve(import.meta.dirname, '../dist/providers/codex-managed-run.js'))
   if (process.env.AGENTMUX_INITIALIZATION_PUBLIC_EVIDENCE) {
-    const paths = ['src/providers/codex-managed-run.ts', 'src/providers/codex-native-rpc.ts', 'dist/providers/codex-managed-run.js',
-      'dist/providers/codex-native-rpc.js', 'dist/agentmux.js', 'dist/hosted-runtime-service.js', 'test/fixtures/frontend-recovery-owner.mjs']
-    const artifacts = await Promise.all(paths.map(async path => ({ path, sha256: createHash('sha256').update(await readFile(resolve(import.meta.dirname, '..', path))).digest('hex') })))
+    const paths = ['core/src/providers/codex-managed-run.ts', 'providers/src/codex/native-rpc.ts', 'core/dist/providers/codex-managed-run.js',
+      'providers/dist/codex/native-rpc.js', 'core/dist/agentmux.js', 'core/dist/hosted-runtime-service.js', 'core/test/fixtures/frontend-recovery-owner.mjs']
+    const artifacts = await Promise.all(paths.map(async path => ({ path, sha256: createHash('sha256').update(await readFile(resolve(import.meta.dirname, '../..', path))).digest('hex') })))
     await appendFile(process.env.AGENTMUX_INITIALIZATION_PUBLIC_EVIDENCE, JSON.stringify({ schema: 'agentmux.settled-resume-public-proof.v1', artifacts,
       original: { agentSessionId: original.agentSessionId, runId: failed.run.runId, pid: failed.run.pid, backendPid: backend.pid,
         actorId: originalActor.actorId, lifecycleOperationId: originalActor.lifecycleOperationId, nativeSessionId: nativeId },

@@ -17,7 +17,7 @@ vi.mock('../src/providers/codex-managed-frontend.js', async importOriginal => ({
     return { publish: boundary.publish, close: async () => {} }
   }
 }))
-vi.mock('../src/providers/codex-native-rpc.js', () => ({ connectCodexNativeActor: async () => ({
+vi.mock('@agentmux/providers/codex/native-rpc', () => ({ connectCodexNativeActor: async () => ({
   request: async (method: string) => method === 'account/read' ? { account: null, requiresOpenaiAuth: false } : ({ thread: { id: 'original-native', sessionId: 'original-session', canAcceptDirectInput: true }, cwd: process.cwd() }), dispose() {}, isConnected: () => true
 }) }))
 

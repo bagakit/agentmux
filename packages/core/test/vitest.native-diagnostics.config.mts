@@ -4,6 +4,7 @@ import { nativeDiagnosticSource } from './helpers/native-diagnostic-source.js'
 
 const root = resolve(import.meta.dirname, '../../..')
 export default defineConfig({ root,
+  resolve: { alias: { '@agentmux/providers/codex/managed-diagnostics': resolve(root, 'packages/providers/src/codex/managed-diagnostics.ts') } },
   cacheDir: resolve(root, '.tmp/recovery-late-exit-convergence/diagnostic-cache', process.env.AGENTMUX_DIAGNOSTIC_MUTATION ?? 'positive'),
   plugins: [{ name: 'actual-native-diagnostic-source', enforce: 'pre',
     transform(code, id) { const next = nativeDiagnosticSource(code, id); if (next !== code) return { code: next, map: null } }

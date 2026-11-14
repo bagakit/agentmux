@@ -8,8 +8,8 @@ import { AgentProviderRegistry, type AgentProviderHookActivationContext } from '
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { withAppServerNativeRead } from '../src/providers/app-server.js'
-import { CODEX_HOOK_SOURCE_PATH, codexManagedHooks } from '../src/providers/codex-launch-hooks.js'
-import { inspectCodexHookActivation } from '../src/providers/codex-hook-activation.js'
+import { CODEX_HOOK_SOURCE_PATH } from '@agentmux/providers/codex/launch-hooks'
+import { codexManagedHooks, inspectCodexHookActivation } from '../src/providers/codex-hook-services.js'
 
 let root: string, client: AgentMuxClient
 beforeEach(async () => {

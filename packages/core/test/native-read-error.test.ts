@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { withCodexLaunchHooks } from '../src/providers/codex-launch-hooks.js'
+import { withCodexLaunchHooks } from '../src/providers/codex-hook-services.js'
 import { AgentMuxError } from '../src/errors.js'
 
 const cleanup: Array<() => Promise<void>> = []

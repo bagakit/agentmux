@@ -22,7 +22,8 @@ it.runIf(process.platform === 'darwin').each(['rpc-rejection', 'transport-close'
     const token = 'private-actor-token-' + failure, capability = 'private-agent-capability-' + failure
     const entry = join(root, 'managed-entry.mjs'), witness = join(root, 'witness.jsonl')
     await build({ entryPoints: [resolve(import.meta.dirname, '../src/providers/codex-managed-run.ts')], outfile: entry,
-      bundle: true, platform: 'node', format: 'esm', target: 'node24',
+      bundle: true, alias: { '@agentmux/providers/codex/managed-diagnostics': resolve(import.meta.dirname, '../../providers/src/codex/managed-diagnostics.ts') },
+      platform: 'node', format: 'esm', target: 'node24',
       banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
       plugins: [{ name: 'actual-native-diagnostic-source', setup(b) { b.onLoad({ filter: /\.ts$/ }, async ({ path }) =>
         ({ contents: nativeDiagnosticSource(await readFile(path, 'utf8'), path), loader: 'ts' })) } }]

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { codexFailure } from '../src/providers/codex-errors.js'
+import { codexFailure } from '@agentmux/providers/codex/errors'
 
 const turn = 'native-turn-7'
 const message = 'Selected model is at capacity. Please try a different model.'

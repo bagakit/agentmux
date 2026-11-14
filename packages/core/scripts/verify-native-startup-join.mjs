@@ -9,7 +9,7 @@ import { verifySourceBoundProof } from './lib/source-bound-proof.mjs'
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(new URL('../package.json', import.meta.url))
 const { build } = require('esbuild'), digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = ['packages/core/src/providers/codex-managed-run.ts', 'packages/core/src/providers/codex-managed-frontend.ts',
-  'packages/core/src/providers/codex-native-rpc.ts', 'packages/core/test/native-startup-join.test.ts',
+  'packages/providers/src/codex/native-rpc.ts', 'packages/core/test/native-startup-join.test.ts',
   'packages/core/test/fixtures/native-startup-join.cjs', 'packages/core/test/native-startup-join.config.mts',
   'packages/core/scripts/verify-native-startup-join.mjs', 'packages/core/scripts/lib/source-bound-proof.mjs']
 const inputs = Object.fromEntries(await Promise.all(sources.map(async path => [path, digest(await readFile(join(root, path)))])))

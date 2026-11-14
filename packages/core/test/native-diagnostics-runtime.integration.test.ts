@@ -16,10 +16,10 @@ const command = resolve(import.meta.dirname, 'fixtures/native-diagnostic-cli.mjs
 const evidenceDirectory = resolve(root, '.tmp/recovery-late-exit-convergence/diagnostic-runtime-cases')
 const candidateFiles = ['packages/core/src/client.ts', 'packages/core/src/providers/codex-native-input.ts',
   'packages/core/dist/client.js', 'packages/core/dist/providers/codex-native-input.js',
-  'packages/core/src/providers/codex-managed-run.ts', 'packages/core/src/providers/codex-managed-diagnostics.ts',
-  'packages/core/src/providers/codex-native-rpc.ts', 'packages/core/src/public-rpc-service.ts',
-  'packages/core/dist/providers/codex-managed-run.js', 'packages/core/dist/providers/codex-managed-diagnostics.js',
-  'packages/core/dist/providers/codex-native-rpc.js', 'packages/core/dist/public-rpc-service.js',
+  'packages/core/src/providers/codex-managed-run.ts', 'packages/providers/src/codex/managed-diagnostics.ts',
+  'packages/providers/src/codex/native-rpc.ts', 'packages/core/src/public-rpc-service.ts',
+  'packages/core/dist/providers/codex-managed-run.js', 'packages/providers/dist/codex/managed-diagnostics.js',
+  'packages/providers/dist/codex/native-rpc.js', 'packages/core/dist/public-rpc-service.js',
   'packages/core/test/fixtures/native-diagnostic-cli.mjs', 'packages/core/test/native-diagnostics-runtime.integration.test.ts']
 const hashes = async () => Object.fromEntries(await Promise.all(candidateFiles.map(async file =>
   [file, createHash('sha256').update(await readFile(resolve(root, file))).digest('hex')])))

@@ -109,8 +109,9 @@ export async function main(args) {
       'wire-numeric-budget', 'source-cursor-midframe', 'unknown-chunk-new-id', 'ignore-confirmed-offset',
       'repartition-old-claim', 'skip-durable-claim'] },
   ]
+  const providerBuildArgs = ['packages/core/node_modules/typescript/bin/tsc', '-p', 'packages/providers/tsconfig.json']
   const buildArgs = ['packages/core/scripts/build.mjs']
-  if (options.plan) return console.log(JSON.stringify({ mode: 'plan-only', buildArgs, tests, mutations: options.mutations ? mutations.map(value => value.id) : [], mutationGates: options.mutations ? mutationGates : [], native, output, actualMachines: 1 }))
+  if (options.plan) return console.log(JSON.stringify({ mode: 'plan-only', providerBuildArgs, buildArgs, tests, mutations: options.mutations ? mutations.map(value => value.id) : [], mutationGates: options.mutations ? mutationGates : [], native, output, actualMachines: 1 }))
   await mkdir(dirname(output), { recursive: true }); await mkdir(output)
   const report = { passed: false, scope: 'Local Core/CLI/native qualification; no real two-machine or UI acceptance', tests: [], mutations: [], native: [] }
   const save = () => writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2))
@@ -123,8 +124,13 @@ export async function main(args) {
       'packages/core/scripts/generate-guides.mjs', 'packages/core/scripts/check-guides.mjs', 'packages/core/native',
       'packages/core/guides',
       'packages/core/tsconfig.build.json', 'packages/core/tsconfig.json', 'tsconfig.base.json',
-      'packages/core/package.json', 'pnpm-lock.yaml']
-    const source = await manifest(sourcePaths), built = await run(buildArgs, await buildEnvironment(output))
+      'packages/core/package.json', 'packages/providers/package.json', 'packages/providers/tsconfig.json',
+      'packages/providers/src', 'pnpm-lock.yaml']
+    const source = await manifest(sourcePaths)
+    const providersBuilt = await run(providerBuildArgs)
+    await writeFile(resolve(output, 'providers-build.log'), providersBuilt.stdout + providersBuilt.stderr)
+    assert(providersBuilt.code === 0 && providersBuilt.signal === null, 'Exact Providers candidate build failed')
+    const built = await run(buildArgs, await buildEnvironment(output))
     await writeFile(resolve(output, 'build.log'), built.stdout + built.stderr)
     assert(built.code === 0 && built.signal === null, 'Exact Core candidate build failed')
     assert.deepEqual(await manifest(sourcePaths), source, 'Core source changed during compilation; candidate is unconfirmed')
@@ -143,7 +149,7 @@ export async function main(args) {
       'packages/core/scripts/verify-cross-host-execution.mjs', ...(options.mutations ? mutationGates.map(gate => gate.script) : []),
       ...native.map(name => `packages/core/scripts/${name}.mjs`), ...tests]
     const consumed = await manifest(consumedPaths)
-    await writeFile(resolve(output, 'candidate.json'), JSON.stringify({ source, consumed, buildArgs, exitCode: built.code,
+    await writeFile(resolve(output, 'candidate.json'), JSON.stringify({ source, consumed, providerBuildArgs, buildArgs, exitCode: built.code,
       node: process.version, executable: process.execPath, platform: process.platform, arch: process.arch }, null, 2))
     report.candidate = resolve(output, 'candidate.json'); await save()
     const testArgs = ['packages/core/node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/core/scripts/fixtures/vitest.cross-host-execution.config.mts', '--reporter=json']
@@ -160,7 +166,7 @@ export async function main(args) {
       await writeFile(resolve(output, mutation.id + '.log'), result.stdout + result.stderr)
       assert(Number.isInteger(result.code) && result.code !== 0 && result.signal === null, 'Mutant survived or process was interrupted: ' + mutation.id)
       const hits = (await readFile(hit, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-      assert(hits.length > 0 && hits.every(value => value.mutation === mutation.id && value.file.endsWith('/packages/core/src/' + mutation.file)), 'Wrong mutation consumer')
+      assert(hits.length > 0 && hits.every(value => value.mutation === mutation.id && value.file.endsWith('/' + mutation.file)), 'Wrong mutation consumer')
       validateTests(JSON.parse(await readFile(json, 'utf8')), true)
       report.mutations.push({ id: mutation.id, killed: true, evidence: json, hits: hit }); await save()
     }
