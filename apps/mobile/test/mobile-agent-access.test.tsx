@@ -32,7 +32,7 @@ function original(kind: 'folder' | 'mote' = 'folder') {
   ] }
   const service = new AgentMuxRpcService({ execute: async request => ({ operation: request.operation, catalog } as never) })
   const rpc = vi.fn((method: string, params: unknown) => service.call(method as never, params as never))
-  return { catalog, rpc, client: { forwardRpc: rpc, onEvent: () => () => {} } as any, open: vi.fn() }
+  return { catalog, rpc, client: { forwardRpc: rpc, onEvent: () => () => {}, runtimeOwnerIdentity: () => ({ runtimeId: 'original-runtime', ownerInstanceId: 'original-instance' }) } as any, open: vi.fn() }
 }
 describe('original spatial Agent remains readable before SDK inventory hydration', () => {
   it('keeps the navigation available before a client is connected', async () => {
@@ -44,7 +44,7 @@ describe('original spatial Agent remains readable before SDK inventory hydration
     const element = await mount(<MobileSpatialNavigation client={f.client} connected home={home} sessions={[]} openSession={f.open} />)
     await click(element, 'Original Project'); await click(element, 'Known original Agent')
     expect(f.open).toHaveBeenLastCalledWith('sid-original', expect.objectContaining({ name: 'Known original Agent', context: expect.objectContaining({ tabId: 'tab-original', regionId: 'region-original', groupId: 'group-original' }) }))
-    const rows = element.querySelectorAll<HTMLButtonElement>(home === 'mote' ? '.mobile-mote-agents .mobile-agent-row__open' : '.mobile-spatial-tab .mobile-session-list > li > button')
+    const rows = element.querySelectorAll<HTMLButtonElement>(home === 'mote' ? '.mobile-mote-agents .mobile-agent-row__open' : '.mobile-spatial-tab .mobile-session-list > li > .mobile-agent-row__open')
     expect(rows).toHaveLength(2)
     await act(async () => rows[1]!.click())
     expect(f.open).toHaveBeenLastCalledWith('sid-second', expect.objectContaining({ context: expect.objectContaining({ regionId: 'region-second' }) }))
@@ -62,12 +62,20 @@ describe('original spatial Agent remains readable before SDK inventory hydration
     const f = original()
     const first = f.catalog.locations.find(value => value.regionId === 'region-original')!
     f.catalog.locations.push({ ...first, displayWorkspaceId: 'second-display', groupId: 'second-group' })
+    // This original Core binding is known independently of the absent SDK inventory.
+    f.catalog.regions.find(region => region.regionId === 'region-original')!.execution = { hostId: 'local', cwd: f.catalog.spaces[0]!.directoryPath }
     const element = await mount(<MobileZoneWorkface client={f.client} zoneId={f.catalog.zones[0]!.zoneId} name="Original Topic" visible openSession={f.open} />)
     await click(element, 'Known original Agent')
     expect(f.open.mock.calls.at(-1)![1]).not.toHaveProperty('context')
-    await click(element, 'second-display / second-group')
+    await act(async () => element.querySelector<HTMLButtonElement>('.mobile-agent-locations-entry')!.click())
+    const choices = [...document.body.querySelectorAll<HTMLElement>('.mobile-agent-location')]
+    expect(choices).toHaveLength(2)
+    const exact = choices.find(choice => [...choice.querySelectorAll('dl > div')].some(field => field.querySelector('dt')?.textContent === 'displayWorkspaceId' && field.querySelector('dd')?.textContent === 'second-display'))!
+    expect(exact, 'The exact second display remains selectable through its complete address').toBeDefined()
+    await act(async () => exact.querySelector<HTMLButtonElement>('button')!.click())
     expect(f.open).toHaveBeenLastCalledWith('sid-original', expect.objectContaining({ context: { ...first, displayWorkspaceId: 'second-display', groupId: 'second-group' } }))
-    expect(f.rpc.mock.calls.map(([method]) => method)).toEqual(['space.ls'])
+    expect(f.rpc.mock.calls.map(([method]) => method)).toEqual(['space.ls', 'space.inspect'])
+    expect(f.rpc).toHaveBeenLastCalledWith('space.inspect', { target: { spaceId: first.spaceId, zoneId: first.zoneId, displayWorkspaceId: 'second-display', groupId: 'second-group', tabId: 'tab-original', regionId: 'region-original' }, presentation: true })
   })
 })
 

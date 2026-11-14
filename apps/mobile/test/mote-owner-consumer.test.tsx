@@ -86,8 +86,9 @@ function clientFor(value: ReturnType<typeof original>) {
     if (method === 'file.read') return parseFileReadResult(await owner.read(params), params)
     if (method === 'app.snapshot') return { agents: [] }
     if (method === 'agent.inspect') return { routeHostId: 'host-original', session: f.client.agentSession(params.target.agentSessionId), displayName: { override: null, availability: 'observed' } }
-    const result = { operation: 'space.ls' as const, catalog: publicCatalog(selectSpatialCatalog(value.catalog, params.target ?? {})) }
-    return parseRpcControlResult('space.ls', rpcControlResult('space.ls', result), params)
+    const operation = method === 'space.inspect' ? 'space.inspect' as const : 'space.ls' as const
+    const result = { operation, catalog: publicCatalog(selectSpatialCatalog(value.catalog, params.target ?? {})) }
+    return parseRpcControlResult(operation, rpcControlResult(operation, result), params)
   })
   f.client.forwardRpc = rpc
   return { ...f, rpc, read }
@@ -172,12 +173,16 @@ it('actual Service and Desktop Store preserve the canonical missing-observation 
     expect(row).not.toBeNull()
     await click(row.querySelector('.mobile-agent-row__open')!)
     expect(open).toHaveBeenCalledWith('session-original', expect.anything())
-    await click(row.querySelector('.mobile-session-locations summary')!)
-    const locations = [...row.querySelectorAll<HTMLButtonElement>('.mobile-session-locations button')]
+    await click(row.querySelector('.mobile-agent-locations-entry')!)
+    const locations = [...document.body.querySelectorAll<HTMLButtonElement>('.mobile-agent-locations-sheet .mobile-agent-location > button')]
     expect(locations).toHaveLength(2); await click(locations[1]!)
-    expect(open).toHaveBeenCalledWith('session-original', expect.objectContaining({ context: expect.objectContaining({
-      tabId: 'main-tab', regionId: 'main-region', displayWorkspaceId: 'second-display', groupId: 'saved-group'
-    }) }))
+    await vi.waitFor(async () => {
+      await act(async () => {})
+      expect(open).toHaveBeenCalledWith('session-original', expect.objectContaining({ context: expect.objectContaining({
+        tabId: 'main-tab', regionId: 'main-region', displayWorkspaceId: 'second-display', groupId: 'saved-group'
+      }) }))
+    })
+    expect(document.body.querySelector('.mobile-agent-locations-issue')?.textContent ?? '', 'The exact original public inspection remains navigable').toBe('')
     await click(row.querySelector('.mobile-agent-row__more')!)
     expect(view.element.querySelector('[aria-label="Agent 消耗"]')).not.toBeNull()
     await act(async () => await vi.waitFor(() => expect(f.metadataRead).toHaveBeenCalledExactlyOnceWith('session-original')))
@@ -297,8 +302,8 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     await click(button(view.element, `查看 Mote 资料 · ${value.topic.title}`)); expect(profile).toHaveBeenCalledOnce()
     const mainRows = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-mote-agents .mobile-agent-row__open')].filter(item => item.textContent?.includes('继续原协调工作'))
     expect(mainRows).toHaveLength(1)
-    await click(mainRows[0]!.closest('.mobile-agent-row')!.querySelector('summary')!)
-    const places = [...mainRows[0]!.closest('.mobile-agent-row')!.querySelectorAll<HTMLButtonElement>('.mobile-session-locations button')]
+    await click(mainRows[0]!.closest('.mobile-agent-row')!.querySelector('.mobile-agent-locations-entry')!)
+    const places = [...document.body.querySelectorAll<HTMLButtonElement>('.mobile-agent-locations-sheet .mobile-agent-location > button')]
     expect(places).toHaveLength(2)
     await click(places[1]!)
     expect(open).toHaveBeenCalledWith('session-original', expect.objectContaining({ context: expect.objectContaining({ displayWorkspaceId: 'second-display', groupId: 'saved-group' }) }))
