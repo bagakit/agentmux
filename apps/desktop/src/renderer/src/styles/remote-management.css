@@ -81,6 +81,8 @@ button.remote-work__row:focus-visible { outline: 1px solid var(--focus-line); ou
 
 .application-access { display: grid; gap: var(--sp-4); min-width: 0; margin-block: var(--sp-4) var(--sp-6); padding-block: var(--sp-4); border-bottom: 1px solid var(--line-soft); font-size: var(--fs-body); container: application-access / inline-size; }
 .application-access__header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
+.application-access__header > div { min-width: 0; }
+.application-access__header > .small-button { flex: none; white-space: nowrap; }
 .application-access__header strong { font-size: 14px; }
 .application-access p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
 .application-access__header p, .application-access__editor header p, .application-access__empty { margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
