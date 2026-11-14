@@ -415,7 +415,8 @@ export type AgentMuxAgentSessionStore = {
   recordRestartAdmission(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, mode?: 'continue' | 'restore'): Promise<AgentMuxStoredAgentSession>
   prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation, dispatch?: AgentMuxPreparedAgentDispatch): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>>
   readCreationCancellation(createOperationId: string): Promise<AgentCreationCancellation | null>
-  admitCreationCancellation(input: AgentCreationCancellation): Promise<void>
+  /** Reports this write's disk ACK independently of its effect. Memory owners cannot confirm disk. */
+  admitCreationCancellation(input: AgentCreationCancellation): Promise<'confirmed' | 'unconfirmed'>
   loadClosedCreation(agentSessionId: string): Promise<AgentMuxClosedCreation | null>
   admitCreationResolution(original: AgentMuxClosedCreation, request: AgentMuxCreationResolveInput, claim: AgentMuxLifecycleClaim & { reservationId: string }, authority?: AgentMuxCreationResolutionAdmission): Promise<AgentMuxClosedCreation>
   closeCreation(original: AgentMuxClosedCreation, runtime: AgentMuxCreationRuntime): Promise<AgentMuxClosedCreation>
@@ -2010,6 +2011,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const previous = this.creationCancellations.get(input.createOperationId)
     if (previous && !isDeepStrictEqual(previous, input)) throw new AgentMuxError('The original creation has another cancellation. Keep its original control.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
     this.creationCancellations.set(input.createOperationId, structuredClone(input))
+    return 'unconfirmed' as const
   }
   private readonly closedCreations = new Map<string, AgentMuxClosedCreation>()
   private readonly sessionRunIds = new Set<string>()
@@ -2928,6 +2930,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (!row) this.db.prepare('INSERT INTO creation_cancellations(creation_operation,control_operation,json) VALUES(?,?,?)').run(input.createOperationId, input.operationId, JSON.stringify(input))
       this.dirty = true
     }, undefined, input.agentSessionId)
+    return 'confirmed' as const
   }
 
   async readInputEpoch(): Promise<string | undefined> {

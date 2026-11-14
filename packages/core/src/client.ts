@@ -2645,19 +2645,19 @@ export class AgentMuxClient {
   async cancelAgentCreation(value: AgentCreationCancellationInput): Promise<AgentCreationCancellationResult> {
     const input = parseAgentCreationCancellation(value), runtime = await this.agentCreationAuthority()
     const { correlation } = await this.readCreationCancellationTarget(input)
-    await this.store.admitCreationCancellation({ ...input, runtimeId: runtime.runtimeId })
+    const acknowledged = await this.store.admitCreationCancellation({ ...input, runtimeId: runtime.runtimeId }) === 'confirmed'
     const active = this.activeCreations.get(input.createOperationId)
     if (active) {
       active.controller.abort(new AgentMuxError('The original creation was explicitly cancelled. Its records and any started Run are retained.', 'AGENT_CREATION_CANCELLED'))
       // The durable control is already visible at Start/input gates. This reader must not wait for an unknown Native ACK.
-      return await this.creationCancellationInspection(input, undefined, true)
+      return await this.creationCancellationInspection(input, undefined, acknowledged)
     }
     if (correlation?.preparedCreation) {
       // An earlier exact-key fence keeps its own immutable control; this explicit cancellation may advance that same monotone fence.
       try { await this.resolveAgentCreation(correlation.creationResolution?.request ?? input) }
-      catch (cause) { return await this.creationCancellationInspection(input, cause instanceof Error ? cause.message : String(cause)) }
+      catch (cause) { return await this.creationCancellationInspection(input, cause instanceof Error ? cause.message : String(cause), acknowledged) }
     }
-    return await this.creationCancellationInspection(input, undefined, true)
+    return await this.creationCancellationInspection(input, undefined, acknowledged)
   }
 
   /** Read only the original durable cancellation and exact creation; no fence or input is dispatched. */
