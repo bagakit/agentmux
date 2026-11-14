@@ -262,7 +262,8 @@ export function NewTabSurface({
   )
   // An unconfirmed discovery check is not evidence that the configured Agent cannot work.
   const installedExecutors = executors.filter(executor => executor.detection?.state !== 'missing')
-  const detecting = inventory?.state === 'checking' || executors.some((executor) => executor.detection?.state === 'checking')
+  const detecting = sourceMode ? sourceLauncher.inventoryState === 'pending'
+    : inventory?.state === 'checking' || executors.some((executor) => executor.detection?.state === 'checking')
   const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
   const sections = { ...DEFAULT_LAUNCHER_SECTIONS,
     terminal: presentation.surface === 'mote' || presentation.surface === 'recall' || presentation.surface === 'survey' || presentation.survey ? 'collapsed' as const : 'expanded' as const,
@@ -274,8 +275,8 @@ export function NewTabSurface({
   const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId && (sourceMode || !splitExecution || agentTarget?.agentExecutor?.hostId === agentWorkspace?.hostId && agentTarget?.agentExecutor?.executorRevision === executor.executorRevision))
   const unconfirmedAvailability = (splitExecution || agentHost?.kind === 'ssh') && (!hostExecutorInventoryMatches(inventory, agentHost) || inventory.state !== 'ready') ||
     executors.some(executor => executor.detection?.state !== 'ready' && executor.detection?.state !== 'missing')
-  const emptyHostInventoryUnconfirmed = !sourceMode && executors.length === 0 && usesHostInventory &&
-    (!hostExecutorInventoryMatches(inventory, agentHost) || inventory?.state !== 'ready')
+  const emptyHostInventoryUnconfirmed = executors.length === 0 && (sourceMode ? sourceLauncher.inventoryState !== 'ready' :
+    usesHostInventory && (!hostExecutorInventoryMatches(inventory, agentHost) || inventory?.state !== 'ready'))
   const confirmedEmptyExecutors = executors.length === 0 && !emptyHostInventoryUnconfirmed
   const retryingAvailability = useLauncherExecutorRecovery(agentHost,
     !sourceMode && motionActive && inputRegionActive && !controlNavigation && sections.agents !== 'hidden', unconfirmedAvailability, splitExecution ? 'host' : undefined)
@@ -499,7 +500,7 @@ export function NewTabSurface({
     ? 'The original project is unconfirmed. Your complete draft is kept; review Agent location.'
     : !sourceLauncher.description ? 'Reading this project device’s launch support…' : !(sourceExecution.kind === 'source-coordinator' ? sourceLauncher.description.contracts.externalAssociation : sourceLauncher.description.contracts.ordinaryLaunch)
       ? `Update AgentMux Core on ${host?.label ?? 'this project device'} before launching this arrangement. The current Core cannot retain its complete launch fields.`
-      : !sourceLauncher.selected ? 'Reading the selected Agent’s declarations…' : !sourceLauncher.selected.creationContract
+      : !sourceLauncher.selected ? undefined : !sourceLauncher.selected.creationContract
         ? 'This Agent device has not confirmed support for complete launch fields. Review it through the project device; your draft is kept.' : undefined : undefined)
 
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
@@ -507,16 +508,26 @@ export function NewTabSurface({
     disabled: false, insertion: insertionRef, feedback, document: dialogDocument, shortcutActive: visible && presentationActive && sections.agents === 'expanded',
     onRemoteFiles: () => setFileReferencesOpen(true) })
 
-  const unconfirmedConfigurations = <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+  const compact = regionHeight !== null && regionHeight < 520
+  const unconfirmedConfigurations = <ServiceWindowNotice disclosure={{ scope: launcherId, id: 'agent-inventory',
+    cause: sourceMode ? sourceLauncher.inventoryIssue ?? sourceLauncher.inventoryState : inventory?.detail ?? inventory?.state ?? 'unconfirmed', visible: motionActive }} notice={{ kind: 'indeterminate', notice: {
     step: 'Agent configurations are unconfirmed',
-    mode: `${agentHost?.label ?? agentWorkspace?.hostId ?? 'Agent environment'}: ${inventory?.detail ?? (inventory?.state === 'checking' ? 'Reading the original Host configuration.' : 'The original Host inventory has not been confirmed.')} Your draft and saved selection are kept.`,
-    restore: agentWorkspace ? 'Check this Host again to read its configurations, or choose another Agent environment.' : 'Choose the registered Agent environment to read its configurations.'
-  } }} actions={agentWorkspace ? <button type="button" className="small-button" disabled={inventory?.state === 'checking'}
-    onClick={() => void checkAgents(agentWorkspace.hostId)}>{inventory?.state === 'checking' ? 'Checking…' : 'Check again'}</button> : undefined} />
+    mode: sourceMode ? `${sourceLauncher.inventoryIssue ?? (sourceLauncher.inventoryState === 'pending'
+      ? 'Reading the original Agent device configurations.' : 'The original Agent configuration list is unconfirmed.')} Your draft and saved selection are kept.`
+      : `${agentHost?.label ?? agentWorkspace?.hostId ?? 'Agent environment'}: ${inventory?.detail ?? (inventory?.state === 'checking' ? 'Reading the original Host configuration.' : 'The original Host inventory has not been confirmed.')} Your draft and saved selection are kept.`,
+    restore: sourceMode ? 'Check the original Agent device again to read its configurations.'
+      : agentWorkspace ? 'Check this Host again to read its configurations, or choose another Agent environment.' : 'Choose the registered Agent environment to read its configurations.'
+  } }} actions={sourceMode || agentWorkspace ? <button type="button" className="small-button" disabled={detecting}
+    onClick={() => sourceMode ? sourceLauncher.refresh() : agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? 'Checking…' : 'Check again'}</button> : undefined} />
 
+  const executorPicker = <AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
+    {...(compact ? { presentation: 'field' as const, label: 'Agent configuration', unsetLabel: 'Choose Agent' } : {})}
+    active={visible && presentationActive} onSelect={chooseExecutor}
+    onConfigure={usesHostInventory && agentWorkspace && settings ? () => settings.openHostExecutors
+      ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} />
   return (
     <SurfaceState ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
-      data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
+      data-density={compact ? 'compact' : 'normal'}
       style={{ '--launcher-hero': `url("${launcherHero}")`, ...(regionHeight === null ? {} : { '--launcher-region-height': `${regionHeight}px` }) } as CSSProperties} body={<>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath}
         executionControl={workspace && sections.agents === 'expanded' ? <LauncherAgentDevice key={launcherId} hosts={config?.hosts ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
@@ -526,9 +537,11 @@ export function NewTabSurface({
       {regionId ? operationHosts.map(hostId => <AgentOperationFeedback key={hostId} compact subject={{ hostId, regionId }} />) : null}
 
 
-      {sourceMode && sourceSupportIssue ? <div className="launcher-source-contract" role="status"><span>{sourceSupportIssue}</span>
-        {settings && workspace ? <button type="button" className="agent-work-text-action" onClick={() => settings.openHost(workspace.hostId)}>{sourceLauncher.description && !sourceLauncher.description.contracts.ordinaryLaunch ? `Open ${host?.label ?? 'project device'} to update Core` : 'Project device settings'}</button> : null}
-      </div> : null}
+      {sourceMode && sourceSupportIssue ? <ServiceWindowNotice disclosure={{ scope: launcherId, id: 'launch-support', cause: sourceSupportIssue, visible: motionActive }}
+        notice={{ kind: 'indeterminate', notice: { step: 'Launch support unconfirmed', mode: sourceSupportIssue,
+          restore: 'Check this original project device again. Your complete task draft is kept.' } }}
+        actions={<><button type="button" className="small-button" disabled={detecting} onClick={sourceLauncher.refresh}>Check Source</button>
+          {settings && workspace ? <button type="button" className="small-button" onClick={() => settings.openHost(workspace.hostId)}>Project device settings</button> : null}</>} /> : null}
       {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busyKind !== null} active={motionActive && !moteId}
         onContinue={original => { if (original.slot.kind === 'region') void run('agent', () => launchAtSource({ tabId: original.slot.kind === 'region' ? original.slot.tabId : '', regionId: original.slot.kind === 'region' ? original.slot.regionId : '' }, original)) }} />)}
       {retainedSourceRequests.issue ? <p role="status">{retainedSourceRequests.issue}</p> : null}
@@ -560,7 +573,7 @@ export function NewTabSurface({
       {sections.agents !== 'hidden' ? <div className="launcher-agents-head">
         {sections.agents === 'collapsed' ? <button type="button" className="launcher-agent-entry" aria-label="Expand Agents" onClick={() => setSection('agents', 'expanded')}>
           <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={promptDisplayText}>{prompt ? promptDisplayText.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
-        </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
+        </button> : <span className="launcher-agents-head__identity">{compact && executors.length ? executorPicker : <strong>Agent</strong>}</span>}
         <span className="launcher-section-actions">
           {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busyKind !== null} /> : null}
           <button type="button" className="icon-button" aria-label="Refresh agents on this device" title="Refresh agents on this device" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
@@ -571,11 +584,10 @@ export function NewTabSurface({
 
       {sections.agents === 'expanded' ? <>
         {moteId && displayedExecutorId && !executors.some(item => item.id === displayedExecutorId) ? <div className="launcher-error" role="status">Saved Agent {displayedExecutorId} is unavailable. Choose another Agent or edit this Mote’s quick mode.</div> : null}
-        {emptyHostInventoryUnconfirmed ? unconfirmedConfigurations
-          : <div className="launcher-agent-catalog" key={agentWorkspace?.hostId ?? 'none'} data-host-id={agentWorkspace?.hostId}><AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
-            active={visible && presentationActive} onSelect={chooseExecutor}
-            onConfigure={usesHostInventory && agentWorkspace && settings ? () => settings.openHostExecutors
-              ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} /></div>}
+        {emptyHostInventoryUnconfirmed ? unconfirmedConfigurations : sourceMode && confirmedEmptyExecutors
+          ? <div className="agent-catalog__empty">No Agent is configured on the original Agent device. Refresh its configurations after adding an Agent there.</div>
+          : compact ? null : <div className="launcher-agent-catalog" key={agentWorkspace?.hostId ?? 'none'} data-host-id={agentWorkspace?.hostId}>{executorPicker}</div>}
+
         <div className="launcher-composer composer" onFocusCapture={attachments.claimScreenshotTarget}><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
           references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
           completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label={sourceMode ? 'Original Space task draft' : 'Agent prompt'} disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}

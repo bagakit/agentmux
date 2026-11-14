@@ -178,11 +178,15 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
 .launcher-mote__archive > button { flex: none; white-space: nowrap; }
 .launcher-mote > .service-window { margin-top: var(--sp-3); }
 /* The measured Region height changes density, never the user's section preferences. */
-.launch-surface[data-density='compact'] { padding: var(--sp-5); }
+.launch-surface[data-density='compact'] { padding: var(--sp-4); background: var(--surface-0); }
 .launch-surface[data-density='compact'] > .surface-state__content { margin-block: 0; }
 .launch-surface[data-density='compact'] .launcher-environment { padding-bottom: var(--sp-3); margin-bottom: var(--sp-3); gap: var(--sp-3); }
 .launch-surface[data-density='compact'] .launcher-environment__project { gap: var(--sp-3); }
+.launch-surface[data-density='compact'] .launcher-environment h2 { font-size: var(--fs-body); letter-spacing: 0; }
+.launch-surface[data-density='compact'] .launcher-environment__title { gap: var(--sp-2); }
 .launch-surface[data-density='compact'] .launcher-agents-head { margin-bottom: var(--sp-2); }
+.launch-surface[data-density='compact'] .launcher-agents-head__identity { flex: 1; min-width: 0; }
+.launch-surface[data-density='compact'] .launcher-primary-actions { order: -1; margin-left: auto; }
 .launch-surface[data-density='compact'] .agent-catalog { max-height: 60px; }
 .launch-surface[data-density='compact'] .agent-catalog-wrapper { margin-bottom: var(--sp-4); }
 .launch-surface[data-density='compact'] .launcher-composer { --composer-input-height: clamp(3rem, calc(var(--launcher-region-height, 400px) * .16), 4rem); --composer-input-max: var(--composer-input-height); }

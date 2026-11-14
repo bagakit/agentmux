@@ -24,6 +24,8 @@ export function useSourceLauncher(selection: LauncherSourceExecution | undefined
     ?? inventory?.executors.find(item => item.availability === 'available')?.executorId
   const selectedScope = JSON.stringify([targetScope, executorId])
   const selectedInventory = selectedRead && selectedRead.key === selectedScope ? selectedRead.value : undefined
+  const inventoryIssue = inventoryError?.key === targetScope ? inventoryError.message : undefined
+  const inventoryState = !selection || !active ? 'idle' : inventory ? 'ready' : inventoryIssue ? 'unavailable' : 'pending'
   useEffect(() => {
     setDescription(undefined); setContractIssue(undefined)
     if (!active || !selection) return
@@ -81,7 +83,8 @@ export function useSourceLauncher(selection: LauncherSourceExecution | undefined
         ...(item.cause ? { cause: item.cause, detail: `${item.cause.code}: ${item.cause.message}` } : {}),
       } }))
   }, [inventory, selected])
-  return { executors, executorId, selected, description, issue: (contractError && contractError.key === sourceKey ? contractError.message : undefined) ?? (selectedError && selectedError.key === selectedScope ? selectedError.message : undefined) ?? (inventoryError && inventoryError.key === targetScope ? inventoryError.message : undefined),
+  return { executors, executorId, selected, description, inventoryState, inventoryIssue,
+    issue: (contractError && contractError.key === sourceKey ? contractError.message : undefined) ?? (selectedError && selectedError.key === selectedScope ? selectedError.message : undefined),
     ready: !!selected && (reach ? description?.contracts.externalAssociation !== null : description?.contracts.ordinaryLaunch !== null) && selected.creationContract?.ordinaryLaunch === 1,
     refresh: () => setRefresh(value => value + 1) }
 }
