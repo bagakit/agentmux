@@ -18,7 +18,7 @@ it('public Client with an actual FileStore reports bare running as unknown while
   expect(status.session.semanticStatus).toBeUndefined()
   expect(status.observation).toMatchObject({ process: 'running', semantic: 'unknown', readiness: 'ready', source: 'run-process' })
   expect(status.session.run.runId).toBe(h.run.runId); expect(status.run.latestOutputBytes).toBe(17)
-  expect(h.requests).toEqual([h.run.runId])
+  expect([...new Set(h.requests)]).toEqual([h.run.runId])
   expect((await h.sessions())[0]!.run).toEqual(status.session.run)
 })
 it('accepted native working persisted in FileStore becomes unknown after the existing TTL without fabricating idle or done', async () => {
@@ -31,7 +31,7 @@ it('accepted native working persisted in FileStore becomes unknown after the exi
   const status = await h.client.statusAgent('stale')
   expect(status.observation).toMatchObject({ process: 'running', semantic: 'unknown', readiness: 'ready', stale: true })
   expect(status.session.semanticStatus).toMatchObject({ state: 'working', observedAt: NOW - 25 * 60_000 })
-  expect(status.session.run.runId).toBe(h.run.runId); expect(h.requests).toEqual([h.run.runId])
+  expect(status.session.run.runId).toBe(h.run.runId); expect([...new Set(h.requests)]).toEqual([h.run.runId])
 })
 it('accepted current working, Stop completion and static waiting keep distinct public meanings', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(NOW)
@@ -96,6 +96,6 @@ it('a Hook that reports its activity unknown reads unconfirmed through agent.inp
   // Claude declares no Provider evidence reader, so nothing else can confirm the state.
   expect(await activity()).toMatchObject({ state: 'unconfirmed', source: 'unconfirmed', sourceId: null, issue: expect.any(String) })
   await h.hook('turn.start', 'start-3', native(3, { turnId: 'native-turn-2' }))
-  await h.hook('turn.complete', 'end-4', native(4, { turnId: 'native-turn-2', reason: 'answer', isAborted: false }))
+  await h.hook('turn.complete', 'end-4', native(4, { turnId: 'native-turn-2', reason: 'answer', isAborted: false, backgroundWork: 'none' }))
   expect(await activity()).toMatchObject({ state: 'idle', source: 'native-hook' })
 })

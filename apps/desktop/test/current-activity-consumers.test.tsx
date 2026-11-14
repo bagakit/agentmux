@@ -94,7 +94,7 @@ it('real Core activity survives an auxiliary source failure through Main, Render
   const input = {sessions:[session],timelines:{},agentNames:{},config,scratchTopicSnapshots:{}}
   expect(select(input).contexts[0]).toMatchObject({bucket:'working',activitySemantic:'active'})
   await h.hook('turn.complete','native-end',{session_id:'native-main',sourceId:'native-source',sequence:2,
-    turnId:'native-turn',reason:'answer',isAborted:false})
+    turnId:'native-turn',reason:'answer',isAborted:false,backgroundWork:'none'})
   const next = projectRuntimeEvent({sessions:[session],timelines:{},pendingAgentLaunches:{},tabs:{},layouts:{},viewModes:{}},
     {type:'core',hostId:'local',event:{type:'agent-session',session:h.client.agentSession(id)}}).state.sessions
   expect(select({...input,sessions:next}).contexts[0]).toMatchObject({bucket:'idle',activitySemantic:'idle',stateLabel:'Idle'})

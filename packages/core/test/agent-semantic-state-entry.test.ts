@@ -151,7 +151,7 @@ it('same-state native receipts never backfill a missing entry time in an old rec
   const h = await harness(session(done()))
   await h.feed('Stop')
   expect(h.client.agentSession('entry-agent').semanticStatus).toEqual({
-    state: 'done', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 2_000), detail: 'Stop'
+    state: 'done', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 2_000), detail: 'Stop', currentActivityRevision: 1, evidenceRevision: 1
   })
   expect((await h.stored()).semanticStatus?.stateEnteredAt).toBeUndefined()
 })
@@ -181,12 +181,12 @@ it('ACP binding events use the same semantic entry owner and preserve same-state
     await bound.eventTail
   }
   await feed('done')
-  expect(h.client.agentSession('entry-agent').semanticStatus).toEqual({ state: 'done', source: 'acp', observedAt: reshapeFixtureEpoch(0, 0, 1_000) })
+  expect(h.client.agentSession('entry-agent').semanticStatus).toEqual({ state: 'done', source: 'acp', observedAt: reshapeFixtureEpoch(0, 0, 1_000), currentActivityRevision: 1, evidenceRevision: 1 })
   clock.mockReturnValue(reshapeFixtureEpoch(0, 0, 2_000))
   await feed('working')
   clock.mockReturnValue(reshapeFixtureEpoch(0, 0, 3_000))
   await feed('working')
-  expect((await h.stored()).semanticStatus).toEqual({ state: 'working', source: 'acp', observedAt: reshapeFixtureEpoch(0, 0, 3_000), stateEnteredAt: reshapeFixtureEpoch(0, 0, 2_000) })
+  expect((await h.stored()).semanticStatus).toEqual({ state: 'working', source: 'acp', observedAt: reshapeFixtureEpoch(0, 0, 3_000), stateEnteredAt: reshapeFixtureEpoch(0, 0, 2_000), currentActivityRevision: 3, evidenceRevision: 3 })
   clock.mockReturnValue(reshapeFixtureEpoch(0, 0, 4_000))
   await feed('done')
   expect(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt).toBe(reshapeFixtureEpoch(0, 0, 4_000))
@@ -204,7 +204,7 @@ it('the file owner and a fresh public client preserve known and unknown entry fa
   await second.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: second.client.agentSession('entry-agent').run, data: '\u001b[0n', source: 'user' })
   const third = await harness(session(), new AgentMuxFileAgentSessionStore(path), false)
   expect(third.client.agentSession('entry-agent').semanticStatus).toEqual({
-    state: 'done', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 2_000), detail: 'Stop', stateEnteredAt: reshapeFixtureEpoch(0, 0, 100)
+    state: 'done', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 2_000), detail: 'Stop', stateEnteredAt: reshapeFixtureEpoch(0, 0, 100), currentActivityRevision: 1, evidenceRevision: 1
   })
   expect(second.writes.map((input) => input.data)).toEqual(['\u001b[0n'])
 })
@@ -221,7 +221,7 @@ it('first typed claim invalidates idle evidence before payload and retry does no
   h.beforeAck(async () => { entryTimesAtInput.push(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt) })
   await h.submit('first-execution')
   expect(entryTimesAtInput).toEqual([undefined, undefined])
-  expect(h.writes.map((input) => input.data)).toEqual(['hello', '\r'])
+  expect(h.writes.map((input) => input.data)).toEqual(['\u001b[200~hello\u001b[201~', '\r'])
   expect((await h.stored()).promptCompletionAdmission).toMatchObject({ submissionId: 'first-execution', completionId: JSON.stringify(['entry-run', 100]) })
   clock.mockReturnValue(reshapeFixtureEpoch(0, 0, 2_000))
   await h.feed('UserPromptSubmit')
@@ -229,7 +229,7 @@ it('first typed claim invalidates idle evidence before payload and retry does no
   await h.feed('Stop')
   await h.submit('first-execution')
   expect(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt).toBe(reshapeFixtureEpoch(0, 0, 3_000))
-  expect(h.writes.map((input) => input.data)).toEqual(['hello', '\r'])
+  expect(h.writes.map((input) => input.data)).toEqual(['\u001b[200~hello\u001b[201~', '\r'])
 })
 
 it('a failed typed input leaves unknown idle evidence without claiming working or acceptance', async () => {

@@ -34,7 +34,10 @@ it.each(['waiting', 'blocked', 'done', 'error'] as const)('old confirmed %s is n
   expect(observation.reason).toBeUndefined(); expect(observation.lastKnownActivity).toBeUndefined()
 })
 it('expired child aggregate retains the current activity observation rather than an older main completion', () => {
-  expect(observe({ state: 'done', source: 'native-hook', observedAt: OLD - 1000, aggregateActivityAt: OLD })).toMatchObject({
+  expect(observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: OLD - 1000 },
+    subagentSessions: { run: { runId: 'original-run' }, providerId: 'claude', nativeSessionId: 'main', unconfirmed: false,
+      sessions: [{ nativeAgentId: 'child', phase: 'running', state: 'working', observedAt: OLD, hookReceiptId: 'child-work' }] },
+    timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, NOW)).toMatchObject({
     reason: 'activity-stale', lastKnownActivity: { state: 'working', observedAt: OLD } })
 })
 it('actual FileStore/Core/service and compiled inspect preserve explanations and reject malformed public facts', async () => {
