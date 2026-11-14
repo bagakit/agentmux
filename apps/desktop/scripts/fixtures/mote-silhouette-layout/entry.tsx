@@ -9,7 +9,7 @@ import { MOTE_SILHOUETTE_TITLES } from '../../../src/renderer/src/components/Mot
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { mountThemeRuntime, updateThemeSelection } from '../../../../../packages/client-ui/src/theme/runtime'
-import { DEFAULT_MOTE_FACE } from '../../../../../packages/core/src/mote-face'
+import { DEFAULT_MOTE_FACE } from '../../../../../packages/core/src/mote/face'
 import type { SessionSnapshot } from '../../../src/shared/contracts'
 import type { SpaceIconChoice as SpaceManualIcon } from '../../../src/renderer/src/lib/space-object-appearance'
 import '../../../src/renderer/src/styles/index.css'

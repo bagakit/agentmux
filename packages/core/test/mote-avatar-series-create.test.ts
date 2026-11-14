@@ -1,6 +1,6 @@
 import { fixtureDisplayPath as reshapeFixtureDisplayPath, fixturePath as reshapeFixturePath } from './helpers/fixture-values.js'
 import { expect, it } from 'vitest'
-import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult } from '../src/mote-avatar-series.js'
+import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult } from '../src/mote/avatar-series.js'
 import { AGENTMUX_RPC_NATIVE_METHODS } from '../src/public-rpc.js'
 
 it('discovers both strict starter methods and rejects traversal or caller-selected paths', () => {

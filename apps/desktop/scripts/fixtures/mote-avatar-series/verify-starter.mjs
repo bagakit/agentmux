@@ -16,9 +16,9 @@ const essentialSource = ['apps/desktop/src/main/mote-avatar-series.ts', 'apps/de
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', 'apps/desktop/src/renderer/src/components/MoteAvatarSeriesEditor.tsx',
   'apps/desktop/src/renderer/src/components/MoteAvatarSeriesCreateDialog.tsx', 'apps/host/src/host.ts',
-  'packages/core/src/mote-avatar-series.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts',
+  'packages/core/src/mote/avatar-series.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts',
   'packages/core/src/public-rpc-client.ts', 'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux.ts',
-  'packages/core/dist/mote-avatar-series.js', 'packages/core/dist/public-rpc-service.js', 'packages/core/dist/agentmux-cli-commands.js',
+  'packages/core/dist/mote/avatar-series.js', 'packages/core/dist/public-rpc-service.js', 'packages/core/dist/agentmux-cli-commands.js',
   'apps/desktop/resources/avatar-series/lowpoly/lowpoly-owl.png', 'apps/desktop/resources/bin/agentmux-workspace-move', checkerPath]
 async function bytes(file, expected) {
   const original = await fs.readFile(file)

@@ -49,7 +49,7 @@ assert.equal(visual.schema, 'agentmux.visual-review.v1')
 assert.equal(visual.status, 'approved'); assert.equal(visual.task, 'T-003')
 assert.equal(visual.reviewer, '/root/mote_visual_review')
 const required = [
-  'packages/core/src/mote-avatar-write.ts', 'packages/core/src/mote-avatar-series.ts',
+  'packages/core/src/mote/avatar-write.ts', 'packages/core/src/mote/avatar-series.ts',
   'packages/core/src/public-rpc.ts', 'packages/core/src/public-rpc-service.ts',
   'packages/core/src/rpc-native-codec.ts', 'packages/core/src/agentmux-cli-commands.ts',
   'apps/desktop/src/main/mote-avatar-writer.ts', 'apps/desktop/src/main/mote-avatar-control.ts',
@@ -113,7 +113,7 @@ for (const name of ['apps/desktop/src/main/config-owner.ts', 'apps/desktop/src/s
 }
 assert.equal(approvals.png.source['apps/desktop/src/main/object-avatar-files.ts'], manifest.source['apps/desktop/src/main/object-avatar-files.ts'])
 for (const name of ['apps/desktop/src/main/mote-avatar-writer.ts', 'apps/desktop/src/main/mote-avatar-control.ts',
-  'packages/core/src/mote-avatar-write.ts', 'packages/core/src/mote-avatar-series.ts',
+  'packages/core/src/mote/avatar-write.ts', 'packages/core/src/mote/avatar-series.ts',
   'packages/core/src/public-rpc.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts']) currentApproved(name, ['native', 'integration'])
 for (const name of guiRequired.slice(0, 5).filter(name => !name.endsWith('/mobile-presentation.ts'))) currentApproved(name, ['gui', 'integration'])
 function includesEvidence(review, reference) {
@@ -240,11 +240,11 @@ assert.equal(originalUnknown.value.operation.durability, 'unknown')
 assert.equal(originalUnknown.value.operation.operationId, unknownId)
 assert.equal(gui.renderer.operations.find(item => item.action === 'kept-request-survives-picker-unmount-remount-without-auto-save').operationId, unknownId)
 assert.equal(gui.reader.operations.find(item => item.action === 'second-process-unknown-read-and-explicit-original-request-retry').operationId, unknownId)
-const coreSeriesPath = path.join(root, 'packages/core/dist/mote-avatar-series.js')
-assert.equal(sha(await fs.readFile(coreSeriesPath)), delta.nativeCoreExports['packages/core/dist/mote-avatar-series.js'], 'Use the actual portable request canonicalizer consumed by this evidence')
+const coreSeriesPath = path.join(root, 'packages/core/dist/mote/avatar-series.js')
+assert.equal(sha(await fs.readFile(coreSeriesPath)), delta.nativeCoreExports['packages/core/dist/mote/avatar-series.js'], 'Use the actual portable request canonicalizer consumed by this evidence')
 const { avatarSeriesCanonical } = await import(pathToFileURL(coreSeriesPath).href)
-const coreWritePath = path.join(root, 'packages/core/dist/mote-avatar-write.js')
-assert.equal(sha(await fs.readFile(coreWritePath)), delta.nativeCoreExports['packages/core/dist/mote-avatar-write.js'])
+const coreWritePath = path.join(root, 'packages/core/dist/mote/avatar-write.js')
+assert.equal(sha(await fs.readFile(coreWritePath)), delta.nativeCoreExports['packages/core/dist/mote/avatar-write.js'])
 const { parseMoteAvatarSave } = await import(pathToFileURL(coreWritePath).href)
 const requestHash = request => 'sha256:' + sha(avatarSeriesCanonical(request))
 parseMoteAvatarSave(originalUnknown.input)
@@ -467,7 +467,7 @@ assert.equal(after.main.renderer.kind, 'bundled')
 assert.equal(after.main.renderer.id, rendererRelease.id); assert.deepEqual(after.main.renderer.identity, rendererRelease.identity)
 const coreRelease = JSON.parse(installed.get(artifactNames[5]).toString())
 assert.equal(coreRelease.sourceCommit, work.build.commit); assert.equal(coreRelease.sourceTree, work.build.tree)
-assert.equal(sha(installed.get(artifactNames[4])), delta.nativeCoreExports['packages/core/dist/mote-avatar-write.js'])
+assert.equal(sha(installed.get(artifactNames[4])), delta.nativeCoreExports['packages/core/dist/mote/avatar-write.js'])
 
 const oldWorkbench = before.workbench, newWorkbench = after.workbench
 for (const key of ['layouts', 'focus', 'activeWorkspaceId', 'mainSurface']) assert.deepEqual(newWorkbench[key], oldWorkbench[key], 'Original workbench changed: ' + key)

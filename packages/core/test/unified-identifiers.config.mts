@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
   'request-allocator': ['packages/core/src/client-request-id.ts', "export { mintObjectId as randomClientRequestId } from './object-id.js'", "export function randomClientRequestId() { return 'fc69400b-bc24-4915-b35f-01a26a085af9' }"],
   'cli-operation': ['packages/core/src/agentmux-cli-commands.ts', "f.values.has('--operation-id') ? id(f, '--operation-id') : mintObjectId()", "f.values.has('--operation-id') ? id(f, '--operation-id') : 'fc69400b-bc24-4915-b35f-01a26a085af9'"],
-  'avatar-uuid-only': ['packages/core/src/mote-avatar-write.ts', '/^[A-Za-z0-9_-]{1,128}$/u', '/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u'],
+  'avatar-uuid-only': ['packages/core/src/mote/avatar-write.ts', '/^[A-Za-z0-9_-]{1,128}$/u', '/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u'],
   'reading-view': ['packages/core/src/conversation-reader.ts', 'const view: ReadingView = { ...ref, id: mintObjectId(),', "const view: ReadingView = { ...ref, id: 'legacy-reading-view',"],
   'captured-epoch': ['packages/core/src/captured-history.ts', '.run(id, mintObjectId(),', ".run(id, 'legacy-captured-epoch',"],
   'registry-reservation': ['packages/core/src/agent-session-registry.ts', 'reservationId: mintObjectId(),\n      ownerId:', "reservationId: 'legacy-reservation',\n      ownerId:"],
