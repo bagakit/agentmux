@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import type { SourceFilesResolution } from '../../../shared/source-files'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+import { SurfaceState } from './SurfaceState'
+
+const Info = semanticIconComponent('status.info')
 
 /** Selection and retained requests live in UserState; Source facts remain with their original owner. */
 export function SourceFilesAccess({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
@@ -42,20 +46,29 @@ export function SourceFilesAccess({ workspace, visible }: { workspace: Workspace
   const retainedFolders = Object.entries(folderRequests).filter(([, request]) => request.workspace.id === workspace.id)
   const message = issue ?? (result?.status === 'selection-required' ? result.issue?.message : input?.issue ?? (result?.status === 'unconfirmed' ? result.issue.message : null))
   const registrationUnknown = input?.registration && input.registrationStatus !== 'confirmed'
+  const registration = result?.status === 'registration-required' && !registrationUnknown ? result.registration : null
   if (input?.locator && !message && !retained.length && !retainedCreations.length && !retainedFolders.length && !registrationUnknown) return null
   return <div className="file-operation-service" role="status">
-    {message ? <p>{message}</p> : null}
-    {registrationUnknown ? <><p>The original folder registration request is retained. Current discovery does not confirm a missing registration reply.</p><button className="small-button" disabled={busy} onClick={() => void check()}>Check original registration</button></> : null}
-    {result?.status === 'registration-required' ? <><p>Connect this folder to its original Files owner to create, move or delete paths. Existing editors remain available.</p>
-      <button className="small-button" disabled={busy} onClick={() => {
-        const packet = result.registration
+    {registration || registrationUnknown || message ? <SurfaceState layout="inline" className="file-operation-service__source" aria-busy={busy}
+      identity={<Info size={14} aria-hidden="true" />}
+      title={registration ? 'Connect this folder to Files' : result?.status === 'unconfirmed' && result.issue.code === 'SPACE_DIRECTORY_CHANGED'
+        ? 'Folder identity changed' : registrationUnknown ? 'Folder registration needs checking' : 'Folder access needs checking'}
+      description={registration ? 'Connect to create, move or delete files. Open editors stay available.'
+        : registrationUnknown ? 'The original registration is saved for checking.' : 'Open editors stay available.'}
+      actions={registration ? <button type="button" className="small-button" disabled={busy} onClick={() => {
         setBusy(true)
-        void useAppStore.getState().useFilesSourceFolder(workspace.id, packet).then(value => { setResult(value); setIssue(null) }, cause => { setIssue(cause instanceof Error ? cause.message : String(cause)) }).finally(() => setBusy(false))
-      }}>Use this folder for Files</button></> : message ? <button className="small-button" disabled={busy} onClick={() => void check()}>Check original folder</button> : null}
-    {message && result?.status !== 'registration-required' ? <button className="small-button" disabled={busy} onClick={() => {
-      setBusy(true)
-      void useAppStore.getState().selectCurrentFilesSource(workspace.id).then(value => { setResult(value); setIssue(null) }, cause => setIssue(cause instanceof Error ? cause.message : String(cause))).finally(() => setBusy(false))
-    }}>Choose current Source</button> : null}
+        void useAppStore.getState().useFilesSourceFolder(workspace.id, registration).then(value => { setResult(value); setIssue(null) }, cause => { setIssue(cause instanceof Error ? cause.message : String(cause)) }).finally(() => setBusy(false))
+      }}>{busy ? 'Connecting…' : 'Use this folder for Files'}</button> : <button type="button" className="small-button" disabled={busy} onClick={() => void check()}>
+        {busy ? 'Checking…' : registrationUnknown ? 'Check original registration' : 'Check original folder'}
+      </button>}
+      details={message || registrationUnknown ? { summary: 'Details', content: <>
+        {message ? <p>{message}</p> : null}
+        {registrationUnknown ? <p>Finding the folder now does not confirm the earlier registration.</p> : null}
+        {message && result?.status !== 'registration-required' ? <button type="button" className="small-button" disabled={busy} onClick={() => {
+          setBusy(true)
+          void useAppStore.getState().selectCurrentFilesSource(workspace.id).then(value => { setResult(value); setIssue(null) }, cause => setIssue(cause instanceof Error ? cause.message : String(cause))).finally(() => setBusy(false))
+        }}>Choose current folder</button> : null}
+      </> } : undefined} /> : null}
     {result?.status === 'selection-required' ? <details className="file-location-choices">
       <summary>Choose working location <small>· {result.registrations.length} saved positions</small></summary>
       <p>This folder is used in several places. Open its original Space to continue at that position, or choose an exact location below.</p>

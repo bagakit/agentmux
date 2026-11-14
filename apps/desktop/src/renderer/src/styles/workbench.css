@@ -223,6 +223,14 @@
 
 .file-operation-service { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); font-size: 12px; line-height: 1.5; background: var(--surface-1); overflow-wrap: anywhere; }
 .file-operation-service p { margin: 0 0 6px; }
+.file-operation-service__source { container-type: inline-size; }
+.file-operation-service__source .surface-state__details p { user-select: text; }
+@container (min-width: 252px) {
+  .file-operation-service__source > .surface-state__content { grid-template-columns: auto max-content minmax(0, 1fr); }
+  .file-operation-service__source :is(.surface-state__heading, .surface-state__details[open]) { grid-column: 2 / -1; }
+  .file-operation-service__source .surface-state__details:not([open]) { grid-column: 3; grid-row: 2; align-self: center; }
+  .file-operation-service__source .surface-state__details:not([open]) > summary { margin-inline-start: 0; }
+}
 .file-operation-service__request { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
 .file-operation-service__request > span, .file-operation-service__request > small { display: block; }
 .file-operation-service__request > small { color: var(--text-3); user-select: text; }
