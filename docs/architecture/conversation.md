@@ -265,6 +265,8 @@ Core Reader 为每个 view 保留一份位置索引（[conversation-reader.ts](.
 
 Core 的 `conversationA2ANotificationId` 从 producer 与 adoption 事实适配通知身份，Desktop、Mobile 与 Focus 交给共享的 `ConversationMessage`。首个 text part 是引用通知时，`ConversationA2AReferences` 按来源范围只读 journal，并以普通 Agent 消息卡直接呈现原信；`ConversationNotificationDetails` 在同一通知位置保留协议与全部贡献的按需原文／JSON，不再次调用消息 renderer。Mobile 沿所选 hosted client 的 `readMessage` 读取，Desktop 沿 Host 路由读取；通知、原信与来源身份各自保留。
 
+[`conversation-input-source`](../../packages/client-ui/src/lib/conversation-input-source.ts) 的纯阅读边界规则区分原 message-key 提交的 rendered wire 与 prompt 的已记录正文。`CapturedConversationMessage` 与 `InputMailboxRecords` 的原提交回执分支消费同一规则；Captured 沿 Core 保存的 `authorExternal` 正文 producer 事实保留外部 journal `envelope.body` 边界，Mailbox 的原提交 `userContent` 仍保留 wire。直接 journal body 和受控输入的显式正文也按 body 阅读。共同 Core parser 只解释完整原信封，完整复制仍取原内容，不把 public-content 资格、协议声明和作者／采用事实混为一个判断。
+
 整条、SID 与局部的 Copy 共用 [`useContentCopyAction`](../../packages/client-ui/src/lib/use-content-copy-action.ts) 的动作原语，各自持有操作、反馈与到期状态；整条 Copy 沿资源 reader 异步取得 deferred 原文。同一消息中后发起的 Copy 取消旧的整条 Copy 尚未完成的准备，已经发往平台的写入仍等待自己的回执；切换来源、卸载与迟到完成都按各自的动作身份处理。原生工具与思考详情的动作身份沿消息来源与 trace 保持，工具调用与结果另外区分字段种类，同字节的新 part 快照不重建动作。`ContentCopyButton` 在原文字节真正改变时重置；缺少稳定 trace 或来源身份的独立 part 保持自身归属。
 
 Desktop 与 Mobile 共用 [`CapturedProcessRecord`](../../packages/client-ui/src/components/CapturedProcessRecord.tsx)、[`WorkflowObservation`](../../packages/client-ui/src/components/WorkflowObservation.tsx) 与 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)，保留参数摘要、来源、完整原文 Copy、编辑差异、定位展开与 `aria-controls`。首次披露后保留详情节点，关闭只隐藏；宿主 wrapper 只提供自己的标尺与定位引用。captured 图标按记录 kind、原生步骤图标按调用／结果 part 决定，工具名称不决定图标种类。观察沿同一过程的固定节点披露，过程开合只隐藏步骤；连续的同一已核作者的进度只收敛重复装饰，消息、SID、时间与动作独立保留。
