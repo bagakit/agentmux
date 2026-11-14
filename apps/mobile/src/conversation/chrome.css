@@ -87,7 +87,7 @@
 /* Reading chrome inside the conversation stays quiet: the coverage disclosure and the live work
  * line sit on the 16px gutter at the meta tier, so speech remains the first thing read. */
 .mobile-app .mobile-conversation .conversation-coverage { padding-inline: var(--mobile-gutter); }
-.mobile-app .mobile-conversation .conversation-coverage > summary { min-height: 36px; font-size: var(--fs-micro); }
+.mobile-app .mobile-conversation .conversation-coverage > summary { min-height: 44px; font-size: var(--fs-micro); }
 .mobile-app .mobile-active-state { margin: 4px var(--mobile-gutter) 6px; font-size: var(--fs-micro); font-weight: 550; color: var(--green); }
 .mobile-app .mobile-active-state > svg { width: 6px; height: 6px; }
 
@@ -169,6 +169,20 @@
 .mobile-app .mobile-mote-source-status > summary { min-height: 36px; padding: 0 10px; border-radius: 999px; background: var(--mobile-attention-wash); color: var(--text-2); font-size: var(--fs-micro); font-weight: 600; }
 .mobile-app .mobile-session-toolbar .mobile-icon-button[aria-pressed='true'] { color: var(--text); background: transparent; }
 .mobile-app .mobile-conversation .conversation-native-thread .conversation-coverage { padding-inline: 0; }
+
+/* Compact auxiliary records share the reading gutter. The row is the touch target;
+ * its shells do not add a second inset or extra vertical padding around that target. */
+.mobile-app .mobile-conversation .native-process-observation > .wf-card--observation {
+  --conversation-disclosure-padding: 0px; width: 100%; margin: 0; }
+.mobile-app .mobile-conversation .wf-observation__header > .wf-head { padding-inline: 0; gap: var(--sp-1); }
+.mobile-app .mobile-conversation .conversation-reply-observation { --conversation-disclosure-padding: 0px; }
+.mobile-app .mobile-conversation .conversation-reply-observation__controls { padding-inline: 0; gap: var(--sp-1); }
+.mobile-app .mobile-conversation .conversation-reply-observation__toggle { min-height: 44px; gap: var(--sp-2); }
+.mobile-app .mobile-conversation .conversation-reply-observation__node { width: 16px; }
+.mobile-app .mobile-conversation .conversation-reply-observation__toggle [data-conversation-source-role='reply-observation'] { border: 0; padding: 0; }
+/* The whole named button and its chevron already disclose the original body. */
+.mobile-app .mobile-conversation .conversation-reply-observation__expand { display: none; }
+.mobile-app .mobile-conversation .conversation-send-receipt[data-receipt-mode='compact'] > .message-disclosure > summary { padding: 0; }
 
 /* On the narrowest header the existing More panel carries Goal work, leaving
  * the original identity readable beside History, Terminal and More. */

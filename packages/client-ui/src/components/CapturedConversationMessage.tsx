@@ -57,10 +57,10 @@ export function CapturedConversationMessage({ item, record, replyObservation, in
     active={props.active !== false} renderClock={props.timeFormatter ?? formatClock} reveal={props.located === true}
     {...(props.bodyExpanded === undefined ? {} : { open: props.bodyExpanded })}
     {...(props.onBodyExpandedChange ? { onOpenChange: props.onBodyExpandedChange } : {})}>{message}</ConversationSendReceipt> : message
-  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} active={props.active !== false} observation={record?.role === 'observation' || Boolean(replyObservation)} compact={replyObservation?.compact ?? record?.role === 'observation'} reveal={props.located === true} sources={record?.sources}>{presented}</ReplyObservation>
+  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} active={props.active !== false} observation={record?.role === 'observation' || Boolean(replyObservation)} compact={replyObservation?.compact ?? record?.role === 'observation'} reveal={props.located === true} sources={record?.sources} sourceLabelsInDetails={props.sourceLabelsInDetails}>{presented}</ReplyObservation>
 }
 
-function ReplyObservation({ item, active, observation, compact, reveal, children, sources }: { item: AgentTimelineItem; active: boolean; observation: boolean; compact: boolean; reveal: boolean; children: ReactNode; sources?: import('../lib/conversation-sources.js').ConversationSources | undefined }) {
+function ReplyObservation({ item, active, observation, compact, reveal, children, sources, sourceLabelsInDetails }: { item: AgentTimelineItem; active: boolean; observation: boolean; compact: boolean; reveal: boolean; children: ReactNode; sources?: import('../lib/conversation-sources.js').ConversationSources | undefined; sourceLabelsInDetails?: boolean | undefined }) {
   const [choice, setChoice] = useState<boolean>()
   const [readOnce, setReadOnce] = useState(!compact)
   const [, selectionChanged] = useState(0)
@@ -91,7 +91,7 @@ function ReplyObservation({ item, active, observation, compact, reveal, children
       <button type="button" className="conversation-reply-observation__toggle" aria-expanded={expanded} aria-controls={bodyId}
         aria-label={expanded ? '收起采集内容' : '展开采集内容'} onClick={() => { setChoice(!expanded); if (!expanded) setReadOnce(true) }}>
         <span className="conversation-reply-observation__node"><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" /></span>
-        <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply ?? COLLECTED_REPLY_TITLE} />
+        <ConversationSourceLabels sources={sourceLabelsInDetails && sources?.main ? { ...sources.main, labels: [] } : sources?.main} observation={sources?.collectedReply ?? COLLECTED_REPLY_TITLE} />
         <time>{formatClock(item.createdAt)}</time>
         {!expanded && preview.text ? <span className="conversation-reply-observation__preview">{preview.text}</span> : null}
         {!expanded && preview.hasOriginal ? <span className="conversation-reply-observation__expand">展开原文</span> : null}
