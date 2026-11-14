@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
-import { StableWorkbenchView } from '../../../src/renderer/src/components/StableWorkbenchView'
+import { StableWorkbenchView, WorkbenchSurfaceHost } from '../../../src/renderer/src/components/StableWorkbenchView'
 import { useWorkbenchWindows, WorkbenchWindowNotices } from '../../../src/renderer/src/lib/workbench-windows'
 import { originalWorkbenchHost } from '../../../src/renderer/src/lib/workbench-window-registry'
 import { api } from '../../../src/renderer/src/lib/api'
@@ -12,6 +12,7 @@ const bridge = (window as any).windowProof
 api.ui.workbenchWindows = bridge
 const reference = { displayWorkspaceId: 'private-workspace', groupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }
 const target = { kind: 'tab' as const, displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }
+const surveyTarget = { kind: 'surface' as const, surface: 'survey' as const }
 const tab = createWorkbenchTab(reference.tabId, { kind: 'launcher', workspaceId: reference.displayWorkspaceId, regionId: reference.regionId })
 const layout = createWorkspaceLayout(reference.groupId, [tab.id])
 useAppStore.setState({ loading: false, tabs: { [tab.id]: tab }, layouts: { [reference.displayWorkspaceId]: layout } })
@@ -36,7 +37,7 @@ function Proof() {
         await wait(() => original.ownerDocument !== document)
         page = await call('app.window.ls', {})
       }
-      const child = page.windows.find((item: any) => item.target)
+      const child = page.windows.find((item: any) => item.target?.kind === 'tab')
       assert(child, 'Original durable window must remain recorded')
       if (phase !== 'seed') assert(child.windowId === localStorage.getItem('originalWindow'), 'Restart must restore the same durable window identity')
       const returned = await call('app.window.return', { operationId: phase + '-return', windowId: child.windowId, documentGeneration: child.documentGeneration })
@@ -49,12 +50,23 @@ function Proof() {
         reopened = await call('app.window.open', { operationId: 'seed-reopen', target, focus: false })
         assert(reopened.recordedOperation.state === 'confirmed', 'Original host remains usable for another open')
         localStorage.setItem('originalWindow', reopened.recordedOperation.windowId)
+        const survey = await call('app.window.open', { operationId: 'seed-survey', target: surveyTarget, focus: true })
+        assert(survey.recordedOperation.state === 'confirmed', 'Open must confirm the original Survey window')
+        localStorage.setItem('originalSurvey', survey.recordedOperation.windowId)
       }
-      await bridge.done({ passed: true, durableWindowId: reopened?.recordedOperation.windowId ?? child.windowId, returned: returned.recordedOperation, sameDomNode: true,
+      const surveyHost = await wait(() => {
+        const host = originalWorkbenchHost(surveyTarget)?.host
+        return host && host.ownerDocument !== document && host
+      })
+      const survey = (await call('app.window.ls', {})).windows.find((item: any) => item.target?.surface === 'survey')
+      assert(survey?.windowId === localStorage.getItem('originalSurvey'), 'Quit and restart must preserve the same Survey window')
+      assert(surveyHost.querySelector('input')?.value === 'Original Survey content', 'The original Survey content is visible in its own document')
+      await bridge.done({ passed: true, durableWindowId: reopened?.recordedOperation.windowId ?? child.windowId, durableSurveyWindowId: survey.windowId, returned: returned.recordedOperation, sameDomNode: true,
         boundary: 'Real Electron Main/Renderer and production WorkbenchWindows, durable window store, hook and StableWorkbenchView. Controlled input, no user App/Run or native webpage.' })
     })().catch(error => bridge.done({ passed: false, error: String(error), stack: error.stack }))
   }, [windows.length])
-  return <><WorkbenchWindowNotices /><div id="original-home" /><StableWorkbenchView homeId="original-home" targetId={null} primaryTabId={reference.tabId} reference={reference} windowTarget={target} active visible retainedRegionId={reference.regionId}>
+  return <><WorkbenchWindowNotices /><div id="survey-home" /><WorkbenchSurfaceHost surface="survey" homeId="survey-home" visible><input defaultValue="Original Survey content" /></WorkbenchSurfaceHost>
+    <div id="original-home" /><StableWorkbenchView homeId="original-home" targetId={null} primaryTabId={reference.tabId} reference={reference} windowTarget={target} active visible retainedRegionId={reference.regionId}>
     <input defaultValue="Original controlled input" />
   </StableWorkbenchView></>
 }

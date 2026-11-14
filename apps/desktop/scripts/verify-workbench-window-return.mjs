@@ -97,6 +97,9 @@ async function restart() {
     }
     assert.notEqual(receipt.restart[0].pid, receipt.restart[1].pid, 'Independent real Electron processes')
     assert.equal(receipt.restart[0].durableWindowId, receipt.restart[1].durableWindowId, 'Same durable original window after real process restart')
+    assert.ok(receipt.restart[0].durableSurveyWindowId)
+    assert.equal(receipt.restart[0].durableSurveyWindowId, receipt.restart[1].durableSurveyWindowId, 'Same durable Survey window after real process restart')
+    assert.deepEqual(receipt.restart.map(proof => [proof.reachedWillQuit, proof.expected.length, proof.closed.length]), [[true, 2, 2], [true, 1, 1]])
     receipt.nativeReceipts = Object.fromEntries(await Promise.all(['seed', 'restore'].map(async phase => {
       const file = join(evidence, phase + '-native.json'); return [file, sha(await readFile(file))]
     })))

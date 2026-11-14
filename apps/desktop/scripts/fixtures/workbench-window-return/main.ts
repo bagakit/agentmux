@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
+import { writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { WorkbenchWindows } from '../../../src/main/workbench-windows'
 import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
@@ -22,9 +23,24 @@ app.whenReady().then(async () => {
   window.webContents.setWindowOpenHandler(details => owner.windowOpen(details, () => { throw new Error('External navigation is outside the private proof') }))
   window.webContents.on('did-create-window', (child, details) => owner.createdWindow(child, details))
   ipcMain.handle('window-proof:done', async (_event, result) => {
+    if (!result.passed) {
+      await writeFile(receipt!, JSON.stringify({ ...result, phase, pid: process.pid }, null, 2))
+      app.exit(1)
+      return
+    }
     await owner.prepareQuit()
-    await writeFile(receipt!, JSON.stringify({ ...result, phase, pid: process.pid, channels: [WORKBENCH_WINDOW_REQUEST, WORKBENCH_WINDOW_CHANGED] }, null, 2))
-    owner.dispose(); app.exit(result.passed ? 0 : 1)
+    const expected = BrowserWindow.getAllWindows().filter(native => native !== window).map(native => native.id)
+    const closed: number[] = []
+    for (const native of BrowserWindow.getAllWindows()) if (native !== window) native.once('closed', () => closed.push(native.id))
+    const record = (reachedWillQuit: boolean) => {
+      const confirmed = reachedWillQuit && expected.length >= 1 && expected.every(id => closed.includes(id))
+      writeFileSync(receipt!, JSON.stringify({ ...result, passed: confirmed, phase, pid: process.pid, expected, closed, reachedWillQuit,
+        channels: [WORKBENCH_WINDOW_REQUEST, WORKBENCH_WINDOW_CHANGED] }, null, 2))
+    }
+    const timer = setTimeout(() => { record(false); app.exit(1) }, 6000)
+    app.once('will-quit', () => { clearTimeout(timer); record(true) })
+    owner.dispose()
+    setImmediate(() => app.quit())
   })
   await window.loadFile(join(directory!, 'renderer/index.html'), { query: { phase: phase! } })
 }).catch(async error => { await writeFile(receipt!, JSON.stringify({ passed: false, error: String(error), pid: process.pid })); app.exit(1) })
