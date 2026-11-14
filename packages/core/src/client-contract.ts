@@ -145,9 +145,11 @@ export type AgentMuxAgentMessageSubmission = {
   conversationKind?: import('./ingress-contract.js').ConnectionIngressMessage['conversationKind']
   /** Original Host-selected reply capability; frozen guidance never routes or authorizes an effect. */
   moteReply?: import('./mote-chat-contract.js').MoteChatReplyReference
-} & ({ condition?: never; admissionIntent?: never; execution?: 'default' } |
-  { condition: AgentPromptCondition; admissionIntent?: never } |
-  { condition?: never; admissionIntent: Exclude<AgentPromptAdmissionIntent, { kind: 'exact-condition' }>; execution: 'immediate' })
+} & ({ condition?: never; admissionIntent?: never; execution?: 'default'; scope?: never } |
+  { condition: AgentPromptCondition; admissionIntent?: never; scope?: never } |
+  { condition?: never; admissionIntent: Exclude<AgentPromptAdmissionIntent, { kind: 'exact-condition' }>; execution: 'immediate';
+    /** Ensure the original first waiting generation; never adopt a later generation's control scope. */
+    scope?: 'ensure-custody' })
 
 export type AgentMuxAgentMessageInput = AgentMuxAgentMessageSubmission & { agentSessionId: string }
 

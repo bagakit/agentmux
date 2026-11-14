@@ -701,7 +701,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       sender: ref.author, ...(ref.channelProfile ? { channelProfile: ref.channelProfile } : {}), ...(ref.channelQuote ? { channelQuote: ref.channelQuote } : {}), recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, ...(record.application.issuer === undefined ? [] : [record.application.issuer]), record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, ...(record.application.issuer === undefined ? [] : [record.application.issuer]), record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
     let refusal: AgentMuxError | undefined
     try {
-      await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message',
+      await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', scope: 'ensure-custody', sourceChannel: 'agent-message',
         ...(retained.conversationKind ? { conversationKind: retained.conversationKind } : {}), ...(this.options.inputRoute?.(retained)?.moteReply ? { moteReply: this.options.inputRoute(retained)!.moteReply } : {}) }, this.context(retained))
     } catch (error) {
       // No reply proves neither absence nor a new effect right. Inspect this exact operation.

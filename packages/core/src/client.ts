@@ -8170,7 +8170,13 @@ export class AgentMuxClient {
 
   async submitAgentMessage(input: AgentMuxAgentMessageInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()
+    if (input.scope !== undefined && (input.scope !== 'ensure-custody' || input.execution !== 'immediate' ||
+        input.admissionIntent === undefined || validateAgentPromptAdmissionIntent(input.admissionIntent).kind === 'exact-condition')) {
+      throw new AgentMuxError('Ensuring original message custody requires a controlled immediate input and its original first waiting generation.', 'INVALID_AGENT_PROMPT')
+    }
     input = { ...input, ...(input.caller ? { caller: { ...input.caller } } : {}) }
+    const waitingRef = (entry: AgentInputJournalEntry): AgentInputWaitRef => input.scope === 'ensure-custody'
+      ? { key: entry.intent.key, waitGeneration: 1 } : entry.control.ref
     const envelope = validateAgentMuxMessageEnvelope(input.envelope)
     const retained = await this.messageQueue.readByMessageId(envelope.messageId) ?? await this.messageQueue.readByOperationId(envelope.operationId)
     if (envelope.sender.kind === 'agent-session' && (retained ? retained.deliveryMode === 'reference' : input.execution !== 'immediate')) {
@@ -8215,8 +8221,9 @@ export class AgentMuxClient {
       if (!original.input) throw new AgentMuxError('The retained message has no original controlled input contract. Inspect its original claim; it cannot be submitted again.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       await this.assertInputWaitingAuthor(original.input.intent, input.caller)
       const receipt = (await this.inspectAgentInput({ key: original.input.intent.key }, input.caller))!
-      // Wake the input at its current waiting generation; an earlier Stop and re-enable has moved it past the first.
-      void this.rejoinAgentInputWaiting({ ref: original.input.control.ref, scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
+      // An explicit resubmission may wake its current enabled generation. A lost
+      // firstsave action only ensures the original first generation's custody.
+      void this.rejoinAgentInputWaiting({ ref: waitingRef(original.input), scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
         this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_INPUT_WAIT_RECOVERY_UNCONFIRMED',
           message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error), evidence: { source: 'agentmux', observedAt: Date.now(), run: receipt.key.expectedRun } })
       })
@@ -8259,7 +8266,7 @@ export class AgentMuxClient {
     if (queued.input) {
       if (admissionIntent.kind === 'exact-condition') throw new AgentMuxError('The caller condition cannot replace the original controlled manual input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const original = await this.inputWaitingPrompt(queued.input.intent, input.caller, context)
-      return await this.acceptInputWaiting(queued.input.control.ref, original.input, 'message', original.authorAgentSessionId,
+      return await this.acceptInputWaiting(waitingRef(queued.input), original.input, 'message', original.authorAgentSessionId,
         this.inputCallAuthority(original.authority, context), context?.requestSignal, Boolean(original.authority?.externalAuthor))
     }
     if (admissionIntent.kind !== 'exact-condition') throw new AgentMuxError('The original controlled input could not be confirmed. Its message and historical claims are retained; no legacy direct dispatch was started.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
