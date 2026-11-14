@@ -864,6 +864,7 @@ export function FileExplorer({
     if (
       !workspaceId ||
       !workspace ||
+      isScratchWorkspaceId(workspace.id) ||
       workspace.hostId !== 'local' ||
       !isFolderWorkspace(workspace) ||
       relinking
@@ -1203,7 +1204,7 @@ export function FileExplorer({
               <span>{tree.rootError}</span>
               <div className="tree-empty__actions">
                 <button className="small-button" onClick={() => void refreshExplorer()}>Retry</button>
-                {workspace?.hostId === 'local' && isFolderWorkspace(workspace) ? (
+                {workspace?.hostId === 'local' && !isScratchWorkspaceId(workspace.id) && isFolderWorkspace(workspace) ? (
                   <button className="small-button" disabled={relinking} onClick={() => void rebindWorkspacePath()}>
                     {relinking ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeObjectFolderOpenIcon size={12} />}
                     {relinking ? 'Choosing…' : 'Choose new folder'}

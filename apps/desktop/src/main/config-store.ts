@@ -1,4 +1,5 @@
 import { parseGoalsCommonActions } from '@agentmux/core'
+import { validateReservedWorkspaceConfigEdit } from './workspace-location.js'
 import { SURVEY_THUMBNAIL_HEIGHT, SURVEY_THUMBNAIL_COLUMNS } from '../shared/survey-thumbnail-layout.js'
 import { BROWSER_NEW_PAGE_DESTINATIONS } from '../shared/browser-new-page-placement.js'
 import { APP_ICON_IDS } from '@agentmux/client-ui/app-icon-catalog'
@@ -1258,6 +1259,7 @@ export class ConfigStore {
         // cannot read, and a direct `save()` over such a file is refused here for the same reason rather
         // than silently overwriting it. (The bytes are still preserved by the sidecar below.)
         const current = configSchema.parse(JSON.parse(previousText)) as AppConfig
+        validateReservedWorkspaceConfigEdit(current, config)
         for (const [executorId, executor] of Object.entries(current.executors)) {
           const next = Object.hasOwn(config.executors, executorId) ? config.executors[executorId] : undefined
           if (next && next.providerId !== executor.providerId) {

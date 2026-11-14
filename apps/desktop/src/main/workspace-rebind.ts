@@ -1,6 +1,6 @@
 import { dirname } from 'node:path'
 import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
-import { isFolderWorkspace } from '../shared/contracts.js'
+import { isFolderWorkspace, isScratchWorkspaceId } from '../shared/contracts.js'
 import { findWorkspaceByLocation } from './workspace-location.js'
 
 /**
@@ -29,6 +29,7 @@ export async function rebindLocalFolder(
 ): Promise<{ config: AppConfig; workspace: WorkspaceRecord | null }> {
   const current = config.workspaces.find((item) => item.id === workspaceId)
   if (!current) throw new Error(`Unknown workspace: ${workspaceId}`)
+  if (isScratchWorkspaceId(current.id)) throw new Error('The reserved Scratch resource keeps its original root. Open the original Mote or Topic directory without rebinding this container.')
   if (current.hostId !== 'local' || !isFolderWorkspace(current)) {
     throw new Error('Only local folder Workspaces can be rebound')
   }

@@ -151,7 +151,8 @@ export function scratchTopicPhysicalPath(workspace: { path: string }, topic: Pic
   return topic.physicalDirectoryPath ?? (absoluteDirectory(topic.directoryPath) ? topic.directoryPath : directoryChild(workspace.path, topic.directoryPath))
 }
 
-export function scratchTopicLogicalPath(workspace: { path: string }, topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath'>): string | null {
+export function scratchTopicLogicalPath(workspace: { path: string }, topic: Pick<ScratchTopicSnapshot, 'id'> & { directoryPath?: string | null }): string | null {
+  if (typeof topic.directoryPath !== 'string' || !topic.directoryPath) return null
   const name = scratchTopicDirectoryName(topic.id)
   return topic.directoryPath === name || scratchTopicIdFromWorkspacePath(workspace.path, topic.directoryPath) === topic.id ? name : null
 }

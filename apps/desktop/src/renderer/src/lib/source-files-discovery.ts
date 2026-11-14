@@ -15,7 +15,11 @@ export function sourceFilesDiscoveryNamespace(workspaceId: string | null, worksp
 const sourceUnavailable = () => new Error('The original Source directory is unconfirmed. Its files, editors and requests are kept; check that Source folder before discovering candidates.')
 /** Called only for an explicit directory/name observation, never on document input. */
 function hasOriginalSource(state: State, workspaceId: string): boolean {
+  const workspace = state.config?.workspaces.find(value => value.id === workspaceId)
   return Boolean(state.sourceFilesInputs.selections[workspaceId] ||
+    Object.values(state.sourceFilesInputs.pending).some(request => sourceFilesWorkspaceMatches(request.workspace, workspace)) ||
+    Object.values(state.sourceFilesInputs.creations).some(request => sourceFilesWorkspaceMatches(request.workspace, workspace)) ||
+    Object.values(state.sourceFilesInputs.folderRequests).some(request => sourceFilesWorkspaceMatches(request.workspace, workspace)) ||
     Object.values(state.sourceFilesInputs.readSources ?? {}).some(pointer => pointer.workspaceId === workspaceId) ||
     Object.entries(state.documents).some(([key, document]) => key.startsWith(workspaceId + '\0') && document.readSource))
 }

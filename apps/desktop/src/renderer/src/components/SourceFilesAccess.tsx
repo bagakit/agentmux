@@ -32,7 +32,7 @@ export function SourceFilesAccess({ workspace, visible }: { workspace: Workspace
   const retained = Object.entries(pending).filter(([, request]) => request.workspace.id === workspace.id)
   const retainedCreations = Object.entries(creations).filter(([, request]) => request.workspace.id === workspace.id)
   const retainedFolders = Object.entries(folderRequests).filter(([, request]) => request.workspace.id === workspace.id)
-  const message = issue ?? input?.issue ?? (result?.status === 'selection-required' ? 'This directory has more than one Source registration. Choose its original Source before changing files.' : null)
+  const message = issue ?? input?.issue ?? (result?.status === 'unconfirmed' ? result.issue.message : result?.status === 'selection-required' ? 'This directory has more than one Source registration. Choose its original Source before changing files.' : null)
   const registrationUnknown = input?.registration && input.registrationStatus !== 'confirmed'
   if (input?.locator && !message && !retained.length && !retainedCreations.length && !retainedFolders.length && !registrationUnknown) return null
   return <div className="file-operation-service" role="status">

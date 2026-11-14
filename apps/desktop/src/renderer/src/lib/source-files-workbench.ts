@@ -72,21 +72,35 @@ export function createSourceFilesWorkbench(ports: {
       input = ports.get().selections[workspaceId]
       if (!input) {
         input = { workspace: baseline, target: { hostId: baseline.hostId, expectedRuntimeId: runtimeId }, selection: { kind: 'directory', path: baseline.path } }
-        const chosen = input
-        ports.set(state => ({ ...state, selections: { ...state.selections, [workspaceId]: chosen } }))
       }
     }
-    if (!current(input)) return { status: 'unconfirmed', issue: { code: 'SOURCE_FILES_SELECTION_CHANGED', message: 'Restore the original directory selection to check its retained requests.' } }
+    // A default observation is not a selected Source. Adopt only a confirmed locator;
+    // failure must leave the original Workspace's existing Files path available.
+    const original = ports.get().selections[workspaceId]
+    const owns = () => sourceFilesWorkspaceMatches(input.workspace, ports.workspace(workspaceId)) && ports.get().selections[workspaceId] === original
+    if (!owns()) return { status: 'unconfirmed', issue: { code: 'SOURCE_FILES_SELECTION_CHANGED', message: 'Restore the original directory selection to check its retained requests.' } }
     const selection = input.registration ? { kind: 'directory' as const, path: input.registration.directory.workspacePath,
       expectedResource: input.registration.directory, ...(input.selection.kind === 'directory' && input.selection.registration ? { registration: input.selection.registration } : {}) } : input.selection
     const result = await ports.api.resolve(input.target, selection)
-    if (!current(input)) return { status: 'unconfirmed', issue: { code: 'SOURCE_FILES_SELECTION_CHANGED', message: 'Later directory selection was retained; the old observation was not adopted.' } }
-    replace(input, { ...input, ...(result.status === 'located' ? { locator: result.locator, issue: undefined } : { locator: undefined,
-      issue: result.status === 'unconfirmed' ? result.issue.message : result.status === 'selection-required' ? 'Choose the original Source registration before changing files.' : undefined }) })
+    if (!owns()) return { status: 'unconfirmed', issue: { code: 'SOURCE_FILES_SELECTION_CHANGED', message: 'Later directory selection was retained; the old observation was not adopted.' } }
+    if (result.status === 'located' || original) {
+      const observed = { ...input, ...(result.status === 'located' ? { locator: result.locator, issue: undefined } : {
+        issue: result.status === 'unconfirmed' ? result.issue.message : result.status === 'selection-required' ? 'Choose the original Source registration before changing files.' : undefined }) }
+      ports.set(state => state.selections[workspaceId] !== original ? state : { ...state, selections: { ...state.selections, [workspaceId]: observed } })
+    }
     return result
   }
   const useFolder = async (workspaceId: string, packet: FolderDirectoryRegistration) => {
-    const input = ports.get().selections[workspaceId]
+    let input = ports.get().selections[workspaceId]
+    if (!input) {
+      const workspace = ports.workspace(workspaceId)
+      if (!workspace || packet.directory.workspacePath !== workspace.path) throw new Error('Use the packet for this exact original Workspace directory.')
+      const baseline = structuredClone(workspace), runtimeId = await ports.runtime(workspace.hostId)
+      if (runtimeId !== packet.runtimeId || !sourceFilesWorkspaceMatches(baseline, ports.workspace(workspaceId)) || ports.get().selections[workspaceId]) throw new Error('The original Source changed before this folder selection. No registration was sent.')
+      input = { workspace: baseline, target: { hostId: baseline.hostId, expectedRuntimeId: runtimeId }, selection: { kind: 'directory', path: baseline.path } }
+      const chosen = input
+      ports.set(state => ({ ...state, selections: { ...state.selections, [workspaceId]: chosen } }))
+    }
     if (!input || !current(input)) throw new Error('The original directory selection changed. Its request was retained.')
     if (input.registration) return await resolve(workspaceId) // Unknown is reconciled read-only, never registered twice.
     if (packet.runtimeId !== ('reference' in input.target ? input.target.reference.runtimeId : input.target.expectedRuntimeId) ||

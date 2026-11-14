@@ -1,5 +1,14 @@
 import { join, normalize as normalizeLocalPath, posix } from 'node:path'
 import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
+
+/** Ordinary configuration edits cannot turn the reserved logical container into one Mote's home. */
+export function validateReservedWorkspaceConfigEdit(before: Pick<AppConfig, 'workspaces'>, after: Pick<AppConfig, 'workspaces'>): void {
+  const original = before.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+  if (!original) return
+  const next = after.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+  if (!next || next.hostId !== original.hostId || next.path !== original.path) throw new Error('The reserved Scratch resource keeps its original Host and root. Existing files, workfaces and Agent Sessions are retained.')
+}
 
 /**
  * The single definition of "same physical location" for a Workspace. The schema's uniqueness refinement

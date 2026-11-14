@@ -3,6 +3,7 @@ import type { AppConfig } from '../shared/contracts.js'
 import { validateThemeConfigEdit } from './theme-config.js'
 
 import { applyConfigEdit, configValuesEqual } from '../shared/config-edit.js'
+import { validateReservedWorkspaceConfigEdit } from './workspace-location.js'
 import { configNameChanges, configNameValue, type NamedChange, type NameChangeAudit } from './name-change-audit.js'
 
 /** One commit queue around the existing Main fact; long host/Git/dialog work is never an updater. */
@@ -67,6 +68,7 @@ export class ConfigOwner {
       let next: AppConfig
       try {
         const requested = apply(current)
+        validateReservedWorkspaceConfigEdit(current, requested)
         validateThemeConfigEdit(current, requested)
         next = this.ports.prepare ? await this.ports.prepare(current, requested) : requested
         // Choices returning to their earlier value are still later publications. Keep deletion
