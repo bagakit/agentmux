@@ -5,7 +5,7 @@ import { durableWriteFile } from './durable-write.js'
 import { AgentMuxNotesStorage, defaultNotesDirectory, withNotesStorageFileLock } from './notes-storage.js'
 import { AgentMuxError } from './errors.js'
 import { applyNotebookChange, applyNotebookFileRelocations, emptyNotebookState, notebookFingerprint, parseNotebookState, type NoteResource, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
-import { NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFilesLocated, initializeNotebookFiles, readNotebookFiles, readNotebookProvenance, writeNotebookFiles, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch, planNotebookFileRelocation, parseNotebookFileRelocationPlan, notebookFileRelocationRows, notebookFileResourceIdentities, readNotebookFileDeleteSnapshots, type NotebookFileDeleteSnapshotQuery, type NotebookFileDeleteSnapshotPage, type NotebookFileResourceIdentity, type NotebookFileRelocationPlan } from './notebook-files.js'
+import { NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFileAuthorityPaths, notebookFilesLocated, initializeNotebookFiles, readNotebookFiles, readNotebookProvenance, writeNotebookFiles, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch, planNotebookFileRelocation, parseNotebookFileRelocationPlan, notebookFileRelocationRows, notebookFileResourceIdentities, readNotebookFileDeleteSnapshots, type NotebookFileDeleteSnapshotQuery, type NotebookFileDeleteSnapshotPage, type NotebookFileResourceIdentity, type NotebookFileRelocationPlan } from './notebook-files.js'
 import { parseNoteProvenanceWrite, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
 import { parseNoteFileTitle, parseNoteTitleIntent, parseNoteTitleOperation, type NoteTitlePort, type NoteTitleIntent, type NoteTitleOperation, type NoteFileTitle, type NoteTitleProjection, type NoteTitleInspection } from './note-title.js'
 import { noteProvenanceResourceKey } from './note-provenance.js'
@@ -33,6 +33,8 @@ export class AgentMuxNotebookStore {
   private currentPath: string
   private legacyPath: string
   get path(): string { return this.currentPath }
+  /** Exact metadata files/subtrees; the enclosing Notes library still contains user content. */
+  get metadataAuthorityPaths(): readonly string[] { return notebookFileAuthorityPaths(this.path) }
   constructor(path?: string, storage = new AgentMuxNotesStorage(), private readonly options: { title?: NoteTitlePort } = {}) {
     this.storage = path === undefined ? storage : null
     this.currentPath = notebookFileRoot(path ?? join(defaultNotesDirectory(), NOTEBOOK_ROOT_NAME))

@@ -1,6 +1,6 @@
 import type { BigIntStats } from 'node:fs'
 import { lstat, realpath } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { AgentMuxError } from '@agentmux/core'
 import { parseFileShareUndoParams, type FileReadParams, type FileReadResource, type FileReadResult, type FileShareCollection, type FileShareUndoParams, type FileShareUndoResult, type FileWriteContext, type FileWriteParams, type FileWriteResult } from '@agentmux/core/files'
 import { noteHistoryRevision, type NoteFileWitness, type NoteHistoryQuery, type NoteHistoryRecord, type NoteHistorySnapshot, type NoteHistorySource, type NoteHistoryWriteRecord } from '@agentmux/core/note-history'
@@ -17,9 +17,11 @@ import type { NoteHistoryWriteAction } from './note-history-actions.js'
 type Node = NoteDocument['content']
 type Target = { params: FileReadParams; resource: FileReadResource }
 type Candidate = { item: FileShareCollection; create: NoteHistoryWriteRecord; originalSource: NoteHistoryWriteRecord; source: Target; sourceOperationId: string; sourceReferenceId: string; ownDestination: boolean; blocks: Record<string, NoteBlockProvenance>; deletionId: string }
-type Scan = { hostId: string; complete: boolean; documents: NoteCorpusSource[]; physical: Map<string, NoteCorpusSource>; roots: string; directoryEntries: Map<string, string>; files: Map<string, string> }
+type Scan = { hostId: string; complete: boolean; documents: NoteCorpusSource[]; physical: Map<string, NoteCorpusSource>; roots: string; metadataPaths: readonly string[]; directoryEntries: Map<string, string>; files: Map<string, string> }
 export type NoteSharedUndoPorts = {
   files: Pick<WorkspaceFiles, 'read' | 'readDirectory'>
+  /** Original Notebook authority only; never caller paths or the enclosing user library. */
+  metadataPaths(): readonly string[]
   workspaces(): Promise<{ workspaces: readonly WorkspaceRecord[]; complete: boolean }>
   target(resource: NoteResource): Promise<Target | null>
   read(params: FileReadParams): Promise<FileReadResult>
@@ -73,6 +75,7 @@ export class NoteSharedUndoOwner {
   }
   private async scan(hostId: string): Promise<Scan> {
     const scope = await this.ports.workspaces()
+    const metadataPaths = await this.metadataPaths()
     const workspaces = scope.workspaces.filter(w => w.hostId === hostId).map(w => ({ ...w })), documents: NoteCorpusSource[] = [], directoryEntries = new Map<string, string>(), files = new Map<string, string>(), physical = new Map<string, NoteCorpusSource>()
     let complete = scope.complete
     for (const workspace of workspaces) {
@@ -80,7 +83,7 @@ export class NoteSharedUndoOwner {
       try {
         const root = await realpath(workspace.path)
         const scanned = await readNoteCorpusSources({ workspace: id => workspaces.find(w => w.id === id), files: {
-          readDirectory: async (owner, path) => { const entries = await this.ports.files.readDirectory(owner, path); directoryEntries.set(join(root, path), JSON.stringify(entries.map(e => [e.name, e.isDirectory, e.isSymlink]).sort())); return entries },
+          readDirectory: async (owner, path) => { const entries = this.contentEntries(root, path, await this.ports.files.readDirectory(owner, path), metadataPaths); directoryEntries.set(join(root, path), JSON.stringify(entries.map(e => [e.name, e.isDirectory, e.isSymlink]).sort())); return entries },
           read: async (owner, path, options) => { const file = join(root, path), before = statValue(await lstat(file, { bigint: true })); const read = await this.ports.files.read(owner, path, options), after = statValue(await lstat(file, { bigint: true })); if (before !== after) complete = false; files.set(file, after); return read }
         } }, { workspaceId: workspace.id, path: '.', maxFiles: 20000, maxDirectories: 20000, maxBytes: 64 * 1024 * 1024 })
         if (scanned.result.coverage.limited || scanned.result.coverage.issues.length) complete = false
@@ -92,7 +95,27 @@ export class NoteSharedUndoOwner {
     }
     const derived = deriveNoteCorpus(documents, complete)
     if (derived.invalid.length || derived.duplicateNoteIds.length) complete = false
-    return { hostId, complete, documents, physical, directoryEntries, files, roots: JSON.stringify(workspaces.map(w => [w.hostId, w.id, w.path]).sort()) }
+    return { hostId, complete, documents, physical, directoryEntries, files, metadataPaths, roots: JSON.stringify(workspaces.map(w => [w.hostId, w.id, w.path]).sort()) }
+  }
+  private async metadataPaths(): Promise<readonly string[]> {
+    return [...new Set((await Promise.all(this.ports.metadataPaths().map(async path => {
+      if (!isAbsolute(path)) throw Error('The original Notebook metadata path is unconfirmed.')
+      const location = join(await realpath(dirname(path)), basename(path))
+      try { return [location, await realpath(path)] } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        return [location]
+      }
+    }))).flat())].sort()
+  }
+  private contentEntries(root: string, path: string, entries: Awaited<ReturnType<WorkspaceFiles['readDirectory']>>, metadataPaths: readonly string[]) {
+    return entries.filter(entry => {
+      // Invalid owner replies still reach the original corpus validator; filtering
+      // must never turn an unreadable scope into permission to collect content.
+      if (!entry.name || entry.name === '.' || entry.name === '..' || /[\\/\0]/u.test(entry.name) ||
+        entry.path !== (path === '.' ? entry.name : path + '/' + entry.name)) return true
+      const absolute = join(root, path, entry.name)
+      return !metadataPaths.some(metadata => absolute === metadata || absolute.startsWith(metadata + sep))
+    })
   }
   private async canonicalResource(scan: Scan, resource: NoteResource): Promise<NoteCorpusSource | undefined> {
     // Overlapping configured roots name one physical file; trusted history still owns its original resource.
@@ -104,13 +127,17 @@ export class NoteSharedUndoOwner {
     return observed
   }
   private async unchanged(scan: Scan): Promise<boolean> {
+    try { if (JSON.stringify(await this.metadataPaths()) !== JSON.stringify(scan.metadataPaths)) return false } catch { return false }
     const scope = await this.ports.workspaces()
     if (!scope.complete || scan.roots !== JSON.stringify(scope.workspaces.filter(w => w.hostId === scan.hostId).map(w => [w.hostId, w.id, w.path]).sort())) return false
     for (const [path, stat] of scan.files) { try { if (statValue(await lstat(path, { bigint: true })) !== stat) return false } catch { return false } }
+    const roots = await Promise.all(scope.workspaces.filter(owner => owner.hostId === 'local').map(async owner => ({ owner, root: await realpath(owner.path) }))).catch(() => null)
+    if (!roots) return false
     for (const [path, entries] of scan.directoryEntries) {
-      const owner = scope.workspaces.find(w => w.hostId === 'local' && (path === w.path || path.startsWith(w.path + '/')))
-      if (!owner) return false
-      try { const current = await this.ports.files.readDirectory(owner, relative(owner.path, path) || '.'); if (JSON.stringify(current.map(e => [e.name, e.isDirectory, e.isSymlink]).sort()) !== entries) return false } catch { return false }
+      const original = roots.find(value => path === value.root || path.startsWith(value.root + sep))
+      if (!original) return false
+      const { owner, root } = original, directory = relative(root, path) || '.'
+      try { const current = this.contentEntries(root, directory, await this.ports.files.readDirectory(owner, directory), scan.metadataPaths); if (JSON.stringify(current.map(e => [e.name, e.isDirectory, e.isSymlink]).sort()) !== entries) return false } catch { return false }
     }
     return true
   }
@@ -193,7 +220,7 @@ export class NoteSharedUndoOwner {
     let insertionEvents: NoteHistoryRecord[] = []
     try { for (const resource of await this.historyResources(resourceOf(request.expectedResource))) insertionEvents.push(...await this.entries(base.noteId, resource, selected)) } catch { /* Exact draft save remains available without collection history. */ }
     const inserted = (n: Node) => insertionEvents.find(e => { try { return e.operation !== 'delete' && e.status === 'committed' && includes(note(e.content)).filter(x => x.attrs?.referenceId === n.attrs!.referenceId && x.attrs?.noteId === n.attrs!.noteId).length === 1 && (!e.beforeContent || !includes(note(e.beforeContent)).some(x => x.attrs?.referenceId === n.attrs!.referenceId)) } catch { return false } })
-    const scan = await this.scan(request.expectedResource.hostId).catch(() => ({ hostId: request.expectedResource.hostId, complete: false, documents: [], physical: new Map<string, NoteCorpusSource>(), roots: '', directoryEntries: new Map<string,string>(), files: new Map<string,string>() })), candidates: Candidate[] = [], sourcePlans = new Map<string, {base:string;content:string}>()
+    const scan = await this.scan(request.expectedResource.hostId).catch(() => ({ hostId: request.expectedResource.hostId, complete: false, documents: [], metadataPaths: [], physical: new Map<string, NoteCorpusSource>(), roots: '', directoryEntries: new Map<string,string>(), files: new Map<string,string>() })), candidates: Candidate[] = [], sourcePlans = new Map<string, {base:string;content:string}>()
     const destinationObservation = await this.canonicalResource(scan, resourceOf(request.expectedResource)).catch(() => undefined)
     let destinationContent = oldDestination ? scan.documents.find(d => resourceKey(d.resource) === resourceKey(resourceOf(request.expectedResource)))?.document.content ?? request.content : request.content
     const transferred: Record<string, NoteBlockProvenance> = {}
@@ -302,7 +329,7 @@ export class NoteSharedUndoOwner {
       })
       if (other) retain(candidate.item, 'other-references', 'Another current saved occurrence uses this shared file; its original source include is retained where still present.')
     }
-    if (!await this.unchanged(scan)) for (const candidate of candidates) if (!candidate.item.retainedReason) retain(candidate.item, 'scope-changed', 'A managed resource changed after destination save; optional source restoration has not started.')
+    if (!await this.unchanged(scan)) for (const candidate of candidates) if (!candidate.item.retainedReason) retain(candidate.item, 'scope-changed', 'The original managed resource scope could not be confirmed after destination save; optional source restoration has not started.')
     const groups = new Map<string, Candidate[]>()
     for (const candidate of candidates.filter(c => !c.item.retainedReason)) { const key = resourceKey(candidate.ownDestination ? resourceOf(request.expectedResource) : candidate.originalSource.resource); const group = groups.get(key) ?? []; group.push(candidate); groups.set(key, group) }
     for (const group of groups.values()) {
@@ -330,7 +357,7 @@ export class NoteSharedUndoOwner {
     for (const candidate of candidates) {
       const { item, create } = candidate
       if (item.retainedReason) continue
-      if (!confirmed(item.source) || !await this.unchanged(scan)) { retain(item, 'scope-changed', 'A managed scope resource changed during the operation; the shared Markdown is retained.'); continue }
+      if (!confirmed(item.source) || !await this.unchanged(scan)) { retain(item, 'scope-changed', 'The original managed scope could not be confirmed during the operation; the shared Markdown is retained.'); continue }
       // The target has its own Zone mapping, which may differ from the source Zone.
       const target = await this.ports.target(resourceOf(item.resource!))
       const observed = target ? await this.ports.read(target.params) : null

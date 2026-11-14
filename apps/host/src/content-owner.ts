@@ -129,7 +129,7 @@ export function createHostContent(options: {
       }
     })
     const deletion = new NoteSharedFileDeleteOwner(files, notebookStore)
-    const undo = new NoteSharedUndoOwner({
+    const undo = new NoteSharedUndoOwner({ metadataPaths: () => notebookStore.metadataAuthorityPaths,
       files, workspaces: configuration, target: publicFiles.targetForNote.bind(publicFiles),
       read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles),
       history: notebookStore.readHistory.bind(notebookStore), operation: notebookStore.readHistoryOperation.bind(notebookStore), lease: notebookStore.runWithWriteLease.bind(notebookStore),
