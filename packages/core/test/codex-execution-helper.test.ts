@@ -41,7 +41,7 @@ it('qualifies the stable native version then builds a fixed explicit Node runner
 })
 
 it('resolves the exact Host PATH candidate before version qualification and freezes the absolute launch path', async () => {
-  const config = await context(), path = join(config.workspacePath, 'codex')
+  const config = await context('executor'), path = join(config.workspacePath, 'codex')
   await writeFile(path, '#!/bin/sh\nexit 0\n'); await chmod(path, 0o700)
   vi.stubEnv('PATH', config.workspacePath)
   config.executable = 'codex'
@@ -53,7 +53,7 @@ it('resolves the exact Host PATH candidate before version qualification and free
 })
 
 it('retains qualified native version capability when stderr contains an ordinary launcher warning', async () => {
-  const config = await context()
+  const config = await context('executor')
   vi.mocked(runProcess).mockResolvedValue({ exitCode: 0, stdout: 'codex-cli 0.165.0\n', stderr: 'warning: optional PATH aliases were not installed\n' })
   expect(parseCodexExecutionRunArguments((await prepareCodexExecutionHelper(config)).args.slice(2)).executable).toBe(config.executable)
   expect(runProcess).toHaveBeenCalledWith(config.executable, ['--version'], expect.objectContaining({ timeoutMs: 2000, maxOutputBytes: 4096 }))
@@ -65,7 +65,7 @@ it.each([
   { exitCode: 1, stdout: 'codex-cli 0.165.0', stderr: '' },
 ])('does not qualify another release or a failed version observation', async result => {
   vi.mocked(runProcess).mockResolvedValue(result)
-  await expect(prepareCodexExecutionHelper(await context())).rejects.toThrow('not qualified')
+  await expect(prepareCodexExecutionHelper(await context('executor'))).rejects.toThrow('not qualified')
 })
 
 it('requires explicit runner arguments and a grant for the exact resource binding', async () => {
