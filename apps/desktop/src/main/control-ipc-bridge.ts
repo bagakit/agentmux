@@ -82,7 +82,9 @@ export class DesktopControlIpcBridge {
       // 仓库，而这条路静默给它 2 秒。
       // DiagnosticEvidenceQuery owns caller deadlines. A cancelled observation is not an
       // actual Renderer reply: retain this admitted read and its query slot until reply/disposal.
-      const timeout = request.operation === 'inspect.mote-context' ? null : setTimeout(() => {
+      // Focus applies navigation before awaiting its original durable checkpoint.
+      // Keep its reply until that owner settles, caller cancellation or disposal.
+      const timeout = request.operation === 'inspect.mote-context' || request.operation === 'focus' ? null : setTimeout(() => {
         this.endObservation(
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
