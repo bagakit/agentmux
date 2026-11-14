@@ -3,7 +3,7 @@ import { expect, it } from 'vitest'
 import { emptyNotebookState } from '@agentmux/core/notebook-catalog'
 import type { NotebookGraphSnapshot } from '../src/shared/notebook-observation'
 import { projectNoteCanvas, canvasSharedObservation, initialCanvasPositions, attachNoteCanvasRelationships, noteCanvasBlockNodeId, noteCanvasFocusNeighborhood } from '../src/renderer/src/lib/note-canvas-model'
-import { arrangeNoteCanvas } from '../src/renderer/src/lib/note-canvas-layout-engine'
+import { arrangeForceGraph } from '../src/renderer/src/lib/force-layout-engine'
 
 const scope = { kind: 'notebook', notebookId: 'default' } as const
 
@@ -78,7 +78,7 @@ it('retains every original held position, including temporarily hidden identitie
 })
 it('uses the existing Graphviz engine for real non-overlapping sized Note coordinates, including cycles', async () => {
   const nodes = [{ id: 'note-with-"quotes', width: 288, height: 420 }, { id: 'other', width: 288, height: 154 }, { id: 'single', width: 288, height: 154 }]
-  const result = await arrangeNoteCanvas({ nodes, edges: [{ source: nodes[0]!.id, target: 'other' }, { source: 'other', target: nodes[0]!.id }, { source: 'other', target: 'other' }] })
+  const result = await arrangeForceGraph({ nodes, edges: [{ source: nodes[0]!.id, target: 'other' }, { source: 'other', target: nodes[0]!.id }, { source: 'other', target: 'other' }] })
   expect(Object.keys(result).sort()).toEqual(nodes.map(node => node.id).sort())
   for (const a of nodes) for (const b of nodes) if (a !== b) { const p = result[a.id]!, q = result[b.id]!; expect(p.x + a.width <= q.x || q.x + b.width <= p.x || p.y + a.height <= q.y || q.y + b.height <= p.y).toBe(true) }
 })
