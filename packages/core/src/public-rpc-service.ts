@@ -4283,7 +4283,7 @@ export class AgentMuxRpcService {
     if (observed.session.run.runId !== input.expectedRun.runId) throw new AgentMuxError('The original main Run changed during entry. Keep its history and read its current receipt.', 'AGENT_SESSION_RUN_CHANGED')
     // A healthy Run stays available even when optional maintenance is paused. Only a new Start is fenced.
     if (observed.run.state !== 'running') {
-      const prefs = this.ports.moteQuickPreferences && await this.ports.moteQuickPreferences.read({ kind:'quick', target:input.target })
+      const prefs = this.ports.moteQuickPreferences && await this.ports.moteQuickPreferences.read({ kind:'quick', target:input.target, includeChoices:false })
       // Only an explicit pause, disable, stop or cancellation fences this person's own open. An unconfirmed
       // maintenance reading is often the Host's own failed recovery attempt on this same Session; that
       // observation gap does not take away the explicit entry, which reports its own Core result.
@@ -4402,7 +4402,7 @@ export class AgentMuxRpcService {
     if(main.status!=='ready'||!main.identity||!main.current||!main.roleRevision)return rollover
     try {
         let preference:import('./mote/preferences.js').MoteQuickPreferencesReadResult|undefined
-        try { preference=this.ports.moteQuickPreferences&&await this.ports.moteQuickPreferences.read({kind:'quick',target:main.target}) }
+        try { preference=this.ports.moteQuickPreferences&&await this.ports.moteQuickPreferences.read({kind:'quick',target:main.target,includeChoices:false}) }
         catch { throw new AgentMuxError('The saved Main Executor choice could not be read. Keep this Query and inspect the original Mote settings; no input was sent.','MOTE_MAIN_EXECUTOR_UNCONFIRMED') }
         if(!preference?.defaults||!preference.source?.resource||!['read','deleted'].includes(preference.source.result.status))throw new AgentMuxError('The saved Main Executor choice is unconfirmed. Keep this Query and inspect the original Mote settings; no input was sent.','MOTE_MAIN_EXECUTOR_UNCONFIRMED')
         // Original MOTE facts survive unrelated choice/catalog observations.
