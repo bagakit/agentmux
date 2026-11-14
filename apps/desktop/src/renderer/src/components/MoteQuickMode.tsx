@@ -9,7 +9,10 @@ import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, type MotePresenceReading } from
 import { MOTE_QUICK_MODE_PATH, type MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { readMoteQuickDefaults, saveMoteQuickDefaults, type SavedMoteQuickMode } from '../lib/mote-quick-mode'
+import { readMoteQuickDefaults, saveMoteQuickDefaults, adoptMoteHeartbeatGuidance, type SavedMoteQuickMode } from '../lib/mote-quick-mode'
+import { checkpointLauncherState, useLauncherState } from '../lib/launcher-state'
+import { restoredMoteQuickDraft } from '../lib/mote-quick-draft'
+import type { MoteQuickPreferencesSaveParams } from '@agentmux/core/mote-preferences'
 import { moteConversationChoices, moteConversationLabel, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { executorsForHost } from '../lib/executors'
@@ -29,20 +32,18 @@ import { originalInputExplanation } from '../lib/original-input-presentation'
 import type { AgentInputSubmissionReceipt, AgentPromptSubmissionRecord } from '@agentmux/core'
 import { agentPromptSubmissionOutcome } from '@agentmux/core/mote-dialogue'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
+import { sameMoteHeartbeatReference } from '../lib/mote-heartbeat-report'
 
 const ThemeActionQuickModeIcon = semanticIconComponent('action.quick-mode')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 const ThemeActionPinIcon = semanticIconComponent('action.pin')
-const HeartbeatIcon = semanticIconComponent('action.configure-reconnect')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 
 
 type ResumeRequest = { ownerHostId: string; scheduleId: string; expectedRevision: number; operationId: string }
-// User drafts only: no current-role, delivery or schedule facts are authored here.
-const retainedQuickDrafts = new Map<string, { draft: MoteQuickDefaults; minutes: string; rolloverKind: 'keep-current' | 'idle'; rolloverMinutes: string; saved: SavedMoteQuickMode | null; resume: ResumeRequest | null }>()
 
 export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active: boolean
@@ -62,7 +63,7 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
     <div className="mote-details__section-actions"><span><ThemeActionQuickModeIcon size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Main Agent</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved main Agent' : 'Choose main Agent')}</strong>{defaults.conversation ? <ThemeActionPinIcon size={12} aria-label="Kept open" /> : null}</button>
-    <MoteHeartbeatStatus scope={scope} reading={heartbeat.saved?.maintenance} loading={heartbeat.loading} unavailable={heartbeat.unavailable} issue={heartbeat.issue} visible={active} onRefresh={heartbeat.refresh}
+    <MoteHeartbeatStatus scope={scope} reading={heartbeat.saved?.maintenance} reports={heartbeat.saved?.reports} onOpenPath={onOpenPath} loading={heartbeat.loading} unavailable={heartbeat.unavailable} issue={heartbeat.issue} visible={active} onRefresh={heartbeat.refresh}
       actions={<button type="button" className="small-button" onClick={edit}>Configure heartbeat</button>} />
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Conversation rollover</span><strong>{saved?.status !== 'saved' ? 'Unconfirmed' : defaults.conversationRollover?.kind === 'idle' ? `After ${defaults.conversationRollover.idleMs / 60000} min idle` : defaults.conversationRollover ? 'Keep current conversation' : 'Not configured'}</strong></button>
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
@@ -80,32 +81,54 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
 }) {
   const ownerDocument = useWorkbenchDocument()
   const space = useMoteSpace()
-  const draftKey = JSON.stringify(moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings) ?? [scope.workspace.hostId, scope.workspace.path, scope.topic.id])
-  const restored = useRef(originalHeartbeat ? undefined : retainedQuickDrafts.get(draftKey))
-  const [saved, setSaved] = useState<SavedMoteQuickMode | null>(restored.current?.saved ?? null), [draft, setDraft] = useState<MoteQuickDefaults>(() => restored.current?.draft ?? (scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.defaults : {}))
+  const liveHeartbeat = useMoteHeartbeatReading(scope, true)
+  const draftKey = 'mote-quick:' + JSON.stringify(moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings) ?? [scope.workspace.hostId, scope.workspace.path, scope.topic.id])
+  const retained = originalHeartbeat ? undefined : useLauncherState.getState().drafts[draftKey]?.moteQuick
+  const restored = useRef(restoredMoteQuickDraft(retained))
+  const draftRestoreIssue = useRef(Boolean(retained && !restored.current)).current
+  const [saved, setSaved] = useState<SavedMoteQuickMode | null>(null), [draft, setDraft] = useState<MoteQuickDefaults>(() => restored.current?.draft ?? (scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.defaults : {}))
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null), [attempt, setAttempt] = useState(0)
   const [minutes, setMinutes] = useState(restored.current?.minutes ?? String((draft.presence ?? DEFAULT_MOTE_PRESENCE).intervalMs / 60000))
   const [rolloverKind, setRolloverKind] = useState<'keep-current' | 'idle'>(restored.current?.rolloverKind ?? draft.conversationRollover?.kind ?? 'keep-current')
   const [rolloverMinutes, setRolloverMinutes] = useState(restored.current?.rolloverMinutes ?? (draft.conversationRollover?.kind === 'idle' ? String(draft.conversationRollover.idleMs / 60000) : ''))
   const presence = draft.presence ?? DEFAULT_MOTE_PRESENCE
   const [originalSchedule, setOriginalSchedule] = useState(originalHeartbeat?.schedule)
-  const maintenance: MotePresenceReading | undefined = originalSchedule ? { status: originalSchedule.status === 'active' ? 'active' : 'paused', schedule: originalSchedule, issue: null } : saved?.maintenance
+  const [originalSafeInput, setOriginalSafeInput] = useState<MotePresenceReading['input']>()
+  const liveMaintenance = liveHeartbeat.saved?.maintenance
+  const maintenance: MotePresenceReading | undefined = originalSchedule ? { status: originalSchedule.status === 'active' ? 'active' : 'paused', schedule: originalSchedule, issue: null, ...(originalSafeInput ? { input: originalSafeInput } : {}) }
+    : saved?.maintenance?.schedule?.loopId === liveMaintenance?.schedule?.loopId && !liveHeartbeat.unavailable ? liveMaintenance : saved?.maintenance
   const resumeRequest = useRef<ResumeRequest | null>(restored.current?.resume ?? null)
   const [resuming, setResuming] = useState(false)
   const [inputReading, setInputReading] = useState<{ identity: string; hostId: string; input: AgentInputSubmissionReceipt | null; record: AgentPromptSubmissionRecord | null }>()
   const inputIdentity = (schedule: NonNullable<MotePresenceReading['schedule']>) => JSON.stringify([schedule.loopId, schedule.hostId, schedule.agentSessionId,
     schedule.providerId, schedule.workspacePath, schedule.revision, schedule.managedSource?.sourceId, schedule.managedSource?.revision, schedule.pause?.episodeId, schedule.lastTickId,
-    schedule.pendingCompletion?.operationId ?? null, schedule.pendingCompletion?.condition?.expectedRun.runId ?? null])
+    schedule.pendingCompletion?.operationId ?? null, schedule.pendingCompletion?.condition?.expectedRun.runId ?? null, schedule.lastInputRef ?? null])
   const originalInput = maintenance?.schedule && inputReading?.identity === inputIdentity(maintenance.schedule) ? inputReading : undefined
   const checkedMissingKey = !originalHeartbeat && originalInput !== undefined && maintenance?.schedule?.status === 'paused' &&
-    maintenance.schedule.lastOutcome === 'unknown' && !maintenance.schedule.pendingCompletion && moteHeartbeatReadingMatchesSource(saved)
+    maintenance.schedule.lastOutcome === 'unknown' && !maintenance.schedule.pendingCompletion && !maintenance.schedule.lastInputRef && moteHeartbeatReadingMatchesSource(saved)
   const form = useRef(draft); form.current = draft
   const edited = useRef(Boolean(restored.current)), lifetime = useRef<object>({}), content = useRef<HTMLDivElement>(null), id = useId()
   const latestDraft = useRef({ draft, minutes, rolloverKind, rolloverMinutes, saved, accepted: false })
   latestDraft.current = { ...latestDraft.current, draft, minutes, rolloverKind, rolloverMinutes, saved }
-  useLayoutEffect(() => () => { const current = latestDraft.current
-    if (!originalHeartbeat && !current.accepted && (edited.current || current.saved?.pending || resumeRequest.current)) retainedQuickDrafts.set(draftKey, { draft: current.draft, minutes: current.minutes, rolloverKind: current.rolloverKind, rolloverMinutes: current.rolloverMinutes, saved: current.saved, resume: resumeRequest.current })
-  }, [draftKey])
+  function retainDraft(input = saved?.pending, phase: 'not-dispatched' | 'may-have-dispatched' = 'may-have-dispatched') {
+    if (originalHeartbeat || draftRestoreIssue) return
+    const current = latestDraft.current
+    if (!useLauncherState.getState().setMoteQuickDraft(draftKey, { draft: current.draft, minutes: current.minutes,
+      rolloverKind: current.rolloverKind, rolloverMinutes: current.rolloverMinutes, ...(input ? { pending: { input, phase } } : {}),
+      ...(resumeRequest.current ? { resume: resumeRequest.current } : {}) })) throw Error('Your original settings input could not be retained. No new request was sent.')
+  }
+  async function retainRequest(input: MoteQuickPreferencesSaveParams, epoch: object) {
+    if (lifetime.current !== epoch) throw Error('The original view changed. Its retained request and later draft are kept.')
+    retainDraft(input, 'not-dispatched'); await checkpointLauncherState()
+    if (lifetime.current !== epoch) throw Error('The original view changed. Its retained request and later draft are kept.')
+    retainDraft(input, 'may-have-dispatched'); await checkpointLauncherState()
+    if (lifetime.current !== epoch) throw Error('The original view changed. Its retained request and later draft are kept.')
+  }
+  useLayoutEffect(() => {
+    if (!originalHeartbeat && !latestDraft.current.accepted && (edited.current || saved?.pending || resumeRequest.current)) {
+      try { retainDraft() } catch (error) { setIssue(presentError(error)) }
+    }
+  }, [draftKey, draft, minutes, rolloverKind, rolloverMinutes, saved, busy])
   const facts = useAppStore(useShallow(state => ({ tabs: state.tabs, layouts: state.layouts, config: state.config, snapshots: state.scratchTopicSnapshots,
     bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const ownAgentIds = useMemo(() => [...new Set(Object.values(facts.tabs).filter(tab => tab.workspaceId === scope.workspace.id)
@@ -129,14 +152,14 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
         if (lifetime.current !== epoch) return
         if (!result.schedule || result.schedule.loopId !== originalHeartbeat.schedule.loopId) throw Error('The original reminder’s arrangement is unconfirmed. Its identity and retained input are kept.')
         if (originalInspectionChanged(result.schedule)) setIssue('The owner now reports a different pause or input. This reminder keeps its original input for inspection; your current heartbeat is separate.')
-        else setOriginalSchedule(result.schedule)
+        else { setOriginalSchedule(result.schedule); if (sameMoteHeartbeatReference(result.input?.reference, originalHeartbeat.schedule.lastInputRef)) setOriginalSafeInput(result.input) }
       }).catch(cause => { if (lifetime.current === epoch) setIssue(presentError(cause)) })
         .finally(() => { unsubscribe(); if (lifetime.current === epoch) setLoading(false) })
       return () => { lifetime.current = {}; unsubscribe() }
     }
     void readMoteQuickDefaults(scope).then(source => {
       if (lifetime.current !== epoch) return
-      setSaved(previous => previous?.pending ? { ...source, pending: previous.pending } : source)
+      setSaved(previous => { const pending = previous?.pending ?? restored.current?.pending?.input; return pending ? { ...source, pending } : source })
       if (moved) throw new Error('Your selection changed during the read. Your choices are kept; reread the settings.')
       if (source.issue) setIssue(source.issue)
       else if (!edited.current) {
@@ -163,7 +186,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       throw Error('The original heartbeat target is unconfirmed. Its reminder and original input are kept.')
     return record.pause?.episodeId !== original.pause?.episodeId || record.pendingCompletion?.operationId !== original.pendingCompletion?.operationId ||
       record.pendingCompletion?.condition?.expectedRun.runId !== original.pendingCompletion?.condition?.expectedRun.runId ||
-      record.managedSource?.sourceId !== original.managedSource?.sourceId || record.managedSource?.revision !== original.managedSource?.revision
+      record.managedSource?.sourceId !== original.managedSource?.sourceId || record.managedSource?.revision !== original.managedSource?.revision || !sameMoteHeartbeatReference(record.lastInputRef, original.lastInputRef)
   }
   async function confirmCurrentHeartbeat(schedule: ContinuousProgressLoop, ownerHostId: string) {
     const current = await readMoteQuickDefaults(scope), record = current.maintenance?.schedule
@@ -187,11 +210,14 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       if (lifetime.current !== epoch) return
       const { ownerHostId, ...input } = original
       resumeRequest.current = original
+      retainDraft(); await checkpointLauncherState()
+      if (lifetime.current !== epoch) return
       dispatched = true
       const result = existing ? await api.schedule.inspect({ operationId: input.operationId }, ownerHostId) : await api.schedule.resume(input, ownerHostId)
       if (lifetime.current !== epoch) return
       if (!result.schedule || result.schedule.loopId !== original.scheduleId) throw new Error('The original resume is unconfirmed. Its request is kept; inspect it again.')
       resumeRequest.current = null
+      retainDraft()
       setSaved(previous => previous ? { ...previous, maintenance: { status: result.schedule!.status === 'active' ? 'active' : 'paused', schedule: result.schedule, issue: null } } : previous)
     } catch (cause) {
       if (!dispatched && lifetime.current === epoch) setInputReading(undefined)
@@ -214,19 +240,19 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       const pending = originalHeartbeat ? originalHeartbeat.schedule.pendingCompletion : result.schedule.pendingCompletion
       const control = pending?.condition ? { kind: 'agent' as const, hostId: schedule.hostId, agentSessionId: schedule.agentSessionId, run: pending.condition.expectedRun } : null
       const key = pending?.condition ? { kind: 'prompt' as const, agentSessionId: schedule.agentSessionId, expectedRun: pending.condition.expectedRun, submissionId: pending.operationId } : null
-      const [input, record] = control && key ? await Promise.all([api.sessions.inspectInput(control, key), api.sessions.inspectSubmission(control, key)]) : [null, null]
+      const [input, record] = control && key && !schedule.lastInputRef ? await Promise.all([api.sessions.inspectInput(control, key), api.sessions.inspectSubmission(control, key)]) : [null, null]
       if (lifetime.current !== epoch) return
       setInputReading({ identity: inputIdentity(originalHeartbeat?.schedule ?? result.schedule), hostId: schedule.hostId, input, record })
       if (originalHeartbeat && changed) setIssue('The owner now reports a different pause or input. This reminder keeps its original input for inspection; your current heartbeat is separate.')
-      else if (originalHeartbeat) setOriginalSchedule(result.schedule)
-      else setSaved(previous => previous ? { ...previous, maintenance: { status: result.schedule!.status === 'active' ? 'active' : 'paused', schedule: result.schedule!, issue: previous.maintenance?.issue ?? null } } : previous)
+      else if (originalHeartbeat) { setOriginalSchedule(result.schedule); if (sameMoteHeartbeatReference(result.input?.reference, originalHeartbeat.schedule.lastInputRef)) setOriginalSafeInput(result.input) }
+      else setSaved(previous => previous ? { ...previous, maintenance: { status: result.schedule!.status === 'active' ? 'active' : 'paused', schedule: result.schedule!, ...(result.input ? { input: result.input } : {}), issue: previous.maintenance?.issue ?? null } } : previous)
     } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
     finally { if (lifetime.current === epoch) setResuming(false) }
   }
   const continueToConversation = onContinue ?? (space?.topicId === scope.topic.id ? () => space.select('discussion') : undefined)
   const firstConversation = !draft.conversation && Boolean(draft.executorId) && Boolean(continueToConversation)
   async function save() {
-    if (busy || !saved) return
+    if (busy || !saved || draftRestoreIssue) return
     if (moteMinutesToMs(minutes, { wholeMinutes: true }) === null) {
       setIssue('Enter a whole number of minutes, at least 1. Your choices and original settings are kept.'); return
     }
@@ -236,31 +262,46 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     const submitted = form.current, epoch = lifetime.current
     const current = () => lifetime.current === epoch && form.current === submitted
     setBusy(true); setIssue(null)
-    try { await saveMoteQuickDefaults(scope, submitted, saved, onOpenPath, current, reference); if (current()) { latestDraft.current.accepted = true; retainedQuickDrafts.delete(draftKey); onClose(); if (firstConversation) continueToConversation?.() } }
-    catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
+    try { await saveMoteQuickDefaults(scope, submitted, saved, onOpenPath, current, reference, undefined, input => retainRequest(input, epoch)); if (current()) { latestDraft.current.accepted = true; useLauncherState.getState().setMoteQuickDraft(draftKey, undefined); await checkpointLauncherState(); if (current()) { onClose(); if (firstConversation) continueToConversation?.() } } }
+    catch (cause) { if (!saved.pending) restored.current = undefined; if (lifetime.current === epoch) setIssue(presentError(cause)) }
     finally { if (lifetime.current === epoch) setBusy(false) }
   }
+  async function adopt() {
+    if (!saved || busy || originalHeartbeat || draftRestoreIssue) return
+    const epoch = lifetime.current
+    setBusy(true); setIssue(null)
+    try {
+      await adoptMoteHeartbeatGuidance(scope, saved, () => lifetime.current === epoch, input => retainRequest(input, epoch))
+      if (lifetime.current !== epoch) return
+      restored.current = undefined
+      retainDraft(); await checkpointLauncherState()
+      if (lifetime.current === epoch) setAttempt(value => value + 1)
+    } catch (error) { if (lifetime.current === epoch) { if (!saved.pending) restored.current = undefined; retainDraft(); setIssue(presentError(error)) } }
+    finally { if (lifetime.current === epoch) setBusy(false) }
+  }
+  const guidance = saved?.maintenance?.guidance
   const heartbeat = (
-        <fieldset tabIndex={-1} className="mote-quick-mode__presence mote-quick-mode__heartbeat"><legend><HeartbeatIcon size={14} />Heartbeat</legend>
-          <MoteHeartbeatStatus scope={scope} reading={maintenance} unavailable={originalHeartbeat ? loading || Boolean(issue) : !moteHeartbeatReadingMatchesSource(saved)} loading={loading} onRefresh={() => setAttempt(value => value + 1)} controlsAfterStatus={focusHeartbeat}
-            actions={!originalHeartbeat && resumeRequest.current ? <button type="button" className="small-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : 'Inspect original resume'}</button>
+        <fieldset tabIndex={-1} className="mote-quick-mode__presence mote-quick-mode__heartbeat"><legend hidden>Heartbeat</legend>
+          <MoteHeartbeatStatus scope={scope} reading={maintenance} reports={liveHeartbeat.saved?.reports} onOpenPath={onOpenPath} unavailable={originalHeartbeat ? loading || Boolean(issue) : !moteHeartbeatReadingMatchesSource(saved)} loading={loading} onRefresh={() => { liveHeartbeat.refresh(); setAttempt(value => value + 1) }} controlsAfterStatus={focusHeartbeat}
+            actions={<>{!originalHeartbeat && saved?.pending?.action ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => void adopt()}>Check original adoption</button> : null}{!originalHeartbeat && resumeRequest.current ? <button type="button" className="small-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : 'Inspect original resume'}</button>
               : maintenance?.schedule?.lastOutcome === 'unknown' ? <>{!checkedMissingKey ? <button type="button" className="primary-button" disabled={resuming} onClick={() => void inspectHeartbeat()}>{resuming ? 'Checking…' : 'Check original delivery'}</button> : null}
-                {checkedMissingKey ? <div className="mote-heartbeat__issue" role="status"><p>This record has no retained input key. Its earlier delivery remains unknown. Resuming can send a due check immediately.</p>
+                {checkedMissingKey ? <div className="mote-heartbeat__issue" role="status"><p>Its earlier delivery remains unknown. Resuming can send a due check immediately.</p>
                   {presence.enabled ? <button type="button" className="primary-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>Resume future checks</button> : null}</div> : null}</>
               : originalHeartbeat ? <button type="button" className="small-button" disabled={resuming} onClick={() => void inspectHeartbeat()}>Inspect original arrangement</button>
               : resumeRequest.current || maintenance?.schedule?.status === 'paused' && presence.enabled ? <button type="button" className="small-button" disabled={resuming}
-                onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button> : null}
+                onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button> : null}</>}
             detailsActions={<>{originalInput && !originalInput.input && !originalInput.record ? <p>The original input was not observed in this read. That does not prove it was never sent.</p> : originalInput?.input ? <><p>{originalInputExplanation(originalInput.input.status, originalInput.input.control.waiting).title}</p>{!originalHeartbeat ? <OriginalInputWaitingControl hostId={originalInput.hostId} receipt={originalInput.input} onRefresh={inspectHeartbeat} /> : null}</> : originalInput?.record ? <p>{originalInputExplanation(agentPromptSubmissionOutcome(originalInput.record)).title}</p> : null}
-              {originalInput?.record ? <><p>{originalInput.record.semanticIdle ? 'The original native turn ended. Its result remains in the conversation.' : 'Native processing is not confirmed by this receipt.'}</p><pre>{JSON.stringify(originalInput.record, null, 2)}</pre></> : null}
+              {originalInput?.record ? <p>{originalInput.record.semanticIdle ? 'The original input returned idle. This does not confirm completed work.' : 'Native processing is not confirmed by this receipt.'}</p> : null}
+              {!originalHeartbeat && !saved?.pending?.action && guidance?.adoptedRevision !== guidance?.availableRevision && guidance ? <div className="mote-heartbeat__guidance"><p>Updated care guidance is available for future checks. Your interval, paused choice and retained input stay as they are.</p><button type="button" className="small-button" disabled={busy || loading} onClick={() => void adopt()}>Use updated guidance</button></div> : null}
               {!originalHeartbeat && !checkedMissingKey && maintenance?.schedule?.lastOutcome === 'unknown' && presence.enabled ? <><p>Resuming can send a due check immediately. It preserves any retained original input and does not confirm whether an earlier unknown delivery was sent.</p><button type="button" className="small-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button></> : null}</>}
-            controls={originalHeartbeat ? undefined : <><label><input type="checkbox" aria-label="Enable automatic Mote maintenance" checked={presence.enabled}
-            onChange={event => update({ ...form.current, presence: { ...presence, enabled: event.target.checked } })} />Keep an eye on my work</label>
-          <div className="mote-quick-mode__interval"><label htmlFor={id + '-interval'}>Check every<small>Minutes · default 30</small></label>
+            controls={originalHeartbeat ? undefined : <><div className="mote-quick-mode__care-settings"><label><input type="checkbox" aria-label="Enable automatic Mote maintenance" checked={presence.enabled}
+            onChange={event => update({ ...form.current, presence: { ...presence, enabled: event.target.checked } })} />Automatic care</label>
+          <label className="mote-quick-mode__interval" htmlFor={id + '-interval'}>Every
           <input id={id + '-interval'} aria-label="Heartbeat interval (minutes)" type="number" inputMode="numeric" min="1" step="1" value={minutes}
             onChange={event => { const value = event.target.value; setMinutes(value); edited.current = true
               const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
               if (intervalMs !== null) update({ ...form.current, presence: { ...presence, intervalMs } })
-            }} /></div><p className="mote-details__hint">Applies after Save. Changing the interval keeps a paused schedule paused.</p></>} />
+            }} /> min</label></div><p className="mote-details__hint">Default 30 min · applies after Save. A paused heartbeat stays paused.</p></>} />
         </fieldset>
   )
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
@@ -300,9 +341,10 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
         </details>
         </> : null}
         {loading ? <p role="status" className="mote-details__hint">{originalHeartbeat ? 'Reading the original arrangement…' : 'Reading MOTE.md…'}</p> : null}
+        {draftRestoreIssue ? <p role="status" className="mote-details__issue">The saved original request could not be decoded. Its stored input and your Agent are kept; no replacement request will be sent.</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<button className="small-button" type="button" onClick={() => setAttempt(value => value + 1)}>Reread</button></div> : null}
       </div>
-      <footer className="mote-quick-mode-dialog__footer">{originalHeartbeat ? <><span>Reviewing this original heartbeat keeps your current chat.</span><button type="button" className="small-button" onClick={onClose}>Close</button></> : <><button className="icon-button" type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><ThemeFileTextIcon size={15} /></button><span>Saving sends no message.</span><button type="button" className="small-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={loading || busy || !saved || Boolean(saved.issue)} onClick={() => void save()}>{busy ? 'Saving…' : firstConversation ? 'Save and continue' : 'Save'}</button></>}</footer>
+      <footer className="mote-quick-mode-dialog__footer">{originalHeartbeat ? <><span>Reviewing this original heartbeat keeps your current chat.</span><button type="button" className="small-button" onClick={onClose}>Close</button></> : <><button className="icon-button" type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><ThemeFileTextIcon size={15} /></button><span>Saving sends no message.</span><button type="button" className="small-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={loading || busy || !saved || Boolean(saved.issue) || Boolean(saved?.pending?.action) || draftRestoreIssue} onClick={() => void save()}>{busy ? 'Saving…' : saved?.pending ? 'Check original save' : firstConversation ? 'Save and continue' : 'Save'}</button></>}</footer>
     </Dialog.Content>
   </DocumentOverlayPortal></Dialog.Root>
 }

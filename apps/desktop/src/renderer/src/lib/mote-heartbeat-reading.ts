@@ -9,6 +9,7 @@ import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from
 import { moteHeartbeatReadingMatchesSource } from './mote-heartbeat-presentation'
 import { validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
 import { api } from './api'
+import { parseMoteDialogueResult } from '@agentmux/core/mote-dialogue'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 
 type Reading = { saved: SavedMoteQuickMode | null; loading: boolean; unavailable: boolean; issue: string | null }
@@ -48,8 +49,20 @@ export function useMoteHeartbeatNoticeReadings() {
 function createReader(key: string, target: MotePreferencesTarget, initialScope: MoteWorkfaceScope) {
   let scope = initialScope, state = empty, generation = 0, disposed = false, pending: Promise<void> | null = null, requested = false
   let needsSource = true, nextSourceRead = 0, retryDelay = 5000
+  let reportPending = false
   const listeners = new Set<() => void>()
   const publish = (next: Reading) => { state = next; for (const listener of listeners) listener(); publishNotices() }
+  function readReports() {
+    if (disposed || reportPending || document.hidden || !state.saved?.maintenance?.schedule?.lastInputRef) return
+    reportPending = true
+    const cut = generation, query = { target, kind: 'heartbeat' as const, limit: 20 }
+    void api.moteDialogue.read(query).then(value => {
+      const page = parseMoteDialogueResult('space.mote.dialogue.read', value, query)
+      if (!disposed && cut === generation && state.saved) publish({ ...state, saved: { ...state.saved, reports: { page, issue: page.sourceIssue } } })
+    }).catch(error => {
+      if (!disposed && cut === generation && state.saved) publish({ ...state, saved: { ...state.saved, reports: { page: state.saved.reports?.page ?? null, issue: presentError(error) } } })
+    }).finally(() => { reportPending = false })
+  }
   function read() {
     if (disposed || document.hidden) return
     if (pending) { requested = true; return }
@@ -59,18 +72,21 @@ function createReader(key: string, target: MotePreferencesTarget, initialScope: 
     let sourceChanged = false
     publish({ ...state, loading: true })
     pending = Promise.resolve().then(async () => {
-      if (full) return readMoteQuickTarget(target)
-      const input = { scheduleId: schedule!.loopId }
+      const selected = full ? await readMoteQuickTarget(target) : original!
+      const selectedSchedule = selected.maintenance?.schedule
+      if (!selectedSchedule) return selected
+      const input = { scheduleId: selectedSchedule.loopId }
       const result = validateScheduleRpcResult('schedule.inspect', await api.schedule.inspect(input, target.expectedResource.hostId), input)
       const record = result.schedule
-      if (!record || (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).some(field => record[field] !== schedule![field]))
+      if (!record || (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).some(field => record[field] !== selectedSchedule[field]))
         throw Error('The original heartbeat arrangement is not confirmed. Its last reading and input are kept.')
-      sourceChanged = record.status === 'stopped' && schedule!.status !== 'stopped' ||
-        record.pause?.reason === 'source-changed' && schedule!.pause?.reason !== 'source-changed' ||
-        record.managedSource?.revision !== schedule!.managedSource?.revision || record.managedSource?.sourceId !== schedule!.managedSource?.sourceId
-      return { ...original!, maintenance: { ...original!.maintenance!, schedule: record,
-        status: original!.maintenance!.status === 'active' || original!.maintenance!.status === 'paused'
-          ? record.status === 'active' ? 'active' as const : 'paused' as const : original!.maintenance!.status } }
+      sourceChanged = record.status === 'stopped' && selectedSchedule.status !== 'stopped' ||
+        record.pause?.reason === 'source-changed' && selectedSchedule.pause?.reason !== 'source-changed' ||
+        record.managedSource?.revision !== selectedSchedule.managedSource?.revision || record.managedSource?.sourceId !== selectedSchedule.managedSource?.sourceId
+      const { input: _previous, ...maintenance } = selected.maintenance!
+      return { ...selected, ...(state.saved?.reports ? { reports: state.saved.reports } : {}), maintenance: { ...maintenance, schedule: record, ...(result.input ? { input: result.input } : {}),
+        status: maintenance.status === 'active' || maintenance.status === 'paused'
+          ? record.status === 'active' ? 'active' as const : 'paused' as const : maintenance.status } }
     }).then(saved => {
       if (!disposed && cut === generation && !document.hidden) {
         const unavailable = Boolean(sourceChanged || saved.issue || !saved.maintenance || saved.maintenance.status === 'unconfirmed' || !moteHeartbeatReadingMatchesSource(saved))
@@ -78,6 +94,7 @@ function createReader(key: string, target: MotePreferencesTarget, initialScope: 
         if (sourceChanged) { needsSource = true; requested = true }
         publish({ saved: unavailable && state.saved ? state.saved : saved, loading: false,
           unavailable, issue: sourceChanged ? 'The original arrangement changed. Reading this Mote’s current heartbeat.' : saved.issue ?? saved.maintenance?.issue ?? null })
+        readReports()
       }
     }).catch(error => {
       if (!disposed && cut === generation && !document.hidden) {

@@ -23,7 +23,10 @@
 .mote-quick-mode__heartbeat { padding: 0; border: 0; margin-top: 10px; }
 .mote-quick-mode__heartbeat > legend { display: flex; gap: 6px; align-items: center; padding: 0; margin-bottom: 10px; }
 .mote-quick-mode__heartbeat > label { margin-top: 0 !important; }
-.mote-quick-mode__interval { display: grid; grid-template-columns: minmax(0, 1fr) 86px; gap: 12px; align-items: center; }
+.mote-quick-mode__care-settings { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
+.mote-quick-mode__care-settings > label { margin: 0 !important; font-size: 12px; }
+.mote-quick-mode__interval { display: inline-flex; gap: 6px; align-items: center; }
+.mote-quick-mode__interval input[type=number] { width: 64px; padding: 6px; }
 .mote-quick-mode__interval label { margin: 0 !important; }
 .mote-heartbeat { min-width: 0; display: grid; gap: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--accent, var(--focus-line)) 22%, var(--line-soft)); border-radius: 10px; background: color-mix(in srgb, var(--accent, var(--focus-line)) 4%, var(--surface-0)); }
 .mote-quick-mode > .mote-heartbeat { margin-block: 10px; }
@@ -32,7 +35,7 @@
 .mote-heartbeat__portrait .space-object-icon, .mote-heartbeat__portrait .project-rail-row__icon { width: 26px; height: 26px; }
 .mote-heartbeat__identity > div { min-width: 0; }
 .mote-heartbeat__eyebrow { color: var(--text-2); font-size: 10px; letter-spacing: .03em; }
-.mote-heartbeat h3 { margin: 3px 0 0; color: var(--text); font-size: 13px; font-weight: 550; line-height: 1.45; overflow-wrap: anywhere; }
+.mote-heartbeat h3 { margin: 0 0 2px; color: var(--text); font-size: 13px; font-weight: 550; line-height: 1.45; overflow-wrap: anywhere; }
 .mote-heartbeat p { margin: 0; font-size: 12px; line-height: 1.6; }
 .mote-heartbeat__purpose { color: var(--text-2); }
 .mote-heartbeat__controls { display: grid; gap: 12px; padding-block: 2px; }
@@ -51,6 +54,16 @@
 .mote-heartbeat__details[open] > :not(summary) { margin-top: 8px; }
 .mote-heartbeat__details pre { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; }
 .mote-heartbeat__details code { overflow-wrap: anywhere; }
+.mote-heartbeat__subline { display: block; color: var(--text-2); margin-top: 2px; }
+.mote-heartbeat__report { border-top: 1px solid var(--line-soft); padding-top: 10px; color: var(--text-2); font-size: 12px; min-width: 0; }
+.mote-heartbeat__report > summary { cursor: pointer; color: var(--text); }
+.mote-heartbeat__report[open] > :not(summary) { margin-top: 8px; }
+.mote-heartbeat__attribution { font-size: 10px !important; }
+.mote-heartbeat__idea { display: grid; gap: 5px; padding-block: 7px; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere; }
+.mote-heartbeat__idea button { justify-self: start; }
+.mote-heartbeat__guidance { display: grid; gap: 8px; }
+.mote-heartbeat__report-summary { color: var(--text); }
+.mote-heartbeat__report-summary > span { display: block; color: var(--text-2); font-size: 10px; margin-bottom: 3px; }
 @media (prefers-reduced-motion: no-preference) {
   .dialog-surface.mote-quick-mode-dialog[data-state='open'] { animation-name: mote-quick-mode-enter; }
 }

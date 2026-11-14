@@ -9,8 +9,10 @@ import { useAppStore } from '../store'
 import { documentKey } from './workbench-tabs'
 import { moteConnectionTarget } from './mote-connection-default'
 import { api } from './api'
+import { moteMainRoleRevision } from '@agentmux/core/mote-dialogue'
+import type { MoteHeartbeatReports } from './mote-heartbeat-report'
 
-export type SavedMoteQuickMode = { document: FileDocument | null; defaults: MoteQuickDefaults; choices?: MoteQuickChoices; issue?: string; source?: FileReadResult; pending?: MoteQuickPreferencesSaveParams; maintenance?: MotePresenceReading }
+export type SavedMoteQuickMode = { document: FileDocument | null; defaults: MoteQuickDefaults; choices?: MoteQuickChoices; issue?: string; source?: FileReadResult; pending?: MoteQuickPreferencesSaveParams; maintenance?: MotePresenceReading; reports?: MoteHeartbeatReports }
 export async function readMoteQuickDefaults(scope: MoteWorkfaceScope): Promise<SavedMoteQuickMode> {
   const target = moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings)
   if (!target) return { document: null, defaults: {}, issue: 'The original Mote resource is unconfirmed. Its settings and conversations remain available.' }
@@ -28,7 +30,8 @@ export class MoteQuickSaveError extends Error {
 }
 /** Client draft/navigation checks precede one original Host CAS writer. No YAML is written here. */
 export async function saveMoteQuickDefaults(scope: MoteWorkfaceScope, defaults: MoteQuickDefaults, saved: SavedMoteQuickMode,
-  _open: (path: string) => Promise<unknown>, stillCurrent: () => boolean, reference?: WorkbenchProjectionSelection | null, destination?: FileDestination): Promise<MoteQuickWrite> {
+  _open: (path: string) => Promise<unknown>, stillCurrent: () => boolean, reference?: WorkbenchProjectionSelection | null, destination?: FileDestination,
+  retain?: (input: MoteQuickPreferencesSaveParams) => Promise<void>): Promise<MoteQuickWrite> {
   let dispatched = false, confirmed: MoteQuickWrite | null = null
   try {
     const state = useAppStore.getState(), target = moteConnectionTarget(scope, state.spaceZoneBindings)
@@ -47,6 +50,8 @@ export async function saveMoteQuickDefaults(scope: MoteWorkfaceScope, defaults: 
     if (pending && JSON.stringify(pending.values) !== JSON.stringify(defaults)) throw new Error('The previous save has an unknown result. Retain that original request and inspect it before saving different settings.')
     const input: MoteQuickPreferencesSaveParams = pending ?? { kind: 'quick', target, baseline, values: structuredClone(defaults), ...(chosen ? { destination: chosen } : {}), operationId: crypto.randomUUID() }
     saved.pending = input
+    await retain?.(input)
+    if (!stillCurrent()) throw new Error('Your later selection is kept. The original request is retained and was not sent.')
     dispatched = true
     const result = parseMotePreferencesSaveResult(await api.motePreferences.save(input), input)
     if ((result.status !== 'saved' && result.status !== 'unchanged') || !result.source) {
@@ -60,4 +65,30 @@ export async function saveMoteQuickDefaults(scope: MoteWorkfaceScope, defaults: 
     if (result.message) throw new Error(result.message)
     return confirmed
   } catch (cause) { throw new MoteQuickSaveError(cause, dispatched, confirmed) }
+}
+
+/** A person explicitly adopts one fresh published guide for unclaimed future inputs. */
+export async function adoptMoteHeartbeatGuidance(scope: MoteWorkfaceScope, saved: SavedMoteQuickMode, stillCurrent: () => boolean,
+  retain: (input: MoteQuickPreferencesSaveParams) => Promise<void>) {
+  let input = saved.pending
+  if (input && input.action?.kind !== 'adopt-current-guidance') throw new Error('Inspect the retained original settings save before adopting guidance.')
+  if (!input) {
+    const current = await readMoteQuickDefaults(scope), schedule = current.maintenance?.schedule, guidance = current.maintenance?.guidance
+    const main = current.defaults.conversation, resource = current.source?.resource
+    if (current.issue || !schedule?.revision || !guidance?.currentDefinition || !main || !resource ||
+      schedule.hostId !== main.hostId || schedule.agentSessionId !== main.sessionId ||
+      schedule.managedSource?.revision !== moteMainRoleRevision(current.defaults, current.document?.revision ?? null)) throw new Error('Read this Mote’s current Main and original guidance before adopting. Your settings are kept.')
+    input = { kind: 'quick', target: moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings)!, baseline: { resource, document: current.document, defaults: current.defaults },
+      values: structuredClone(current.defaults), operationId: crypto.randomUUID(), action: { kind: 'adopt-current-guidance',
+        expectedSchedule: { loopId: schedule.loopId, revision: schedule.revision }, expectedMain: { roleRevision: moteMainRoleRevision(current.defaults, current.document?.revision ?? null), reference: main },
+        expectedDefinition: { intentId: guidance.currentDefinition.intentId, operationId: guidance.currentDefinition.operationId }, guidanceRevision: guidance.availableRevision } }
+    saved.pending = input
+  }
+  await retain(input)
+  if (!stillCurrent()) throw new Error('Your later selection is kept. The original adoption request remains retained.')
+  const result = parseMotePreferencesSaveResult(await api.motePreferences.save(input), input)
+  if (result.status === 'refused-before-write') delete saved.pending
+  if (result.status !== 'unchanged' || !result.maintenanceAdoption || result.maintenanceAdoption.state !== 'adopted') throw new Error(result.message ?? 'The original guidance adoption remains unconfirmed. Check this same request again.')
+  delete saved.pending
+  return result
 }

@@ -8,6 +8,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { desktopUserFragments } from './desktop-user-state'
 import type { SplitDirection } from '@agentmux/layout'
 import { launcherSourceExecution } from './launcher-source'
+import { restoredMoteQuickDraft, type MoteQuickDraft } from './mote-quick-draft'
 
 export type LauncherSection = 'agents' | 'terminal' | 'browser' | 'note'
 export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
@@ -19,6 +20,7 @@ export type MoteProfileDraft = { source: import('@agentmux/core').FileDocument; 
 export type QueuedDraftMove = { operationId: string; sessionId: string; runId: string; text: string; body: string }
 export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt; moteIdea?: MoteIdeaDraft; schedule?: ScheduleDraft;
   moteProfile?: MoteProfileDraft | undefined;
+  moteQuick?: MoteQuickDraft | undefined;
   progressUpdate?: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined;
   progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
   unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
@@ -50,6 +52,7 @@ type LauncherState = {
   settleHeldPrompt(launcherId: string, operationId: string, delivered: boolean): boolean
   setMoteIdeaDraft(launcherId: string, value: MoteIdeaDraft): boolean
   setMoteProfileDraft(launcherId: string, value: MoteProfileDraft | undefined): boolean
+  setMoteQuickDraft(launcherId: string, value: MoteQuickDraft | undefined): boolean
   setScheduleDraft(launcherId: string, patch: Partial<ScheduleDraft>): boolean
   setProgressUpdate(launcherId: string, request: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined): boolean
   setProgressDraft(launcherId: string, patch: Partial<NonNullable<LauncherDraft['progressDraft']>> | undefined): boolean
@@ -88,6 +91,12 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
   setMoteProfileDraft(launcherId, value) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), moteProfile: value } } })); return true }
     catch { reportStorageIssue('Your profile draft could not be saved on this device. Current input remains available.'); return false }
+  },
+  setMoteQuickDraft(launcherId, value) {
+    const parsed = value === undefined ? undefined : restoredMoteQuickDraft(value)
+    if (value && !parsed) return false
+    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), moteQuick: parsed } } })); return true }
+    catch { reportStorageIssue('Your original Mote settings request could not be saved on this device. Current input remains available.'); return false }
   },
   setProgressUpdate(launcherId, request) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), progressUpdate: request } } })); return true }
