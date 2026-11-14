@@ -25,14 +25,12 @@ export type HostTopologyItem = {
   network?: string | null | undefined
   localAddress?: LocalHostAddress | undefined
 }
-type HostNodeData = HostTopologyItem & { selected: boolean; compact: boolean; tooltipSuppressed: boolean; onSelect: (id: string) => void }
+type HostNodeData = HostTopologyItem & { selected: boolean; tooltipSuppressed: boolean; onSelect: (id: string) => void }
 type HostNode = Node<HostNodeData, 'host'>
 type EntryNode = Node<{ label: string }, 'entry'>
 type TopologyNode = HostNode | EntryNode
 const HOST_SIZE = { width: 192, height: 106 }
 const ENTRY_SIZE = { width: 128, height: 80 }
-const COMPACT_HOST_SIZE = { width: 158, height: 64 }
-const COMPACT_ENTRY_SIZE = { width: 112, height: 52 }
 const ports = [Position.Left, Position.Right, Position.Top, Position.Bottom]
 
 function Ports({ type }: { type: 'source' | 'target' }) {
@@ -48,13 +46,13 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
   return <>
     <Ports type="target" />
     <button type="button" className="remote-host-node nopan" data-host-node={host.id} data-current-host={data.selected} {...tooltip.props}
-      data-compact={data.compact || undefined} data-check-state={check?.state ?? 'idle'} aria-pressed={data.selected} onClick={() => { tooltip.hide(); data.onSelect(host.id) }}
+      data-check-state={check?.state ?? 'idle'} aria-pressed={data.selected} onClick={() => { tooltip.hide(); data.onSelect(host.id) }}
       >
-      <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={14} />{host.kind === 'local' ? 'Local' : hostTransportLabel(host)}{!data.compact ? <span className={`remote-check-dot remote-check-dot--${check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} /> : null}</span>
+      <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={14} />{host.kind === 'local' ? 'Local' : hostTransportLabel(host)}<span className={`remote-check-dot remote-check-dot--${check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} /></span>
       <strong>{host.label}</strong>
-      {!data.compact ? <span className="remote-host-node__address" title={host.kind === 'ssh' && host.transport !== 'tailcat' ? host.hostname : undefined}>{host.kind === 'local' ? address?.label ?? 'Local address unknown' : host.transport === 'tailcat' ? 'Private Tailcat address' : host.hostname || 'Address required'}</span> : null}
+      <span className="remote-host-node__address" title={host.kind === 'ssh' && host.transport !== 'tailcat' ? host.hostname : undefined}>{host.kind === 'local' ? address?.label ?? 'Local address unknown' : host.transport === 'tailcat' ? 'Private Tailcat address' : host.hostname || 'Address required'}</span>
       <span className="remote-host-node__footer">
-        <span>{data.compact ? hint.summary.replace(/^Current: /, '') : hostCheckLabel(check ?? { state: 'idle' })}</span>{!data.compact && checkedAt !== undefined ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time> : null}
+        <span>{hostCheckLabel(check ?? { state: 'idle' })}</span>{checkedAt !== undefined ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time> : null}
 </span>
     </button>
     {tooltip.content}
@@ -72,9 +70,8 @@ function ManagementEntry({ data }: NodeProps<EntryNode>) {
 const nodeTypes = { host: HostTopologyNode, entry: ManagementEntry }
 
 /** A projection of configured routes. The graph owns viewport geometry, never Host or Runtime truth. */
-export const HostTopology = memo(function HostTopology({ items, selectedId, onSelect, linkView, onOpenLink, active = true, compact = false }: {
+export const HostTopology = memo(function HostTopology({ items, selectedId, onSelect, linkView, onOpenLink, active = true }: {
   active?: boolean
-  compact?: boolean
   linkView?: ReactNode
   onOpenLink?: () => void
   items: readonly HostTopologyItem[]
@@ -82,11 +79,6 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
   onSelect: (id: string) => void
 }) {
   const instance = useRef<ReactFlowInstance<TopologyNode, Edge> | null>(null)
-  const viewport = useRef<HTMLDivElement>(null)
-  const hostSize = compact ? COMPACT_HOST_SIZE : HOST_SIZE
-  const entrySize = compact ? COMPACT_ENTRY_SIZE : ENTRY_SIZE
-  const bankSize = Math.ceil(items.length / 2)
-  const [compactNarrow, setCompactNarrow] = useState(false)
   const [scope, setScope] = useState<'fleet' | 'link'>('fleet')
   const cancelLayout = useRef<(() => void) | null>(null)
   const positions = useRef(new Map<string, { x: number; y: number }>())
@@ -102,14 +94,10 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
   const topologyKey = JSON.stringify(items.map(item => item.host.id))
   const routeKey = JSON.stringify(items.map(item => [item.host.id, item.host.kind, item.host.kind === 'ssh' ? item.host.transport : undefined]))
   const projectedNodes: TopologyNode[] = useMemo(() => [
-    { id: 'entry', type: 'entry', position: compact ? compactNarrow ? { x: 175, y: (bankSize - 1) * 40 + 6 } : { x: (bankSize - 1) * 88 + 23, y: 91 } : { x: 0, y: 0 }, ...entrySize,
-      data: { label: compact ? 'This client' : 'AgentMux' }, selectable: false },
+    { id: 'entry', type: 'entry', position: { x: 0, y: 0 }, ...ENTRY_SIZE, data: { label: 'AgentMux' }, selectable: false },
     ...items.map((item, index): HostNode => ({ id: `host:${item.host.id}`, type: 'host',
-      position: compact
-        ? compactNarrow ? { x: index < bankSize ? 0 : 304, y: index % bankSize * 80 } : { x: index % bankSize * 176, y: index < bankSize ? 0 : 170 }
-        : { x: 220 + index % 2 * 232, y: Math.floor(index / 2) * 146 },
-      ...hostSize, data: { ...item, compact, selected: item.host.id === selectedId, tooltipSuppressed: !active || scope !== 'fleet', onSelect } }))
-  ], [items, selectedId, onSelect, active, scope, compact, compactNarrow, hostSize, entrySize, bankSize])
+      position: { x: 220 + index % 2 * 232, y: Math.floor(index / 2) * 146 }, ...HOST_SIZE, data: { ...item, selected: item.host.id === selectedId, tooltipSuppressed: !active || scope !== 'fleet', onSelect } }))
+  ], [items, selectedId, onSelect, active, scope])
   const [nodes, setNodes, onNodesChange] = useNodesState<TopologyNode>(projectedNodes)
   useEffect(() => {
     setNodes(previous => {
@@ -117,47 +105,32 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
       // Controlled nodes retain the library's measured geometry when their source data changes.
       return projectedNodes.map(node => {
         const previousNode = byId.get(node.id)
-        const position = positions.current.get(node.id) ?? (compact ? node.position : previousNode?.position ?? node.position)
+        const position = positions.current.get(node.id) ?? previousNode?.position ?? node.position
         const data = previousNode && Object.entries(node.data).every(([key, value]) => Reflect.get(previousNode.data, key) === value) ? previousNode.data : node.data
         return { ...previousNode, ...node, position, data } as TopologyNode
       })
     })
-  }, [projectedNodes, setNodes, compact])
+  }, [projectedNodes, setNodes])
   const edges = useMemo<Edge[]>(() => {
     const byId = new Map(nodes.map(node => [node.id, node]))
     const source = byId.get('entry')
     return items.map(item => {
     const target = byId.get(`host:${item.host.id}`)
-    const dx = (target?.position.x ?? 220) + hostSize.width / 2 - (source?.position.x ?? 0) - entrySize.width / 2
-    const dy = (target?.position.y ?? 0) + hostSize.height / 2 - (source?.position.y ?? 0) - entrySize.height / 2
-    const horizontal = compact ? compactNarrow : Math.abs(dx) > Math.abs(dy)
+    const dx = (target?.position.x ?? 220) + HOST_SIZE.width / 2 - (source?.position.x ?? 0) - ENTRY_SIZE.width / 2
+    const dy = (target?.position.y ?? 0) + HOST_SIZE.height / 2 - (source?.position.y ?? 0) - ENTRY_SIZE.height / 2
+    const horizontal = Math.abs(dx) > Math.abs(dy)
     return { id: `route:${item.host.id}`, source: 'entry', target: `host:${item.host.id}`,
     sourceHandle: horizontal ? dx > 0 ? Position.Right : Position.Left : dy > 0 ? Position.Bottom : Position.Top,
     targetHandle: horizontal ? dx > 0 ? Position.Left : Position.Right : dy > 0 ? Position.Top : Position.Bottom,
     type: 'default', selectable: false,
-    ...(compact ? { style: { strokeDasharray: '5 4' } } : {}),
     className: item.host.id === selectedId ? 'remote-route remote-route--selected' : 'remote-route',
     zIndex: item.host.id === selectedId ? 1 : 0 }
-  })}, [nodes, routeKey, selectedId, compact, compactNarrow, entrySize, hostSize])
+  })}, [nodes, routeKey, selectedId])
   const fit = useCallback(() => { void instance.current?.fitView({ padding: .18, maxZoom: 1 }) }, [])
-  useEffect(() => {
-    if (!compact || !active || !viewport.current) return
-    const resize = new ResizeObserver(entries => {
-      const width = entries[0]?.contentRect.width
-      if (width) setCompactNarrow(width < 590)
-    })
-    resize.observe(viewport.current)
-    return () => resize.disconnect()
-  }, [compact, active])
-  useEffect(() => {
-    if (!compact || !active || viewportTouched.current) return
-    const frame = requestAnimationFrame(fit)
-    return () => cancelAnimationFrame(frame)
-  }, [compact, compactNarrow, active, fit])
   const arrangedAttempt = useRef(-1)
   // Finite, off-thread geometry. Status, selection and counters never start a layout.
   useEffect(() => {
-    if (!active || scope !== 'fleet' || compact) return
+    if (!active || scope !== 'fleet') return
     const ids = ['entry', ...items.map(item => `host:${item.host.id}`)]
     const force = arrangedAttempt.current !== arrangeAttempt
     if (!force && ids.every(id => positions.current.has(id))) return
@@ -188,13 +161,13 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
       edges: items.map(item => ({ source: 'entry', target: `host:${item.host.id}` }))
     } })
     return () => { cancel(); if (cancelLayout.current === cancel) cancelLayout.current = null }
-  }, [active, scope, topologyKey, arrangeAttempt, fit, setNodes, compact])
+  }, [active, scope, topologyKey, arrangeAttempt, fit, setNodes])
 
-  return <div className="remote-topology" aria-label="Configured host topology" data-host-topology data-compact={compact || undefined}>
-    {!compact ? <header className="remote-topology__header"><div className="remote-topology__caption"><span>HOST CONNECTIONS</span><small>{scope === 'fleet' ? 'Configured hosts' : 'One selected connection'}</small></div>
-      {linkView ? <div className="remote-topology__scope" aria-label="Topology scope"><button type="button" aria-label="Fleet map" aria-pressed={scope === 'fleet'} onClick={() => changeScope('fleet')}>Fleet</button><button type="button" aria-label="Selected link" aria-pressed={scope === 'link'} onClick={() => changeScope('link')}>Selected link</button></div> : null}</header> : null}
+  return <div className="remote-topology" aria-label="Configured host topology" data-host-topology>
+    <header className="remote-topology__header"><div className="remote-topology__caption"><span>HOST CONNECTIONS</span><small>{scope === 'fleet' ? 'Configured hosts' : 'One selected connection'}</small></div>
+      {linkView ? <div className="remote-topology__scope" aria-label="Topology scope"><button type="button" aria-label="Fleet map" aria-pressed={scope === 'fleet'} onClick={() => changeScope('fleet')}>Fleet</button><button type="button" aria-label="Selected link" aria-pressed={scope === 'link'} onClick={() => changeScope('link')}>Selected link</button></div> : null}</header>
     <div hidden={scope !== 'link'} className="remote-topology__link">{scope === 'link' ? linkView : null}</div>
-    <div ref={viewport} hidden={scope !== 'fleet'} className="remote-topology__viewport"><ReactFlow<TopologyNode, Edge> nodes={nodes} onNodesChange={changes => {
+    <div hidden={scope !== 'fleet'} className="remote-topology__viewport"><ReactFlow<TopologyNode, Edge> nodes={nodes} onNodesChange={changes => {
       if (changes.some(change => change.type === 'position' && change.dragging)) cancelLayout.current?.()
       for (const change of changes) if (change.type === 'position' && change.position) positions.current.set(change.id, change.position)
       onNodesChange(changes)
@@ -202,7 +175,7 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
       onInit={value => { instance.current = value }} fitView fitViewOptions={{ padding: .18, maxZoom: 1 }}
       onMoveStart={event => { if (event) viewportTouched.current = true }}
       nodesDraggable nodeDragThreshold={4} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false}
-      elementsSelectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} zoomOnScroll={!compact} minZoom={.1} maxZoom={1.4}
+      elementsSelectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.1} maxZoom={1.4}
       defaultEdgeOptions={{ style: { strokeWidth: 1.25 } }} proOptions={{ hideAttribution: true }}>
     </ReactFlow></div>
     {items.length === 0 ? <p className="remote-topology__empty">No hosts match this search.</p> : null}
@@ -210,8 +183,8 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
       <button type="button" className="icon-button" aria-label="Zoom in" onClick={() => void instance.current?.zoomIn()}><ZoomInIcon size={15} /></button>
       <button type="button" className="icon-button" aria-label="Zoom out" onClick={() => void instance.current?.zoomOut()}><ZoomOutIcon size={15} /></button>
       <button type="button" className="icon-button" aria-label="Fit all hosts" onClick={fit}><FitIcon size={15} /></button>
-      {!compact ? <button type="button" className="remote-topology__arrange" aria-label="Arrange hosts" aria-busy={arranging} onClick={() => { viewportTouched.current = false; arrange(value => value + 1) }}><ArrangeIcon size={14} />{arranging ? 'Arranging…' : 'Arrange'}</button> : null}
+      <button type="button" className="remote-topology__arrange" aria-label="Arrange hosts" aria-busy={arranging} onClick={() => { viewportTouched.current = false; arrange(value => value + 1) }}><ArrangeIcon size={14} />{arranging ? 'Arranging…' : 'Arrange'}</button>
     </div>
-    {!compact && scope === 'fleet' ? <p className="remote-topology__hint" role={layoutIssue ? 'status' : undefined}>{layoutIssue ?? 'Saved connections · drag to arrange'}</p> : null}
+    {scope === 'fleet' ? <p className="remote-topology__hint" role={layoutIssue ? 'status' : undefined}>{layoutIssue ?? 'Saved connections · drag to arrange'}</p> : null}
   </div>
 })

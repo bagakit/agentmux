@@ -4,25 +4,3 @@
 .mesh-paths-issue details { color: var(--text-3); font-size: var(--fs-meta); }
 .mesh-settings-pane > [data-mesh-view=paths], .mesh-settings-pane > [data-mesh-view=machines] { overflow: auto; overscroll-behavior: contain; }
 .mesh-editor-navigation { flex: none; display: flex; align-items: center; padding-bottom: var(--sp-3); }
-.mesh-explorer__header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.mesh-saved-connections .remote-topology[data-compact] { height: 278px; background: var(--surface-0) radial-gradient(circle, color-mix(in srgb, var(--text-3) 23%, transparent) 1px, transparent 1px) 0 0 / 20px 20px; }
-.mesh-saved-connections .remote-topology__viewport { inset: 0 0 34px; }
-.mesh-saved-connections .remote-topology__controls { inset: auto 10px 5px auto; }
-.mesh-saved-connections .remote-host-node { width: 158px; height: 64px; padding: 5px 8px; gap: 3px; border-radius: 6px; }
-.mesh-saved-connections .remote-host-node > strong { font-size: 13px; }
-.mesh-saved-connections .remote-host-node__footer { font-size: 11px; }
-.mesh-saved-connections .remote-entry-node { width: 112px; height: 52px; gap: 2px; }
-.mesh-saved-connections .remote-entry-node > svg { width: 14px; height: 14px; }
-.mesh-saved-connections .remote-topology .react-flow__edge-path { stroke: var(--text-3); }
-.mesh-saved-connections .remote-topology .remote-route--selected .react-flow__edge-path { stroke: var(--green); }
-.mesh-saved-connections__legend { display: flex; gap: 7px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
-.mesh-saved-connections__legend span { margin-inline-start: auto; color: var(--text-3); }
-.mesh-saved-connections__legend i { border-top: 2px dashed var(--text-3); width: 20px; }
-.mesh-saved-connections__details { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line-soft); }
-.mesh-saved-connections__details > div { display: grid; min-width: 0; gap: 3px; overflow-wrap: anywhere; font-size: var(--fs-body); }
-.mesh-saved-connections__details small { color: var(--text-2); font-size: var(--fs-meta); }
-@container (max-width: 760px) {
-  .mesh-explorer[data-mesh-overview] > .mesh-explorer__header { flex-wrap: wrap; }
-  .mesh-saved-connections .remote-topology[data-compact] { height: 352px; }
-}
-.mesh-explorer__header-actions .mesh-explorer__segments button { white-space: nowrap; }
