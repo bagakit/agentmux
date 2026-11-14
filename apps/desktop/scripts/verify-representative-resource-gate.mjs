@@ -136,27 +136,34 @@ assert.throws(() => admitReport(null), /coverage-missing/u)
 const harnessMain = declaration(harness, 'main')
 async function runHarnessMain(source, status) {
   const receipts = []
+  const events = []
   const noIo = async () => {}
   const options = {
     execFileAsync: async () => ({ stdout: 'fixture-source' }),
     readFile: async () => JSON.stringify({ source: {}, product: {}, support: {}, binaries: [] }),
     access: noIo, chmod: noIo, mkdir: noIo, writeFile: noIo, rm: noIo, assertProbePathsRemoved: noIo,
     exerciseReceiptlessDaemonCleanup: noIo, assertRepresentativeResult: admitReport,
+    inspectRuntimeApplicationPayload: async root => { assert.equal(root, 'root'); return 'published-closure' },
+    materializeRuntimePayload: async (closure, root) => {
+      assert.equal(closure, 'published-closure'); assert.equal(root, 'private-app'); events.push('staged')
+    },
     runStage: async (stage, _identity, run) => {
+      events.push(stage.representative ? 'representative' : 'diagnostic')
       run.report = stage.representative ? { representative: { status } } : { schema: 'diagnostic-report' }
     },
     join: (...paths) => paths.join('/'), measuredWorkspaces: [], repositoryRoot: 'root', directory: 'private', userData: 'data',
-    manifestPath: 'manifest', entry: 'entry', runtimeDirectory: 'runtime', representativeRuntime: 'representative-runtime',
+    manifestPath: 'manifest', entry: 'entry', desktopRoot: 'private-app', runtimeDirectory: 'runtime', representativeRuntime: 'representative-runtime',
     representativeDirectory: 'representative', reportPath: 'report', representativeReportPath: 'representative-report',
     process: { platform: 'darwin', arch: 'arm64', stdout: { write: text => receipts.push(JSON.parse(text.split('=')[1])) } }
   }
   const execute = new AsyncFunction('options', `const {${Object.keys(options).join(',')}} = options\n${source}\nawait main()`)
   try { await execute(options) }
-  catch (error) { return { receipts, error } }
-  return { receipts, error: null }
+  catch (error) { return { receipts, events, error } }
+  return { receipts, events, error: null }
 }
 for (const status of ['passed', 'budget-exceeded', 'coverage-missing']) {
   const published = await runHarnessMain(harnessMain, status)
+  assert.deepEqual(published.events, ['staged', 'diagnostic', 'representative'])
   assert.equal(published.receipts[0]?.representative?.status, status)
   if (status === 'passed') assert.equal(published.error, null)
   else assert.equal(published.error?.errors.length, 1, 'The published gate must fail for ' + status)
