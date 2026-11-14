@@ -320,6 +320,7 @@ type RuntimeController = SourceRuntimeController
 import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler.js'
 
 const store: AgentMuxAgentSessionStore = {
+  readExecutorInvocation: async () => undefined,
   readRetiredAgentSession: async () => null,
   async load() { return [] },
   async loadMetadata() { return [] },
