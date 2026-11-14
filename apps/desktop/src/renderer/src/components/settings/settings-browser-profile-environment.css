@@ -5,7 +5,7 @@
 .profile-environment__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }
 .profile-environment__field { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; color: var(--text-2); font-size: var(--fs-meta); }
 .profile-environment__field input { width: 100%; min-width: 0; }
-.profile-environment__field select { min-width: 0; min-height: 28px; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; }
+.profile-environment__field select { width: 100%; }
 .profile-environment__group, .profile-environment__application { border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); min-width: 0; }
 .profile-environment summary { color: var(--text-2); font-size: var(--fs-meta); cursor: pointer; overflow-wrap: anywhere; }
 .profile-environment summary small { margin-left: var(--sp-3); color: var(--text-3); font-weight: 400; }

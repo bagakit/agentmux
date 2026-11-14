@@ -1,3 +1,4 @@
+import { NativeSelect, TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -77,9 +78,9 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
       </div>
       {online ? <form className="browser-profile-extensions__online" aria-label="Prepare online extension" onSubmit={event => { event.preventDefault(); void run(prepareOnline) }}>
         {onlineExtensionId ? <strong>Update the selected extension</strong> : null}
-        <label>Source<select aria-label="Online extension source" disabled={busy} value={onlineKind} onChange={event => setOnlineKind(event.target.value as typeof onlineKind)}><option value="package-url">Package URL</option><option value="update-manifest">Update manifest</option></select></label>
-        <label>HTTPS address<input type="url" autoComplete="off" spellCheck={false} required disabled={busy} value={onlineUrl} onChange={event => setOnlineUrl(event.target.value)} placeholder="https://…" /></label>
-        {onlineKind === 'update-manifest' ? <label>Add-on ID<input required autoComplete="off" spellCheck={false} disabled={busy} value={addonId} onChange={event => setAddonId(event.target.value)} /></label> : null}
+        <label>Source<NativeSelect aria-label="Online extension source" disabled={busy} value={onlineKind} onChange={event => setOnlineKind(event.target.value as typeof onlineKind)}><option value="package-url">Package URL</option><option value="update-manifest">Update manifest</option></NativeSelect></label>
+        <label>HTTPS address<TextInput type="url" autoComplete="off" spellCheck={false} required disabled={busy} value={onlineUrl} onChange={event => setOnlineUrl(event.target.value)} placeholder="https://…" /></label>
+        {onlineKind === 'update-manifest' ? <label>Add-on ID<TextInput required autoComplete="off" spellCheck={false} disabled={busy} value={addonId} onChange={event => setAddonId(event.target.value)} /></label> : null}
         <p className="browser-profile-editor__quiet">Downloads use no website sign-in. Preparing a package does not install it.</p>
         <div className="browser-profile-extensions__actions"><button type="button" disabled={busy} onClick={() => setOnline(false)}>Cancel</button><button type="submit" disabled={busy || !onlineUrl.trim() || onlineKind === 'update-manifest' && !addonId.trim()}>Prepare for review</button></div>
       </form> : null}

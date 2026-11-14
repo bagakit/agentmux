@@ -2,7 +2,7 @@ import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { useRef, useState } from 'react'
-import { TextInput } from '@agentmux/client-ui/input'
+import { NativeSelect, TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import type { BrowserProfileEdit, BrowserProfileFolder, BrowserProfileSummary } from '../../../../shared/contracts'
@@ -49,10 +49,10 @@ export function BrowserProfileOrganization({ profile, folders, revision, busy, r
   return <section className="browser-profile-editor__section browser-profile-organization" aria-label="Organization">
     <h4>Organization</h4>
     <div className="browser-profile-organization__folder">
-      <label>Folder<select ref={folderSelect} aria-label="Profile folder" value={profile.folderId ?? ''} disabled={busy}
+      <label>Folder<NativeSelect ref={folderSelect} aria-label="Profile folder" value={profile.folderId ?? ''} disabled={busy}
         onChange={event => void onEdit({ folderId: event.target.value || null })}>
         <option value="">Unassigned</option>{folders.map(folder => <option key={folder.id} value={folder.id}>{folder.label}</option>)}
-      </select></label>
+      </NativeSelect></label>
       <Menu.Root>
         <Menu.Trigger asChild><IconButton type="button" aria-label="Manage folders" title="Manage folders" disabled={busy}><MoreIcon size={14} /></IconButton></Menu.Trigger>
         <DocumentOverlayPortal component={Menu.Portal}>

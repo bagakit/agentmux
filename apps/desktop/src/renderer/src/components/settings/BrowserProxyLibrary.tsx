@@ -1,3 +1,4 @@
+import { NativeSelect, Textarea, TextInput } from '@agentmux/client-ui/input'
 import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { normalizeBrowserProfileNetwork } from '../../../../shared/browser-profile-network'
 import { useEffect, useRef, useState } from 'react'
@@ -94,12 +95,12 @@ export function BrowserProxyLibrary({ assets, active }: { assets: BrowserProxyAs
   return <details className="browser-proxy-library">
     <summary>Proxy library <span>{assets?.length ?? '—'}</span></summary>
     <p className="settings-hint">Save a server once, then assign its exact version to selected Profiles. Sign-ins stay with each Profile.</p>
-    <label>Saved proxy<select aria-label="Saved proxy asset" value={value.assetId ?? ''} onChange={event => choose(event.target.value)}><option value="">New proxy</option>{value.assetId && !asset ? <option value={value.assetId}>Unavailable saved proxy</option> : null}{assets?.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+    <label>Saved proxy<NativeSelect aria-label="Saved proxy asset" value={value.assetId ?? ''} onChange={event => choose(event.target.value)}><option value="">New proxy</option>{value.assetId && !asset ? <option value={value.assetId}>Unavailable saved proxy</option> : null}{assets?.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</NativeSelect></label>
     <div className="browser-proxy-library__fields">
-      <label>Name<input aria-label="Proxy asset name" value={value.label} maxLength={128} onBlur={checkpointDraft} onChange={event => edit({ label: event.target.value })} /></label>
-      <label>Server<input aria-label="Proxy asset server" spellCheck={false} placeholder="http://host:port" value={value.server} onBlur={checkpointDraft} onChange={event => edit({ server: event.target.value })} /></label>
-      <label>Don’t proxy<input aria-label="Proxy asset bypass" value={value.bypass} onBlur={checkpointDraft} onChange={event => edit({ bypass: event.target.value })} /></label>
-      <label>Notes<textarea aria-label="Proxy asset notes" value={value.notes} maxLength={2000} onBlur={checkpointDraft} onChange={event => edit({ notes: event.target.value })} /></label>
+      <label>Name<TextInput aria-label="Proxy asset name" value={value.label} maxLength={128} onBlur={checkpointDraft} onChange={event => edit({ label: event.target.value })} /></label>
+      <label>Server<TextInput aria-label="Proxy asset server" spellCheck={false} placeholder="http://host:port" value={value.server} onBlur={checkpointDraft} onChange={event => edit({ server: event.target.value })} /></label>
+      <label>Don’t proxy<TextInput aria-label="Proxy asset bypass" value={value.bypass} onBlur={checkpointDraft} onChange={event => edit({ bypass: event.target.value })} /></label>
+      <label>Notes<Textarea aria-label="Proxy asset notes" value={value.notes} maxLength={2000} onBlur={checkpointDraft} onChange={event => edit({ notes: event.target.value })} /></label>
     </div>
     {asset && value.baseRevision !== asset.revision ? <p role="status" className="settings-hint">A different version is in the current library snapshot. Your draft is kept. <button className="small-button" onClick={() => edit({ baseRevision: asset.revision })}>Use current version for this edit</button></p> : null}
     {problem && (value.label || value.server) ? <p role="status" className="browser-proxy-library__issue">{problem}</p> : null}

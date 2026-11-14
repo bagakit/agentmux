@@ -1,4 +1,4 @@
-import { TextInput } from '@agentmux/client-ui/input'
+import { NativeSelect, Switch, TextInput } from '@agentmux/client-ui/input'
 import type { EnvironmentBrand, ProfileEnvironmentFields } from '../../lib/browser-profile-environment-form'
 
 type TextField = {
@@ -112,8 +112,7 @@ export function ProfileEnvironmentFieldsEditor({
       <details className="profile-environment__group" open={fields.location || undefined}>
         <summary>Location{fields.location ? <small>Custom</small> : null}</summary>
         <label className="profile-environment__choice">
-          <input
-            type="checkbox"
+          <Switch
             checked={fields.location}
             onChange={(event) => change({ location: event.target.checked })}
           />
@@ -138,8 +137,7 @@ export function ProfileEnvironmentFieldsEditor({
         <details className="profile-environment__hints">
           <summary>Client hints</summary>
           <label className="profile-environment__choice">
-            <input
-              type="checkbox"
+            <Switch
               checked={fields.hints}
               onChange={(event) => change({ hints: event.target.checked })}
             />
@@ -154,16 +152,14 @@ export function ProfileEnvironmentFieldsEditor({
                 {field('model', 'Device model', { placeholder: 'Empty when unspecified' })}
               </div>
               <label className="profile-environment__choice">
-                <input
-                  type="checkbox"
+                <Switch
                   checked={fields.mobile}
                   onChange={(event) => change({ mobile: event.target.checked })}
                 />
                 Mobile client hint
               </label>
               <label className="profile-environment__choice">
-                <input
-                  type="checkbox"
+                <Switch
                   checked={fields.bitnessEnabled}
                   onChange={(event) => change({ bitnessEnabled: event.target.checked })}
                 />
@@ -172,7 +168,7 @@ export function ProfileEnvironmentFieldsEditor({
               {fields.bitnessEnabled ? field('bitness', 'Bitness', { placeholder: 'Bitness' }) : null}
               <label className="profile-environment__field">
                 <span>WOW64 hint</span>
-                <select
+                <NativeSelect
                   aria-label="WOW64 hint"
                   value={fields.wow64}
                   onChange={(event) =>
@@ -182,7 +178,7 @@ export function ProfileEnvironmentFieldsEditor({
                   <option value="default">Engine default</option>
                   <option value="true">True</option>
                   <option value="false">False</option>
-                </select>
+                </NativeSelect>
               </label>
               <BrandRows label="Brands" value={fields.brands} onChange={(brands) => change({ brands })} />
               <BrandRows

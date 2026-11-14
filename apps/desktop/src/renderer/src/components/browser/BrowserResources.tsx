@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxBrowserTarget } from '@agentmux/core'
-import { TextInput } from '@agentmux/client-ui/input'
+import { NativeSelect, SearchInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import { useAppStore } from '../../store'
@@ -104,8 +104,8 @@ export function BrowserResources({ active, directory, app, observationError }: {
         {app && app.state !== 'available' ? ` ${app.state} reading.` : ''}
         {app?.lastSuccessAt != null ? ` Read at ${new Date(app.lastSuccessAt).toLocaleTimeString()}.` : ''}</p></details>
     <div className="browser-resources__controls">
-      <TextInput aria-label="Find Browser resources" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a page…" />
-      <select aria-label="Browser resource state" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">All states</option><option value="live">Running</option><option value="released">Released</option><option value="cold">Not loaded</option><option value="unknown">Unknown</option></select>
+      <SearchInput aria-label="Find Browser resources" clearLabel="Clear Browser resources filter" value={query} onValueChange={setQuery} placeholder="Find a page…" />
+      <NativeSelect aria-label="Browser resource state" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">All states</option><option value="live">Running</option><option value="released">Released</option><option value="cold">Not loaded</option><option value="unknown">Unknown</option></NativeSelect>
       <button className="small-button" disabled={!active || directory.pending} onClick={() => void directory.refresh()}><RefreshIcon size={13} />{directory.pending ? 'Refreshing…' : 'Refresh'}</button>
     </div>
     {selected.size ? <div className="browser-resources__selection" role="group" aria-label="Selected Browser resources">

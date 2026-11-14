@@ -12,7 +12,7 @@
 .profile-bookmarks__browser { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: end; min-width: 0; }
 .profile-bookmarks label { display: grid; gap: 5px; min-width: 0; font-size: 11px; color: var(--text-3); }
 .profile-bookmarks__browser label { flex: 1 1 200px; }
-.profile-bookmarks select, .profile-bookmarks input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-1); color: var(--text-1); padding: 6px 7px; font: inherit; }
+.profile-bookmarks .ui-input { width: 100%; }
 .profile-bookmarks__list { list-style: none; margin: 0; padding: 0; display: grid; min-width: 0; }
 .profile-bookmarks__list > li { display: grid; gap: 4px; min-width: 0; border-top: 1px solid var(--line); padding-block: 9px; }
 .profile-bookmarks__entry { display: flex; flex-wrap: wrap; gap: 3px 7px; min-width: 0; text-align: left; padding: 0; border: 0; background: none; color: var(--text-1); overflow-wrap: anywhere; }

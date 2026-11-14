@@ -1,3 +1,4 @@
+import { NativeSelect } from '@agentmux/client-ui/input'
 import { SurfaceState } from '../SurfaceState'
 import { useEffect, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -111,12 +112,12 @@ export function BrowserProfileTrash({ active, folders, onBack, onRestored }: {
       <p className="browser-profile-trash__retention">{retentionText(entry)}</p>
       {entry.purge ? <aside className="browser-profiles-settings__service" role="status"><strong>{entry.purge.status === 'waiting-for-restart' ? 'Deletion requested' : entry.purge.status === 'failed' ? 'Cleanup failed · data retained' : entry.purge.status === 'unknown' ? 'Cleanup result is unknown' : 'Cleanup in progress'}</strong><p>{entry.purge.warning || 'This original deletion intent is kept. Completed or uncertain cleanup is not repeated by reading this list.'}</p><small>Action {entry.purge.purgeId}</small></aside> : null}
       {entry.profile.folderId && !folders.some(value => value.id === entry.profile.folderId) ? <p>The original folder was removed. Choose a folder or restore unfiled.</p> : null}
-      <label>Restore to<select aria-label={`Restore folder for ${entry.profile.label}`} value={folder[entry.id] ?? ''} disabled={Boolean(busy[entry.id])} onChange={event => setFolder(current => ({ ...current, [entry.id]: event.target.value }))}>
+      <label>Restore to<NativeSelect aria-label={`Restore folder for ${entry.profile.label}`} value={folder[entry.id] ?? ''} disabled={Boolean(busy[entry.id])} onChange={event => setFolder(current => ({ ...current, [entry.id]: event.target.value }))}>
         <option value="">Original folder</option><option value="unfiled">Unfiled</option>{folders.map(value => <option value={value.id} key={value.id}>{value.label}</option>)}
-      </select></label>
+      </NativeSelect></label>
       <Button type="button" variant="primary" disabled={Boolean(busy[entry.id])} onClick={() => void restore(entry)}>{busy[entry.id] ? 'Working…' : `Restore ${entry.profile.label}`}</Button>
       {!entry.purge ? <div className="browser-profile-trash__cleanup">
-        <label>Retention<select aria-label={`Retention for ${entry.profile.label}`} value={days[entry.id] ?? 7} disabled={Boolean(busy[entry.id])} onChange={event => setDays(current => ({ ...current, [entry.id]: Number(event.target.value) }))}><option value={7}>7 days from approval</option><option value={30}>30 days from approval</option></select></label>
+        <label>Retention<NativeSelect aria-label={`Retention for ${entry.profile.label}`} value={days[entry.id] ?? 7} disabled={Boolean(busy[entry.id])} onChange={event => setDays(current => ({ ...current, [entry.id]: Number(event.target.value) }))}><option value={7}>7 days from approval</option><option value={30}>30 days from approval</option></NativeSelect></label>
         <Button type="button" disabled={Boolean(busy[entry.id] || confirm && (busy[confirm.entry.id] || confirm.uncertain))} onClick={event => { confirmationTrigger.current = event.currentTarget; setConfirm({ entry, purgeId: mintObjectId(), deleteAfter: Date.now() + (days[entry.id] ?? 7) * 86_400_000 }) }}>Approve expiry</Button>
         {entry.retention ? <Button type="button" disabled={Boolean(busy[entry.id])} onClick={() => void keep(entry)}>Keep indefinitely</Button> : null}
         <Button type="button" variant="danger" disabled={Boolean(busy[entry.id] || confirm && (busy[confirm.entry.id] || confirm.uncertain))} onClick={event => { confirmationTrigger.current = event.currentTarget; setConfirm({ entry, purgeId: mintObjectId() }) }}>Delete permanently</Button>

@@ -1,8 +1,9 @@
 import { SegmentedControl } from '@agentmux/client-ui/components/SegmentedControl'
 import { TextInput } from '@agentmux/client-ui/input'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useId, useRef, useState } from 'react'
 import type { BrowserProfileEdit, BrowserProfileSummary } from '../../../../shared/contracts'
 import { formatBrowserProfileProxyServer, normalizeBrowserProfileNetwork, type BrowserProfileNetwork } from '../../../../shared/browser-profile-network'
 import { api } from '../../lib/api'
@@ -30,6 +31,7 @@ export function ProfileNetworkRoute({ profile, proxy, openBrowsers, run, baselin
   openBrowsers: number
   run(key: string, action: () => Promise<unknown>): Promise<boolean>
 }) {
+  const routeHintId = useId()
   const saved = profile.network ?? { mode: 'system' as const }
   const savedServer = saved.mode === 'proxy' ? formatBrowserProfileProxyServer(saved.server) : ''
   const savedBypass = saved.mode === 'proxy' ? (saved.bypass ?? []).join(', ') : ''
@@ -56,11 +58,11 @@ export function ProfileNetworkRoute({ profile, proxy, openBrowsers, run, baselin
         value={mode} onValueChange={next => { beginEdit(); setMode(next) }} />
       {mode === 'proxy' ? <div className="browser-profile-editor__route-fields">
         <TextInput aria-label="Proxy server" placeholder="host:port or socks5://host:port" value={server} spellCheck={false}
-          aria-invalid={problem !== null && server.trim() !== ''} onChange={event => { beginEdit(); setServer(event.target.value) }} />
+          aria-describedby={routeHintId} aria-invalid={problem !== null && server.trim() !== ''} onChange={event => { beginEdit(); setServer(event.target.value) }} />
         {more ? <TextInput aria-label="Don’t proxy" placeholder="*.corp.example, localhost" value={bypass} spellCheck={false} onChange={event => { beginEdit(); setBypass(event.target.value) }} />
           : <button type="button" className="browser-profile-editor__link" onClick={() => setMore(true)}>More</button>}
       </div> : null}
-      <p className={problem && server.trim() ? 'browser-profile-editor__error' : 'browser-profile-editor__quiet'} role={problem && server.trim() ? 'alert' : undefined}>
+      <p id={routeHintId} className={problem && server.trim() ? 'browser-profile-editor__error' : 'browser-profile-editor__quiet'} role={problem && server.trim() ? 'alert' : undefined}>
         {problem && server.trim() ? problem
           : mode === 'system' ? 'Pages use the proxy settings of this Mac.' : mode === 'direct' ? 'Pages connect without any proxy, even if this Mac has one.'
           : 'Every page of this Profile goes through this server. If it cannot be reached, its pages do not open rather than connecting directly.'}
@@ -112,7 +114,7 @@ export function ProfileProxySignIn({ profile }: { profile: BrowserProfileSummary
     <section className="browser-profile-editor__section" aria-label="Proxy sign-in">
       <h4>Proxy sign-in</h4>
       {editing ? <form className="browser-profile-editor__sign-in" onSubmit={event => { event.preventDefault(); void save({ username, password }) }}
-        onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(false); setPassword('') } }}>
+        onKeyDown={event => { if (event.key === 'Escape' && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); event.stopPropagation(); setEditing(false); setPassword('') } }}>
         <TextInput aria-label="Proxy user name" placeholder="User name" autoComplete="off" autoFocus value={username} maxLength={256} onChange={event => setUsername(event.target.value)} />
         <TextInput aria-label="Proxy password" placeholder="Password" type="password" autoComplete="new-password" value={password} maxLength={1024} onChange={event => setPassword(event.target.value)} />
         <button type="button" className="small-button" onClick={() => { setEditing(false); setPassword('') }}>Cancel</button>

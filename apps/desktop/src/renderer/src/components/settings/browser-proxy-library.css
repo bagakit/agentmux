@@ -2,7 +2,7 @@
 .browser-proxy-library > summary { cursor: pointer; font-weight: 600; }
 .browser-proxy-library > summary > span { font-weight: 400; color: var(--text-3); margin-left: 5px; }
 .browser-proxy-library label { display: grid; gap: 4px; min-width: 0; margin-top: 8px; font-size: 11px; }
-.browser-proxy-library input, .browser-proxy-library select, .browser-proxy-library textarea { box-sizing: border-box; width: 100%; min-width: 0; font: inherit; color: var(--text); background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: 5px; padding: 6px 8px; }
+.browser-proxy-library .ui-input { width: 100%; }
 .browser-proxy-library textarea { min-height: 52px; resize: vertical; }
 .browser-proxy-library__fields { display: grid; gap: 0 10px; grid-template-columns: minmax(0, 1fr); }
 .browser-proxy-library__actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
