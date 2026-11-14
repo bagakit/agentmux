@@ -226,3 +226,12 @@
 .file-operation-service__request { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
 .file-operation-service__request > span, .file-operation-service__request > small { display: block; }
 .file-operation-service__request > small { color: var(--text-3); user-select: text; }
+.file-location-choices > summary { cursor: pointer; font-weight: 500; }
+.file-location-choices small { color: var(--text-3); font-weight: 400; }
+.file-location-choices > p { margin-top: 8px; color: var(--text-2); }
+.file-location-choices .file-operation-service__request { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.file-location-choices .file-operation-service__request > details { min-width: 0; flex: 1; }
+.file-location-choices dl { margin: 8px 0; }
+.file-location-choices dt { color: var(--text-3); }
+.file-location-choices dd { margin: 0 0 6px; user-select: text; }
+.file-location-choices button { flex: none; }

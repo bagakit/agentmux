@@ -288,7 +288,7 @@ export function originalSourceScopeFromGraph(target: SpaceMountRecord, graph: Ag
 function snapshotResource(target: SpaceMountRecord, snapshot: Pick<SpaceSnapshot, 'reference' | 'scope'> | undefined, workspaceId = target.workspaceId): FolderSpaceResource | undefined {
   if (!snapshot || snapshot.reference.runtimeId !== target.reference.runtimeId || snapshot.reference.spaceId !== target.reference.spaceId) return undefined
   const space = snapshot.scope.space, zones = snapshot.scope.zones.filter(zone => zone.workspaceId === workspaceId && snapshot.scope.bindings.some(binding => binding.spaceId === target.reference.spaceId && binding.zoneId === zone.zoneId))
-  const zone = zones.length === 1 ? zones[0] : undefined
+  const zone = workspaceId === target.workspaceId ? zones.find(zone => zone.zoneId === target.zoneId) : zones.length === 1 ? zones[0] : undefined
   if (!space || space.kind !== 'folder' || !zone || zone.hostId === null || zone.directoryPath === null) return undefined
   return { id: workspaceId, hostId: zone.hostId, path: zone.directoryPath, name: space.name, kind: zone.kind === 'worktree' ? 'worktree' : 'folder',
     ...(space.directoryPath !== zone.directoryPath ? { repoPath: space.directoryPath } : {}), ...(zone.branch ? { branch: zone.branch } : {}) }

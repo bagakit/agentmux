@@ -1,5 +1,5 @@
 import type { FileDirectoryListing, FileNameListing } from '@agentmux/core/files'
-import type { AppState } from '../store'
+import { currentCoreSpatialGraph, type AppState } from '../store'
 import { api } from './api'
 import { sourceFilesMappingMatches, sourceFilesQuery, sourceFilesWorkspaceMatches } from './source-files-workbench'
 import type { SourceFilesInput, SourceFilesInputs } from './source-files-workbench'
@@ -27,11 +27,11 @@ function hasOriginalSource(state: State, workspaceId: string): boolean {
 async function sourceListing(workspaceId: string, path: string, mode: 'directory' | undefined, get: () => State) {
   const before = get(), input = before.sourceFilesInputs.selections[workspaceId]
   if (!input) { if (hasOriginalSource(before, workspaceId)) throw sourceUnavailable(); return null }
-  if (!input.locator || !sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(before, workspaceId))) throw sourceUnavailable()
+  if (!input.locator || !sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(before, workspaceId, currentCoreSpatialGraph()))) throw sourceUnavailable()
   const reply = await api.sourceFiles.call(input.target, 'file.list', { ...sourceFilesQuery(input.locator, path), ...(mode ? { mode } : {}) })
   const after = get()
   if (after.sourceFilesInputs.selections[workspaceId] !== input ||
-      !sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(after, workspaceId)) ||
+      !sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(after, workspaceId, currentCoreSpatialGraph())) ||
       !reply.carrierCurrent || !reply.result.resource || !sourceFilesMappingMatches(input.locator, reply.result.resource, path)) throw sourceUnavailable()
   if (reply.result.result.status === 'unknown') throw new Error(reply.result.result.message)
   return reply.result.result

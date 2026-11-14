@@ -2,6 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { parseFileDeleteParams, parseFileMkdirParams, parseFileMoveParams, type FileMutationEffect } from '@agentmux/core/files'
 import type { FolderDirectoryRegistration } from '@agentmux/core/space-folder'
 import type { SpaceMountSourceTarget } from '../../../shared/space-mount'
+import type { SpaceMountRecord } from '../../../shared/space-mount'
 import type { SourceFilesLocator, SourceFilesResolution } from '../../../shared/source-files'
 import type { SourceFilesApi } from '../../../shared/source-files-client'
 import type { WorkspaceRecord } from '../../../shared/contracts'
@@ -54,6 +55,7 @@ export function createSourceFilesWorkbench(ports: {
   workspace(id: string): SourceFilesInput['workspace'] | undefined
   checkpoint(): Promise<void>
   runtime(hostId: string): Promise<string>
+  location?(workspaceId: string, runtimeId: string): SpaceMountRecord | undefined
   register(hostId: string, packet: FolderDirectoryRegistration): Promise<import('@agentmux/core/space-folder').FolderSpaceReceipt>
   prepareEffect(workspaceId: string, locator: SourceFilesLocator): (effect: FileMutationEffect) => Promise<void>
 }) {
@@ -65,19 +67,24 @@ export function createSourceFilesWorkbench(ports: {
     const workspace = ports.workspace(workspaceId)
     if (!workspace) throw new Error('The original display Workspace is unavailable. Its buffers and requests are retained.')
     let input = ports.get().selections[workspaceId]
+    let observedLocation: string | undefined
     if (!input) {
       const baseline = structuredClone(workspace), runtimeId = await ports.runtime(workspace.hostId)
       if (!sourceFilesWorkspaceMatches(baseline, ports.workspace(workspaceId))) throw new Error('The directory selection changed while observing its Source.')
       // Another explicit selection may have won while discovery awaited.
       input = ports.get().selections[workspaceId]
       if (!input) {
-        input = { workspace: baseline, target: { hostId: baseline.hostId, expectedRuntimeId: runtimeId }, selection: { kind: 'directory', path: baseline.path } }
+        const mount = ports.location?.(workspaceId, runtimeId)
+        observedLocation = JSON.stringify(mount ?? null)
+        input = { workspace: baseline, target: { hostId: baseline.hostId, expectedRuntimeId: runtimeId },
+          selection: mount ? { kind: 'mount', mount } : { kind: 'directory', path: baseline.path } }
       }
     }
     // A default observation is not a selected Source. Adopt only a confirmed locator;
     // failure must leave the original Workspace's existing Files path available.
     const original = ports.get().selections[workspaceId]
-    const owns = () => sourceFilesWorkspaceMatches(input.workspace, ports.workspace(workspaceId)) && ports.get().selections[workspaceId] === original
+    const owns = () => sourceFilesWorkspaceMatches(input.workspace, ports.workspace(workspaceId)) && ports.get().selections[workspaceId] === original &&
+      (observedLocation === undefined || observedLocation === JSON.stringify(ports.location?.(workspaceId, 'expectedRuntimeId' in input.target ? input.target.expectedRuntimeId : input.target.reference.runtimeId) ?? null))
     if (!owns()) return { status: 'unconfirmed', issue: { code: 'SOURCE_FILES_SELECTION_CHANGED', message: 'Restore the original directory selection to check its retained requests.' } }
     const selection = input.registration ? { kind: 'directory' as const, path: input.registration.directory.workspacePath,
       expectedResource: input.registration.directory, ...(input.selection.kind === 'directory' && input.selection.registration ? { registration: input.selection.registration } : {}) } : input.selection
@@ -179,14 +186,35 @@ export function createSourceFilesWorkbench(ports: {
       return await resolve(workspaceId)
     },
     async selectRegistration(workspaceId: string, registration: import('../../../shared/space-mount').SpaceMountRecord) {
-      const input = ports.get().selections[workspaceId]
-      if (!input || !current(input)) throw new Error('The original directory selection is no longer current.')
+      const original = ports.get().selections[workspaceId], workspace = ports.workspace(workspaceId)
+      if (!workspace || registration.hostId !== workspace.hostId) throw new Error('The original directory selection is no longer current.')
+      const input = original ?? { workspace: structuredClone(workspace), target: { hostId: workspace.hostId, reference: registration.reference },
+        selection: { kind: 'directory' as const, path: workspace.path } }
+      const owns = () => sourceFilesWorkspaceMatches(input.workspace, ports.workspace(workspaceId)) && ports.get().selections[workspaceId] === original
+      if (!owns()) throw new Error('The original directory selection is no longer current.')
       const selection = { kind: 'directory' as const, path: input.workspace.path, registration: structuredClone(registration),
         ...(input.registration ? { expectedResource: input.registration.directory } : {}) }
-      const result = await ports.api.resolve(input.target, selection)
-      if (!current(input)) throw new Error('Later Source selection was preserved. The old registration was not adopted.')
-      if (result.status !== 'located') return result
-      replace(input, { ...input, selection, locator: result.locator })
+      const retained = original?.registration && original.registrationStatus !== 'confirmed'
+        ? { workspace: original.workspace, target: original.target, packet: original.registration } : undefined
+      const known = input.locator?.mount
+      const sameLocation = known?.hostId === registration.hostId && known.reference.runtimeId === registration.reference.runtimeId &&
+        known.reference.spaceId === registration.reference.spaceId && known.zoneId === registration.zoneId && known.workspaceId === registration.workspaceId
+      const selected: SourceFilesInput = { workspace: input.workspace, target: input.target, selection, ...(sameLocation ? { locator: input.locator } : {}) }
+      const key = mintObjectId()
+      ports.set(state => state.selections[workspaceId] !== original ? state : { ...state,
+        selections: { ...state.selections, [workspaceId]: selected },
+        folderRequests: retained ? { ...state.folderRequests, [key]: retained } : state.folderRequests })
+      await ports.checkpoint()
+      if (!current(selected)) throw new Error('Later Source selection was preserved. The old registration was not adopted.')
+      let result: SourceFilesResolution
+      try { result = await ports.api.resolve(selected.target, selection) }
+      catch (cause) {
+        replace(selected, { ...selected, issue: cause instanceof Error ? cause.message : String(cause) })
+        throw cause
+      }
+      if (!current(selected)) throw new Error('Later Source selection was preserved. The old registration was not adopted.')
+      replace(selected, { ...selected, ...(result.status === 'located' ? { locator: result.locator } : {
+        issue: result.status === 'unconfirmed' ? result.issue.message : 'The selected working location is unconfirmed. Check its original Space.' }) })
       await ports.checkpoint()
       return result
     },

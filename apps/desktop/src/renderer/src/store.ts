@@ -6018,6 +6018,22 @@ function sourceFilesWorkbenchOwner(): ReturnType<typeof createSourceFilesWorkben
     workspace: id => originalSpaceWorkspace(useAppStore.getState(), id, currentCoreSpatialGraph()),
     checkpoint: checkpointMountedSpaceInputs,
     runtime: async hostId => (await api.spaceMounts.call('resources', { hostId })).runtimeId,
+    location: (workspaceId, runtimeId) => {
+      const state = useAppStore.getState(), workspace = originalSpaceWorkspace(state, workspaceId, currentCoreSpatialGraph())
+      if (!workspace) return undefined
+      const source = originalSourceEntryForSelection(state, workspaceId)
+      if (source) return source.target
+      const choice = state.workbenchSpaceSelection
+      if (choice?.workspaceId !== workspaceId || !choice.spaceId || !choice.zoneId) return undefined
+      // An ordinary Main file view can also have a spatial selection. Only the
+      // original local Core resource qualifies it as a Source Files location.
+      const graph = currentCoreSpatialGraph(), zone = graph?.zones.find(value => value.zoneId === choice.zoneId)
+      if (workspace.hostId !== 'local' || zone?.workspaceId !== workspaceId || zone.hostId !== workspace.hostId ||
+          zone.kind === 'unknown' || zone.directoryPath !== workspace.path ||
+          !graph?.bindings.some(value => value.spaceId === choice.spaceId && value.zoneId === choice.zoneId)) return undefined
+      return { hostId: workspace.hostId, reference: { runtimeId: choice.sourceRuntimeId ?? runtimeId, spaceId: choice.spaceId },
+        zoneId: choice.zoneId, workspaceId }
+    },
     register: (hostId, registration) => api.spaceMounts.call('register', { hostId, registration }),
     prepareEffect: prepareSourceFileEffect
   })
