@@ -1,3 +1,5 @@
+import type { SemanticIconId } from './icon-catalog.js'
+
 /** Instance presentation only. Callers own work eligibility and current navigation selection. */
 export const ICON_ANIMATIONS = ['none', 'work', 'stream', 'execute', 'wait', 'orbit', 'feedback', 'selection', 'spin'] as const
 export type IconAnimation = typeof ICON_ANIMATIONS[number]
@@ -15,3 +17,9 @@ export const SEMANTIC_ICON_PEN = {
   strokeLinecap: 'var(--icon-linecap, round)',
   strokeLinejoin: 'var(--icon-linejoin, round)'
 } as const
+
+export function semanticIconHref(name: SemanticIconId): string { return `#agentmux-icon-${name}` }
+
+export function workIconHref(name: SemanticIconId, part: 'body' | 'pen'): string {
+  return `${semanticIconHref(name)}${part === 'pen' ? '--work-pen' : ''}`
+}

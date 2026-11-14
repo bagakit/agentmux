@@ -1,7 +1,7 @@
 import { ICON_GLYPHS, SEMANTIC_ICON_IDS, type SemanticIconId, type IconShape } from './icon-catalog.js'
 import { iconShapes } from './icon-assets.js'
 import { themeColorSchema, type ThemeValue } from './schema.js'
-import { SEMANTIC_ICON_PEN, type SemanticIconPresentation } from './icon-presentation.js'
+import { semanticIconHref, workIconHref, SEMANTIC_ICON_PEN, type SemanticIconPresentation } from './icon-presentation.js'
 
 /** CSS and native widgets consume these semantic masks while retaining their original DOM state. */
 const NATIVE_ICON_PROJECTIONS = {
@@ -37,13 +37,6 @@ const NATIVE_ICON_IMAGES = {
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const sprites = new WeakMap<Document, { element: SVGSVGElement; signature: string; nativeSignature: string; imageSignature: string }>()
-export function semanticIconHref(name: SemanticIconId): string { return `#agentmux-icon-${name}` }
-
-export const WORK_ICON_PARTS = ['body', 'pen'] as const
-export function workIconHref(name: SemanticIconId, part: typeof WORK_ICON_PARTS[number]): string {
-  return `${semanticIconHref(name)}${part === 'pen' ? '--work-pen' : ''}`
-}
-
 /** The document root owns one sprite. Existing React and editor DOM keep stable references. */
 export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'icons' | 'iconStyle'>, nativeTextColor: string): void {
   let sprite = sprites.get(document)

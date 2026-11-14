@@ -1,5 +1,5 @@
 import type { ComponentPropsWithRef } from 'react'
-import { SemanticIcon } from '../theme/icons.js'
+import { SemanticIcon } from '../theme/semantic-icon.js'
 
 export type AgentWorkLocationObservation =
   | { state: 'confirmed'; positions: Iterable<string> }

@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef } from 'react'
 import { TextInput } from '../input/index.js'
-import { SemanticIcon } from '../theme/icons.js'
+import { SemanticIcon } from '../theme/semantic-icon.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 
 /** The caller owns validation, pending/error facts and the rename transaction. */
