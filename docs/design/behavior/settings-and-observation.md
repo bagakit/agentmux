@@ -297,9 +297,9 @@ Capsule 与 Goals 的用途介绍直接嵌入各自原设置模块，作为可�
 
 Agent CLIs 提供可直接到达的 Providers 和 Executors 入口。Provider 声明协议适配，一个 Provider 可被多个 Executor 引用。每个 Executor 是绑定一个 Provider 的独立启动配置，已保存的 Provider 身份不能因导航或分组而改变。Provider 上下文、所属 Executor 列表与当前详情互相可达。全局模板与准确接收 Host 的配置清单分别保留原 owner、身份和保存动作，Host 的 Provider 默认与显式注册来源保持可辨；Host 注册成功只能确认本次提交的快照，不能清空回执前的后续输入；原回执版本只用于同一准确 Host 连接配置与 Executor ID 的下一次明确提交，目标改变不得沿用，失败或结果未知仍保留草稿且不自动重试。Provider 分组不把不同范围合并，也不把本机声明当作远端事实。参考界面的同名对象不改变本产品身份、配置范围和原保存语义；目录读取、检查与编辑状态分别表达，沿本节既有草稿、检查与保存合同，不把视觉重组扩大成新的配置或运行时能力。
 
-Providers 以纵向 Provider 行和固定能力列比较所选 Host，可按名称、标识或默认命令筛选。每项复用 Core 返回的声明，保留历史读取与实时流、观察权限与回复权限等差别。能力未声明、Host 上未验证和已确认不可用分别表达。每行可进入该 Host 对应 Provider 的 Executors 与[受管 Hook 检查和更新](agent-hooks.md#在-executor-范围检查和更新)。说明 Skills 来自原 Session 的用户级或项目级目录，可在输入框的 Skills 入口查看。Skill 版本只取原文件声明；缺少版本或受管更新来源时分别明确表达，检查和比较不安装、更新或执行 Skill。
+Providers 以纵向 Provider 行和固定能力列比较所选 Host，可按名称、标识或默认命令筛选。每项复用 Core 返回的声明，保留历史读取与实时流、观察权限与回复权限等差别。能力未声明、Host 上未验证和已确认不可用分别表达。每行可进入该 Host 对应 Provider 的 Executors 与[受管 Hook 检查和更新](agent-hooks.md#在-executor-范围检查和更新)。Skill versions 指向[原 Session 的 Skills 入口](conversation-input.md#skill-与-command-的发现不阻塞输入)。选择和探测 ACP 见 [ACP Provider 运行指南](../../guides/provider-acp.md)。
 
-Providers 同屏可看所选 Host 的有效 Executor 条目数及按 Provider 的分布，沿 Host Executor 清单区分默认与显式配置，数量不表示 CLI 已安装。Session 概览复用[所选 Host 的只读网络观察](mesh.md#所选-host-的只读网络观察)，分别呈现 Saved、Running saved 与 Retired。每项保留来源、时间与失败范围，Running saved 是 Saved 的子集，不当作单独分区加总。不轮询历史或启动额外进程；只在该工作面打开、切换 Host 或刷新时读观察，局部失败保留同一 Host 的上一确认值，并标为旧观察。
+Providers 同屏可看所选 Host 的有效 Executor 条目数及按 Provider 的分布，沿 Host Executor 清单区分默认与显式配置，数量不表示 CLI 已安装。Session 概览复用[所选 Host 的只读网络观察](mesh.md#所选-host-的只读网络观察)，分别呈现 Saved、Running saved 与 Retired。每项保留来源、时间与失败范围，Running saved 是 Saved 的子集，不当作单独分区加总。目录和概览沿所选 Host 的路由直接读取；打开、切换 Host 或刷新时取观察，无需轮询历史或启动额外进程。局部失败保留同一 Host 的上一确认值，并标为旧观察。
 
 ### Browser use 与 Agent 操作呈现
 
