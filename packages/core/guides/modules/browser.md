@@ -144,9 +144,9 @@ Read only the matching local help:
   `profileId` and optional original `operationId`; read coverage, unattributed bytes and issues
   alongside site sizes. `clear` takes `profileId`, `expectedRevision`, `operationId` and
   `sites:[{origin,storageKeys}]` copied from that inspection. Select one site or all identified
-  sites in one operation; unknown data is outside that selection. Only the original Main human
-  confirmation approves deletion. Cache API entries in the frozen keys at execution time are
-  in scope; cookies, IndexedDB, localStorage, Service Worker registrations and other
+  sites in one operation; unknown data cannot establish additional keys. Only the original Main
+  human confirmation approves deletion. All current Cache API buckets in the frozen keys are
+  in scope, including unmeasured buckets; cookies, IndexedDB, localStorage, Service Worker registrations and other
   Profiles remain. Pending IDs survive restart; inspect the original ID after an unknown reply
   and never replay deletion automatically. Native acknowledgements and before/after disk
   measurements are separate; active pages can rebuild caches.
