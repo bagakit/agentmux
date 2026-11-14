@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { AgentMuxError } from './errors.js';
 import { rpcRecord } from './rpc-data.js';
 import { parseAgentMuxSpatialGraph, type AgentMuxSpatialGraph, type AgentMuxSpatialState } from './spatial-graph.js';
+import { closeWorkbenchRegion, removeTab } from './spatial-layout.js';
 import { parseSpaceAuthorityRef, spaceIdentityString as rpcString, type SpaceAuthorityRef, type SpaceAuthoritySource } from './space-reference.js';
 export { parseSpaceAuthorityRef, type SpaceAuthorityRef, type SpaceAuthoritySource } from './space-reference.js';
 export type SpaceScope = {
@@ -242,6 +243,22 @@ export function applySpaceEdits(state: AgentMuxSpatialState, input: SpaceApply):
     for (const id of remove.zones ?? [])
         if (graph.bindings.some(binding => binding.zoneId === id))
             invalid('Unbind the original Zone before removing it; other Space bindings are retained.', 'SPACE_PARENT_MISMATCH');
+    // Entity removal also retires its exact saved presentation. Leaving old leaves
+    // behind either rejects a valid split close or resurrects it after restart.
+    for (const id of remove.regions ?? []) {
+        const tabId = state.graph.regions.find(region => region.regionId === id)?.tabId;
+        const layout = tabId && graph.tabLayouts[tabId];
+        if (!tabId || !layout) continue;
+        const next = closeWorkbenchRegion(layout, id);
+        if (next) graph.tabLayouts[tabId] = next;
+        else delete graph.tabLayouts[tabId];
+    }
+    for (const id of remove.tabs ?? []) {
+        delete graph.tabLayouts[id];
+        for (const [workspaceId, layout] of Object.entries(graph.layouts))
+            for (const group of layout.groups)
+                if (group.tabOrder.includes(id)) graph.layouts[workspaceId] = removeTab(graph.layouts[workspaceId]!, group.id, id);
+    }
     const after = new SpaceScopeIndex({ ...state, graph }).select(input.reference.spaceId);
     for (const field of ['zones', 'tabs', 'regions'] as const) {
         const key = idKeys[field], ids = new Set(after[field].map(item => String(item[key as keyof typeof item])));
