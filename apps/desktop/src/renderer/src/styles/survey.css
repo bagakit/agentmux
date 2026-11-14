@@ -380,3 +380,10 @@
 .survey-pin-mark { display: grid; flex: none; place-items: center; width: 12px; color: var(--text-3); }
 .survey-tab-cell .survey-tab-close { width: 20px; height: 20px; }
 .survey-tab-cell[data-selectable="true"] > .survey-tab-column { padding-left: 4px; padding-top: 30px; }
+
+.survey-pinned-items { flex: none; display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-2); }
+.survey-pinned-heading { padding: var(--sp-2) var(--sp-3) var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+
+.global-survey-surface .survey-item-row:has(.survey-pin-mark) > .survey-item { padding-right: 48px; }
+.global-survey-surface .survey-item-row:has(.survey-pin-mark):has(.survey-item-tab-close) > .survey-item { padding-right: 76px; }
+.global-survey-surface .survey-item-row[data-headerless="true"] .survey-pin-mark { position: absolute; right: 6px; top: 31px; }

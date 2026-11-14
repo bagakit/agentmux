@@ -23,6 +23,8 @@ import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem, type SurveyItemNameDraft } from './SurveyZoneItem'
 import { SurveyTabColumn } from './SurveyTabColumn'
 import { SurveyPageItem } from './SurveyPageItem'
+import { surveyPinnedReferences, surveyPinKey } from '../lib/survey-pins'
+import type { AgentMuxSurveyPinReference } from '@agentmux/core/control'
 import { surveyCompositionDestinations, type SurveyCompositionDestinationIntent } from '../lib/survey-composition-destinations'
 import type { SurveyContentReference, SurveyCompositionDropTarget, SurveyCompositionSelectionControl } from '../lib/survey-composition-drag'
 import { SurveyItemList } from './SurveyItemList'
@@ -109,6 +111,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const profiles = useBrowserProfiles(visible)
   const pageReferences = useAppStore(state => state.surveyPageReferences)
   const pageReadRecovery = useAppStore(state => state.surveyPageReadRecovery)
+  const pinnedItems = useAppStore(state => state.pinnedItems)
+  const pinReadRecovery = useAppStore(state => state.surveyPinReadRecovery)
+  const pinReferences = useMemo(() => surveyPinnedReferences({ pinnedItems, surveyPinReadRecovery: pinReadRecovery }), [pinnedItems, pinReadRecovery])
+  const pinnedKeys = useMemo(() => new Set(pinReferences.map(surveyPinKey)), [pinReferences])
   const setCollected = useAppStore(state => state.setSurveyZoneCollected)
   const toolsOpen = useAppStore(state => state.surveyToolsOpen)
   const setSelection = useAppStore(state => state.setSurveyZoneSelection)
@@ -612,6 +618,18 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         position: { zoneId: currentZone.zoneId, tabId: currentPanel.tabId, regionId: currentPanel.regionId } } })
   }
 
+  function pinOptions(reference: AgentMuxSurveyPinReference) {
+    const pinned = pinnedKeys.has(surveyPinKey(reference))
+    return { pinned, onPinChange(value: boolean) {
+      const requestId = mintObjectId()
+      void useAppStore.getState().executeControl({ schemaVersion: 5, requestId, operation: 'space.survey-list',
+        pin: { reference, pinned: value, expectedPinned: pinned } }).then(result => {
+        if (result.operation !== 'space.survey-list') { setError('The original pin operation returned another result. Its item and current preferences are kept.'); return }
+        if (result.issues.length) setError(`[${requestId}] ${result.issues.map(issue => issue.message + ' ' + issue.recovery).join(' ')}`)
+      }).catch(cause => setError(`[${requestId}] ${presentError(cause)}`))
+    } }
+  }
+
   function itemOptionsFor(zone: AgentMuxZoneFact | undefined, activityDetails = zone ? activity(zone).details : null): SurveyItemOptionsProps {
     const bindings = zone ? catalog?.bindings.filter(binding => binding.zoneId === zone.zoneId) ?? [] : []
     const members = zone ? catalog?.tabs.filter(tab => tab.zoneId === zone.zoneId) ?? [] : []
@@ -621,6 +639,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       visible: visible && !controlsCoverPage, title: zone ? itemTitle(zone) : selection ? 'Retained exploration' : 'New exploration',
       zone: zone ?? null, workspace: zone ? resourceWorkspaces.get(zone.workspaceId) ?? null : null,
       collected: !!zone && collected[zone.zoneId] === true,
+      ...(zone && collected[zone.zoneId] ? pinOptions({ kind: 'zone', zoneId: zone.zoneId }) : {}),
       ...(zone && collected[zone.zoneId] ? { grouping: list.groupingFor(zone.zoneId) } : {}),
       relatedSpaces: zone && catalog ? bindings.flatMap(binding => catalog.spaces.filter(space => space.spaceId === binding.spaceId)) : null,
       relatedSpacesUnconfirmed: bindings.some(binding => !catalog?.spaces.some(space => space.spaceId === binding.spaceId && !space.issue)),
@@ -652,12 +671,15 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     ? surveyPageOwner(tabs, pageSelection, catalog) : null
   const currentPageZoneId = currentPageOwner ? catalog?.tabs.find(tab => tab.tabId === currentPageOwner.tab.id)?.zoneId : null
   const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)].filter(([zoneId]) => profileReferences.zoneIds.has(zoneId)))
-  const savedPageItems = profileReferences.pages.length ? <div aria-label="Saved Survey pages">{profileReferences.pages.map(page => {
+  const pinnedZoneIds = pinReferences.flatMap(reference => reference.kind === 'zone' && itemTitles.has(reference.zoneId) ? [reference.zoneId] : [])
+  const pinnedPages = profileReferences.pages.filter(page => pinnedKeys.has(surveyPinKey({ kind: 'page', ...page })))
+  const ordinaryPages = profileReferences.pages.filter(page => !pinnedKeys.has(surveyPinKey({ kind: 'page', ...page })))
+  const pageItems = (references: typeof profileReferences.pages) => references.length ? <div aria-label="Saved Survey pages">{references.map(page => {
           const owner = surveyPageOwner(tabs, page, catalog), browser = owner?.surface.kind === 'browser' ? owner.surface : null
-          return <SurveyPageItem selection={selectionFor({ kind: 'page', ...page })} key={JSON.stringify(page)} page={page} browser={browser} enabled={visible && !controlsCoverPage}
+          return <SurveyPageItem {...pinOptions({ kind: 'page', ...page })} selection={selectionFor({ kind: 'page', ...page })} key={JSON.stringify(page)} page={page} browser={browser} enabled={visible && !controlsCoverPage}
             selected={pageSelection?.regionId === page.regionId && pageSelection.browserId === page.browserId} onSelect={() => setSelection({ kind: 'page', ...page })} onClose={browser ? () => closePage({ kind: 'page', ...page }) : undefined}
             actions={<SurveyItemOptions {...itemOptionsFor(undefined, browser ? <span>{browser.url}</span> : <span>Original Browser unconfirmed; its exact reference is retained.</span>)}
-              rowAction compact title={browser?.title || 'Retained page'} workspace={browser ? resourceWorkspaces.get(browser.workspaceId) ?? null : null}
+              {...pinOptions({ kind: 'page', ...page })} rowAction compact title={browser?.title || 'Retained page'} workspace={browser ? resourceWorkspaces.get(browser.workspaceId) ?? null : null}
               onMovePage={() => { const source = catalog && captureSurveyCompositionSource(useAppStore.getState(), catalog, { kind: 'page', ...page }); if (source) setMovingSources([source]); else setError('The original page changed. Its reference is kept; inspect that same Browser before moving it.') }}
               onClosePage={browser ? () => closePage({ kind: 'page', ...page }) : undefined}
               onRemovePageReference={() => void removePageReference(page)} />} />
@@ -686,6 +708,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           onChange={view => { intent.current += 1; setError(null); void useAppStore.getState().setSurveyProfileView(view).then(save => { if (save.reason) setError('The environment view is kept; saving is unconfirmed. ' + save.reason) }).catch(cause => setError(presentError(cause))) }}
           onRefresh={() => void browserProfiles.refresh()} />
         {profileViewRecovery ? <p role="status" className="survey-relation-notice">{profileViewRecovery.issue}</p> : null}
+        {pinReadRecovery ? <p className="survey-relation-notice" role="status">{pinReadRecovery.issue}</p> : null}
         {pageReadRecovery ? <p className="survey-relation-notice" role="status" data-survey-page-read-recovery>
           {pageReadRecovery.issue}
           <button type="button" className="survey-tab-view" onClick={() => void useAppStore.getState().retrySurveyPagesRead()}>
@@ -697,17 +720,17 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           {unresolvedCompositions.map(operation => <button key={operation.requestId} type="button" onClick={() => setReviewingComposition(operation.requestId)}>Review combination · {operation.sources.length} {operation.sources.every(source => source.kind === 'page') ? 'pages' : 'items'}</button>)}
           {pendingCompositions.length > unresolvedCompositions.length ? <details><summary>A saved combination record could not be read</summary><p>The original record is kept. Other content and combinations remain available.</p><pre>{JSON.stringify(pendingCompositions.filter(entry => !isSurveyCompositionRecovery(entry)), null, 2)}</pre></details> : null}
         </div> : null}
-        <SurveyItemList leading={selectionControls} trailing={savedPageItems} composition={{ start: startComposition, canDrop: canCompose, drop: dropComposition }} model={list} titles={itemTitles} selectedZoneId={selection?.zoneId ?? currentPageZoneId ?? undefined} visible={visible && !controlsCoverPage} renderItem={(zoneId, dragHandle, compositionEnabled) => {
+        <SurveyItemList leading={selectionControls} pinnedZoneIds={pinnedZoneIds} pinnedPages={pageItems(pinnedPages)} trailing={pageItems(ordinaryPages)} composition={{ start: startComposition, canDrop: canCompose, drop: dropComposition }} model={list} titles={itemTitles} selectedZoneId={selection?.zoneId ?? currentPageZoneId ?? undefined} visible={visible && !controlsCoverPage} renderItem={(zoneId, dragHandle, compositionEnabled) => {
           const zone = displayedItems.get(zoneId)
           if (!zone) return <div className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             {dragHandle}<button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><ThemeStatusUnknownIcon size={14} /><strong>Retained exploration</strong></button>
             <span className="survey-relation-notice" role="status">Original source is not confirmed. Its reference is kept.</span>
-            <div className="survey-item-shortcuts"><button type="button" aria-label="Remove retained exploration from Survey" title="Remove from Survey" onClick={() => closeItem(zoneId)}><ThemeActionCloseIcon size={12} /></button></div>
+            <div className="survey-item-shortcuts"><button type="button" className="survey-item-tab-close" aria-label="Remove retained exploration from Survey" title="Remove from Survey" onClick={() => closeItem(zoneId)}><ThemeActionCloseIcon size={12} /></button><SurveyItemOptions {...itemOptionsFor(undefined)} {...pinOptions({ kind: 'zone', zoneId })} rowAction compact title="Retained exploration" /></div>
           </div>
             const status = activity(zone)
             const itemTabs = [...new Set(itemReferences(zone.zoneId).map(reference => reference.tabId))]
             const itemOptions = itemOptionsFor(zone, status.details)
-            return <SurveyZoneItem selection={selectionFor({ kind: 'research', zoneId: zone.zoneId })} compositionEnabled={compositionEnabled} dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId || currentPageZoneId === zone.zoneId}
+            return <SurveyZoneItem pinned={pinnedKeys.has(surveyPinKey({ kind: 'zone', zoneId }))} selection={selectionFor({ kind: 'research', zoneId: zone.zoneId })} compositionEnabled={compositionEnabled} dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId || currentPageZoneId === zone.zoneId}
               showTitle={selectingContent || sidebarCollapsed || itemTabs.length < 2 || Boolean(explorationNames[zone.zoneId]?.trim())}
               tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn selection={selectionFor({ kind: 'tab', tabId })} compositionEnabled={compositionEnabled} key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId || currentPageOwner?.tab.id === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
               onCloseSingleTab={itemTabs.length === 1 ? () => closeItemTab(zone.zoneId, itemTabs[0]!, itemTitle(zone)) : undefined}

@@ -30,9 +30,11 @@ function acceptsContainer(from: Target | undefined, groupId: string | null): boo
 }
 
 /** List organization alone owns drag behavior; each original row retains its existing content/actions. */
-export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId, leading, trailing, composition }: {
+export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId, leading, trailing, pinnedZoneIds = [], pinnedPages, composition }: {
   leading?: ReactNode
   trailing?: ReactNode
+  pinnedZoneIds?: readonly string[]
+  pinnedPages?: ReactNode
   composition?: { start(reference: SurveyContentReference): string | null; canDrop(target: SurveyCompositionDropTarget): boolean; drop(target: SurveyCompositionDropTarget | null): void }
   model: SurveyListOrganizationModel
   titles: ReadonlyMap<string, string>
@@ -79,7 +81,8 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
   const previewBounds = useRef<{ left: number; right: number; width: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   useEffect(() => { if (!visible) { held.current = null; setDragging(false); composition?.drop(null) } }, [visible])
-  const ids = (values: string[]) => values.filter(id => titles.has(id))
+  const pinnedSet = new Set(pinnedZoneIds)
+  const ids = (values: string[]) => values.filter(id => titles.has(id) && !pinnedSet.has(id))
   function start(event: DragStartEvent) {
     if (event.active.data.current?.kind === 'content') { held.current = null; contentPresentation.current = (event.active.data.current as SurveyContentDrag).presentation; contentLabel.current = composition?.start((event.active.data.current as SurveyContentDrag).reference) ?? null }
     else { contentLabel.current = null; held.current = { expected: model.stored, editable: model.editable } }
@@ -154,6 +157,15 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
         return items.length ? items : pointer.length ? pointer : args.pointerCoordinates ? [] : closestCenter(candidates)
       }}>
       {leading}
+      {pinnedZoneIds.length || pinnedPages ? <div className="survey-pinned-items" role="group" aria-label="Pinned Survey items">
+        <span className="survey-pinned-heading">Pinned</span>
+        <SortableContext items={pinnedZoneIds.map(itemKey)} strategy={verticalListSortingStrategy}>
+          {pinnedZoneIds.filter(id => titles.has(id)).map((zoneId, index) => <SortableItem key={zoneId} zoneId={zoneId} index={index}
+            groupId={model.effective.groups.find(group => group.zoneIds.includes(zoneId))?.groupId ?? null}
+            title={titles.get(zoneId)!} visible={visible} render={(id, _handle, enabled) => renderItem(id, null, enabled)} />)}
+        </SortableContext>
+        {pinnedPages}
+      </div> : null}
       <Ungrouped hasGroups={model.effective.groups.length > 0}>{rows(model.effective.ungrouped, null)}</Ungrouped>
       <SortableContext items={model.effective.groups.map(group => groupKey(group.groupId))} strategy={verticalListSortingStrategy}>
         {model.effective.groups.map(group => <SurveyListGroup key={group.groupId} group={group} model={model} visible={visible} selected={group.zoneIds.includes(selectedZoneId ?? '')}>
