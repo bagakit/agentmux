@@ -7,6 +7,9 @@ import owning from '../scripts/fixtures/toolkit-custom/vitest.config.mts'
 
 const owner = 'apps/desktop/src/main/toolkit-custom-owner.ts'
 const changes: Record<string, [string, string, string]> = {
+  'cache-receipt-read-error': ['apps/desktop/src/main/toolkit-receipt-store.ts', '      this.loaded = null\n      throw error', '      throw error'],
+  'cache-custom-load-error': [owner, "        value.error = 'Tool receipt is unconfirmed: ' + message(error)\n        value.loading = null", "        value.error = 'Tool receipt is unconfirmed: ' + message(error)"],
+  'cache-performance-load-error': ['apps/desktop/src/main/toolkit-owner.ts', '        this.loaded = null\n      }', '      }'],
   'raw-ownership': ['apps/desktop/src/main/runtime-controller.ts', "if (output === 'raw') this.toolkitRuns.set", 'if (true) this.toolkitRuns.set'],
   'repeat-load': [owner, 'const added = [...enabled].filter(id => !this.autoStartingTools.has(id))', 'const added = [...enabled]'],
   'runner-environment': [owner, '      delete env.ELECTRON_RUN_AS_NODE\n', ''],
@@ -37,4 +40,4 @@ export default defineConfig({ ...owning, plugins: [...(owning.plugins ?? []), {
 }], test: { ...owning.test,
   include: ['apps/desktop/test/toolkit-tui-runtime.test.ts', 'apps/desktop/test/toolkit-tui-owner.test.ts',
     'apps/desktop/test/toolkit-custom-owner.test.ts', 'apps/desktop/test/toolkit-owner.test.ts',
-    'apps/desktop/test/run-service-projection.test.ts'] } })
+    'apps/desktop/test/run-service-projection.test.ts', 'apps/desktop/test/toolkit-receipt-store.test.ts'] } })

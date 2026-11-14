@@ -1,13 +1,16 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp"), getAppPath: () => process.cwd() } }))
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, mkdtemp, readFile, rename, rm, rmdir } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import type { IpcMainInvokeEvent } from 'electron'
 import { ToolkitReceiptStore } from '../src/main/toolkit-receipt-store.js'
 import { CustomToolkitOwner } from '../src/main/toolkit-custom-owner.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
-import { TOOLKIT_MAX_LISTED_TOOLS, type ToolkitToolDefinition } from '@agentmux/core/control'
+import { ToolkitOwner } from '../src/main/toolkit-owner.js'
+import { registerToolkitIpc } from '../src/main/toolkit-ipc.js'
+import { TOOLKIT_MAX_LISTED_TOOLS, type ToolkitToolDefinition, type ToolkitResult } from '@agentmux/core/control'
 const directories: string[] = []
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }) })
 async function store(ids: () => string[]) {
@@ -56,5 +59,54 @@ describe('bounded Toolkit durable receipt file', () => {
     expect(await tools.get('good')).toMatchObject({ state: 'idle', latestConfirmed: null, reason: null })
     expect(open).not.toHaveBeenCalled()
     await tools.dispose()
+  })
+  it('rereads the original file in the same Main owners after a temporary filesystem read error', async () => {
+    const definition: ToolkitToolDefinition = { id: 'local-tui', revision: 'original-revision', name: 'Terminal', icon: 'terminal',
+      mode: 'tui', enabled: true, autoStart: false, statusBar: 'icon', workspacePath: _hygiene_fixturePath("tmp"), script: '', args: [] }
+    const performanceRun = { hostId: 'local', runId: 'original-performance-run' }
+    const { file, value } = await store(() => [definition.id, 'performance'])
+    await value.save(definition.id, { latestConfirmed: null, admission: {
+      definition, executionId: 'original-tui-request', invocationId: 'original-invocation', expectedLatestExecutionId: null,
+      target: { workspacePath: definition.workspacePath }, run: null, startedAt: 1000, text: '', state: 'unknown', reason: 'Original TUI launch receipt was missing.'
+    } })
+    await value.save('performance', { schema: 'agentmux.performance.receipt.v1', admission: {
+      executionId: 'original-performance-request', run: performanceRun, startedAt: 1000, reason: 'Original Performance observation.'
+    } })
+    const retained = file + '.held'
+    // EISDIR at the exact receipt path, while the original byte image remains intact.
+    await rename(file, retained)
+    await mkdir(file)
+    const config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [definition] } }
+    const configuration = new ConfigOwner({ read: () => config, save: async next => next, publish: () => {} })
+    const openRunPort = vi.fn(async () => { throw new Error('A read must never open a Run.') })
+    const owner = new ToolkitOwner({ config: configuration, receiptPath: file, openRunPort, enabled: () => true,
+      launch: () => ({ runner: process.execPath, cli: '', script: resolve('apps/desktop/resources/toolkit/performance.mjs'), cwd: definition.workspacePath, env: {} }) })
+    let get: ((event: IpcMainInvokeEvent, id: string) => unknown) | undefined
+    const detach = registerToolkitIpc(owner, (channel, handler) => { if (channel === 'toolkit:get') get = handler })
+    const inspect = async (id: string) => await get!({} as IpcMainInvokeEvent, id) as Extract<ToolkitResult, { operation: 'toolkit.get' }>
+    const observed = vi.fn()
+    const lease = await owner.subscribe(definition.id, observed, vi.fn(), new AbortController().signal)
+    try {
+      const missing = await Promise.all([inspect(definition.id), inspect('performance')])
+      expect(missing.map(({ snapshot }) => snapshot)).toEqual([
+        expect.objectContaining({ state: 'unknown', reason: expect.stringContaining('Tool receipt is unconfirmed') }),
+        expect.objectContaining({ state: 'unknown', reason: expect.stringContaining('Performance admission is unconfirmed') })
+      ])
+      await rmdir(file)
+      await rename(retained, file)
+      const [tui, performance] = await Promise.all([inspect(definition.id), inspect('performance')])
+      expect(tui.snapshot).toMatchObject({ state: 'unknown', reason: 'Original TUI launch receipt was missing.',
+        admission: { executionId: 'original-tui-request', run: null } })
+      expect(performance.snapshot).toMatchObject({ state: 'unknown', reason: 'Original Performance observation.',
+        executionId: 'original-performance-request', run: performanceRun })
+      expect(observed).toHaveBeenLastCalledWith(expect.objectContaining({
+        admission: expect.objectContaining({ executionId: 'original-tui-request' })
+      }))
+      expect(openRunPort).not.toHaveBeenCalled()
+    } finally {
+      lease.dispose()
+      detach()
+      await owner.dispose()
+    }
   })
 })
