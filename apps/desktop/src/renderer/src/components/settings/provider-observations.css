@@ -1,0 +1,119 @@
+.provider-observations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 10px;
+}
+
+.provider-observation {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--surface-1);
+}
+
+.provider-observation > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 3px 10px;
+}
+
+.provider-observation h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.provider-observation header small,
+.provider-observation__time,
+.provider-observation__note {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.provider-observation__total {
+  color: var(--text);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.provider-observation__total,
+.provider-observation dd,
+.provider-observation time {
+  font-variant-numeric: tabular-nums;
+}
+
+.provider-observation dl,
+.provider-observation dd,
+.provider-observation p {
+  margin: 0;
+}
+
+.provider-observation__bar {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  height: 5px;
+  border-radius: 5px;
+  background: var(--line-soft);
+}
+
+.provider-observation__bar > span {
+  height: 100%;
+  background: var(--blue);
+}
+
+.provider-observation__bar--executors > span:first-child,
+.provider-observation__session[data-reading='stale'] .provider-observation__bar > span {
+  background: var(--text-3);
+}
+
+.provider-observation[data-reading='stale'] .provider-observation__bar {
+  opacity: 0.7;
+}
+
+.provider-observation__inventory {
+  display: grid;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.provider-observation__inventory > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.provider-observation__sessions {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(16px, 1fr);
+  gap: 5px 8px;
+}
+
+.provider-observation__session {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  gap: 1px 8px;
+  font-size: 12px;
+}
+
+.provider-observation__session dt { grid-column: 1; grid-row: 1; color: var(--text-2); }
+.provider-observation__count { grid-column: 2; grid-row: 1; justify-self: end; color: var(--text); font-weight: 600; }
+.provider-observation__session .provider-observation__bar { grid-column: 3; grid-row: 1; }
+.provider-observation__time { grid-column: 2 / -1; grid-row: 2; }
+
+.provider-observation__issue {
+  color: var(--text-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

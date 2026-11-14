@@ -834,10 +834,10 @@ export class RuntimeController {
     return options?.observation ? { catalog: entries, warnings: [...warnings.values()] } : entries
   }
 
-  async discoverExecutors(hostId: string): Promise<import('../shared/contracts.js').HostExecutorInventory> {
+  async discoverExecutors(hostId: string, options?: { refresh?: boolean }): Promise<import('../shared/contracts.js').HostExecutorInventory> {
     const host = this.hosts.get(hostId)
     if (!host) throw new AgentMuxError('The exact execution Host is not configured.', 'UNKNOWN_HOST')
-    const inventory = await host.client.listHostExecutors({ refresh: true })
+    const inventory = await host.client.listHostExecutors({ refresh: options?.refresh ?? true })
     if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed while reading its Executor inventory. Refresh this Host.', 'EXECUTOR_HOST_CHANGED')
     return { routeHostId: hostId, ...inventory }
   }

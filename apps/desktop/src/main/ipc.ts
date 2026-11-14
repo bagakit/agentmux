@@ -1883,9 +1883,10 @@ export async function registerIpc(args: {
   })
   handleWithEvent('providers:forHost', (_event, hostId: string) => callUserRpc('agent.provider.ls', { hostId }))
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await refreshSettingsExecutor(executorId, hostId, configOwner, runtimeIncidents ?? args.runtime))
-  handle('executors:discover', async (hostId: string) => {
+  handle('executors:discover', async (hostId: string, refresh = true) => {
     if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
-    return await args.runtime.discoverExecutors(hostId)
+    if (typeof refresh !== 'boolean') throw new TypeError('Executor refresh must be boolean.')
+    return await args.runtime.discoverExecutors(hostId, { refresh })
   })
   handleWithEvent('executors:unregister', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.executors.unregister'>) =>
     sessionInputOperationResult(() => callUserRpc('settings.executors.unregister', input)))

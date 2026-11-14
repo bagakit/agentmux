@@ -609,7 +609,9 @@ const api: AgentMuxPreloadApi = {
   },
   executors: {
     detect: (executorId: AgentExecutorId, hostId: string) => ipcRenderer.invoke('executors:detect', executorId, hostId),
-    discover: (hostId: string) => ipcRenderer.invoke('executors:discover', hostId),
+    discover: (hostId, options) => options?.refresh === undefined
+      ? ipcRenderer.invoke('executors:discover', hostId)
+      : ipcRenderer.invoke('executors:discover', hostId, options.refresh),
     register: (hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput) => ipcRenderer.invoke('executors:register', hostId, input),
     unregister: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('executors:unregister', input)),
     hooks: async (input, update) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('executors:hooks', input, update))
