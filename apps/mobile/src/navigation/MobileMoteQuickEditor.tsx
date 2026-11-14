@@ -2,8 +2,14 @@ import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
+import { FormRow } from '@agentmux/client-ui/components/FormRow'
+import { TextInput } from '@agentmux/client-ui/input'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, sameMoteDefaultConversation, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { useMoteQuickDraft } from './useMoteQuickDraft'
+
+const HEARTBEAT_MINUTES_ISSUE = '心跳间隔请填至少 1 分钟的整数。'
+const ROLLOVER_MINUTES_ISSUE = '请填写大于 0 的空闲分钟数，例如 20 或 1.5。'
 
 type Props = { target: MotePreferencesTarget; client: AgentMuxHostedClient | null; visible: boolean;
   copyText: ClientUiPlatform['copyText']; onClose(): void; onSaved(): void }
@@ -40,9 +46,19 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
     {read?.status === 'ready' && (!read.choices || read.choices.executors === null || read.choices.destinations === null) && <p role="status">正在读取其余候选；已保存的配置仍可编辑和保存。</p>}
     {read?.choices?.issues && <MobileNotice kind="warning" owner={client} identity={[JSON.stringify(target),read.choices.issues.executors,read.choices.issues.locations]} role="status">{Object.values(read.choices.issues).join(' ')}<button type="button" className="mobile-text-button" onClick={() => { void model.inspect() }}>重新核对候选</button></MobileNotice>}
     <MobileNotice dismissible={!model.busy && !model.adoptionBusy} kind={blocked && !model.busy && !model.adoptionBusy ? "warning" : "feedback"} owner={client} identity={[JSON.stringify(target),blocked?.input.operationId,blocked?.phase,model.notice]} role="status">{model.busy ? '正在保存配置…' : model.adoptionBusy ? '正在采用当前修订…' : blocked ? '保存还没确认。' : model.notice || '正在核对配置…'}</MobileNotice>
-    <form onSubmit={event => { event.preventDefault()
-      if (moteMinutesToMs(minutes, { wholeMinutes: true }) === null) { setIntervalIssue('心跳间隔请填至少 1 分钟的整数。'); return }
-      if (rolloverKind === 'idle' && moteMinutesToMs(rolloverMinutes) === null) { setRolloverIssue('请填写大于 0 的空闲分钟数，例如 20 或 1.5。'); return }
+    <form noValidate onKeyDown={event => {
+      if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault()
+    }} onSubmit={event => { event.preventDefault()
+      if (moteMinutesToMs(minutes, { wholeMinutes: true }) === null) {
+        setIntervalIssue(HEARTBEAT_MINUTES_ISSUE)
+        event.currentTarget.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')?.focus()
+        return
+      }
+      if (rolloverKind === 'idle' && moteMinutesToMs(rolloverMinutes) === null) {
+        setRolloverIssue(ROLLOVER_MINUTES_ISSUE)
+        event.currentTarget.querySelector<HTMLInputElement>('input[name="rolloverMinutes"]')?.focus()
+        return
+      }
       void model.save()
     }}>
       <label>新对话使用的 Agent<select aria-label="新对话使用的 Agent" value={executor} onChange={event => {
@@ -58,23 +74,27 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
         <label>自动流转策略<select aria-label="自动流转策略" value={rolloverKind} onChange={event => editRollover(event.target.value as 'keep-current' | 'idle', rolloverMinutes)}>
           <option value="keep-current">保持当前对话</option><option value="idle">空闲后新一轮</option>
         </select></label>
-        {rolloverKind === 'idle' && <label>对话空闲时长（分钟）<input type="number" inputMode="decimal" min="0" step="any" aria-label="对话空闲时长（分钟）" value={rolloverMinutes}
-          onChange={event => editRollover('idle', event.target.value)} /></label>}
+        {rolloverKind === 'idle' && <FormRow layout="stacked" label="对话空闲时长（分钟）"
+          description="填写大于 0 的分钟数，可用小数。" error={rolloverIssue} invalid={Boolean(rolloverIssue)}>
+          {field => <TextInput {...field} name="rolloverMinutes" type="number" inputMode="decimal" min="0" step="any" value={rolloverMinutes}
+            onChange={event => editRollover('idle', event.target.value)} />}
+        </FormRow>}
         <p>保存后才生效。达到空闲时长后，下次新问题再开启新一轮；旧对话保留。保存不会立即切换主对话，也不会发送消息。</p>
         {!read || read.status !== 'ready' ? <p>已保存的流转策略尚未确认；当前选择保留。</p> : !read.defaults?.conversationRollover && <p>配置中还没有流转策略，不修改时保持当前对话。</p>}
-        {rolloverIssue && <p role="status">{rolloverIssue}</p>}
       </fieldset>
       <fieldset className="mobile-mote-presence"><legend>主 Agent 驻留与心跳</legend>
         <label><input type="checkbox" aria-label="启用 Mote 自动维持" checked={presence.enabled} onChange={event => model.edit({ ...draft.values, presence: { ...presence, enabled: event.target.checked } })} />启用自动维持</label>
-        <label>心跳间隔（分钟）<input type="number" inputMode="numeric" min="1" step="1" required aria-label="心跳间隔（分钟）" value={minutes} onChange={event => {
-          const value = event.target.value; setMinutes(value)
-          const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
-          if (intervalMs !== null) {
-            setIntervalIssue(''); model.edit({ ...draft.values, presence: { ...presence, intervalMs } })
-          } else setIntervalIssue('心跳间隔请填至少 1 分钟的整数。')
-        }} /></label>
-        <p>默认每 30 分钟核对目标、工作 thread 和未完成承诺；没有新进展时可保持安静。修改间隔不会恢复已经暂停的安排。</p>
-        {intervalIssue && <p role="status">{intervalIssue}</p>}
+        <FormRow layout="stacked" label="心跳间隔（分钟）"
+          description="默认每 30 分钟核对目标、工作 thread 和未完成承诺；没有新进展时可保持安静。修改间隔不会恢复已经暂停的安排。"
+          error={intervalIssue} invalid={Boolean(intervalIssue)}>
+          {field => <TextInput {...field} name="heartbeatMinutes" type="number" inputMode="numeric" min="1" step="1" required value={minutes} onChange={event => {
+            const value = event.target.value; setMinutes(value)
+            const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
+            if (intervalMs !== null) {
+              setIntervalIssue(''); model.edit({ ...draft.values, presence: { ...presence, intervalMs } })
+            } else setIntervalIssue(HEARTBEAT_MINUTES_ISSUE)
+          }} />}
+        </FormRow>
         <p data-mote-maintenance-status={maintenance?.status ?? 'unread'}>{maintenanceLabel}</p>
         {maintenance?.issue && <p role="status">{maintenance.issue}</p>}
         {maintenance?.schedule && <>
