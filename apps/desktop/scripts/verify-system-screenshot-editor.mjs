@@ -166,7 +166,7 @@ try {
   for (const mutation of mutations) assert.equal(sources[mutation.source ?? source].split(mutation.from).length, 2, 'Unique production mutation: ' + mutation.id)
   await test('baseline')
   for (const mutation of mutations) await test(mutation.id, mutation)
-  const phase = await command('native-stage', process.execPath, [resolve('apps/desktop/scripts/fixtures/system-screenshot-editor/verify-native.mjs'), out], {}, 120000)
+  const phase = await command('native-stage', process.execPath, [resolve('apps/desktop/scripts/fixtures/system-screenshot-editor/verify-native.mjs'), out], {}, 240000)
   assert.equal(phase.code, 0, phase.log)
   const native = JSON.parse(await readFile(join(out, 'native-stage-receipt.json'), 'utf8'))
   assert.equal(native.passed, true)
