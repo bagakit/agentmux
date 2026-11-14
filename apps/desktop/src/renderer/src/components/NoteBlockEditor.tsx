@@ -434,6 +434,10 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       {actionEditor && <NoteTableTools editor={actionEditor} />}
     </RovingToolbar>
     {attachments.pending && <p className="note-knowledge-notice" role="status">Copying attachments to this Note’s folder…</p>}
+    {attachments.retainedFiles.length > 0 && <div className="note-knowledge-notice" role="status">Selected attachment files kept in this editor: {attachments.retainedFiles.map((file, index) => <button key={index} type="button" className="note-text-button" onClick={() => {
+      const href = URL.createObjectURL(file), link = window.document.createElement('a')
+      link.href = href; link.download = file.name; link.click(); setTimeout(() => URL.revokeObjectURL(href), 1000)
+    }}>Save {file.name || 'attachment'}</button>)}</div>}
     {attachments.issue && <p className="note-knowledge-notice" role="status">{attachments.issue} <button type="button" className="note-text-button" onClick={attachments.dismiss}>Dismiss</button></p>}
     <div className="note-editor__body" onFocus={event => { if (editor && (event.target as HTMLElement).closest('.note-block-content') === editor.view.dom) { shared?.focusEditor(editor, attachments); showSelectedAction() } }} onPointerMove={event => {
       if (!editor || editor.isDestroyed || !(event.target instanceof ownerDocument.defaultView!.Element)) return

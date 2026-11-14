@@ -54,7 +54,7 @@ export type FileDocumentIssue =
 export function hasRecoverableFileBuffer(document: FileDocument | undefined, issue: FileDocumentIssue | undefined): boolean {
   // Overwrite of a formerly clean deleted file can end in write-unknown/error;
   // replacing that diagnostic cannot revoke custody of its existing body.
-  return Boolean(document && issue)
+  return Boolean(document && (issue || document.noteEditing?.shareCleanupIssue))
 }
 
 /** A write receipt has no same-opened-FD read source for the replacement inode. */

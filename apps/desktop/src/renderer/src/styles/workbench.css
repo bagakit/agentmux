@@ -219,8 +219,8 @@
 }
 .workbench-tab-rename-feedback > .service-window { margin: 0; }
 
-.file-operation-service { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--border-color); font-size: 12px; line-height: 1.5; background: var(--surface-raised, var(--panel-background)); overflow-wrap: anywhere; }
+.file-operation-service { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); font-size: 12px; line-height: 1.5; background: var(--surface-1); overflow-wrap: anywhere; }
 .file-operation-service p { margin: 0 0 6px; }
-.file-operation-service__request { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color); }
+.file-operation-service__request { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
 .file-operation-service__request > span, .file-operation-service__request > small { display: block; }
-.file-operation-service__request > small { color: var(--text-secondary); user-select: text; }
+.file-operation-service__request > small { color: var(--text-3); user-select: text; }

@@ -743,57 +743,6 @@ const mockApi: AgentMuxDesktopApi = {
       mockFileInvalidationListeners.add(listener)
       return () => mockFileInvalidationListeners.delete(listener)
     },
-    create: async (_workspaceId, input) => {
-      if (mockFiles.has(input.path)) throw new Error(`Path already exists: ${input.path}`)
-      mockFiles.set(input.path, input.kind === 'directory' ? null : '')
-      if (input.kind === 'file') mockFileRevisions.set(input.path, `mock:${++mockRevisionSequence}`)
-    },
-    move: async (input) => {
-      if (input.source.workspaceId !== input.destination.workspaceId) {
-        return {
-          status: 'error',
-          code: 'WORKSPACE_MOVE_CROSS_WORKSPACE',
-          message: 'Moving paths between workspaces is not supported',
-          finalLocation: 'source'
-        }
-      }
-      if (!mockFiles.has(input.source.path)) {
-        return {
-          status: 'error',
-          code: 'ENOENT',
-          message: `Path not found: ${input.source.path}`,
-          finalLocation: 'unknown'
-        }
-      }
-      if (mockFiles.has(input.destination.path)) {
-        return {
-          status: 'error',
-          code: 'WORKSPACE_MOVE_DESTINATION_EXISTS',
-          message: `Path already exists: ${input.destination.path}`,
-          finalLocation: 'source'
-        }
-      }
-      const entries = [...mockFiles.entries()]
-      for (const [path, content] of entries) {
-        if (path === input.source.path || path.startsWith(`${input.source.path}/`)) {
-          mockFiles.delete(path)
-          const nextPath = `${input.destination.path}${path.slice(input.source.path.length)}`
-          mockFiles.set(nextPath, content)
-          const revision = mockFileRevisions.get(path)
-          mockFileRevisions.delete(path)
-          if (revision) mockFileRevisions.set(nextPath, revision)
-        }
-      }
-      return { status: 'moved' }
-    },
-    delete: async (_workspaceId, path) => {
-      for (const candidate of [...mockFiles.keys()]) {
-        if (candidate === path || candidate.startsWith(`${path}/`)) {
-          mockFiles.delete(candidate)
-          mockFileRevisions.delete(candidate)
-        }
-      }
-    },
     openSystem: async (_workspaceId, path) => {
       if (!mockFiles.has(path)) throw new Error(`Could not open ${path}`)
     },

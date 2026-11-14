@@ -66,7 +66,6 @@ import type {
   BrowserInputHistoryScope,
   BrowserViewport,
   ZoomCommand,
-  CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   RunFanOutInput,
   KeepOneOfFanOutInput,
@@ -74,7 +73,6 @@ import type {
   DesktopControlCancellation,
   DesktopControlResponse,
   HostConfig,
-  MoveWorkspacePathInput,
   RemoveWorktreeInput,
   RuntimeEvent,
   SessionHistoryObservationEvent,
@@ -383,10 +381,6 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on(WORKSPACE_FILE_INVALIDATED_CHANNEL, wrapped)
       return () => ipcRenderer.off(WORKSPACE_FILE_INVALIDATED_CHANNEL, wrapped)
     },
-    create: (workspaceId: string, input: CreateWorkspacePathInput) =>
-      ipcRenderer.invoke('files:create', workspaceId, input),
-    move: (input: MoveWorkspacePathInput) => ipcRenderer.invoke('files:move', input),
-    delete: (workspaceId: string, path: string) => ipcRenderer.invoke('files:delete', workspaceId, path),
     openSystem: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openSystem', workspaceId, path),
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },

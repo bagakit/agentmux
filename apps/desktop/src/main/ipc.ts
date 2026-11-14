@@ -46,7 +46,6 @@ import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
 import { ClientIncidentRuntimeOwner } from './client-incident-runtime.js'
 import type { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { isAgentSchedule } from '@agentmux/core'
-import { NoteFileMutations } from './note-file-mutations.js'
 import { parseFileShareUndoParams, parseFileShareUndoResult } from '@agentmux/core/files'
 import { NoteSharedUndoOwner } from '@agentmux/host/note-shared-undo-owner'
 import { NoteSharedFileDeleteOwner } from '@agentmux/host/note-shared-file-delete-owner'
@@ -214,14 +213,12 @@ import type {
   BrowserPresentationActivation,
   BrowserProfileClearSiteApproval, BrowserProfileDeleteApproval, BrowserProfileEdit,
   BrowserViewport,
-  CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   CreateWorkspaceInput,
   DesktopControlResponse,
   HostConfig,
   KeepOneOfFanOutInput,
   KeepOneOfFanOutOutcome,
-  MoveWorkspacePathInput,
   RemoveWorktreeInput,
   RemoveWorktreeOutcome,
   WorktreeRemovalNotice,
@@ -1264,7 +1261,6 @@ export async function registerIpc(args: {
   const publicFiles = new FileReadOwner<WorkspaceRecord>({ share: { share: (input, context) => noteSharedBlocks.share(input, context), undoShare: (input, context) => noteSharedBlocks.undoShare(input, context), inspectShare: (input, context) => noteSharedBlocks.inspectShare(input, context) }, files: { writeBytes: (owner, input) => notesStorageOwner.write(owner, input, actual => files.writeBytes(actual, input)), writeSharedUndo: (owner, input, context, action, transferred) => notesStorageOwner.write(owner, input, actual => noteFileWriter.writeSharedUndo(actual, input, context, action, transferred)), createShared: (owner, input, context, source) => notesStorageOwner.write(owner, input, actual => noteFileWriter.createShared(actual, input, context, source)), read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), restore: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.restore(actual, input, context)), undo: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.undo(actual, input, context)), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     retiredZone: async id => (await spatialState.read())?.graph.resources['zone:' + id],
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
-  const noteFileMutations = new NoteFileMutations(files, notebookStore.runWithWriteLease.bind(notebookStore))
   const sharedFileDeletion = new NoteSharedFileDeleteOwner(files, notebookStore)
   const sharedUndo = new NoteSharedUndoOwner({ files, workspaces: async () => ({ workspaces: config.workspaces, complete: true }), target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: notebookStore.readHistory.bind(notebookStore), operation: notebookStore.readHistoryOperation.bind(notebookStore), lease: notebookStore.runWithWriteLease.bind(notebookStore), delete: async (resource, input, context) => { const owner = titleWorkspace(resource); return owner ? notesStorageOwner.write(owner, input, actual => sharedFileDeletion.delete(actual, input, context)) : { status: 'unknown', code: 'NOTE_RESOURCE_CHANGED', message: 'The exact original shared deletion resource changed.' } } })
   noteSharedBlocks = new NoteSharedBlockOwner({ undo: sharedUndo, files: { read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), createShared: publicFiles.createShared.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles) }, historyOperation: notebookStore.readHistoryOperation.bind(notebookStore), withWriteLease: notebookStore.runWithWriteLease.bind(notebookStore) })
@@ -1372,22 +1368,6 @@ export async function registerIpc(args: {
   handle('files:unobserve', async (workspaceId: string, path: string) => {
     const key = `${workspaceId}\0${path}`
     await fileObservations.unobserve(key)
-  })
-  handle('files:create', async (workspaceId: string, input: CreateWorkspacePathInput) => {
-    await noteFileMutations.create(workspace(config, workspaceId), input)
-  })
-  handle('files:move', async (input: MoveWorkspacePathInput) => await nameAudit.run([{
-    target: { kind: 'workspace-path', id: JSON.stringify([input.source.workspaceId, input.source.path]) },
-    location: { workspaceId: input.source.workspaceId, cwd: workspace(config, input.source.workspaceId).path,
-      hostId: workspace(config, input.source.workspaceId).hostId, destinationWorkspaceId: input.destination.workspaceId },
-    before: input.source.path, requested: input.destination.path
-  }], () => noteFileMutations.move(workspace(config, input.source.workspaceId), workspace(config, input.destination.workspaceId), input),
-  result => result.status === 'moved' ? { actual: input.destination.path } : {
-    actual: result.finalLocation === 'source' ? input.source.path : null,
-    status: result.finalLocation === 'source' ? 'failed' : 'unknown', reason: result.message
-  }))
-  handle('files:delete', async (workspaceId: string, path: string) => {
-    await noteFileMutations.delete(workspace(config, workspaceId), path)
   })
   handle('files:openSystem', async (workspaceId: string, path: string) => {
     const error = await shell.openPath(await files.localPathForSystemOpen(workspace(config, workspaceId), path))

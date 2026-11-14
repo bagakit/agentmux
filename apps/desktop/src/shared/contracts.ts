@@ -1806,9 +1806,6 @@ export type AgentMuxDesktopApi = {
     observe(workspaceId: string, path: string): Promise<void>
     unobserve(workspaceId: string, path: string): Promise<void>
     onInvalidated(listener: (event: WorkspaceFileInvalidated) => void): () => void
-    create(workspaceId: string, input: CreateWorkspacePathInput): Promise<void>
-    move(input: MoveWorkspacePathInput): Promise<WorkspacePathMoveResult>
-    delete(workspaceId: string, path: string): Promise<void>
     /** Open a local Workspace path with the host operating system's default handler. */
     openSystem(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>

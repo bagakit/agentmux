@@ -197,6 +197,7 @@ export function NoteFileSurfaceView({ tabId, surface, visible = true }: { tabId:
   if (!document) return null
   return <div className="note-surface" style={noteReadingStyle(config?.notes)}>
 
+    {document.noteEditing?.shareCleanupIssue && <p className="note-knowledge-notice" role="status">{document.noteEditing.shareCleanupIssue.message}</p>}
     {document.noteEditing?.shareUndo ? <div className="note-knowledge-notice" role="status">{saving ? 'Saving this shared-reference removal…' : sharedUndoIssue && 'message' in sharedUndoIssue ? sharedUndoIssue.message : noteShareUndoRecoveryMessage(document.noteEditing)}
       {!saving && <><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().inspectNoteShareUndo(surface.workspaceId, surface.path)}>Check this removal</button><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().continueNoteShareUndo(surface.workspaceId, surface.path)}>Continue this removal</button></>}
     </div> : document.noteEditing?.shareUndoReceipt?.retained.length ? <div className="note-knowledge-notice" role="status">{document.noteEditing.shareUndoReceipt.status === 'partial' ? noteShareUndoRecoveryMessage(document.noteEditing) : [...new Set(document.noteEditing.shareUndoReceipt.retained.map(value => value.message))].join(' ')}</div> : null}

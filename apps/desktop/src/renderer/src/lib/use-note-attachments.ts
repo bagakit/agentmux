@@ -18,14 +18,25 @@ function base64(bytes: Uint8Array): string {
 /** Files owns durable bytes; this hook only places confirmed relative references in the current draft. */
 export function useNoteAttachments(resource: NoteResource | undefined) {
   const [issue, setIssue] = useState<string | null>(null), [pending, setPending] = useState(false)
+  const [retainedFiles, setRetainedFiles] = useState<File[]>([])
+  const retain = (files: readonly File[]) => setRetainedFiles(previous => [...new Set([...previous, ...files])])
   const active = useRef(true), busy = useRef(false), currentKey = useRef(''), generation = useRef(0)
   const key = JSON.stringify(resource ?? null)
   if (currentKey.current !== key) { currentKey.current = key; generation.current += 1 }
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const importFiles = useCallback((files: readonly File[], editor: Editor): void => {
     if (!files.length) return
-    if (busy.current) { setIssue('An attachment import is still running. Keep this new selection and choose it again when the current import finishes. Other editing remains available.'); return }
-    if (!resource || editor.isDestroyed || !editor.isEditable) { setIssue('The original Note file is unavailable. Keep your selected files; the draft is retained.'); return }
+    if (busy.current) { retain(files); setIssue('An attachment import is still running. Keep this new selection and choose it again when the current import finishes. Other editing remains available.'); return }
+    if (!resource || editor.isDestroyed || !editor.isEditable) { retain(files); setIssue('The original Note file is unavailable. Keep your selected files; the draft is retained.'); return }
+    const mainNamespaceCurrent = () => !Object.entries(useAppStore.getState().documents).some(([id, document]) => {
+      if (!document.readSource) return false
+      const legacy = document.legacyMainNote?.resource
+      return id === resource.workspaceId + '\0' + resource.path || Boolean(legacy && legacy.hostId === resource.hostId &&
+        legacy.workspaceId === resource.workspaceId && legacy.workspacePath === resource.workspacePath && legacy.path === resource.path)
+    })
+    if (!mainNamespaceCurrent()) {
+      retain(files); setIssue('Attachment import is not confirmed for this Source. Your selected files are kept below; ordinary text editing remains available.'); return
+    }
     busy.current = true; setPending(true); setIssue(null)
     const originalGeneration = generation.current
     let bookmark = editor.state.selection.getBookmark(), valid = true
@@ -57,12 +68,14 @@ export function useNoteAttachments(resource: NoteResource | undefined) {
             throw Error('The exact attachment destination is not confirmed absent. No import was requested.')
           const bytes = new Uint8Array(await file.arrayBuffer())
           if (!current()) throw Error('The original Note changed before import. The selected file is retained.')
+          if (!mainNamespaceCurrent()) throw Error('The original Note became Source-bound before import. No Main import was requested; the selected file is kept.')
           const input = { ...target, expectedResource: observed.resource, expectedRevision: null, operationId,
             byteLength: bytes.byteLength, revision: fileUploadRevision(bytes), dataBase64: base64(bytes) } as const
           const receipt = parseFileImportResult(await api.files.importPublic(input), input)
           if (receipt.result.status !== 'written') throw Error(receipt.result.status === 'conflict'
             ? 'The attachment destination is occupied; its existing bytes were kept.' : receipt.result.message)
           if (!current()) throw Error('The file was imported, but the original Note changed. No reference was inserted.')
+          if (!mainNamespaceCurrent()) throw Error('The original Main file was imported, but this editor is now Source-bound. No reference was inserted; the selected file is kept.')
           const href = './' + encodeURIComponent(filename), selection = bookmark.resolve(editor.state.doc)
           const node = workspaceFilePreviewFormat(name)?.kind === 'image'
             ? editor.schema.nodes.image!.create({ src: href, alt: file.name, title: null })
@@ -70,11 +83,12 @@ export function useNoteAttachments(resource: NoteResource | undefined) {
           editor.view.dispatch(editor.state.tr.setSelection(selection).replaceSelectionWith(node, false))
           // The transaction handler advances the bookmark for the next selected file.
         } catch (error) {
+          retain([file])
           problems.push(`${file.name || 'Attachment'}: ${error instanceof Error ? error.message : String(error)}${targetPath ? ` Target: ${targetPath}. Operation: ${operationId}.` : ''}`)
         }
       }
       if (active.current && problems.length) setIssue(problems.join('\n'))
     })().finally(() => { editor.off('transaction', map); unsubscribe(); busy.current = false; if (active.current) setPending(false) })
   }, [resource, key])
-  return { importFiles, issue, pending, dismiss: () => setIssue(null) }
+  return { importFiles, issue, pending, retainedFiles, dismiss: () => setIssue(null) }
 }
