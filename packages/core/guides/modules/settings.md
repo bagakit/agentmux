@@ -69,6 +69,15 @@ settings workspaces register input {hostId,path,name?}. Registration only record
 existing directory; it creates no Git worktree and starts no Agent. A directory is not required
 to be a Git repository. Registration, navigation and Agent creation have separate receipts.
 
+## Node management
+
+Cluster → Node defaults to this device and can explicitly select another saved Core.
+Its publishing editor uses that original Node owner, Runtime and policy operation;
+switching the management target does not change an Agent's execution or replay a save.
+Owner publication still requires the original authenticated person. A managed caller or
+ordinary device cannot acquire it by selecting a target. Incoming connections remain
+the original device's listener settings; another Node never shows this Mac's editor.
+
 ## Tailcat transport
 
 Settings → Cluster → Hosts → Connection holds the original Host's transport selection:

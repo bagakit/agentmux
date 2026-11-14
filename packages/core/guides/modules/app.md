@@ -45,6 +45,11 @@ Surface, workface, preferences and drafts remain. Its sectionId is the Panel's a
 including manual page changes; visible states whether that section is currently presented.
 An unknown section preserves the original page. Navigation preserves eligible conversation
 input without synthetic blur/restore; a main input hidden by Settings is reported unavailable.
+For an exact saved device, use app focus --settings-section hosts --host HOST or
+app focus --settings-section network-node --host HOST. The first opens its connection
+workface; the second selects that original Core in Node management. settingsPage.hostId
+reports the page's actual selected Host, including manual changes, rather than echoing
+the request. Selection does not publish resources, update Core or grant owner authority.
 app focus --close-settings closes only that overlay, retaining its mounted editors and drafts.
 This does not save configuration, submit text or grant permission-response authority.
 
