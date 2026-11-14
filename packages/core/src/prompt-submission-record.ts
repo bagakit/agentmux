@@ -11,12 +11,27 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { dequal } from 'dequal'
 import { nativeInputCorrelationKey } from './native-input-correlation.js'
-import { createHash } from 'node:crypto'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { base64urlnopad } from '@scure/base'
 import type { AgentMuxRunRef, AgentMuxStoredAgentSession, AgentPromptInputPlan, AgentPromptSubmissionRecord, AgentTerminalInputPhaseState, AgentTerminalPromptReadinessSource } from './types.js'
 
 /** Pure original-input record decoding, shared by durable storage and public receipts. */
 export const MAX_STORED_TEXT_BYTES = 1024 * 1024
 const MAX_ID_BYTES = 512
+function utf8ByteLength(value: string, maxBytes = Infinity): number {
+  let bytes = 0
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index)
+    if (unit < 0x80) bytes += 1
+    else if (unit < 0x800) bytes += 2
+    else if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1)
+      if (next >= 0xdc00 && next <= 0xdfff) { bytes += 4; index++ } else bytes += 3
+    } else bytes += 3
+    if (bytes > maxBytes) return bytes
+  }
+  return bytes
+}
 /**
  * Whether the UTF-8 encoding of `value` stays within `maxBytes`, without encoding it.
  * Every stored Session row is normalized on each read and write, and these bodies can be
@@ -28,19 +43,11 @@ const MAX_ID_BYTES = 512
 function utf8WithinBytes(value: string, maxBytes: number): boolean {
   if (value.length > maxBytes) return false
   if (value.length * 3 <= maxBytes) return true
-  let bytes = 0
-  for (let index = 0; index < value.length; index++) {
-    const unit = value.charCodeAt(index)
-    if (unit < 0x80) bytes += 1
-    else if (unit < 0x800) bytes += 2
-    else if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < value.length) {
-      const next = value.charCodeAt(index + 1)
-      if (next >= 0xdc00 && next <= 0xdfff) { bytes += 4; index++ } else bytes += 3
-    } else bytes += 3
-    if (bytes > maxBytes) return false
-  }
-  return true
+  return utf8ByteLength(value, maxBytes) <= maxBytes
 }
+const encoder = new TextEncoder()
+const promptDigest = (text: string): string => base64urlnopad.encode(sha256(encoder.encode(text)))
+
 function record(value: unknown, name: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError(`${name} must be an object.`, 'INVALID_AGENT_SESSION_STORE')
   return value as Record<string, unknown>
@@ -183,8 +190,8 @@ export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissi
 /** The original machine identity used by both phase dispatch and its retained receipt. */
 export function terminalPromptPhaseOperationIdentity(session: { agentSessionId: string; run: AgentMuxRunRef }, submissionId: string,
   phase: 'refresh' | 'interrupt' | 'payload' | 'submit', data: string): string {
-  return createHash('sha256').update(JSON.stringify(['agentmux-terminal-prompt-v1', session.agentSessionId,
-    session.run.runId, submissionId, phase, data])).digest('base64url')
+  return promptDigest(JSON.stringify(['agentmux-terminal-prompt-v1', session.agentSessionId,
+    session.run.runId, submissionId, phase, data]))
 }
 
 const ptyConflict = (): never => { throw new AgentMuxError('The original PTY input claim or phase receipt changed.', 'AGENT_PROMPT_OPERATION_CONFLICT') }
@@ -233,22 +240,22 @@ function validatePtyPlan(value: AgentPromptSubmissionRecord): void {
   if (!admission || !plan || plan.kind === 'native-rpc' || plan.kind === 'runtime-launch') return
   const terminal = value.terminalPromptSubmission
   if (plan.kind === 'single-phase') {
-    if (terminal || admission.endByte - admission.startByte !== Buffer.byteLength(plan.data)) return ptyConflict()
+    if (terminal || admission.endByte - admission.startByte !== utf8ByteLength(plan.data)) return ptyConflict()
   } else if (terminal) {
     const first = terminal.prepare?.interrupt ?? terminal.payload
     if (terminal.run.runId !== value.run.runId || terminal.submissionId !== admission.submissionId ||
-        terminal.promptDigest !== createHash('sha256').update(admission.intent!.prompt).digest('base64url') ||
+        terminal.promptDigest !== promptDigest(admission.intent!.prompt) ||
         terminal.payload.operationId !== terminalPromptPhaseOperationIdentity(value, terminal.submissionId, 'payload', plan.payload) ||
         terminal.submit.operationId !== terminalPromptPhaseOperationIdentity(value, terminal.submissionId, 'submit', plan.submit) ||
         first.operationId !== admission.operationId || first.inputByteRange.startByte !== admission.startByte ||
         terminal.submit.inputByteRange.endByte !== admission.endByte ||
         terminal.payload.inputByteRange.endByte !== terminal.submit.inputByteRange.startByte ||
-        terminal.payload.inputByteRange.endByte - terminal.payload.inputByteRange.startByte !== Buffer.byteLength(plan.payload) ||
-        terminal.submit.inputByteRange.endByte - terminal.submit.inputByteRange.startByte !== Buffer.byteLength(plan.submit) ||
+        terminal.payload.inputByteRange.endByte - terminal.payload.inputByteRange.startByte !== utf8ByteLength(plan.payload) ||
+        terminal.submit.inputByteRange.endByte - terminal.submit.inputByteRange.startByte !== utf8ByteLength(plan.submit) ||
         terminal.prepare?.interrupt && (plan.kind !== 'render-then-submit' || !plan.prepare ||
           terminal.prepare.interrupt.operationId !== terminalPromptPhaseOperationIdentity(value, terminal.submissionId, 'interrupt', plan.prepare.interrupt) ||
           terminal.prepare.interrupt.inputByteRange.endByte !== terminal.payload.inputByteRange.startByte ||
-          terminal.prepare.interrupt.inputByteRange.endByte - terminal.prepare.interrupt.inputByteRange.startByte !== Buffer.byteLength(plan.prepare.interrupt))) return ptyConflict()
+          terminal.prepare.interrupt.inputByteRange.endByte - terminal.prepare.interrupt.inputByteRange.startByte !== utf8ByteLength(plan.prepare.interrupt))) return ptyConflict()
   }
   const refreshes = [...(value.ptyRefreshHistory ?? []), ...(admission.frameRefresh ? [admission.frameRefresh] : [])]
   for (let index = 0; index < refreshes.length; index++) {
@@ -256,7 +263,7 @@ function validatePtyPlan(value: AgentPromptSubmissionRecord): void {
     if (plan.kind !== 'render-then-submit' || !plan.prepare?.refresh || !admission.submissionId ||
         refresh.operationId !== terminalPromptPhaseOperationIdentity(value, admission.submissionId, 'refresh',
           JSON.stringify([plan.prepare.refresh, refresh.nativeSourceId, refresh.resizeRevision])) ||
-        refresh.inputByteRange.endByte - refresh.inputByteRange.startByte !== Buffer.byteLength(plan.prepare.refresh) ||
+        refresh.inputByteRange.endByte - refresh.inputByteRange.startByte !== utf8ByteLength(plan.prepare.refresh) ||
         previous && (previous.nativeSourceId !== refresh.nativeSourceId || previous.resizeRevision >= refresh.resizeRevision ||
           previous.inputByteRange.endByte > refresh.inputByteRange.startByte) ||
         !refreshClaim(admission, terminal) && refresh.inputByteRange.endByte > admission.startByte) return ptyConflict()
