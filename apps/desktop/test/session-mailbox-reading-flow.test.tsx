@@ -369,7 +369,7 @@ it('reveals the exact last original row only for an explicit floating More, with
   const editor=originalContainer.querySelector<HTMLElement>('.composer-queued-editor')!
   expect(revealTargets.at(-1)).toBe(editor)
   expect(editor.dataset.editingId).toBe('original-99')
-  expect(editor.querySelector('.composer-queued-editor__actions button:last-child')).not.toBeNull()
+  expect(editor.querySelector('.composer-edit-footer [aria-label="保存待发消息"]')).not.toBeNull()
   const editingScrolls=revealTargets.length,editingFocus=document.activeElement
   await show([...queued,{id:'later',text:'Later arrival',status:'queued',deliverable:true,editable:true}])
   expect(revealTargets).toHaveLength(editingScrolls)

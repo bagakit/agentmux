@@ -7,8 +7,10 @@ import { createHash } from 'node:crypto'
 import { build } from 'vite'
 import { runProbeProcess } from './probe-process.mjs'
 const desktop = resolve(import.meta.dirname, '..'), root = resolve(desktop, '../..')
-const require = createRequire(import.meta.url), fixture = join(desktop, 'scripts/fixtures/message-delivery-diagnostics')
+const require = createRequire(import.meta.url)
 const only = process.argv.find(arg => arg.startsWith('--only='))?.slice(7)
+const annotationEditor = only === 'annotation-editor'
+const fixture = join(desktop, 'scripts/fixtures', annotationEditor ? 'conversation-annotation-note' : 'message-delivery-diagnostics')
 const requestedEvidence = process.argv.find(arg => arg.startsWith('--evidence='))?.slice(11)
 const privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-message-diagnostic-")), directory = requestedEvidence ? resolve(root, requestedEvidence) : join(root, ".local/state/message-recovery-fixture", ("visual-" + (globalThis.crypto.randomUUID()) + ""))
 const hash = value => createHash('sha256').update(value).digest('hex'), inputs = {}
@@ -27,13 +29,15 @@ try {
   await writeFile(join(directory, 'compiled-inputs.json'), JSON.stringify(inputs, null, 2))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const lines = []
-  const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(privateRoot, 'renderer/index.html'), privateRoot, directory, only ?? ''], {
+  const main = join(desktop, 'scripts/fixtures/message-delivery-diagnostics/main.cjs')
+  const outcome = await runProbeProcess(require('electron'), [main, join(privateRoot, 'renderer/index.html'), privateRoot, directory, only ?? ''], {
     temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 90000, onLine: line => lines.push(line) })
   await writeFile(join(directory, 'process.log'), lines.join('\n'))
   const receipt = JSON.parse(await readFile(join(directory, 'render.json'), 'utf8'))
   assert.equal(outcome.exitCode, 0, JSON.stringify(receipt.failure)); assert.equal(receipt.passed, true)
   await writeFile(join(directory, 'review.md'), ['# 等待独立看图评审', '',
-    '真实 WorkspaceWorkbench / Message Tool 与产品 CSS；数据由既有 preview API / queue / diagnostic journal 提供。未发送用户消息，未操作用户 Run。',
+    annotationEditor ? '真实 SessionPane / 对话批注与产品 CSS，数据来自私有 preview。未发送用户消息，未操作用户 Run。'
+      : '真实 WorkspaceWorkbench / Message Tool 与产品 CSS；数据由既有 preview API / queue / diagnostic journal 提供。未发送用户消息，未操作用户 Run。',
     '请读取 fixture scene.md 与 owning SSOT，逐张打开以下完整截图并评审任务主次、信息可读性、留白、操作和窄屏表现。采图成功不代签审美通过。', '',
     ...receipt.frames.map(frame => `- ${frame.width}px / ${frame.state}: [截图](${frame.file})`), ''].join('\n'))
   console.log(directory)

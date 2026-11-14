@@ -35,7 +35,7 @@ async function queuedEditorScene(width, appearance) {
   const field = `${editor}.querySelector('textarea')`
   const save = `${editor}.querySelector('[aria-label="保存待发消息"]')`
   const copy = `${editor}.querySelector('.composer-pending__copy')`
-  const cancel = `${editor}.querySelector('.composer-queued-editor__actions .composer-tool')`
+  const cancel = `[...${editor}.querySelectorAll('.composer-edit-footer button')].find(button=>button.textContent==='取消')`
   const long = width === 320
   const seed = await evaluate(`deliveryDiagnostics.seedQueuedEditor(${JSON.stringify(appearance)},${long})`)
   await waitFor(`${floating}?.querySelector('.composer-pending__preview:enabled')`)
@@ -49,7 +49,7 @@ async function queuedEditorScene(width, appearance) {
   const geometry = await evaluate(`(()=>{const c=${card},e=${editor},f=${field},s=${save};
     const rect=node=>node.getBoundingClientRect().toJSON()
     const parts=[${copy},${cancel},s]
-    return {card:rect(c),owner:rect(${surface}),field:rect(f),footer:rect(e.querySelector('.composer-queued-editor__footer')),
+    return {card:rect(c),owner:rect(${surface}),field:rect(f),footer:rect(e.querySelector('.composer-edit-footer')),
       title:e.querySelector('label').textContent, focus:f===document.activeElement, scrolls:f.scrollHeight>f.clientHeight,
       fullButtons:parts.every(button=>{const r=rect(button);return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}),
       copy:rect(parts[0]),cancel:rect(parts[1]),save:rect(s),terminal:rect(${terminal}),sameTerminal:window.queuedEditorFixtureTerminal===${terminal},
@@ -59,6 +59,7 @@ async function queuedEditorScene(width, appearance) {
   assert.ok(geometry.field.width >= Math.min(geometry.owner.width, 360) - 56, 'The real editor gives the message a full-width field')
   assert.ok(geometry.card.x >= geometry.owner.x && geometry.card.right <= geometry.owner.right)
   assert.ok(geometry.field.bottom < geometry.footer.top && geometry.copy.right < geometry.cancel.x && geometry.cancel.right <= geometry.save.x)
+  assert.ok(Math.abs(geometry.footer.right - geometry.save.right) < 2, 'The shared footer aligns the primary action on its right edge')
   assert.notEqual(geometry.cardBorder, geometry.fieldOutline, 'The card does not repeat the focused field outline')
   assert.equal(geometry.scrolls, long)
   assert.deepEqual(geometry.terminal, before.terminal)
@@ -113,6 +114,11 @@ async function queuedEditorScene(width, appearance) {
     await evaluate(`${mailboxField}.select()`)
     await win.webContents.debugger.sendCommand('Input.insertText', { text: '仅编辑邮箱里的候选文字。' })
     await waitFor(`${mailboxField}.value==='仅编辑邮箱里的候选文字。'`)
+    assert.ok(await evaluate(`(()=>{
+      const footer=${mailbox}.querySelector('.composer-edit-footer')
+      const [cancel, save]=footer.querySelectorAll('.composer-edit-footer__actions button')
+      return save.classList.contains('primary-button') && getComputedStyle(save).backgroundColor!==getComputedStyle(cancel).backgroundColor
+    })()`), 'Mailbox context preserves the shared primary and secondary treatments')
     await capture(width, 'mailbox-queued-editor-light')
     await key('Escape', 'Escape', 27)
     await waitFor(`!${mailboxField}`)
@@ -120,14 +126,93 @@ async function queuedEditorScene(width, appearance) {
   }
   result.events.push({ width, appearance, geometry, copyCancelSavePassed: true })
 }
+
+async function annotationEditorScene(width, appearance) {
+  await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height: width === 320 ? 540 : 740, deviceScaleFactor: 1, mobile: false })
+  const original = '.log-turn__body'
+  const editor = "document.querySelector('.log-turn__annotation:not([hidden])')"
+  const field = `${editor}.querySelector('textarea')`
+  const send = `${editor}.querySelector('[aria-label="发送批注"]')`
+  const add = `${editor}.querySelector('[aria-label="将批注加入回复草稿"]')`
+  await evaluate(`annotationPreview.theme(${JSON.stringify(appearance)})`)
+  const passage = `[...document.querySelectorAll('${original} p')].find(p=>p.textContent.includes('The second repeated phrase'))`
+  await waitFor(`Boolean(${passage})`)
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: width / 2, y: 260, deltaY: -3000, deltaX: 0 })
+  await evaluate(`${passage}.scrollIntoView({block:'center'})`)
+  await painted()
+  await evaluate(`(()=>{
+    const paragraph=[...document.querySelectorAll('${original} p')].find(p=>p.textContent.includes('The second repeated phrase'))
+    const node=paragraph.firstChild
+    const range=document.createRange()
+    const quote='The second repeated phrase is the passage we want to discuss.'
+    const start=node.textContent.indexOf(quote)
+    range.setStart(node,start);range.setEnd(node,start+quote.length)
+    const selection=getSelection();selection.removeAllRanges();selection.addRange(range)
+    paragraph.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}))
+  })()`)
+  await waitFor("document.querySelector('.conversation-selection-actions')?.style.visibility==='visible'")
+  await click("document.querySelector('.conversation-selection-actions button:first-child')")
+  await waitFor(`${editor}?.style.visibility==='visible' && document.activeElement===${field}`)
+  assert.equal(await evaluate(`${send}.disabled && ${add}.disabled`), true)
+  const draft = await evaluate('annotationPreview.draft()')
+  const note = width === 320
+    ? '请核对这段里第二处相同表述的来源。\n\n这条批注需要和原文一起保留，方便之后逐项对照。\n\n只把确认过的部分加入本轮回复。'
+    : '请核对这段里第二处相同表述的来源。'
+  await win.webContents.debugger.sendCommand('Input.insertText', { text: note })
+  await waitFor(`${field}.value===${JSON.stringify(note)} && !${send}.disabled`)
+  await painted()
+  const geometry = await evaluate(`(()=>{
+    const edit=${editor}, footer=edit.querySelector('.composer-edit-footer'), input=${field}
+    const rect=node=>node.getBoundingClientRect().toJSON()
+    return {card:rect(edit), field:rect(input), footer:rect(footer), send:rect(${send}), add:rect(${add}),
+      primary:[...footer.querySelectorAll('.primary-button')].map(button=>button.getAttribute('aria-label')),
+      quote:edit.querySelector('blockquote').textContent.trim()}
+  })()`)
+  assert.equal(geometry.quote, 'The second repeated phrase is the passage we want to discuss.')
+  assert.deepEqual(geometry.primary, ['发送批注'])
+  assert.ok(geometry.card.x >= 0 && geometry.card.right <= width && geometry.field.width >= geometry.card.width - 26)
+  assert.ok(geometry.add.right <= geometry.send.x)
+  assert.ok(Math.abs(geometry.footer.right - geometry.send.right) < 2, 'The shared footer aligns the primary action on its right edge')
+  await capture(width, `annotation-editor-${appearance}`)
+  await click(`${editor}.querySelector('[aria-label="关闭批注"]')`)
+  await waitFor(`!${editor}`)
+  await click("document.querySelector('.conversation-annotation-recovery button')")
+  await waitFor(`${editor}?.style.visibility==='visible' && ${field}.value===${JSON.stringify(note)}`)
+  assert.equal(await evaluate('annotationPreview.draft()'), draft)
+  if (width === 320 && appearance === 'light') {
+    await evaluate('annotationPreview.failNextAdd()')
+    await click(add)
+    await waitFor(`${editor}?.querySelector('[role="alert"]')?.textContent.includes('Private draft handoff rejected')`)
+    assert.equal(await evaluate(`${field}.value`), note)
+    await capture(width, 'annotation-editor-draft-rejected')
+  }
+  await click(add)
+  await waitFor(`!${editor}`)
+  assert.ok(await evaluate(`annotationPreview.draft().includes(${JSON.stringify(note)}) && annotationPreview.draft().includes('The second repeated phrase')`))
+  assert.deepEqual(await evaluate('annotationPreview.controls'), [])
+  result.events.push({ width, appearance, geometry, originalDraftAndSelectionVerified: true })
+}
+
 app.whenReady().then(async () => {
   try {
     await fs.mkdir(evidence, { recursive: true })
     win = new BrowserWindow({ show: false, width: 1281, height: 820, webPreferences: { backgroundThrottling: false, sandbox: false } })
     result.consoleErrors = []
     win.webContents.on('console-message', details => { if (details.level === 'error') result.consoleErrors.push(details.message) })
-    await win.loadFile(html); win.webContents.debugger.attach('1.3')
+    const annotationQuery = { query: { 'compact-editor': '1' } }
+    await win.loadFile(html, only === 'annotation-editor' ? annotationQuery : undefined); win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+    if (only === 'annotation-editor') {
+      for (const width of [640, 320]) for (const appearance of ['dark', 'light']) {
+        result.stage = `${width}-annotation-editor-${appearance}`
+        if (result.events.length) await win.loadFile(html, annotationQuery)
+        await waitFor('Boolean(window.annotationPreview)')
+        await annotationEditorScene(width, appearance)
+      }
+      assert.equal(result.frames.length, 5)
+      result.passed = true
+      return
+    }
     await waitFor('Boolean(window.deliveryDiagnostics)')
     if (only === 'queued-editor') {
       for (const width of [640, 320]) for (const appearance of ['dark', 'light']) {
@@ -239,7 +324,9 @@ app.whenReady().then(async () => {
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack, stage: result.stage }
     if (win && !win.isDestroyed()) {
-      result.dom = await evaluate(`({focus:document.activeElement?.outerHTML,mailbox:${mailbox}?.outerHTML,facts:window.deliveryDiagnostics?.facts()})`)
+      result.dom = only === 'annotation-editor'
+        ? await evaluate('({focus:document.activeElement?.tagName, body:document.body.innerText, reads:window.annotationPreview?.reads})')
+        : await evaluate(`({focus:document.activeElement?.outerHTML,mailbox:${mailbox}?.outerHTML,facts:window.deliveryDiagnostics?.facts()})`)
       await capture(0, 'failed-scene')
     }
   }

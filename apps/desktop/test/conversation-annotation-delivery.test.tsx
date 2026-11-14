@@ -20,6 +20,8 @@ import { ConversationAnnotationDelivery } from '../src/renderer/src/components/C
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 
 // Preserve the actual reading/selection/annotation/queue chain. The unrelated
 // terminal process, Composer paint and Region chrome are controlled leaves.
@@ -34,6 +36,7 @@ const initial = useAppStore.getState()
 const annotation = { messageId: '["native","source","message-1"]', quote: 'Exact quote\nSecond line', note: 'Keep this exact advice' }
 const origin = { workspaceId: 'display', tabGroupId: 'source-group', tabId: 'source-tab', regionId: 'source-region' }
 let root: Root, container: HTMLDivElement, directory: string, spatial: AgentMuxSpatialStateStore, dispose: (() => void) | undefined
+let closeReading: (() => Promise<void>) | undefined
 let config: AppConfig, source: Extract<SessionSnapshot, { kind: 'agent' }>
 let accepted: ReturnType<typeof vi.fn>, error: ReturnType<typeof vi.fn>, pending: ReturnType<typeof vi.fn>
 const creations = new Map<string, AgentLaunchResult['created']>()
@@ -56,13 +59,14 @@ beforeEach(async () => {
   source = { ...seed, id: 'source', executorId: 'fixture', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), label: 'Source Agent',
     control: { ...seed.control, hostId: 'local', agentSessionId: 'source', run: { runId: 'source-run' } } }
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockImplementation(async () => ({ sessions: useAppStore.getState().sessions.length ? useAppStore.getState().sessions : [source], timelines: {}, recoveryCandidates: [] }))
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
     const item = useAppStore.getState().sessions.find(value => value.id === (control.kind === 'agent' ? control.agentSessionId : control.runId))
     if (!item) throw new Error('Exact recipient absent'); return item
   })
+  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
   vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => {
@@ -91,8 +95,9 @@ afterEach(async () => {
   await flush()
   await vi.waitFor(() => expect(Object.keys(useAppStore.getState().agentSteerInFlight)).toHaveLength(0))
   await act(async () => root.unmount()); container.remove(); dispose?.(); dispose = undefined
+  await closeReading?.(); closeReading = undefined
   vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true); localStorage.clear()
-  await rm(directory, { recursive: true, force: true })
+  await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 })
 })
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve() }) }
 async function mount(note = annotation.note, active = true) { await act(async () => root.render(<ConversationAnnotationDelivery sessionId="source" origin={origin}
@@ -146,7 +151,10 @@ it('sends exactly to the default current Agent through real queue admission, wit
 it('sends a selected actual SessionPane passage through Note and Delivery into the original queue, preserving the Composer draft', async () => {
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(holdInput)
   const writers = [vi.spyOn(api.sessions, 'write'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'recover'), vi.spyOn(api.sessions, 'stop')]
-  vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: 'source', source: { providerId: 'codex', nativeSessionId: 'private-source' }, items: [], nextCursor: null })
+  const original = { providerId: 'codex' as const, nativeSessionId: 'private-source' }
+  const reading = await conversationPagePortFixture({ hostId: 'local', agentSessionId: 'source' }, original,
+    async () => ({ agentSessionId: 'source', source: original, items: [], nextCursor: null }))
+  closeReading = reading.close
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 380, 600))
   vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(() => {
     const rect = new DOMRect(20, 100, 120, 18)
@@ -157,7 +165,19 @@ it('sends a selected actual SessionPane passage through Note and Delivery into t
     id: 'actual-selected-message', agentSessionId: 'source', kind: 'assistant_message', status: 'complete', source: 'native-hook',
     title: 'Original response', content: 'Exact quote followed by the original response.', createdAt: 1, updatedAt: 1
   }] } } })
+  await reading.publishCaptured(useAppStore.getState().timelines.source!.items)
   await act(async () => root.render(<SessionPane sessionId="source" surfaceKind="agent" visible interactiveResize={false} linkOrigin={origin} />)); await flush()
+  const disclosure = await vi.waitFor(async () => {
+    await flush()
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="展开采集内容"]')
+    expect(trigger, container.textContent ?? '').not.toBeNull()
+    return trigger!
+  })
+  await click(disclosure)
+  await vi.waitFor(async () => {
+    await flush()
+    expect(container.querySelector('.log-turn__body p'), container.textContent ?? '').not.toBeNull()
+  })
   const body = container.querySelector<HTMLElement>('.log-turn__body')!, node = body.querySelector('p')!.firstChild!
   expect(body).not.toBeNull(); expect(node.textContent).toContain('Exact quote')
   const range = document.createRange(); range.setStart(node, 0); range.setEnd(node, 11)

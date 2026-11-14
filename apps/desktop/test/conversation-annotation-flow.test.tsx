@@ -64,6 +64,16 @@ function selectInsideBody(host: HTMLElement, quote: string): void {
   body!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
 }
 
+async function openNoteForSelection(host: HTMLElement, quote: string) {
+  await act(async () => { selectInsideBody(host, quote) })
+  const toolbar = document.querySelector('.conversation-selection-actions')
+  expect(toolbar, '原选区需要先显示划词操作条').not.toBeNull()
+  expect(document.querySelector('.log-turn__annotation')).toBeNull()
+  const annotate = [...toolbar!.querySelectorAll('button')].find(button => button.textContent === '批注')
+  expect(annotate).toBeDefined()
+  await act(async () => annotate!.click())
+}
+
 describe('对话消息上的选区注解', () => {
   // 不给这个标志，`act()` 只打一行 stderr 警告就放行——状态更新会在断言之后才刷进 DOM，
   // 于是"点了没反应"读起来像通过。
@@ -78,13 +88,13 @@ describe('对话消息上的选区注解', () => {
     ))
 
     expect(
-      host.querySelector('.log-turn__annotation'),
+      document.querySelector('.log-turn__annotation'),
       '还没选中任何东西，注解弹层就已经在了——它该是选中才出现的'
     ).toBeNull()
 
-    await act(async () => { selectInsideBody(host, QUOTE) })
+    await openNoteForSelection(host, QUOTE)
 
-    const dialog = host.querySelector('.log-turn__annotation')
+    const dialog = document.querySelector('.log-turn__annotation')
     expect(
       dialog,
       '选中正文后注解弹层没有出现。源码里有那段 JSX 不等于它会渲染——' +
@@ -105,14 +115,13 @@ describe('对话消息上的选区注解', () => {
     const root = createRoot(host)
     const onAnnotate = vi.fn()
     await act(async () => root.render(<ConversationAnnotationOwner onAnnotate={onAnnotate}>{onSelectAnnotation => <ConversationMessage {...BASE} onSelectAnnotation={onSelectAnnotation} />}</ConversationAnnotationOwner>))
-    await act(async () => { selectInsideBody(host, QUOTE) })
+    await openNoteForSelection(host, QUOTE)
 
-    const submit = [...host.querySelectorAll<HTMLButtonElement>('.log-turn__annotation-actions button')]
-      .find((button) => button.textContent === 'Add to reply draft')
-    expect(submit, '提交键不在弹层里——这条判据在空转').toBeDefined()
+    const submit = document.querySelector<HTMLButtonElement>('.log-turn__annotation .composer-edit-footer [aria-label="将批注加入回复草稿"]')
+    expect(submit, '提交键不在弹层里——这条判据在空转').not.toBeNull()
     expect(submit!.disabled, '注解还空着，提交键却是可点的：交一条空注解等于什么都没说').toBe(true)
 
-    const textarea = host.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')
+    const textarea = document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')
     expect(textarea, '注解输入框不在弹层里').not.toBeNull()
     await act(async () => {
       // 受控输入：直接设 value 不会让 React 看见，要走原生 setter 再派发 input。
@@ -149,7 +158,7 @@ describe('对话消息上的选区注解', () => {
     await act(async () => { selectInsideBody(host, QUOTE) })
 
     expect(
-      host.querySelector('.log-turn__annotation'),
+      document.querySelector('.conversation-selection-actions, .log-turn__annotation'),
       '宿主没接 onAnnotate，却弹出了注解框——用户写完点提交会什么都不发生'
     ).toBeNull()
 
