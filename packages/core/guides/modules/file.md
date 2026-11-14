@@ -21,9 +21,13 @@ includeRevision:true. The same Native FD is hashed in fixed-size blocks and its 
 is checked before returning observation.revision={status:"observed",revision:"sha256:..."}.
 Directories, symlinks, other entries and absence return {status:"not-applicable"}; a failed requested
 observation remains unknown. Unrequested stats never hash. This does not relax Note body retention
-limits; file read still supplies editable body/revision pairs. Explicit hashing is a cold operation
-with IO proportional to file size. A finite request waits for its original owner result; cancellation
-or transport failure leaves this observation unknown and does not authorize deletion or stop an Agent.
+limits; file read still supplies editable body/revision pairs. When available, document.readIdentity
+contains the entry from the same body FD and its ordered parent-to-Workspace-root witnesses.
+It describes this read's source, not current pathname existence, write authority or a mutation ACK.
+Missing provenance leaves the body readable; successful writes do not carry it forward to a new inode.
+Explicit hashing is a cold operation with IO proportional to file size. A finite request waits
+for its original owner result; cancellation or transport failure leaves this observation unknown
+and does not authorize deletion or stop an Agent.
 
 For one direct directory use file mkdir --input FILE|- with
 {operationId,zoneId,path,expectedResource:COMPLETE_STAT_RESOURCE,expectedAbsent:true,
