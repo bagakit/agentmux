@@ -2,7 +2,7 @@ import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
 import { assertDispatchEventKind, type DispatchEventKind, type DispatchObservation, type DispatchIdentityDiagnostic } from '../agent-handoff.js'
 import { readGoalDelegationSource } from '../goal-delegation-source.js'
-import type { MoteDialogueRead, MoteDialoguePage, MoteDialogueLink } from '../mote-dialogue-contract.js'
+import type { MoteDialogueRead, MoteDialoguePage, MoteDialogueLink } from './dialogue-contract.js'
 
 export type MoteSupervisionRead = Omit<MoteDialogueRead, 'kind'>
 export type MoteWorkSource = Extract<MoteDialogueLink, { kind: 'work' }>

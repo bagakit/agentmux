@@ -17,7 +17,7 @@ import { SPACE_AUTHORITY_METHODS, type SpaceAuthorityParams, type SpaceAuthority
 import { NODE_LOCATOR_METHODS, type NodeLocatorParamsMap, type NodeLocatorResultMap, type NodeLocatorMethod } from './node-locator.js'
 import { NODE_PUBLISHING_METHODS, type NodePublishingParams, type NodePublishingResults, type NodePublishingMethod } from './node-publishing.js'
 import { AGENTMUX_RPC_IMAGE_METHODS, type ImageParamsMap, type ImageResultMap, type ImageMethod } from './public-rpc-image.js'
-import { MOTE_DIALOGUE_METHODS, type MoteDialogueParamsMap, type MoteDialogueResultMap } from './mote-dialogue.js'
+import { MOTE_DIALOGUE_METHODS, type MoteDialogueParamsMap, type MoteDialogueResultMap } from './mote/dialogue.js'
 import { AGENT_PROGRESS_METHODS, type AgentProgressParams, type AgentProgressResults } from './agent-progress.js'
 import { MOTE_CHAT_RPC_METHODS } from './mote/chat-codec.js'
 import { AGENT_LEARNING_METHODS, type AgentLearningMethod, type AgentLearningParamsMap, type AgentLearningResultMap } from './agent-learning.js'
@@ -188,7 +188,7 @@ type OperationKeys<T> = T extends object ? {
 } : T
 type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
   ? { target: import('./space-control.js').AgentMuxSpaceSelector | { operationId: string }; presentation?: boolean }
-  : M extends 'space.mote.preferences.save' ? import('./mote-preferences.js').MotePreferencesSaveParams
+  : M extends 'space.mote.preferences.save' ? import('./mote/preferences.js').MotePreferencesSaveParams
   : M extends 'goal.ls' ? AgentMuxRpcGoalFilters
   : M extends 'goal.create' ? GoalKeys<Omit<BusinessParams<M>, 'decision'>> & {
       risk?: import('./control.js').AgentMuxDemandDecision['risk'];

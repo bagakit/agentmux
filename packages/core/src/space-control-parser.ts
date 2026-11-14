@@ -15,7 +15,7 @@ import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { parseMoteQuickDefaults, parseMoteDefaultConversation, parseMotePreferencesReadInput, parseMotePreferencesSaveInput,
-  parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
+  parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote/preferences.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
   AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact, AgentMuxMotePresentation, AgentMuxMoteConversationReference, AgentMuxSurveyOrganization

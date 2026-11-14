@@ -24,7 +24,7 @@ import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBro
 import { isBrowserProfileControlOperation, assertBrowserProfileControlTarget, type BrowserProfileControlPayload, type BrowserProfileControlResult } from './browser-profile-control.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, type AgentMuxRpcMethod } from './public-rpc.js'
 
-import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
+import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote/preferences.js'
 import { parseClientNotificationsObservation } from './client-notifications.js'
 import { rpcRecord, rpcString, rpcCount } from './rpc-data.js'
 export { rpcRecord, rpcString, rpcCount } from './rpc-data.js'

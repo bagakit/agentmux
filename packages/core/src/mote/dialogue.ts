@@ -1,5 +1,5 @@
-import type { MoteDefaultConversation, MotePreferencesTarget } from './mote-preferences.js'
-import type { FileReadResource } from './public-rpc-files.js'
+import type { MoteDefaultConversation, MotePreferencesTarget } from './preferences.js'
+import type { FileReadResource } from '../public-rpc-files.js'
 
 /** The original durable Mote content identity, never a display occurrence or an Agent SID. */
 export type MoteDialogueIdentity = { hostId: string; moteId: string }
@@ -15,7 +15,7 @@ export type MoteMainSnapshot = {
   roleRevision: string | null
   current: MoteDefaultConversation | null
   issue: string | null
-  transition?: import('./mote-preferences.js').MoteMainTransitionMarker
+  transition?: import('./preferences.js').MoteMainTransitionMarker
 }
 
 /** Legacy reads remain read-only. The first original CAS can retain this exact baseline generation; a confirmed absent MOTE.md has no revision yet. */
@@ -30,15 +30,15 @@ export type MoteMainReader = {
   assertCurrent(snapshot: MoteMainSnapshot, signal?: AbortSignal): Promise<void>
 }
 
-export * from './mote-dialogue-contract.js'
-export { observeMoteWorkSource } from './mote/supervision.js'
-export { MOTE_SUPERVISION_GUIDANCE } from './mote/guidance.js'
-export { agentPromptSubmissionOutcome, type AgentPromptSubmissionOutcome } from './agent-input-wait.js'
+export * from './dialogue-contract.js'
+export { observeMoteWorkSource } from './supervision.js'
+export { MOTE_SUPERVISION_GUIDANCE } from './guidance.js'
+export { agentPromptSubmissionOutcome, type AgentPromptSubmissionOutcome } from '../agent-input-wait.js'
 
-export { agentTakeoverPrompt, type AgentTakeoverContextSource } from './agent-takeover-context.js'
-export * from './mote-main-period.js'
+export { agentTakeoverPrompt, type AgentTakeoverContextSource } from '../agent-takeover-context.js'
+export * from './main-period.js'
 
-export { retainedMoteMainStarts, pendingMoteMainStarts, moteMainHandoverInputId, type MoteMainDeferredInput } from './spatial-agent-open-contract.js'
+export { retainedMoteMainStarts, pendingMoteMainStarts, moteMainHandoverInputId, type MoteMainDeferredInput } from '../spatial-agent-open-contract.js'
 
-export { spatialAgentOpenDocument, spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
-export type { ConversationCheckpoint } from './conversation-changes.js'
+export { spatialAgentOpenDocument, spatialAgentOpenRecord } from '../spatial-agent-open-contract.js'
+export type { ConversationCheckpoint } from '../conversation-changes.js'

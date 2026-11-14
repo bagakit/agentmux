@@ -22,7 +22,7 @@ import type { AgentMuxContinuityControlReceipt } from './control-contract.js'
 import { validateAgentLaunchPromptInputPlan, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import { browserInputContextFields, parseBrowserInputContext } from '../browser-input-context.js'
 import { AgentMuxError } from '../errors.js'
-import { parseMoteMainEntrySource, type MoteMainEntrySource } from '../mote-main-entry-source.js'
+import { parseMoteMainEntrySource, type MoteMainEntrySource } from '../mote/main-entry-source.js'
 import { parseWorkspaceTrustPreparation, type AgentWorkspaceTrustPreparation } from '../workspace-trust-preparation.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */

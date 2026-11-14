@@ -123,16 +123,16 @@
       "import": "./dist/automatic-input-source.js"
     },
     "./mote-dialogue-store": {
-      "types": "./dist/mote-dialogue-store.d.ts",
-      "import": "./dist/mote-dialogue-store.js"
+      "types": "./dist/mote/dialogue-store.d.ts",
+      "import": "./dist/mote/dialogue-store.js"
     },
     "./mote-dialogue": {
-      "types": "./dist/mote-dialogue.d.ts",
-      "import": "./dist/mote-dialogue.js"
+      "types": "./dist/mote/dialogue.d.ts",
+      "import": "./dist/mote/dialogue.js"
     },
     "./mote-preferences": {
-      "types": "./dist/mote-preferences.d.ts",
-      "import": "./dist/mote-preferences.js"
+      "types": "./dist/mote/preferences.d.ts",
+      "import": "./dist/mote/preferences.js"
     },
     "./session-history-content": {
       "types": "./dist/session-history-content.d.ts",

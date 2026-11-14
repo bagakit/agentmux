@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseMoteDefaultConversation, type MoteDefaultConversation } from './mote-preferences.js'
+import { parseMoteDefaultConversation, type MoteDefaultConversation } from './mote/preferences.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import { spatialCatalog, type AgentMuxSpatialGraph } from './spatial-graph.js'
 import { addTabOrThrow, createWorkbenchViewLayout, createWorkspaceLayout } from './spatial-layout.js'

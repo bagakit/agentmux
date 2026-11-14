@@ -1,12 +1,12 @@
-import type { MoteMainPeriod, MoteMainTransitionPreparation } from './mote-main-period.js'
+import type { MoteMainPeriod, MoteMainTransitionPreparation } from './main-period.js'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdir, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { AgentMuxError } from './errors.js'
-import { parseMoteDialogueLink, sameMoteDialogue, moteDialogueSelection, type MoteDialogueLink, type MoteDialogueRead } from './mote-dialogue-contract.js'
-import type { MoteDialogueIdentity } from './mote-dialogue.js'
+import { AgentMuxError } from '../errors.js'
+import { parseMoteDialogueLink, sameMoteDialogue, moteDialogueSelection, type MoteDialogueLink, type MoteDialogueRead } from './dialogue-contract.js'
+import type { MoteDialogueIdentity } from './dialogue.js'
 
 const applicationId = 0x414d444c
 const key = (identity: MoteDialogueIdentity) => JSON.stringify([identity.hostId, identity.moteId])
@@ -100,12 +100,12 @@ export class MoteDialogueStore {
       db.prepare('INSERT INTO role_transitions(mote_key,operation_id,digest,json) VALUES (?,?,?,?)').run(key(value.identity),value.marker.operationId,value.marker.intentDigest,JSON.stringify(value));db.exec('COMMIT');return value
     } catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error} finally{db.close()}
   }
-  async confirmTransition(identity:MoteDialogueIdentity, marker:import('./mote-preferences.js').MoteMainTransitionMarker, roleRevision:string, reference:import('./mote-preferences.js').MoteDefaultConversation|null) {
+  async confirmTransition(identity:MoteDialogueIdentity, marker:import('./preferences.js').MoteMainTransitionMarker, roleRevision:string, reference:import('./preferences.js').MoteDefaultConversation|null) {
     const original=await this.transition(identity,marker.operationId,marker.intentDigest)
     if(!original||original.after.roleRevision!==roleRevision||!isDeepStrictEqual(original.after.reference,reference)||!isDeepStrictEqual(original.marker,marker))throw new AgentMuxError('The saved role does not confirm this original transition.','MOTE_DIALOGUE_SOURCE_UNCONFIRMED')
     const db=(await this.open(true))!;try{db.prepare('UPDATE role_transitions SET confirmed=1 WHERE mote_key=? AND operation_id=?').run(key(identity),marker.operationId)}finally{db.close()}
   }
-  private period(db:DatabaseSync, identity:MoteDialogueIdentity, link:Extract<MoteDialogueLink,{kind:'main'}>, current?:import('./mote-dialogue.js').MoteMainSnapshot):MoteMainPeriod|undefined {
+  private period(db:DatabaseSync, identity:MoteDialogueIdentity, link:Extract<MoteDialogueLink,{kind:'main'}>, current?:import('./dialogue.js').MoteMainSnapshot):MoteMainPeriod|undefined {
     if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='role_transitions'").get())return undefined
     const rows=db.prepare("SELECT json FROM role_transitions WHERE mote_key=? AND json_extract(json,'$.after.roleRevision')=? AND (confirmed=1 OR operation_id=?) UNION ALL SELECT json FROM role_transitions WHERE mote_key=? AND json_extract(json,'$.before.roleRevision')=? AND (confirmed=1 OR operation_id=?)").all(key(identity),link.roleRevision,current?.transition?.operationId??'',key(identity),link.roleRevision,current?.transition?.operationId??'')
     const transitions=rows.map(row=>JSON.parse(String(row.json)) as MoteMainTransitionPreparation).filter(t=>t.marker.operationId!==current?.transition?.operationId||t.marker.intentDigest===current.transition.intentDigest&&t.after.roleRevision===current.roleRevision&&isDeepStrictEqual(t.after.reference,current.current))
@@ -117,7 +117,7 @@ export class MoteDialogueStore {
       startedAt:start?.marker.effectiveAt??null,endedAt:end?.marker.effectiveAt??null,start:start?.cause??null,end:end?.cause??null,
       range:after&&start?.afterQualified!==false&&(!end||through)&&(!through||after.sourceHostId===through.sourceHostId&&isDeepStrictEqual(after.frontier.scope,through.frontier.scope))?{kind:'bounded',after,through}:start?{kind:'unconfirmed',issue:issue||'The exact original source boundary is unconfirmed. Keep its original Session.'}:{kind:'whole-session'}}
   }
-  async read(identity: MoteDialogueIdentity, query: MoteDialogueRead, current?:import('./mote-dialogue.js').MoteMainSnapshot) {
+  async read(identity: MoteDialogueIdentity, query: MoteDialogueRead, current?:import('./dialogue.js').MoteMainSnapshot) {
     const db = await this.open()
     if (!db) {
       if (query.cursor) throw new AgentMuxError('The original Mote source journal is unavailable. Keep its cursor and references.', 'MOTE_DIALOGUE_SOURCE_CHANGED')

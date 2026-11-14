@@ -1,30 +1,30 @@
-import { parseMoteMainPeriod, parseMoteMainRolloverDecision, type MoteMainPeriod, type MoteMainRolloverReading } from './mote-main-period.js'
+import { parseMoteMainPeriod, parseMoteMainRolloverDecision, type MoteMainPeriod, type MoteMainRolloverReading } from './main-period.js'
 import { dequal } from 'dequal'
-import { parseMoteSupervisionObservations, type MoteSupervisionRead, type MoteSupervisionPage } from './mote/supervision.js'
-export type { MoteSupervisionRead, MoteSupervisionPage, MoteSupervisionObservation } from './mote/supervision.js'
-import { parseAgentInputSubmit, type AgentInputSubmit } from './agent-input-submit.js'
-import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
-import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
-import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
-import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
-import type { AgentPromptSubmissionRecord } from './types.js'
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
-import { parseMotePreferencesReadInput, parseMoteQuickDefaults, parseMoteDefaultConversation, sameMotePreferencesTarget, type MotePreferencesTarget } from './mote-preferences.js'
-import type { FileReadResource } from './public-rpc-files.js'
-import type { MoteDialogueIdentity, MoteMainSnapshot } from './mote-dialogue.js'
-import { normalizeAgentContinuityOperation, type AgentMuxContinuityOperation } from './agent-session-recovery/continuity-contract.js'
-import { parseMoteMainEntrySource, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteMainEntrySource } from './mote-main-entry-source.js'
-export { sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation } from './mote-main-entry-source.js'
-import type { AgentMuxRunRef } from './types.js'
-import { moteMainHandoverInputId, moteMainBindingDefaults, validateMoteMainBindingObservation, validateMoteMainBindingReceipt, spatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRecord, type MoteMainBindingObservation, type MoteMainBindingReceipt } from './spatial-agent-open-contract.js'
+import { parseMoteSupervisionObservations, type MoteSupervisionRead, type MoteSupervisionPage } from './supervision.js'
+export type { MoteSupervisionRead, MoteSupervisionPage, MoteSupervisionObservation } from './supervision.js'
+import { parseAgentInputSubmit, type AgentInputSubmit } from '../agent-input-submit.js'
+import { validateAgentPromptInputKey, type AgentPromptInputKey } from '../agent-prompt-condition.js'
+import { parseAgentInputSubmissionReceipt } from '../agent-input-receipt-codec.js'
+import { parsePromptSubmissionRecord } from '../prompt-submission-record.js'
+import type { AgentInputSubmissionReceipt } from '../agent-input-wait.js'
+import type { AgentPromptSubmissionRecord } from '../types.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
+import { parseMotePreferencesReadInput, parseMoteQuickDefaults, parseMoteDefaultConversation, sameMotePreferencesTarget, type MotePreferencesTarget } from './preferences.js'
+import type { FileReadResource } from '../public-rpc-files.js'
+import type { MoteDialogueIdentity, MoteMainSnapshot } from './dialogue.js'
+import { normalizeAgentContinuityOperation, type AgentMuxContinuityOperation } from '../agent-session-recovery/continuity-contract.js'
+import { parseMoteMainEntrySource, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteMainEntrySource } from './main-entry-source.js'
+export { sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation } from './main-entry-source.js'
+import type { AgentMuxRunRef } from '../types.js'
+import { moteMainHandoverInputId, moteMainBindingDefaults, validateMoteMainBindingObservation, validateMoteMainBindingReceipt, spatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRecord, type MoteMainBindingObservation, type MoteMainBindingReceipt } from '../spatial-agent-open-contract.js'
 
 export type MoteDialogueLink = {
   sequence: number
   identity: MoteDialogueIdentity
   operationId: string
   associatedAt: number
-} & ({ kind: 'main'; roleRevision: string; reference: import('./mote-preferences.js').MoteDefaultConversation;
+} & ({ kind: 'main'; roleRevision: string; reference: import('./preferences.js').MoteDefaultConversation;
   /** No inferred message cut: this source is the complete original Session, with original coverage. */
   range: 'whole-session'; period?: MoteMainPeriod; file: { resource: FileReadResource; revision: string } }
   | { kind: 'work'; eventId: string; mainRoleRevision: string; main: { hostId: string; agentSessionId: string };
@@ -39,7 +39,7 @@ export type MoteDialogueReceipt = { operationId: string; links: MoteDialogueLink
 /** Frozen intake in the original Core input journal; never a current-role registry or another input. */
 export type MoteDialogueInputRoute = {
   identity: MoteDialogueIdentity; operationId: string; roleRevision: string
-  reference: import('./mote-preferences.js').MoteDefaultConversation
+  reference: import('./preferences.js').MoteDefaultConversation
   key: Extract<AgentPromptInputKey, { kind: 'prompt' }>
   runtimeId: string | null; intentDigest: string; admittedAt: number; rollover?:MoteMainRolloverReading
   /** Original native recovery operation; its actual launch input key remains with that lifecycle owner. */
@@ -62,7 +62,7 @@ export type MoteDialogueInputReference = { inputKey: Extract<AgentPromptInputKey
 export type MoteMainSetupRequest = { target: MotePreferencesTarget; creation: { hostId: string; operationId: string } }
 export type MoteMainSetupResult = {
   operationId: string; ownerHostId: string; record: AgentMuxSpatialAgentOpenRecord | null
-  reference: import('./mote-preferences.js').MoteDefaultConversation | null
+  reference: import('./preferences.js').MoteDefaultConversation | null
   creation: 'confirmed' | 'unconfirmed'; source: 'confirmed' | 'not-needed' | 'unconfirmed'
   binding: 'confirmed' | 'refused' | 'unconfirmed'; issue: string | null
   /** Original File receipt references; an observed writer role is deliberately separate. */
@@ -84,11 +84,11 @@ export type MoteDialogueCallContext = {
   signal?: AbortSignal
   assertCurrent?(): Promise<void>
   /** Original authenticated RPC context retained by Core, including Runtime participant authority. */
-  readDispatch?(hostId: string, sourceMessageId: string): Promise<import('./agent-handoff.js').DispatchObservation>
+  readDispatch?(hostId: string, sourceMessageId: string): Promise<import('../agent-handoff.js').DispatchObservation>
 }
 export interface MoteDialoguePort {
   /** Trusted original MOTE owner for logical-main intake; not a wire-supplied snapshot. */
-  mainInput?: import('./mote-dialogue.js').MoteMainReader
+  mainInput?: import('./dialogue.js').MoteMainReader
   read(input: MoteDialogueRead, context?: MoteDialogueCallContext): Promise<MoteDialoguePage>
   supervision(input: MoteSupervisionRead, context?: MoteDialogueCallContext): Promise<MoteSupervisionPage>
   link(input: MoteDialogueWrite, context?: MoteDialogueCallContext): Promise<MoteDialogueReceipt>
@@ -200,7 +200,7 @@ export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,v
       const execution = rpcRecord(raw.execution,['hostId','workspacePath','workspaceId','runtimeId','executorRevision'],code)
       for (const key of ['hostId','workspacePath','workspaceId']) text(execution[key],code)
       for (const key of ['runtimeId','executorRevision']) if (execution[key] !== undefined) text(execution[key],code)
-      const record = spatialAgentOpenRecord({ resources: { 'core:agent-open': {schema:'agentmux.spatial-agent-open.v1', requests:{ [query.creation.operationId]:p.record }} } } as unknown as import('./spatial-graph.js').AgentMuxSpatialGraph, query.creation.operationId)
+      const record = spatialAgentOpenRecord({ resources: { 'core:agent-open': {schema:'agentmux.spatial-agent-open.v1', requests:{ [query.creation.operationId]:p.record }} } } as unknown as import('../spatial-graph.js').AgentMuxSpatialGraph, query.creation.operationId)
       if (!record?.moteMain || !sameMotePreferencesTarget(record.moteMain.target,query.target) || !dequal(p.reference, {hostId:record.execution.hostId,sessionId:record.agentSessionId,displayWorkspaceId:record.address.displayWorkspaceId,groupId:record.address.groupId,tabId:record.address.tabId,regionId:record.address.regionId}) && p.reference !== null) return fail(code)
       if (p.creation === 'confirmed' && p.reference === null || p.source === 'not-needed' && record?.moteMain?.baseline.defaults.conversation || p.source === 'confirmed' && !record?.moteMain?.baseline.defaults.conversation || p.binding === 'confirmed' && p.bindingObserved === null && !['saved','unchanged'].includes(String((p.bindingReceipt as MoteMainBindingReceipt | null)?.status)) || p.binding === 'refused' && !record?.moteMainFollowUps?.refusedBeforeBinding && (p.bindingReceipt as MoteMainBindingReceipt | null)?.status !== 'refused-before-write') return fail(code)
       if (record && p.bindingReceipt !== null) validateMoteMainBindingReceipt(record,p.bindingReceipt as MoteMainBindingReceipt)

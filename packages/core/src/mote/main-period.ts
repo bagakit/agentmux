@@ -1,12 +1,12 @@
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
-import { parseConversationCheckpoint, type ConversationCheckpoint } from './conversation-changes.js'
-import { parseMoteDefaultConversation, parseMotePreferencesTarget, parseMoteQuickDefaults } from './mote-preferences.js'
-import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
+import { parseConversationCheckpoint, type ConversationCheckpoint } from '../conversation-changes.js'
+import { parseMoteDefaultConversation, parseMotePreferencesTarget, parseMoteQuickDefaults } from './preferences.js'
+import { validateAgentPromptInputKey } from '../agent-prompt-condition.js'
 import { dequal } from 'dequal'
-import type { MotePreferencesTarget, MoteDefaultConversation, MoteMainRolloverPolicy } from './mote-preferences.js'
-import type { AgentMuxRunRef } from './types.js'
-import type { AgentPromptInputKey } from './agent-prompt-condition.js'
+import type { MotePreferencesTarget, MoteDefaultConversation, MoteMainRolloverPolicy } from './preferences.js'
+import type { AgentMuxRunRef } from '../types.js'
+import type { AgentPromptInputKey } from '../agent-prompt-condition.js'
 
 export type MoteMainTransitionCause = { kind:'initial' | 'manual-takeover' | 'selection' | 'clear'; operationId:string }
   | { kind:'automatic'; operationId:string; decision:MoteMainRolloverDecision }
@@ -33,9 +33,9 @@ export function parseMoteMainPeriod(value: unknown): MoteMainPeriod {
 }
 
 export type MoteMainTransitionPreparation = {
- identity:import('./mote-dialogue.js').MoteDialogueIdentity;
- marker:import('./mote-preferences.js').MoteMainTransitionMarker;
- before:{roleRevision:string|null;reference:MoteDefaultConversation|null;file?:{resource:import('./public-rpc-files.js').FileReadResource;revision:string}};
+ identity:import('./dialogue.js').MoteDialogueIdentity;
+ marker:import('./preferences.js').MoteMainTransitionMarker;
+ before:{roleRevision:string|null;reference:MoteDefaultConversation|null;file?:{resource:import('../public-rpc-files.js').FileReadResource;revision:string}};
  after:{roleRevision:string;reference:MoteDefaultConversation|null};
  beforeCut:ConversationCheckpoint|null;afterCut:ConversationCheckpoint|null;afterQualified?:boolean;
  cause:MoteMainTransitionCause;issue:string|null

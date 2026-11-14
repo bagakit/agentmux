@@ -3,7 +3,7 @@ import type {
   MoteConnectionRef,
   MoteConnectionPreferencesSaveParams,
   MoteConnectionPreferencesSaveResult
-} from '../mote-preferences.js'
+} from './preferences.js'
 import type { ConnectionEnrollmentOperation, ConnectionEnrollmentCallContext, ConnectionEnrollmentAdvanceInput } from '../connection-enrollment-contract.js'
 import type { DesiredConnectionProfile, ConnectionProfileOperation } from '../connection-profile-contract.js'
 import type { ConnectionSetupInitialPublication, ConnectionSetupOperation, ConnectionSetupAdvance } from '../connection-setup-contract.js'

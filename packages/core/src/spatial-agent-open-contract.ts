@@ -1,17 +1,17 @@
 import { safeId } from './agent-identifiers.js'
 import { deriveObjectId } from './object-id.js'
-import { parseMoteMainRolloverDecision, type MoteMainRolloverDecision } from './mote-main-period.js'
+import { parseMoteMainRolloverDecision, type MoteMainRolloverDecision } from './mote/main-period.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseAgentInputSubmit } from './agent-input-submit.js'
 import type { AgentMuxAgentSession } from './types.js'
 import type { AgentMuxSpaceAgentFact, AgentMuxSpaceAddress, AgentMuxSpaceControlRequest } from './space-control.js'
 import type { AgentMuxSpatialGraph } from './spatial-graph.js'
-import { parseMotePreferencesTarget, parseMoteDefaultConversation, parseMoteQuickBaseline, parseMotePreferencesSaveResult, sameMoteQuickDefaults, sameMotePreferencesTarget, effectiveMoteQuickSave, moteChangedMainRoleRevision, type MotePreferencesTarget, type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from './mote-preferences.js'
+import { parseMotePreferencesTarget, parseMoteDefaultConversation, parseMoteQuickBaseline, parseMotePreferencesSaveResult, sameMoteQuickDefaults, sameMotePreferencesTarget, effectiveMoteQuickSave, moteChangedMainRoleRevision, type MotePreferencesTarget, type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from './mote/preferences.js'
 import { parseCoordinatorAgentReference, type CoordinatorAgentReference } from './agent-open-contract.js'
 import { rpcRecord } from './rpc-data.js'
 import { AgentMuxError } from './errors.js'
 import type { FileReadResource } from './public-rpc-files.js'
-import type { MoteDefaultConversation } from './mote-preferences.js'
+import type { MoteDefaultConversation } from './mote/preferences.js'
 
 /** Correlation on the original creation admission. It grants no Main role or input authority. */
 export type MoteMainBaseline = Omit<MoteQuickBaseline, 'document'> & { documentRevision: string | null }

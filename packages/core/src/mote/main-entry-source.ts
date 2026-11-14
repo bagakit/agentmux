@@ -1,8 +1,8 @@
 import { dequal } from 'dequal'
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
-import { parseMoteDefaultConversation, parseMotePreferencesTarget, sameMotePreferencesTarget, type MoteDefaultConversation, type MotePreferencesTarget } from './mote-preferences.js'
-import type { AgentMuxContinuityOperation } from './agent-session-recovery/continuity-contract.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
+import { parseMoteDefaultConversation, parseMotePreferencesTarget, sameMotePreferencesTarget, type MoteDefaultConversation, type MotePreferencesTarget } from './preferences.js'
+import type { AgentMuxContinuityOperation } from '../agent-session-recovery/continuity-contract.js'
 
 /** Frozen admission on the original continuity operation, never a second current-role store. */
 export type MoteMainEntrySource = {

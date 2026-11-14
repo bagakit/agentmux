@@ -121,7 +121,7 @@ export type AgentMuxMotePresentation = {
   /** The Mote's own files scope, independent of its member Zones and execution cwd. */
   content: { zoneId: string; hostId: string; workspaceId: string; workspacePath: string } | null
   quickMode:
-    | { status: 'saved'; version: string; defaults: import('./mote-preferences.js').MoteQuickDefaults }
+    | { status: 'saved'; version: string; defaults: import('./mote/preferences.js').MoteQuickDefaults }
     | { status: 'missing' }
     | { status: 'unconfirmed'; message: string }
   /** The original owner's confirmed occurrence; an unavailable one remains in quickMode. */
@@ -329,8 +329,8 @@ type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.survey-list'; organization?: AgentMuxSurveyOrganization; expected?: AgentMuxSurveyOrganization; collection?: AgentMuxSurveyCollectionChange; pin?: AgentMuxSurveyPinChange }
   | { operation: 'space.agent-order'; displayWorkspaceId: string; order?: AgentMuxWorkspaceAgentOrderMember[]; expectedOrder?: AgentMuxWorkspaceAgentOrderMember[] }
-  | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadInput)
-  | ({ operation: 'space.mote.preferences.save' } & import('./mote-preferences.js').MotePreferencesSaveInput)
+  | ({ operation: 'space.mote.preferences.read' } & import('./mote/preferences.js').MotePreferencesReadInput)
+  | ({ operation: 'space.mote.preferences.save' } & import('./mote/preferences.js').MotePreferencesSaveInput)
   | { operation: 'agent.view'; agentSessionId: string; mode?: AgentMuxAgentViewMode }
   | { operation: 'space.view'; regionId: string; mode?: AgentMuxFileViewMode }
   | { operation: 'file.format'; regionId: string }
@@ -365,8 +365,8 @@ export type AgentMuxSpaceControlRequest = Base & (
 export type AgentMuxSpaceControlResult =
   | ({ operation: 'space.survey-list' } & AgentMuxSurveyListReport)
   | ({ operation: 'space.agent-order' } & AgentMuxWorkspaceAgentOrderReport)
-  | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadResult)
-  | ({ operation: 'space.mote.preferences.save'; requestId: string } & import('./mote-preferences.js').MotePreferencesSaveControlResult)
+  | ({ operation: 'space.mote.preferences.read' } & import('./mote/preferences.js').MotePreferencesReadResult)
+  | ({ operation: 'space.mote.preferences.save'; requestId: string } & import('./mote/preferences.js').MotePreferencesSaveControlResult)
   | ({ operation: 'agent.view' } & AgentMuxAgentViewReport)
   | ({ operation: 'space.view' } & AgentMuxFileViewReport)
   | ({ operation: 'file.format' } & AgentMuxFileFormatReport)

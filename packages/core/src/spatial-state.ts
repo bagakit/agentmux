@@ -402,7 +402,7 @@ export class AgentMuxSpatialStateStore {
     })
   }
   /** Called only with the result returned by the original writer, never with a client receipt. */
-  async recordMoteMainBindingResult(input: import('./mote-preferences.js').MoteQuickPreferencesSaveParams, result: import('./mote-preferences.js').MoteQuickPreferencesSaveResult) {
+  async recordMoteMainBindingResult(input: import('./mote/preferences.js').MoteQuickPreferencesSaveParams, result: import('./mote/preferences.js').MoteQuickPreferencesSaveResult) {
     return this.locked(async () => {
       const current = await this.read()
       if (!current) return false

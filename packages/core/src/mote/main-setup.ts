@@ -1,9 +1,9 @@
 import { dequal } from 'dequal'
-import type { AgentMuxAgentCreationInspection } from './types.js'
-import type { AgentMuxSpatialStateStore } from './spatial-state.js'
-import { moteMainBaseline, moteMainBindingDefaults, moteMainBindingInput, moteMainCreatedReference, retainedMoteMainBindingReceipt, sameMoteMainBaseline, spatialAgentOpenRecord, type MoteMainBindingObservation } from './spatial-agent-open-contract.js'
-import { moteQuickBaseline, sameMotePreferencesTarget, sameMoteQuickDefaults, type MoteQuickPreferencesReadInput, type MoteQuickPreferencesReadResult, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from './mote-preferences.js'
-import type { MoteDialoguePage, MoteDialogueRead, MoteDialogueReceipt, MoteDialogueWrite, MoteMainSetupRequest, MoteMainSetupResult } from './mote-dialogue-contract.js'
+import type { AgentMuxAgentCreationInspection } from '../types.js'
+import type { AgentMuxSpatialStateStore } from '../spatial-state.js'
+import { moteMainBaseline, moteMainBindingDefaults, moteMainBindingInput, moteMainCreatedReference, retainedMoteMainBindingReceipt, sameMoteMainBaseline, spatialAgentOpenRecord, type MoteMainBindingObservation } from '../spatial-agent-open-contract.js'
+import { moteQuickBaseline, sameMotePreferencesTarget, sameMoteQuickDefaults, type MoteQuickPreferencesReadInput, type MoteQuickPreferencesReadResult, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from './preferences.js'
+import type { MoteDialoguePage, MoteDialogueRead, MoteDialogueReceipt, MoteDialogueWrite, MoteMainSetupRequest, MoteMainSetupResult } from './dialogue-contract.js'
 
 /** Composition over the original admission, Session, dialogue and Files owners. No new durable owner. */
 export async function reconcileMoteMainSetup(input: MoteMainSetupRequest, advance: boolean, ports: {

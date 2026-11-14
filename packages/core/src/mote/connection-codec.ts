@@ -8,7 +8,7 @@ import {
   parseMotePreferencesSaveResult,
   sameMotePreferencesTarget,
   sameMoteConnectionValues
-} from '../mote-preferences.js'
+} from './preferences.js'
 import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, summarizeConnectionEnrollmentPreset } from '../connection-enrollment-codec.js'
 import { parseConnectionProfileOperation, parseDesiredConnectionProfile } from '../connection-profile-codec.js'
 import { parseConnectionSetupInitialPublication, parseConnectionSetupOperation, parseConnectionSetupParams } from '../connection-setup-codec.js'
@@ -168,14 +168,14 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
           )
             fail()
           return {
-            params: params as import('../mote-preferences.js').MoteConnectionPreferencesSaveParams,
+            params: params as import('./preferences.js').MoteConnectionPreferencesSaveParams,
             observedReceipt:
               r.observedReceipt === null
                 ? null
                 : (parseMotePreferencesSaveResult(
                     r.observedReceipt,
                     params
-                  ) as import('../mote-preferences.js').MoteConnectionPreferencesSaveResult)
+                  ) as import('./preferences.js').MoteConnectionPreferencesSaveResult)
           }
         })()
   const result: MoteConnectionOperation = {

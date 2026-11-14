@@ -1,13 +1,13 @@
-import { sameConnectionApplication } from './connections-contract.js'
-import { parseConnectionApplication } from './room-binding-codec.js'
-import { deriveObjectId } from './object-id.js'
-import { parseScheduleRecord } from './public-rpc-schedules.js'
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
-import type { ConnectionApplication } from './connections-contract.js'
-import type { AgentMuxSpaceFact } from './space-control.js'
+import { sameConnectionApplication } from '../connections-contract.js'
+import { parseConnectionApplication } from '../room-binding-codec.js'
+import { deriveObjectId } from '../object-id.js'
+import { parseScheduleRecord } from '../public-rpc-schedules.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
+import type { ConnectionApplication } from '../connections-contract.js'
+import type { AgentMuxSpaceFact } from '../space-control.js'
 import { parseFileReadParams, parseFileReadResult, type FileDocument, type FileReadResource, type FileReadResult,
-  type FileResource } from './public-rpc-files.js'
+  type FileResource } from '../public-rpc-files.js'
 
 /** Durable home of the default Mote, independent of its name and appearance. */
 export const PMO_TEAMS_TOPIC_ID = 'launcher:leader'
@@ -31,10 +31,10 @@ export function moteMinutesToMs(value: string, options: { wholeMinutes?: boolean
   return Number.isSafeInteger(ms) && ms > 0 && (!options.wholeMinutes || ms >= 60_000) ? ms : null
 }
 export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; conversationRevision?: string; /** Retained legacy file value; no lifecycle execution effect. */ recovery?: 'startup' | 'on-open'; presence?: MotePresencePreferences; conversationRollover?: MoteMainRolloverPolicy; conversationTransition?: MoteMainTransitionMarker }
-export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('./continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null }
+export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('../continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null }
 export interface MoteQuickPreferencesPort {
   read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult>
-  save(input: MoteQuickPreferencesSaveParams, context?: import('./connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult>
+  save(input: MoteQuickPreferencesSaveParams, context?: import('../connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult>
 }
 /** Generation of one changed Main, shared by the writer and its exact original-operation reader. */
 export function moteChangedMainRoleRevision(spaceId: string, operationId: string, documentRevision: string | null): string {
@@ -87,7 +87,7 @@ export type MoteConnectionPreferencesSaveResult = MoteConnectionPreferencesReadI
 /** Borrow the original connection-preference owner without installing a general control handler. */
 export interface MoteConnectionPreferencesPort {
   read(input: MoteConnectionPreferencesReadInput): Promise<MoteConnectionPreferencesReadResult>
-  save(input: MoteConnectionPreferencesSaveParams, context?: import('./connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteConnectionPreferencesSaveResult>
+  save(input: MoteConnectionPreferencesSaveParams, context?: import('../connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteConnectionPreferencesSaveResult>
 }
 export type MotePreferencesReadInput = MoteQuickPreferencesReadInput | MoteConnectionPreferencesReadInput
 export type MotePreferencesReadResult = MoteQuickPreferencesReadResult | MoteConnectionPreferencesReadResult
@@ -137,7 +137,7 @@ export function parseMoteConnectionValues(value: unknown, code: Code = 'INVALID_
   const ref = fields(p.connection, ['connectionId', 'application'], ['connectionId', 'application'], code)
   const connectionId = text(ref.connectionId, code)
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(connectionId)) fail('The original Connection reference is invalid.', code)
-  let application: import('./connections-contract.js').ConnectionApplication
+  let application: import('../connections-contract.js').ConnectionApplication
   try { application = parseConnectionApplication(ref.application) } catch { return fail('The original Connection reference is invalid.', code) }
   return { connection: { connectionId, application } }
 }

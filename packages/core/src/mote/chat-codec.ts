@@ -1,6 +1,6 @@
 import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
-import { parseMoteConnectionValues, parseMotePreferencesTarget, sameMotePreferencesTarget } from '../mote-preferences.js'
+import { parseMoteConnectionValues, parseMotePreferencesTarget, sameMotePreferencesTarget } from './preferences.js'
 import { parseConnectionDelivery } from '../connection-delivery-codec.js'
 import { parseConnectionActor, parseRoomBinding } from '../room-binding-codec.js'
 import { parseMoteChatDiagnosis } from './chat-diagnosis.js'

@@ -41,9 +41,9 @@ import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
 import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecord, isSpatialAgentAssociation, spatialAgentAssociationRecord } from './spatial-agent-open-contract.js'
 import { agentTakeoverPrompt } from './agent-takeover-context.js'
 import { agentDerivedActionPrompt, isAgentBuiltInDerivedActionId, parseAgentDerivedActionFields } from './agent-derived-actions.js'
-import { reconcileMoteMainSetup } from './mote-main-setup.js'
+import { reconcileMoteMainSetup } from './mote/main-setup.js'
 import { MOTE_INPUT_GUIDANCE } from './mote/input-source.js'
-import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote-dialogue.js'
+import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote/dialogue.js'
 import { moteInputObservationId } from './mote/input.js'
 import { parseCreationContinueParams, parseCreationContinueReceipt, parseCreationContinueResult } from './agent-creation-continue.js'
 import { parseAgentExecutionReference } from './errors.js'
@@ -101,7 +101,7 @@ import { parseConversationLandmarkQuery, parseConversationLandmarkWrite } from '
 import { isConnectionServiceMethod, parseConnectionServiceParams } from './connection-service-codec.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote/connection-codec.js'
 import type { MoteConnectionPort, MoteConnectionMethod } from './mote/connection-contract.js'
-import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickPreferencesPort, type MoteConnectionPreferencesPort, type MoteConnectionPreferencesReadInput, type MoteConnectionPreferencesSaveParams } from './mote-preferences.js'
+import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickPreferencesPort, type MoteConnectionPreferencesPort, type MoteConnectionPreferencesReadInput, type MoteConnectionPreferencesSaveParams } from './mote/preferences.js'
 import { isConnectionProfileMethod, parseConnectionProfileParams } from './connection-profile-codec.js'
 import { isConnectionEnrollmentMethod, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
@@ -1958,7 +1958,7 @@ export class AgentMuxRpcService {
             const routed=main?.identity?await journal.readMoteMainInputRoute(main.identity,key.submissionId):null
             if(routed||original.input||original.record)throw new AgentMuxError('This Query already belongs to its original input producer. No new Main was created.','MOTE_MAIN_INPUT_PREEXISTING')
             const decision=main&&await this.evaluateMoteRollover(main,key,journal,context)
-            const frozen=(value:import('./mote-main-period.js').MoteMainRolloverDecision)=>{const {evaluatedAt:_now,...original}=value;return original}
+            const frozen=(value:import('./mote/main-period.js').MoteMainRolloverDecision)=>{const {evaluatedAt:_now,...original}=value;return original}
             if(decision?.status!=='due'||!decision.decision||request.requestId!==intent.rollover.creationOperationId||intent.deferredInput?.operationId!==intent.rollover.queryOperationId||!isDeepStrictEqual(frozen(decision.decision),frozen(intent.rollover)))throw new AgentMuxError('The original rollover policy, role or activity changed. Keep this Query and inspect its original source.','MOTE_MAIN_CHANGED')
           }
         }
@@ -3994,7 +3994,7 @@ export class AgentMuxRpcService {
     return {key,record,...(observed ? {input:observed} : {}),...(receipt?.moteObservationId ? {moteObservationId:receipt.moteObservationId} : {})}
   }
 
-  private async moteMainSetup(method: 'space.mote.dialogue.setup.inspect' | 'space.mote.dialogue.setup.advance', input: import('./mote-dialogue.js').MoteMainSetupRequest, context: AgentMuxRpcCallContext): Promise<import('./mote-dialogue.js').MoteMainSetupResult> {
+  private async moteMainSetup(method: 'space.mote.dialogue.setup.inspect' | 'space.mote.dialogue.setup.advance', input: import('./mote/dialogue.js').MoteMainSetupRequest, context: AgentMuxRpcCallContext): Promise<import('./mote/dialogue.js').MoteMainSetupResult> {
     const assertCurrent = async () => { context.signal?.throwIfAborted(); await this.assertRuntimeFence(context); await this.inputCallContext(context).assertCurrent?.() }
     await assertCurrent()
     if (input.creation.hostId !== 'local') {
@@ -4020,8 +4020,8 @@ export class AgentMuxRpcService {
         if (routes.length !== 1 || this.endpointUnverified(routes[0]!.client)) throw new AgentMuxError('The exact original Agent execution Host is unavailable or ambiguous. Its Session and request remain retained.', 'CONTROL_UNAVAILABLE')
         await assertCurrent(); return await routes[0]!.client.inspectAgentCreation(sessionId)
       },
-      read:async request => parseMotePreferencesReadResult(await resourceCall('space.mote.preferences.read',request),request) as import('./mote-preferences.js').MoteQuickPreferencesReadResult,
-      save:async request => parseMotePreferencesSaveResult(await resourceCall('space.mote.preferences.save',request),request) as import('./mote-preferences.js').MoteQuickPreferencesSaveResult,
+      read:async request => parseMotePreferencesReadResult(await resourceCall('space.mote.preferences.read',request),request) as import('./mote/preferences.js').MoteQuickPreferencesReadResult,
+      save:async request => parseMotePreferencesSaveResult(await resourceCall('space.mote.preferences.save',request),request) as import('./mote/preferences.js').MoteQuickPreferencesSaveResult,
       sources:async request => parseMoteDialogueResult('space.mote.dialogue.read',await resourceCall('space.mote.dialogue.read',request),request),
       link:async request => parseMoteDialogueResult('space.mote.dialogue.link',await resourceCall('space.mote.dialogue.link',request),request)
     })
@@ -4094,7 +4094,7 @@ export class AgentMuxRpcService {
   }
 
   /** Explicit entry admits the exact current role into the original Session continuity owner, without an input journal. */
-  private async moteMainRecovery(method: 'space.mote.dialogue.recovery.ensure' | 'space.mote.dialogue.recovery.inspect', input: import('./mote-dialogue.js').MoteDialogueRecoveryRequest, context: AgentMuxRpcCallContext): Promise<import('./mote-dialogue.js').MoteDialogueRecoveryInspection> {
+  private async moteMainRecovery(method: 'space.mote.dialogue.recovery.ensure' | 'space.mote.dialogue.recovery.inspect', input: import('./mote/dialogue.js').MoteDialogueRecoveryRequest, context: AgentMuxRpcCallContext): Promise<import('./mote/dialogue.js').MoteDialogueRecoveryInspection> {
     const call = this.inputCallContext(context)
     await call.assertCurrent?.(); context.signal?.throwIfAborted()
     const owners = (await this.clients()).filter(scope => scope.hostId === input.reference.hostId)
@@ -4149,11 +4149,11 @@ export class AgentMuxRpcService {
   }
 
   /** Logical intake adds only an immutable route to the original journal. Original Core remains the sole input owner. */
-  private async moteMainInput(method: 'space.mote.dialogue.input.submit' | 'space.mote.dialogue.input.inspect', input: import('./mote-dialogue.js').MoteDialogueInputSubmit | import('./mote-dialogue.js').MoteDialogueInputRead, context: AgentMuxRpcCallContext): Promise<import('./mote-dialogue.js').MoteDialogueInputInspection> {
+  private async moteMainInput(method: 'space.mote.dialogue.input.submit' | 'space.mote.dialogue.input.inspect', input: import('./mote/dialogue.js').MoteDialogueInputSubmit | import('./mote/dialogue.js').MoteDialogueInputRead, context: AgentMuxRpcCallContext): Promise<import('./mote/dialogue.js').MoteDialogueInputInspection> {
     const owner=this.ports.moteDialogue?.mainInput
     return method==='space.mote.dialogue.input.submit'&&owner?.withRole?await owner.withRole(input.target,()=>this.moteMainInputInRole(method,input,context)):await this.moteMainInputInRole(method,input,context)
   }
-  private async moteMainInputInRole(method: 'space.mote.dialogue.input.submit' | 'space.mote.dialogue.input.inspect', input: import('./mote-dialogue.js').MoteDialogueInputSubmit | import('./mote-dialogue.js').MoteDialogueInputRead, context: AgentMuxRpcCallContext): Promise<import('./mote-dialogue.js').MoteDialogueInputInspection> {
+  private async moteMainInputInRole(method: 'space.mote.dialogue.input.submit' | 'space.mote.dialogue.input.inspect', input: import('./mote/dialogue.js').MoteDialogueInputSubmit | import('./mote/dialogue.js').MoteDialogueInputRead, context: AgentMuxRpcCallContext): Promise<import('./mote/dialogue.js').MoteDialogueInputInspection> {
     const mainOwner = this.ports.moteDialogue?.mainInput
     if (!mainOwner) throw new AgentMuxError('The original Mote main input owner is unavailable. Keep the draft and original operation; no input was sent.', 'CONTROL_UNAVAILABLE')
     await this.inputCallContext(context).assertCurrent?.(); context.signal?.throwIfAborted()
@@ -4163,17 +4163,17 @@ export class AgentMuxRpcService {
     const parsed = 'input' in input ? parseAgentInputSubmit(input.input) : null
     const recovery = 'input' in input ? input.recovery : undefined
     const journal = await this.messageRouteJournal(), submit = parsed ? {...parsed,...(parsed.capturedContext ? {} : {moteGuidance:true as const})} : null
-    const operationId = submit?.operationId ?? (input as import('./mote-dialogue.js').MoteDialogueInputRead).operationId
+    const operationId = submit?.operationId ?? (input as import('./mote/dialogue.js').MoteDialogueInputRead).operationId
     let route = await journal.readMoteMainInputRoute(main.identity,operationId)
     let firstIntake = false
-    let rollover: import('./mote-main-period.js').MoteMainRolloverReading | undefined
+    let rollover: import('./mote/main-period.js').MoteMainRolloverReading | undefined
     if (submit) {
       const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
         ? Object.fromEntries(Object.entries(value).filter(([,v]) => v !== undefined).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0).map(([k,v]) => [k,canonical(v)])) : value
       const {preparationRetry:_preparationRetry,...stableIntent} = submit
       const digest = createHash('sha256').update(JSON.stringify(canonical({input:stableIntent,...(recovery ? {recovery:{operationId:recovery.operationId}} : {})}))).digest('hex')
       const key = {kind:'prompt' as const,agentSessionId:submit.agentSessionId,expectedRun:submit.expectedRun,submissionId:submit.operationId}
-      const expectedRoleRevision = (input as import('./mote-dialogue.js').MoteDialogueInputSubmit).expectedRoleRevision
+      const expectedRoleRevision = (input as import('./mote/dialogue.js').MoteDialogueInputSubmit).expectedRoleRevision
       if (route) {
         if (route.intentDigest !== digest || route.roleRevision !== expectedRoleRevision || !isDeepStrictEqual(route.key,key)) throw new AgentMuxError('This logical main input already names another original role, target or content. Keep its original input key.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       } else {
@@ -4238,12 +4238,12 @@ export class AgentMuxRpcService {
     return {...(route.rollover?{rollover:route.rollover}:{}),route,record:result.record,input:result.input ?? null,...(rollover?{rollover}:{})}
   }
 
-  private async evaluateMoteRollover(main: import('./mote-dialogue.js').MoteMainSnapshot, queryInputKey:Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>, journal:DurableAgentMuxMessageQueue, context:AgentMuxRpcCallContext):Promise<import('./mote-main-period.js').MoteMainRolloverReading> {
+  private async evaluateMoteRollover(main: import('./mote/dialogue.js').MoteMainSnapshot, queryInputKey:Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>, journal:DurableAgentMuxMessageQueue, context:AgentMuxRpcCallContext):Promise<import('./mote/main-period.js').MoteMainRolloverReading> {
     const operationId=queryInputKey.submissionId
-    let rollover:import('./mote-main-period.js').MoteMainRolloverReading={status:'unconfirmed',decision:null,issue:'The original Main dialogue activity is unconfirmed. Existing input remains available.'}
+    let rollover:import('./mote/main-period.js').MoteMainRolloverReading={status:'unconfirmed',decision:null,issue:'The original Main dialogue activity is unconfirmed. Existing input remains available.'}
     if(main.status!=='ready'||!main.identity||!main.current||!main.roleRevision)return rollover
     try {
-        let preference:import('./mote-preferences.js').MoteQuickPreferencesReadResult|undefined
+        let preference:import('./mote/preferences.js').MoteQuickPreferencesReadResult|undefined
         try { preference=this.ports.moteQuickPreferences&&await this.ports.moteQuickPreferences.read({kind:'quick',target:main.target}) }
         catch { throw new AgentMuxError('The saved Main Executor choice could not be read. Keep this Query and inspect the original Mote settings; no input was sent.','MOTE_MAIN_EXECUTOR_UNCONFIRMED') }
         if(!preference?.defaults||!preference.source?.resource||!['read','deleted'].includes(preference.source.result.status))throw new AgentMuxError('The saved Main Executor choice is unconfirmed. Keep this Query and inspect the original Mote settings; no input was sent.','MOTE_MAIN_EXECUTOR_UNCONFIRMED')

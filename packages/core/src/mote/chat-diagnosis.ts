@@ -13,7 +13,7 @@ import type { ConnectionDeliverySourceObservation } from '../connection-diagnosi
 import { CONNECTION_DELIVERY_GAP_REASONS, CONNECTION_DELIVERY_RECEIPT_REASONS, CONNECTION_DELIVERY_STATES,
   parseConnectionDeliveryObservation, parseConnectionDeliverySourceObservation } from '../connection-delivery-codec.js'
 import type { ConnectionIngressRuntimeObservation } from '../ingress-contract.js'
-import { parseMoteConnectionValues, parseMotePreferencesTarget, type MoteConnectionRef } from '../mote-preferences.js'
+import { parseMoteConnectionValues, parseMotePreferencesTarget, type MoteConnectionRef } from './preferences.js'
 import { rpcRecord } from '../rpc-data.js'
 
 export const moteChatDiagnosisWindowLimit = 5 as const

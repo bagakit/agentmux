@@ -33,7 +33,7 @@ import { parseConversationSnapshotResult, type ConversationSnapshotInput, type C
 import { isImageMethod, parseImageParams, parseImageResult } from './public-rpc-image.js'
 import { parseAgentStopInspection, type AgentMuxAgentStopIdentity } from './agent-stop-receipt.js'
 import { MOTE_INPUT_GUIDANCE } from './mote/input-source.js'
-import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult } from './mote-dialogue.js'
+import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult } from './mote/dialogue.js'
 import { parseCreationContinueParams, parseCreationContinueResult } from './agent-creation-continue.js'
 import { parseMessageFieldPage, validateMessageFieldRead } from './agent-message-field.js'
 import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection, parseAgentExecutionBindingObservation } from './public-rpc-agent-execution.js'

@@ -1,4 +1,4 @@
-import type { MoteConnectionRef, MotePreferencesTarget } from '../mote-preferences.js'
+import type { MoteConnectionRef, MotePreferencesTarget } from './preferences.js'
 import type { ConnectionActor, ConnectionApplication } from '../connections-contract.js'
 import type { ConnectionEnrollmentCallContext } from '../connection-enrollment-contract.js'
 import type { ConnectionDelivery } from '../connection-delivery-contract.js'
