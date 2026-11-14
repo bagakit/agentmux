@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import * as Menu from '@agentmux/client-ui/components/HoverDropdownMenu'
+import * as Dropdown from '@agentmux/client-ui/components/DropdownMenu'
 import * as Modal from '@agentmux/client-ui/components/Modal'
 import { TextInput } from '@agentmux/client-ui/input'
 import { ClientUiOverlayProvider } from '@agentmux/client-ui/overlay-host'
@@ -38,5 +39,12 @@ export default function Overlays() {
         <Menu.Item onSelect={() => setTitle('Review board')}>Reset title</Menu.Item>
       </Menu.Content></Menu.Portal>
     </Menu.Root>
+    <Dropdown.Root modal={false}>
+      <Dropdown.Trigger>File actions</Dropdown.Trigger>
+      <Dropdown.Portal><Dropdown.Content style={{ background: 'var(--surface-2)', color: 'var(--text)',
+        borderRadius: 'var(--radius)', padding: 'var(--sp-4)', zIndex: 'var(--layer-popover)' }}>
+        <Dropdown.Item onSelect={() => setTitle('Untitled board')}>Clear the title</Dropdown.Item>
+      </Dropdown.Content></Dropdown.Portal>
+    </Dropdown.Root>
   </ClientUiOverlayProvider>
 }
