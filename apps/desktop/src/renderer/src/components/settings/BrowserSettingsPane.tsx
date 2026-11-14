@@ -1,4 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
+import { SelectionField } from '../SelectionField'
+import { BROWSER_NEW_PAGE_DESTINATIONS, resolveBrowserNewPagePlacement, type BrowserNewPageDestination } from '../../../../shared/browser-new-page-placement'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useState } from 'react'
 import type { AppLinkSchemeChoice, BrowserConfig } from '../../../../shared/contracts'
@@ -12,7 +14,16 @@ import { api } from '../../lib/api'
 import { SettingsConceptSummary } from './SettingsConceptSummary'
 import './browser-settings.css'
 
-export type BrowserPreferences = { agentAutomation: boolean; automaticMemoryRelease: boolean; exitCheckUrl: string }
+export type BrowserPreferences = { agentAutomation: boolean; automaticMemoryRelease: boolean; exitCheckUrl: string;
+  newPageSpace: BrowserNewPageDestination; newPageFocus: BrowserNewPageDestination; newPageSurvey: BrowserNewPageDestination }
+
+const newPageFields = [
+  { scene: 'space', key: 'newPageSpace', label: 'Space' },
+  { scene: 'focus', key: 'newPageFocus', label: 'Focus' },
+  { scene: 'survey', key: 'newPageSurvey', label: 'Survey' }
+] as const
+const newPageOptions = BROWSER_NEW_PAGE_DESTINATIONS.map(value => ({ value,
+  label: { window: 'Window', tab: 'Tab', region: 'Region' }[value] }))
 
 /** Matches Main's rule: https without a user name or password. Empty turns the check off. */
 function validExitCheckUrl(value: string): boolean {
@@ -37,7 +48,10 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   onSave: (value: BrowserPreferences, expected: BrowserPreferences) => Promise<void>
   onForget: (scheme: string, expected: AppLinkSchemeChoice) => Promise<void>
 }) {
-  const saved = { agentAutomation: browser.agentAutomation === true, automaticMemoryRelease: browser.automaticMemoryRelease !== false, exitCheckUrl: browser.exitCheckUrl ?? '' }
+  const saved: BrowserPreferences = { agentAutomation: browser.agentAutomation === true, automaticMemoryRelease: browser.automaticMemoryRelease !== false, exitCheckUrl: browser.exitCheckUrl ?? '',
+    newPageSpace: resolveBrowserNewPagePlacement(browser.newPagePlacement, 'space'),
+    newPageFocus: resolveBrowserNewPagePlacement(browser.newPagePlacement, 'focus'),
+    newPageSurvey: resolveBrowserNewPagePlacement(browser.newPagePlacement, 'survey') }
   const draft = useSettingDraftRecord(saved)
   const saveState = useSettingsSave()
   const directory = useBrowserDirectory(active)
@@ -51,8 +65,20 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   return (
     <div className="settings-pane-stack settings-browser">
       <SettingsConceptSummary icon="object.browser" title="Pages, permissions and connections"
-        description="Control how agents use browser pages, then inspect page resources and connected browsers below." />
+        description="Choose where websites open new pages, manage agent access and inspect browser resources." />
       <section className="settings-browser__preferences" aria-label="Browser preferences">
+      <section className="settings-group" data-settings-field="new-page-placement">
+        <header><span>New pages from websites</span></header>
+        <div className="browser-new-page-placement">
+          {newPageFields.map(field => <div key={field.scene} className="browser-new-page-placement__row" data-settings-field={`new-page-${field.scene}`}>
+            <label htmlFor={`browser-new-page-${field.scene}`}>{field.label}</label>
+            <SelectionField id={`browser-new-page-${field.scene}`} label={`New webpage in ${field.label}`}
+              value={draft.value[field.key]} options={newPageOptions} searchable={false}
+              onValueChange={value => draft.setField(field.key, value as BrowserNewPageDestination)} />
+          </div>)}
+          <p className="settings-browser__permission-note">Applies when a website opens a separate page. Navigation within a page stays in that page. Message and terminal links keep their Focus setting.</p>
+        </div>
+      </section>
       <section className="settings-group" data-settings-field="agent-automation">
         <header><span>Agent automation</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">

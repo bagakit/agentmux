@@ -1,9 +1,10 @@
 import { BROWSER_TOOLBAR_ITEM_ORDER } from '../../../shared/browser-toolbar.js'
 import { DEFAULT_CONFIG } from '../../config-store.js'
-import { booleanSetting, integerSetting, textSetting, invalid } from '../scalar-setting.js'
+import { booleanSetting, enumSetting, integerSetting, textSetting, invalid } from '../scalar-setting.js'
 import { DEFAULT_SURVEY_THUMBNAIL_LAYOUT, SURVEY_THUMBNAIL_HEIGHT, SURVEY_THUMBNAIL_COLUMNS, resolveSurveyThumbnailLayout } from '../../../shared/survey-thumbnail-layout.js'
 import type { ScalarSetting } from '../scalar-setting.js'
 import { browserAgentControlSettings } from './browser-agent-control.js'
+import { BROWSER_NEW_PAGE_SCENES, BROWSER_NEW_PAGE_DESTINATIONS, BROWSER_NEW_PAGE_PLACEMENT_DEFAULTS, resolveBrowserNewPagePlacement } from '../../../shared/browser-new-page-placement.js'
 import { validBrowserProfileExitCheckUrl } from '../../browser-profile-exit-check.js'
 import { DEFAULT_BROWSER_START_PAGE, BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, BROWSER_START_PAGE_HISTORY_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit, type BrowserStartPageConfig } from '../../../shared/browser-start-page.js'
 
@@ -11,6 +12,10 @@ const writeStartPage = <K extends keyof BrowserStartPageConfig>(config: Paramete
   ({ ...config, browser: { ...config.browser, startPage: { ...resolveBrowserStartPage(config.browser.startPage), [key]: value } } })
 
 export const browserSettings = [
+  ...BROWSER_NEW_PAGE_SCENES.map(scene => enumSetting(`browser.newPagePlacement.${scene}`,
+    BROWSER_NEW_PAGE_DESTINATIONS, BROWSER_NEW_PAGE_PLACEMENT_DEFAULTS[scene],
+    config => resolveBrowserNewPagePlacement(config.browser.newPagePlacement, scene),
+    (config, value) => ({ ...config, browser: { ...config.browser, newPagePlacement: { ...config.browser.newPagePlacement, [scene]: value } } }))),
   booleanSetting('browser.automaticMemoryRelease', DEFAULT_CONFIG.browser.automaticMemoryRelease !== false,
     config => config.browser.automaticMemoryRelease !== false,
     (config, automaticMemoryRelease) => ({ ...config, browser: { ...config.browser, automaticMemoryRelease } })),

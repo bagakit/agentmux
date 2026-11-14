@@ -1,10 +1,12 @@
 import type { BrowserWindowConstructorOptions, WebContents } from 'electron'
 import { browserWindowOpenOutcome } from './browser-app-link.js'
 
+export type NativeBrowserOpenRequest = Pick<Parameters<Parameters<WebContents['setWindowOpenHandler']>[0]>[0], 'disposition'>
+
 /** The synchronous Chromium creation request is consumed once, without replaying its URL.
  * Page identity, lifecycle, controls and presentation all belong to BrowserViewManager. */
 export function installNativeBrowserWindows(source: WebContents, host: {
-  create(options: BrowserWindowConstructorOptions): WebContents
+  create(options: BrowserWindowConstructorOptions, request: NativeBrowserOpenRequest): WebContents
   handOff(url: string, scheme: string): void
   report(warning: string, page?: WebContents): void
 }): void {
@@ -20,7 +22,7 @@ export function installNativeBrowserWindows(source: WebContents, host: {
   })
   events.prependListener('-will-add-new-contents', () => { pending = null })
   events.on('-new-window', (event: Electron.Event) => { if (pending?.event === event) pending = null })
-  source.setWindowOpenHandler(({ url }) => {
+  source.setWindowOpenHandler(({ url, disposition }) => {
     const request = pending
     pending = null
     const decision = browserWindowOpenOutcome(url, host.handOff)
@@ -32,7 +34,7 @@ export function installNativeBrowserWindows(source: WebContents, host: {
         const page = host.create(guest ? options : { ...options, webPreferences: {
           ...(source as WebContents & { getLastWebPreferences(): Electron.WebPreferences }).getLastWebPreferences(),
           ...options.webPreferences, session: source.session
-        } })
+        } }, { disposition })
         if (!guest) {
           const close = () => { if (!page.isDestroyed()) page.close() }
           events.once('current-render-view-deleted', close)

@@ -1,3 +1,4 @@
+import { finishNativeBrowserOpening } from './lib/browser-native-opening'
 import type { GoalRelationAccess } from '@agentmux/core/control'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { noteHistoryCoreTarget, readNoteFileHistory } from './lib/note-history-source'
@@ -12045,10 +12046,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (projection.state !== current || Object.keys(settled).length) set({ ...projection.state, ...settled })
       if (projection.target) {
         const target = projection.target
-        void import('./lib/workbench-windows').then(({ openWorkbenchWindow }) => {
-          const surface = get().tabs[target.tabId]?.regions[target.regionId]
-          if (surface?.kind === 'browser' && surface.browserId === event.browser.id) return openWorkbenchWindow({ kind: 'region', ...target }, { focus: false })
-        }).catch(error => get().reportError(error))
+        if (projection.notice) get().reportError(new Error(projection.notice), { kind: 'indeterminate',
+          event: { source: 'spatial', key: `native-browser:${event.browser.id}` } })
+        void finishNativeBrowserOpening({ get, checkpoint: checkpointSpatialWorkbench,
+          openWindow: async (location, returnContext) => {
+            const { openWorkbenchWindow } = await import('./lib/workbench-windows')
+            const surface = get().tabs[location.tabId]?.regions[location.regionId]
+            if (surface?.kind === 'browser' && surface.browserId === event.browser.id) {
+              await openWorkbenchWindow({ kind: 'region', ...location }, { focus: false, returnContext })
+            }
+          },
+          reveal: async (context, stillCurrent) => {
+            const { revealWorkbenchContext } = await import('./lib/workbench-windows')
+            if (stillCurrent()) revealWorkbenchContext(context)
+          }
+        }, event.opening ? { ...event, opening: { ...event.opening, context: projection.context ?? null } } : event,
+          target, projection.destination ?? 'window').catch(error => get().reportError(error))
       }
       return
     }

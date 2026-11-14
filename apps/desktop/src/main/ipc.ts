@@ -604,7 +604,7 @@ export async function registerIpc(args: {
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
-  {}, browserAgentAuthority(args.runtime))
+  {}, browserAgentAuthority(args.runtime), () => configOwner.current.browser.newPagePlacement)
   browsers.sitePermissions = new BrowserSitePermissions(join(app.getPath('userData'), 'browser-site-permissions.json'), id => browsers.refreshSitePermissions(id))
   browserProfiles.cleanupPurgedIdentity = async profileId => {
     let credentialCleanup: 'confirmed' | 'unknown' = 'unknown', permissionCleanup: 'confirmed' | 'unknown' = 'unknown'

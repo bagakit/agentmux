@@ -379,6 +379,8 @@ export type BrowserToolbarConfig = {
 }
 
 export type BrowserConfig = {
+  /** Website-created pages; absence uses scene defaults without changing existing pages. */
+  newPagePlacement?: Partial<import('./browser-new-page-placement').BrowserNewPagePlacement>
   /** Absence keeps automatic memory release enabled; manual safe actions are independent. */
   automaticMemoryRelease?: boolean
   /** An https address a person chose for checking where a Profile's route reaches; absent means off. */
@@ -1488,7 +1490,7 @@ export type { BrowserPng, BrowserScreenshotCapture, BrowserScriptRunReport, Brow
 import type { BrowserPng, BrowserScreenshotCapture, BrowserScriptRunReport, BrowserElementRect, BrowserElementSelection, BrowserAnnotationMarker, BrowserPageNode, BrowserPageSnapshot, BrowserPageFrameFailure } from '@agentmux/browser/model/page'
 
 export type BrowserEvent =
-  | { type: 'native-opened'; browser: BrowserSnapshot; workspaceId: string | null; window: { width: number; height: number } }
+  | { type: 'native-opened'; browser: BrowserSnapshot; workspaceId: string | null; window: { width: number; height: number }; opening?: BrowserNativeOpening }
   | { type: 'updated'; browser: BrowserSnapshot }
   | { type: 'released'; id: string; navigationId: string }
   | { type: 'unavailable'; id: string; error: string }
@@ -1499,6 +1501,14 @@ export type BrowserBounds = {
   y: number
   width: number
   height: number
+}
+
+/** Frozen placement policy for one original Chromium child request. */
+export type BrowserNativeOpening = {
+  /** Original native disposition requests a foreground tab; Agent work stays in the background. */
+  foreground?: boolean
+  context: import('./workbench-windows').WorkbenchReturnContext | null
+  destination: import('./browser-new-page-placement').BrowserNewPageDestination
 }
 
 export type BrowserPresentationOccurrence = {

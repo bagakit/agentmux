@@ -1,3 +1,5 @@
+import { readWorkbenchReturnContext, type WorkbenchReturnContext } from '../shared/workbench-windows'
+import { resolveBrowserNewPagePlacement, type BrowserNewPagePlacement } from '../shared/browser-new-page-placement'
 import type { BrowserTaskParallelList, BrowserTaskParallelInput, BrowserTaskParallelInspection, BrowserTaskParallelSummary, BrowserTaskParallelContinuationInput, BrowserTaskParallelContinuationReceipt } from '@agentmux/core/control'
 import { createHash } from 'node:crypto'
 import type { BrowserTaskParallelHost } from './browser-task-parallel.js'
@@ -145,6 +147,7 @@ type BrowserEntry = {
   id: string
   source?: import('@agentmux/core').AgentMuxBrowserSource
   nativeChild?: {
+    opening?: import('../shared/contracts').BrowserNativeOpening
     window: { width: number; height: number }
     /** Only an unposted original display projection; no native page request is repeated. */
     projectionPending?: true
@@ -973,7 +976,8 @@ export class BrowserViewManager {
     private readonly feedbackPreferences: () => BrowserAgentControlPreferences = () => DEFAULT_BROWSER_AGENT_CONTROL,
     private readonly recoveryPreviews?: BrowserRecoveryPreviewStore,
     private readonly nativeWindows: { confirmLeave?(window: BrowserWindow): Promise<boolean> } = {},
-    private readonly agents?: BrowserAgentAuthority
+    private readonly agents?: BrowserAgentAuthority,
+    private readonly newPagePlacement: () => Partial<BrowserNewPagePlacement> | undefined = () => undefined
   ) {
     this.unsubscribeProfileEnvironment = profiles.onEnvironmentApplicationChange?.(id => this.refreshProfileEnvironment(id))
     this.unsubscribeTaskAssets = taskAssets?.subscribe(browserId => {
@@ -1085,7 +1089,8 @@ export class BrowserViewManager {
     }
     const id = mintObjectId()
     const lease: PresentationLease = { id, entry, document, window: nativeWindow, windowDocument: input.window,
-      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location }, ...(occurrence.layoutHost === true ? { layoutHost: true } : {}) }, geometry }
+      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location }, ...(occurrence.layoutHost === true ? { layoutHost: true } : {}),
+        ...(spatial ? { returnContext: readWorkbenchReturnContext(occurrence.returnContext, { kind: 'region', ...occurrence.location as Exclude<typeof occurrence.location, { kind: 'inline' }> }) ?? undefined } : {}) }, geometry }
     this.presentationLeases.set(id, lease)
     entry.presentationLeaseIds.add(id)
     this.followLayoutHost(lease)
@@ -1951,15 +1956,19 @@ export class BrowserViewManager {
     }
   }
 
-  private createNativeChild(parent: BrowserEntry, sourceView: WebContentsView, options: BrowserWindowConstructorOptions): WebContents {
+  private createNativeChild(parent: BrowserEntry, sourceView: WebContentsView, options: BrowserWindowConstructorOptions, request: import('./browser-native-windows').NativeBrowserOpenRequest): WebContents {
     // Only the original page may contribute this request. This rejects a stale
     // source incarnation, without closing its independent healthy replacement.
     if (!this.owns(parent, sourceView)) throw new Error('The original native Browser page is no longer current; its child was not created.')
     const lease = parent.inputLeaseId ? this.presentationLeases.get(parent.inputLeaseId) : undefined
     let location: import('@agentmux/core').AgentMuxBrowserSource['location']
+    let returnContext: WorkbenchReturnContext | null = null
     if (lease?.entry === parent && 'displayWorkspaceId' in lease.occurrence.location && this.isPresentationDocumentCurrent(lease.document)) {
       try {
-        if (!this.presentationWindow || this.presentationWindow(lease.windowDocument, lease.occurrence.location) === lease.window) location = { ...lease.occurrence.location }
+        if (!this.presentationWindow || this.presentationWindow(lease.windowDocument, lease.occurrence.location) === lease.window) {
+          location = { ...lease.occurrence.location }
+          returnContext = readWorkbenchReturnContext(lease.occurrence.returnContext, { kind: 'region', ...location })
+        }
       } catch { /* Source Browser identity is still known; an unconfirmed placement is omitted. */ }
     }
     const source = { browserId: parent.id, navigationId: parent.navigationId, ...(location ? { location } : {}) }
@@ -1969,6 +1978,9 @@ export class BrowserViewManager {
     const child = this.registerEntry(mintObjectId(), view.webContents.getURL() || 'about:blank', parent.storage, view,
       'responsive', parent.workspaceId, undefined, { source, agent: parent.agent, ...(parent.agentWarning ? { warning: parent.agentWarning } : {}) }, { window, originalRequest: true })
     void this.prepareProfilePageEnvironment(child, view).catch(error => { if (this.owns(child, view)) { child.activity = { ...child.activity, warning: `Native child environment scope is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Its original page remains.` }; this.emit(child) } })
+    child.nativeChild!.opening = { context: returnContext,
+      foreground: request.disposition === 'foreground-tab' && parent.activity.control === 'human' && !this.agentOwnsInput(parent),
+      destination: returnContext ? resolveBrowserNewPagePlacement(this.newPagePlacement(), returnContext.surface) : 'window' }
     this.observeNativeChild(child, () => this.markResourceRisk(parent, sourceView, 'document-used'))
     // Main created this Browser for the parent's page; a program's call running now caused it.
     parent.activeRun?.effects?.opened(child.id)
@@ -2008,7 +2020,7 @@ export class BrowserViewManager {
       const observedActivity = observed.activity ?? entry.activity
       const warning = child.projectionWarning ? removeWarning(observedActivity.warning, child.projectionWarning) : observedActivity.warning
       const { warning: _warning, ...activity } = observedActivity
-      this.send({ type: 'native-opened', browser: { ...observed, activity: { ...activity, ...(warning ? { warning } : {}) } }, workspaceId: entry.workspaceId, window: child.window })
+      this.send({ type: 'native-opened', browser: { ...observed, activity: { ...activity, ...(warning ? { warning } : {}) } }, workspaceId: entry.workspaceId, window: child.window, ...(child.opening ? { opening: child.opening } : {}) })
       delete child.projectionPending
       this.clearNativeChildWarning(entry, 'projectionWarning')
     })
@@ -4944,7 +4956,7 @@ export class BrowserViewManager {
     // Electron finishes the original request using its complete child-creation options.
     {
       installNativeBrowserWindows(contents, {
-        create: options => this.createNativeChild(entry, view, options),
+        create: (options, request) => this.createNativeChild(entry, view, options, request),
         handOff: (target, scheme) => {
         if (!this.owns(entry, view)) return
         void this.handOffAppLink(entry, target, scheme)

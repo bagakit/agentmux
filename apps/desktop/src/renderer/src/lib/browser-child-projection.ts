@@ -2,8 +2,9 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxBrowserSource } from '@agentmux/core'
 import { addTabPlacement, groupIds, regionIds } from '@agentmux/layout'
 import type { BrowserEvent } from '../../../shared/contracts'
+import type { WorkbenchReturnContext } from '../../../shared/workbench-windows'
 import type { BrowserProjectionState } from './browser-state'
-import { createWorkbenchTab, workbenchSurfaces } from './workbench-tabs'
+import { addWorkbenchRegion, createWorkbenchTab, workbenchSurfaces } from './workbench-tabs'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from './workbench-projection'
 
 export type BrowserSourceResolution =
@@ -104,7 +105,7 @@ export function nativeBrowserContainerChanged(state: BrowserProjectionState, pre
 }
 
 export function projectNativeBrowserOpening(state: BrowserProjectionState, event: Extract<BrowserEvent, { type: 'native-opened' }>):
-  { state: BrowserProjectionState; target: WorkbenchProjectionSelection | null; issue: string | null } {
+  { state: BrowserProjectionState; target: WorkbenchProjectionSelection | null; issue: string | null; destination?: 'window' | 'tab' | 'region'; notice?: string; context?: WorkbenchReturnContext | null } {
   // A repeated original event must never create another display or another native window.
   if (Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface => surface.kind === 'browser' && surface.browserId === event.browser.id))) {
     return { state, target: null, issue: null }
@@ -114,7 +115,22 @@ export function projectNativeBrowserOpening(state: BrowserProjectionState, event
   const locations = resolution?.status === 'available' ? [resolution.location] : resolution?.locations ?? []
   const sourceWorkspaceId = locations.map(location => workspaceIdentity(state.tabs[location.tabId]?.regions[location.regionId]?.workspaceId)).find(Boolean)
   const eventWorkspaceId = workspaceIdentity(event.workspaceId)
-  const groups = orderedGroups(state)
+  const requested = event.opening?.destination ?? 'window'
+  if (requested === 'region' && resolution?.status === 'available') {
+    const location = resolution.location, original = state.tabs[location.tabId]!
+    const workspaceId = eventWorkspaceId ?? sourceWorkspaceId
+    if (workspaceId && original.workspaceId === workspaceId) {
+      const next = addWorkbenchRegion(original, location.regionId, 'right', { ...event.browser,
+        kind: 'browser', browserId: event.browser.id, workspaceId, regionId: event.browser.id })
+      if (next !== original) return { state: { ...state, tabs: { ...state.tabs, [original.id]: {
+        ...next, layout: { ...next.layout, activeRegionId: original.layout.activeRegionId }
+      } } }, target: { ...location, regionId: event.browser.id }, issue: null, destination: 'region', context: event.opening?.context ?? null }
+    }
+  }
+  // The common exact-source path touches one real Group; unrelated workspaces do not amplify it.
+  const exact = resolution?.status === 'available' ? resolution.location : null
+  const exactGroup = exact ? state.layouts[exact.displayWorkspaceId]?.groups.find(group => group.id === exact.groupId) : undefined
+  const groups = exact && exactGroup ? [{ displayWorkspaceId: exact.displayWorkspaceId, group: exactGroup }] : orderedGroups(state)
   // A container choice is client layout policy, never evidence of the triggering occurrence.
   // In particular, an unknown source must not hide an already healthy native child.
   const preferred = [
@@ -148,7 +164,10 @@ export function projectNativeBrowserOpening(state: BrowserProjectionState, event
       return previous ? { ...group, activeTabId: previous.activeTabId, recentTabIds: previous.recentTabIds } : group
     }) }
     return { state: { tabs: { ...state.tabs, [tabId]: tab }, layouts: { ...state.layouts, [origin.displayWorkspaceId]: preserved } },
-      target: { displayWorkspaceId: origin.displayWorkspaceId, groupId: origin.groupId, tabId, regionId }, issue: null }
+      target: { displayWorkspaceId: origin.displayWorkspaceId, groupId: origin.groupId, tabId, regionId }, issue: null,
+      destination: requested === 'region' || resolution?.status !== 'available' ? 'window' : requested,
+      context: resolution?.status === 'available' && sourceWorkspaceId === workspaceId ? event.opening?.context ?? null : null,
+      ...(requested === 'region' ? { notice: 'The original split destination is unconfirmed. The same child page is kept in its own window; its original request has not been repeated.' } : {}) }
   }
   return { state, target: null,
     issue: `Browser ${event.browser.id} is open and available to Agents. No existing workspace Group has a usable workspace binding. Restore a workspace layout to show the same page automatically; the original link has not been opened again.` }

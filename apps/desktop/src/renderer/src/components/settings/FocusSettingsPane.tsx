@@ -65,7 +65,7 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
           {previewButton('agent-reading', 'Agent reading', 'reading')}
         </section>
         <section className="settings-group" data-settings-preview-group="opening-resources"><header><span>Opening resources</span></header>
-          <Choices id="link-destination" legend="Open links in Focus" value={draft.value.linkDestination} options={[{ value: 'region', label: 'Beside the Agent', hint: 'Keep both in view' }, { value: 'tab', label: 'New Tab in Space', hint: 'Give the resource room' }]} onChange={value => change('linkDestination', value, 'links')} />
+          <Choices id="link-destination" legend="Message and terminal links" value={draft.value.linkDestination} options={[{ value: 'region', label: 'Beside the Agent', hint: 'Keep both in view' }, { value: 'tab', label: 'New Tab in Space', hint: 'Give the resource room' }]} onChange={value => change('linkDestination', value, 'links')} />
           <p className="focus-settings-description">Alt-click chooses a position for that link.</p>
           {previewButton('opening-resources', 'Opening resources', 'links')}
         </section>
