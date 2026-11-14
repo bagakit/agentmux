@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 const variants = {
+  'memory-confirms-cancellation-disk': {path:'packages/core/src/agent-session-store.ts',edits:[
+    ["    this.creationCancellations.set(input.createOperationId, structuredClone(input))\n    return 'unconfirmed' as const", "    this.creationCancellations.set(input.createOperationId, structuredClone(input))\n    return 'confirmed' as const"]]},
   'skip-cancellation-pair': {path:'packages/core/src/client.ts',edits:[
     ['    if (actual !== expected) throw new AgentMuxError(', '    if (false && actual !== expected) throw new AgentMuxError('],
     ['    for (const reservation of [closed, correlation]) {', '    for (const reservation of []) {']]},

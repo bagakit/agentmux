@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createTakeoverOwnerFixture } from './helpers/takeover-owner.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'
+import { AgentMuxClient } from '../src/client.js'
+import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 it('cancels a complete original public takeover before admission and keeps its source workface', async () => {
@@ -83,6 +85,26 @@ it.each(['existing', 'retired', 'closed', 'prepared'] as const)('Hosted cancella
   expect(start).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(f.inner.kernel.input).toHaveBeenCalledTimes(inputCount)
   if (state === 'prepared') { release.resolve(); expect((await settled).outcome).toBe('opened'); expect(f.started).toHaveLength(1) }
   expect(await f.client.readAgentSession(f.source.agentSessionId)).toEqual(f.source)
+})
+it.each(['file', 'memory'] as const)('Hosted cancellation preserves its effect and reports the actual %s Store disk ACK', async kind => {
+  const f = await createTakeoverOwnerFixture(cleanup), request = originalRequest(f, 'disk-ack-original')
+  const created = await f.rpc.call('agent.open', request), agentSessionId = created.agent!.agentSessionId
+  let client = f.client
+  if (kind === 'memory') {
+    const store = new AgentMuxMemoryAgentSessionStore()
+    await store.compareAndSwapMetadata(null, (await f.store.readMetadata(agentSessionId))!)
+    client = new AgentMuxClient({ store, providers: [f.provider], creationAuthority: f.inner.creationAuthority })
+    cleanup.push(() => client.dispose())
+  }
+  const remote = await hostedTestClient(client); cleanup.push(() => remote.dispose())
+  remote.port.call = async (method, params, options) => await remote.service.call(method, structuredClone(params),
+    { ...options, principal: { kind: 'user', id: 'disk-ack-user' } }) as never
+  const input = { createOperationId: request.operationId, agentSessionId, operationId: 'disk-ack-cancellation' }
+  expect(await remote.sdk.cancelAgentCreation(input)).toMatchObject({ outcome: 'created', run: { runId: created.agent!.runId },
+    diskDurability: kind === 'file' ? 'confirmed' : 'unconfirmed' })
+  expect(await remote.sdk.inspectAgentCreationCancellation(input)).toMatchObject({ outcome: 'created', cancellation: input, diskDurability: 'unconfirmed' })
+  expect((await client.readAgentSession(agentSessionId))?.run).toEqual({ runId: created.agent!.runId })
+  expect(f.started).toHaveLength(1)
 })
 it('cancellation wins the real admission transaction after takeover preparation was already in flight', async () => {
   const f = await createTakeoverOwnerFixture(cleanup), reached = deferred(), release = deferred(), request = originalRequest(f, 'admission-race')
