@@ -18,7 +18,7 @@ import type { BrowserSnapshot } from '../src/shared/contracts'
 import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
 import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import type { SurfaceMemoryCollectionInput } from '../src/renderer/src/lib/surface-memory-budget-candidates'
-import type { TerminalParkingCollectionInput } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
+
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 // Use the installed browser PanelGroup, whose child registration effects are absent in its Node build.
@@ -33,7 +33,6 @@ const observation = vi.hoisted(() => ({
   catalogUnavailable: false,
   survey: [] as Parameters<typeof import('../src/renderer/src/components/GlobalSurveySurface').GlobalSurveySurface>[0][],
   memory: [] as { input: SurfaceMemoryCollectionInput; candidates: { id: string; kind: string; visible: boolean; navigationContextActive: boolean }[] }[],
-  terminals: [] as { workbenchVisible: boolean; projectedVisibleTabIds?: ReadonlySet<string> | undefined }[],
   stages: [] as { stage: HTMLElement; host: string | null; update: () => void; stopped: boolean }[]
 }))
 vi.mock('../src/renderer/src/components/GlobalSurveySurface', async (importOriginal) => {
@@ -49,12 +48,7 @@ vi.mock('../src/renderer/src/lib/surface-memory-budget-candidates', async (impor
     observation.memory.push({ input, candidates }); return candidates
   } }
 })
-vi.mock('../src/renderer/src/lib/terminal-cold-parking-coordinator', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/renderer/src/lib/terminal-cold-parking-coordinator')>()
-  return { ...actual, useTerminalColdParking: (options: Parameters<typeof actual.useTerminalColdParking>[0]) => {
-    observation.terminals.push(options); return actual.useTerminalColdParking(options)
-  } }
-})
+
 vi.mock('@floating-ui/dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@floating-ui/dom')>()
   return { ...actual, autoUpdate: (...args: Parameters<typeof actual.autoUpdate>) => {
@@ -70,7 +64,7 @@ import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopC
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { api } from '../src/renderer/src/lib/api'
 import { addWorkbenchRegion, createWorkbenchTab, documentKey, workbenchSurfaces } from '../src/renderer/src/lib/workbench-tabs'
-import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
+
 import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
@@ -123,7 +117,7 @@ beforeEach(() => {
   savedLauncherStorage = localStorage.getItem('agentmux-launcher')
   useLauncherState.setState({ drafts: {}, sections: {}, executors: {}, persistenceIssue: null })
   observation.catalogUnavailable = false;
-  observation.memory = []; observation.terminals = []; observation.stages = []; observation.survey = []
+  observation.memory = []; observation.stages = []; observation.survey = []
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const survey = this.closest('.global-survey-surface') !== null
     return new DOMRect(survey ? 200 : 250, 48, 600, 500)
@@ -978,9 +972,7 @@ it('feeds visibility and memory owners only the selected original tree and hides
   expect([...latest.input.projectedVisibleTabIds!]).toEqual([mixed.id])
   expect(latest.candidates.map(({ id, visible }) => ({ id, visible }))).toEqual([
     { id: 'page-a', visible: true }, { id: 'page-b', visible: true }, { id: 'file-region', visible: true }, { id: 'foreign-page', visible: false }])
-  const state = useAppStore.getState(), terminalOptions = observation.terminals.at(-1)!
-  const terminalInput: TerminalParkingCollectionInput = { tabs: state.tabs, layouts: state.layouts, sessions: state.sessions, activeWorkspaceId: state.activeWorkspaceId, ...terminalOptions }
-  expect(collectTerminalColdParkCandidates(terminalInput).map(({ id, visible }) => ({ id, visible }))).toEqual([{ id: 'agent-region', visible: true }])
+  expect(dom.container.querySelector('[data-terminal-probe="agent-1"]')?.getAttribute('data-visible')).toBe('true')
   await dom.click('[aria-label="Settings"]')
   expect([...observation.memory.at(-1)!.input.projectedVisibleTabIds!]).toEqual([]); healthy()
 })

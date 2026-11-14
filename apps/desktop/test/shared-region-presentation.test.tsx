@@ -107,8 +107,6 @@ async function presentationFixture({ file = false }: { file?: boolean } = {}) {
 
 
 it('uses the actual Focus menu to move only the original exact Region and return its DOM without changing the Tab or Run', async () => {
-  const budget: unknown[] = []
-  vi.stubGlobal('__regionBudgetFacts', budget)
   const fixture = await presentationFixture()
   try {
     await fixture.focus()
@@ -150,8 +148,6 @@ it('uses the actual Focus menu to move only the original exact Region and return
     expect(slot.id).toBe('focus-workbench-slot:' + JSON.stringify([fixture.reference.displayWorkspaceId, fixture.reference.groupId, fixture.reference.tabId, fixture.reference.regionId]))
     expect(original.dataset.fixtureVisible).toBe('true')
     expect(sibling.dataset.fixtureVisible).toBe('false')
-    expect(budget.length).toBeGreaterThan(0)
-    expect(budget.at(-1)).toEqual([{ id: 'decoy-region', visible: false },{ id: 'exact-r1', visible: false },{ id: 'exact-r2', visible: true }])
     expect(projected.contains(sibling)).toBe(false)
     expect(sibling.isConnected).toBe(true)
     expect(original.getAttribute('data-presentation-reference')).toBe(JSON.stringify(fixture.reference))

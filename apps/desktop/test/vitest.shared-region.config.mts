@@ -19,10 +19,6 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root,'.tmp/re
   if (mutation) { const change=mutations[mutation]; assert.ok(change,'Known Region semantic mutation')
    if (path===resolve(root,'apps/desktop/src/renderer/src',change[0])) { assert.equal(code.split(change[1]).length-1,1,'Unique actual loaded Region mutation');code=code.replace(change[1],change[2]) }
   }
-  if (path===resolve(root,'apps/desktop/src/renderer/src/lib/terminal-cold-parking-coordinator.tsx')) {
-   assert.equal(code.split('  return candidates').length-1,1,'Actual nonempty budget observation anchor')
-   code=code.replace('  return candidates','  ;(globalThis as unknown as { __regionBudgetFacts?: unknown[] }).__regionBudgetFacts?.push(candidates.map(item => ({ id: item.id, visible: item.visible })))\n  return candidates')
-  }
   if (process.env.AGENTMUX_REGION_LOADED) appendFileSync(process.env.AGENTMUX_REGION_LOADED,JSON.stringify({ path:relative(root,path),sourceSHA:createHash('sha256').update(source).digest('hex'),loadedSHA:createHash('sha256').update(code).digest('hex'),transformed:code!==source,mutation })+'\n')
   if (code!==source)return {code,map:null}
  }}],

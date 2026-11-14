@@ -14,7 +14,6 @@ import { warmCandidates } from './helpers/reusable-shell-candidates'
 import { api } from '../src/renderer/src/lib/api'
 import { PMO_FLOATING_TAB_SLOT_PREFIX } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
 import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-memory-budget-candidates'
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 // Load the installed browser primary so original real Panel registration precedes layout effects.
@@ -194,14 +193,11 @@ it('closes only the chosen split projection and preserves another healthy Termin
 })
 
 
-it('protects only the projected visible Tab from resource parking while its base workspace is hidden', () => {
+it('protects the projected visible file from resource release while its base workspace is hidden', () => {
   const h = seed()
   const input = { tabs: useAppStore.getState().tabs, layouts: useAppStore.getState().layouts,
     sessions: useAppStore.getState().sessions, activeWorkspaceId: null, workbenchVisible: false,
     projectedVisibleTabIds: new Set([h.mote.id]) }
-  expect(collectTerminalColdParkCandidates(input).map(one => ({ id: one.id, visible: one.visible, context: one.navigationContextActive }))).toEqual([
-    { id: 'ordinary-region', visible: false, context: false }, { id: 'mote-region', visible: true, context: true }
-  ])
   const file = { ...h.mote, regions: { 'mote-region': { regionId: 'mote-region', kind: 'file' as const, workspaceId: SCRATCH_WORKSPACE_ID, path: 'SOUL.md' } } }
   expect(collectSurfaceMemoryCandidates({ ...input, tabs: { [h.mote.id]: file }, documents: {}, dirtyDocuments: {}, savingDocuments: {} }))
     .toEqual([expect.objectContaining({ id: 'mote-region', visible: true, navigationContextActive: true })])

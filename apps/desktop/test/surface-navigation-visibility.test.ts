@@ -1,19 +1,10 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
-
-// 冷泊车协调器 import 了 store（它导出的 hook 要读 store），而 store 在测试环境里会撞上
-// `__AGENTMUX_WEB_PREVIEW__` 这个只在打包时注入的全局。本文件只用它的纯函数
-// `collectTerminalColdParkCandidates`，所以按同族测试（terminal-cold-parking-coordinator.test.ts）
-// 的既有做法把 store 挡在外面。
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: () => undefined
-}))
+import { describe, expect, it } from 'vitest'
 
 import { surfaceNavigationVisibility } from '../src/renderer/src/lib/surface-navigation-visibility.js'
 import { activeTopicIdFromLayout } from '../src/renderer/src/lib/scratch-topic-layout.js'
 import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-memory-budget-candidates.js'
-import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/contracts.js'
@@ -87,19 +78,16 @@ it('resource owners skip covered layouts and keep exact visible projections', ()
   }
 
   const memory = collectSurfaceMemoryCandidates(input)
-  const parking = collectTerminalColdParkCandidates(input)
   expect(memory).toHaveLength(24)
-  expect(parking).toHaveLength(25)
   expect(memory.filter(candidate => candidate.navigationContextActive).map(candidate => candidate.id)).toEqual(['region:file-0'])
-  expect(parking.filter(candidate => candidate.navigationContextActive).map(candidate => candidate.id)).toEqual(['region:shell-1'])
-  expect([...memory, ...parking].filter(candidate => candidate.visible).map(candidate => candidate.id)).toEqual(['region:file-0', 'region:shell-1'])
+  expect(memory.filter(candidate => candidate.visible).map(candidate => candidate.id)).toEqual(['region:file-0'])
   expect(groupReads).toEqual({ scratch: 0, other: 0 })
 
-  const reopened = collectTerminalColdParkCandidates({ ...input, workbenchVisible: true })
+  const reopened = surfaceNavigationVisibility(tabs['shell-3']!, layouts[SCRATCH_WORKSPACE_ID], tabs, { ...input, workbenchVisible: true })
   expect(groupReads.scratch).toBeGreaterThan(0)
   expect(groupReads.other).toBe(0)
-  expect(reopened.find(candidate => candidate.id === 'region:shell-3')?.navigationContextActive).toBe(true)
-  expect(reopened.find(candidate => candidate.id === 'region:shell-25')?.navigationContextActive).toBe(false)
+  expect(reopened.navigationContextActive).toBe(true)
+  expect(surfaceNavigationVisibility(tabs['shell-25']!, layouts[SCRATCH_WORKSPACE_ID], tabs, { ...input, workbenchVisible: true }).navigationContextActive).toBe(false)
 })
 
 // ---------------------------------------------------------------------------
@@ -267,7 +255,7 @@ describe('surfaceNavigationVisibility 的取值', () => {
 
   it('Scratch 里停在未绑 Topic 的一张 Tab 上时，绑了 Topic 的隐藏 Tab 仍算上下文活着', () => {
     // `activeTopicId === null` 那条析取项此前零覆盖：删掉它，这个文件其余 8 条**加上**三个消费者
-    // 侧的 terminal-cold-parking / surface-memory-budget / scratch-topic-layout 共 24 条全绿（实测）。
+    // 原 surface-memory-budget / scratch-topic-layout 消费者不应掩盖这个分支。
     //
     // 为什么 true 才是对的：activeTopicId 为 null 时下面那次投影不发生（`projected = layout`），
     // 于是这些绑了 Topic 的 Tab **就在同一份未投影的 layout 里**，只是被别的 Tab 盖住——而
@@ -303,24 +291,9 @@ describe('surfaceNavigationVisibility 的取值', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 接线层：两个回收器真的都走这一处，而不是各自再写一遍。
-//
-// 这一层必须与行为层分开，因为它们各自能单独失败，且失败形状完全不同：行为层挡「这一处判错了」，
-// 接线层挡「有人绕过了这一处」。此前正是接线层缺失——两个协调器把同一段逻辑逐字抄了两遍且互不
-// import，于是只改一处会让另一处静默保留旧行为并全绿（本仓 duplicated-rule-defeats-the-fix 那族）。
-// ---------------------------------------------------------------------------
-
-describe('两个回收器共用同一处判定', () => {
-  it('两个候选收集器对同一批 Tab 判出一致的在屏状态', () => {
-    // 这一条是**行为侧**的接线证明：不查源码文本，而是让两个收集器各自跑一遍同一批输入，
-    // 断言它们对每个 Region 的 `visible` / `navigationContextActive` 都与那处唯一实现一致。
-    // 任何一侧重新手抄一份判定并漂移，这里就红——不需要那份手抄长成什么特定样子。
-    //
-    // 输入刻意用 **Scratch 的两个 Topic**，而不是普通 workspace：Topic 投影是这段逻辑里最容易在
-    // 手抄时被整段漏掉的部分（普通 workspace 下它根本不参与），用普通 workspace 做 fixture 时，
-    // 一份「只保留 workspace + activeTab 两项」的手抄仍然处处一致，这条就恒绿。实测：M3 那次把
-    // 冷泊车侧换成不含 Topic 的手抄，普通 workspace 的 fixture 下这条通过，只有结构判据红。
+// 原可回收的 file/browser 仍按统一导航事实区分当前 Topic 与隐藏 Topic。
+describe('内存预算沿用统一在屏判定', () => {
+  it('file/browser 候选与同批 Tab 的原在屏判定一致', () => {
     const shownTerminal = { ...terminalTab('shown-shell', SCRATCH_WORKSPACE_ID), topicId: 'view:a' }
     const shownFile = { ...fileTab('shown-doc', SCRATCH_WORKSPACE_ID), topicId: 'view:a' }
     const hiddenTerminal = { ...terminalTab('hidden-shell', SCRATCH_WORKSPACE_ID), topicId: 'view:b' }
@@ -351,10 +324,8 @@ describe('两个回收器共用同一处判定', () => {
       dirtyDocuments: {},
       savingDocuments: {}
     })
-    const parking = collectTerminalColdParkCandidates(shared)
 
-    // 两个收集器筛的 Region 种类不同（一个只要 file/browser，一个只要 agent/terminal），所以
-    // 取值要按它们各自认领的那个 Region 对齐，而不是按数组下标。
+    // 用准确 Region 对齐实际 file/browser 候选。
     const expected = new Map(
       Object.values(tabs).map((tab) => {
         const { navigationContextActive, tabVisible } = surfaceNavigationVisibility(
@@ -370,15 +341,11 @@ describe('两个回收器共用同一处判定', () => {
       })
     )
 
-    // 前提自检：两个收集器都必须真的产出了候选，且**隐藏 Topic 那一侧也在里面**——否则下面的
+    // 前提自检：实际候选必须同时含显示和隐藏 Topic，否则下面的
     // 循环只比对了看得见的那些，Topic 投影是否被手抄漏掉根本不可观测。
     expect(memory.map((candidate) => candidate.id).sort(), '内存预算侧的候选不是预期那两个').toEqual([
       'region:hidden-doc',
       'region:shown-doc'
-    ])
-    expect(parking.map((candidate) => candidate.id).sort(), '冷泊车侧的候选不是预期那两个').toEqual([
-      'region:hidden-shell',
-      'region:shown-shell'
     ])
     // 前提自检之二：这批输入必须真的能区分对错——隐藏 Topic 的取值与显示中的不同。两者相同时
     // 整条断言退化成恒真（本仓 property-unobservable-in-default-env 那族）。
@@ -387,7 +354,7 @@ describe('两个回收器共用同一处判定', () => {
       '隐藏 Topic 与显示中的取值相同，这批输入区分不出手抄漏掉 Topic 投影'
     ).not.toEqual(expected.get('region:shown-shell'))
 
-    for (const candidate of [...memory, ...parking]) {
+    for (const candidate of memory) {
       expect(
         { visible: candidate.visible, navigationContextActive: candidate.navigationContextActive },
         `${candidate.id} 的在屏判定与那处唯一实现不一致——有人又自己判了一遍`

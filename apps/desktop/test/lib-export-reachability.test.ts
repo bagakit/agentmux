@@ -286,14 +286,7 @@ const DELIBERATE: ReadonlyArray<{
       '冲突守卫遍历它——此前它在测试里被手抄成 `terminal || editor`，于是新增作用域被静默排除在守卫外。' +
       '删了这个导出，那道守卫又回到手抄清单的盲点。'
   },
-  {
-    module: 'lib/terminal-cold-parking-policy.ts',
-    name: 'haveSameTerminalRegionIds',
-    kind: 'test-only',
-    premise:
-      '纯集合相等谓词（两个 region-id 集合是否一致）。生产侧 coordinator 用 ref 增量维护可见集、不做整集' +
-      '比较，只有 terminal-cold-parking-policy.test.ts 直接调它。是为可测性抽出的纯 helper。'
-  },
+
   {
     module: 'lib/terminal-selection-mode.ts',
     name: 'MOUSE_TRACKING_MODES',

@@ -21,7 +21,7 @@ import type { KnowledgeTopic, TopicKnowledgeWrite, TopicMethod, TopicParams, Top
 import type { BrowserSnapshot } from '../src/shared/contracts'
 import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import type { SurfaceMemoryCollectionInput } from '../src/renderer/src/lib/surface-memory-budget-candidates'
-import type { TerminalParkingCollectionInput } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
+
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 // Use the installed browser PanelGroup, whose child registration effects are absent in its Node build.
@@ -36,7 +36,6 @@ const observation = vi.hoisted(() => ({
   catalogUnavailable: false,
   recall: [] as Parameters<typeof import('../src/renderer/src/components/GlobalRecallSurface').GlobalRecallSurface>[0][],
   memory: [] as { input: SurfaceMemoryCollectionInput; candidates: { id: string; kind: string; visible: boolean; navigationContextActive: boolean }[] }[],
-  terminals: [] as { workbenchVisible: boolean; projectedVisibleTabIds?: ReadonlySet<string> | undefined }[],
   stages: [] as { stage: HTMLElement; host: string | null; update: () => void; stopped: boolean }[]
 }))
 vi.mock('../src/renderer/src/components/GlobalRecallSurface', async (importOriginal) => {
@@ -52,12 +51,7 @@ vi.mock('../src/renderer/src/lib/surface-memory-budget-candidates', async (impor
     observation.memory.push({ input, candidates }); return candidates
   } }
 })
-vi.mock('../src/renderer/src/lib/terminal-cold-parking-coordinator', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/renderer/src/lib/terminal-cold-parking-coordinator')>()
-  return { ...actual, useTerminalColdParking: (options: Parameters<typeof actual.useTerminalColdParking>[0]) => {
-    observation.terminals.push(options); return actual.useTerminalColdParking(options)
-  } }
-})
+
 vi.mock('@floating-ui/dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@floating-ui/dom')>()
   return { ...actual, autoUpdate: (...args: Parameters<typeof actual.autoUpdate>) => {
@@ -73,7 +67,7 @@ import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopC
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { api } from '../src/renderer/src/lib/api'
 import { addWorkbenchRegion, createWorkbenchTab, documentKey, workbenchSurfaces } from '../src/renderer/src/lib/workbench-tabs'
-import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
+
 import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
@@ -123,7 +117,7 @@ beforeEach(() => {
   savedLauncherStorage = localStorage.getItem('agentmux-launcher')
   useLauncherState.setState({ drafts: {}, sections: {}, executors: {}, persistenceIssue: null })
   observation.catalogUnavailable = false;
-  observation.memory = []; observation.terminals = []; observation.stages = []; observation.recall = []
+  observation.memory = []; observation.stages = []; observation.recall = []
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const survey = this.closest('.global-recall-surface') !== null
     return new DOMRect(survey ? 200 : 250, 48, 600, 500)

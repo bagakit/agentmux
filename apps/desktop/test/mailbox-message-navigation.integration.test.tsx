@@ -86,7 +86,7 @@ function originalControl() {
   if (session?.kind !== 'agent') throw new Error('The original mounted Agent control is missing')
   return session.control
 }
-const pane = (id = 'agent-1', parked = false) => <SessionPane sessionId={id} surfaceKind="agent" interactiveResize={false} visible parked={parked}
+const pane = (id = 'agent-1', visible = true) => <SessionPane sessionId={id} surfaceKind="agent" interactiveResize={false} visible={visible}
   linkOrigin={{ workspaceId: 'workspace', tabId: 'tab', regionId: 'region' }} />
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve() }); await act(async () => new Promise(resolve => setTimeout(resolve, 25))) }
 async function open(folder = 'inbox', content = panel()) {
@@ -454,7 +454,7 @@ it.each([{ providerId: 'claude', nativeSessionId: 'native-a' }, { providerId: 'c
     expect(target).not.toBeNull()
   }, { timeout: 8000 })
   // Activity rendering does not prove that this Pane's separate input reader
-  // has admitted its original window before being hidden and parked.
+  // has admitted its original window before being hidden.
   await vi.waitFor(() => {
     const records = diagnostics.mock.calls.map(([record]) => record).filter(record =>
       record.scope.hostId === 'local' && record.scope.agentSessionId === 'agent-1' &&
@@ -681,11 +681,11 @@ it('focus on an equal-source message in another display is later intent rather t
   } finally { hold.release(); externalFeed.remove() }
 })
 
-it('never mounts a never-opened Terminal in Activity and preserves the original parked release boundary', async () => {
+it('creates Terminal only after it opens and retains it through Activity and hidden presentation', async () => {
   useAppStore.setState({ viewModes: { 'agent-1': 'activity' } }); await dom.render(pane()); expect(terminals.mounted).toBe(0)
   await act(async () => useAppStore.getState().setViewMode('agent-1', 'terminal', { focus: false })); expect(terminals.mounted).toBe(1)
   await act(async () => useAppStore.getState().setViewMode('agent-1', 'activity', { focus: false })); expect(terminals.disposed).toBe(0)
-  await dom.render(pane('agent-1', true)); expect(terminals.disposed).toBe(1)
+  await dom.render(pane('agent-1', false)); expect(terminals.disposed).toBe(0); expect(terminals.mounted).toBe(1)
 })
 
 it('a theme/connecting early return does not invent an already-opened Terminal', async () => {

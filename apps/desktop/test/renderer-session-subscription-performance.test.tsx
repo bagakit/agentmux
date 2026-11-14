@@ -23,8 +23,6 @@ import { sessionPresentationById } from '../src/renderer/src/lib/session-present
 import { AgentRoster, AgentTreePanel } from '../src/renderer/src/components/AgentRoster.js'
 import * as roster from '../src/renderer/src/lib/agent-roster.js'
 import * as tree from '../src/renderer/src/lib/agent-tree.js'
-import { RendererResourceOwners } from '../src/renderer/src/components/RendererResourceOwners.js'
-import { useTerminalRegionParked } from '../src/renderer/src/lib/terminal-cold-parking-coordinator.js'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../src/renderer/src/lib/workbench-session-subscriptions.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
@@ -132,26 +130,7 @@ describe('mounted Renderer session subscription cost', () => {
     expect(container.querySelector('[data-tab-state]')?.textContent).toBe('visible:waiting')
   })
 
-  it('does not notify a Terminal parking consumer when its parked set is unchanged', async () => {
-    let renders = 0
-    function ParkingProbe() {
-      const parked = useTerminalRegionParked('region')
-      renders += 1
-      return <output data-parking-probe>{parked ? 'parked' : 'warm'}</output>
-    }
-    await act(async () => root.render(<RendererResourceOwners workbenchVisible measurementActive={false}><ParkingProbe /></RendererResourceOwners>))
-    expect(container.querySelector('[data-parking-probe]')?.textContent).toBe('warm')
-    expect(renders).toBeGreaterThan(0)
-    const before = renders
-    // The actual Region's semantic observation changes, while its lifecycle/parking facts do not.
-    await act(async () => useAppStore.getState().applyEvent({
-      type: 'core', hostId: 'local', event: {
-        type: 'agent-status', agentSessionId: 'visible', state: 'working',
-        evidence: { source: 'native-hook', observedAt: Date.now() }
-      }
-    }))
-    expect(renders).toBe(before)
-  })
+
 
   it('keeps the mounted status decay owner active without replacing Session or Run identity', async () => {
     const session = agent('visible')

@@ -20,6 +20,9 @@ vi.mock('react-resizable-panels', async () => {
   return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
 })
 
+// This Header/Host fixture has no native canvas; the independent Terminal lifecycle suite owns xterm.
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-terminal-layout-leaf /> }))
+
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement, agent: Extract<SessionSnapshot, { kind: 'agent' }>, config: AppConfig
 const remoteId = 'private-execution-host', directory = _hygiene_fixturePath("srv/private/project")
@@ -45,11 +48,11 @@ afterEach(async () => {
   vi.unstubAllGlobals(); vi.restoreAllMocks()
 })
 function pane(session: SessionSnapshot, portal: string | null = null, regionId = 'private-region') {
-  // Park the heavy terminal through its actual public presentation policy. The owning
+  // The owning
   // SessionPane/Header, ordinary-Terminal branch and Focus portal are never mocked.
   // Actual xterm layout/paint is exercised by the independent private Electron producer.
   return <SessionPane sessionId={session.id} surfaceKind={session.kind} interactiveResize={false}
-    visible={false} parked readOnly headerPortalTargetId={portal}
+    visible={false} readOnly headerPortalTargetId={portal}
     linkOrigin={{ workspaceId: 'local-display', tabGroupId: 'private-group', tabId: 'private-tab', regionId }} />
 }
 async function mount(session: SessionSnapshot = agent, portal: string | null = null) {
@@ -170,9 +173,9 @@ it('an unconfirmed execution identity stays unknown instead of borrowing This Ma
 })
 
 it('the Focus portal preserves the same Header and original Host, including a long renamed label and the precise keyboard details', async () => {
-  // Focus is interactive; only the existing Header is portalled. No terminal or input is mounted.
+  // Focus portals the existing Header; hidden presentation keeps its original content lifecycle.
   const target = document.createElement('div'); target.id = 'private-focus-header'; document.body.append(target)
-  const render = () => <SessionPane sessionId={agent.id} surfaceKind="agent" interactiveResize={false} visible={false} parked
+  const render = () => <SessionPane sessionId={agent.id} surfaceKind="agent" interactiveResize={false} visible={false}
     headerPortalTargetId={target.id} linkOrigin={{ workspaceId: 'local-display', tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }} />
   await act(async () => root.render(render()))
   const header = target.querySelector<HTMLElement>('.agent-region-header')!
@@ -196,7 +199,7 @@ function createdReceipt(): AgentMuxAgentSession {
 }
 async function withoutSnapshot(kind: 'agent' | 'terminal' = 'agent', visible = false, workspaceId = 'local-display') {
   await act(async () => root.render(<SessionPane sessionId={agent.id} surfaceKind={kind} interactiveResize={false}
-    visible={visible} parked={!visible} readOnly
+    visible={visible} readOnly
     linkOrigin={{ workspaceId, tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }} />))
 }
 

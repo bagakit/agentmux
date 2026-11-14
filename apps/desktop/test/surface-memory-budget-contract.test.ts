@@ -47,7 +47,7 @@ describe('Browser/Monaco surface budget wiring', () => {
     expect(workbench.length).toBeGreaterThan(10_000)
   })
 
-  it('keeps Browser and Monaco budgets independent from Terminal parking', () => {
+  it('keeps Browser and Monaco budgets outside the retained Terminal lifecycle', () => {
     expect(policy).not.toContain('terminal-cold-parking')
     expect(policy).toContain("SurfaceMemoryKind = 'monaco' | 'browser'")
     expect(policy).toContain('selectBrowserSurfaceReleases')

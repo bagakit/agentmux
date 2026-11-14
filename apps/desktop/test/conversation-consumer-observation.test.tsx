@@ -70,7 +70,7 @@ async function fixture(rows = [native('native-input', 'Source text is not an ide
   const host = document.createElement('div'); document.body.append(host); const root = createClientUiRoot(host)
   closes.push(async () => { await act(async () => root.unmount()); host.remove() })
   const props = activityReadingProps({ control: { hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }, workspaceRoot: f.root })
-  props.conversationReading!.consumer = { runId: f.session.run.runId, regionId: 'original-region', presentationId: 'original-presentation', visible: true, parked: false, activityShown: true, viewMode: 'activity' }
+  props.conversationReading!.consumer = { runId: f.session.run.runId, regionId: 'original-region', presentationId: 'original-presentation', visible: true, activityShown: true, viewMode: 'activity' }
   const query: ConversationConsumerQuery = { hostId: 'local', agentSessionId: f.session.agentSessionId, expectedRunId: f.session.run.runId,
     records: [{ hostId: 'local', agentSessionId: f.session.agentSessionId, source: { kind: 'native', providerId: 'claude', nativeSessionId: 'native-main', recordId: 'native-input' } },
       { hostId: 'local', agentSessionId: f.session.agentSessionId, source: { kind: 'captured', recordId: 'captured-input' } }] }
@@ -230,10 +230,10 @@ it('takes the ref, Run and gate from the real SessionPane consumer rather than t
   let sample = (await x.inspect()).consumers[0]!
   expect(sample.reference).toEqual({ hostId: 'local', agentSessionId: agent.id })
   expect(sample.runId).toBe(x.f.session.run.runId); expect(sample.location.regionId).toBe('original-region')
-  expect(sample.gates).toEqual({ enabled: true, visible: true, parked: false, activityShown: true, viewMode: 'activity' })
+  expect(sample.gates).toEqual({ enabled: true, visible: true, activityShown: true, viewMode: 'activity' })
   await render(false)
   sample = (await x.inspect()).consumers[0]!
-  expect(sample.gates).toEqual({ enabled: false, visible: false, parked: false, activityShown: true, viewMode: 'activity' })
+  expect(sample.gates).toEqual({ enabled: false, visible: false, activityShown: true, viewMode: 'activity' })
   expect(sample.runId).toBe(x.f.session.run.runId)
   expect(useAppStore.getState().agentComposerDrafts[agent.id]).toBe('Original unsent draft')
   expect(x.f.controls.map(value => value.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])

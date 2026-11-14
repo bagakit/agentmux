@@ -16,7 +16,6 @@ import { createSessionServiceNoticeSelector } from '../src/renderer/src/lib/sess
 import { serviceNoticeFingerprint, type ServiceNoticeItem } from '../src/renderer/src/lib/use-service-notices'
 import { sessionPresentationById } from '../src/renderer/src/lib/session-presentation'
 import { createWorkbenchTab, documentKey, type WorkbenchTab, type BrowserWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
-import { TerminalParkingProvider } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
 import { SurfaceMemoryBudgetProvider, type SurfaceMemoryBudgetState } from '../src/renderer/src/lib/surface-memory-budget-coordinator'
 import type { BrowserControlConfirmation } from '../src/renderer/src/lib/workbench-presentation'
 import type { BrowserSnapshot } from '../src/shared/contracts'
@@ -385,18 +384,16 @@ const resourceProbe: ResourceContextProbe = (globalThis as typeof globalThis & {
     row[key] = (row[key] ?? 0) + 1
   }
 }
-let updateResourceParking: (value: ReadonlySet<string>) => void
 let updateResourceRelease: (value: SurfaceMemoryBudgetState) => void
 let updateResourceConfirmation: (value: BrowserControlConfirmation) => void
 let originalResourceConfirmation: BrowserControlConfirmation
 function ResourceContextWorkbench() {
-  const [parked, setParked] = useState<ReadonlySet<string>>(new Set())
   const [released, setReleased] = useState<SurfaceMemoryBudgetState>({ monacoRegionIds: new Set(), browserRegionIds: new Set() })
   const [confirmation, setConfirmation] = useState<BrowserControlConfirmation>(() => originalResourceConfirmation)
-  updateResourceParking = setParked; updateResourceRelease = setReleased
+  updateResourceRelease = setReleased
   updateResourceConfirmation = value => setConfirmation(() => value)
   const child = useMemo(() => <WorkspaceWorkbench workspaceId="workspace" onBrowserControlConfirmation={confirmation} />, [confirmation])
-  return <SurfaceMemoryBudgetProvider state={released}><TerminalParkingProvider parkedRegionIds={parked}>{child}</TerminalParkingProvider></SurfaceMemoryBudgetProvider>
+  return <SurfaceMemoryBudgetProvider state={released}>{child}</SurfaceMemoryBudgetProvider>
 }
 const resourceRegion = (id: string) => dom.container.querySelector<HTMLElement>(`[data-workbench-region-id="${id}"]`)!
 const settleResources = async () => act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve() })
@@ -501,30 +498,6 @@ it('keeps unrelated resource-context bodies quiet while original Workbench facts
     await dom.click('button[data-workbench-tab-id="resource-affected"]'); await settleResources()
     await vi.waitFor(() => expect(document.querySelectorAll('[data-native-editor-substitute]')).toHaveLength(original.fileIds.length))
     const saved = preserveResourceWorkface(original)
-    async function parking(phase: string, values: ReadonlySet<string>): Promise<Counts> {
-      const key = `${count}:${phase}`; resourceProbe.phase = key; resourceProbe.counts[key] = {}
-      await act(async () => updateResourceParking(values)); await settleResources(); resourceProbe.phase = ''
-      unchangedResourceWorkface(original, saved)
-      return resourceProbe.counts[key]!
-    }
-    expect(await parking('equal-empty', new Set())).toEqual({})
-    for (const [phase, values] of [['park', new Set(['region-resource-affected'])], ['unpark', new Set<string>()]] as const) {
-      const row = await parking(phase, values)
-      for (const id of ['region-resource-unrelated', ...original.fileIds, ...original.browserIds]) {
-        expect(row[`wrapper:render:${id}`], 'real shared context delivery must execute').toBeGreaterThan(0)
-        for (const kind of ['body', 'session', 'file', 'browser']) for (const stage of ['render', 'commit']) {
-          expect.soft(row[`${kind}:${stage}:${id}`] ?? 0, `${phase} unrelated ${kind} ${stage} ${id}`).toBe(0)
-        }
-      }
-      expect(row['body:render:region-resource-affected']).toBeGreaterThan(0)
-      expect(row['session:commit:region-resource-affected']).toBeGreaterThan(0)
-      expect(Boolean(resourceRegion('region-resource-affected').querySelector('[data-original-terminal]'))).toBe(phase === 'unpark')
-      if (phase === 'park') {
-        expect(resourceRegion('region-resource-affected').textContent).toContain('Terminal parked')
-        expect(await parking('equal-parked', new Set(['region-resource-affected']))).toEqual({})
-      }
-      sample('resource-context', count, { phase, resourceCounts: row, originalDomDraftRangeAndScrollPreserved: true })
-    }
     if (count === 12) {
       const originalFile = resourceRegion(original.fileIds[0]!)
       await act(async () => updateResourceRelease({ monacoRegionIds: new Set([original.fileIds[0]!]), browserRegionIds: new Set() }))

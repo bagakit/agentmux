@@ -288,7 +288,7 @@ it('publishes real Activity read, Range hold, release and DOM commit through the
   const originalDocument = { windowId: '17', documentGeneration: '1' }
   closes.push(registerWorkbenchDocument(dom.host.ownerDocument, originalDocument))
   const props = activityReadingProps({ control: { hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }, workspaceRoot: f.root })
-  props.conversationReading!.consumer = { runId: f.session.run.runId, regionId: 'original-region', presentationId: 'original-presentation', visible: true, parked: false, activityShown: true, viewMode: 'activity' }
+  props.conversationReading!.consumer = { runId: f.session.run.runId, regionId: 'original-region', presentationId: 'original-presentation', visible: true, activityShown: true, viewMode: 'activity' }
   const query = { hostId: 'local', agentSessionId: f.session.agentSessionId }
   const current = () => inspectConversationConsumers(query).consumers[0]!
   const render = async (visible = true, enabled = true) => act(async () => dom.root.render(<ActivityView {...props}
