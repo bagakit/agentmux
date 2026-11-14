@@ -5,7 +5,7 @@ import { AgentMuxError } from '../errors.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import type { AgentProviderSessionStatusContext, AgentProviderSessionStatusObservationContext } from '../agent-provider.js'
 import type { AgentPromptExecutionEvidence, AgentProviderSessionStatus } from '../types.js'
-import { codexTurnRecordId } from './codex-turn-outcome.js'
+import { codexTurnRecordId } from '@agentmux/providers/codex/turn-outcome'
 import { codexNativeSourceId, codexTurnRecordEvidence, readCodexPromptExecutionEvidence } from './codex-prompt-execution-evidence.js'
 
 const READ_BYTES = 512 * 1024

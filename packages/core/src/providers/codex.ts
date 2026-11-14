@@ -20,7 +20,7 @@ import { CODEX_LAUNCH_OPTIONS } from './launch-options.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { discoverAppServerNativeSession, planCodexQuestionReply, readAppServerSessionHistoryPage,
   readAppServerSessionHistoryRecord } from './app-server.js'
-import { readCodexSavedSessionHistoryPage, readCodexSavedSessionHistoryRecord, readCodexSavedConversationChanges } from './codex-saved-history.js'
+import { readCodexSavedSessionHistoryPage, readCodexSavedSessionHistoryRecord, readCodexSavedConversationChanges } from './codex-history-reader.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition, AgentProviderHookNormalizationContext } from '../agent-provider.js'
 import type { AgentNativeHookSpecification, AgentNativeHookToolFields } from '../hook-normalizer.js'

@@ -6,7 +6,7 @@ import { nativeProcessFiles, nativeProcessBirth } from '../agent-native-process.
 import type { AgentProviderPromptExecutionContext } from '../agent-provider.js'
 import type { AgentPromptExecutionEvidence } from '../types.js'
 import { AgentMuxError } from '../errors.js'
-import { codexTurnOutcome, codexTurnRecordId } from './codex-turn-outcome.js'
+import { codexTurnOutcome, codexTurnRecordId } from '@agentmux/providers/codex/turn-outcome'
 
 const TAIL_BYTES = 512 * 1024
 const HEADER_BYTES = 512 * 1024

@@ -1,8 +1,9 @@
-import type { AgentTurnOutcome } from '../types.js'
-import { codexFailure } from '@agentmux/providers/codex/errors'
+import { codexFailure } from './errors.js'
+
+type CodexTurnOutcome = { status: 'completed' | 'interrupted' } | { status: 'failed'; failure: ReturnType<typeof codexFailure> }
 
 /** One native result decoder for observation, history and changes. No presentation inference. */
-export function codexTurnOutcome(record: Record<string, unknown>, nativeSessionId: string): AgentTurnOutcome | undefined {
+export function codexTurnOutcome(record: Record<string, unknown>, nativeSessionId: string): CodexTurnOutcome | undefined {
   const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
     ? record.payload as Record<string, unknown> : undefined
   if (record.type !== 'event_msg' || !payload || typeof payload.turn_id !== 'string' || !payload.turn_id ||
