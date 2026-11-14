@@ -91,11 +91,14 @@ reference and Run instead of a synthetic local Session ID. Input acknowledgement
 is separate from current Run health, Goal completion and human acceptance.
 
 For an existing original input, an explicit `access.coordinator` selects its independent
-current Runtime reader. Check reads its frozen key, body, note and API source even
+current Runtime reader. For Check, that carrier can stand alone, for example
+`{"coordinator":{"hostId":"ORIGINAL_COORDINATOR"}}`, without inventing Source access.
+Check reads its frozen key, body, note and API source even
 when the Source is unreadable; it never submits or rejoins. A denied or mismatched
 Coordinator read does not switch to another channel. Without that selector, Check
 uses the original Source read strategy. Start and explicit continuation still
-require their original Source admission and current input authority.
+require their original Source admission and current input authority. Start, continuation
+and relationship Save do not accept Coordinator-only access.
 
 ## File evidence
 
