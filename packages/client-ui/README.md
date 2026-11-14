@@ -192,7 +192,7 @@ Use `SegmentedControl` to edit a single value across a few visible choices. Its 
 
 ### Compact editors
 
-Use `ComposerTextarea variant="compact"` with `ComposerEditFooter` for a short multiline edit inside an existing surface. The field handles IME, grows with content, and scrolls when it reaches its height limit. Put existing utilities or metadata in `leading` and the action buttons in reading order. Use the shared primary `Button` for the action at the right edge. Hosts importing styles individually need `input/styles.css`, `styles/buttons.css` and `styles/composer.css`.
+Use `ComposerTextarea variant="compact"` with `ComposerEditFooter` for a short multiline edit inside an existing surface. The field handles IME, grows with content, and scrolls when it reaches its height limit. For drafts that need more editing room, the caller can set `expanded` on the compact field and link its size toggle to the field ID with `aria-controls`. Both sizes use the same native textarea and selection. Put existing utilities or metadata in `leading` and the action buttons in reading order. Use the shared primary `Button` for the action at the right edge. Hosts importing styles individually need `input/styles.css`, `styles/buttons.css` and `styles/composer.css`.
 
 ```tsx
 import { ComposerTextarea } from '@agentmux/client-ui/input'
