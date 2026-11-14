@@ -1,4 +1,4 @@
-import type { AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave } from './space-control.js'
+import type { AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave, AgentMuxSurveyPinReference, AgentMuxSurveyPresentation, AgentMuxSpaceAddress } from './space-control.js'
 
 /** Client presentation facts. Core neither owns nor initializes a desktop surface. */
 export type AgentMuxDesktopSurface = 'space' | 'focus' | 'goals' | 'survey' | 'recall'
@@ -6,6 +6,8 @@ export type AgentMuxDesktopFocusView = 'list' | 'map'
 export type AgentMuxDesktopMainSurface = 'workbench' | 'agents' | 'board' | 'survey' | 'recall'
 export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
+  /** The reference identifies an existing saved item, not a pin or a new membership. */
+  | { kind: 'survey'; selection: AgentMuxSurveyPinReference; reference?: Pick<AgentMuxSpaceAddress, 'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'> }
   | { kind: 'mote'; spaceId: string; eventId?: string }
   | { kind: 'settings'; sectionId: string | null; hostId?: string }
   | { kind: 'goal'; goalId: string; runtimeId?: string; namespace?: string; section?: 'plan' }
@@ -24,6 +26,8 @@ export type AgentMuxDesktopSelection = {
   surface: AgentMuxDesktopSurface; mainSurface: AgentMuxDesktopMainSurface
   focusView: AgentMuxDesktopFocusView | null
   space: AgentMuxDesktopSpaceSelection | null; goalId: string | null
+  /** The original Survey choice, independent of retained Work selection. */
+  survey?: AgentMuxSurveyPresentation['selection']
 }
 export type AgentMuxDesktopProvenance = 'observed' | 'unavailable' | 'unknown'
 export type AgentMuxDesktopInput = {

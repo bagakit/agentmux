@@ -318,8 +318,7 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'focus': {
       const nav = actual.navigation as Record<string, unknown>
       const target = nav.requested as Record<string, unknown>
-      if (Object.keys(target).length !== Object.keys(request.target).length ||
-        Object.entries(request.target).some(([key, value]) => target[key] !== value) ||
+      if (!isDeepStrictEqual(target, request.target) ||
         (actual.input as Record<string, unknown>).policy !== request.inputPolicy ||
         nav.expectedAgentSessionId !== request.expectedAgentSessionId) fail()
       break

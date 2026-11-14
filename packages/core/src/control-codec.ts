@@ -514,6 +514,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'open.git', ...parseGitOpenParams(params) }
   }
   if (source.operation === 'open.terminal' || source.operation === 'open.browser') {
+    if (source.operation === 'open.browser' && source.survey !== undefined && source.survey !== true) {
+      throw new AgentMuxError('Survey registration must be explicitly true when requested.', 'INVALID_CONTROL_REQUEST')
+    }
     if (source.operation === 'open.browser' && source.mode !== undefined && source.mode !== 'normal' && source.mode !== 'private') {
       throw new AgentMuxError('Browser mode must be normal or private.', 'INVALID_CONTROL_REQUEST')
     }
@@ -543,6 +546,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
           ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }),
           ...(source.capsuleId === undefined ? {} : { capsuleId: source.capsuleId as string }),
           ...(source.profileId === undefined ? {} : { profileId: identity(source.profileId, 'Browser Profile ID is invalid.', 'INVALID_CONTROL_REQUEST') }),
+          ...(source.survey === true ? { survey: true as const } : {}),
           destination,
           ...(owner ? { caller: owner } : {})
         }

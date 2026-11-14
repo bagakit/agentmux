@@ -1,7 +1,7 @@
 import type { AgentExecutionSourceDiagnostics } from './agent-execution-source-diagnostics.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parseAdoptedHostRoute } from './host-route.js'
-import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyPageSelection, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
+import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveySelection, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError, parseAgentExecutionReference, parseAgentExecutionFailure } from './errors.js'
 import { parseAgentExecutionInspection } from './public-rpc-agent-execution.js'
@@ -474,22 +474,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
   }, 'Agent presentation', code), item => item.agentSessionId, 'Agent presentation', code) : undefined
   const survey = Object.hasOwn(source, 'survey') ? (() => {
     const raw = fields(source.survey, ['items', 'pages', 'selection', 'issue', 'organization', 'profileView', 'pinnedReferences'], code)
-    const reference = (value: unknown) => {
-      const item = fields(value, ['tabId', 'regionId'], code)
-      return { tabId: spaceControlId(item.tabId, 'Survey Tab', code, true), regionId: spaceControlId(item.regionId, 'Survey Region', code, true) }
-    }
-    let selection: import('./space-control.js').AgentMuxSurveyPresentation['selection'] = null
-    if (raw.selection !== null) {
-      const choice = fields(raw.selection, ['kind', 'regionId', 'browserId', 'presentation', 'zoneId', 'selection', 'active'], code)
-      if (choice.kind === 'page') {
-        selection = parseSurveyPageSelection(choice, code)
-      } else {
-        const zone = fields(choice, ['zoneId', 'selection', 'active'], code)
-        selection = { zoneId: spaceControlId(zone.zoneId, 'Survey selected Zone', code, true),
-          selection: unique(list(zone.selection, reference, 'Survey references', code), item => JSON.stringify(item), 'Survey references', code),
-          active: zone.active === null ? null : reference(zone.active) }
-      }
-    }
+    const selection = parseSurveySelection(raw.selection, code)
     const pages = unique(list(raw.pages, value => {
       const item = fields(value, ['regionId', 'browserId', 'name', 'profileId', 'issue'], code)
       const page = parseSurveyPageReferences([{ regionId: item.regionId, browserId: item.browserId }], code)[0]!

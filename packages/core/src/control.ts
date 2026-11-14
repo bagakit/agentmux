@@ -304,6 +304,8 @@ export type AgentMuxControlOpenBrowserRequest = RequestBase & {
   capsuleId?: string
   /** Exact Browser Profile for a new normal page; absent uses the current default. Not with private or a Capsule. */
   profileId?: string
+  /** Explicitly save only this new page's exact Survey reference; placement and selection remain separate. */
+  survey?: true
 }
 export type AgentMuxMessageTarget =
   | { kind: 'reply'; sourceMessageId: string }

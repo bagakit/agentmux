@@ -1,14 +1,16 @@
 import type { FocusAgentTarget } from './focus-agent-navigation'
 import { workbenchDocuments, workbenchDocumentIdentity } from './workbench-window-registry'
-import type { AgentMuxDesktopFloating, AgentMuxDesktopInput, AgentMuxDesktopObservation,
+import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopFloating, AgentMuxDesktopInput, AgentMuxDesktopObservation,
   AgentMuxDesktopOverlays, AgentMuxDesktopPresentation, AgentMuxDesktopSelection } from '@agentmux/core'
 import type { WorkbenchTab } from './workbench-tabs'
 import { workbenchRegionProjectionSlotId } from './workbench-projection'
+import { surveyPageOwner } from './survey-page-references'
 
 export type DesktopAppPresentationOwner = {
   loading: boolean
   overlays: { settings: boolean; quickSwitcher: boolean }
   settings?: { sectionIds: readonly string[]; open(sectionId: string, hostId?: string): void; close(): void; read(): { sectionId: string; visible: boolean; hostId?: string | null } | null }
+  survey?: { select(target: Extract<AgentMuxDesktopFocusTarget, { kind: 'survey' }>): void }
   /** The existing Space content slot may cover its retained main workface. */
   contentExpanded?: boolean
   floating: { state: 'closed' | 'preview' | 'pinned'; topicId: string | null; tabId: string | null; regionId?: string | null } | null
@@ -44,6 +46,13 @@ export function requestDesktopSettingsNavigation(sectionId: string | null, hostI
   if (!settings.sectionIds.includes(sectionId)) return 'unknown-section'
   settings.open(sectionId, hostId)
   return 'requested'
+}
+
+/** The App's original Survey navigator owns its occurrence preference and saved selection. */
+export function requestDesktopSurveyNavigation(target: Extract<AgentMuxDesktopFocusTarget, { kind: 'survey' }>): void {
+  const survey = appReader?.()?.survey
+  if (!survey) throw new Error('The original Survey navigator is unavailable. Existing pages, references and input are kept.')
+  survey.select(target)
 }
 
 export function desktopElementVisible(element: HTMLElement | null): boolean {
@@ -151,7 +160,10 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
   const blockers: AgentMuxDesktopPresentation['blockers'] = []
   if (overlays.settings) blockers.push('settings')
   if (overlays.quickSwitcher) blockers.push('quick-switcher')
-  const { tabId = null, regionId = null } = selection.surface === 'space' ? selection.space ?? {} : {}
+  const survey = selection.surface === 'survey' ? selection.survey : null
+  const pageOwner = survey && 'kind' in survey ? surveyPageOwner(tabs, survey) : undefined
+  const { tabId = null, regionId = null } = selection.surface === 'space' ? selection.space ?? {}
+    : survey ? 'kind' in survey ? survey.presentation ?? { tabId: pageOwner?.tab.id ?? null, regionId: survey.regionId } : survey.active ?? {} : {}
   const windowTarget = selection.surface === 'space' && regionId ? primaryRegion(selection.space, tabs) : null
   const windowIdentity = windowTarget && windowTarget.ownerDocument !== document ? workbenchDocumentIdentity(windowTarget.ownerDocument) : null
   if (windowIdentity) blockers.length = 0
@@ -165,7 +177,12 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
       const main = document.querySelector<HTMLElement>(`[data-desktop-surface="${selection.surface}"]`)
       const views = selection.surface === 'focus' && main ? [...(main.matches(`[data-desktop-focus-view="${selection.focusView}"]`) ? [main] : []), ...main.querySelectorAll<HTMLElement>(`[data-desktop-focus-view="${selection.focusView}"]`)]
         .filter(element => desktopElementVisible(element) && !element.closest('[data-pmo-teams-topic-floating]')) : []
-      const target = selection.surface === 'focus' ? views.length === 1 ? views[0]! : null : selection.surface !== 'space' ? main : regionId ? primaryRegion(selection.space, tabs)
+      const surveyRegions = survey && regionId && tabId ? Array.from(main?.querySelectorAll<HTMLElement>('[data-workbench-region-id]') ?? []).filter(region =>
+        region.dataset.workbenchRegionId === regionId && desktopElementVisible(region) &&
+        (region.closest<HTMLElement>('[data-workbench-primary-tab-id]')?.dataset.workbenchPrimaryTabId ??
+          region.closest<HTMLElement>('[data-workbench-tab-id]')?.dataset.workbenchTabId) === tabId) : []
+      const target = selection.surface === 'focus' ? views.length === 1 ? views[0]! : null
+        : survey && regionId ? surveyRegions.length === 1 ? surveyRegions[0]! : null : selection.surface !== 'space' ? main : regionId ? primaryRegion(selection.space, tabs)
         : selection.space?.zoneId ? queryIdentity('data-desktop-zone-id', selection.space.zoneId) : selection.space ? null : main
       const borrowed = selection.surface === 'space' && target?.closest('[data-pmo-teams-topic-floating]')
       const exactGoal = selection.surface !== 'goals' || !selection.goalId ||

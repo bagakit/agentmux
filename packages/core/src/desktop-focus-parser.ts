@@ -2,6 +2,7 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlFocusRequest, t
 import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { parseSpaceControlSelector, spaceControlId } from './space-control-parser.js'
+import { parseSurveyPinReference, parseSurveySelection } from './survey-organization.js'
 import type {
   AgentMuxDesktopFocusTarget, AgentMuxDesktopFloating, AgentMuxDesktopInput,
   AgentMuxDesktopObservation, AgentMuxDesktopOverlays, AgentMuxDesktopPresentation,
@@ -50,7 +51,18 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section', 'selection', 'reference'], code)
+  if (source.kind === 'survey') {
+    fields(source, ['kind', 'selection', 'reference'], code)
+    const selection = parseSurveyPinReference(source.selection, code)
+    const reference = source.reference === undefined ? undefined : (() => {
+      const raw = fields(source.reference, ['displayWorkspaceId', 'groupId', 'tabId', 'regionId'], code)
+      return { displayWorkspaceId: spaceControlId(raw.displayWorkspaceId, 'Survey display Workspace', code, true),
+        groupId: spaceControlId(raw.groupId, 'Survey Group', code, true), tabId: spaceControlId(raw.tabId, 'Survey Tab', code, true),
+        regionId: spaceControlId(raw.regionId, 'Survey Region', code, true) }
+    })()
+    return { kind: 'survey', selection, ...(reference ? { reference } : {}) }
+  }
   if (source.kind === 'space') {
     fields(source, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
     const { kind: _, ...raw } = source
@@ -130,12 +142,13 @@ function spaceSelection(value: unknown, code: Code): AgentMuxDesktopSpaceSelecti
   return result
 }
 function selection(value: unknown, code: Code): AgentMuxDesktopSelection {
-  const source = fields(value, ['surface', 'mainSurface', 'focusView', 'space', 'goalId'], code)
+  const source = fields(value, ['surface', 'mainSurface', 'focusView', 'space', 'goalId', 'survey'], code)
   const surface = member(source.surface, surfaces, 'Surface', code)
   if (source.mainSurface !== mainSurfaces[surface]) fail('Public and internal Surface disagree.', code)
   const focusView = surface === 'focus' ? member(source.focusView, ['list', 'map'], 'Focus view', code) : null
   if (surface !== 'focus' && source.focusView !== null) fail('A non-Focus Surface cannot select a Focus view.', code)
-  return { surface, mainSurface: mainSurfaces[surface], focusView, space: spaceSelection(source.space, code), goalId: source.goalId === null ? null : goalId(source.goalId, 'Selected Goal', code) }
+  return { surface, mainSurface: mainSurfaces[surface], focusView, space: spaceSelection(source.space, code), goalId: source.goalId === null ? null : goalId(source.goalId, 'Selected Goal', code),
+    ...(source.survey === undefined ? {} : { survey: parseSurveySelection(source.survey, code) }) }
 }
 function documentIdentity(source: Record<string, unknown>, required: boolean, code: Code): { windowId?: string; documentGeneration?: string } {
   const hasWindow = Object.hasOwn(source, 'windowId'), hasDocument = Object.hasOwn(source, 'documentGeneration')
@@ -236,6 +249,12 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
     (!navigation.requested.tabId && !navigation.requested.regionId))) fail('Input target requires an exact Tab or Region.', code)
   if ((navigation.state === 'applied' || navigation.state === 'unchanged')) {
     const requested = navigation.requested, actual = navigation.selection
+    if (requested.kind === 'survey') {
+      const selected = actual.survey, target = requested.selection
+      if (actual.surface !== 'survey' || !selected || (target.kind === 'page'
+        ? !('kind' in selected) || selected.regionId !== target.regionId || selected.browserId !== target.browserId
+        : !('zoneId' in selected) || selected.zoneId !== target.zoneId)) fail('Survey receipt does not confirm the exact saved reference.', code)
+    }
     if (requested.kind === 'focus-agent' && (actual.surface !== 'focus' || actual.focusView !== 'list' ||
       result.focus.agent?.hostId !== requested.hostId || result.focus.agent.agentSessionId !== requested.agentSessionId || result.focus.agent.state !== 'visible'))
       fail('Focus Agent receipt is not visibly confirmed for the exact target.', code)
@@ -266,7 +285,10 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
     fail('A map presentation cannot identify a retained, borrowed or native Region.', code)
   }
   if (result.presentation.state === 'main-visible' || result.presentation.state === 'floating' || result.presentation.state === 'window') {
-    const presented = navigation.selection.surface === 'space' ? navigation.selection.space : null
+    const survey = navigation.selection.survey
+    const presented = navigation.selection.surface === 'space' ? navigation.selection.space
+      : navigation.selection.surface === 'survey' && survey ? ('zoneId' in survey ? survey.active
+        : survey.presentation ?? { tabId: result.presentation.tabId, regionId: survey.regionId }) : null
     if (result.presentation.provenance !== 'observed' || result.presentation.tabId !== (presented?.tabId ?? null) ||
       result.presentation.regionId !== (presented?.regionId ?? null) ||
       (result.presentation.state === 'floating' && (!presented?.tabId || !presented.regionId))) {

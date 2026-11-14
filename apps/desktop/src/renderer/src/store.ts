@@ -133,7 +133,7 @@ import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { planSurveyTabComposition, reconcileResearchCompositionSelection, type SurveyCompositionRequest, type SurveyCompositionReport } from './lib/survey-tab-composition'
 import { retainSurveyComposition, surveyCompositionTargetConfirmed, restoreSurveyCompositionRecoveries, changeSurveyCompositionRecovery, isSurveyCompositionRecovery, type SurveyCompositionRecovery, type SurveyCompositionReview } from './lib/survey-composition-recovery'
 import { readSurveyProfileView, surveySelectionProfileMatch, type SurveyProfileView, type SurveyProfileViewRecovery } from './lib/survey-profile-view'
-import { switchBrowserProfileForSurvey, repairSurveyProfileAdmission, type SurveyProfileBindingReceipt } from './lib/survey-profile-binding'
+import { admitPreparedSurveyPage, switchBrowserProfileForSurvey, repairSurveyProfileAdmission, type SurveyProfileBindingReceipt } from './lib/survey-profile-binding'
 import { openSystemUrlInSurvey } from './lib/survey-system-url'
 import { openSystemPageInSurvey, type SystemPageHost } from './lib/survey-system-page'
 import { isSystemWebUrl, type SystemPageOutcome } from '../../shared/system-web-url'
@@ -170,7 +170,7 @@ import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
 import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveDesktopMoteSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, type SessionLocationReference, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
-import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readGoalReadingPresentation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, requestDesktopSurveyNavigation, readGoalReadingPresentation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { refreshNotebookLibrary, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
@@ -7748,6 +7748,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy,
             moteDiscussionEntry: { workspaceId: resolved.workspaceId, topicId: resolved.topicId!, token: moteEntryToken,
               ...(request.target.eventId === undefined ? {} : { eventId: request.target.eventId }) } })
+        } else if (request.target.kind === 'survey') {
+          requestDesktopSurveyNavigation(request.target)
         } else if (request.target.kind === 'focus-agent') {
           get().revealFocusAgent(request.target)
         } else if (request.target.kind === 'surface') {
@@ -8237,8 +8239,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Once attached, Survey and display-label observations cannot revoke this healthy page.
       const reference = { regionId: plan.regionId, browserId }
       let survey: import('@agentmux/core/control').AgentMuxSurveyPageAdmission = { outcome: 'not-requested', save: null, issues: [] }
-      if (request.profileId !== undefined) {
-        try { survey = await get().registerSurveyBrowserPage(reference, browser.profileId!) }
+      if (request.survey || request.profileId !== undefined) {
+        try { survey = request.survey ? (await admitPreparedSurveyPage(get, reference, browser, get().surveyPageReferences)).admission
+          : await get().registerSurveyBrowserPage(reference, browser.profileId!) }
         catch {
           survey = { outcome: 'partial', reference, save: null, issues: [{ step: 'survey', code: 'SURVEY_PAGE_REGISTRATION_UNCONFIRMED',
             message: 'The page is attached, but its Survey registration is unconfirmed.',

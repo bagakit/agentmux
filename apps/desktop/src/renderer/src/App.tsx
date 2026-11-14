@@ -39,13 +39,15 @@ import { MountedSpaceWorkbench } from './components/MountedSpaceWorkbench'
 import { SurfaceState } from './components/SurfaceState'
 import { GlobalRecallSurface } from './components/GlobalRecallSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
-import { isSurveyPage, surveyPageProjection, surveySelectionPresentation } from './lib/survey-page-references'
+import { isSurveyPage, surveyPageOwner, surveyPageProjection, surveySelectionPresentation, type SurveySelection } from './lib/survey-page-references'
+import { surveySelectionProfileMatch } from './lib/survey-profile-view'
+import { browserProfiles } from './lib/browser-profiles'
 import { resolveBrowserStartPage } from '../../shared/browser-start-page'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
 import { MoteWorkface } from './components/MoteWorkface'
 import { moteWorkbenchProjection } from './lib/mote-workbench-projection'
 import { pmoTeamsTopicFloatingViewTargets, pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
-import { desktopSurface } from './lib/desktop-focus-navigation'
+import { desktopSurface, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { focusTimelineCurrentReference } from './lib/focus-timeline-current'
 import { installDesktopPresentationOwner, desktopPresentationCommitted, type DesktopAppPresentationOwner } from './lib/desktop-presentation'
 import { surfaceSwitchObservation } from './lib/surface-switch-observation'
@@ -65,7 +67,7 @@ import { RendererResourceOwners } from './components/RendererResourceOwners'
 import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
 import { beginRendererStartup } from './lib/startup-progress'
 import { StartupLoadingSurface } from './components/StartupLoadingSurface'
-import { surveySelectReference, surveyResolvedZoneSelection } from './lib/survey-workface'
+import { surveySelectReference, surveyResolvedZoneSelection, surveyInitialZoneSelection } from './lib/survey-workface'
 import { spatialCatalog } from './lib/space-agent-control'
 import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
 import { resolveWorkbenchZone, workbenchProjectionMatches, sameWorkbenchProjectionSelection, projectWorkbenchProjection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './lib/workbench-projection'
@@ -194,6 +196,7 @@ function DesktopApp() {
         open: (sectionId, hostId) => navigateSettings({ section: sectionId as SettingsPageId,
           ...(hostId === undefined ? {} : { hostId, ...(sectionId === 'hosts' ? { field: 'resources' } : {}) }) }, 'preserve'),
         close: () => { setSettingsInputPolicy('preserve'); closeSettings() } },
+      survey: { select: selectSurveyTarget },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null,
@@ -339,6 +342,53 @@ function DesktopApp() {
   const focusProjection = mainSurface === 'agents' && focusMode === 'list' ? focusPresentation.projection : null
   const focusTab = focusProjection?.selection.length === 1 ? tabs[focusProjection.selection[0]!.tabId] : null
   const surveyOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
+  function selectSurveyTarget(target: Extract<import('@agentmux/core/control').AgentMuxDesktopFocusTarget, { kind: 'survey' }>) {
+    const state = useAppStore.getState(), chosen = target.selection, reference = target.reference
+    const fail = (message: string): never => { throw new DesktopFocusFailure({ step: 'target', code: 'SURVEY_TARGET_UNCONFIRMED', message,
+      recovery: 'Keep the original page and input. Read space survey-list and space ls --presentation, then choose that exact saved reference.' }) }
+    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+    const catalog = spatialCatalog(state, topics)
+    let selected: SurveySelection
+    if (chosen.kind === 'page') {
+      if (!state.surveyPageReferences.some(page => page.regionId === chosen.regionId && page.browserId === chosen.browserId)) fail('This exact Browser/Region is not a saved Survey page. Navigation does not collect it.')
+      selected = { kind: 'page', regionId: chosen.regionId, browserId: chosen.browserId }
+      if (reference) {
+        const scope = surveyPageProjection(selected, catalog, state.tabs, () => {}, reference)
+        if (reference.regionId !== chosen.regionId || !scope?.selection.some(member => sameWorkbenchProjectionSelection(member, reference))) fail('The exact saved page is not at this requested occurrence. Its current page and selection are kept.')
+      }
+    } else {
+      if (!state.surveyCollectedZones[chosen.zoneId]) fail('This original research is not saved in Survey. Navigation does not collect it.')
+      selected = state.surveyZoneSelection && !isSurveyPage(state.surveyZoneSelection) && state.surveyZoneSelection.zoneId === chosen.zoneId
+        ? state.surveyZoneSelection : surveyInitialZoneSelection(catalog, chosen.zoneId, state.layouts, state.tabs, state.activeWorkspaceId)
+      if (reference) {
+        const scope = resolveWorkbenchZone(chosen.zoneId, catalog, state.layouts, state.tabs, 'survey-workbench', [reference], () => {})
+        if (!scope?.catalog.locations.some(member => workbenchProjectionMatches(scope, member) && sameWorkbenchProjectionSelection(member, reference))) fail('This occurrence is not a member of the requested original research.')
+        selected = surveySelectReference(selected, reference)
+      }
+    }
+    const normalProfile = (surface: (typeof state.tabs)[string]['regions'][string] | undefined) =>
+      surface?.kind === 'browser' && surface.mode === 'normal' && !surface.capsuleId ? surface.profileId : undefined
+    let profileId: string | null | undefined
+    if (isSurveyPage(selected)) profileId = normalProfile(surveyPageOwner(state.tabs, selected, catalog)?.surface)
+    else {
+      const members = catalog.tabs.filter(tab => tab.zoneId === selected.zoneId)
+      const active = selected.active && members.some(tab => tab.tabId === selected.active!.tabId)
+        ? state.tabs[selected.active.tabId]?.regions[selected.active.regionId] : undefined
+      const browsers = members.flatMap(tab => Object.values(state.tabs[tab.tabId]?.regions ?? {}))
+        .filter(surface => surface.kind === 'browser' && surface.mode === 'normal' && !surface.capsuleId)
+      const profiles = new Set(browsers.map(normalProfile))
+      profileId = normalProfile(active) ?? (members.every(tab => state.tabs[tab.tabId]) && profiles.size === 1 && !profiles.has(undefined)
+        ? profiles.values().next().value : undefined)
+    }
+    const defaultProfileId = browserProfiles.get().profiles?.find(profile => profile.isDefault)?.id
+    if (profileId && surveySelectionProfileMatch(state.surveyProfileView, selected, state.tabs, defaultProfileId, catalog) === 'other') {
+      // Navigation selects an actual environment view; it never rebinds or reloads a member.
+      void state.setSurveyProfileView({ kind: 'profile', profileId })
+    }
+    surveyOccurrence.current = reference ?? null
+    state.setSurveyZoneSelection(selected)
+    state.setMainSurface('survey')
+  }
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState()
     if (!state.surveyZoneSelection || JSON.stringify(state.surveyZoneSelection) !== JSON.stringify(surveySelection)) return

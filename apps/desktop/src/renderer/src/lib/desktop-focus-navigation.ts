@@ -14,6 +14,7 @@ import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { homeZoneId } from '../../../shared/space-addresses'
 import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
+import { surveySelectionPresentation, type SurveySelection } from './survey-page-references'
 
 export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey', recall: 'recall' } as const
 export const desktopSurface: Record<AgentMuxDesktopMainSurface, AgentMuxDesktopSurface> = {
@@ -24,6 +25,7 @@ export type DesktopSelectionState = {
   mainSurface: AgentMuxDesktopMainSurface
   selectedDemandId: string | null
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
+  surveyZoneSelection?: SurveySelection | null
   tabs: Readonly<Record<string, WorkbenchTab>>
   layouts: Readonly<Record<string, WorkspaceLayout>>
 }
@@ -370,7 +372,8 @@ export function desktopSelection(state: DesktopSelectionState & { focusView: 'li
         regionId: state.tabs[tab.tabId]?.layout.activeRegionId ?? null, topicId: catalog.spaces.find(space => space.spaceId === spaceId)?.topicId ?? null }
     }
   }
-  return { surface: desktopSurface[state.mainSurface], mainSurface: state.mainSurface, focusView: state.mainSurface === 'agents' ? state.focusView : null, space, goalId: state.selectedDemandId }
+  return { surface: desktopSurface[state.mainSurface], mainSurface: state.mainSurface, focusView: state.mainSurface === 'agents' ? state.focusView : null, space, goalId: state.selectedDemandId,
+    ...(state.mainSurface === 'survey' ? { survey: surveySelectionPresentation(state.surveyZoneSelection ?? null) } : {}) }
 }
 
 /** A confirmed user close follows only a confirmed member of this exact Zone.

@@ -81,6 +81,27 @@ export function parseSurveyPageSelection(value: unknown, code = 'CONTROL_PROTOCO
     groupId: surveyPageId(view.groupId, code), tabId: surveyPageId(view.tabId, code), regionId: surveyPageId(view.regionId, code) } }
 }
 
+/** The same saved selection is observed by spatial discovery and exact Desktop navigation. */
+export function parseSurveySelection(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): import('./space-control.js').AgentMuxSurveyPresentation['selection'] {
+  if (value === null) return null
+  const raw = settingsResourceEnvelope(value, ['kind', 'regionId', 'browserId', 'presentation', 'zoneId', 'selection', 'active'], code)
+  if (raw.kind === 'page') return parseSurveyPageSelection(raw, code)
+  settingsResourceEnvelope(raw, ['zoneId', 'selection', 'active'], code)
+  const member = (value: unknown) => {
+    const item = settingsResourceEnvelope(value, ['tabId', 'regionId'], code)
+    return { tabId: surveyPageId(item.tabId, code), regionId: surveyPageId(item.regionId, code) }
+  }
+  if (!Array.isArray(raw.selection) || Object.getPrototypeOf(raw.selection) !== Array.prototype ||
+    Reflect.ownKeys(raw.selection).length !== raw.selection.length + 1) throw new AgentMuxError('Survey selection requires a dense list of original references.', code)
+  const selection = Array.from({ length: raw.selection.length }, (_, index) => {
+    const descriptor = Object.getOwnPropertyDescriptor(raw.selection, String(index))
+    if (!descriptor?.enumerable || !('value' in descriptor)) throw new AgentMuxError('Survey selection requires original data references.', code)
+    return member(descriptor.value)
+  })
+  if (new Set(selection.map(item => JSON.stringify(item))).size !== selection.length) throw new AgentMuxError('Survey selection contains duplicate references.', code)
+  return { zoneId: surveyPageId(raw.zoneId, code), selection, active: raw.active === null ? null : member(raw.active) }
+}
+
 /** One portable codec for public wire and the original client preference owner. */
 export function parseSurveyOrganization(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AgentMuxSurveyOrganization {
   const fail = (message: string): never => { throw new AgentMuxError(message, code) }
