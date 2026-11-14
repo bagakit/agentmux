@@ -381,6 +381,10 @@ export function ConversationMessage({
         {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div> : null
 
+  const recordedTime = messageTiming ?? (createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
+    ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
+    {renderClock(createdAt)}
+  </span>)
   const card = {
     avatar: nativeCollaboration ? null : described?.channelProfile?.profile?.avatarUrl ? <ChannelProfileAvatar key={JSON.stringify([avatarSpeaker?.id, described.channelProfile.checkedAt])} url={described.channelProfile.profile.avatarUrl}>{platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: displayName })}</ChannelProfileAvatar>
       : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
@@ -392,10 +396,7 @@ export function ConversationMessage({
       {status === 'failed' ? <span className="log-row__chip log-row__chip--failed" role="status">{platform.renderIcon('failed', 12)}Failed</span> : null}
       {status === 'unverified' ? <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span> : null}
     </>,
-    time: messageTiming ?? (createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
-      ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
-      {renderClock(createdAt)}
-    </span>),
+    time: processContent ? null : recordedTime,
     actions: hasCopyContent && !copyInParent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
       {messageActions}
       {hasCopyContent && !copyInParent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
@@ -403,10 +404,12 @@ export function ConversationMessage({
       </button> : null}
     </span> : null,
     feedback: copyState === 'failed' ? <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'} · Retry Copy</span> : null,
-    details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || sourceLabelsInDetails && sources || nativeCollaboration
+    details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || sourceLabelsInDetails && sources || nativeCollaboration || processContent && recordedTime
       ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
         revealSourceKey={revealSubmission}
         declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>
+        {processContent && recordedTime ? <dl className="conversation-input-details__facts"><dt>原记录时间</dt><dd>{recordedTime}</dd></dl> : null}
+        {sourceLabelsInDetails && directToolPart && sources?.parts[0] ? <dl className="conversation-input-details__facts"><dt>工具内容来源</dt><dd><ConversationSourceLabels sources={sources.parts[0]} /></dd></dl> : null}
         {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{detailsOnlyMetadata ? submissionMetadata : null}{sourceLabelsInDetails && sources ? <ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /> : null}{messageDetails}{collaborationOriginal}
       </ConversationInputDetails> : null,
     metadata: <>{metadataInDetails && (messageStatus || submissionMetadata) ? <div className="log-turn__meta">{messageStatus}{detailsOnlyMetadata
@@ -498,7 +501,7 @@ export function ConversationMessage({
               /></div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? directToolPart ? (
               <div key={key} className="conversation-tool-trace__payload conversation-tool-trace__payload--direct" data-trace-kind={part.kind}
                 {...(part.kind === 'tool-result' && part.failed ? { 'data-status': 'failed' } : {})} data-call-id={part.callId}>
-                <ConversationSourceLabels sources={sources?.parts[index]} />
+                {!sourceLabelsInDetails || sources?.parts[index]?.unread ? <ConversationSourceLabels sources={sources?.parts[index]} /> : null}
                 <ConversationToolPayload text={part.kind === 'tool-call' ? part.input : part.output} identity={readingIdentity} sourceIdentity={readingIdentity}
                   {...(part.callId ? { callId: part.callId } : {})} copyLabel={part.kind === 'tool-call' ? 'Copy tool input' : 'Copy tool output'} />
               </div>

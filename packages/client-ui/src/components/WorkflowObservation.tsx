@@ -11,6 +11,8 @@ export type RecordedProcessObservation = {
   status?: WorkflowObservationStatus
   recordedTime?: WorkflowRecordedTime
   label?: string
+  /** Name recorded on the first member; identifies a summary without inventing a task. */
+  title?: string
   elapsed?: string
   metrics?: ReactNode
   streaming?: boolean
@@ -72,7 +74,7 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
       onClick={() => onExpandedChange(!expanded)}>
       <span className="log-fold__node"><SemanticIcon name="navigation.disclosure" size={12} className="wf-chev log-fold__chevron" /></span>
       <span className="log-fold__label">
-        {observation.label ? <span className="wf-observation__recorded">{observation.label}</span> : null}
+        {observation.label ? <span className="wf-observation__label">{observation.label}</span> : null}
         {recordedTime && !compact ? <span className="log-fold__time" title={recordedTime.offset}>
           <span>{recordedTime.from}</span><span aria-hidden="true">–</span><span>{recordedTime.to}</span>
         </span> : null}

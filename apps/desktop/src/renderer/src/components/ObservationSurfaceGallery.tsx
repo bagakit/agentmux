@@ -89,6 +89,7 @@ export function ObservationSurfaceGallery() {
           <div className="observation-sample__label">Conversation · example states</div>
           <div className="observation-sample__body">
             <ConversationView sessionId={galleryConversation.agentSessionId} executionHostId="local" page={galleryConversation}
+              detailsOnlyMetadata sourceLabelsInDetails showInputSource={false}
               records={galleryConversationReading.records} originalRecords={galleryConversationReading.originalRecords}
               renderProcess={props => <NativeProcessObservation {...props} compact />}
               onContinue={() => setConversationAction('Continue requested for this example message; delivery belongs to the host.')} />

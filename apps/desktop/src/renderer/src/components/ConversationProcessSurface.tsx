@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { ConversationProcessProps } from '@agentmux/client-ui/components/ConversationRecordSequence'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { ObservedProcessDock, type RecordedProcessObservation } from '@agentmux/client-ui/components/WorkflowObservation'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { conversationItemRef } from '@agentmux/core/conversation'
 import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 
@@ -55,9 +56,10 @@ export function ConversationProcessObservation({ process, scope, selected, onSel
     if (result.kind === 'unavailable') setLocateNotice(result.message)
   }
   const summary = (observation: RecordedProcessObservation) => pinned && active && observation.stepCount > 0 && placement?.target
-    ? createPortal(<ObservedProcessDock title="已加载过程"
-      source={<span title={sources.join('\n')}>{sourceLabel} · 仅限当前已加载范围</span>}
-      summary={<><span>{observation.stepCount} 条已加载记录</span>{observation.metrics}
+    ? createPortal(<ObservedProcessDock title={observation.title ?? observation.label ?? '过程摘要'}
+      source={<span title={sources.join('\n')}>{sourceLabel} · 仅限当前已加载范围{observation.recordedTime
+        ? <span title={observation.recordedTime.offset}> · {observation.recordedTime.from}{observation.recordedTime.to !== observation.recordedTime.from ? ` – ${observation.recordedTime.to}` : ''}</span> : null}</span>}
+      summary={<><span>{observation.stepCount} 条记录</span>{observation.metrics}
         {observation.status === 'failed' ? <span>记录标记为失败</span> : null}
         {observation.status === 'running' ? <span>最近记录：进行中</span> : null}
         {observation.status === 'interrupted' ? <span>记录标记为中断</span> : null}
@@ -69,7 +71,8 @@ export function ConversationProcessObservation({ process, scope, selected, onSel
     <NativeProcessObservation {...process} compact
       actions={placement && active ? <button ref={pin} type="button" className="small-button"
         aria-label={pinned ? '取消固定过程摘要' : '固定过程摘要到输入框上方'} aria-pressed={pinned}
-        onClick={() => { setLocateNotice(null); pinned ? close() : onSelect(key) }}>{pinned ? '已固定' : '固定摘要'}</button> : undefined}
+        title={pinned ? '取消固定过程摘要' : '固定过程摘要到输入框上方'}
+        onClick={() => { setLocateNotice(null); pinned ? close() : onSelect(key) }}><SemanticIcon name={pinned ? 'action.unpin' : 'action.pin'} size={12} />{pinned ? <span>已固定</span> : null}</button> : undefined}
       renderSummary={summary} />
   </>
 }

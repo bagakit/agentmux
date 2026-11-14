@@ -112,7 +112,13 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
   const status = nativeOnly ? recordedStepStatus ?? (turnOutcome?.status === 'completed' ? 'complete' : turnOutcome?.status) : undefined
   const first = items[0]
   const recordedTime = groupRecordTime(records)
+  const original = records[0]?.original
+  const header = original?.kind === 'deferred' ? original.item : original
+  const firstTool = header?.kind === 'native' ? ('parts' in header ? header.parts : header.item.contentParts).find(part => part.kind === 'tool-call') : undefined
+  const title = header?.kind === 'captured' ? header.item.toolName ?? header.item.title
+    : firstTool?.kind === 'tool-call' ? firstTool.name : header?.item.title
   const observation: RecordedProcessObservation = { id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: records.length, countUnit: 'records',
+    ...(title ? { title } : {}),
     ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }
   return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={observation} actions={actions}

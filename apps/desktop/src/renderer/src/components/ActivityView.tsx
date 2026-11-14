@@ -1014,7 +1014,7 @@ export function ActivityView({
         pending={readPending && !earlierReadPending} activity={activity.segments} describeSpeaker={describeSpeaker}
         tools={<>{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>} /> : undefined)}
       {renderMoteBody(moteInsertions => (
-      <ConversationView detailsOnlyMetadata={moteConversation} sourceLabelsInDetails={moteConversation} showInputSource={!moteConversation}
+      <ConversationView detailsOnlyMetadata sourceLabelsInDetails showInputSource={false} coverageSummary="阅读范围与来源"
         readingGeometry={{ viewport: () => feedEl, content: () => logRef.current,
           following: () => !readingWindow.historical && followRef.current.following, pinToBottom,
           captureAnchor: () => { if (feedEl) anchorRef.current = captureReadingAnchor(feedEl) },
