@@ -269,10 +269,38 @@ async function kernelOwnerIdentity(pid, selected) {
     imageIdentity: { kind: 'kernel-code-directory', cdHash: identity.cdHash, artifactSha256: selected.daemonSha256 } }
 }
 
+/** A declaration query has no deadline; cancelling it affects only its own child. */
+async function readRuntimeVersion(daemonPath) {
+  const started = Date.now(), pending = exec(daemonPath, ['--version'], { maxBuffer: 4096 })
+  let interruption = null
+  const progress = () => process.stdout.write(`runtime_version_wait=${JSON.stringify({ candidate: daemonPath, pid: pending.child.pid ?? null, waitedMs: Date.now() - started })}\n`)
+  const cancel = signal => {
+    if (interruption) return
+    interruption = signal
+    pending.child.kill('SIGTERM')
+  }
+  const onInterrupt = () => cancel('SIGINT'), onTerminate = () => cancel('SIGTERM')
+  process.once('SIGINT', onInterrupt); process.once('SIGTERM', onTerminate)
+  progress()
+  const timer = setInterval(progress, 5000)
+  try {
+    const response = await pending
+    if (interruption) throw new Error(`Runtime version query interrupted by ${interruption}.`)
+    return response
+  } catch (cause) {
+    if (!interruption) throw cause
+    throw Object.assign(new Error(`Runtime version query for ${daemonPath} was interrupted by ${interruption}; the staged candidate is retained.`, { cause }),
+      { stage: 'runtime-version', candidate: daemonPath, interruption, queryPid: pending.child.pid ?? null })
+  } finally {
+    clearInterval(timer)
+    process.off('SIGINT', onInterrupt); process.off('SIGTERM', onTerminate)
+  }
+}
+
 async function daemonDeclaration(selected) {
   const image = await lstat(selected.daemonPath, { bigint: true })
   fail(image.isFile(), 'The selected Runtime candidate is not a regular executable file.')
-  const response = await exec(selected.daemonPath, ['--version'], { maxBuffer: 4096 })
+  const response = await readRuntimeVersion(selected.daemonPath)
   const declared = /^ctxmuxd (\S+) \(protocol (\d+), handoff ([^\s(),]+)\)\s*$/.exec(response.stdout)
   fail(declared && declared[1] === selected.daemonVersion && Number(declared[2]) === selected.manifest.product.protocol,
     'The selected Runtime candidate did not declare its selected version, protocol and handoff.')
