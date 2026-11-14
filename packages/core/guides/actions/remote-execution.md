@@ -13,7 +13,7 @@ From the Desktop that starts or views the work:
 | --- | --- | --- |
 | Local | On this device | On this device |
 | Reach · Remote Project | On this device | On the remote Host |
-| Relay · Remote Agent | On the remote Host | On this device |
+| Outpost · Remote Agent | On the remote Host | On this device |
 | Orbit · Remote Workspace | Remotely | Remotely, on the Agent Host by default |
 
 Remote Workspace keeps computation and the project off this device. It does not enable
@@ -23,6 +23,30 @@ different remote Hosts keep their exact two ends; the screen names each Host.
 These choices belong to the person in Desktop. An Agent does not make them on the
 person's behalf. The equivalent explicit split-workspace flags also require an
 authenticated user or device; do not assume that identity.
+
+## Working through another Host
+
+The mode describes where work happens; the route describes how you reach it.
+Suppose you view from A, A connects to B, and B connects to C. With access to both
+ends configured and authorized, the same modes describe work reached through B:
+
+| Mode from A | Agent runs | Project files and commands |
+| --- | --- | --- |
+| Reach · Remote Project | A | C |
+| Outpost · Remote Agent | C | A |
+| Orbit · Remote Workspace | C | C |
+| Orbit · Remote Workspace | B | C, or the reverse arrangement |
+
+B is not an execution end when it only carries the connection. When the two ends
+are B and C, both are remote from A; their exact names still matter. There is no
+fourth cascade mode. Connections do not pass on trust or permissions, and the
+Agent needs an authorized route to the project side, including back to A.
+
+Currently, B's public service can use C when C is configured there. A Desktop
+does not automatically import B's Hosts or establish an A/C workflow from those
+two connections. Configure and verify a route to C in the current entry point
+before using it. An SSH jump host can carry an explicitly configured route; that
+configuration alone does not prove a working end-to-end connection.
 
 ## Start work
 

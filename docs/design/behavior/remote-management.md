@@ -105,10 +105,28 @@ Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、H
 | 模式 | Agent 运行端 | 项目文件与工具端 |
 | --- | --- | --- |
 | Reach · Remote Project | 发起端 | 远端 |
-| Relay · Remote Agent | 远端 | 发起端 |
+| Outpost · Remote Agent | 远端 | 发起端 |
 | Orbit · Remote Workspace | 远端 | 远端，默认与 Agent 同一 Host |
 
 普通 Local 是两端均在发起端。Remote Workspace 表达本机提供访问工作面，计算与项目在远端；它不代表只读 ACL、自动持续推进或新常驻服务。已有两端分别位于不同远端的安排继续保留，明确显示各自原 Host。模式是原两端事实的相对投影，不是持久枚举、权限、连接状态或新的执行协议；原 Agent 发起来源不冒充人类客户端本机。
+
+### 级联路径与工作模式
+
+工作模式回答“Agent 和项目在哪里”，连接路径回答“怎样到达它们”，两者分别表达。以 A 上的 Desktop 为观察端，A 连接 B、B 连接 C：若到准确两端的访问路径已配置并获准，经 B 到达 C 仍沿同一组模式，不新增“级联模式”。
+
+| 从 A 观察 | Agent 运行端 | 项目文件与工具端 |
+| --- | --- | --- |
+| Reach · Remote Project | A | C |
+| Outpost · Remote Agent | C | A |
+| Orbit · Remote Workspace | C | C |
+| Orbit · Remote Workspace | B | C |
+| Orbit · Remote Workspace | C | B |
+
+B 仅作为中转时不冒充 Agent 或项目端；两端分别在 B、C 时均相对 A 为远端，仍须各自具名。连接线不传递 Host 身份、来源信任或权限，也不能证明项目工具端已对 Agent 可达；反向访问 A 同样需要自己的准确路径与授权。
+
+**当前能力边界：**B 的公共服务可以组合 B 自己已配置的 C 服务，但 A Desktop 不会递归导入 B 的 Host 配置，也没有仅凭 A→B、B→C 就建立完整 A／C 工作流的多跳解析。使用 C 仍需在当前入口显式配置并确认到 C 的准确路由；SSH 配置可提供跳板传输，不能据此声称已经建立或验证完整链路。这里定义级联场景的模式语义，不宣称自动发现、路由或授权已经交付。
+
+### 开始与继续工作
 
 Remote 将“开始工作”与“已有工作”呈现为两个明确任务面；切换保留原准备选择、所选 Session 和搜索，不运行准备、清除草稿或重绑。模式品牌名在设置、Launcher、Goal 创建和非本地 Agent 标签中一致，紧邻或在身份详情保留 Remote Project／Remote Agent／Remote Workspace 及准确两端说明。品牌名不成为持久模式值、权限或连接事实。用户先选择方向，再明确准确的已登记项目与 Agent 设备，检查同一处两端摘要后进入原 Launcher。分端时默认 Agent 启动目录来自该 Host 的权威 home，按需选该 Host 的已登记目录；同 Host 原普通执行不强建工具 binding。准备不启动 Agent、不发送任务、不安装、升级或授信，不猜 `~` 或任意同名目录。准备失败保留原选择和草稿，迟到结果不能覆盖新对象、配置或后续输入。没有匹配项目时提供准确 Host 的原项目登记入口，不把未知清单当空列表。
 
