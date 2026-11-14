@@ -1,5 +1,5 @@
 import { goalDiscussionSessionBindings } from '@agentmux/host/goal-discussion-bindings'
-import { useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { rendererPerformance } from './renderer-performance'
 import { sessionPresentationById } from './session-presentation'
@@ -134,6 +134,11 @@ function subscribe(kind: ConsumerKind, scope: RetainedConsumerScope, listener: L
   }
 }
 
+// A stable subscriber must not retain the Hook render's first selector context.
+function createScopedSubscription(kind: ConsumerKind, scope: RetainedConsumerScope) {
+  return (listener: Listener) => subscribe(kind, scope, listener)
+}
+
 /** One shared admission, then only related consumers. Visibility never freezes live facts. */
 export function useObservedAppStore<K extends ConsumerKind, T>(kind: K, visible: boolean, scope: RetainedConsumerScope, selector: (state: ConsumerFacts<K>) => T): T {
   const visibility = useRef(visible)
@@ -148,7 +153,7 @@ export function useObservedAppStore<K extends ConsumerKind, T>(kind: K, visible:
     if (kind === 'composer' || kind === 'sessionPane') rendererPerformance.check(kind, visibility.current, changed)
     return value
   }, [kind, selector])
-  const subscribeScope = useCallback((listener: Listener) => subscribe(kind, scope, listener), [kind, scope])
+  const subscribeScope = useMemo(() => createScopedSubscription(kind, scope), [kind, scope])
   // getSnapshot always consumes the current authoritative Store, including parent render/reveal.
   return useSyncExternalStore(subscribeScope, observed, observed)
 }

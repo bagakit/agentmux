@@ -13,7 +13,7 @@ import { createWorkspaceAgentContextsSelector, FOCUS_BUCKETS, focusNeutralGroupS
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import { gitWorkspaceKey } from '../features/git/history/GitHistoryContext'
 import type {
   SessionSnapshot,
@@ -63,6 +63,15 @@ const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTo
 
 const AGENT_GROUP_LABELS: Record<FocusBucket, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown' }
 const NO_AGENT_ORDER: readonly string[] = []
+
+// Row callbacks outlive a list render; retain only its selection updater.
+function createWorkspaceSelectionToggle(setSelected: Dispatch<SetStateAction<ReadonlySet<string>>>) {
+  return (key: string) => setSelected(previous => {
+    const next = new Set(previous)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    return next
+  })
+}
 
 export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool(props: Parameters<typeof WorkspaceAgentsContent>[0]) {
   return <WorkspaceAgentsContent {...props} />
@@ -127,11 +136,7 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
   const unavailableSelected = selected.size - chosen.length
   const hiddenSelected = chosen.filter(context => filter !== 'all' && context.bucket !== filter).length
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
-  const toggle = useCallback((key: string) => setSelected(previous => {
-    const next = new Set(previous)
-    if (next.has(key)) next.delete(key); else next.add(key)
-    return next
-  }), [])
+  const toggle = useMemo(() => createWorkspaceSelectionToggle(setSelected), [setSelected])
   useEffect(() => { setSelected(new Set()); setSelecting(false); setFilter('all'); setNotice('') }, [workspace.id])
   async function reorder(event: DragEndEvent) {
     if (!event.over || event.active.id === event.over.id) return
