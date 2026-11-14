@@ -114,6 +114,16 @@ export async function stagePortableArchive(directory, { mutateScroll = false } =
     }
   })
   const chunks = (Array.isArray(outputs) ? outputs : [outputs]).flatMap(output => output.output).filter(item => item.type === 'chunk')
+  const byPath = new Map(chunks.map(chunk => [chunk.fileName, chunk]))
+  for (const chunk of chunks) for (const dependency of [...chunk.imports, ...chunk.dynamicImports]) {
+    assert.ok(byPath.has(dependency) || externals.test(dependency), 'Unbundled private runtime dependency ' + dependency)
+  }
+  function reaches(entry, destination, seen = new Set()) {
+    if (entry === destination) return true
+    if (seen.has(entry)) return false
+    seen.add(entry)
+    return byPath.get(entry)?.imports.some(dependency => reaches(dependency, destination, seen)) ?? false
+  }
   const moduleIds = [...new Set(chunks.flatMap(chunk => Object.entries(chunk.modules).filter(([, data]) => data.renderedLength > 0).map(([id]) => id)))].filter(id => !id.startsWith('\0'))
   if (mutateScroll) assert.ok(scrollMutation && moduleIds.includes(scrollMutation.id), 'The archive did not retain the altered scroll lock')
   const packageRoots = new Set()
@@ -129,6 +139,9 @@ export async function stagePortableArchive(directory, { mutateScroll = false } =
     assert.deepEqual(roots, [installedPackageRoot(owner)], 'Overlay requires one resolved ' + name)
     const providers = chunks.filter(chunk => Object.keys(chunk.modules).includes(owner)).map(chunk => chunk.fileName)
     assert.equal(providers.length, 1)
+    for (const entry of ['components/Modal.js', 'components/HoverDropdownMenu.js']) {
+      assert.ok(reaches(entry, providers[0]), entry + ' must use the shared ' + name)
+    }
     overlay[name] = { chunk: providers[0], sha256: digest(await readFile(owner)) }
   }
   for (const [entry, target] of Object.entries(distribution)) {
