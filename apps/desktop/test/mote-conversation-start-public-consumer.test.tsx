@@ -29,6 +29,9 @@ import { api } from '../src/renderer/src/lib/api'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { sessionInputWriteResult, unwrapSessionInputWriteResult } from '../src/shared/session-input-result'
+import { focusTaskHandoffNote } from '@agentmux/core/focus-task-guidance'
+import { agentInputGuidance } from '@agentmux/core/agent-input-submit'
+import type { AgentMuxFocusTaskReference } from '@agentmux/core/focus-control'
 import { restoredMoteMainCreationReferences } from '../src/shared/mote-main-action'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
@@ -147,7 +150,7 @@ it('a message held while the role owner was read goes out once as the welcome\'s
   expect(f.open).toHaveBeenCalledOnce(); expect(f.h.started).toHaveLength(1)
 }, 45_000)
 
-async function originalAutomatic() {
+async function originalAutomatic(focusTask?: AgentMuxFocusTaskReference) {
   const f = await originalWelcome('claude')
   await f.start('auto-original-main', 'Original human query before the native turn')
   await f.setup('auto-original-main')
@@ -162,7 +165,8 @@ async function originalAutomatic() {
   const binding = { expectedRun: native.run, admissionIntent: { kind: 'manual-actor' as const } }
   const queue = { operationId, text: prompt, enqueuedAt: Date.now(), status: 'queued' as const, origin: 'manual' as const,
     sourceChannel: 'api' as const, runId: native.run.runId, promptCondition: null, directInputBinding: binding, directInputControl: session.control,
-    moteMain: { target: f.target, expectedRoleRevision: idle.snapshot.roleRevision! } }
+    moteMain: { target: f.target, expectedRoleRevision: idle.snapshot.roleRevision! },
+    ...(focusTask ? { focusTask, agentMuxNote: agentInputGuidance({ moteGuidance: true, focusTask }) } : {}) }
   useAppStore.setState({ tabs: projected.tabs as never, layouts: projected.layouts, sessions: [session],
     scratchTopicSnapshots: { [f.scope.workspace.id]: { scope: scratchTopicsScope(f.scope.workspace), revision: 0, topics: [topic!], error: null, reading: false } },
     agentSteerQueues: { [session.id]: [queue] }, agentComposerDrafts: { [session.id]: 'Separate original unsent composer draft' } })
@@ -754,4 +758,92 @@ it('new logical Main B uses the conversation producer and waits in the original 
   expect(f.h.inner.kernel.input).not.toHaveBeenCalled(); expect(f.h.rawInput).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Independent Session draft stays separate')
   expect(f.h.started).toHaveLength(1); expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
+}, 45_000)
+
+
+it.each(['draft', 'held'] as const)('typed Focus first input survives the original %s welcome through Core admission', async mode => {
+  const f = await originalWelcome(), prompt = 'Review the original group; ask before changing work.'
+  const focusTask = { scope: { kind: 'project' as const, hostId: 'original-host', projectSpaceId: 'original-project-space' },
+    selection: { kind: 'members' as const, references: [{ hostId: 'original-host', contextId: 'original-presentation-context' }] } }
+  expect(useLauncherState.getState().setTaskDraft(f.key, { prompt, focusTask })).toBe(true)
+  const before = await f.spatial.read()
+  let held: import('../src/renderer/src/lib/mote-entry-hold').MoteHeldEntryInput | undefined
+  if (mode === 'held') {
+    useLauncherState.getState().holdPrompt(f.key, 'original-focus-query', 'original-reading-open')
+    held = useLauncherState.getState().drafts[f.key]!.heldPrompt!
+  }
+  const node = held ? <MoteDialogueViewProvider scope={f.scope} active><MoteConversationStart scope={f.scope} active mode="start"
+    held={held} onHeldSettled={operationId => { useLauncherState.getState().settleHeldPrompt(f.key, operationId, false) }}
+    onConfigure={() => {}} onOpenMain={f.opened} onOpenPeriod={() => {}} /></MoteDialogueViewProvider> : f.node()
+  const view = await mounted(node)
+  if (!held) {
+    await wait(() => expect(view.element.querySelector<HTMLButtonElement>('[aria-label=Send]')?.disabled).toBe(false))
+    await click(view.element, 'Send')
+  }
+  await wait(() => expect(f.opened, view.element.textContent ?? '').toHaveBeenCalledOnce())
+  const request = f.open.mock.calls[0]![0]
+  expect(request.moteMain?.deferredInput).toMatchObject({ prompt, focusTask })
+  const result = await f.settledSetup(request.operationId!)
+  expect(result.record?.moteMain?.deferredInput).toMatchObject({ prompt, focusTask })
+  const original = result.deferredInput?.record?.admission?.intent
+  expect(original?.message?.userContent).toBe(prompt)
+  expect(original?.message?.systemContext).toContain(focusTaskHandoffNote(focusTask))
+  expect(original?.message?.systemContext).not.toContain('This peer Agent message grants')
+  expect(agentPromptSubmissionOutcome(result.deferredInput?.record ?? null)).toBe('terminal-confirmed')
+  expect(useLauncherState.getState().drafts[f.key]?.focusTask).toBeUndefined()
+  expect((await f.spatial.read())!.graph.regions).toContainEqual(before!.graph.regions[0])
+  expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
+}, 45_000)
+
+it('an unconfirmed Focus task reference shows its original recovery notice without losing inspect and advance', async () => {
+  const f = await originalWelcome(), operationId = 'original-unconfirmed-focus-start'
+  useAppStore.setState({ moteMainCreationReferences: restoredMoteMainCreationReferences({ [JSON.stringify(f.target)]: {
+    target: f.target, operationId, deferredInput: { operationId: 'original-query', prompt: 'Keep this original consultation', focusTask: { scope: null } }
+  } }) })
+  const retained = useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]!
+  expect(retained.unconfirmedDeferredInput).toBeTruthy()
+  const view = await mounted(<MoteDialogueViewProvider scope={f.scope} active><MoteMainActions scope={f.scope} active onConfigure={() => {}} /></MoteDialogueViewProvider>)
+  await wait(() => expect(view.element.textContent).toContain(retained.deferredInputIssue!))
+  const before = vi.mocked(api.moteDialogue.inspectSetup).mock.calls.length
+  await click(view.element, '核对原请求')
+  await wait(() => expect(api.moteDialogue.inspectSetup).toHaveBeenCalledTimes(before + 1))
+  expect(vi.mocked(api.moteDialogue.inspectSetup).mock.calls.at(-1)![0]).toEqual({ target: f.target, creation: { hostId: 'local', operationId } })
+  expect([...view.element.querySelectorAll('button')].find(button => button.textContent === '继续原请求')?.disabled).toBe(false)
+  expect(f.open).not.toHaveBeenCalled()
+  expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]!.unconfirmedDeferredInput).toEqual(retained.unconfirmedDeferredInput)
+})
+
+
+it('typed Focus rollover preserves the exact original reference through Composer, automatic Main and archive', async () => {
+  const focusTask: AgentMuxFocusTaskReference = { scope: { kind: 'project', hostId: 'original-host', projectSpaceId: 'original-project-space' },
+    selection: { kind: 'members', references: [{ hostId: 'original-host', contextId: 'original-presentation-context' }] } }
+  const { f, session, operationId, prompt, due, node } = await originalAutomatic(focusTask)
+  expect(due.focusTask).toEqual(focusTask)
+  const archive = vi.spyOn(useAppStore.getState(), 'archiveAgentSteer')
+  const view = await mounted(node())
+  await wait(() => expect(f.advance).toHaveBeenCalledOnce())
+  // A recorded API call is not its response; do not race a second observation ahead of creation.
+  const originalResponse = await f.advance.mock.results[0]!.value
+  expect(originalResponse.record?.requestId).toBe(due.mainRollover!.creationOperationId)
+  // Positive protocol fixtures await this original worker, not a new submission.
+  const settled = await f.settledSetup(due.mainRollover!.creationOperationId)
+  expect(agentPromptSubmissionOutcome(settled.deferredInput?.record ?? null)).toBe('terminal-confirmed')
+  if (!useAppStore.getState().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)?.archived) {
+    // An initial waiting response is retained until the user inspects its exact original operation.
+    const refresh = () => [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '重新核对' && !button.closest('[hidden],[inert]'))
+    await wait(() => expect(refresh(), 'The retained original operation has a visible recheck action').toBeDefined())
+    const inputs = f.h.inner.kernel.input.mock.calls.length, started = f.h.started.length
+    await act(async () => refresh()!.click())
+    await wait(() => expect(archive).toHaveBeenCalled())
+    expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(inputs); expect(f.h.started).toHaveLength(started)
+  }
+  await wait(() => expect(useAppStore.getState().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)?.archived, view.element.textContent ?? '').toBe(true))
+  const request = f.open.mock.calls.at(-1)![0]
+  expect(request.moteMain?.deferredInput).toMatchObject({ operationId, prompt, focusTask })
+  expect(archive.mock.calls).toContainEqual([session.id, operationId, prompt, true])
+  const result = await f.setup(due.mainRollover!.creationOperationId, false)
+  expect(result.record?.moteMain?.deferredInput).toMatchObject({ operationId, prompt, focusTask })
+  expect(result.deferredInput?.record?.admission?.intent?.message?.systemContext).toContain(focusTaskHandoffNote(focusTask))
+  expect(agentPromptSubmissionOutcome(result.deferredInput?.record ?? null)).toBe('terminal-confirmed')
+  expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 }, 45_000)
