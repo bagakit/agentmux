@@ -54,6 +54,51 @@ it.runIf(!publicConsumer)('compiled creation inspect reads pending disk facts wh
   expect(JSON.parse(result.stdout).result).toMatchObject({ known: true, admission: { phase: 'dispatched', run: null, observation: { availability: 'unavailable' } } })
   expect(start).toHaveBeenCalledOnce()
 })
+it.runIf(!publicConsumer)('direct prepared creation retains its frozen cwd before journal admission, during pending Start and after an actual Native ACK loss', async () => {
+  const f = await fixture(), cwd = join(f.root, 'original-pending-cwd'), changed = join(f.root, 'caller-changed-cwd')
+  await mkdir(cwd); await mkdir(changed)
+  const prepared = await f.host.client.prepareTerminal({ createOperationId: 'direct-sdk-pending-cwd', workspacePath: cwd, command: '/bin/cat' })
+  const owner = (f.host.client as any).terminalRecoveryOwner(), originalCreate = owner.createInitial.bind(owner)
+  let admit!: () => void, reachedAdmission!: () => void
+  const admission = new Promise<void>(yes => { admit = yes }), admitted = new Promise<void>(yes => { reachedAdmission = yes })
+  vi.spyOn(owner, 'createInitial').mockImplementationOnce(async (input: unknown) => { reachedAdmission(); await admission; return originalCreate(input) })
+  const kernel = (f.host.client as any).kernel, originalStart = kernel.startPrepared.bind(kernel)
+  let dispatch!: () => void, reachedStart!: () => void
+  const dispatchAllowed = new Promise<void>(yes => { dispatch = yes }), startReached = new Promise<void>(yes => { reachedStart = yes })
+  const start = vi.spyOn(kernel, 'startPrepared').mockImplementationOnce(async (...args: unknown[]) => {
+    reachedStart(); await dispatchAllowed
+    await originalStart(...args)
+    throw Error('Controlled loss after the actual original Native Start ACK')
+  })
+  // Attach the rejection observer before releasing either controlled window.
+  const creation = f.host.client.createPreparedTerminal(prepared).then(value => ({ value }), error => ({ error }))
+  try {
+    await admitted
+    prepared.workspacePath = changed
+    const beforeJournal = f.host.client.retainExecutionDirectoryMutation(async path => path === cwd)
+    try { await expect(beforeJournal.assertUnreferenced()).rejects.toMatchObject({ code: 'EXECUTION_DIRECTORY_REFERENCED' }) }
+    finally { beforeJournal.release() }
+    expect(start).not.toHaveBeenCalled()
+    admit(); await startReached
+    // This controlled pre-dispatch window complements the fixed Native source review;
+    // it does not claim to instrument the daemon's own prepublication instruction.
+    const pending = f.host.client.retainExecutionDirectoryMutation(async path => path === cwd)
+    try { await expect(pending.assertUnreferenced()).rejects.toMatchObject({ code: 'EXECUTION_DIRECTORY_REFERENCED' }) }
+    finally { pending.release() }
+    dispatch()
+    expect(await creation).toMatchObject({ error: expect.objectContaining({ message: expect.stringContaining('actual original Native Start ACK') }) })
+    const result = await f.cli(prepared.createOperationId)
+    expect(result.code, result.stderr).toBe(0)
+    const original = JSON.parse(result.stdout).result.admission
+    expect(original).toMatchObject({ workspacePath: cwd, phase: 'published', run: { workspacePath: cwd, state: 'running' } })
+    const published = f.host.client.retainExecutionDirectoryMutation(async path => path === cwd)
+    try { await expect(published.assertUnreferenced()).rejects.toMatchObject({ code: 'EXECUTION_DIRECTORY_REFERENCED' }) }
+    finally { published.release() }
+    await f.host.client.writeTerminalBytes({ runId: original.run.runId }, 'original-cwd-still-healthy')
+    expect((await f.native.client.status(original.run.runId)).state.type).toBe('running')
+    expect(start).toHaveBeenCalledOnce()
+  } finally { admit(); dispatch(); await creation }
+})
 it.runIf(!publicConsumer)('the real Host rejects a creation receipt for another original operation instead of accepting a carrier-shaped result', async () => {
   const f = await fixture()
   vi.spyOn(f.host.client, 'inspectTerminalCreation').mockResolvedValue({ hostId: 'local', operationId: 'foreign-op', known: false, admission: null })
