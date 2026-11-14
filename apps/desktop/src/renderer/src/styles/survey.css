@@ -226,6 +226,8 @@
 .global-survey-surface .survey-navigation { transition: width 180ms ease; overflow: hidden; container: survey-navigation / inline-size; }
 .global-survey-surface .survey-navigation.survey-tabs--resizing { transition: none; }
 .global-survey-surface .survey-tabs { width: 100%; padding-inline: var(--sp-2); box-sizing: border-box; }
+/* Compact actions overhang their card; retain the full hit area inside the scroller. */
+.global-survey-surface .survey-page-list { padding-block-start: 2px; }
 .global-survey-surface .survey-sidebar-actions { flex: none; margin: 0 var(--sp-2); }
 .global-survey-surface .survey-new-page { min-height: 32px; justify-content: flex-start; }
 .global-survey-surface .survey-item-actions { margin-top: 0; }
@@ -284,7 +286,9 @@
 .survey-item-compact-activity:empty { display: none; }
 .survey-status-label { flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
 .survey-item-activity .survey-status-label { max-width: none; }
-.global-survey-surface .survey-item-row[data-headerless="true"] > .survey-drag-handle { left: auto; right: 3px; top: 32px; }
+.global-survey-surface .survey-item-row[data-headerless="true"] > .survey-drag-handle { left: 3px; right: auto; top: -6px; height: 24px; z-index: 2; background: var(--surface-2); }
+.global-survey-surface .survey-item-row[data-headerless="true"] { touch-action: none; cursor: grab; }
+.global-survey-surface .survey-item-row[data-headerless="true"][data-content-dragging="true"] { cursor: grabbing; }
 
 @container survey-navigation (max-width: 220px) {
   .survey-item:has(.survey-status-label) { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: var(--sp-3); row-gap: 1px; }

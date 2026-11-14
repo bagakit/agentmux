@@ -63,8 +63,15 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, activit
       <span className="survey-item-meta"><span className="survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span></span>
     </button>
   const compact = !showTitle && Boolean(tabColumns) && !editing
-  const row = <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected} data-headerless={compact} data-selectable={Boolean(selection) || undefined} data-multi-tab={Boolean(tabColumns)} data-content-dragging={drag.isDragging || undefined}
-    role={compact ? 'group' : undefined} aria-label={compact ? title : undefined}
+  const row = <div ref={compact ? drag.setNodeRef : undefined} {...(compact ? drag.attributes : {})} className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected} data-headerless={compact} data-selectable={Boolean(selection) || undefined} data-multi-tab={Boolean(tabColumns)} data-content-dragging={drag.isDragging || undefined}
+    role={compact ? 'group' : undefined} aria-label={compact ? title : undefined} data-survey-content-key={compact ? surveyContentKey(reference) : undefined}
+    onPointerDown={event => {
+      const target = event.target
+      // Only this card's frame and grid gaps represent the whole research. Tabs and controls own their input.
+      if (!compact || !(target instanceof Element) || !event.currentTarget.contains(target) ||
+        target !== event.currentTarget && !target.classList.contains('survey-item-tabs')) return
+      drag.listeners?.onPointerDown?.(event)
+    }}
     onClick={event => { if (compact && event.target === event.currentTarget) onSelect(zone.zoneId) }} onKeyDown={event => {
       if (!compact) return
       if (event.key === 'F2' && onRename) { event.preventDefault(); beginEdit() }
@@ -72,7 +79,9 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, activit
         event.preventDefault()
         const target = event.target as HTMLElement, rect = target.getBoundingClientRect()
         target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left, clientY: rect.bottom }))
+        return
       }
+      if (event.target === event.currentTarget) drag.listeners?.onKeyDown?.(event)
     }}>
     {selection ? <SurveyCompositionCheckbox selection={selection} label={`Select all Tabs in ${title}`} /> : !editing ? dragHandle : null}
     {editing ? <form className="survey-item-name" onSubmit={async event => { event.preventDefault(); if (saving.current) return; saving.current = true; const generation = editGeneration.current, baseline = draft.revision; try { if (await onRename?.(draft.value, baseline.revision) && draft.revision === baseline) { ++baseline.revision; if (generation === editGeneration.current) { ++editGeneration.current; onEdit?.(false) } } } finally { saving.current = false } }}>
