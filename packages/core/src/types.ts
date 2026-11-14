@@ -649,9 +649,8 @@ export type AgentTurnUsage = {
  *
  * 这份合同是**纯可序列化数据**：没有函数、没有类实例。argv、键位、hook 规则这些 Provider 特有的
  * 知识全部留在 Core 侧（见 agent-launch-option.ts、agent-interaction.ts、hook-normalizer.ts），
- * 只有声明本身跨边界。因此**新增一个 Provider 是在 packages/core 里新增一个模块**——它填这七条轴，
- * Desktop 照这份声明渲染，ctxmux 继续只拥有 Run/PTY/ordered bytes/Replay/Gap/Attachment 与进程事实，
- * 两侧都不需要为它长出一条分支。
+ * 只有声明本身跨边界。具体适配器在 packages/providers 按原生协议组织，Core 组合并注册公开能力。
+ * Desktop 根据声明渲染，ctxmux 只拥有 Run/PTY/ordered bytes/Replay/Gap/Attachment 与进程事实。
  */
 export type AgentCatalogEntry = {
   id: AgentProviderId
