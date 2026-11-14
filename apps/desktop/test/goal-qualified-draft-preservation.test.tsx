@@ -47,6 +47,23 @@ it('actual Store hydration and an unrelated checkpoint retain an opaque original
  } finally {dispose()}
 })
 
+it('the original private creation leaf keeps future Source requests across hydration and an unrelated checkpoint without dispatching them',async()=>{
+ const draftKey=JSON.stringify([goal.id,'assignees']),future={goalId:goal.id,role:'assignees',kind:'future-source-create',operationId:'original-future-C',
+  request:{original:'Keep the complete authored request'},unreadableOption:{value:'original draft'}},neighbor={future:'unchanged'}
+ localStorage.setItem(key,JSON.stringify({state:{goalAgentCreationDrafts:{[draftKey]:future,neighbor}},version:1}))
+ await useAppStore.persist.rehydrate();const dispose=await initialize()
+ try {
+ const calls=vi.spyOn(api.spaceMounts,'call'),launch=vi.spyOn(api.sessions,'launchAgent')
+ const saved=await retainGoalAgentSelectionDraft({goalId:'other-goal',role:'related',selected:['original-other'],expectedUpdatedAt:1})
+ expect(saved.clientStateWritten).toBe(true)
+ expect(JSON.parse(localStorage.getItem(key)!).state.goalAgentCreationDrafts).toEqual({[draftKey]:future,neighbor})
+ await dom.render(<GoalAgentPicker demand={goal} role="assignees" onSave={async()=>false} onClose={()=>{}}/> )
+ expect(document.body.textContent).toContain('original creation uses an unreadable format')
+ expect(calls).not.toHaveBeenCalled();expect(launch).not.toHaveBeenCalled();expect(useAppStore.getState().executeControl).not.toHaveBeenCalled()
+ expect(JSON.parse(localStorage.getItem(key)!).state.goalAgentCreationDrafts[draftKey]).toEqual(future)
+ }finally{dispose()}
+})
+
 it('real Picker and finite Start distinguish a raw reference equal to a qualified semantic key',async()=>{
  const dispose=await initialize()
  try {

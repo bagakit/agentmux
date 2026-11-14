@@ -293,7 +293,7 @@ describe('mounted original Goal delegation consumer', () => {
     await mount(record, createElement(GoalExecution, { demand: { ...record, sessions: [], workspacePath: null }, onUpdate: vi.fn().mockResolvedValue(true) }))
     const recovery = button('Check creation and relationship')
     expect(recovery.closest('details')).toBeNull(); expect(recovery.parentElement!.getAttribute('role')).toBe('status')
-    expect(useAppStore.getState().goalAgentCreationDrafts[originalKey]!.operationId).toBe('original-creation')
+    expect(useAppStore.getState().goalAgentCreationDrafts[originalKey]).toHaveProperty('operationId', 'original-creation')
   })
   it('shows a finite Start reminder reason once while preserving a different unknown and original recovery', async () => {
     const reason = 'The original reminder is prepared. Manual input remains available.'

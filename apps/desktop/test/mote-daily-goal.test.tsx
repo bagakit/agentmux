@@ -1388,7 +1388,7 @@ it('Mote new-chat origin: exact Host validation and mapped Core Session survive 
 // T003: actual Goal detail/picker → original Store/preload/Main → original Core creation.
 import { chooseField } from './helpers/selection-field'
 import { GoalAgentPicker } from '../src/renderer/src/components/GoalAgentPicker'
-import { goalAgentRows, goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts } from '../src/renderer/src/lib/goal-agent-selection'
+import { goalAgentRows, goalCreationDraftKey, readGoalAgentCreationDraft, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts } from '../src/renderer/src/lib/goal-agent-selection'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 function PickerDetail() {
   const demand = useAppStore(state => state.demands.goal)!
@@ -1477,7 +1477,7 @@ it('Demand picker: Mote creation waits on the original owner, freezes one OP, pr
   expect(activeBefore).toMatchObject({ tabId: 'content-tab', regionId: 'content-region' })
   expect(originalTab?.regions['content-region']).toMatchObject({ kind: 'agent', sessionId: session.agentSessionId })
   await pickerButton('Create Mote Session'); await vi.waitFor(() => expect(release).toBeTypeOf('function'))
-  const draft = useAppStore.getState().goalAgentCreationDrafts[goalCreationDraftKey('goal', 'assignees')]!
+  const draft = readGoalAgentCreationDraft(useAppStore.getState().goalAgentCreationDrafts[goalCreationDraftKey('goal', 'assignees')], 'goal', 'assignees')!
   expect(draft).toMatchObject({ phase: 'may-have-dispatched', request: { focus: false, content: { kind: 'new-agent', executorId: 'picker-fixture' } } })
   expect(draft.request.content).not.toHaveProperty('prompt'); expect(draft.request.content).not.toHaveProperty('executionWorkspaceId')
   expect(document.querySelector<HTMLButtonElement>('[aria-label="Close Agent picker"]')!.disabled).toBe(true)
@@ -1503,37 +1503,15 @@ it('Demand picker: Mote creation waits on the original owner, freezes one OP, pr
   expect(inspected.requestId).toBe(draft.operationId)
   const createdId = inspected.agentSessionId!
   expect(createdId).toBe(await f.core.resolveAgentCreationSessionId(draft.operationId))
-  expect(restoredGoalAgentCreationDrafts(JSON.parse(window.localStorage.getItem('agentmux-workbench-v1')!).state.goalAgentCreationDrafts)[goalCreationDraftKey('goal', 'assignees')]?.operationId).toBe(draft.operationId)
+  expect(readGoalAgentCreationDraft(restoredGoalAgentCreationDrafts(JSON.parse(window.localStorage.getItem('agentmux-workbench-v1')!).state.goalAgentCreationDrafts)[goalCreationDraftKey('goal', 'assignees')], 'goal', 'assignees')?.operationId).toBe(draft.operationId)
   await pickerButton('Save relationships')
   await vi.waitFor(async () => expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId, createdId]))
   expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId, createdId]); expect((await demands.get('goal'))!.sessionIds).toContain(createdId)
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.writes).toEqual([])
 })
-it('Demand picker: failed pre-dispatch save retains the exact request and explicit recovery creates one Agent in the chosen directory', async () => {
-  const f = await pickerCore(), path = join(directory, 'chosen-project'); await mkdir(path)
-  const workspace = { id: 'picker-chosen', name: 'Chosen directory', hostId: 'local', path, kind: 'folder' as const }
-  config.workspaces = [...config.workspaces, workspace]; useAppStore.setState({ config, layouts: { ...useAppStore.getState().layouts, [workspace.id]: createWorkspaceLayout('picker-group') } })
-  await act(async () => root.render(<PickerDetail />)); await pickerButton('Choose Goal assignees'); await pickerButton('New Agent')
-  await chooseField(document.querySelector<HTMLElement>('[aria-label="Working folder for this arrangement"]')!, workspace.id)
-  await pickerButton('Prepare locations')
-  await chooseField(document.querySelector<HTMLElement>('[aria-label="New Session Agent configuration"]')!, 'picker-fixture')
-  const originalWrite = window.localStorage.setItem.bind(window.localStorage)
-  const failed = vi.spyOn(window.localStorage, 'setItem').mockImplementation((...args) => { if (args[0] === 'agentmux-workbench-v1') throw new Error('Private pre-dispatch save failed'); return originalWrite(...args) })
-  await pickerButton('Create Agent')
-  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')!.textContent).toContain('Creation has not been dispatched'))
-  const draft = useAppStore.getState().goalAgentCreationDrafts[goalCreationDraftKey('goal', 'assignees')]!
-  expect(draft.phase).toBe('not-dispatched'); expect(f.start).not.toHaveBeenCalled()
-  failed.mockRestore()
-  await pickerButton('Cancel'); await pickerButton('Choose Goal assignees')
-  expect(f.start).not.toHaveBeenCalled()
-  await pickerButton('Save selection and create once')
-  await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1))
-  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')!.textContent).toContain('Original Session observed'))
-  expect((f.start.mock.calls[0]![0] as any).cwd).toBe(path)
-  expect(useAppStore.getState().goalAgentCreationDrafts[goalCreationDraftKey('goal', 'assignees')]!.operationId).toBe(draft.operationId)
-  expect((await f.core.resolveAgentCreationSessionId(draft.operationId))).toBe(useAppStore.getState().spatialRequests[draft.operationId]!.agentSessionId)
-  expect(f.writes).toEqual([]); expect(manager.list()).toEqual([])
-})
+// Source creation and its failed-checkpoint recovery now consume the original
+// public Source Host in goal-source-creation.test.tsx. The legacy spatial-only
+// request shape is retained solely for original requests and Mote creation.
 
 it('Demand picker: hidden assignee directory does no work for unrelated Session output and Tab observations', async () => {
   const commits = vi.fn()
