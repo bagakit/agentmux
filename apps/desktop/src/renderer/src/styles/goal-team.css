@@ -14,11 +14,14 @@
 .goal-team__edit > summary { justify-content: flex-end; color: var(--text-2); font-size: var(--fs-meta); }
 .goal-team__group { display: grid; gap: var(--sp-3); min-width: 0; padding-block: var(--sp-3); }
 .goal-team__group + .goal-team__group { border-top: 1px solid var(--line-soft); }
-.goal-team__retained, .goal-team__unresolved { gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text-2); }
+.goal-team__retained { gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text-2); }
 .goal-team__retained { display: grid; }
 .goal-team__retained-content { display: flex; min-width: 0; }
 .goal-team__retained .goal-team__roles { margin: 0; }
-.goal-team__unresolved { display: flex; align-items: flex-start; }
+.goal-team__unresolved { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; color: var(--text-2); }
+.goal-team__relationship { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
+.goal-team__relationship > [data-goal-team-role] { color: var(--text-2); }
+.goal-team__identity-details code { overflow-wrap: anywhere; }
 .goal-team__unresolved > [aria-hidden='true'] { flex: none; color: var(--text-3); margin-top: var(--sp-1); }
 .goal-team__unresolved > div { display: grid; gap: var(--sp-2); min-width: 0; }
 .goal-team__unresolved strong { font-size: var(--fs-body); font-weight: 550; }

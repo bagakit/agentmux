@@ -9,7 +9,7 @@
 .goal-review__extra-checks { margin-top: var(--sp-6); }
 .goal-review__extra-checks h3 { margin-bottom: var(--sp-4); color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
 
-.goals-grounding.goal-review--report { padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); }
+.goals-grounding.goal-review--report { scroll-margin-top: var(--goal-detail-reading-offset, 90px); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); }
 .goal-review--report .goals-section-heading { align-items: baseline; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0 0 var(--sp-2); }
 .goal-review--report .goals-section-heading h2 { display: inline-flex; align-items: center; gap: var(--sp-2); margin: 0; }
 .goal-review__status { margin-inline-start: auto; color: var(--text-2); font-size: var(--fs-meta); }

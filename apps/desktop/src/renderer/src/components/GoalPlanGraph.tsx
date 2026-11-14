@@ -40,7 +40,13 @@ export function goalPlanDeliveries(plan: GoalPlanView) {
 const ThemeObjectWorkflowIcon = semanticIconComponent('object.workflow')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const StartIcon = semanticIconComponent('action.start')
-const FinishIcon = semanticIconComponent('status.completed')
+const finishIcons = {
+  Succeeded: semanticIconComponent('status.completed'),
+  'Closed with gaps': semanticIconComponent('status.gap'),
+  Unverified: semanticIconComponent('status.unknown'),
+  Cancelled: semanticIconComponent('status.disabled'),
+  Pending: semanticIconComponent('status.queued')
+}
 
 /** Columns by dependency depth; within a column the plan order is kept. */
 export function goalPlanColumns(projection: GoalPlanView): GoalPlanNodeView[][] {
@@ -164,9 +170,9 @@ function NodeExecutor({ item, compact = false }: { item: GoalPlanNodeView; compa
   const presentation = useGoalAgentPresentation(executor?.agentSessionId, executor?.hostId)
   const hosts = useAppStore(state => state.config?.hosts)
   if (!executor) {
-    if (item.team?.length) return <TeamAssignment team={item.team} role={item.teamRole ?? 'Goal team'} compact={compact} />
+    if (item.team?.length) return <TeamAssignment team={item.team} role={item.teamRole ?? 'Assigned'} compact={compact} />
     const available = item.claimable
-    return <span className="goal-plan-node__who goal-plan-node__who--open" data-claim-open={available || undefined}>{available ? 'Open to claim' : 'Unassigned'}</span>
+    return <span className="goal-plan-node__who goal-plan-node__who--open" data-claim-open={available || undefined}>{available ? 'Open to claim' : item.state === null ? 'Executor unconfirmed' : 'Unassigned'}</span>
   }
   const assignment = item.targetOnly || item.delegation && item.delegation.linkedAt === undefined ? 'Task target' :
     !item.wholeGoal && !item.delegation ? (item.claimed ? 'Claimed' : 'Assigned') : null
@@ -343,6 +349,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
   const accepted = isCurrentGroundingAccepted(demand.alignment, demand.grounding)
   const finishState = demand.status === 'cancelled' ? 'Cancelled' : demand.status !== 'done' ? 'Pending'
     : !accepted ? 'Unverified' : demand.grounding?.checks.some(check => check.outcome === 'gap') ? 'Closed with gaps' : 'Succeeded'
+  const FinishIcon = finishIcons[finishState]
   return <section className={`goal-plan${wholeGoal || progress ? '' : ' goal-plan--unavailable'}`} aria-label="Goal plan" data-goal-plan-revision={projection.revision ?? undefined}>
     <div className="goals-section-heading">
       <div className="goal-plan__heading">
@@ -358,7 +365,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <div className="goal-plan__workbench">
     <div className="goal-plan__stage">
-    <div className="goal-plan__canvas" ref={canvas} tabIndex={0} aria-label="Execution graph">
+    <div className="goal-plan__canvas" data-single-task={projection.nodes.length === 1 || undefined} ref={canvas} tabIndex={0} aria-label="Execution graph">
       <svg className="goal-plan__edges" width={width} height={height} aria-hidden="true">
         <defs><marker id={arrowId} markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto" viewBox="0 0 6 6"><path d="M0 0 L6 3 L0 6 Z" fill="context-stroke" /></marker></defs>
         {edges.map(edge => <path key={JSON.stringify([edge.boundary, edge.from, edge.to])} d={edge.d} markerEnd={`url(#${arrowId})`}

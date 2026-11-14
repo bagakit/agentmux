@@ -23,7 +23,7 @@ import '../styles/goal-team.css'
 
 const ThemeActionChooseAssigneeIcon = semanticIconComponent('action.choose-assignee')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
-const roleNames = { supervisor: 'Supervisor', assignees: 'Executor', related: 'Related' }
+const roleNames = { supervisor: 'Supervisor', assignees: 'Assignee', related: 'Related' }
 
 
 /** The full Agent directory and topology mount only in their explicit editors. */
@@ -49,24 +49,34 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
   return <section className="goal-collaboration goal-team" aria-label="Goal collaboration">
     <header className="goal-team__heading"><h2>Team</h2><details className="goal-team__edit"><summary>Edit relationships</summary><div className="goal-team__editors">
       <Button type="button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Supervisor</Button>
-      <Button type="button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Executors</Button>
+      <Button type="button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Assignees</Button>
       <Button type="button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Related</Button>
     </div></details></header>
-    <div className="goal-team__actors">{team.groups.map(group => <div className="goal-team__group" key={group.id} data-goal-team-reference={group.id}>
-      {group.actors.map(actor => <GoalTeamActorCard key={actor.key} actor={actor} onRecommend={recommend} />)}
-      {group.identities.filter(identity => !group.actors.some(actor => actor.key === JSON.stringify([identity.subject.hostId, identity.subject.agentSessionId]))).map(identity => {
-        const key = JSON.stringify([identity.subject.hostId, identity.subject.agentSessionId])
-        return <GoalTeamReference key={key} identity={identity} read={reads.get(key)} roles={identity.currentSupervisor ? ['supervisor'] : []} onRetry={() => retry(key)} />
-      })}
-      {!group.identities.length ? <div className="goal-team__unresolved" data-goal-team-unconfirmed={group.id}>
-        <span aria-hidden="true"><ThemeObjectAgentIcon size={18} /></span><div><strong>{group.reference ? compactReferenceId(group.reference.execution.agentSessionId) : 'Agent reference'}</strong><span>{group.reference ? `Runtime ${compactReferenceId(group.reference.execution.runtimeId)} · Space ${compactReferenceId(group.reference.source.spaceId)}` : 'The original Host is not confirmed.'}</span>
-          <details className="goal-team__identity-details"><summary>Reference details</summary><code>{group.reference ? JSON.stringify(group.reference) : group.legacySessionId}</code></details></div>
-      </div> : null}
-      {group.unconfirmedRoles.length ? <div className="goal-team__unqualified-roles">
-        <span>{group.unconfirmedRoles.map(role => <span key={role} data-goal-team-role={role} data-role-host="unconfirmed">{roleNames[role]} </span>)} · {group.reference ? 'Current execution not observed' : 'Host not confirmed'}</span>
-        <Button type="button" onClick={() => setRole(group.unconfirmedRoles[0]!)}>Review relationship</Button>
-      </div> : null}
-    </div>)}</div>
+    <div className="goal-team__actors">{team.groups.map(group => {
+      const unresolved = group.identities.length === 0
+      const roles = group.unconfirmedRoles.map(role => <span key={role} data-goal-team-role={role} data-role-host="unconfirmed">{roleNames[role]}</span>)
+      const review = group.unconfirmedRoles.length ? <Button type="button" onClick={() => setRole(group.unconfirmedRoles[0]!)}>Review relationship</Button> : null
+      return <div className="goal-team__group" key={group.id} data-goal-team-reference={group.id}>
+        {group.actors.map(actor => <GoalTeamActorCard key={actor.key} actor={actor} onRecommend={recommend} />)}
+        {group.identities.filter(identity => !group.actors.some(actor => actor.key === JSON.stringify([identity.subject.hostId, identity.subject.agentSessionId]))).map(identity => {
+          const key = JSON.stringify([identity.subject.hostId, identity.subject.agentSessionId])
+          return <GoalTeamReference key={key} identity={identity} read={reads.get(key)} roles={identity.currentSupervisor ? ['supervisor'] : []} onRetry={() => retry(key)} />
+        })}
+        {unresolved ? <div className="goal-team__unresolved" data-goal-team-unconfirmed={group.id}>
+          <ThemeObjectAgentIcon size={14} aria-hidden="true" />
+          <div><strong>{group.reference ? compactReferenceId(group.reference.execution.agentSessionId) : group.legacySessionId ? `Session ${compactReferenceId(group.legacySessionId)}` : 'Agent reference'}</strong>
+            <div className="goal-team__relationship">{roles}<span>{group.reference ? 'Current execution not observed' : 'Host is not confirmed'}</span></div>
+            <div className="goal-team__reference-actions">{review}
+              <details className="goal-team__identity-details"><summary>Original reference</summary>
+                {group.reference ? <><p>Runtime {compactReferenceId(group.reference.execution.runtimeId)} · Space {compactReferenceId(group.reference.source.spaceId)}</p><code>{JSON.stringify(group.reference)}</code></> : <code>{group.legacySessionId}</code>}
+              </details>
+            </div>
+          </div>
+        </div> : review ? <div className="goal-team__unqualified-roles">
+          <div className="goal-team__relationship">{roles}<span>{group.reference ? 'Current execution not observed' : 'Host not confirmed'}</span></div>{review}
+        </div> : null}
+      </div>
+    })}</div>
     {!team.groups.length ? <p className="goals-caption">No Agents assigned yet. Use Edit relationships to choose them.</p> : null}
     {!demand.supervisorSessionId && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
     {creationDrafts.map(role => <p key={role} className="goals-service" role="status">Original Agent creation retained.<Button type="button" onClick={() => setRole(role)}>Check creation and relationship</Button></p>)}

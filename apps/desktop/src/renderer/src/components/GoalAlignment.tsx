@@ -69,7 +69,10 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
   const criterionIds = new Set(alignment?.criteria.map(criterion => criterion.id))
   const extraChecks = grounding?.checks.filter(check => !criterionIds.has(check.criterionId)) ?? []
   const resultExplanation = goalResultExplanation(demand)
-  const goalRequestButton = <button type="button" className={!failure && focus === 'definition' && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : recipient.requestLabel('grill')}</button>
+  const missingDoneReport = demand.status === 'done' && !grounding
+  const needsDefinition = focus === 'definition' || focus === 'results' && missingDoneReport && !alignment?.confirmedAt
+  const useBrief = missingDoneReport && !alignment && Boolean(demand.description.trim())
+  const goalRequestButton = <button type="button" className={!failure && needsDefinition && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : useBrief ? 'Draft criteria from brief' : recipient.requestLabel('grill')}</button>
   const goalRequestNote = <span className="goals-request-action"><img className="goals-request-action__art" src={dialogueArtworkUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} /><span className="goals-caption">{recipient.description}</span></span>
   const resultRequest = alignment?.confirmedAt ? <button type="button" className={!failure && focus === 'results' && demand.status === 'done' && !grounding ? 'primary-button' : 'small-button'} data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : recipient.requestLabel('grounding')}</button> : null
   const reportCaption = accepted ? hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'
@@ -86,7 +89,7 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
     {!accepted && gapIssue === null && demand.status !== 'done' ? <p className="goals-caption">Accept and finish also closes the goal.</p> : null}
   </> : null
   const definitionActions = <div className="goals-inline-actions">
-    {!failure && alignment && !alignment.confirmedAt && !confirmIssue ? <button type="button" className={focus === 'definition' ? 'primary-button' : 'small-button'} data-goal-confirm disabled={pending} onClick={() => void acknowledge({ kind: 'confirm', revision: alignment.revision })}>{pending ? 'Saving…' : 'Confirm goal'}<ThemeActionConfirmIcon size={13} /></button> : null}
+    {!failure && alignment && !alignment.confirmedAt && !confirmIssue ? <button type="button" className={needsDefinition ? 'primary-button' : 'small-button'} data-goal-confirm disabled={pending} onClick={() => void acknowledge({ kind: 'confirm', revision: alignment.revision })}>{pending ? 'Saving…' : 'Confirm goal'}<ThemeActionConfirmIcon size={13} /></button> : null}
     {goalRequestButton}{goalRequestNote}
   </div>
   const resultChecks = alignment && currentReport ? alignment.criteria.map(criterion => ({ ...criterion, check: checks.get(criterion.id) })) : []
@@ -96,7 +99,7 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
     else counts.unchecked++
     return counts
   }, { met: 0, gaps: 0, unchecked: 0 })
-  const report = grounding ? <section className="goals-grounding goal-review goal-review--report" aria-label="Goal result"
+  const report = grounding ? <section className="goals-grounding goal-review goal-review--report" aria-label="Goal result" tabIndex={-1}
     data-goal-id={demand.id} data-goal-alignment-revision={currentReport ? alignment!.revision : undefined}
     data-goal-confirmation-state={currentReport ? alignment!.confirmedAt ? 'confirmed' : 'unconfirmed' : undefined}
     data-goal-grounding-submission={grounding.submissionId} data-goal-result-state={reportState}>
@@ -123,8 +126,8 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
     {reportActions}
   </section> : null
   const noResults = <div className={`goals-no-results${compactAgreement ? ' goal-review__no-results--compact' : ''}`} data-goal-result-state="missing">
-    {!compactAgreement ? <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div> : null}
-    {demand.status === 'done' ? <><p className="goals-condition"><strong>Results not verified</strong></p><p className="goals-muted">Marked done, but no report has checked the work against success criteria.</p></> : <p className="goals-muted">Agents work on this goal next. Ask for a result check when the work is ready.</p>}
+    {!compactAgreement && !missingDoneReport ? <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div> : null}
+    {missingDoneReport ? <p className="goals-muted">Ask the agent to check the finished work against the confirmed criteria.</p> : <p className="goals-muted">Agents work on this goal next. Ask for a result check when the work is ready.</p>}
     <div className="goals-inline-actions">{alignment?.confirmedAt ? <Button type="button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</Button> : null}{resultRequest}</div>
   </div>
   return <>
@@ -142,10 +145,11 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
       </div></details>
       {compactAgreement ? noResults : null}
     </section> : <div className="goals-clarification" aria-label="Clarify goal" data-goal-id={demand.id} data-goal-confirmation-state="unconfirmed">
-      <p className="goals-muted">Clarify the outcome and what success looks like with the agent.</p><div className="goals-inline-actions">{goalRequestButton}{goalRequestNote}</div>
+      {useBrief ? null : <p className="goals-muted">Clarify the outcome and what success looks like with the agent.</p>}
+      <div className="goals-inline-actions">{goalRequestButton}{goalRequestNote}</div>
     </div>}
     {children}
-    {grounding && !currentReport ? report : !grounding && !compactAgreement && (demand.status === 'done' || alignment?.confirmedAt) ? noResults : null}
+    {grounding && !currentReport ? report : !grounding && !compactAgreement && alignment?.confirmedAt ? noResults : null}
   </>
 
 }

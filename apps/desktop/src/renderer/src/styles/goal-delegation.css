@@ -26,3 +26,15 @@
 .goal-collaboration__relationships { display: grid; gap: var(--sp-3); }
 .goal-collaboration__relationships > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
 .goal-collaboration__relationships > summary .goals-caption { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+.goal-request-reader > summary { width: fit-content; padding-block: var(--sp-2); font-size: var(--fs-body); font-weight: 550; color: var(--text-2); }
+.goal-request-reader__surface { min-width: 0; max-width: 86ch; padding: var(--sp-4) clamp(12px, 2cqw, 26px) var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text); font-size: var(--fs-prose); }
+.goal-request-reader__switch { width: fit-content; max-width: 100%; margin-bottom: var(--sp-4); }
+.goal-request-reader__document { min-width: 0; overflow-wrap: anywhere; line-height: 1.65; }
+.goal-request-reader__document > :first-child { margin-top: 0; }
+.goal-request-reader__document > :last-child { margin-bottom: 0; }
+.goal-request-reader__document :is(pre, table) { max-width: 100%; overflow-x: auto; }
+.goal-request-reader .goal-request-reader__raw { font-family: var(--font-mono); font-size: var(--fs-body); line-height: 1.65; tab-size: 4; }
+.goal-request-reader__details dl { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr); align-items: baseline; margin: 0; font-size: var(--fs-body); }
+.goal-request-reader__details dt { color: var(--text-3); }
+.goal-request-reader__details dd { color: var(--text); font-family: var(--font-mono); }

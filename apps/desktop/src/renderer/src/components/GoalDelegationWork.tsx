@@ -9,6 +9,7 @@ import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
 import { goalDelegationRows } from '../lib/goal-delegation-presentation'
 import { goalStartRows } from '../lib/goal-start-presentation'
+import { GoalRequestReader } from './GoalRequestReader'
 import { GoalStartWork } from './GoalStartWork'
 import type { GoalNextStepSource } from '../lib/goal-presentation'
 import { GoalExecutionResponsibility, GoalResponsibilitySummary } from './GoalResponsibilitySummary'
@@ -101,7 +102,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
         <Button type="button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.ownerAgentSessionId, row.delegation.hostId)}>Open task owner</Button>
       </div>
-      <details className="goal-delegation__source"><summary>Task and source</summary>
+      <GoalRequestReader text={row.delegation.requestText ?? row.delegation.text} details={<>
         <dl><dt>Owner Host</dt><dd>{row.delegation.hostId}</dd><dt>Worker Host</dt><dd>{delegationWorkerHostId(row.delegation)}</dd><dt>Owner</dt><dd>{row.delegation.ownerAgentSessionId}</dd>
           <dt>Worker</dt><dd>{row.delegation.workerAgentSessionId}</dd><dt>Original Run</dt><dd>{row.delegation.workerRunId}</dd>
           <dt>Source message</dt><dd>{row.delegation.sourceMessageId}</dd><dt>Thread</dt><dd>{row.delegation.threadId}</dd>
@@ -111,12 +112,12 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
         {row.delegation.attention ? <dl><dt>Reminder operation</dt><dd>{row.delegation.attention.operationId}</dd>
           <dt>Reminder intent</dt><dd>{row.delegation.attention.intentId}</dd><dt>Original Supervisor</dt><dd>{row.delegation.attention.supervisorAgentSessionId}</dd>
           <dt>Supervisor Run</dt><dd>{row.delegation.attention.supervisorRunId}</dd></dl> : null}
-        <pre>{row.delegation.requestText ?? row.delegation.text}</pre>
+        </>}>
         {row.report ? <div className="goal-delegation__checks"><p>{row.report.grounding.summary}</p>
           {row.report.grounding.checks.map(check => <div key={check.criterionId}><strong>{check.criterionId} · {check.outcome}</strong>
             {check.note ? <p>{check.note}</p> : null}<GoalEvidence evidence={check.evidence} criterion={check.criterionId} /></div>)}
         </div> : null}
-      </details>
+      </GoalRequestReader>
     </article> }))
   const records = [...startRecords, ...delegationRecords]
   const focusedKey = focus?.kind === 'start' || focus?.kind === 'delegation' ? `${focus.kind}:${focus.operationId}` : null
@@ -126,7 +127,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
   const recordNodes = embedded ? [
     ...records.filter(record => record.key === focusedKey).map(record => <Fragment key={record.key}>{record.element}</Fragment>),
     overview ? <div key="goal-overview" className="goal-work-area__overview">{overview}</div> : null,
-    ...(others.length ? [<div key="original-executions" className="goal-work-area__records"><details><summary data-goal-other-work>{others.length} original {others.length === 1 ? 'execution' : 'executions'}{needsAttention ? ` · ${needsAttention} need checking` : ''}</summary>{others.map(record => <Fragment key={record.key}>{record.element}</Fragment>)}</details><Button type="button" onClick={() => void refresh()}>Refresh reports</Button></div>] : [])
+    ...(others.length ? [<div key="original-executions" className="goal-work-area__records"><details><summary data-goal-other-work>{others.length} original {others.length === 1 ? 'execution' : 'executions'}{needsAttention ? ` · ${needsAttention} to check` : ''}</summary>{others.map(record => <Fragment key={record.key}>{record.element}</Fragment>)}</details><Button type="button" onClick={() => void refresh()}>Refresh reports</Button></div>] : [])
   ] : records.map(record => <Fragment key={record.key}>{record.element}</Fragment>)
   const responsibility = <GoalResponsibilitySummary demand={current} active={active} embedded={embedded} represented={embedded ? represented : undefined} primary={embedded ? primary && focus?.kind === 'patrol' : undefined} />
   return <>{beforeRecords}{responsibility}{rows.length || starts.length || current.delegationObservationIssue || issue || embedded && overview ? <section id={`goal-work-${demand.id}`} tabIndex={-1} className="goal-delegation" aria-label={embedded ? 'Original work records' : 'Delegated work'}>

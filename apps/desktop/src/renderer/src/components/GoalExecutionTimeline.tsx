@@ -78,6 +78,15 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { d
       </li>)}</ul>
     </section>
   }
+  if (onlyRow?.target && !onlyRow.events.length && !onlyRow.active && !onlyRow.planned) {
+    const { target } = onlyRow
+    const active = selected?.nodeId === target.nodeId && selected.attemptId === target.attemptId && selected.wholeGoal === target.wholeGoal
+    return <section className="goal-execution-time goal-execution-time--empty" aria-label="Execution timeline" data-goal-execution-time data-goal-time-row={onlyRow.id}>
+      <h3><TimelineIcon size={14} aria-hidden="true" />Execution timeline</h3>
+      <span>No times recorded</span>
+      <button type="button" aria-label={`Read ${onlyRow.title}`} aria-pressed={active} onClick={event => onSelect(target, event.currentTarget)}>View task</button>
+    </section>
+  }
   const byId = new Map(nodes.map(item => [item.node.id, item]))
   let start = Infinity, end = -Infinity
   for (const row of rows) {

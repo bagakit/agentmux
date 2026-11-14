@@ -94,6 +94,8 @@ export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, 
   const supervisor = demand.supervisorSessionId, hosts = goalSupervisorHostWitnesses(demand)
   const observation = demand.responsibility?.supervisor
   const diagnostic = observation && { ended: 'Supervisor Run ended', blocked: 'Supervisor needs attention', unknown: 'Supervisor observation unconfirmed', missing: 'Supervisor unassigned', available: '', busy: '' }[observation.state]
+  const hostUnconfirmed = typeof supervisor === 'string' && hosts.length !== 1
+  const showDiagnostic = diagnostic && (supervisor || observation?.state !== 'missing') && !(hostUnconfirmed && observation?.state === 'unknown')
   const rows = demand.responsibility?.executions ?? []
   const next = rows.find(row => row.nextOwner.kind === 'manager' && row.alert !== null)
     ?? rows.find(row => row.nextOwner.kind === 'manager' && row.phase !== 'closed')
@@ -108,7 +110,7 @@ export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, 
         : <strong title={demandAgentReferenceLabel(supervisor)}>{hosts.length ? 'Supervisor Host is conflicting' : 'Supervisor Host is unconfirmed'}</strong>
         : <strong>No Supervisor assigned</strong>}
     </div>
-    {diagnostic ? <p className="goal-supervisor-rail__issue" role="status">{diagnostic}</p> : null}
+    {showDiagnostic ? <p className="goal-supervisor-rail__issue" role="status">{diagnostic}</p> : null}
     {typeof supervisor === 'string' || diagnostic ? <details className="goal-supervisor-rail__detail" data-goal-supervisor-source>
       <summary>Supervisor source</summary>
       {typeof supervisor === 'string' ? <p className="goal-supervisor-rail__source">{hosts.length === 1 ? `Host ${hosts[0]}` : hosts.length ? 'Supervisor Host is conflicting' : 'Supervisor Host is unconfirmed'} · Session {supervisor}</p> : null}
@@ -119,7 +121,7 @@ export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, 
     </button> : null}
     {next && next.execution.operationId !== currentDelivery?.operationId ? <div className="goal-supervisor-rail__next" data-goal-supervisor-next={next.execution.operationId}>
       <span>Next · {nextOwner}</span><p>{next.nextOwner.action}</p>
-    </div> : !currentDelivery ? <p className="goal-supervisor-rail__empty">{demand.responsibility ? 'No open execution responsibility recorded.' : 'Execution responsibility has not been observed.'}</p> : null}
+    </div> : !currentDelivery && (rows.length || demand.dispatches?.length || demand.delegations?.length) ? <p className="goal-supervisor-rail__empty">{demand.responsibility ? 'No open execution responsibility recorded.' : 'Current execution responsibility is unconfirmed.'}</p> : null}
     {demand.delegationObservationIssue ? <p className="goal-supervisor-rail__issue" role="status">{demand.delegationObservationIssue}</p> : null}
     {onOpenDiscussion ? <Button type="button" className="goal-supervisor-rail__discussion" disabled={discussionBusy} onClick={onOpenDiscussion}><DiscussionIcon size={13} aria-hidden="true" />Open goal discussion</Button> : null}
     <section className="goal-supervisor-rail__coordination" aria-label="Coordination history">

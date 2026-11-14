@@ -109,7 +109,8 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     const section = resultsRef.current
     const details = definition ? section?.querySelector<HTMLDetailsElement>('.goal-review__disclosure') : null
     if (details) details.open = true
-    revealWork(section)
+    const report = !definition ? section?.querySelector<HTMLElement>('[data-goal-grounding-submission]') : null
+    revealWork(report ?? section)
   }
   function revealOriginalWork(source: Extract<GoalNextStepSource, { kind: 'start' | 'delegation' | 'patrol' }>) {
     const operation = CSS.escape(source.operationId)
@@ -213,10 +214,14 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   </div>
   const stage = acknowledgementFeedback.failure ? 'you' : fact.stage
   const next = acknowledgementFeedback.failure ? 'Acknowledgement unconfirmed' : fact.text
+  const missingDoneReport = demand.status === 'done' && !demand.grounding
+  const briefFirst = missingDoneReport && !demand.plan
+  const readReport = Boolean(demand.grounding) && (fact.source.kind === 'results' || fact.source.kind === 'definition' && !demand.alignment)
+  const readDefinition = Boolean(demand.alignment) && (fact.source.kind === 'definition' || missingDoneReport && !demand.alignment?.confirmedAt)
   const reviewFirst = Boolean(acknowledgementFeedback.failure) || fact.source.kind === 'definition' || fact.source.kind === 'results'
   const review = <div key="goal-review" ref={resultsRef} tabIndex={-1} className="goals-detail__definition"><GoalAlignment key={demand.id} emphasis={fact.source.kind === 'definition' || fact.source.kind === 'results' ? fact.source.kind : null} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending} /></div>
   const brief = <section ref={overviewRef} tabIndex={-1} className="goals-intent-body goals-detail__brief" aria-label="Goal brief" data-goal-reading-section="overview" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
-    <div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" />{demand.alignment ? 'Your original intent' : 'Goal brief'}</h2>{descriptionDirty ? <span className="goals-caption">Unsaved draft</span> : null}</div>{intent(demand.plan ? 3 : 14)}{saveFeedback}
+    <div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" />{demand.alignment ? 'Your original intent' : 'Goal brief'}</h2>{descriptionDirty ? <span className="goals-caption">Unsaved draft</span> : null}</div>{intent(demand.plan ? 3 : briefFirst ? 6 : 14)}{saveFeedback}
   </section>
   return <aside ref={detailRef} className="goals-detail" data-goal-detail-id={demand.id} data-goal-view={showSupervisor ? 'supervisor' : 'work'} aria-label={`Goal workspace for ${demand.title}`}>
     <header ref={toolbarRef} className="goals-detail__toolbar">
@@ -261,8 +266,8 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           {projection.progress ? <span className="goals-detail__progress" data-goal-meta-plan={`${projection.progress.done}/${projection.progress.total}`}>
             <ThemeDoneIcon size={14} aria-hidden="true" />Plan {projection.progress.done} of {projection.progress.total} done</span> : null}
           {currentDelivery ? <Button variant="primary" onClick={event => revealAttempt(currentDelivery.node.id, currentDelivery.delegation.operationId, event.currentTarget)}>View delivery<ThemeNavigationForwardIcon size={13} aria-hidden="true" /></Button> : null}
-          {(fact.source.kind === 'definition' || fact.source.kind === 'results') && !acknowledgementFeedback.failure
-            ? <Button type="button" onClick={() => revealGoalReview(fact.source.kind === 'definition')}>{fact.source.kind === 'results' ? 'Read results' : 'Read success criteria'}</Button> : null}
+          {(readReport || readDefinition) && !acknowledgementFeedback.failure
+            ? <Button type="button" onClick={() => revealGoalReview(readDefinition)}>{readReport ? 'Read results' : demand.alignment?.criteria.length ? 'Read success criteria' : 'Read proposal'}</Button> : null}
           {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{GOAL_GROUP_LABELS[queue.stage]} · {queue.index} of {queue.total}</span>{queue.nextId ? <Button type="button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></Button> : null}</span> : null}
         </div>
         <p className="goals-detail__edit-status" aria-live="polite">{hasEditDraft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
@@ -272,8 +277,9 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         <div className="goals-detail__main">
           {acknowledgementFeedback.failure ? review : null}
           {plan}
+          {briefFirst ? brief : null}
           {reviewFirst && !acknowledgementFeedback.failure ? review : null}
-          <GoalWorkArea key={`work:${demand.id}`} demand={demand} overview={brief} primary={!acknowledgementFeedback.failure && !currentDelivery} onRevealResults={() => revealSection(resultsRef.current)} />
+          <GoalWorkArea key={`work:${demand.id}`} demand={demand} overview={briefFirst ? undefined : brief} primary={!acknowledgementFeedback.failure && !currentDelivery} onRevealResults={() => revealSection(resultsRef.current)} />
           {!reviewFirst ? review : null}
           {hasActivity ? <div ref={activityRef} tabIndex={-1} className="goals-detail__activity" data-goal-reading-section="activity" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}><GoalActivity demand={demand} /></div> : null}
         </div>

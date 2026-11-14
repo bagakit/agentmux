@@ -65,7 +65,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
     const result = grounding!.checks.some(check => check.outcome === 'gap') ? 'Accepted with gaps' : 'Accepted'
     return { stage: 'finished', text: demand.status === 'done' ? `${result} · Finished` : result, source: resultSource }
   }
-  if (demand.status === 'done' && !grounding) return { stage: 'attention', text: 'Results not verified', source: resultSource }
+  if (demand.status === 'done' && !grounding) return { stage: 'attention', text: 'Marked done · No verification report', source: resultSource }
   if (demand.status !== 'done') {
     if (retained?.phase === 'selecting-access') return { stage: 'attention', text: 'Choose task connections · No task submitted', source: { kind: 'goal' } }
     if (retainedGoalInputHere(retainedInput, demand.id) && !retained) return { stage: 'unknown', text: 'Original task input unreadable · Retained', source: { kind: 'goal' } }
