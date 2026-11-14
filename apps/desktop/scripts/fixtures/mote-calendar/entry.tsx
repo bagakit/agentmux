@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, FileReadResult, ScheduleParamsMap } from '@agentmux/core'
-import { validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
+import { validateScheduleRpcResult, type ScheduleHistoryEntry, type ScheduleHistoryBucket } from '@agentmux/core/schedule-rpc'
 import { parseMoteChatResult } from '@agentmux/core/mote-chat'
 import { parseConnectionResult } from '@agentmux/core/connections'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
@@ -43,7 +43,7 @@ const topic: ScratchTopicSnapshot = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', sum
   confirmedDirectoryPaths: [workspacePath + '/' + rootPath], identityDirectoryPath: workspacePath + '/' + rootPath,
   topicPath: workspacePath + '/' + rootPath + '/topic.md', collaborators: [] }
 const spaceId = directoryIdentity(workspace.hostId, topic.directoryPath), zoneId = homeZoneId(spaceId), groupId = 'calendar-private-group'
-const now = Date.now(), day = 86_400_000
+const now = Date.now(), day = 86_400_000, minute = 60_000
 const civil = (instant: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(instant)
 const nine = (instant: number) => new Date(civil(instant) + ("T" + new Date(_batchFixtureEpoch(0, 32400)).toISOString().slice(11, 19) + "+" + new Date(_batchFixtureEpoch(0, 28800)).toISOString().slice(11, 16))).getTime()
 const nextNine = nine(now) > now ? nine(now) : nine(now + day)
@@ -70,14 +70,15 @@ const calendar = { kind: 'daily' as const, time: (new Date(_batchFixtureEpoch(0,
 const make = (id: string, index: number, prompt: string, due: number, rest: Partial<ContinuousProgressLoop> = {}): ContinuousProgressLoop => ({ ...targets[index]!,
   loopId: id, creationOperationId: 'original-' + id, futureIntentId: 'private-intent-' + id, revision: 2, intervalMs: 60_000, calendar, prompt, status: 'active', nextCheckAt: due, ...rest })
 function sceneRecords(): ContinuousProgressLoop[] {
+  if (densityProof && new URLSearchParams(location.search).has('empty')) return []
   if (densityProof) {
     const anchor = Math.floor(now / 60_000) * 60_000 + 60_000
     return [make('group-watch', 1, '盯群：检查原群的新消息，重要的内容回原会话。', anchor,
       { calendar: undefined, everyMs: 60_000, lastOccurrenceAt: anchor - 60_000, lastOutcome: 'sent' }),
     make('maintenance', 0, 'Mote main heartbeat.\n\n检查主对话、未完成事项和原安排，继续已授权的工作。', anchor,
       { calendar: undefined, everyMs: 120_000, lastOccurrenceAt: anchor - 120_000, lastOutcome: 'sent', managedSource: { sourceId: 'mote-main:fixture', revision: 'fixture' } }),
-    make('completed-timer', 1, 'Research reminder: review the original decision.', nine(now - day),
-      { calendar: undefined, afterMs: 1_200_000, status: 'stopped', lastOccurrenceAt: nine(now - day), lastOutcome: 'sent' })]
+    make('completed-timer', 1, 'Research reminder: review the original decision.', nine(now - 2 * day),
+      { calendar: undefined, afterMs: 1_200_000, status: 'stopped', lastOccurrenceAt: nine(now - 2 * day), lastOutcome: 'sent' })]
   }
   return [make('daily-brief', 0, '早上一起看：项目进展、需要我决定的事情，以及今天最小的一步\n保留原始资料与每个待确认的问题；这段长正文需要完整的阅读宽度。 Compare the original evidence, keep unresolved choices visible, and wait for confirmation before making the next decision.', nextNine),
     make('research-timer', 1, '20 分钟后提醒我回来比较调研结论，不要替我决定或发消息给别人', now + 20 * 60_000, { calendar: undefined, afterMs: 1_200_000 }),
@@ -124,18 +125,44 @@ api.schedule.history = async params => {
   calls.push({ method: 'schedule.history', params: clone(params) })
   const record = records.find(item => item.loopId === params.scheduleId)
   if (!record) throw new Error('PRIVATE_FIXTURE_HISTORY_SCOPE_MISMATCH')
-  const previous = densityProof && record.loopId === 'group-watch'
-  const at = previous ? nine(now - day) + 40 * 60_000 : record.lastOccurrenceAt
-  const entries = at === undefined || at < params.from || at >= params.to ? [] : [{
-    operationId: 'original-fixture-receipt-' + record.loopId, occurrenceAt: at, runId: 'original-calendar-run',
-    recap: { text: previous ? 'Group watch\nReview the open commitments and record what changed.' : record.prompt, truncated: false },
-    delivery: previous ? 'native-admitted' : 'terminal-confirmed',
-    nativeResult: previous ? { state: 'completed', observedAt: at + 1_000 } : { state: 'unsupported' }
-  }]
-  return validateScheduleRpcResult('schedule.history', {
-    scheduleId: params.scheduleId, from: params.from, to: params.to, executionScope: 'connected-host',
-    coverage: 'recorded-inputs', entries, nextCursor: null
-  }, params)
+  const entries: ScheduleHistoryEntry[] = []
+  function add(at: number, input: string, failed = false) {
+    if (at < params.from || at >= params.to) return
+    entries.push({ operationId: 'original-' + record!.loopId + '-' + at, occurrenceAt: at, runId: 'original-calendar-run',
+      recap: { text: input, truncated: false }, delivery: failed ? 'native-admitted' : 'terminal-confirmed',
+      nativeResult: failed ? { state: 'failed', observedAt: at + 1_000 } : { state: 'unsupported' } })
+  }
+  if (record.lastOccurrenceAt !== undefined) add(record.lastOccurrenceAt, record.prompt)
+  if (densityProof) {
+    const morning = nine(now - day)
+    if (record.loopId === 'group-watch') add(morning + 4 * minute, 'Group watch\nReview the open commitments and record what changed.')
+    if (record.loopId === 'maintenance') {
+      add(morning + 21 * minute, record.prompt)
+      add(morning + 51 * minute, record.prompt, true)
+    }
+  }
+  const result = { scheduleId: record.loopId, from: params.from, to: params.to, executionScope: 'connected-host',
+    coverage: 'recorded-inputs', nextCursor: null }
+  if (params.bucketStarts) {
+    const bounds = [...params.bucketStarts, params.to]
+    const buckets = params.bucketStarts.flatMap((from, index) => {
+      const to = bounds[index + 1]!
+      const groups: ScheduleHistoryBucket['groups'] = []
+      for (const entry of entries.filter(entry => entry.occurrenceAt >= from && entry.occurrenceAt < to)) {
+        const originalLabel = entry.recap?.text.split('\n')[0] ?? null
+        const group = groups.find(group => group.delivery === entry.delivery && group.nativeState === entry.nativeResult.state)
+        if (group) {
+          if (group.originalLabel !== originalLabel) group.originalLabel = null
+          group.count++
+          group.firstAt = Math.min(group.firstAt, entry.occurrenceAt)
+          group.lastAt = Math.max(group.lastAt, entry.occurrenceAt)
+        } else groups.push({ delivery: entry.delivery, nativeState: entry.nativeResult.state, originalLabel, count: 1, firstAt: entry.occurrenceAt, lastAt: entry.occurrenceAt })
+      }
+      return groups.length ? [{ from, to, groups }] : []
+    })
+    return validateScheduleRpcResult('schedule.history', { ...result, entries: [], buckets }, params)
+  }
+  return validateScheduleRpcResult('schedule.history', { ...result, entries: entries.sort((a,b) => b.occurrenceAt - a.occurrenceAt) }, params)
 }
 const mutate = (action: 'pause' | 'resume' | 'cancel') => async (params: ScheduleParamsMap['schedule.pause']) => {
   calls.push({ method: 'schedule.' + action, params: clone(params) })

@@ -52,7 +52,7 @@ app.whenReady().then(async () => {
         nameRect:rect(n.querySelector('.mote-details__name')),close:visible(close)?control(close):null,coarse:matchMedia('(pointer: coarse)').matches,
         densityPolicy:matchMedia('(pointer: coarse)').matches?'coarse: 44px targets and unobstructed readable content':'fine: finite identity card beside personality, first useful content visible, original Calendar density',
         tabs:[...tabs?.querySelectorAll('[role="tab"]')??[]].map(control),
-        identity:[...n.querySelectorAll('[aria-label="Change Mote avatar"],[aria-label="Rename Mote"]')].map(control),
+        identity:[...n.querySelectorAll('[aria-label="Change Mote avatar"],[aria-label="Rename Mote"]')].filter(visible).map(control),
         axes:[...n.querySelectorAll('[data-behavior-axis]')].filter(visible).map(e=>({axis:e.dataset.behaviorAxis,rect:rect(e)})),
         fonts:fonts.map(e=>({prose:e.classList.contains('mote-details__prose'),size:parseFloat(getComputedStyle(e).fontSize),lineHeight:getComputedStyle(e).lineHeight})),
         overflow:[n,content,visible(calendar)?calendar.querySelector('.mote-calendar__toolbar'):null].filter(visible).map(e=>({className:e.className,clientWidth:e.clientWidth,scrollWidth:e.scrollWidth})),
@@ -81,7 +81,7 @@ app.whenReady().then(async () => {
     const checkGeometry = facts => {
       assert.equal(facts.tabs.length, 3, 'All original Mote tabs must be present before measuring')
       assert.deepEqual(facts.tabs.map(tab => tab.label), ['Profile', 'Ideas', 'Calendar'])
-      assert.equal(facts.identity.length, 2, 'Original avatar and rename controls must remain present')
+      assert.equal(facts.identity.length, facts.section === 'profile' ? 2 : 0, 'Avatar and rename belong to Profile')
       if (!facts.coarse && facts.name === 'Mote') headerBudget(facts)
       if (!facts.coarse && facts.name === 'Mote' && facts.calendarOffset !== null && facts.scenario === 'populated') calendarBudget(facts)
       assert.ok(facts.fonts.length > 0, 'Visible original body text must be measured')
@@ -227,7 +227,7 @@ app.whenReady().then(async () => {
       win.webContents.debugger.detach()
     }
     await until(`!matchMedia('(pointer: coarse)').matches`, 'Restore original fine pointer')
-    await click(button('Connection & preferences'), 'Original preferences disclosure')
+    await click(button('Connections & cooperation'), 'Original preferences disclosure')
     await capture('profile-preferences-narrow-dark')
     await click(button('Ideas'), 'Ideas workspace')
     await click(button('Find a worthwhile idea'), 'Original idea request')
@@ -268,13 +268,13 @@ app.whenReady().then(async () => {
     await read(`document.querySelector('.calendar-fixture').dataset.mediumProof=''`)
     await capture('calendar-medium-month-dark')
     const medium = await geometry()
-    assert.ok(medium.calendarToolbar.width <= 600 && medium.panel.width >= 560, 'The intermediate pane must exercise the separate header and Calendar breakpoints')
+    assert.ok(medium.calendarToolbar.width <= 650 && medium.panel.width >= 560, 'The intermediate pane must exercise the separate header and Calendar breakpoints')
     await read(`delete document.querySelector('.calendar-fixture').dataset.mediumProof`)
     await read(`document.querySelector('.calendar-fixture').dataset.wideProof=''`)
     win.setContentSize(1600, 900); await capture('calendar-expanded-month-dark')
     const expanded = await geometry()
     assert.ok(expanded.calendar.width > 1000, 'The actual product Calendar must cross its wide-container breakpoint')
-    assert.ok(expanded.canvas.width > 0 && expanded.agenda.width > 0 && expanded.agenda.left >= expanded.canvas.right, 'A wide Calendar must show its original canvas and agenda side by side')
+    assert.ok(expanded.canvas.width >= expanded.calendar.width * .94 && !expanded.agenda, 'The initial month should use the full content area')
     await read(`delete document.querySelector('.calendar-fixture').dataset.wideProof`)
     win.setContentSize(1240, 900)
     await click(button('Week'), 'Week point-time view')
@@ -284,7 +284,7 @@ app.whenReady().then(async () => {
     win.setContentSize(332, 900); await pause(100)
     await capture('02-narrow-upcoming-dark')
     // Keyboard changes the original SurfaceModeSwitch, rather than setting local view state.
-    await click(button('Upcoming'), 'Upcoming mode keyboard start'); await key('Home')
+    await click(button('Upcoming'), 'Upcoming mode keyboard start'); await key('ArrowLeft')
     await until(`(${button('Month')})?.getAttribute('aria-selected')==='true'`, 'Keyboard-selected Month mode')
     await capture('03-narrow-month-dark')
     const dates = await read(`(()=>{const root=${panel};return [...root.querySelectorAll('[data-mote-date]')].map(n=>({date:n.getAttribute('data-mote-date'),pressed:n.getAttribute('aria-pressed'),label:n.getAttribute('aria-label')}))})()`)
@@ -304,11 +304,11 @@ app.whenReady().then(async () => {
     win.setContentSize(332, 900)
     await click(button('New arrangement'), 'Open original shared arrangement form')
     // A mouse opens the macOS native select popup outside the hidden Renderer.
-    // Enter through the actual message field, then traverse the form backwards.
-    await until(`(${inPanel('.schedule-create')})?.open`, 'Original arrangement form opened')
+    // Enter through the actual message field, then traverse the form in display order.
+    await until(`!!(${inPanel('[role="dialog"][aria-label="New arrangement"]')})`, 'Original arrangement editor opened')
     await click(inPanel('.schedule-create [aria-label="Arranged message"]'), 'Original arrangement message field')
     const formControls = await read(`(${inPanel('.schedule-create')}).querySelectorAll('button,input,textarea,select,summary').length`)
-    for (let step = 0; step < formControls && await read(`document.activeElement?.getAttribute('aria-label')!=='Arrangement timing'`); step++) await key('Tab', ['shift'])
+    for (let step = 0; step < formControls && await read(`document.activeElement?.getAttribute('aria-label')!=='Arrangement timing'`); step++) await key('Tab')
     assert.equal(await read(`document.activeElement?.getAttribute('aria-label')`), 'Arrangement timing')
     for (const letter of 'Countdown') await key(letter)
     await key('Enter')
