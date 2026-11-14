@@ -464,8 +464,7 @@ export function AgentSessionComposer({
         {...(!readOnly ? { onCancelQueuedPreparation: (operationId: string) => { void feedback.run(async () => { await useAppStore.getState().cancelAgentSteerPreparation(ownerKey, operationId) }) } } : {})}
         {...(!disabled && !readOnly ? { onEditQueued: async (id: string, expectedText: string, nextText: string) => {
           feedback.dismiss()
-          try { useAppStore.getState().editQueuedAgentSteer(ownerKey, id, expectedText, nextText) }
-          catch (error) { feedback.report(error); throw error }
+          return useAppStore.getState().editQueuedAgentSteer(ownerKey, id, expectedText, nextText)
         } } : {})}
         onCopyQueued={async (text) => { feedback.dismiss(); return copyTextToClipboard(text, feedback.report) }}
     >
