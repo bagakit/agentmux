@@ -15,12 +15,9 @@ const edits: Record<string, Array<{ path: string; before: string; after: string 
     before: 'matchesProviderNativeSessionTarget(expected.nativeHandle, session.nativeHandle) &&\n      sessionSemanticResumeSourceRuns(session).includes(intent.key.expectedRun.runId)',
     after: 'true' }],
   'cold-authority': [
-    { path: 'packages/core/src/client.ts',
-      before: "if (!this.isRetainedHumanInput(saved.intent) || saved.intent.source.kind !== 'prompt' || saved.intent.source.recoveryAuthorization !== 'local-human') continue",
-      after: 'if (!this.isRetainedHumanInput(saved.intent)) continue' },
-    { path: 'packages/core/src/agent-global-message-queue.ts',
-      before: "intent.source.authorHuman === true && intent.source.recoveryAuthorization === 'local-human' &&",
-      after: 'intent.source.authorHuman === true &&' }
+    { path: 'packages/core/src/agent-input-wait.ts',
+      before: "intent.source.recoveryAuthorization === 'local-human' && intent.source.inputContext === undefined &&",
+      after: 'intent.source.inputContext === undefined &&' }
   ],
   'missing-delivery-binding': [{ path: 'packages/core/src/agent-global-message-queue.ts',
     before: "control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), ...(current.control.retry ? { retry: current.control.retry } : {}), at: Date.now() }",

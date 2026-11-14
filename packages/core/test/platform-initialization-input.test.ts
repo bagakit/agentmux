@@ -13,6 +13,8 @@ import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 import type { AgentProviderInputInitialization, AgentProviderInputInitializationContext } from '../src/index.js'
 import { withAgentInputClaimLease } from '../src/agent-input-claim-lease.js'
 import { AgentMuxError } from '../src/index.js'
+import { initializeInputWaitingIndex } from '../src/agent-message-journal.js'
+import { parseAgentInputMailboxPage } from '../src/agent-input-mailbox-codec.js'
 
 const closes: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -83,6 +85,59 @@ async function startingFixture(reason: 'first-start' | 'post-resume') {
   inner.kernel.status = vi.fn(async (id: string) => ({ ...f.run(id), program: native.command, pid: 20124 }))
   return { ...f, native, inner, key: (id: string) => ({ kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: current.run, submissionId: id }) }
 }
+
+it('restorable conversation positions and mailbox retain only original sustainable local authority', async () => {
+  const f = await startingFixture('first-start')
+  const submit = async (id: string, authorHuman: boolean, restricted = false) => f.client.submitAgentPrompt({
+    agentSessionId: 'recipient', expectedRun: f.key(id).expectedRun, operationId: id, prompt: 'Original ' + id,
+    admissionIntent: { kind: 'session-conversation' }, execution: 'immediate', authorHuman
+  }, restricted ? { assertCurrent: async () => {} } : undefined)
+  await submit('local-conversation', true)
+  await submit('nonhuman-conversation', false)
+  await submit('restricted-conversation', true, true)
+  await f.inner.inputWaitingRecipients.get('recipient')?.pending
+  const queue = f.inner.messageQueue
+  const keys = async () => (await queue.readRestorablePromptInputs()).map((entry: { intent: { key: unknown } }) => entry.intent.key)
+  expect(await keys()).toEqual([f.key('local-conversation')])
+  // The rebuild and incremental index must select the same original records.
+  await queue.withLock(async () => {
+    queue.db.exec('DROP TABLE input_waiting')
+    initializeInputWaitingIndex(queue.db)
+  })
+  expect(await keys()).toEqual([f.key('local-conversation')])
+  const request = { agentSessionId: 'recipient' }
+  const page = await f.client.readAgentInputMailbox(request)
+  expect(page.items).toHaveLength(3)
+  expect(parseAgentInputMailboxPage(JSON.parse(JSON.stringify(page)), request)).toEqual(page)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it('same-Run local conversation recovery grants no cross-Run semantic continuation', async () => {
+  const f = await startingFixture('first-start'), current = (await f.store.readMetadata('recipient'))!
+  const nativeHandle = { kind: 'provider' as const, providerId: 'grok', sessionId: 'original-native' }
+  await f.store.compareAndSwapMetadata(current, { ...current, nativeHandle })
+  await f.inner.registry.refresh('recipient', current.run)
+  const key = f.key('local-conversation-fixed-run')
+  await f.client.submitAgentPrompt({ agentSessionId: 'recipient', expectedRun: key.expectedRun, operationId: key.submissionId,
+    prompt: 'Original fixed-Run conversation', admissionIntent: { kind: 'session-conversation' }, execution: 'immediate', authorHuman: true })
+  await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key }))?.control.waiting?.failure?.message).toContain('pending (directory-trust)'))
+  const original = (await f.store.readMetadata('recipient'))!, nextRun = { runId: 'next-semantic-run' }, at = original.updatedAt + 1
+  await f.store.compareAndSwapMetadata(original, { ...original, run: nextRun, retiredRuns: [...original.retiredRuns, original.run],
+    nativeBinding: { source: 'semantic-resume-target', run: nextRun, observedAt: at }, updatedAt: at,
+    continuity: { operationId: 'native-resume', agentSessionId: 'recipient', trigger: 'manual', policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY },
+      reason: 'original-native-context', admittedAt: at, observedAt: at, rechecks: 0, kind: 'resumed', previousRun: original.run,
+      newRun: nextRun, nativeTarget: nativeHandle, evidence: { kind: 'run-running', observedAt: at } } })
+  // An independently ready frontend removes initialization as an alternate
+  // refusal, so this counterexample specifically proves the original Run fence.
+  f.inner.terminalFrontendWatches.set('recipient', { key: JSON.stringify([nextRun.runId, undefined]), controller: new AbortController(),
+    pending: Promise.resolve(true), failures: 0, ready: new Set(), frontend: { state: 'ready', run: nextRun, initialization: { phase: 'ready' } } })
+  await f.inner.registry.refresh('recipient', nextRun); f.inner.publishSession(f.inner.registry.get('recipient'))
+  await f.inner.inputWaitingRecipients.get('recipient')?.pending
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  const retained = (await f.client.inspectAgentInput({ key }))!
+  expect(retained.key).toEqual(key); expect(retained.admission).toBeNull()
+  expect(retained.control.deliveryKey).toBeUndefined()
+})
 
 it('post-resume login keeps the original input waiting while native/manual healthy paths remain usable', async () => {
   const f = await startingFixture('post-resume'), provider = f.client.providers.get('grok')
@@ -157,8 +212,8 @@ it('real private Core process restart retains the original pending first input a
   vi.stubEnv('AGENTMUX_TEST_OWNER_ENTRY', resolve(import.meta.dirname, 'fixtures/platform-initialization-owner.mjs'))
   vi.stubEnv('NODE_OPTIONS', '--experimental-transform-types --import ' + loader)
   const f = await headlessFixture({ ownerNodeArgs: ['--experimental-transform-types', '--import', loader] }); closes.push(f.cleanup)
-  const command = join(f.root, 'private-grok'), writes = join(f.root, 'original-terminal-bytes')
-  await writeFile(command, `#!${process.execPath}\nconst fs=require('node:fs'),a=process.argv.slice(2);if(a.includes('--version')){console.log('grok 1.0.77');process.exit(0)}if(a.includes('inspect')){console.log(JSON.stringify({cwd:process.cwd(),projectTrusted:false,hooks:[]}));process.exit(0)}process.stdin.setRawMode(true);process.stdin.on('data',d=>fs.appendFileSync(${JSON.stringify(writes)},d));console.log('Native initializer');setInterval(()=>{},1000);\n`)
+  const command = join(f.root, 'private-grok'), writes = join(f.root, 'original-terminal-bytes'), hook = join(f.root, 'private-hook.json')
+  await writeFile(command, `#!${process.execPath}\nconst fs=require('node:fs'),a=process.argv.slice(2);if(a.includes('--version')){console.log('grok 1.0.77');process.exit(0)}if(a.includes('inspect')){console.log(JSON.stringify({cwd:process.cwd(),projectTrusted:false,hooks:[]}));process.exit(0)}fs.writeFileSync(${JSON.stringify(hook)},JSON.stringify({url:process.env.AGENTMUX_HOOK_URL,token:process.env.AGENTMUX_HOOK_TOKEN}));process.stdin.setRawMode(true);process.stdin.on('data',d=>fs.appendFileSync(${JSON.stringify(writes)},d));console.log('Native initializer');setInterval(()=>{},1000);\n`)
   await chmod(command, 0o700); await writeFile(writes, '')
   let sdk = await f.client()
   const original = await sdk.createAgent({ providerId: 'grok', executorId: 'grok', agentSessionId: 'private-original-start',
@@ -191,6 +246,24 @@ it('real private Core process restart retains the original pending first input a
   expect(receipt.key, cli.stdout).toEqual(key); expect(receipt.status).toBe('waiting'); expect(receipt.admission).toBeNull()
   await sdk.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, data: 'Explicit original terminal action', source: 'user' })
   await until(() => readFile(writes, 'utf8'), value => value === 'Explicit original terminal action', 'healthy original raw terminal input')
+  // A saved waiting receipt is insufficient: after the actual owner restart,
+  // this same live Run's native start must wake the original task without a
+  // second submit/rejoin from a client. The isolated native protocol driver
+  // supplies the real authenticated Hook, not a direct Registry write.
+  const endpoint = JSON.parse(await readFile(hook, 'utf8'))
+  const started = await fetch(endpoint.url, { method: 'POST', headers: {
+    authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json'
+  }, body: JSON.stringify({ receiptId: 'private-native-start-after-restart', eventName: 'session_start',
+    payload: { hookEventName: 'session_start', sessionId: 'private-original-native' } }) })
+  expect(started.status).toBe(204)
+  await until(() => sdk.readAgentSession(original.agentSessionId), value => value?.nativeBinding?.run.runId === original.run.runId, 'same original Run native start is confirmed')
+  const sent = await until(() => sdk.inspectAgentInput({ key }), value => value?.status === 'terminal-confirmed', 'original saved task automatically wakes after owner restart')
+  expect(sent!.key).toEqual(key)
+  expect(await readFile(writes, 'utf8')).toBe('Explicit original terminal action' + input.prompt + '\r')
+  await f.restart(); sdk = await f.client()
+  expect((await sdk.inspectAgentInput({ key }))?.status).toBe('terminal-confirmed')
+  expect((await sdk.statusAgent(original.agentSessionId)).run).toMatchObject({ runId: live.run.runId, pid: live.run.pid, state: 'running' })
+  expect(await readFile(writes, 'utf8')).toBe('Explicit original terminal action' + input.prompt + '\r')
   await sdk.stopAgent(original.agentSessionId, original.run)
 })
 

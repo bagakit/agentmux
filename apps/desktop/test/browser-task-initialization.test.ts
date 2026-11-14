@@ -6,6 +6,8 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
 import { captureExecutorInvocation } from '../../../packages/core/src/agent-executor-invocation'
+import { RuntimeController } from '../src/main/runtime-controller'
+import { sessionInputWriteResult, unwrapSessionInputWriteResult } from '../src/shared/session-input-result'
 import { api } from '../src/renderer/src/lib/api'
 import { createBrowserAgent } from '../src/renderer/src/lib/browser-agent-creation'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -69,9 +71,12 @@ it.each(['directory-trust', 'authentication'] as const)('Browser creation keeps 
     control: { ...browser.control!, owner: 'agent', agent: { hostId: 'local', agentSessionId: session.id }, revision: 2, inputIsolation: 'isolated' } } as never)
   vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session)
   vi.spyOn(api.sessions, 'inspectInput').mockImplementation(async (_control, key) => f.client.inspectAgentInput({ key }))
-  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_control, prompt, operationId, binding, choice, authorHuman, agentMuxNote) =>
-    f.client.submitAgentPrompt({ agentSessionId: session.id, prompt, operationId, ...binding,
-      execution: choice?.execution, authorHuman, agentMuxNote }))
+  const runtime = Object.create(RuntimeController.prototype) as RuntimeController
+  Object.assign(runtime, { configuredClient: () => f.client,
+    trackHostOperation: (_host: string, call: () => Promise<unknown>) => call() })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (control, prompt, operationId, binding, choice, authorHuman, agentMuxNote) =>
+    unwrapSessionInputWriteResult(structuredClone(await sessionInputWriteResult(() => runtime.submitPrompt(
+      control, prompt, operationId, binding, undefined, choice, authorHuman, agentMuxNote)))))
 
   const result = await createBrowserAgent('browser', source)
   expect(result.kind).toBe('input-unconfirmed')

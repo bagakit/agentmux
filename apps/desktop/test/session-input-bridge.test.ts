@@ -2,6 +2,7 @@
 import '../src/preload/index'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxDesktopApi, AgentMuxPreloadApi, SessionInputWriteResult } from '../src/shared/contracts'
+import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
@@ -30,24 +31,44 @@ const failures: SessionInputWriteResult[] = [
 ]
 
 beforeEach(() => bridge.invoke.mockReset())
+function expectInvocation(channel: string, args: readonly unknown[]) {
+  expect(bridge.invoke.mock.calls).toHaveLength(1)
+  const actual = bridge.invoke.mock.calls[0]!, expected = [channel, ...args]
+  expect(actual.slice(0, expected.length)).toEqual(expected)
+  // Omitted optional arguments may cross contextBridge as explicit undefined;
+  // every caller-supplied value must retain its exact original position.
+  expect(actual.slice(expected.length)).toEqual(Array(Math.max(0, actual.length - expected.length)).fill(undefined))
+}
 for (const invocation of invocations) {
   for (const failure of failures) {
     it(`${invocation.method} copies ${!failure.ok && failure.error.code} through the raw preload before Renderer restores the error`, async () => {
       bridge.invoke.mockImplementation(async () => structuredClone(failure))
       const raw = await (bridge.raw!.sessions[invocation.method] as (...args: unknown[]) => Promise<SessionInputWriteResult>)(...invocation.args)
       expect(raw).toEqual(failure)
-      expect(bridge.invoke.mock.calls).toEqual([[invocation.channel, ...invocation.args]])
+      expectInvocation(invocation.channel, invocation.args)
       bridge.invoke.mockClear()
       const result = (api.sessions[invocation.method] as (...args: unknown[]) => Promise<void>)(...invocation.args)
       expect(failure.ok).toBe(false)
       if (failure.ok) throw new Error('Nonempty error case required')
       await expect(result).rejects.toMatchObject(failure.error)
-      expect(bridge.invoke.mock.calls).toEqual([[invocation.channel, ...invocation.args]])
+      expectInvocation(invocation.channel, invocation.args)
     })
   }
   it(`${invocation.method} resolves successful input to the original void Desktop contract`, async () => {
     bridge.invoke.mockResolvedValue({ ok: true })
     await expect((api.sessions[invocation.method] as (...args: unknown[]) => Promise<void>)(...invocation.args)).resolves.toBeUndefined()
-    expect(bridge.invoke.mock.calls).toEqual([[invocation.channel, ...invocation.args]])
+    expectInvocation(invocation.channel, invocation.args)
   })
 }
+
+it('preserves conversation intent and the original waiting key through preload and Renderer receipt decoding', async () => {
+  const key = { kind: 'prompt' as const, agentSessionId: control.agentSessionId, expectedRun: control.run, submissionId: 'original-semantic-task' }
+  const ref = { key, waitGeneration: 1 }
+  const receipt: AgentInputSubmissionReceipt = { key, ref, persistence: 'confirmed', status: 'waiting', observation: 'rejoin-needed', admission: null,
+    control: { ref, state: 'enabled', at: 1, waiting: { phase: 'session', reason: 'native-session-starting', wake: 'session-restored' } } }
+  const args: Parameters<AgentMuxDesktopApi['sessions']['submitPrompt']> = [control, 'Original task', key.submissionId,
+    { expectedRun: control.run, admissionIntent: { kind: 'session-conversation' } }, { execution: 'immediate' }, true]
+  bridge.invoke.mockImplementation(async () => structuredClone({ ok: true, inputReceipt: receipt }))
+  await expect(api.sessions.submitPrompt(...args)).resolves.toEqual(receipt)
+  expectInvocation('sessions:submitPrompt', args)
+})

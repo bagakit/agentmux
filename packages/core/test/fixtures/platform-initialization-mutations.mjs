@@ -2,6 +2,10 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 
 export const initializationMutations = {
+  'cold-semantic-drop': ['packages/core/src/client.ts', [
+    ['if (!isRestorableLocalPromptInput(saved.intent)) continue', "if (!isRestorableLocalPromptInput(saved.intent) || saved.intent.admissionIntent.kind !== 'manual-actor') continue"]]],
+  'cold-index-omit': ['packages/core/src/agent-message-journal.ts', [
+    ["IN ('manual-actor', 'session-conversation')", "IN ('manual-actor')"]]],
   'stage-manual': ['packages/core/src/public-rpc-service.ts', [
     ["admissionIntent:{kind:'session-conversation'},execution:'immediate'}},context)", "admissionIntent:{kind:'manual-actor'},execution:'immediate'}},context)"]]],
   'startup-bypass': ['packages/core/src/client.ts', [
@@ -26,6 +30,7 @@ export const initializationMutations = {
     ['!this.nativeSessionStarting(event.session, intent))) diagnostic.abort(new AgentMuxError(', '!this.nativeSessionStarting(event.session, intent))) void (new AgentMuxError(']]]
 }
 const observed = new Set(['packages/core/src/client.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/agent-provider.ts',
+  'packages/core/src/agent-input-wait.ts', 'packages/core/src/agent-message-journal.ts', 'packages/core/src/agent-global-message-queue.ts',
   'packages/core/src/providers/grok.ts', 'packages/core/src/providers/grok-input-initialization.ts',
   'packages/core/src/agent-native-source.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/client-event-publisher.ts',
   'packages/core/test/platform-initialization-input.test.ts', 'packages/core/test/native-history-input-continuity.test.ts',
