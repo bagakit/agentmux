@@ -65,25 +65,52 @@ export type ScheduleOccurrence = Readonly<{
   revision?: number
   at: number
   kind: 'next-due' | 'projected' | 'last-accepted'
-  /** Future interval occurrences in this half-open range are not individually projected. */
-  omittedRepeat?: Readonly<{ from: number; to: number }>
+  /** For a projected interval, at is the first time and count includes it. */
+  repeat?: Readonly<{ everyMs: number; count: number }>
 }>
+
+function assertOccurrenceWindow(window: ScheduleOccurrenceWindow, now = window.from) {
+  if (![window.from, window.to, now].every(value => Number.isSafeInteger(value) && Number.isFinite(new Date(value).getTime())) || window.to < window.from) {
+    throw new RangeError('Schedule projection requires a finite half-open UTC window and an explicit clock.')
+  }
+}
+
+/** Intersect compact recurrences with a visible subrange without allocating each occurrence. */
+export function sliceScheduleOccurrences(items: readonly ScheduleOccurrence[], window: ScheduleOccurrenceWindow): ScheduleOccurrence[] {
+  assertOccurrenceWindow(window)
+  const result: ScheduleOccurrence[] = []
+  for (const item of items) {
+    if (!item.repeat) {
+      if (item.at >= window.from && item.at < window.to) result.push(item)
+      continue
+    }
+    const { everyMs, count } = item.repeat
+    const start = Math.max(0, Math.ceil((window.from - item.at) / everyMs))
+    const end = Math.min(count, Math.ceil((window.to - item.at) / everyMs))
+    if (start < end) result.push({ ...item, at: item.at + start * everyMs, repeat: { everyMs, count: end - start } })
+  }
+  return result.sort(compareOccurrences)
+}
+
+const compareOccurrences = (a: ScheduleOccurrence, b: ScheduleOccurrence) => a.at - b.at || a.scheduleId.localeCompare(b.scheduleId)
+const canForecast = (record: Readonly<ContinuousProgressLoop>) => record.status === 'active' && record.lastOutcome !== 'unknown' && !record.pendingCompletion
+
+/** Dates already due or accepted are displayed separately from future estimates. */
+export function scheduleForecastCount(item: ScheduleOccurrence, record: Readonly<ContinuousProgressLoop>, now: number): number {
+  return item.kind === 'projected' ? item.repeat?.count ?? 1
+    : item.kind === 'next-due' && item.at >= now && canForecast(record) ? 1 : 0
+}
 
 /** Read-only visible-window projection. Actual deadlines and accepted occurrences keep
  * their original timestamps; future rule estimates never change schedule eligibility. */
 export function projectScheduleOccurrences(records: readonly Readonly<ContinuousProgressLoop>[], window: ScheduleOccurrenceWindow, now: number): readonly ScheduleOccurrence[] {
-  if (![window.from, window.to, now].every(value => Number.isSafeInteger(value) && Number.isFinite(new Date(value).getTime())) || window.to < window.from) {
-    throw new RangeError('Schedule projection requires a finite half-open UTC window and an explicit clock.')
-  }
+  assertOccurrenceWindow(window, now)
   const projected = new Map<string, ScheduleOccurrence>()
-  const add = (record: Readonly<ContinuousProgressLoop>, at: number, kind: ScheduleOccurrence['kind'], omittedRepeat?: ScheduleOccurrence['omittedRepeat']) => {
+  const add = (record: Readonly<ContinuousProgressLoop>, at: number, kind: ScheduleOccurrence['kind'], repeat?: ScheduleOccurrence['repeat']) => {
     if (at < window.from || at >= window.to) return
     const key = JSON.stringify([record.loopId, at]), previous = projected.get(key)
-    if (previous?.kind === 'last-accepted' || previous && kind === 'projected') {
-      if (omittedRepeat && previous) projected.set(key, { ...previous, omittedRepeat })
-      return
-    }
-    projected.set(key, { scheduleId: record.loopId, ...(record.revision === undefined ? {} : { revision: record.revision }), at, kind, ...(omittedRepeat ? { omittedRepeat } : {}) })
+    if (previous?.kind === 'last-accepted' || previous && kind === 'projected') return
+    projected.set(key, { scheduleId: record.loopId, ...(record.revision === undefined ? {} : { revision: record.revision }), at, kind, ...(repeat ? { repeat } : {}) })
   }
   for (const record of records) {
     if (!isAgentSchedule(record)) continue
@@ -91,16 +118,16 @@ export function projectScheduleOccurrences(records: readonly Readonly<Continuous
     // This is the plan's timestamp of the last Host-accepted input, not its actual
     // delivery wall clock, a completed Agent task or a replay of all past occurrences.
     if (record.lastOccurrenceAt !== undefined) add(record, record.lastOccurrenceAt, 'last-accepted')
-    if (record.everyMs !== undefined && record.status === 'active' && record.lastOutcome !== 'unknown' && !record.pendingCompletion) {
-      const start = Math.max(now, record.nextCheckAt, window.from)
+    if (!canForecast(record)) continue
+    if (record.everyMs !== undefined) {
+      const start = Math.max(now, record.nextCheckAt + 1, (record.lastOccurrenceAt ?? -Infinity) + 1, window.from)
       const first = record.nextCheckAt + Math.ceil((start - record.nextCheckAt) / record.everyMs) * record.everyMs
       if (Number.isSafeInteger(first) && first < window.to) {
-        const omittedFrom = first + record.everyMs
-        add(record, first, 'projected', Number.isSafeInteger(omittedFrom) && omittedFrom < window.to ? { from: omittedFrom, to: window.to } : undefined)
+        add(record, first, 'projected', { everyMs: record.everyMs, count: Math.ceil((window.to - first) / record.everyMs) })
       }
       continue
     }
-    if (record.status !== 'active' || record.lastOutcome === 'unknown' || record.pendingCompletion || !record.calendar || record.calendar.kind === 'once') continue
+    if (!record.calendar || record.calendar.kind === 'once') continue
     let cursor = Math.max(now, record.nextCheckAt, window.from - 1)
     while (cursor < window.to) {
       const next = nextCalendarOccurrence(record.calendar, cursor)
@@ -109,5 +136,5 @@ export function projectScheduleOccurrences(records: readonly Readonly<Continuous
       cursor = next
     }
   }
-  return [...projected.values()].sort((a, b) => a.at - b.at || a.scheduleId.localeCompare(b.scheduleId))
+  return [...projected.values()].sort(compareOccurrences)
 }
