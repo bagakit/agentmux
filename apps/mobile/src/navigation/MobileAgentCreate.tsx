@@ -1,7 +1,8 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { FormRow } from '@agentmux/client-ui/components/FormRow'
+import { Textarea } from '@agentmux/client-ui/input'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcResult } from '@agentmux/core'
@@ -10,6 +11,7 @@ import { getDeviceWorkface } from '../recovery/device-workface'
 import type { MobileAgentCreateIntent } from '../recovery/agent-create-intents'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import { MobileSheetHandle } from './MobileSheetHandle'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 
 export type MobileAgentCreateTarget =
   | { spaceId?: string; zoneId?: string; tabId?: never; regionId?: never }
@@ -113,10 +115,35 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
         {issue.operationId === intent.input.operationId && feedback}
         <details><summary>创建位置</summary><dl><dt>Space</dt><dd>{intent.input.destination.spaceId}</dd><dt>Zone</dt><dd>{intent.input.destination.zoneId}</dd>{!intent.input.destination.newTab && <><dt>Tab</dt><dd>{intent.input.destination.tabId}</dd><dt>Region</dt><dd>{intent.input.destination.regionId}</dd></>}<dt>Operation</dt><dd>{intent.input.operationId}</dd></dl></details>
       </section>)}
-      <label>空间<select aria-label="新 Agent 空间" disabled={launcher} value={spaceId} onChange={event => { markEdited(); localForm.current.space = event.target.value; localForm.current.zone = ''; setSpace(event.target.value); setZone('') }}><option value="">选择空间</option>{catalog?.spaces.map(space => <option key={space.spaceId} value={space.spaceId}>{space.name} · {space.hostId}</option>)}</select></label>
-      <label>Zone<select aria-label="新 Agent Zone" disabled={launcher} value={zoneId} onChange={event => { markEdited(); localForm.current.zone = event.target.value; setZone(event.target.value) }}><option value="">选择 Zone</option>{boundZones.map(zone => <option key={zone.zoneId} value={zone.zoneId}>{zone.branch ?? (launcher ? '工作目录' : zone.directoryPath ?? zone.zoneId)}</option>)}</select></label>
-      <label>执行器<select aria-label="新 Agent 执行器" value={executorId} onChange={event => { markEdited(); localForm.current.executor = event.target.value; setExecutor(event.target.value) }}><option value="">选择执行器</option>{executors.map(executor => <option key={executor.id} value={executor.id}>{typeof executor.value.name === 'string' ? executor.value.name : executor.id}</option>)}</select></label>
-      <label>初始指令<textarea aria-label="新 Agent 初始指令" value={prompt} onChange={event => { markEdited(); localForm.current.prompt = event.target.value; setPrompt(event.target.value) }} placeholder="可留空" /></label>
+      <FormRow layout="stacked" label="空间">
+        {field => <select {...field} name="spaceId" disabled={launcher} value={spaceId} onChange={event => {
+          markEdited(); localForm.current.space = event.target.value; localForm.current.zone = ''; setSpace(event.target.value); setZone('')
+        }}>
+          <option value="">选择空间</option>
+          {catalog?.spaces.map(space => <option key={space.spaceId} value={space.spaceId}>{space.name} · {space.hostId}</option>)}
+        </select>}
+      </FormRow>
+      <FormRow layout="stacked" label="Zone">
+        {field => <select {...field} name="zoneId" disabled={launcher} value={zoneId} onChange={event => {
+          markEdited(); localForm.current.zone = event.target.value; setZone(event.target.value)
+        }}>
+          <option value="">选择 Zone</option>
+          {boundZones.map(zone => <option key={zone.zoneId} value={zone.zoneId}>{zone.branch ?? (launcher ? '工作目录' : zone.directoryPath ?? zone.zoneId)}</option>)}
+        </select>}
+      </FormRow>
+      <FormRow layout="stacked" label="执行器">
+        {field => <select {...field} name="executorId" value={executorId} onChange={event => {
+          markEdited(); localForm.current.executor = event.target.value; setExecutor(event.target.value)
+        }}>
+          <option value="">选择执行器</option>
+          {executors.map(executor => <option key={executor.id} value={executor.id}>{typeof executor.value.name === 'string' ? executor.value.name : executor.id}</option>)}
+        </select>}
+      </FormRow>
+      <FormRow layout="stacked" label="初始指令">
+        {field => <Textarea {...field} name="prompt" value={prompt} onChange={event => {
+          markEdited(); localForm.current.prompt = event.target.value; setPrompt(event.target.value)
+        }} placeholder="可留空" />}
+      </FormRow>
       <button className={pending ? 'mobile-secondary' : 'mobile-primary'} disabled={busy || !connected || !client} onClick={() => void run(null)}>{busy ? '正在核对…' : pending ? '另建 Agent（保留待核对项）' : '创建 Agent'}</button>
       {unretained.current && <button className="mobile-text-button" onClick={() => {
         unretained.current = null; setIssue({ message: '已放弃本次未发起的创建；表单保留，可恢复设备存储后重试。' }); redraw(value => value + 1)
