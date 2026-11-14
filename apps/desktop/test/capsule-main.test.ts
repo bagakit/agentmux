@@ -14,7 +14,7 @@ import { formatCapsuleAnswer } from '@agentmux/core/capsule'
 import type { AgentMuxRpcServiceOptions } from '../../../packages/core/src/public-rpc-service'
 
 const bridge = vi.hoisted(() => ({ root: '', handlers: new Map<string, (...args: any[]) => any>(), options: [] as any[],
-  nativeDocument: null as null | { sender: any; frame: any; record: any; browserId: string; navigationId: string; instanceId?: string; remote?: { hostId: string; runtimeId: string } }, failDispatchSave: false }))
+  nativeDocument: null as null | { sender: any; frame: any; record: any; browserId: string; navigationId: string; instanceId?: string; remote?: { hostId: string; runtimeId: string } }, failDispatchSave: false, controlPath: '' }))
 vi.mock('electron', () => ({ app: { getPath: () => bridge.root, getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false, once: vi.fn(), on: vi.fn(), off: vi.fn() },
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => any) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
@@ -22,6 +22,7 @@ vi.mock('electron', () => ({ app: { getPath: () => bridge.root, getAppPath: () =
   globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() } }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(), AgentMuxControlServer: class {
   constructor(options: unknown) { bridge.options.push(options) }
+  get path() { return bridge.controlPath }
   async start() {} async stop() {}
 } }))
 vi.mock('@agentmux/connectors', async actual => ({ ...await actual<typeof import('@agentmux/connectors')>(), createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, onChannelMetadataChanged: () => () => {}, close: async () => {} }) }))
@@ -73,17 +74,26 @@ afterEach(async () => {
   if (failure) { console.error(inspect(failure, { depth: 6 })); throw failure }
 })
 function barrier() { let release!: () => void; const promise = new Promise<void>(yes => { release = yes }); return { promise, release } }
-async function fixture() {
+async function fixture(options: { nodeLocation?: boolean } = {}) {
   const h = await rpcOwnerFixture(['producer', 'recipient', 'outsider']); closes.push(h.close)
   const directory = await mkdtemp('/tmp/capsule-main-'); closes.push(() => rm(directory, { recursive: true, force: true }))
   bridge.root = directory; bridge.options.length = 0; bridge.handlers.clear(); bridge.nativeDocument = null
   const desktopPath = join(directory, 'desktop.sock'), hostPath = join(directory, 'host.sock'), stateDirectory = join(directory, 'capsules')
+  bridge.controlPath = desktopPath
+  const spatialReady = vi.fn()
+  const nodeRuntime = options.nodeLocation ? 'original-main-node-runtime' : undefined
+  const nodeOwner = options.nodeLocation ? new (await import('../../../packages/core/src/node-publishing-owner')).NodePublishingOwner({ stateDirectory: join(directory, 'node-state'), runtimeId: nodeRuntime!, ownerInstanceId: 'original-node-instance' }) : undefined
+  if (nodeOwner) {
+    await mkdir(join(directory, 'node-state'))
+    const initial = await nodeOwner.call('settings.node.inspect', {})
+    await nodeOwner.call('settings.node.configure', { expectedRevision: initial.policyRevision, operationId: 'publish-main-link-node', policy: { ...initial.policy, alias: 'actual-main-node' } })
+  }
   const presentation = { connect: (context?: import('@agentmux/core').AgentMuxRpcCallContext) => connectAgentMuxRpc({ endpoint: { transport: 'unix' as const, path: desktopPath }, ...(context?.caller ? { credentials: context.caller } : {}) }) }
   let service = await startCapsuleRuntime({ stateDirectory, socketPath: join(directory, 'capsule.sock') })
   const serviceIdentity = await service.identity()
   const adapters = createCapsuleDesktopAdapters(presentation)
   closes.push(() => service.close())
-  const host = new AgentMuxControlServer({ socketPath: hostPath, coreClients: h.coreClients,
+  const host = new AgentMuxControlServer({ socketPath: hostPath, coreClients: h.coreClients, ...(nodeOwner ? { nodePublishing: nodeOwner } : {}),
     capsules: { call: async (method, params, context, originalContext) => {
       const connection = await connectCapsuleRuntime({ socketPath: join(directory, 'capsule.sock'), expectedRuntimeId: serviceIdentity.runtimeId, adapters: adapters(originalContext) })
       try { return await connection.call(method, params, context) }
@@ -96,14 +106,21 @@ async function fixture() {
   vi.spyOn(runtime as any, 'configuredClient').mockReturnValue(h.client)
   vi.spyOn(runtime as any, 'connectedClient').mockResolvedValue(h.client)
   const original = vi.spyOn(runtime, 'callOriginalCore').mockImplementation(async (hostId, method, params, context) => {
+    if (nodeOwner && hostId === 'local' && method === 'node.inspect') throw new Error('Original local Node observation unavailable')
     return await rpc.call(method, params, context?.caller ? { credentials: context.caller } : {}) as never
   })
   const submit = vi.spyOn(runtime, 'submitPrompt')
   const app = Object.assign(new EventEmitter(), { id: 810, mainFrame: { framesInSubtree: [] }, isDestroyed: () => false, send: vi.fn() })
   const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'workspace', hostId: 'local', name: 'Original project', path: directory, kind: 'folder' as const }] }
+  if (nodeOwner) {
+    const remote = { id: 'exact-node-carrier', kind: 'ssh' as const, label: 'Configured node carrier', hostname: 'private.invalid', runtimeId: nodeRuntime! }
+    config.hosts.push(remote)
+    runtime.commit({ hosts: [{ id: remote.id, config: remote, client: h.client, executionHost: { kind: 'local', dispose() {} } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  }
   const disposeMain = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(app), window: { webContents: app, setBackgroundColor() {}, isDestroyed: () => false } as unknown as BrowserWindow,
     initialConfig: config, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never,
     runtime, scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {} } as never,
+    ...(nodeOwner ? { spatialLinks: { ready: spatialReady, unavailable() {} } as never } : {}),
     workbenchWindows: { setNativeOwner: () => () => {} } as never, workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
   closes.push(disposeMain)
   const registered = bridge.options.find(value => value.capsuleInput && value.capsules)
@@ -132,11 +149,28 @@ async function fixture() {
   const question = await invoke('capsule:document', ['request', { operationId: 'original-question', question: 'Approve the original result?', draft: 'Original draft' }], pageSender) as import('@agentmux/core/capsule').CapsuleInteraction
   const params = { operationId: 'original-human-answer', capsuleId: page.record.capsuleId, interactionId: question.interactionId, expectedRevision: question.revision, answer: 'Approved original answer' }
   const queue = new DurableAgentMuxMessageQueue(join(h.root, 'messages.ndjson'))
-  return { ...h, directory, stateDirectory, runtime, original, submit, app, page, pageSender, rpc, desktopRpc, registered, invoke, question, params, queue, spatial, stopDesktop,
+  return { ...h, directory, stateDirectory, runtime, original, submit, app, page, pageSender, rpc, desktopRpc, registered, invoke, question, params, queue, spatial, stopDesktop, spatialReady, nodeRuntime,
     usePresentation(port: typeof presentationPort) { presentationPort = port }, observe(value: Record<string, unknown>) { observation = value },
     async restartCapsuleService() { await service.close(); service = await startCapsuleRuntime({ stateDirectory, socketPath: join(directory, 'capsule.sock') }) } }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
+
+it('actual Main link readiness locates a published Node through its configured scope and original private Core', async () => {
+  const h = await fixture({ nodeLocation: true })
+  const handler = bridge.handlers.get('ui:spatialLinksReady')
+  expect(handler, 'Original registered Main readiness handler').toBeTypeOf('function')
+  await handler!({ sender: h.app, senderFrame: h.app.mainFrame })
+  expect(h.spatialReady).toHaveBeenCalledOnce()
+  const links = h.spatialReady.mock.calls[0]![3] as import('../src/main/spatial-link-ingress').HostLinkPorts
+  const signal = new AbortController().signal
+  const pinned = await links.locate({ alias: 'actual-main-node', expectedRuntimeId: h.nodeRuntime! }, signal)
+  expect(pinned).toMatchObject({ status: 'unique', matches: [{ hostId: 'exact-node-carrier', publication: { node: { runtimeId: h.nodeRuntime, alias: 'actual-main-node' } } }] })
+  expect(h.original.mock.calls.some(([hostId, method]) => hostId === 'exact-node-carrier' && method === 'node.inspect')).toBe(true)
+  const bare = await links.locate({ alias: 'actual-main-node' }, signal)
+  expect(bare).toMatchObject({ status: 'unconfirmed', issues: [{ hostId: 'local' }] })
+  expect(h.submit).not.toHaveBeenCalled()
+})
+
 
 it('the actual registered App chrome route derives the remote owner from its Browser and preserves original drafts without Human input', async () => {
   const h = await fixture(), remote = { hostId: 'original-remote-B', runtimeId: 'original-runtime-B' }

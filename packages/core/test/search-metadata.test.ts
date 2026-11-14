@@ -21,6 +21,15 @@ const facts = (): AgentMuxSearchMetadata => ({
 })
 
 describe('Core original-object metadata search', () => {
+  it('keeps published Host aliases out of unqualified local metadata identity matching', () => {
+    const input = facts(), before = structuredClone(input)
+    for (const query of ['amux://host/studio', 'amux://host/studio/agent/CaseAgent?runtime=original']) {
+      const result = searchAgentMuxMetadata(query, input)
+      expect(result.issue).toContain('node locate')
+      expect(result.sessions).toEqual([]); expect(result.locations).toEqual([])
+    }
+    expect(input).toEqual(before)
+  })
   it('matches Mote links by exact durable Space and never treats a plain Space or uninspected event as that Mote', () => {
     const input = facts()
     expect(searchAgentMuxMetadata('amux://mote/FolderSpace', input).sessions).toEqual([])

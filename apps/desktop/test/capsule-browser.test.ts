@@ -20,6 +20,8 @@ import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { capsulePresentation, createCapsuleBrowserDocument, resolveCapsuleColdDocument } from '../src/main/capsule-presentation'
 import { RemoteCapsuleProxy } from '../src/main/remote-capsule-proxy'
+import { formatHostAddress } from '../../../packages/core/src/sharing'
+import { browserObjectLink } from '../src/shared/browser-object-link'
 import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills'
 
 // Native ownership and event ordering are controlled here. Actual Electron navigation, pixels
@@ -146,6 +148,57 @@ it('keeps the original local partition and cold data identity while remote Runti
   expect(hydrated.regions['remote-region']).toMatchObject({ capsuleRemote: { runtimeId: 'Runtime-B' }, capsuleOrigin: proxy.origin })
   await expect(h.manager.create('Runtime-B', proxy.origin + '/', 'workspace', undefined, 'normal', 'responsive', {
     capsule, capsuleOrigin: proxy.origin, capsuleRemote: { hostId: 'other', runtimeId: 'runtime-b' } })).rejects.toThrow('another container')
+})
+
+it('retains a qualified remote container address across own-address entry, external navigation and cold restoration', async () => {
+  const h = await fixture(), capsule = await h.page('injected'), remote = { hostId: 'original-B', runtimeId: 'OriginalRuntime' }
+  const proxy = new RemoteCapsuleProxy(capsule, h.owner); await proxy.listen(); cleanups.push(() => proxy.close())
+  const link = formatHostAddress({ alias: 'studio', runtimeId: remote.runtimeId,
+    resource: { kind: 'capsule', capsuleId: capsule.record.capsuleId } })
+  const opened = await h.manager.create('qualified-browser', proxy.origin + '/', 'workspace', undefined, 'normal', 'responsive', {
+    capsule, capsuleOrigin: proxy.origin, capsuleRemote: remote, capsuleObjectLink: link })
+  const first = h.views.at(-1)!; await first.lastLoad
+  const partition = first.options.webPreferences.partition
+  expect(h.manager.target(opened.id)).toMatchObject({ objectLink: link })
+  const own = await h.manager.navigate(opened.id, link)
+  expect(own.navigationId).toBe(opened.navigationId); expect(h.views.at(-1)).toBe(first)
+  for (const wrong of [link.replace('OriginalRuntime', 'OtherRuntime'), link.replace(capsule.record.capsuleId, 'OtherCapsule')]) {
+    await expect(h.manager.navigate(opened.id, wrong)).rejects.toThrow('original Capsule')
+    expect(h.views.at(-1)).toBe(first)
+  }
+  const external = await h.manager.navigate(opened.id, 'https://outside.invalid/kept'); await first.lastLoad
+  expect(external.objectLink).toBeUndefined(); expect(external.capsuleObjectLink).toBe(link)
+  const tab = createWorkbenchTab('qualified-tab', { ...external, regionId: 'qualified-region', kind: 'browser', workspaceId: 'workspace', browserId: opened.id })
+  const hydrated = hydratePersistedTab(JSON.parse(JSON.stringify(reducePersistedTab(tab)))).regions['qualified-region']!
+  expect(hydrated).toMatchObject({ capsuleObjectLink: link, url: external.url, capsuleRemote: remote })
+  await h.manager.release(opened.id)
+  const cold = await fixture()
+  await cold.manager.create(opened.id, external.url, 'workspace', undefined, 'normal', 'responsive', {
+    capsule, capsuleOrigin: proxy.origin, capsuleRemote: remote, capsuleObjectLink: (hydrated as typeof external).capsuleObjectLink! })
+  const restored = cold.views.at(-1)!; await restored.lastLoad
+  expect(restored.options.webPreferences.partition).toBe(partition)
+  await cold.manager.navigate(opened.id, proxy.origin + '/'); await restored.lastLoad
+  expect(cold.manager.target(opened.id)).toMatchObject({ objectLink: link })
+  expect(browserObjectLink({ url: proxy.origin + '/', capsuleId: capsule.record.capsuleId, capsuleOrigin: proxy.origin,
+    capsuleRemote: remote, capsuleObjectLink: 'amux://capsule/OtherCapsule' })).toBeUndefined()
+})
+
+it('adds a qualified address to an existing remote Browser without changing its document or partition', async () => {
+  const h = await fixture(), capsule = await h.page('injected'), remote = { hostId: 'B', runtimeId: 'RuntimeB' }
+  const proxy = new RemoteCapsuleProxy(capsule, h.owner); await proxy.listen(); cleanups.push(() => proxy.close())
+  const opened = await h.manager.create('existing-remote', proxy.origin + '/route', 'workspace', undefined, 'normal', 'responsive', {
+    capsule, capsuleOrigin: proxy.origin, capsuleRemote: remote })
+  const view = h.views.at(-1)!; await view.lastLoad
+  expect(opened.objectLink).toBeUndefined()
+  const before = h.manager.target(opened.id)!
+  const link = formatHostAddress({ alias: 'new-alias', runtimeId: remote.runtimeId, resource: { kind: 'capsule', capsuleId: capsule.record.capsuleId } })
+  const updated = h.manager.recordCapsuleOpen(opened.id, capsule.record.capsuleId, 'qualified-open', link)
+  expect(updated.objectLink).toBe(link); expect(updated.capsuleObjectLink).toBe(link)
+  expect(updated.navigationId).toBe(before.navigationId); expect(updated.url).toBe(before.url)
+  expect(h.views.at(-1)).toBe(view)
+  expect(h.manager.capsuleDocument(view.webContents as never, view.webContents.mainFrame as never)?.remote).toEqual(remote)
+  h.manager.recordCapsuleOpen(opened.id, capsule.record.capsuleId, 'bad-hint', link.replace('RuntimeB', 'OtherRuntime'))
+  expect(h.manager.target(opened.id)).toMatchObject({ objectLink: link })
 })
 
 it('keeps Capsule storage independent from user Profiles and installs SDK only for injected containers', async () => {

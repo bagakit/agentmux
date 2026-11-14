@@ -1,9 +1,24 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { formatAmuxSharing, formatSessionAddress, formatRegionAddress, formatTabAddress,
-  formatSpaceAddress, formatZoneAddress, formatMoteAddress, formatAmuxObjectLink, parseAmuxObjectLink, type AmuxObjectLinkTarget } from '../src/sharing.js'
+  formatSpaceAddress, formatZoneAddress, formatMoteAddress, formatHostAddress, formatAmuxObjectLink, parseAmuxObjectLink, type AmuxObjectLinkTarget } from '../src/sharing.js'
 
 describe('amux object sharing', () => {
+  it('keeps published aliases separate from original Runtime and nested resource identities', () => {
+    for (const runtimeId of [undefined, 'Original/Runtime ?#']) {
+      const base = { alias: 'studio-mac', ...(runtimeId === undefined ? {} : { runtimeId }) }
+      for (const resource of [undefined, { kind: 'agent' as const, agentSessionId: 'SID/Original' }, { kind: 'capsule' as const, capsuleId: 'CID ?#' }]) {
+        const address = { ...base, ...(resource === undefined ? {} : { resource }) }
+        expect(parseAmuxObjectLink(formatHostAddress(address))).toEqual({ kind: 'host', ...address })
+      }
+    }
+    expect(formatHostAddress({ alias: 'studio-mac', runtimeId: 'Original' })).toBe('amux://host/studio-mac?runtime=Original')
+    for (const raw of ['amux://host/Studio', 'amux://host/studio/', 'amux://host/%73tudio', 'amux://host/studio/agent/',
+      'amux://host/studio/agent/%2f', 'amux://host/studio?runtime=', 'amux://host/studio?runtime=A&exec=run',
+      'amux://host/studio?runtime=A#x', 'amux://host/studio/terminal/ID', 'amux://host/studio/agent/A/thread/B']) {
+      expect(() => parseAmuxObjectLink(raw), raw).toThrow()
+    }
+  })
   it('copies one original typed link without metadata, instructions or a guessed location', () => {
     expect(formatSessionAddress('original')).toBe('amux://agent/original')
     expect(formatRegionAddress('region:original')).toBe('amux://region/region%3Aoriginal')

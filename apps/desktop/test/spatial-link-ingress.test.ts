@@ -4,6 +4,8 @@ import { parseAgentMuxControlRequest, formatAmuxObjectLink, type AgentMuxControl
 import { focusFacts } from '../../../packages/core/test/fixtures/desktop-focus-facts'
 import { SpatialLinkIngress, receiveSpatialLinkArguments } from '../src/main/spatial-link-ingress'
 import type { CapsuleOpenResult } from '@agentmux/core/capsule'
+import type { HostLinkPorts } from '../src/main/spatial-link-ingress'
+import type { NodeLocateResult } from '@agentmux/core/node-locator'
 
 const space = (spaceId: string) => formatAmuxObjectLink({ kind: 'space', spaceId })
 const zone = (zoneId: string) => formatAmuxObjectLink({ kind: 'zone', zoneId })
@@ -20,7 +22,8 @@ function ports() {
     expect(parseAgentMuxControlRequest(request)).toEqual(request)
     requests.push(request); signals.push(signal)
     return { ...focusFacts(request), navigation: { ...focusFacts(request).navigation,
-      ...(request.expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId: request.expectedAgentSessionId }) }, presentation: { provenance: 'observed' as const, state: 'main-visible' as const,
+      ...(request.expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId: request.expectedAgentSessionId }),
+      ...(request.expectedAgentHostId === undefined ? {} : { expectedAgentHostId: request.expectedAgentHostId }) }, presentation: { provenance: 'observed' as const, state: 'main-visible' as const,
       tabId: null, regionId: null, blockers: [] } }
   })
   return { requests, signals, execute, report: vi.fn() }
@@ -167,6 +170,83 @@ function agentCatalog(locations: number) {
     locations: Array.from({ length: locations }, (_, index) => ({ regionId: 'R', tabId: 'T', groupId: 'G' + index,
       workspaceId: 'execution-workspace', displayWorkspaceId: 'display-workspace', spaceId: null, zoneId: null })) }
 }
+
+function located(hostId = 'remote-b', runtimeId = 'original-runtime', hostIds = [hostId]): NodeLocateResult {
+  return { status: 'unique', issues: [], matches: [{ hostId, hostIds, publication: {
+    node: { runtimeId, ownerInstanceId: 'owner-instance', alias: 'studio' }, policyRevision: 'original-revision',
+    resourcesShared: false, roots: [], landing: null } }] }
+}
+function hostPorts(result = located()): HostLinkPorts {
+  return { locate: vi.fn(async () => result), openCapsule: vi.fn(async input => capsuleResult(input.operationId)) }
+}
+
+it('opens the resolved Host resource page through exact Settings navigation, preserving input', async () => {
+  const ingress = new SpatialLinkIngress(), p = ports(), host = hostPorts()
+  p.execute.mockImplementation(async request => {
+    if (request.operation !== 'focus' || request.target.kind !== 'settings') throw Error('Expected original Settings navigation')
+    expect(parseAgentMuxControlRequest(request)).toEqual(request)
+    expect(request.target).toEqual({ kind: 'settings', sectionId: 'hosts', hostId: 'remote-b' })
+    expect(request.inputPolicy).toBe('preserve')
+    const facts = focusFacts(request)
+    return { ...facts, overlays: { ...facts.overlays, settings: true, settingsPage: {
+      sectionIds: ['hosts'], sectionId: 'hosts', visible: true, hostId: 'remote-b' } } }
+  })
+  ingress.ready(p.execute, p.report, undefined, host)
+  await expect(ingress.receive('amux://host/studio?runtime=original-runtime')).resolves.toBeNull()
+  expect(host.locate).toHaveBeenCalledWith({ alias: 'studio', expectedRuntimeId: 'original-runtime' }, expect.any(AbortSignal))
+  expect(p.execute).toHaveBeenCalledTimes(1); expect(host.openCapsule).not.toHaveBeenCalled()
+})
+
+it('filters same-SID display candidates by confirmed original Runtime carriers and retains a Host condition', async () => {
+  const ingress = new SpatialLinkIngress(), p = ports(), host = hostPorts()
+  p.execute.mockImplementationOnce(async () => {
+    const catalog = agentCatalog(1), original = catalog.regions[0]!, location = catalog.locations[0]!
+    return { operation: 'space.ls', catalog: { ...catalog,
+      regions: [original, { ...original, regionId: 'remote-region', execution: { hostId: 'remote-b', cwd: '/work' } }],
+      locations: [location, { ...location, regionId: 'remote-region' }] } }
+  })
+  ingress.ready(p.execute, p.report, undefined, host)
+  await expect(ingress.receive('amux://host/studio/agent/original%20SID?runtime=original-runtime')).resolves.toBeNull()
+  expect(p.requests).toHaveLength(1)
+  expect(p.requests[0]).toMatchObject({ target: { regionId: 'remote-region' }, expectedAgentSessionId: 'original SID', expectedAgentHostId: 'remote-b' })
+  expect(host.openCapsule).not.toHaveBeenCalled()
+})
+
+it.each(['local', 'remote-b'])('opens the original %s Capsule without replacing its storage namespace', async hostId => {
+  const ingress = new SpatialLinkIngress(), p = ports(), host = hostPorts(located(hostId, 'original-runtime', hostId === 'local' ? ['ssh-self', 'local'] : [hostId]))
+  const local = vi.fn(async (_id: string, operationId: string) => capsuleResult(operationId))
+  ingress.ready(p.execute, p.report, local, host)
+  await expect(ingress.receive(`amux://host/studio/capsule/${capsuleId}?runtime=original-runtime`)).resolves.toBeNull()
+  expect(local).toHaveBeenCalledTimes(hostId === 'local' ? 1 : 0)
+  expect(host.openCapsule).toHaveBeenCalledTimes(hostId === 'local' ? 0 : 1)
+  if (hostId !== 'local') expect(host.openCapsule).toHaveBeenCalledWith({ hostId, expectedRuntimeId: 'original-runtime', capsuleId, operationId: expect.any(String),
+    objectLink: `amux://host/studio/capsule/${capsuleId}?runtime=original-runtime` }, expect.any(AbortSignal))
+  expect(p.execute).not.toHaveBeenCalled()
+})
+
+it.each(['ambiguous', 'unconfirmed', 'missing', 'wrong-runtime'] as const)('keeps original work for %s Node location without a fallback or new object', async status => {
+  const ingress = new SpatialLinkIngress(), p = ports(), result = located()
+  if (status === 'ambiguous') { result.status = status; result.matches.push(located('remote-c', 'another-runtime').matches[0]!) }
+  else if (status === 'unconfirmed') { result.status = status; result.issues.push({ hostId: 'remote-c', code: 'NODE_UNAVAILABLE', message: 'Original observation unavailable' }); result.matches = [] }
+  else if (status === 'missing') { result.status = status; result.matches = [] }
+  else result.matches[0]!.publication.node.runtimeId = 'wrong-runtime'
+  const host = hostPorts(result), local = vi.fn()
+  ingress.ready(p.execute, p.report, local, host)
+  expect(await ingress.receive(`amux://host/studio/capsule/${capsuleId}${status === 'ambiguous' ? '' : '?runtime=original-runtime'}`)).toContain('workface is kept')
+  expect(p.execute).not.toHaveBeenCalled(); expect(host.openCapsule).not.toHaveBeenCalled(); expect(local).not.toHaveBeenCalled()
+})
+
+it('cancels only an old Node lookup when a later native URL arrives', async () => {
+  const ingress = new SpatialLinkIngress(), p = ports(), host = hostPorts()
+  let finish!: (result: NodeLocateResult) => void
+  host.locate = vi.fn(async () => await new Promise(resolve => { finish = resolve }))
+  ingress.ready(p.execute, p.report, undefined, host)
+  const first = ingress.receive('amux://host/studio'); const second = ingress.receive(zone('newer'))
+  expect(await first).toContain('superseded')
+  finish(located()); await expect(second).resolves.toBeNull(); await settled()
+  expect(p.requests.map(request => request.target)).toEqual([{ kind: 'space', zoneId: 'newer' }])
+  expect(host.openCapsule).not.toHaveBeenCalled()
+})
 
 it.each(['cold', 'warm'])('opens a %s Agent link at its one exact position with an original SID condition', async mode => {
   const ingress = new SpatialLinkIngress(), p = ports()

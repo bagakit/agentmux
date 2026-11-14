@@ -8,6 +8,7 @@ import { RemoteCapsuleProxy } from '../src/main/remote-capsule-proxy'
 import { capsuleDocumentIpc } from '../src/main/capsule-document-ipc'
 import { capsulePageChrome } from '../src/main/capsule-page-chrome'
 import { createRemoteCapsulePresentation } from '../src/main/remote-capsule-presentation'
+import { formatHostAddress } from '../../../packages/core/src/sharing'
 
 const closes: Array<() => unknown> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close() })
@@ -100,8 +101,12 @@ it('trusted remote page chrome retains B requests and drafts, rejects another CI
 })
 it('the URI-independent adapter acquires the exact Runtime, renders A locally and reports B endpoint without opening a B workface', async () => {
   const h = await fixture(), requests: any[] = [], acquire = vi.fn(async () => h.client)
-  const adapter = createRemoteCapsulePresentation({ acquire, graph: async () => null, current: () => null, ensure: async () => { throw Error('no saved Browser') },
-    recordOpen: vi.fn() as never, original: vi.fn() as never,
+  let graph: any = null, currentUrl: string | undefined
+  const recordOpen = vi.fn()
+  const adapter = createRemoteCapsulePresentation({ acquire, graph: async () => graph,
+    current: () => currentUrl ? { url: currentUrl } : null,
+    ensure: async () => ({ id: 'browser-A', capsuleId: h.capsule.record.capsuleId, url: currentUrl! } as never),
+    recordOpen: recordOpen as never, original: vi.fn() as never,
     observe: async () => ({ desktop: { selection: { space: { tabId: 'tab-original' } } }, activeWorkspaceId: null, layouts: {} }),
     execute: async request => { requests.push(request); return request.operation === 'open.browser'
       ? { operation: 'open.browser', region: { browserId: 'browser-A', regionId: 'region-A', tabId: 'tab-A' } } as never
@@ -118,11 +123,24 @@ it('the URI-independent adapter acquires the exact Runtime, renders A locally an
   expect(await (await fetch(request.url)).text()).toContain('Original B')
   expect(prepared?.capsule.record).toEqual(h.capsule.record)
   expect(h.calls.mock.calls.some(([method]) => method === 'capsule.open')).toBe(false)
+  const link = formatHostAddress({ alias: 'studio', runtimeId: 'runtime-B', resource: { kind: 'capsule', capsuleId: h.capsule.record.capsuleId } })
+  currentUrl = request.url
+  const saved = { id: 'browser-A', browserId: 'browser-A', workspaceId: 'workspace', mode: 'normal' as const, url: request.url, title: '',
+    capsuleId: h.capsule.record.capsuleId, capsuleOrigin: new URL(request.url).origin, capsuleRemote: { hostId: 'B', runtimeId: 'runtime-B' } }
+  graph = { tabs: [{ tabId: 'tab-A', regionIds: ['region-A'] }],
+    regions: [{ regionId: 'region-A', tabId: 'tab-A', kind: 'browser', browserId: 'browser-A' }], resources: { 'region:region-A': saved } }
+  await adapter.openRemoteCapsule({ hostId: 'B', expectedRuntimeId: 'runtime-B', capsuleId: h.capsule.record.capsuleId,
+    operationId: 'qualified-reopen', objectLink: link })
+  expect(requests.filter(request => request.operation === 'open.browser')).toHaveLength(1)
+  expect(recordOpen).toHaveBeenCalledWith('browser-A', h.capsule.record.capsuleId, 'qualified-reopen', link)
+  await adapter.restore(saved)
+  expect(await adapter.document(request.url, h.capsule.record.capsuleId)).toMatchObject({ capsuleObjectLink: link, capsuleRemote: saved.capsuleRemote })
+  const acquired = acquire.mock.calls.length
   acquire.mockRejectedValueOnce(new Error('An additional Runtime identity observation is unavailable'))
   const retained = await adapter.client({ hostId: 'B', runtimeId: 'runtime-B' }, h.capsule.record.capsuleId)
     .then(client => client.call('capsule.inspect', { capsuleId: h.capsule.record.capsuleId })).catch(error => error)
   expect(retained).toMatchObject({ record: { capsuleId: h.capsule.record.capsuleId } })
-  expect(acquire).toHaveBeenCalledTimes(1)
+  expect(acquire).toHaveBeenCalledTimes(acquired)
   await expect(adapter.openRemoteCapsule({ hostId: 'local', expectedRuntimeId: 'runtime-B', capsuleId: h.capsule.record.capsuleId,
     operationId: 'wrong-local' })).rejects.toThrow('original local owner')
 })

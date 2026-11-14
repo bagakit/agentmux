@@ -1171,6 +1171,39 @@ it('keeps both original Mote regions after human Focus navigation cancels a pend
 })
 
 describe('Settings semantic navigation', () => {
+  it('Host-qualified links select the actual Host resources and retain original work and drafts', async () => {
+    await control({ kind: 'space', regionId: 'source-region' })
+    const before = useAppStore.getState(), originalTabs = before.tabs
+    await act(async () => useAppStore.setState({ config: { ...before.config!, hosts: [...before.config!.hosts,
+      { id: 'second-host', kind: 'ssh', label: 'Other original Host', hostname: 'unprepared.invalid', user: 'fixture' }] } }))
+    const result = await control({ kind: 'settings', sectionId: 'hosts', hostId: 'local' })
+    expect(result.navigation.state).toBe('applied')
+    expect(result.overlays.settingsPage).toMatchObject({ sectionId: 'hosts', visible: true, hostId: 'local' })
+    const host = container.querySelector('[data-settings-host="local"]')!
+    expect(host.querySelector('[data-host-view]')?.getAttribute('data-host-view')).toBe('overview')
+    expect(host.querySelector<HTMLDetailsElement>('.remote-host-section')?.open).toBe(true)
+    expect(useAppStore.getState().tabs).toBe(originalTabs)
+    expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
+    const second = container.querySelector<HTMLButtonElement>('[data-host-disclosure="second-host"] [data-host-panel="overview"]')!
+    expect(second).not.toBeNull()
+    await act(async () => second.click())
+    expect((await readSettings()).overlays.settingsPage).toMatchObject({ hostId: 'second-host' })
+    await control({ kind: 'settings', sectionId: null })
+  })
+  it('Host-qualified Agent focus checks the original Host before navigation and keeps a healthy same-SID workface', async () => {
+    await control({ kind: 'space', regionId: 'source-region' })
+    const before = useAppStore.getState(), drafts = before.agentComposerDrafts
+    const request = { schemaVersion: 5 as const, requestId: crypto.randomUUID(), operation: 'focus' as const,
+      target: { kind: 'space' as const, regionId: 'target-region' }, inputPolicy: 'preserve' as const,
+      expectedAgentSessionId: target.control.agentSessionId, expectedAgentHostId: 'another-host' }
+    let response!: AgentMuxDesktopFocusResult
+    await act(async () => { response = await useAppStore.getState().executeControl(parseAgentMuxControlRequest(request)) as AgentMuxDesktopFocusResult })
+    expect(response.navigation.state).toBe('rejected')
+    expect(response.navigation.expectedAgentHostId).toBe('another-host')
+    expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+    expect(useAppStore.getState().sessions).toEqual(before.sessions)
+  })
   async function readSettings() {
     const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'inspect.client' })
     if (result.operation !== 'inspect.client') throw new Error('Expected original client inspection')

@@ -8,7 +8,7 @@ import type { AgentMuxRpcClient } from '../../src/public-rpc-client.js';
 export async function nodeRuntimeFixture(peer?: {
     socketPath: string;
     owner: AgentMuxRuntimeOwnerIdentity;
-}, desktopStyle = false, core = process.env.AGENTMUX_NODE_COMPILED_CORE_ROOT!) {
+}, desktopStyle = false, core = process.env.AGENTMUX_NODE_COMPILED_CORE_ROOT!, worker = resolve(import.meta.dirname, '../fixtures/node-publishing-core.mjs')) {
     if(!core) throw Error('Exact private candidate Core required');
     const root = await mkdtemp('/tmp/nnp-core-'), runtimeDirectory = join(root, 'r'), stateDirectory = join(root, 's');
     await Promise.all([mkdir(runtimeDirectory, { mode: 0o700 }), mkdir(join(stateDirectory, 'ctxmux'), { recursive: true, mode: 0o700 }), mkdir(join(root, 'home'), { mode: 0o700 })]);
@@ -31,7 +31,7 @@ export async function nodeRuntimeFixture(peer?: {
     try {
         await new Promise<void>((yes, no) => { const timer = setTimeout(() => no(Error('Private Native readiness timeout: ' + errors)), 20000); daemon.stdio[3]!.once('data', () => { clearTimeout(timer); yes(); }); daemon.once('error', e => { clearTimeout(timer); no(e); }); daemon.once('exit', code => { clearTimeout(timer); no(Error('Private Native exited ' + code + ': ' + errors)); }); });
         const launch = async () => {
-            server = spawn(process.execPath, [resolve(import.meta.dirname, '../fixtures/node-publishing-core.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+            server = spawn(process.execPath, [worker], { env, stdio: ['ignore', 'pipe', 'pipe'] });
             const child = server;
             let stdout = '', stderr = '';
             return await new Promise<typeof current>((yes, no) => { const timer = setTimeout(() => no(Error('Private Core readiness timeout: ' + stderr)), 20000); child.stderr!.on('data', b => stderr += String(b)); child.stdout!.on('data', b => { stdout += String(b); if (stdout.includes('\n')) {
