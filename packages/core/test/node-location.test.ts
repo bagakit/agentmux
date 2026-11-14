@@ -34,7 +34,7 @@ it('keeps unrelated or ambiguous sites unknown and rounds only an enabled origin
   addresses[0] = '192.0.2.10'
   expect(await source.read('original')).toBeNull()
   expect(lookup).not.toHaveBeenCalled()
-  const result = { source: 'public-egress', latitude: 31, longitude: 121, label: 'Example city', accuracyKm: 120 }
+  const result = { source: 'public-egress', latitude: 31, longitude: 121, label: 'Example city', accuracyKm: 200 }
   expect(await source.read('original', publicPolicy)).toEqual(result)
   expect(await source.read('original', publicPolicy)).toEqual(result)
   expect(lookup).toHaveBeenCalledTimes(1)
@@ -80,7 +80,7 @@ it('serves only a published location through the real RPC endpoint and preserves
     await writeFile(path, '[]')
     const next = await rpc.call('settings.node.configure', { operationId: 'allow-egress', expectedRevision: saved.policyRevision, policy: { ...saved.policy, mapLocation: publicPolicy } })
     expect(lookup).not.toHaveBeenCalled()
-    expect((await rpc.call('node.location', input)).location).toEqual({ latitude: 35, longitude: 140, label: 'Example', source: 'public-egress', accuracyKm: 80 })
+    expect((await rpc.call('node.location', input)).location).toEqual({ latitude: 35, longitude: 140, label: 'Example', source: 'public-egress', accuracyKm: 100 })
     expect(lookup).toHaveBeenCalledExactlyOnceWith('https://get.geojs.io/v1/ip/geo.json', expect.objectContaining({ signal: expect.anything() }))
     await rpc.call('settings.node.configure', { operationId: 'stop-egress', expectedRevision: next.policyRevision, policy: { ...next.policy, mapLocation: { ...publicPolicy, estimatePublicEgress: false } } })
     expect((await rpc.call('node.location', input)).location).toBeNull()
