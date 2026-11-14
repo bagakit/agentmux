@@ -36,7 +36,7 @@ const MountedSpaceFocusEntry = memo(function MountedSpaceFocusEntry({ mountKey, 
     {missing ? <p role="status" className="mounted-space-issue">The original Space is currently absent. Last confirmed members and private input are kept.</p> : null}
     {matches.length ? <ul>{matches.map(member => { const fact = sessions.get(member.key), state = fact?.current?.state; return <li key={member.key}>
       <button type="button" className="mounted-space-focus__member" onClick={() => open(member.tab.tabId, member.region.regionId)}>
-        <strong>{member.region.agentSessionId ? <MountedExecutionRelation member={member} target={target} /> : null}{member.tab.name ?? 'Original work'} · {member.region.kind === 'agent' ? 'Agent' : member.region.kind}</strong>
+        <strong>{member.region.agentSessionId ? <MountedExecutionRelation member={member} target={target} occurrence={sessions.get(member.key)?.occurrence} /> : null}{member.tab.name ?? 'Original work'} · {member.region.kind === 'agent' ? 'Agent' : member.region.kind}</strong>
         <small>{member.region.agentSessionId ?? 'No Agent started'} · Execution {member.region.execution?.runtimeId ?? 'unconfirmed'}</small>
         <span>{member.region.agentSessionId ? state?.status === 'observed' && !fact?.stale ? `Observed · ${state.session.semanticStatus?.state ?? 'Semantic state not observed'}` : 'Original Session state not yet confirmed' : 'Original project · private task draft'}</span>
       </button>

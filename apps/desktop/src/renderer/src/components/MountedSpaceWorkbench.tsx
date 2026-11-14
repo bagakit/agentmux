@@ -105,7 +105,7 @@ function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError,
     ? { hostId: target.hostId, target: { reference: member.reference, regionId: original.regionId, runtimeId,
       agentSessionId: original.agentSessionId, expectedRun: known.session.run } } : undefined
   return <section className="mounted-space-region" data-source-region={member.key}>
-    <header>{original.agentSessionId ? <MountedExecutionRelation member={member} target={target} /> : <AgentIcon size={14} aria-hidden="true" />}<strong>{original.kind === 'agent' ? 'Original Agent' : original.kind === 'launcher' ? 'New work' : original.kind}</strong></header>
+    <header>{original.agentSessionId ? <MountedExecutionRelation member={member} target={target} occurrence={session?.occurrence} /> : <AgentIcon size={14} aria-hidden="true" />}<strong>{original.kind === 'agent' ? 'Original Agent' : original.kind === 'launcher' ? 'New work' : original.kind}</strong></header>
     <details><summary>Original reference</summary><dl><div><dt>Source Runtime</dt><dd><code>{member.reference.runtimeId}</code></dd></div>
       <div><dt>Agent reference</dt><dd><code>{original.agentSessionId ?? 'Not created'}</code></dd></div>
       <div><dt>Source Host alias</dt><dd>{original.execution?.hostId ?? 'Unconfirmed'}</dd></div>
