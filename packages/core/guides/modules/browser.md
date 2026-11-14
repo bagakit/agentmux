@@ -88,10 +88,24 @@ the user's new-Tab/tool choice and crowded-layout exceptions, and separate navig
 focus. A link that the system hands to a desktop application may wait for the person's
 handoff choice while the original page stays unchanged.
 
-Profile native environment uses `browser profile update --profile ID --expected-revision N --environment JSON`.
+Profile native environment uses `browser profile update --profile ID --expected-revision TOKEN --environment JSON`.
 The bundle accepts userAgent, acceptLanguages, timeZone, locale, geolocation, userAgentMetadata, screen
 and hardwareConcurrency; null clears it. Read the original Profile for each Browser/field native application
 and explicit scope. Saving does not reload the page or grant geolocation permission. DevTools owns its native
 connection while open; actual detach is unknown and closing DevTools reapplies without replaying page actions.
 Subdocuments, Workers and initial scripts remain unknown; Canvas/WebGL/fonts/TLS and complete fingerprint
 emulation are unsupported. Screen edits compose with the original execution Viewport.
+
+Proxy library: `browser profile proxy ls` reads stable non-secret assets and exact proxy revision tokens.
+Use `proxy create --edit JSON`, `proxy update --proxy ID --expected-revision TOKEN --edit JSON`, or
+`proxy delete --proxy ID --expected-revision TOKEN`. Edit is {label,server,bypass?:string[],notes?:string};
+keep sign-in out of server lines. Each Profile retains its original encrypted credential owner, scoped to
+its saved proxy endpoint. Changing the route does not grant a replacement server the old password.
+Editing an asset keeps existing Profile routes. Explicit `proxy assign --proxy ID --expected-revision TOKEN
+--items JSON` uses frozen [{profileId,expectedRevision}] from exact Profile reads, applies each original
+session and saves its versioned binding. It returns ordered partial results; one conflict does not cancel
+other items. Manual network edits clear a binding. An asset referenced by active or archived Profiles is
+kept. Native networkApplication.scope=session-proxy-config reports native configuration ACK, pending or
+unknown; it does not certify authentication, an exit, UDP/QUIC or WebRTC. After a lost reply inspect the
+original identities; do not blindly replay a write. An unconfirmed write readback is an observation of
+original bytes, not a durability receipt. The original page, input and healthy controls remain available.
