@@ -12,7 +12,7 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 /** Draft stays at its exact original project on a failed save; no workspace or runtime writes. */
 export type FocusDiscussionSlot = { active: boolean; container: HTMLElement | null }
 export function FocusProjectPreferences({ projectKey, name, discussion }: {
-  projectKey?: string; name: string; discussion?(state: FocusDiscussionSlot): ReactNode
+  projectKey?: string; name: string; discussion?: ((state: FocusDiscussionSlot) => ReactNode) | undefined
 }) {
   const projects = useAppStore(state => state.config?.focus?.projects)
   const saved = focusProjectPreference(projectKey ?? '', projects ?? [])
