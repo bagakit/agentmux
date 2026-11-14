@@ -1,5 +1,7 @@
 import { ViewportPortal, type Node, type Rect, type XYPosition } from '@xyflow/react'
+import type { ReactNode } from 'react'
 import type { MeshLocation } from '../../../../shared/mesh-map-locations'
+import land from './mesh-world.svg'
 
 export const WORLD_WIDTH = 1000
 export const WORLD_HEIGHT = WORLD_WIDTH / 2
@@ -9,6 +11,30 @@ const TRAY_HEADER = 48
 
 export function projectMeshLocation({ latitude, longitude }: MeshLocation): XYPosition {
   return { x: (longitude + 180) * WORLD_WIDTH / 360, y: (90 - latitude) * WORLD_HEIGHT / 180 }
+}
+
+export function unprojectMeshLocation({ x, y }: XYPosition): MeshLocation {
+  return { latitude: 90 - y * 180 / WORLD_HEIGHT, longitude: x * 360 / WORLD_WIDTH - 180 }
+}
+
+const meridians = Array.from({ length: 11 }, (_, index) => (index - 5) * 30)
+const parallels = meridians.filter(degrees => Math.abs(degrees) < 90)
+
+export function MeshAtlas({ children }: { children?: ReactNode }) {
+  return <div className="mesh-geography__atlas" aria-hidden="true">
+    <img className="mesh-geography__land" src={land} alt="" draggable={false} />
+    <svg className="mesh-geography__grid" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}>
+      {meridians.map(longitude => {
+        const { x } = projectMeshLocation({ longitude, latitude: 0 })
+        return <line key={longitude} x1={x} x2={x} y1={0} y2={WORLD_HEIGHT} />
+      })}
+      {parallels.map(latitude => {
+        const { y } = projectMeshLocation({ longitude: 0, latitude })
+        return <line key={latitude} x1={0} x2={WORLD_WIDTH} y1={y} y2={y} data-equator={latitude === 0 || undefined} />
+      })}
+      {children}
+    </svg>
+  </div>
 }
 
 export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points: ReadonlyMap<string, XYPosition>, narrow: boolean) {
@@ -64,10 +90,7 @@ export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points
 export function MeshGeography({ marks, unknown, tray }: Pick<ReturnType<typeof placeGeographicNodes>, 'marks' | 'unknown' | 'tray'>) {
   return <ViewportPortal>
     <div className="mesh-geography" aria-hidden="true" style={{ width: WORLD_WIDTH }}>
-      <div className="mesh-geography__atlas" style={{ height: WORLD_HEIGHT }}>
-        {/* The original SVG starts at 85°N and ends at 60°S. Both layers use the same projection. */}
-        <div className="mesh-geography__land" style={{ top: WORLD_HEIGHT * 5 / 180, height: WORLD_HEIGHT * 145 / 180 }} />
-      </div>
+      <MeshAtlas />
       {tray ? <div className="mesh-geography__tray" style={{ left: tray.x, top: tray.y, width: tray.width, height: tray.height }}>
         <strong>Location unknown</strong><span>{unknown}</span>
       </div> : null}

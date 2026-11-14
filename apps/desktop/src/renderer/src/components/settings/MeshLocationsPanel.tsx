@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, type MouseEvent } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { SelectionField } from '../SelectionField'
@@ -7,6 +7,7 @@ import { meshLocationValue, readMeshLocation, type MeshMapLocations } from '../.
 import { saveConfigSlice } from './save-config-slice'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
+import { MeshAtlas, projectMeshLocation, unprojectMeshLocation, WORLD_WIDTH, WORLD_HEIGHT } from './MeshGeography'
 
 export function MeshLocationsPanel({ hosts, locations, editing, onEdit }: {
   hosts: readonly HostConfig[]
@@ -19,10 +20,23 @@ export function MeshLocationsPanel({ hosts, locations, editing, onEdit }: {
   const save = useSettingsSave()
   const current = hosts.find(host => host.id === editing)
   const value = current ? draft.value[current.id] ?? '' : ''
+  const coordinates = useRef<HTMLInputElement>(null)
+  const point = readMeshLocation(value)
+  const marker = point && projectMeshLocation(point)
   const invalid = hosts.find(host => {
     const point = draft.value[host.id]?.trim()
     return point && !readMeshLocation(point)
   })
+
+  function selectPosition(event: MouseEvent<HTMLButtonElement>, hostId: string) {
+    if (event.detail === 0) { coordinates.current?.focus(); return }
+    const bounds = event.currentTarget.getBoundingClientRect()
+    if (!bounds.width || !bounds.height) return
+    const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)) * WORLD_WIDTH
+    const y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height)) * WORLD_HEIGHT
+    const { latitude, longitude } = unprojectMeshLocation({ x, y })
+    draft.setField(hostId, `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`)
+  }
 
   async function submit() {
     const submitted = draft.beginSave()
@@ -44,11 +58,14 @@ export function MeshLocationsPanel({ hosts, locations, editing, onEdit }: {
     <div className="mesh-locations-panel__fields">
       <label><span>Device</span><SelectionField label="Map device" value={current?.id ?? ''} options={hosts.map(host => ({ value: host.id, label: host.label }))}
         onValueChange={onEdit} /></label>
-      {current ? <label><span>Latitude, longitude</span><TextInput aria-label="Latitude, longitude" value={value}
+      {current ? <label><span>Latitude, longitude</span><TextInput ref={coordinates} aria-label="Latitude, longitude" value={value}
         placeholder="Not set"
         onChange={event => draft.setField(current.id, event.target.value)} /></label> : null}
     </div>
-    <p>Use decimal degrees, for example 45.0, -90.0. Clear the field to remove the pin.</p>
+    {current ? <button className="mesh-location-picker" type="button" aria-label="Pick device location on the map" onClick={event => selectPosition(event, current.id)}>
+      <MeshAtlas>{marker ? <circle className="mesh-geography__pin" cx={marker.x} cy={marker.y} r="7" /> : null}</MeshAtlas>
+    </button> : null}
+    <p>Pick a location on the map or enter latitude and longitude in decimal degrees. Clear the field to remove the pin.</p>
     <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft}
       blocked={invalid ? `Enter valid coordinates for ${invalid.label}.` : undefined}
       label="Save locations" onSave={() => void submit()} />

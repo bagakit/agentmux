@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { BaseEdge, Position, ReactFlow, useNodesState, type Edge, type EdgeProps, type Node, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react'
+import { BaseEdge, getViewportForBounds, Position, ReactFlow, useNodesState, type Edge, type EdgeProps, type Node, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { meshLocationValue, readMeshLocation, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
@@ -17,6 +17,8 @@ type MapNode = PeerNode | SavedHostNode | SavedClientNode
 type MapEdge = Edge<{ sourcePoint?: XYPosition; targetPoint?: XYPosition }>
 const SIZE = { width: 188, height: 64 }
 const COMPACT_PEER_SIZE = { width: 166, height: SIZE.height }
+const MIN_ZOOM = .15
+const MAX_ZOOM = 2
 const NO_HOSTS: readonly HostConfig[] = []
 function MeshPeer({ data }: NodeProps<PeerNode>) {
   const { peer, sharedLocal } = data
@@ -197,7 +199,10 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const boundsWidth = geography?.bounds.width, boundsHeight = geography?.bounds.height
   const fit = useCallback(() => {
     if (boundsWidth !== undefined && boundsHeight !== undefined) {
-      void instance.current?.fitBounds({ x: boundsX ?? 0, y: boundsY ?? 0, width: boundsWidth, height: boundsHeight }, { padding: fitPadding })
+      const rect = canvas.current?.getBoundingClientRect()
+      if (rect?.width && rect.height) void instance.current?.setViewport(getViewportForBounds({
+        x: boundsX ?? 0, y: boundsY ?? 0, width: boundsWidth, height: boundsHeight
+      }, rect.width, rect.height, MIN_ZOOM, MAX_ZOOM, fitPadding))
     }
     else void instance.current?.fitView({ padding: fitPadding, maxZoom: 1 })
   }, [fitPadding, boundsX, boundsY, boundsWidth, boundsHeight])
@@ -324,14 +329,13 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
     <div className="mesh-explorer__body" data-empty={!hasMap || undefined}><div className="mesh-explorer__workspace">
       {view === 'list' ? directory : null}
       {view === 'topology' && legend ? <div className="mesh-explorer__map-key" data-geographic={geographic || undefined}>{legend}
-        <span>{geography ? `${geography.marks.length} placed · ${geography.unknown} location unknown` : 'Logical layout · Device locations unknown'}</span></div> : null}
+        <span>{geography ? `${geography.marks.length} located · ${geography.unknown} location unknown` : 'Connection diagram · Device locations unknown'}</span></div> : null}
       {hasMap ? <div className="mesh-explorer__graph" hidden={view !== 'topology'}>
         <div ref={canvas} className="mesh-explorer__canvas" data-mixed={mixed || undefined} data-saved={hosts.length > 0 || undefined} data-narrow={narrow || undefined}
           data-geographic={geographic || undefined} aria-label="Network relationship canvas">
-          {geography ? null : <div className="mesh-explorer__map-outline" aria-hidden="true" />}
           <ReactFlow<MapNode, MapEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onInit={value => { instance.current = value; if (geographic) requestViewport() }}
           onNodesChange={changes => { if (changes.some(change => change.type === 'position' && change.dragging)) cancelLayout.current?.(); for (const change of changes) if (change.type === 'position' && change.position && !geographic) positions.set(change.id, change.position); onNodesChange(changes) }}
-          onMoveStart={event => { if (event) viewportTouched.current = true }} fitView={!geographic} fitViewOptions={{ padding: fitPadding, maxZoom: 1 }} minZoom={.15} maxZoom={2} nodesDraggable={!geographic} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false} elementsSelectable={false} deleteKeyCode={null} zoomOnScroll={false} proOptions={{ hideAttribution: true }}>
+          onMoveStart={event => { if (event) viewportTouched.current = true }} fitView={!geographic} fitViewOptions={{ padding: fitPadding, maxZoom: 1 }} minZoom={MIN_ZOOM} maxZoom={MAX_ZOOM} nodesDraggable={!geographic} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false} elementsSelectable={false} deleteKeyCode={null} zoomOnScroll={false} proOptions={{ hideAttribution: true }}>
           {geography ? <MeshGeography {...geography} /> : null}
           </ReactFlow></div>
         <div className="mesh-explorer__canvas-tools"><span>{selected?.kind === 'circuit' ? 'Adopted circuit selected' : selected?.kind === 'route' ? 'Available route selected' : ''}</span><Button type="button" aria-label="Fit observed topology" onClick={fit}>Fit</Button>{hasRelayPeers && !geographic ? <Button type="button" aria-label="Rearrange observed topology" onClick={() => { cancelLayout.current?.(); viewportTouched.current = false; arrange(value => value + 1) }}>{arranging ? 'Arranging…' : 'Arrange'}</Button> : null}<Button type="button" aria-label="Zoom in network" onClick={() => void instance.current?.zoomIn()}>+</Button><Button type="button" aria-label="Zoom out network" onClick={() => void instance.current?.zoomOut()}>−</Button></div>
