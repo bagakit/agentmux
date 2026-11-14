@@ -7,7 +7,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversationChanges, readGrokSessionHistoryRecord } from './grok-native-history.js'
-import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -40,6 +40,13 @@ export const GROK_HOOK_EVENTS = [
  * 那是零依赖叶子，hook 子进程靠它拿表，不能反向依赖本模块。此处只保留配置侧清单与 rules。
  */
 export const GROK_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (!['pre_tool_use', 'post_tool_use', 'post_tool_use_failure'].includes(eventName)) return {}
+    // Native stdin emits these same-value aliases; camelCase is the original spelling.
+    return hookToolFields(payload.toolName === undefined ? payload.tool_name : payload.toolName,
+      payload.toolInput === undefined ? payload.tool_input : payload.toolInput,
+      payload.toolUseId === undefined ? payload.tool_use_id : payload.toolUseId)
+  },
   toolOutcome(eventName, payload) {
     if (eventName === 'post_tool_use_failure') {
       const output = formatHookToolOutput(typeof payload.error === 'string' ? payload.error : undefined)

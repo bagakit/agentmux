@@ -23,13 +23,18 @@ import { readAppServerSessionHistoryPage, readAppServerSessionHistoryRecord } fr
 import { readCodexSavedSessionHistoryPage, readCodexSavedSessionHistoryRecord, readCodexSavedConversationChanges } from './codex-saved-history.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition, AgentProviderHookNormalizationContext } from '../agent-provider.js'
-import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { nativeHookToolCallId } from '../hook-normalizer.js'
+import type { AgentNativeHookSpecification, AgentNativeHookToolFields } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import type { AgentHookToolInvocation, AgentLaunchPlan } from '../types.js'
-import { buildPromptInputPayload, catalog, sanitizeBracketedPasteText } from './shared.js'
+import { buildPromptInputPayload, catalog, hookToolFields, sanitizeBracketedPasteText } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+
+function codexToolFields(eventName: string, payload: Readonly<Record<string, unknown>>): AgentNativeHookToolFields {
+  if (eventName === 'PermissionRequest') return hookToolFields(payload.tool_name, payload.tool_input)
+  if (eventName !== 'PreToolUse' && eventName !== 'PostToolUse') return {}
+  return hookToolFields(payload.tool_name, payload.tool_input, payload.tool_use_id)
+}
 
 function openToolInvocation(eventName: string, payload: Readonly<Record<string, unknown>>,
   context: AgentProviderHookNormalizationContext, mainSubject: boolean): AgentHookToolInvocation | undefined {
@@ -38,16 +43,16 @@ function openToolInvocation(eventName: string, payload: Readonly<Record<string, 
   const sid = typeof payload.session_id === 'string' && payload.session_id ? payload.session_id : undefined
   const turn = typeof payload.turn_id === 'string' && payload.turn_id ? payload.turn_id : undefined
   const path = typeof payload.transcript_path === 'string' && isAbsolute(payload.transcript_path) ? payload.transcript_path : undefined
-  const id = nativeHookToolCallId(payload as Record<string, unknown>)
+  const tool = codexToolFields(eventName, payload), id = tool.reportedToolCallId
   const sameSource = previous && (sid ? sid === previous.nativeSessionId :
     context.nativeHandle?.kind === 'provider' && context.nativeHandle.sessionId === previous.nativeSessionId) &&
     (payload.transcript_path === undefined ? context.nativeHandle?.kind === 'provider' &&
       context.nativeHandle.transcriptPath === previous.nativeTranscriptPath : path === previous.nativeTranscriptPath)
   const sameTurn = sameSource && (!turn || turn === previous.nativeTurnId)
   if (eventName === 'Stop' || eventName === 'Interrupt' || eventName === 'SessionStart') return undefined
-  if (eventName === 'PreToolUse' && sid && turn && path && id && typeof payload.tool_name === 'string' && payload.tool_name && payload.tool_input !== undefined) {
-    const toolInput = typeof payload.tool_input === 'string' ? payload.tool_input : JSON.stringify(payload.tool_input)
-    return { nativeSessionId: sid, nativeTurnId: turn, nativeTranscriptPath: path, nativeToolCallId: id, toolName: payload.tool_name, toolInput,
+  if (eventName === 'PreToolUse' && sid && turn && path && id && tool.toolName && tool.toolInput !== undefined) {
+    const toolInput = typeof tool.toolInput === 'string' ? tool.toolInput : JSON.stringify(tool.toolInput)
+    return { nativeSessionId: sid, nativeTurnId: turn, nativeTranscriptPath: path, nativeToolCallId: id, toolName: tool.toolName, toolInput,
       ...(sameTurn && (previous.ambiguous || previous.nativeToolCallId !== id) ? { ambiguous: true as const } : {}) }
   }
   if (!sameTurn) return undefined
@@ -61,6 +66,7 @@ function permissionToolCallId(eventName: string, payload: Readonly<Record<string
   context: AgentProviderHookNormalizationContext): string | undefined {
   const previous = context.previousHookReceipt, invocation = previous?.toolInvocation
   const native = context.nativeHandle
+  const tool = codexToolFields(eventName, payload)
   // PermissionRequest omits tool_use_id in the native protocol. Only the exact
   // immediately preceding authenticated PreToolUse supplies that missing identity.
   if (eventName !== 'PermissionRequest' || previous?.eventName !== 'PreToolUse' ||
@@ -70,10 +76,10 @@ function permissionToolCallId(eventName: string, payload: Readonly<Record<string
       typeof payload.session_id !== 'string' || !payload.session_id ||
       invocation.nativeSessionId !== payload.session_id || native.sessionId !== payload.session_id ||
       !invocation.nativeTranscriptPath || invocation.nativeTranscriptPath !== payload.transcript_path || native.transcriptPath !== payload.transcript_path ||
-      invocation.toolName !== 'Bash' || payload.tool_name !== 'Bash') return undefined
+      invocation.toolName !== 'Bash' || tool.toolName !== 'Bash') return undefined
   try {
     const before = JSON.parse(invocation.toolInput) as Record<string, unknown>
-    const after = payload.tool_input as Record<string, unknown> | undefined
+    const after = tool.toolInput as Record<string, unknown> | undefined
     if (!after || Array.isArray(after) || typeof after !== 'object' ||
         Object.keys(before).some(key => !['command', 'description'].includes(key)) ||
         Object.keys(after).some(key => !['command', 'description'].includes(key)) ||
@@ -85,6 +91,7 @@ function permissionToolCallId(eventName: string, payload: Readonly<Record<string
 }
 
 export const CODEX_HOOKS: AgentNativeHookSpecification = {
+  toolFields: codexToolFields,
   toolOutcome(eventName, payload) {
     // Unified exec sends plain output without its exit code; other responses are tool-owned JSON.
     const output = formatHookToolOutput(eventName === 'PostToolUse' ? payload.tool_response : undefined)

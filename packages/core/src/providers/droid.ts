@@ -5,7 +5,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { readDroidSessionHistoryPage, readDroidSessionHistoryRecord } from './droid-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -42,6 +42,10 @@ export const DROID_HOOK_EVENTS = [
 ] as const
 
 export const DROID_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (eventName !== 'PreToolUse' && eventName !== 'PostToolUse') return {}
+    return hookToolFields(payload.tool_name, payload.tool_input)
+  },
   toolOutcome(eventName, payload) {
     // Factory defines tool_response as tool-specific; arbitrary keys are not failure flags.
     const output = formatHookToolOutput(eventName === 'PostToolUse' ? payload.tool_response : undefined)

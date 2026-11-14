@@ -17,7 +17,7 @@ import {
   type AgentTerminalInteractionProtocol,
   type PostureControlDeclaration
 } from './agent-interaction.js'
-import { normalizeNativeHook, type AgentNativeHookSpecification } from './hook-normalizer.js'
+import { normalizeNativeHook, projectNativeHookToolFields, type AgentNativeHookSpecification } from './hook-normalizer.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
 import { createBuiltInAgentProviders } from './providers/index.js'
 import type {
@@ -649,12 +649,13 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         ? envelope
         : { ...envelope, eventName: normalized.eventName }
       const mainInteraction = normalized.mainSubject ? definition.interaction : undefined
+      const toolFields = projectNativeHookToolFields(definition.hook, normalized.eventName, resolvedEnvelope.payload ?? {})
       const interaction = mainInteraction
-        ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction,
+        ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction, toolFields,
           definition.hook.resolveInteractionToolCallId?.(normalized.eventName, resolvedEnvelope.payload ?? {}, correlationContext), normalized.lifecycleEvent)
         : undefined
       const interactionCompletion = mainInteraction
-        ? normalizeTerminalInteractionCompletion(resolvedEnvelope, normalized.status.observedAt, mainInteraction) : undefined
+        ? normalizeTerminalInteractionCompletion(resolvedEnvelope, normalized.status.observedAt, mainInteraction, toolFields) : undefined
       return { ...normalized, ...(interaction ? { interaction } : {}),
         ...(interactionCompletion ? { interactionCompletion } : {}) }
     }

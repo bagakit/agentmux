@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import { nativeHookToolCallId } from './hook-normalizer.js'
+import type { AgentNativeHookToolFields } from './hook-normalizer.js'
 import type {
   AgentHookLifecycleEvent,
   AgentMuxInteractionInputPlan,
@@ -241,14 +241,14 @@ function parseQuestion(value: unknown, index: number): AgentMuxQuestion | null {
 function questionRequest(
   envelope: NativeHookEnvelope,
   observedAt: number,
-  rawInput: unknown
+  rawInput: unknown,
+  nativeToolCallId?: string
 ): AgentMuxInteractionRequest | undefined {
   const source = record(rawInput)
   const rawQuestions = Array.isArray(source?.questions) ? source.questions : [rawInput]
   const parsed = rawQuestions.length === MAX_QUESTIONS ? rawQuestions.map(parseQuestion) : []
   const supported = parsed.length === MAX_QUESTIONS && parsed[0] !== null
   const questions = supported ? parsed as AgentMuxQuestion[] : []
-  const nativeToolCallId = nativeHookToolCallId(envelope.payload ?? {})
   return {
     kind: 'question',
     id: envelope.receiptId,
@@ -269,24 +269,24 @@ export function normalizeTerminalInteraction(
   envelope: NativeHookEnvelope,
   observedAt: number,
   protocol: AgentTerminalInteractionDetection,
+  toolFields: AgentNativeHookToolFields,
   resolvedToolCallId?: string,
   lifecycleEvent?: AgentHookLifecycleEvent | null
 ): AgentMuxInteractionRequest | undefined {
-  const payload = envelope.payload ?? {}
   // 消费 adapter 已得到的 normalized.eventName（通过内部解析后的信封传递），不重新看 payload 字段猜名。
   const eventName = envelope.eventName
-  const toolName = boundedText(payload.tool_name) ?? boundedText(payload.toolName)
+  const toolName = boundedText(toolFields.toolName)
   if (toolName && protocol.questionTools.includes(toolName.toLowerCase())) {
     // A question tool's other stages (a native permission ask for the same call) are not a second
     // request and not a permission: only the declared question event opens it.
     return eventName && protocol.questionEvents.includes(eventName)
-      ? questionRequest(envelope, observedAt, payload.tool_input ?? payload.toolInput ?? payload.input)
+      ? questionRequest(envelope, observedAt, toolFields.toolInput, toolFields.reportedToolCallId)
       : undefined
   }
   // Only the exact Provider's normalized lifecycle may establish a permission request.
   if (lifecycleEvent === 'permission-request') {
-    const toolInput = serializedInput(payload.tool_input ?? payload.toolInput)
-    const nativeToolCallId = nativeHookToolCallId(payload) ?? resolvedToolCallId
+    const toolInput = serializedInput(toolFields.toolInput)
+    const nativeToolCallId = toolFields.reportedToolCallId ?? resolvedToolCallId
     return {
       kind: 'permission',
       id: envelope.receiptId,
@@ -304,7 +304,7 @@ export function normalizeTerminalInteraction(
         ...(option.tier === undefined ? {} : { tier: option.tier })
       })),
       ...(toolName ? { toolName } : {}),
-      ...(toolInput ? { toolInput } : {}),
+      ...(toolInput !== undefined ? { toolInput } : {}),
       evidence: {
         source: 'native-hook',
         observedAt,
@@ -319,13 +319,13 @@ export function normalizeTerminalInteraction(
 export function normalizeTerminalInteractionCompletion(
   envelope: NativeHookEnvelope,
   observedAt: number,
-  protocol: AgentTerminalInteractionDetection
+  protocol: AgentTerminalInteractionDetection,
+  toolFields: AgentNativeHookToolFields
 ): NormalizedHookEvent['interactionCompletion'] {
-  const payload = envelope.payload ?? {}
   // 消费 adapter 已得到的 normalized.eventName，不重新看 payload 字段猜名。
   const eventName = envelope.eventName
-  const toolName = boundedText(payload.tool_name) ?? boundedText(payload.toolName)
-  const nativeToolCallId = nativeHookToolCallId(payload)
+  const toolName = boundedText(toolFields.toolName)
+  const nativeToolCallId = toolFields.reportedToolCallId
   if (!eventName || !toolName || !nativeToolCallId) return undefined
   const question = protocol.questionTools.includes(toolName.toLowerCase())
   const events = question ? protocol.questionCompletionEvents : protocol.permissionCompletionEvents

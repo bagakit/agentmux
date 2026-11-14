@@ -6,7 +6,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from '../agent-native-locator.js'
-import { catalog } from './shared.js'
+import { catalog, hookToolFields } from './shared.js'
 import { hookDeliverySource } from '../agent-hook-delivery.js'
 import { readPiConversationChanges, readPiSessionHistoryPage } from './pi-native-history.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
@@ -34,6 +34,11 @@ export const PI_HOOK_EVENTS = [
  * - Pi 自身无交互权限事件，catalog.permission 记 `none`；工具与轮次无双向关联，replyCorrelation 记 `none`。
  */
 export const PI_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (eventName === 'tool_execution_end') return hookToolFields(payload.tool_name, undefined)
+    if (eventName !== 'tool_call' && eventName !== 'tool_execution_start') return {}
+    return hookToolFields(payload.tool_name, payload.tool_input)
+  },
   // Our extension forwards only tool_name at tool_execution_end, without result or failure facts.
   toolOutcome: () => ({ failed: false }),
   lifecycle: {

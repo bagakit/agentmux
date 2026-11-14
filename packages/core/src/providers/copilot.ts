@@ -4,7 +4,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -72,6 +72,10 @@ export const COPILOT_HOOK_EVENTS = [
  * 「等我点一下」和「正在干活」在界面上长得一模一样（与 Cursor 的两个授权门同一判断）。
  */
 export const COPILOT_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (!['preToolUse', 'postToolUse', 'postToolUseFailure'].includes(eventName)) return {}
+    return hookToolFields(payload.toolName, payload.toolArgs)
+  },
   toolOutcome(eventName, payload) {
     if (eventName === 'postToolUseFailure') {
       const output = formatHookToolOutput(typeof payload.error === 'string' ? payload.error : undefined)

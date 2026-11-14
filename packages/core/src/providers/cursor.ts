@@ -5,7 +5,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { cursorDataRoot, cursorWorkspaceSlug, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
 import { discoverCursorNativeSession } from './cursor-native-session.js'
 
@@ -60,6 +60,11 @@ export const CURSOR_HOOK_EVENTS = [
  * 隔离子代理事件（`subagentStart`/`subagentStop` 携带 `subagent_id`），防止子代理覆盖主会话句柄。
  */
 export const CURSOR_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (eventName === 'beforeShellExecution') return hookToolFields(undefined, undefined, payload.tool_use_id)
+    if (!['preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeMCPExecution'].includes(eventName)) return {}
+    return hookToolFields(payload.tool_name, payload.tool_input, payload.tool_use_id)
+  },
   toolOutcome(eventName, payload) {
     const failed = eventName === 'postToolUseFailure'
     const body = failed ? (typeof payload.error_message === 'string' ? payload.error_message : undefined)

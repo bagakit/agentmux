@@ -6,7 +6,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { readHermesSessionHistoryPage } from './hermes-native-history.js'
-import { catalog, hermesHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, hermesHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -44,11 +44,23 @@ export const HERMES_HOOK_EVENTS = [
 ] as const
 
 function extraField(payload: Readonly<Record<string, unknown>>, field: string): unknown {
-  const extra = payload.extra && typeof payload.extra === 'object' ? payload.extra as Record<string, unknown> : undefined
-  return extra?.[field] ?? payload[field]
+  const extra = payload.extra && typeof payload.extra === 'object' && !Array.isArray(payload.extra)
+    ? payload.extra as Record<string, unknown> : undefined
+  return extra?.[field]
 }
 
 export const HERMES_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (eventName === 'pre_tool_call' || eventName === 'post_tool_call') {
+      return hookToolFields(payload.tool_name, payload.tool_input, extraField(payload, 'tool_call_id'))
+    }
+    if (eventName === 'pre_approval_request' || eventName === 'post_approval_response') return hookToolFields(payload.tool_name, payload.tool_input)
+    return {}
+  },
+  assistantResponse(eventName, payload) {
+    const response = eventName === 'post_llm_call' ? extraField(payload, 'assistant_response') : undefined
+    return typeof response === 'string' ? response.trim() || undefined : undefined
+  },
   toolOutcome(eventName, payload) {
     if (eventName !== 'post_tool_call') return { failed: false }
     const extra = payload.extra && typeof payload.extra === 'object' && !Array.isArray(payload.extra)

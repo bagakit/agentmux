@@ -36,10 +36,16 @@ export type AgentNativeHookStateRule = {
   events: readonly string[]
   state: AgentSemanticState
   toolNames?: readonly string[]
-  /** A pure predicate over the flattened native payload; first matching rule wins. */
+  /** A pure predicate over this Provider's original payload; first matching rule wins. */
   matches?: (payload: Readonly<Record<string, unknown>>) => boolean
   /** Undefined uses only this Provider's declared dialect; null explicitly declares no lifecycle. */
   lifecycleEvent?: AgentHookLifecycleEvent | null
+}
+
+export type AgentNativeHookToolFields = {
+  toolName?: string
+  toolInput?: unknown
+  reportedToolCallId?: string
 }
 
 /** Provider protocol facts for the one existing per-Run child roster. Pre-veto callbacks are not ends. */
@@ -62,6 +68,10 @@ export type AgentNativeSubagentTracking = {
 
 export type AgentNativeHookSpecification = {
   lifecycle?: AgentHookLifecycleDialect
+  /** Select only fields actually reported by this Provider in the original event. */
+  toolFields?: (eventName: string, rawPayload: Readonly<Record<string, unknown>>) => AgentNativeHookToolFields
+  /** Provider-owned display text, without promoting its surrounding payload into control facts. */
+  assistantResponse?: (eventName: string, rawPayload: Readonly<Record<string, unknown>>) => string | undefined
   /** Interpret only this Provider's original payload; shared nesting is not a result protocol. */
   toolOutcome?: (eventName: string, rawPayload: Readonly<Record<string, unknown>>) => HookToolOutcome
   /**
@@ -248,7 +258,7 @@ function subagentId(
   tracking: AgentNativeSubagentTracking,
   payload: Record<string, unknown>
 ): string | undefined {
-  return stringField(payload, ...(tracking.idKeys ?? ['agent_id', 'agentId', 'subagent_id']))
+  return stringField(payload, ...(tracking.idKeys ?? []))
 }
 
 /** The same declared subject boundary used for native locator and interaction promotion. */
@@ -257,11 +267,10 @@ export function nativeHookHasSubagentSubject(
   eventName: string,
   payload: Record<string, unknown>
 ): boolean {
-  const flattened = flattenNestedPayload(payload)
-  if (specification.subagentSubject?.(flattened)) return true
+  if (specification.subagentSubject?.(payload)) return true
   const tracking = specification.subagentTracking
-  return Boolean(tracking && (tracking.matches?.(eventName, flattened) ?? true) && (
-    subagentId(tracking, flattened) ||
+  return Boolean(tracking && (tracking.matches?.(eventName, payload) ?? true) && (
+    subagentId(tracking, payload) ||
     tracking.startEvents.includes(eventName) || tracking.stopEvents.includes(eventName)
   ))
 }
@@ -360,9 +369,10 @@ function transcriptPathField(
 function eventRule(
   specification: AgentNativeHookSpecification,
   eventName: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  tool: AgentNativeHookToolFields
 ): AgentNativeHookStateRule | undefined {
-  const toolName = stringField(payload, 'tool_name', 'toolName', 'name')?.toLowerCase()
+  const toolName = tool.toolName?.toLowerCase()
   for (const rule of specification.rules) {
     if (!rule.events.includes(eventName)) continue
     if (rule.toolNames && !rule.toolNames.includes(toolName ?? '')) continue
@@ -445,24 +455,13 @@ function timelineItem(
   }
 }
 
-/**
- * 各家 Provider 用来标识**同一次工具调用**的关联键。
- *
- * Claude Code 与 Codex 的 `PreToolUse`/`PostToolUse` 都带 `tool_use_id`（值形如 `toolu_01…`），
- * 一次调用的事前事后两条信封携带同一个 id——这是把「入参」和「结果」认成同一次调用的唯一权威依据。
- * 其余是同族命名变体，留给尚未接入的 Provider；取第一个能读出的。顺序即优先级。
- */
-const TOOL_CALL_ID_KEYS = [
-  'tool_use_id',
-  'toolUseId',
-  'tool_call_id',
-  'toolCallId',
-  'call_id',
-  'callId'
-] as const
-
-export function nativeHookToolCallId(payload: Record<string, unknown>): string | undefined {
-  return stringField(flattenNestedPayload(payload), ...TOOL_CALL_ID_KEYS)
+/** Pure Provider selection; absence never enables an alias or a nested-payload fallback. */
+export function projectNativeHookToolFields(
+  specification: AgentNativeHookSpecification,
+  eventName: string,
+  rawPayload: Readonly<Record<string, unknown>>
+): AgentNativeHookToolFields {
+  return specification.toolFields?.(eventName, rawPayload) ?? {}
 }
 
 /** Pure projection only: safe to repeat at the durable CAS without replaying roster or lifecycle effects. */
@@ -473,7 +472,7 @@ export function projectNativeHookToolInvocation(
   context: AgentProviderHookNormalizationContext,
   mainSubject: boolean
 ): AgentHookToolInvocation | undefined {
-  return specification.toolInvocation?.(eventName, flattenNestedPayload(payload), context, mainSubject)
+  return specification.toolInvocation?.(eventName, payload, context, mainSubject)
 }
 
 type NativeToolSubject = {
@@ -532,19 +531,20 @@ function buildTimeline(
   eventName: string,
   lifecycleEvent: AgentHookLifecycleEvent | undefined,
   payload: Record<string, unknown>,
+  tool: AgentNativeHookToolFields,
   observedAt: number,
   subject: NativeToolSubject | undefined,
   childSpeaker: boolean
 ): AgentTimelineMutation[] {
-  const assistant = stringField(
+  const assistant = specification.assistantResponse ? specification.assistantResponse(eventName, envelope.payload ?? {}) : stringField(
     payload,
     'last_assistant_message',
     'lastAssistantMessage',
     'assistant_response',
     'text'
   )
-  const toolName = stringField(payload, 'tool_name', 'toolName', 'name')
-  const rawToolInput = payload.tool_input ?? payload.toolInput ?? payload.toolArgs ?? payload.args ?? payload.input
+  const toolName = tool.toolName
+  const rawToolInput = tool.toolInput
   const toolInput =
     typeof rawToolInput === 'string'
       ? rawToolInput
@@ -571,7 +571,7 @@ function buildTimeline(
     // 完全失明——那两家虽都声明了 `timeline: 'complete-events'`，失败的命令却和成功的长得一模一样。
     // 认不出生命周期（`undefined`）时按事前处理：没有 canonical 依据就不宣称「已经有结果了」。
     const isToolResult = lifecycleEvent === 'tool-use-end'
-    const toolCallId = nativeHookToolCallId(payload)
+    const toolCallId = tool.reportedToolCallId
     // 结果只有事后才知道，所以只在事后事件上采集——事前那一行谈不上成败，给它盖任何结论都是编造。
     const outcome = isToolResult ? specification.toolOutcome?.(eventName, envelope.payload ?? {}) : undefined
     if (subject && toolCallId && kind === 'tool_call') {
@@ -640,42 +640,16 @@ function buildTimeline(
   return timeline
 }
 
-/**
- * 把嵌在信封里的事件专属字段摊平到负载顶层。
- *
- * Hermes 的 shell-hook wire 协议是**两层**的：顶层只有 `hook_event_name`/`tool_name`/`tool_input`/
- * `session_id`/`cwd` 五个固定键，其余每一个事件专属 kwarg 都被塞进 `extra` 子对象（本机
- * `agent/shell_hooks.py` 的 `_serialize_payload`：`extras = {k: v for k, v in kwargs.items()
- * if k not in _TOP_LEVEL_PAYLOAD_KEYS}`）。也就是说 `post_tool_call` 的 `status`、`result`、
- * `error_message`、`tool_call_id` **全在 `extra` 里**。
- *
- * 不解包的后果实测有三条，且三条同时发生：工具失败被画成成功（`status: 'error'` 读不到）、工具输出
- * 全丢（`result` 读不到）、以及 `pre_tool_call` 与 `post_tool_call` 在时间轴上并排两行而不是收敛成
- * 一条（`tool_call_id` 读不到，id 退化成按 receipt 序号编）。
- *
- * 在这里解包一次、而不是给每个读取点加一串 `extra.x` 变体：`extra` 是**信封结构**而非某个字段的别名，
- * 下游那十几处读取（tool 名、入参、结果、成败、id、native handle、用量）没有一处需要知道这件事。
- * 顶层同名键优先——顶层是 Hermes 自己声明的固定位，`extra` 只补它没说的那些。
- */
-const NESTED_PAYLOAD_KEY = 'extra'
-
-function flattenNestedPayload(payload: Record<string, unknown>): Record<string, unknown> {
-  const nested = payload[NESTED_PAYLOAD_KEY]
-  if (typeof nested !== 'object' || nested === null || Array.isArray(nested)) return payload
-  // 顶层键后写，故顶层胜出。`extra` 本身留着：它对诊断有用，且下游没有任何读取点认这个名字。
-  return { ...(nested as Record<string, unknown>), ...payload }
-}
-
 export function normalizeNativeHook(
   specification: AgentNativeHookSpecification,
   envelope: NativeHookEnvelope,
   context: AgentProviderHookNormalizationContext
 ): NormalizedHookEvent {
   const rawPayload = envelope.payload ?? {}
-  const payload = flattenNestedPayload(rawPayload)
+  const payload = rawPayload
   // 事件名优先读取信封显式名，其次按该 Provider 声明的精确来源（仅当 payload 声明时读指定键，
   // 缺席/空白/非字符串时不读其他合法键；flag/generated-code 不借 payload 补名）。读不出时如实记为 'unknown'。
-  // 来源声明读取原始负载，与 Hook 子进程一致；展开的 extra 只供事件规则和内容读取。
+  // Every protocol reader receives the original payload; only its Provider interprets nesting.
   const eventName = resolveHookEventName(envelope.eventName, rawPayload, specification.eventNameSource ?? null) ?? 'unknown'
   if (context.protectedNativeTarget === true && context.nativeTargetMismatch === true) {
     const observedAt = Date.now()
@@ -683,7 +657,8 @@ export function normalizeNativeHook(
       mainSubject: false, subject: { kind: 'unknown', basis: 'process-native-record', reason: 'resume-target-mismatch' },
       lifecycleEvent: null, semanticState: 'unknown', status: { state: agentDisplayState('unknown'), source: 'native-hook', observedAt, detail: eventName }, timeline: [] }
   }
-  const rule = eventRule(specification, eventName, payload)
+  const tool = projectNativeHookToolFields(specification, eventName, rawPayload)
+  const rule = eventRule(specification, eventName, payload, tool)
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。
   const nativeLifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent, specification.lifecycle)
@@ -802,20 +777,20 @@ export function normalizeNativeHook(
     ...(childActivity ? { childActivity: true } : {}),
     ...(lifecycleEvent !== undefined ? { lifecycleEvent } : {}),
     ...(() => {
-      const nativeToolCallId = nativeHookToolCallId(payload)
-      const toolName = stringField(payload, 'tool_name', 'toolName', 'name')
-      const input = payload.tool_input ?? payload.toolInput ?? payload.toolArgs ?? payload.args ?? payload.input
+      const nativeToolCallId = tool.reportedToolCallId
+      const toolName = tool.toolName
+      const input = tool.toolInput
       const toolInput = typeof input === 'string' ? input : input === undefined ? undefined : JSON.stringify(input)
       if (specification.toolInvocation) {
         const invocation = projectNativeHookToolInvocation(specification, eventName, payload, context, mainSubject)
         return invocation ? { toolInvocation: invocation } : {}
       }
-      return mainSubject && toolSubject?.kind === 'main' && nativeToolCallId && toolName && toolInput
+      return mainSubject && toolSubject?.kind === 'main' && nativeToolCallId && toolName && toolInput !== undefined
         ? { toolInvocation: { nativeSessionId: toolSubject.nativeSessionId, nativeToolCallId, toolName, toolInput } } : {}
     })(),
     semanticState,
     status,
-    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, toolSubject, childSpeaker),
+    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, tool, observedAt, toolSubject, childSpeaker),
     ...(handle ? { nativeHandle: handle } : {}),
     ...(turnUsage ? { turnUsage } : {})
   }

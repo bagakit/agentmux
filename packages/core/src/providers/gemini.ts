@@ -5,7 +5,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -44,6 +44,10 @@ export const GEMINI_HOOK_EVENTS = [
  * `SessionEnd` 属于会话终结，Core 不拿它判轮次。
  */
 export const GEMINI_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (eventName !== 'BeforeTool' && eventName !== 'AfterTool') return {}
+    return hookToolFields(payload.tool_name, payload.tool_input)
+  },
   toolOutcome(eventName, payload) {
     if (eventName !== 'AfterTool') return { failed: false }
     const response = payload.tool_response && typeof payload.tool_response === 'object' && !Array.isArray(payload.tool_response)

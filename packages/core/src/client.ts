@@ -100,7 +100,7 @@ import {
   type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry } from './agent-plugin.js';
-import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation, nativeHookHasSubagentSubject } from './hook-normalizer.js'
+import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, projectNativeHookToolFields, projectNativeHookToolInvocation, nativeHookHasSubagentSubject } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -10632,10 +10632,9 @@ export class AgentMuxClient {
       !nativeHookHasSubagentSubject(provider.hook, eventName, payload)
     if (!provider.hook.processNativeIdentity && !transition) return {}
     if (transition) this.hookNativeWitnesses.delete(session.run.runId)
-    const nested = payload.extra && typeof payload.extra === 'object' ? payload.extra as Record<string, unknown> : {}
-    const incoming = (provider.hook.nativeHandle?.sessionIdKeys ?? []).map(key => normalizeNativeSessionId(payload[key] ?? nested[key])).find(Boolean)
+    const incoming = (provider.hook.nativeHandle?.sessionIdKeys ?? []).map(key => normalizeNativeSessionId(payload[key])).find(Boolean)
     const candidate = JSON.stringify(incoming ?? null)
-    const childCandidate = (provider.hook.subagentTracking?.idKeys ?? []).map(key => normalizeNativeSessionId(payload[key] ?? nested[key])).find(Boolean)
+    const childCandidate = (provider.hook.subagentTracking?.idKeys ?? []).map(key => normalizeNativeSessionId(payload[key])).find(Boolean)
     const previous = this.hookNativeWitnesses.get(session.run.runId)
     if (previous && !hasSelectedNativeTarget(session) && (previous.candidate === candidate || previous.handle?.sessionId === incoming) &&
       (!childCandidate || previous.reason === 'native-witness-unavailable' || previous.childSessionIds?.includes(childCandidate) || previous.reason === `native-child-unconfirmed:${childCandidate}`)) return previous
@@ -10886,7 +10885,7 @@ export class AgentMuxClient {
     if (this.endedRuns.has(envelope.runId)) return
     const canPromoteLocator = !witnessTargetMismatch
     const precedingInteractionReceiptId = normalized.interaction?.nativeToolCallId &&
-      !nativeHookToolCallId(envelope.payload ?? {}) ? context.previousHookReceipt?.id : undefined
+      !projectNativeHookToolFields(provider.hook, normalized.eventName, envelope.payload ?? {}).reportedToolCallId ? context.previousHookReceipt?.id : undefined
     const activityId = JSON.stringify(['activity-state', 'native-hook', session.run.runId, envelope.receiptId])
     const nativeActivity = normalized.currentActivity
     const observedActivity = this.nativeCurrentActivities.get(session.agentSessionId)
@@ -11204,7 +11203,7 @@ export class AgentMuxClient {
           const { nativeToolCallId: _notReportedByCallback, ...originalCallback } = interaction
           // A callback's own invocation identity may be reported by its Provider (including
           // its native module). Never borrow a preceding call's identity to settle this pipe.
-          const callbackToolCallId = nativeHookToolCallId(envelope.payload ?? {})
+          const callbackToolCallId = projectNativeHookToolFields(provider.hook, normalized.eventName, envelope.payload ?? {}).reportedToolCallId
           interaction = { ...originalCallback, ...(callbackToolCallId ? { nativeToolCallId: callbackToolCallId } : {}), permissionHook: { receiptId: receipt.id,
             ...(current.nativeHandle?.kind === 'provider' ? { nativeSessionId: current.nativeHandle.sessionId } : {}),
             ...(normalized.nativeTurnId ? { nativeTurnId: normalized.nativeTurnId } : {}),

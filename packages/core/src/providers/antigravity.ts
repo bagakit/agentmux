@@ -7,7 +7,7 @@ import { ANTIGRAVITY_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, managedHookCommand, hookCommandTimeout, hookToolFields } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -16,6 +16,13 @@ export const ANTIGRAVITY_HOOK_EVENTS = [
 ] as const
 
 export const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (eventName !== 'PreToolUse' && eventName !== 'PostToolUse') return {}
+    const call = payload.toolCall
+    if (!call || typeof call !== 'object' || Array.isArray(call)) return {}
+    const toolCall = call as Record<string, unknown>
+    return hookToolFields(toolCall.name, toolCall.args)
+  },
   toolOutcome(eventName, payload) {
     const error = eventName === 'PostToolUse' && typeof payload.error === 'string' ? payload.error : undefined
     const failed = error !== undefined && error.trim().length > 0
@@ -75,7 +82,7 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
 }
 
 export function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  const provider = defineAgentProvider({
+  return defineAgentProvider({
     discoverNativeSession: discoverAntigravityNativeSession,
     readSessionHistoryPage: readAntigravitySessionHistoryPage,
     observeSessionHistory: observeAntigravitySessionHistory,
@@ -99,21 +106,4 @@ export function createAntigravityProvider(defineAgentProvider: ProviderFactory):
     ]
   })
 
-  return {
-    ...provider,
-    normalizeHook(envelope, context) {
-      // First-party Pre/PostToolUse carries toolCall.name/args, not flat tool fields.
-      // Adapt only those protocol events; the original nested payload remains available.
-      const call = envelope.payload?.toolCall
-      if ((envelope.eventName !== 'PreToolUse' && envelope.eventName !== 'PostToolUse') ||
-          !call || typeof call !== 'object' || Array.isArray(call)) {
-        return provider.normalizeHook(envelope, context)
-      }
-      const toolCall = call as Record<string, unknown>
-      return provider.normalizeHook({
-        ...envelope,
-        payload: { ...envelope.payload, tool_name: toolCall.name, tool_input: toolCall.args }
-      }, context)
-    }
-  }
 }

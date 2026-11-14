@@ -29,6 +29,7 @@ import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import {
   buildPromptInputPayload,
   catalog,
+  hookToolFields,
   launchScopedHookCommand,
   hookCommandTimeout,
   sanitizeBracketedPasteText
@@ -65,6 +66,12 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (eventName === CLAUDE_ASKED_TOOL_END_EVENT) return hookToolFields(payload.tool_name, undefined, payload.tool_use_id)
+    if (!['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest'].includes(eventName)) return {}
+    // Our native plugin attaches the asked call's own ID to classic PermissionRequest.
+    return hookToolFields(payload.tool_name, payload.tool_input, payload.tool_use_id)
+  },
   toolOutcome(eventName, payload) {
     const failed = eventName === 'PostToolUseFailure'
     const body = failed ? (typeof payload.error === 'string' ? payload.error : undefined)

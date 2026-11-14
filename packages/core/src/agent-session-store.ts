@@ -1243,16 +1243,18 @@ export function normalizeAgentInteractionRequest(value: unknown): AgentMuxIntera
     const toolName = source.toolName === undefined
       ? undefined
       : string(source.toolName, 'pendingInteraction.request.toolName')
-    const toolInput = source.toolInput === undefined
-      ? undefined
-      : text(source.toolInput, 'pendingInteraction.request.toolInput')
+    const toolInput = source.toolInput
+    if (toolInput !== undefined && (typeof toolInput !== 'string' ||
+        Buffer.byteLength(toolInput) > MAX_PATH_BYTES || toolInput.includes('\0'))) {
+      throw new AgentMuxError('pendingInteraction.request.toolInput is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
     const request: Extract<AgentMuxInteractionRequest, { kind: 'permission' }> = {
       kind: 'permission',
       ...base,
       title: text(source.title, 'pendingInteraction.request.title'),
       options,
       ...(toolName ? { toolName } : {}),
-      ...(toolInput ? { toolInput } : {}),
+      ...(toolInput !== undefined ? { toolInput } : {}),
       ...(source.nativeToolCallId === undefined ? {} : {
         nativeToolCallId: string(source.nativeToolCallId, 'pendingInteraction.request.nativeToolCallId')
       })

@@ -6,7 +6,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
-import { catalog } from './shared.js'
+import { catalog, hookToolFields } from './shared.js'
 import { hookDeliverySource } from '../agent-hook-delivery.js'
 
 export { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
@@ -37,6 +37,16 @@ function isChildPayload(payload: Readonly<Record<string, unknown>>): boolean {
 }
 
 export const OPENCODE_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (eventName !== 'message.part.updated') return {}
+    const part = payload.part
+    if (!part || typeof part !== 'object' || Array.isArray(part)) return {}
+    const toolPart = part as Record<string, unknown>
+    if (toolPart.type !== 'tool') return {}
+    const state = toolPart.state && typeof toolPart.state === 'object' && !Array.isArray(toolPart.state)
+      ? toolPart.state as Record<string, unknown> : undefined
+    return hookToolFields(toolPart.tool, state?.input, toolPart.callID)
+  },
   rules: [
     // 授权门：Agent 正卡在一个授权决定上等人回答。
     { events: ['permission.updated'], state: 'waiting', lifecycleEvent: 'permission-request' },
@@ -105,11 +115,8 @@ function adaptOpenCodePayload(payload: Record<string, unknown>): Record<string, 
   const part = typeof payload.part === 'object' && payload.part ? (payload.part as Record<string, unknown>) : undefined
   if (part) {
     if (part.type === 'tool') {
-      if (typeof part.tool === 'string') result.tool_name = part.tool
-      if (typeof part.callID === 'string') result.call_id = part.callID
       const state = typeof part.state === 'object' && part.state ? (part.state as Record<string, unknown>) : undefined
       if (state) {
-        if (state.input !== undefined) result.tool_input = state.input
         if (state.status === 'completed') {
           result.tool_output = state.output ?? ''
         } else if (state.status === 'error') {

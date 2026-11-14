@@ -7,6 +7,15 @@ import { resolveCoreBinPath } from '../runtime-paths.js'
 import { LAUNCH_SCOPED_HOOK_FLAG } from '../launch-scoped-hook.js'
 import type { BuiltInAgentProviderId } from '../agent-provider-id.js'
 import type { AgentCatalogEntry, AgentProviderId } from '../types.js'
+import type { AgentNativeHookToolFields } from '../hook-normalizer.js'
+
+/** Pack fields already selected by one Provider; this helper knows no protocol keys. */
+export function hookToolFields(name: unknown, input: unknown, reportedId?: unknown): AgentNativeHookToolFields {
+  const toolName = typeof name === 'string' ? name.trim() : undefined
+  const reportedToolCallId = typeof reportedId === 'string' ? reportedId.trim() : undefined
+  return { ...(toolName ? { toolName } : {}), ...(input === undefined ? {} : { toolInput: input }),
+    ...(reportedToolCallId ? { reportedToolCallId } : {}) }
+}
 
 export type ManagedHookPlanBuilder = (
   workspacePath: string,

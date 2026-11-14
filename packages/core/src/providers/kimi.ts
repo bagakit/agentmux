@@ -1,7 +1,7 @@
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog } from './shared.js'
+import { catalog, hookToolFields } from './shared.js'
 import { readKimiSessionHistoryPage } from './kimi-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -29,6 +29,10 @@ type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
  * 4. TS 2.1.1 中无 SubagentStart/SubagentStop hook，不声明 subagentTracking；亦不预设未证 agentName 别名猜测。
  */
 export const KIMI_HOOKS: AgentNativeHookSpecification = {
+  toolFields(eventName, payload) {
+    if (!['PreToolUse', 'PostToolUse', 'PostToolUseFailure'].includes(eventName)) return {}
+    return hookToolFields(payload.tool_name, payload.tool_input, payload.tool_call_id)
+  },
   toolOutcome(eventName, payload) {
     const failed = eventName === 'PostToolUseFailure'
     const error = payload.error && typeof payload.error === 'object' && !Array.isArray(payload.error)
