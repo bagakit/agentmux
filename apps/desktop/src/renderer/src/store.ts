@@ -18,11 +18,11 @@ import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOp
 import { editSourceCoordinatorInput, sourceCoordinatorInputKey, type SourceCoordinatorInput } from './lib/source-coordinator-input'
 import { associateCreatedSourceCoordinator } from './lib/source-coordinator-request'
 import { launcherSourceMatches, type SourceCoordinatorStart } from './lib/launcher-source'
-import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistration, mountedSpaceInput, mountedSpaceInputs as mountedSpaceInputEntries, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
+import { editMountedSpaceInput, editMountedRegistration, mountedSpaceInput, mountedSpaceInputs as mountedSpaceInputEntries, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
 import { ordinarySpaceMember, type OrdinaryMemberReference } from './lib/ordinary-space-member'
 import { originalSourceMember, originalSpaceResource, originalSpaceWorkspace, originalSourceFileSurface, ensureOriginalSourceFilesInput, originalSourceActionUnavailable, isOriginalSourceFileWorkspace, isOriginalSourceWorkspaceProjection, reconcileOriginalSourceProjection, originalSourceScopeFromGraph, preserveOriginalSourceProjection, originalSourceEntryForSelection, originalRawSourceOccurrenceConfirmed, originalSourceWorkspaceId, originalSourceLauncherTabId, originalSourceTabProjectionId, originalSourceRegionProjectionId, originalSourceGroupProjectionId, originalSourceLauncherRegionId, originalSourceInputOwnerKey, type OriginalSpaceLocation } from './lib/original-space-navigation'
 import { observeMountedSessions, type MountedSessionObservation, type MountedSessionUpdate } from './lib/space-mount-sessions'
-import { spaceMountKey, type SpaceMountRecord, type SpaceMountView } from '../../shared/space-mount'
+import { spaceMountKey, type SpaceMountRecord, type SpaceMountView, type SpaceMountMemberTarget } from '../../shared/space-mount'
 import type { SpaceSnapshot } from '@agentmux/core'
 import { parseSpaceCloseReceipt, parseSpaceCloseResult, spaceCloseDecisions, type SpaceClosePrepare, type SpaceCloseReceipt, type SpaceCloseCommitResult } from '@agentmux/core/space-close'
 import { isWorkbenchCloseRendererRequest, type WorkbenchCloseRendererRequest, type WorkbenchCloseRendererResult } from '../../shared/workbench-close-control'
@@ -217,6 +217,7 @@ import { restoreSurveyPinPreferences, persistedSurveyPins, surveyPinnedReference
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, surveySelectReference, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import { configValuesEqual } from '../../shared/config-edit'
+import { copySourceComposerInputs, pruneSourceComposerInputs, sourceInputRecoveryRows } from './lib/source-composer-handoff'
 import { inspectSpaceIconOverrides } from '../../shared/space-object-appearance'
 import { sessionNameMetadataRecord, type SessionNameMetadata } from './lib/session-name-metadata'
 import {
@@ -241,6 +242,7 @@ import type {
   AgentLaunchResult,
   LaunchOptionSelection,
   AgentSessionControl,
+  AgentInputTarget,
   AgentSessionRecoveryCandidate,
   AgentTimelineSnapshot,
   AppConfig,
@@ -460,9 +462,9 @@ import {
   renameWorkbenchTab,
   replaceWorkbenchRegion,
   sessionTabId,
+  sourceRegionProjectionReference,
   swapWorkbenchTabRegions,
   tabStillOpen,
-  sourceRegionProjectionReference,
   titleWorkbenchSurface,
   topicIdForSession,
   updateWorkbenchRegion,
@@ -811,6 +813,8 @@ export type AgentSteerReaction = { code: string; replySource: ConversationReplyS
 export type MoteMainInputSelection = Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>
 export type AgentSteerOptions = {
   focusTask?: AgentMuxFocusTaskReference | undefined
+  /** Exact foreign execution transport; the canonical queue owner remains execution Runtime + raw SID. */
+  originalMember?: SpaceMountMemberTarget
   /** Read-only transport facts for this admission; never inserted into the local Session map. */
   originalSession?: SessionSnapshot
   moteMain?: MoteMainInputSelection | undefined
@@ -875,6 +879,10 @@ export type AgentSteerQueueEntry = {
   /** Frozen only by a new direct composer producer, before its first Core intake. */
   directInputBinding?: Extract<AgentPromptInputBinding, { admissionIntent: unknown }>
   directInputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control']
+  /** Persisted foreign locator used by the same direct-input queue drain. */
+  originalMember?: SpaceMountMemberTarget
+  /** Immutable original user-document input retained by the one-time handoff; never an input grant. */
+  recoveredSourceInput?: unknown
   /** Core's original receipt is a projection; the client never dispatches accepted waiting. */
   inputReceipt?: AgentInputSubmissionReceipt
   inputStopReceipt?: import('@agentmux/core').AgentInputWaitStopReceipt
@@ -915,6 +923,22 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
   return initialNativeComposerBinding(session) ??
     // Main role routing is frozen separately; this new human Send still uses the current terminal.
     { expectedRun: { ...session.control.run }, admissionIntent: { kind: 'manual-actor' } }
+}
+
+function originalMemberComposerBinding(session: SessionSnapshot | undefined, origin?: 'manual'): AgentSteerQueueEntry['directInputBinding'] {
+  if (origin !== 'manual' || session?.kind !== 'agent' || session.processState !== 'running') return
+  if (session.pendingInteraction) return interactionNativeComposerBinding(session)
+  return initialNativeComposerBinding(session) ?? { expectedRun: { ...session.control.run }, admissionIntent: { kind: 'manual-actor' as const } }
+}
+
+function originalInputRoute(entry: Pick<AgentSteerQueueEntry, 'originalMember' | 'directInputControl'>): AgentSessionControl | AgentInputTarget {
+  const member = entry.originalMember
+  if (!member) return entry.directInputControl!
+  const expectedAdmission = member.target.expectedAdmission
+  if (!expectedAdmission) throw Object.assign(new Error(
+    'Source input must retain its original creation C or association L. The original Agent, draft and input are kept.'),
+    { code: 'SPACE_MEMBER_ADMISSION_UNCONFIRMED' })
+  return { kind: 'space-member-target', target: { hostId: member.hostId, target: { ...member.target, expectedAdmission } } }
 }
 
 /** Associate a Core receipt with its original client intent; never infer carriage from a current Run. */
@@ -965,8 +989,8 @@ function projectResumeInputReceipts(state: AppState, sessionId: string): Partial
 }
 
 function projectInputReceipt(state: AppState, sessionId: string, receipt: AgentInputSubmissionReceipt): Partial<AppState> {
-  const queue = state.agentSteerQueues[sessionId]
-  if (!queue || receipt.key.kind !== 'prompt' || receipt.key.agentSessionId !== sessionId) return {}
+  const queue = state.agentSteerQueues[sessionId], ownerSessionId = queue?.find(entry => entry.originalMember)?.originalMember?.target.agentSessionId ?? sessionId
+  if (!queue || receipt.key.kind !== 'prompt' || receipt.key.agentSessionId !== ownerSessionId) return {}
   const key = receipt.key
   return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue.map(entry => {
     if (entry.operationId !== key.submissionId || entry.directInputBinding?.expectedRun.runId !== key.expectedRun.runId ||
@@ -991,6 +1015,17 @@ function consumeInputReceipt(sessionId: string, receipt: AgentInputSubmissionRec
       (receipt.key.kind === 'prompt' ? receipt.key.submissionId : receipt.key.messageId))?.directInputControl
     useAppStore.getState().reportError(failure, { kind: 'indeterminate', ...(subject ? { subject } : {}) })
   }
+}
+
+/** The exact member reader supplies provenance; a raw SID never selects a foreign queue. */
+export function consumeOriginalMemberInputReceipt(target: SpaceMountMemberTarget, receipt: AgentInputSubmissionReceipt): void {
+  const key = receipt.key
+  if (key.kind !== 'prompt' || key.agentSessionId !== target.target.agentSessionId ||
+      key.expectedRun.runId !== target.target.expectedRun.runId) return
+  const owner = originalSourceInputOwnerKey(target.target.runtimeId, target.target.agentSessionId)
+  const entry = useAppStore.getState().agentSteerQueues[owner]?.find(item => item.operationId === key.submissionId)
+  if (!entry?.originalMember || !configValuesEqual(entry.originalMember, target)) return
+  consumeInputReceipt(owner, receipt)
 }
 
 function pendingSteerRecord(entry: AgentSteerQueueEntry, inFlightId?: string, phase?: 'preparing' | 'submitting', confirmed = false): AgentMuxPendingMessage {
@@ -1097,7 +1132,6 @@ export type AppState = GitReadingActions & {
   retainSourceCoordinatorInput(key: string, update: (current: SourceCoordinatorInput | undefined) => SourceCoordinatorInput | undefined): void
   editSpaceMountLauncher(key: string, slot: MountedLauncherSlot, selection: MountedLauncherSelection): void
   editSpaceMountView(key: string, view: SpaceMountView): void
-  editSpaceMountDraft(key: string, tabId: string, regionId: string, text: string, view?: SpaceMountView, zoneId?: string): void
   observeSpaceMount(target: SpaceMountRecord, observation: { snapshot?: SpaceSnapshot; error?: string | undefined; reading: boolean }): void
   /** Default CLI navigation suppresses automatic caret until explicit human/keyboard navigation. */
   /** Ephemeral explicit Mote navigation; never persisted or an execution authority. */
@@ -1796,7 +1830,7 @@ export type AppState = GitReadingActions & {
   inspectInteraction(sessionId: string, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
   setPosture(sessionId: string, modeId: string): Promise<void>
-  interrupt(sessionId: string): Promise<void>
+  interrupt(sessionId: string, originalMember?: SpaceMountMemberTarget): Promise<void>
   controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
   reconcileSessionContinuityControl(hostId: string, sessionId: string, operationId: string): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
@@ -4565,6 +4599,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     tabs: coreSpatialReady ? undefined : state.tabs,
     // Memo dependencies for thin Source/legacy pointers; never another persisted layout.
     readNamespaceTopology: state.tabs,
+    readNamespaceLayout: state.layouts,
     layouts: coreSpatialReady ? undefined : state.layouts,
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
     // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
@@ -4599,7 +4634,6 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     focusTimelineHeight: state.focusTimelineHeight,
     focusTimelineRuler: state.focusTimelineRuler,
     selectedDemandId: state.selectedDemandId,
-    readNamespaceLayout: state.layouts,
     demandArrangement: state.demandArrangement,
     ...(Object.keys(state.demandPmoTabIds).length ? { demandPmoTabIds: state.demandPmoTabIds } : {}),
     projectRailOpen: state.projectRailOpen,
@@ -4871,6 +4905,17 @@ export type AgentRegionReference = { tabId: string; regionId: string; agentSessi
 /** Availability of the original spatial owner, not Agent or Run health. */
 export function agentRegionLocationsKnown(): boolean { return coreSpatialPersistence?.current !== null && coreSpatialPersistence?.current !== undefined }
 
+/** Confirmed raw occurrences stay in the ordinary workface; only absent/unknown occurrences gain a Source projection. */
+function confirmedOriginalRawLocations(state: AppState, target: SpaceMountRecord, graph = currentCoreSpatialGraph()) {
+  if (target.hostId !== 'local' || !graph || !originalSourceScopeFromGraph(target, graph)) return []
+  const locations = workbenchSelectionCatalog(state).locations.filter(location => location.spaceId === target.reference.spaceId &&
+    location.zoneId === target.zoneId && location.workspaceId === target.workspaceId && originalRawSourceOccurrenceConfirmed(state, graph, {
+      spaceId: location.spaceId, zoneId: location.zoneId, workspaceId: location.workspaceId, topicId: null,
+      groupId: location.groupId, tabId: location.tabId, regionId: location.regionId, sourceRuntimeId: target.reference.runtimeId
+    }, false))
+  return locations
+}
+
 /** The accepted Core document locates a foreign occurrence; the member Core still owns access. */
 export function ordinaryAgentSpaceMember(reference: OrdinaryMemberReference) {
   const state = useAppStore.getState(), projected = originalSourceMember(state, reference, coreSpatialPersistence?.current?.graph)
@@ -4905,17 +4950,6 @@ export function agentRegionExecution(reference: AgentRegionReference) {
 /** An explicit related reader refreshes the original owner, without applying or resaving the graph. */
 export async function rereadAgentRegionExecution(reference: AgentRegionReference) {
   const owner = coreSpatialPersistence
-/** Confirmed raw occurrences stay in the ordinary workface; only absent/unknown occurrences gain a Source projection. */
-function confirmedOriginalRawLocations(state: AppState, target: SpaceMountRecord, graph = currentCoreSpatialGraph()) {
-  if (target.hostId !== 'local' || !graph || !originalSourceScopeFromGraph(target, graph)) return []
-  const locations = workbenchSelectionCatalog(state).locations.filter(location => location.spaceId === target.reference.spaceId &&
-    location.zoneId === target.zoneId && location.workspaceId === target.workspaceId && originalRawSourceOccurrenceConfirmed(state, graph, {
-      spaceId: location.spaceId, zoneId: location.zoneId, workspaceId: location.workspaceId, topicId: null,
-      groupId: location.groupId, tabId: location.tabId, regionId: location.regionId, sourceRuntimeId: target.reference.runtimeId
-    }, false))
-  return locations
-}
-
   if (!owner) throw new Error('The original Core spatial owner is not available. Its Region is retained.')
   await owner.read()
   if (coreSpatialPersistence !== owner) throw new Error('The original Core spatial owner changed during observation. Its Region is retained; re-read the current owner.')
@@ -5481,6 +5515,16 @@ export async function checkpointAgentOperations(): Promise<void> {
     await requestWorkbenchStorageFlush(false)
   } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
 }
+/** Copy into the existing queue before removing any exact original saved request. */
+export async function handoffOriginalMemberComposerInput(target: SpaceMountMemberTarget, tabId?: string): Promise<boolean> {
+  const rows = sourceInputRecoveryRows(useAppStore.getState().mountedSpaceInputs, target, tabId)
+  if (!rows.some(row => row.input)) return false
+  useAppStore.setState(state => copySourceComposerInputs(state, rows))
+  await checkpointMountedSpaceInputs()
+  useAppStore.setState(state => pruneSourceComposerInputs(state, rows))
+  await checkpointMountedSpaceInputs()
+  return true
+}
 function requestWorkbenchStorageCommit(): void {
   workbenchStorageCommit = requestWorkbenchStorageFlush(false)
   void workbenchStorageCommit.catch(() => {})
@@ -5588,6 +5632,10 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   if (!text.trim() && !agentMuxNote?.trim()) return false
   const session = options?.originalSession ?? useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
+  if (options?.originalMember && options.inputImages?.length) {
+    (onRejected ?? useAppStore.getState().reportError)(new Error('Image input through this original member connection is unavailable. The original draft and attachments are retained.'))
+    return false
+  }
   const browserRecipient = options?.browserRecipient ?? options?.browserInput?.control
   if (browserRecipient && (origin !== 'manual' || browserRecipient.hostId !== session.control.hostId ||
       browserRecipient.agentSessionId !== session.control.agentSessionId || browserRecipient.run.runId !== session.control.run.runId)) {
@@ -5623,11 +5671,11 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   const originalNote = focusTask && !options?.moteMain ? [sourceNote, fixedNote].filter(Boolean).join('\n\n') : sourceNote
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (JSON.stringify(existing.focusTask) === JSON.stringify(focusTask) && existing.text === text && JSON.stringify(existing.inputImages) === JSON.stringify(options?.inputImages) && existing.agentMuxNote === originalNote && JSON.stringify(existing.moteSource) === JSON.stringify(moteSource) && JSON.stringify(existing.moteMain) === JSON.stringify(options?.moteMain) && JSON.stringify(existing.browserInput) === JSON.stringify(browserInput) && JSON.stringify(existing.browserRecipient) === JSON.stringify(browserRecipient) && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && JSON.stringify(existing.goalPmo) === JSON.stringify(options?.goalPmo) && JSON.stringify(existing.goalDispatch) === JSON.stringify(options?.goalDispatch) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
+    if (JSON.stringify(existing.focusTask) === JSON.stringify(focusTask) && existing.text === text && JSON.stringify(existing.inputImages) === JSON.stringify(options?.inputImages) && existing.agentMuxNote === originalNote && JSON.stringify(existing.moteSource) === JSON.stringify(moteSource) && JSON.stringify(existing.moteMain) === JSON.stringify(options?.moteMain) && JSON.stringify(existing.browserInput) === JSON.stringify(browserInput) && JSON.stringify(existing.browserRecipient) === JSON.stringify(browserRecipient) && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && JSON.stringify(existing.goalPmo) === JSON.stringify(options?.goalPmo) && JSON.stringify(existing.goalDispatch) === JSON.stringify(options?.goalDispatch) && JSON.stringify(existing.originalMember) === JSON.stringify(options?.originalMember) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
     ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content, source or an earlier execution choice. Your original message and draft are kept.'))
     return false
   }
-  if ((useAppStore.getState().agentSteerQueues[sessionId]?.filter(entry => !entry.archived).length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
+  if ((useAppStore.getState().agentSteerQueues[sessionId]?.filter(entry => !entry.archived && entry.recoveredSourceInput === undefined).length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
     (onRejected ?? useAppStore.getState().reportError)(new Error(`The active message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Archive queued messages before adding another. Your draft is kept.`))
     return false
   }
@@ -5637,6 +5685,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     promptCondition: options?.goalContinuation ? validateAgentPromptCondition(options.goalContinuation.condition) : null,
     ...(directInputBinding ? { directInputBinding, runId: directInputBinding.expectedRun.runId } : {}),
     ...(directInputBinding || options?.originalSession ? { directInputControl: structuredClone(browserRecipient ?? session.control) } : {}),
+    ...(options?.originalMember ? { originalMember: structuredClone(options.originalMember) } : {}),
     ...(options?.execution === undefined ? {} : { execution: options.execution }),
     ...(options?.goalContinuation ? { goalContinuation: structuredClone(options.goalContinuation) } : {}),
     ...(options?.goalPmo ? { goalPmo: structuredClone(options.goalPmo) } : {}),
@@ -5658,7 +5707,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ...(origin === 'manual' ? { origin: 'manual' } : {}),
     ...(origin === 'manual' && !options?.goalContinuation && !options?.goalPmo && !options?.goalDispatch ? { freshComposerIntent: true as const } : {})
   }
-  void api.continuousProgress.pauseForInput(session.control).catch(error => useAppStore.getState().reportError(error))
+  if (!options?.originalMember) void api.continuousProgress.pauseForInput(session.control).catch(error => useAppStore.getState().reportError(error))
   useAppStore.setState((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
   return entry.operationId
 }
@@ -6123,9 +6172,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!current) throw new Error('The original Source reference is unavailable. Its view was not moved.')
       return { ...current, view }
     }) }))
-  },
-  editSpaceMountDraft(key, tabId, regionId, text, view, zoneId) {
-    set(state => ({ mountedSpaceInputs: editMountedSpaceDraftInput(state.mountedSpaceInputs,key,tabId,regionId,text,view,undefined,zoneId) }))
   },
   observeSpaceMount(target, observation) {
     const key = spaceMountKey(target.reference)
@@ -12786,10 +12832,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async archiveAgentSteer(sessionId, operationId, expectedText, archived) {
     const original = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
     if (archived && original?.directInputBinding && original.inputIntakeStarted) {
-      const control = original.directInputControl
-      if (!control || control.agentSessionId !== sessionId || control.run.runId !== original.directInputBinding.expectedRun.runId) throw controlFailure(
+      const control = original.directInputControl, originalSessionId = original.originalMember?.target.agentSessionId ?? sessionId
+      if (original.originalMember ? original.originalMember.target.expectedRun.runId !== original.directInputBinding.expectedRun.runId
+        : !control || control.agentSessionId !== originalSessionId || control.run.runId !== original.directInputBinding.expectedRun.runId) throw controlFailure(
         'STALE_AGENT_SESSION', 'The original Core waiting endpoint is unconfirmed; its input and archive intent are retained.')
-      const receipt = await api.sessions.inspectInput(control, { kind: 'prompt', agentSessionId: sessionId,
+      const receipt = await api.sessions.inspectInput(originalInputRoute(original), { kind: 'prompt', agentSessionId: originalSessionId,
         expectedRun: original.directInputBinding.expectedRun, submissionId: operationId })
       if (receipt) {
         consumeInputReceipt(sessionId, receipt)
@@ -12807,7 +12854,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!archived && ((entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && confirmedSteerDelivery(state.timelines[sessionId], state.sessions.find((item): item is Extract<SessionSnapshot, { kind: 'agent' }> => item.kind === 'agent' && item.id === sessionId)?.control, operationId))) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Its archived record is kept; read the confirmed History instead of restoring it to Pending.')
       }
-      if (!archived && entry.archived && queue!.filter(item => !item.archived).length >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
+      if (!archived && entry.archived && entry.recoveredSourceInput === undefined && queue!.filter(item => !item.archived && item.recoveredSourceInput === undefined).length >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The active message queue is full. Archive another active message before restoring this original record; its archived facts are kept.')
       }
       result = entry
@@ -13020,7 +13067,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const entry = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
     if (entry?.inputReceipt) {
       const control = entry.directInputControl
-      if (!control || control.agentSessionId !== entry.inputReceipt.key.agentSessionId || control.run.runId !== entry.inputReceipt.key.expectedRun.runId) return false
+      const original = entry.originalMember?.target
+      if (original ? original.agentSessionId !== entry.inputReceipt.key.agentSessionId || original.expectedRun.runId !== entry.inputReceipt.key.expectedRun.runId
+        : !control || control.agentSessionId !== entry.inputReceipt.key.agentSessionId || control.run.runId !== entry.inputReceipt.key.expectedRun.runId) return false
       const ref = entry.inputReceipt.ref
       const previous = entry.inputStopIntent
       const intent = previous && previous.ref.waitGeneration === ref.waitGeneration && previous.ref.key.kind === ref.key.kind &&
@@ -13028,13 +13077,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ? previous : { ref: structuredClone(ref), cancelOperationId: mintObjectId() }
       set(current => ({ agentSteerQueues: { ...current.agentSteerQueues, [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item =>
         item.operationId === operationId ? { ...item, inputStopIntent: intent } : item) } }))
-      const stopped = await api.sessions.stopInputWaiting(control, intent.ref, intent.cancelOperationId)
+      const stopped = await api.sessions.stopInputWaiting(originalInputRoute(entry), intent.ref, intent.cancelOperationId)
       // The original stop ACK is already known. A later read failure must not
       // discard it or replace that original cancellation operation with a new identity.
       set(current => ({ agentSteerQueues: { ...current.agentSteerQueues, [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item =>
         item.operationId === operationId ? { ...item, inputStopReceipt: stopped } : item) } }))
       try {
-        const projection = await api.sessions.inspectInput(control, entry.inputReceipt.key)
+        const projection = await api.sessions.inspectInput(originalInputRoute(entry), entry.inputReceipt.key)
         if (projection) consumeInputReceipt(sessionId, projection)
       } catch (error) { get().reportError(error) }
       return stopped.outcome === 'stopped-before-dispatch' || stopped.outcome === 'observation-stopped'
@@ -13166,7 +13215,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           let dispatchStarted = false
           const attemptControl = entry.directInputBinding ? entry.directInputControl : session?.kind === 'agent' ? session.control : undefined
           const attemptHostId = attemptControl?.hostId ?? null
-          const attemptSessionId = attemptControl?.agentSessionId ?? sessionId
+          const attemptSessionId = entry.originalMember?.target.agentSessionId ?? attemptControl?.agentSessionId ?? sessionId
           let attemptRunId = entry.runId
           let attemptCondition = entry.promptCondition
           let attemptExecution = entry.execution
@@ -13191,22 +13240,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             // Persisted projection failures keep this original message; never strip its context and send plain text.
             if (entry.browserInput) frozenBrowserInput(entry.browserInput, attemptSessionId, entry.operationId, entry.text, entry.agentMuxNote)
             if (entry.directInputBinding) {
-              const control = entry.directInputControl
-              if (!control || control.agentSessionId !== sessionId || control.run.runId !== entry.directInputBinding.expectedRun.runId) throw controlFailure(
+              const control = entry.directInputControl, expectedAgentSessionId = entry.originalMember?.target.agentSessionId ?? sessionId
+              if (entry.originalMember ? entry.originalMember.target.expectedRun.runId !== entry.directInputBinding.expectedRun.runId
+                : !control || control.agentSessionId !== expectedAgentSessionId || control.run.runId !== entry.directInputBinding.expectedRun.runId) throw controlFailure(
                 'CONTROL_REQUEST_CONFLICT', 'The original manual input control is missing or conflicts with its bound Session and Run. The original key is retained; no current-route replacement was used.')
+              const route = originalInputRoute(entry)
               // All producers share this consumer, including the asynchronous read
               // before first Core intake. Core serializes any subsequent accepted waiting.
               deliveryAttempt.stage = 'core-submit'
+              const observed = await api.sessions.inspectInput(route, { kind: 'prompt', agentSessionId: expectedAgentSessionId,
+                expectedRun: entry.directInputBinding.expectedRun, submissionId: entry.operationId })
+              if (!observed && entry.recoveredSourceInput !== undefined && entry.inputIntakeStarted) throw controlFailure(
+                'AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original saved request may already have been submitted. Its receipt is still unconfirmed; no input was sent again. Keep this request and check its original Core.')
+              // An observation attempt is not intake. Freeze effect custody only after
+              // the read, immediately before the original submit/rejoin or known receipt.
               set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
                 [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item => item.operationId === entry.operationId
                   ? { ...item, inputIntakeStarted: true as const } : item) } }))
-              const observed = await api.sessions.inspectInput(control, { kind: 'prompt', agentSessionId: sessionId,
-                expectedRun: entry.directInputBinding.expectedRun, submissionId: entry.operationId })
               dispatchStarted = true
               const receipt = observed
                 ? observed.status === 'stopped' || observed.status === 'waiting' && (observed.observation === 'rejoin-needed' || observed.control.waiting?.wake === 'explicit-rejoin')
-                  ? await api.sessions.rejoinInputWaiting(control, observed.ref) : observed
-                : await api.sessions.submitPrompt(control, entry.text, entry.operationId, entry.directInputBinding,
+                  ? await api.sessions.rejoinInputWaiting(route, observed.ref) : observed
+                : await api.sessions.submitPrompt(route, entry.text, entry.operationId, entry.directInputBinding,
                     { execution: 'immediate', ...(entry.focusTask ? { focusTask: entry.focusTask } : {}), ...(entry.moteMain ? { moteMain: entry.moteMain } : {}), ...(entry.moteSource ? { moteSource: entry.moteSource } : {}) }, entry.origin === 'manual', entry.agentMuxNote, entry.sourceChannel, undefined, undefined, undefined, entry.browserInput?.capture.reference, entry.inputImages)
               if (!receipt || 'inputKey' in receipt) throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original manual input has no typed receipt. Its text and identity are retained.')
               consumeInputReceipt(sessionId, receipt)
@@ -13517,9 +13572,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     await attempt.pending
   },
 
-  async interrupt(sessionId) {
+  async interrupt(sessionId, originalMember) {
     const session = get().sessions.find((item) => item.id === sessionId)
-    if (session) await api.sessions.interrupt(session.control).catch((error) => get().reportError(error))
+    try {
+      const route = originalMember ? originalInputRoute({ originalMember }) : session?.kind === 'agent' ? session.control : undefined
+      if (route) await api.sessions.interrupt(route)
+    } catch (error) { get().reportError(error) }
   },
   async controlSessionContinuity(sessionId, intentOperationId, action, additionalAttempts) {
     const session = get().sessions.find(item => item.id === sessionId)

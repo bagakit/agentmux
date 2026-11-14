@@ -15,6 +15,7 @@ import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import type { AgentCatalogEntry } from '@agentmux/core'
+import type { SpaceMountMemberTarget } from '../../../shared/space-mount'
 import { workspaceOwnsSessionPath } from '@agentmux/host/mote-model'
 import { sessionResourceContext } from '../lib/session-resource-context'
 import { api } from '../lib/api'
@@ -114,6 +115,7 @@ export function AgentSessionComposer({
   onRevealMessage,
   onOpenTerminal,
   mailboxOrigin,
+  source,
   visible = true
 }: {
   pendingLayout?: PendingDeliveryLayout | undefined
@@ -135,6 +137,8 @@ export function AgentSessionComposer({
   onOpenTerminal?(): void
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
+  /** Foreign execution facts and locator; drafts and queues still use sessionId as their canonical owner. */
+  source?: { target: SpaceMountMemberTarget; session?: SessionSnapshot | undefined } | undefined
   visible?: boolean
 }) {
   const moteWorkface = useContext(MoteWorkfaceContext)
@@ -169,7 +173,7 @@ export function AgentSessionComposer({
   }
   const enqueueDirect = useAppStore.getState().enqueueAgentSteer
   const enqueueAgentSteer: typeof enqueueDirect = (id, value, rejected, operationId, origin, note, options) => enqueueDirect(id, value, rejected, operationId, origin, note,
-    { ...options, ...(session ? { originalSession: session } : {}) })
+    { ...options, ...(session ? { originalSession: session } : {}), ...(source ? { originalMember: source.target } : {}) })
   const archiveAgentSteer = useAppStore.getState().archiveAgentSteer
   const moveAgentSteer = useAppStore.getState().moveAgentSteer
   const sendQueuedAgentSteer = useAppStore.getState().resendRefusedAgentSteer
@@ -202,12 +206,13 @@ export function AgentSessionComposer({
   }, [visible, queuedEntries, memberInput, moteWorkface?.startRollover])
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const observedSession = useObservedAppStore('composer', visible, consumerScope, (state) =>
-    explicitSession === undefined ? sessionPresentationById(state.sessions).get(sessionId) : undefined)
-  const session = explicitSession ?? observedSession
+    !source && explicitSession === undefined ? sessionPresentationById(state.sessions).get(sessionId) : undefined)
+  const session = explicitSession ?? source?.session ?? observedSession
   const moteMain = motePresentation.moteInputIntent !== 'member' && !moteWorkface?.memberIntent && moteDialogue?.target && main?.roleRevision && main.current && session?.kind === 'agent' &&
     main.current.sessionId === session.control.agentSessionId && main.current.hostId === session.control.hostId
     ? { target: moteDialogue.target, expectedRoleRevision: main.roleRevision } : undefined
-  const nativeService = useRunService(session)
+  const configuredService = useRunService(source ? undefined : session)
+  const nativeService = source ? session?.nativeService : configuredService
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
   const viewMode = useObservedAppStore('composer', visible, consumerScope, viewModeSelector)
   const setViewMode = useAppStore.getState().setViewMode
@@ -216,7 +221,7 @@ export function AgentSessionComposer({
   // A published preview revision may append to the same original timeline object.
   useObservedAppStore('composer', visible, consumerScope, state => state.timelines?.[sessionId]?.revision)
   const inputHistory = useComposerInputHistory({ sessionId: ownerKey, draftOwner,
-    control: session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
+    control: source ? undefined : session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
     insertion: insertionRef, ...(timeline ? { timeline } : {}) })
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
   const firstPrompt = useObservedAppStore('composer', visible, consumerScope, firstPromptSelector)
@@ -227,11 +232,17 @@ export function AgentSessionComposer({
   const topicSnapshots = useObservedAppStore('composer', visible, consumerScope, state => state.scratchTopicSnapshots)
   const topics = useMemo(() => scratchTopicsForConfig(config, topicSnapshots), [config, topicSnapshots])
   const toolExecution = session?.kind === 'agent' ? session.toolExecution : undefined
-  const runtimeWorkspace = useMemo(() => config?.workspaces.find(item =>
+  const runtimeWorkspace = useMemo(() => !source ? config?.workspaces.find(item =>
     session?.kind === 'agent' && workspaceOwnsSessionPath(item, session, topics)
-  ), [config, topics, session?.kind, session?.hostId, session?.workspacePath])
-  const resource = useMemo(() => sessionResourceContext(config, session, topics, resourceWorkspaceId),
-    [config, topics, resourceWorkspaceId, session?.kind, session?.hostId, session?.workspacePath,
+  ) : undefined, [source, config, topics, session?.kind, session?.hostId, session?.workspacePath])
+  const resource = useMemo(() => {
+    if (source) {
+      const workspace = config?.workspaces.find(item => item.id === resourceWorkspaceId)
+      return workspace ? { workspace, address: { hostId: workspace.hostId, path: workspace.path } }
+        : { issue: 'The original project file Workspace is unconfirmed. Your draft and message queue are kept; open the original project to reference its files.' }
+    }
+    return sessionResourceContext(config, session, topics, resourceWorkspaceId)
+  }, [source, config, topics, resourceWorkspaceId, session?.kind, session?.hostId, session?.workspacePath,
       toolExecution?.resourceHostId, toolExecution?.workspacePath, session?.kind === 'agent' ? session.workPlacement?.resourceHostId : undefined])
   const workspace = resource.workspace
   const activeFile = useObservedAppStore('composer', visible, consumerScope, (state) =>
@@ -239,26 +250,28 @@ export function AgentSessionComposer({
   )
   // Explicit Session consumers receive the same original catalog entry; an observer lookalike cannot supply controls.
   const observedProviderCatalogEntry = useObservedAppStore('composer', visible, consumerScope, (state) =>
-    explicitSession === undefined && providerCatalogEntry === undefined && session?.kind === 'agent'
+    !source && explicitSession === undefined && providerCatalogEntry === undefined && session?.kind === 'agent'
       ? state.providerCatalog.find((entry) => entry.id === session.providerId)
       : undefined
   )
   const originalProviderCatalogEntry = providerCatalogEntry === undefined ? observedProviderCatalogEntry : providerCatalogEntry ?? undefined
-  const postureControl = session?.kind === 'agent' ? originalProviderCatalogEntry?.postureControl : undefined
+  const postureControl = !source && session?.kind === 'agent' ? originalProviderCatalogEntry?.postureControl : undefined
   const composerOptions = session?.kind === 'agent' ? originalProviderCatalogEntry?.composer : undefined
   const sendDirect = useAppStore.getState().send
   const send: typeof sendDirect = (id, value, rejected, origin, note, options) => sendDirect(id, value, rejected, origin, note,
-    { ...options, ...(session ? { originalSession: session } : {}) })
+    { ...options, ...(session ? { originalSession: session } : {}), ...(source ? { originalMember: source.target } : {}) })
   const interrupt = useAppStore.getState().interrupt
   const setPosture = useAppStore.getState().setPosture
   const reportError = useAppStore.getState().reportError
   // One decision answers three questions the old `availability + isWorking` pair conflated: can the user
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.
-  const submitMode = composerSubmitMode(session, disabled || readOnly)
+  const submitMode = source && !session
+    ? { canType: true, canSubmit: false, primaryAction: 'send' as const, placeholder: 'Original Agent is unconfirmed. Your draft and file tools remain available.' }
+    : composerSubmitMode(session, disabled || readOnly)
   const completion = useComposerCandidates({ scope: JSON.stringify([draftOwner, sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null]),
-    active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue, sessionId,
-    providerId: session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
+    active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue, sessionId: source ? undefined : sessionId,
+    providerId: !source && session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
   const requestPending = session?.kind === 'agent' && Boolean(session.pendingInteraction)
   const nativeQueuePending = session?.kind === 'agent' && Boolean(interactionNativeComposerBinding(session))
 
@@ -348,9 +361,9 @@ export function AgentSessionComposer({
   const onRemoteFiles = useMemo(() => setFileReferencesOpen.bind(null, true), [setFileReferencesOpen])
   const attachmentScope = JSON.stringify([draftOwner, sessionId, session?.hostId, session?.workspacePath, resource.address, workspace?.id])
   useEffect(() => { setFileReferencesOpen(false) }, [attachmentScope, visible])
-  const attachments = useComposerAttachments({ scope: attachmentScope, sessionControl: session?.kind === 'agent' ? session.control : undefined, hostId: session?.hostId,
-    workspacePath: session?.workspacePath,
-    ...(session?.kind === 'agent' && session.toolExecution ? {
+  const attachments = useComposerAttachments({ scope: attachmentScope, sessionControl: !source && session?.kind === 'agent' ? session.control : undefined, hostId: source ? undefined : session?.hostId,
+    workspacePath: source ? undefined : session?.workspacePath,
+    ...(source || session?.kind === 'agent' && session.toolExecution ? {
       fileResource: workspace ? { hostId: workspace.hostId, workspacePath: workspace.path } : null
     } : {}),
     disabled: !submitMode.canType, insertion: insertionRef, feedback,
@@ -358,7 +371,7 @@ export function AgentSessionComposer({
 
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
     nativeService).map(notice => notice.id === 'timeline-observation'
-      ? { ...notice, action: { label: 'Retry work history', run: () => { void useAppStore.getState().resyncTimeline(sessionId, { observationOnly: true }) } } }
+      ? source ? notice : { ...notice, action: { label: 'Retry work history', run: () => { void useAppStore.getState().resyncTimeline(sessionId, { observationOnly: true }) } } }
       : notice.id === 'interaction-receipt' && onOpenTerminal
         ? { ...notice, action: { label: 'Open terminal', run: onOpenTerminal } }
       : notice)
@@ -366,6 +379,13 @@ export function AgentSessionComposer({
     step: 'A message tool action did not complete', mode: feedback.failure.message,
     restore: 'Your draft is kept. You can try the action again.'
   } }, ...(feedback.failure.retry ? { action: { label: 'Retry', run: feedback.failure.retry } } : {}) })
+  if (source) notices.push({ id: 'source-message-tools', occurrence: JSON.stringify(source.target), notice: {
+    kind: 'indeterminate', notice: {
+      step: 'Some message tools are unavailable on this connection',
+      mode: 'This original member connection supports messages and their waiting controls. Recorded input history, Agent mail, automation, Skills and image transfer are unavailable here.',
+      restore: 'Continue editing, referencing confirmed project files and using this message queue. Open the original Agent workface for its other tools; this connection will not use another local Agent.'
+    }
+  } })
   const inbox = useServiceNotices(ownerKey, notices, session?.kind === 'agent')
 
   const sourceProps = moteComposer ? { ownerKey: moteComposer.draftKey, connection: moteComposer.connection,
@@ -375,8 +395,8 @@ export function AgentSessionComposer({
   return (
     <SessionMailbox pendingLayout={deliveryLayout} key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
-        progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
-        control={session?.kind === 'agent' ? session.control : undefined}
+        progressSession={!source && !readOnly && session?.kind === 'agent' ? session : undefined}
+        control={source ? null : session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
           ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
@@ -463,9 +483,9 @@ export function AgentSessionComposer({
       completionFeedback={completion.completionFeedback}
       tools={(referenceTools) => <AgentComposerTools key={completion.scope} active={visible} disabled={!submitMode.canType} commands={completion.commands} referenceTools={referenceTools}
         viewMode={viewMode} onViewModeChange={(mode) => setViewMode(sessionId, mode)}
-        loadSkills={completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
+        loadSkills={source ? async () => { throw new Error('Original Agent Skills are unavailable through this member connection. Your draft is kept; open the original Agent workface to inspect them.') } : completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
         onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
-        {...(session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
+        {...(!source && session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
       value={text}
       disabled={!submitMode.canType}
       placeholder={nativeQueuePending ? 'Message the Agent; the request stays open…' : submitMode.placeholder}
@@ -480,7 +500,7 @@ export function AgentSessionComposer({
       // including while a request card is up. Core's interrupt path (client.signalAgent → kernel.interrupt)
       // has no pendingInteraction or processState gate, so withholding it here would take away a capability
       // the runtime still honours (RED-LINES.md 判定流程 question 2).
-      {...(submitMode.primaryAction === 'stop' ? { onInterrupt: () => void interrupt(sessionId) } : {})}
+      {...(submitMode.primaryAction === 'stop' ? { onInterrupt: () => { void (source ? interrupt(ownerKey, source.target) : interrupt(ownerKey)) } } : {})}
       // Resource helpers edit the existing draft, including while a request is pending.
       // Submission eligibility stays with Core; it does not disable local drafting.
       {...(submitMode.canType ? {

@@ -77,14 +77,6 @@ export function editMountedSpaceInput(value: unknown, key: string, edit: (curren
   if (spaceMountKey(next.target.reference) !== key) return unreadable()
   return next === current ? original : { ...original, [key]: next }
 }
-/** An unreadable optional window layout cannot prevent an exact member draft edit. */
-export function editMountedSpaceDraftInput(value: unknown, key: string, tabId: string, regionId: string, text: string, selectedView?: SpaceMountView, privateTarget?: SpaceMountRecord, zoneId?: string): Record<string, unknown> {
-  const entries = privateTarget ? ensureMemberSpaceInput(value,key,privateTarget) : mountedSpaceInputs(value), target = memberSpaceInputTarget(entries,key), current = entries[key]
-  if (!target || !object(current) || !object(current.drafts)) return unreadable()
-  const draftKey = mountedRegionKey(target.reference,tabId,regionId,zoneId)
-  return current.drafts[draftKey] === text && (!selectedView || current.view === selectedView) ? entries :
-    { ...entries, [key]: { ...current, ...(selectedView ? { view: selectedView } : {}), drafts: { ...current.drafts, [draftKey]: text } } }
-}
 export function mountedRegistrationKey(input: Pick<MountedSpaceRegistrationInput, 'hostId' | 'registration'>): string {
   const { registration: r } = input
   return JSON.stringify(['folder-registration', input.hostId, r.runtimeId, r.workspaceId, r.expectedResource.hostId, r.expectedResource.workspacePath, r.expectedResource.projectRootPath])
@@ -155,7 +147,7 @@ export type MountedSpaceRegion = {
   zone: SpaceSnapshot['scope']['zones'][number] | undefined
 }
 /** One relevant source snapshot index; no local Session/layout lookup or alias normalization. */
-export function mountedSpaceRegions(snapshot: SpaceSnapshot): MountedSpaceRegion[] {
+export function mountedSpaceRegions(snapshot: Pick<SpaceSnapshot, 'reference' | 'scope'>): MountedSpaceRegion[] {
   const tabs = new Map(snapshot.scope.tabs.map(tab => [tab.tabId, tab]))
   const zones = new Map(snapshot.scope.zones.map(zone => [zone.zoneId, zone]))
   return snapshot.scope.regions.flatMap(region => {

@@ -126,7 +126,7 @@ export function registerSpaceMountIpc(ports: {
     read: [], attach: ['afterByte'], refreshAttachment: ['attachmentId','afterByte'], replay: ['attachmentId','afterByte'], detach: ['attachmentId'],
     conversationRead: ['input'], conversationCheckpoint: ['input'], conversationChanges: ['input'], conversationRelease: ['view'], conversationWatch: ['view'], conversationUnwatch: ['readerId'],
     resize: ['attachmentId','cols','rows'], write: ['data','source','observation'], paste: ['text','terminalData','observation'],
-    submitPrompt: ['prompt','operationId','binding'], inspectInput: ['key'], inspectInteraction: ['operationId']
+    inspectInteraction: ['operationId']
   }
   ports.handle('spaceMounts:memberCall', (event, token: string, memberToken: string, method: unknown, value: unknown) => sessionInputOperationResult(() => reads.read(event.sender, token, async signal => {
     if (typeof method !== 'string' || !Object.hasOwn(memberFields, method)) throw new Error('Unknown fixed original member operation.')

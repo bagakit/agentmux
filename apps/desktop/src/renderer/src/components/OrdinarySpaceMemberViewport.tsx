@@ -10,17 +10,18 @@ import { MountedCreationRecovery } from './MountedCreationRecovery'
 import { OriginalSourceMemberMetadata } from './OriginalSourceMemberMetadata'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { mountedSessionFacts } from '../lib/space-mount-sessions'
+import { originalSourceInputOwnerKey } from '../lib/original-space-navigation'
 import './mounted-space.css'
 import './ordinary-space-member.css'
 
 /** An ordinary private Region keeps its layout; only its exact foreign IO source differs. */
 export function OrdinarySpaceMemberViewport(props: {
-  tabId: string; regionId: string; sessionId: string; visible: boolean; active: boolean; interactiveResize?: boolean; children: ReactNode
+  tabId: string; regionId: string; sessionId: string | null; visible: boolean; active: boolean; interactiveResize?: boolean; children: ReactNode
 }) {
   return <SpaceSourceReaders><Viewport {...props} /></SpaceSourceReaders>
 }
 function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResize = false, children }: {
-  tabId: string; regionId: string; sessionId: string; visible: boolean; active: boolean; interactiveResize?: boolean; children: ReactNode
+  tabId: string; regionId: string; sessionId: string | null; visible: boolean; active: boolean; interactiveResize?: boolean; children: ReactNode
 }) {
   const occurrence = useAppStore(() => ordinaryAgentSpaceMember({ tabId, regionId, sessionId }))
   const refreshSource = useSpaceSourceReader(occurrence.kind === 'foreign' ? occurrence.source : undefined, visible)
@@ -32,15 +33,12 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
   const retainedRun = useRef<{ witness: string; runId: string } | undefined>(undefined)
   const retainedCreationRecovery = useRef<{ witness: string; active: boolean } | undefined>(undefined)
   const retainedSessionRecovery = useRef<{ witness: string; active: boolean } | undefined>(undefined)
-  const sourceProjection = sessionId.startsWith('original-source-member:')
+  const sourceProjection = sessionId?.startsWith('original-source-member:') ?? false
   const relationFact = useMemo(() => occurrence.kind === 'foreign' && snapshot ? mountedSessionFacts(snapshot, metadata).get(occurrence.presentation.key) : undefined,
     [occurrence, snapshot, metadata])
   const sourceError = useAppStore(state => occurrence.kind === 'foreign' ? state.mountedSpaceSessions[mountKey]?.error ?? state.mountedSpaceObservations[mountKey]?.error : undefined)
-  const draft = useAppStore(state => {
-    if (occurrence.kind !== 'foreign') return undefined
-    const inputs = state.mountedSpaceInputs as Record<string, { drafts?: Record<string, string> }>
-    return inputs[mountKey]?.drafts?.[occurrence.presentation.key]
-  })
+  const inputOwnerKey = occurrence.kind === 'foreign' ? originalSourceInputOwnerKey(occurrence.member.target.runtimeId, occurrence.member.target.agentSessionId) : ''
+  const draft = useAppStore(state => occurrence.kind === 'foreign' ? state.agentComposerDrafts[inputOwnerKey] : undefined)
   if (occurrence.kind === 'existing') return children
   if (occurrence.kind === 'unconfirmed') return <SurfaceState title="Original Agent reference unconfirmed" description={occurrence.issue}
     details={{ summary: 'Original reference', content: <dl><dt>Region</dt><dd><code>{regionId}</code></dd><dt>Session</dt><dd><code>{sessionId}</code></dd></dl> }} />
@@ -50,7 +48,7 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
     <div><dt>Execution Runtime</dt><dd><code>{occurrence.member.target.runtimeId}</code></dd></div>
     <div><dt>Creation</dt><dd><code>{occurrence.creationOperationId}</code></dd></div></dl>
   const privateDraft = <details className="mounted-space-session-draft" open={Boolean(draft)}><summary>Unsent draft</summary>
-    <label><span>Private task draft</span><textarea aria-label="Original Space task draft" value={draft ?? ''} onChange={event => useAppStore.getState().editSpaceMountDraft(mountKey, tabId, regionId, event.target.value)} /></label>
+    <label><span>Private task draft</span><textarea aria-label="Original Space task draft" value={draft ?? ''} onChange={event => useAppStore.getState().setAgentComposerDraft(inputOwnerKey, event.target.value)} /></label>
   </details>
   const recoveryWitness = JSON.stringify([occurrence.source, occurrence.presentation.key, occurrence.creationOperationId])
   const sessionState = relationFact?.current?.state
@@ -91,7 +89,7 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
     <header className="ordinary-space-member__header"><MountedExecutionRelation member={occurrence.presentation} target={occurrence.source} occurrence={relation} />
     <details className="ordinary-space-member__reference"><summary>Original Agent</summary>{reference}
       {sourceProjection ? <OriginalSourceMemberMetadata current={relationFact?.current} last={relationFact?.last} error={sourceError} /> : null}</details></header>
-    <SpaceMemberWorkface key={JSON.stringify([currentTarget,occurrence.creationOperationId])} target={currentTarget} privateInput={occurrence.source} onRefreshSource={refreshSource}
-      mountKey={mountKey} tabId={tabId} visible={visible} active={active && activeRegion} interactiveResize={interactiveResize} />
+    <SpaceMemberWorkface key={JSON.stringify([currentTarget,occurrence.creationOperationId])} target={currentTarget} privateInput={occurrence.source} sourceTabId={occurrence.presentation.tab.tabId} onRefreshSource={refreshSource}
+      visible={visible} active={active && activeRegion} interactiveResize={interactiveResize} />
   </section>
 }

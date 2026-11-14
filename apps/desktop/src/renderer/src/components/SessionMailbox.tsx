@@ -185,7 +185,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   timeline?: AgentTimelineSnapshot | undefined
   progressSession?: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
   visible?: boolean
-  control?: AgentSessionControl | undefined
+  /** null retains an explicitly unavailable configured route without borrowing a timeline lookalike. */
+  control?: AgentSessionControl | null | undefined
   userMessages?: readonly AgentSessionUserMessage[] | undefined
   onMoveQueuedToDraft?: MoveQueuedMessageToDraft | undefined
   onArchiveQueued?: ArchiveQueuedMessage | undefined
@@ -265,10 +266,10 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   const ProgressIcon = progressStatus === 'active' ? ThemeActionRepeatIcon : progressStatus === 'paused' ? ThemeActionPauseIcon : ThemeStatusUnknownIcon
 
   const storeSession = useAppStore((state) =>
-    propControl ? undefined : state.sessions.find((s) => s.id === timeline?.agentSessionId)
+    propControl !== undefined ? undefined : state.sessions.find((s) => s.id === timeline?.agentSessionId)
   )
   const effectiveControl: AgentSessionControl | undefined =
-    propControl ?? (storeSession?.kind === 'agent' ? storeSession.control : undefined)
+    propControl === null ? undefined : propControl ?? (storeSession?.kind === 'agent' ? storeSession.control : undefined)
 
   const scope = JSON.stringify([effectiveControl?.hostId, effectiveControl?.agentSessionId, effectiveControl?.run.runId, timeline?.agentSessionId])
   const previousScope = useRef(scope)

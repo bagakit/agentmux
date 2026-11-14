@@ -81,6 +81,8 @@
 .mounted-space-agent__issue { margin:0; color:var(--text-2); font-size:12px; line-height:1.6; }
 .mounted-space-agent__composer { min-width:0; max-height:40vh; overflow:auto; }
 .mounted-space-agent__inputs ul { display:grid; gap:12px; list-style:none; padding:0; margin:12px 0 0; }
+.mounted-space-agent__inputs { max-height:36%; overflow:auto; font-size:var(--fs-meta); color:var(--text-2); }
+.mounted-space-agent__inputs > summary { cursor:pointer; color:var(--text-3); }
 .mounted-space-agent__inputs li { display:grid; gap:6px; min-width:0; }
 .mounted-space-agent__inputs p { margin:0; line-height:1.6; }
 .mounted-space-agent__inputs pre { margin:0; max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }

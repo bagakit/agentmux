@@ -14,9 +14,10 @@ function visible(element: HTMLElement | null): element is HTMLElement {
 }
 
 /** The workface supplies its actual nodes; no selector discovers a request or terminal. */
-export function usePendingDeliveryLayout({ boundaryRef, bodyRef, interactionSourceRef, interactionRef, interactionId, terminal, active = true }: {
+export function usePendingDeliveryLayout({ boundaryRef, bodyRef, protectedRef, interactionSourceRef, interactionRef, interactionId, terminal, active = true }: {
   boundaryRef: RefObject<HTMLElement | null>
   bodyRef?: RefObject<HTMLElement | null>
+  protectedRef?: RefObject<HTMLElement | null>
   interactionSourceRef?: RefObject<HTMLElement | null>
   interactionRef?: RefObject<HTMLElement | null>
   interactionId?: string | undefined
@@ -28,6 +29,12 @@ export function usePendingDeliveryLayout({ boundaryRef, bodyRef, interactionSour
     readOverlapTop(popup) {
       if (!active || !visible(boundaryRef.current)) return undefined
       let top = terminal ? readTerminalInputOverlapTop(terminal, popup) : undefined
+      const protectedSurface = protectedRef?.current ?? null
+      if (visible(protectedSurface)) {
+        const rect = protectedSurface.getBoundingClientRect()
+        if (popup.left < rect.right && popup.right > rect.left && popup.top < rect.bottom && popup.bottom > rect.top)
+          top = top === undefined ? rect.top : Math.min(top, rect.top)
+      }
       const source = interactionSourceRef?.current ?? null, card = interactionRef?.current ?? null
       if (interactionId && visible(source) && visible(card)) {
         const rect = source.getBoundingClientRect()
@@ -39,7 +46,7 @@ export function usePendingDeliveryLayout({ boundaryRef, bodyRef, interactionSour
     },
     subscribe(onChange) {
       if (!active) return () => {}
-      const nodes = new Set([boundaryRef.current, bodyRef?.current, interactionSourceRef?.current, interactionRef?.current].filter((node): node is HTMLElement => Boolean(node)))
+      const nodes = new Set([boundaryRef.current, bodyRef?.current, protectedRef?.current, interactionSourceRef?.current, interactionRef?.current].filter((node): node is HTMLElement => Boolean(node)))
       const resize = new ResizeObserver(onChange), mutation = new MutationObserver(onChange)
       for (const node of nodes) {
         resize.observe(node)
@@ -48,5 +55,5 @@ export function usePendingDeliveryLayout({ boundaryRef, bodyRef, interactionSour
       const stopTerminal = terminal ? observeTerminalInputGeometry(terminal, onChange) : () => {}
       return () => { resize.disconnect(); mutation.disconnect(); stopTerminal() }
     }
-  }), [boundaryRef, bodyRef, interactionSourceRef, interactionRef, interactionId, terminal?.regionId, terminal?.sessionId, terminal?.runId, active])
+  }), [boundaryRef, bodyRef, protectedRef, interactionSourceRef, interactionRef, interactionId, terminal?.regionId, terminal?.sessionId, terminal?.runId, active])
 }

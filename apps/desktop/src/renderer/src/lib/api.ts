@@ -1216,7 +1216,8 @@ const mockApi: AgentMuxDesktopApi = {
     },
     recordDeliveryFailure: async record => ({ logId: record.logId, availability: 'unavailable', record: null, persistence: null, issue: 'Preview has no diagnostic Host.' }),
     submitPrompt: async (control, prompt) => {
-      await mockApi.sessions.write(control, `${prompt.trim()}\r`, 'user')
+      if (control.kind === 'space-member-target') throw new Error('Original Space member input requires the original Desktop Core.')
+      await mockApi.sessions.write(control.kind === 'configured-control' ? control.control : control, `${prompt.trim()}\r`, 'user')
     },
     replyQuestion: async () => { throw new Error('Native question replies require the original Desktop Core.') },
     inputMailbox: async () => { throw new Error('Original input mailbox reading requires the Desktop Runtime.') },

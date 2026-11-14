@@ -6,7 +6,7 @@ import { spaceSessionMemberKey, type SpaceSessionMember } from '@agentmux/core/s
 import { mountedSessionFacts, type MountedSessionObservation } from './space-mount-sessions'
 import { mountedRegionKey, type MountedSpaceRegion } from './space-mount-view'
 
-export type OrdinaryMemberReference = { tabId: string; regionId: string; sessionId: string }
+export type OrdinaryMemberReference = { tabId: string; regionId: string; sessionId: string | null }
 type ExistingPresentation = { id: string; hostId: string; control: { kind: 'agent'; hostId: string; agentSessionId: string } }
 export type OrdinarySpaceMember = { kind: 'existing' } | { kind: 'unconfirmed'; issue: string } | {
   kind: 'foreign'; source: SpaceMountRecord; member: SpaceMountMemberTarget; metadataMember: SpaceSessionMember; presentation: MountedSpaceRegion; creationOperationId: string
@@ -57,7 +57,8 @@ export function ordinarySpaceMember(graph: AgentMuxSpatialGraph | null | undefin
     return { kind: 'foreign', source, creationOperationId: region.creationOperationId,
       presentation: { key: mountedRegionKey(source.reference, tab.tabId, region.regionId), reference: source.reference, tab, region, zone: tab.zoneId === null ? undefined : index.zones.get(tab.zoneId) },
       metadataMember: { hostId: region.execution.hostId, runtimeId: executionRuntimeId, agentSessionId: region.agentSessionId },
-      member: { hostId: sourceHostId, target: { reference: source.reference, regionId: region.regionId, runtimeId: executionRuntimeId, agentSessionId: region.agentSessionId, expectedRun: { runId: region.runId } } } }
+      member: { hostId: sourceHostId, target: { reference: source.reference, regionId: region.regionId, runtimeId: executionRuntimeId, agentSessionId: region.agentSessionId,
+        expectedRun: { runId: region.runId }, expectedAdmission: { kind: 'creation', operationId: region.creationOperationId } } } }
   }
   const result = project(); index.values.set(key, result); return result
 }

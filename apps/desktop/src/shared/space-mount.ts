@@ -80,8 +80,6 @@ export type SpaceMountMemberMethods = {
   resize: { input: { attachmentId: string; cols: number; rows: number }; result: { cols: number; rows: number } | null }
   write: { input: { data: import('@agentmux/core').AgentMuxRunInputData; source: import('@agentmux/core').AgentMuxAgentWriteInput['source']; observation?: import('@agentmux/core/control').InputObservationReference }; result: void }
   paste: { input: { text: string; terminalData: string; observation?: import('@agentmux/core/control').InputObservationReference }; result: void }
-  submitPrompt: { input: { prompt: string; operationId: string; binding: import('@agentmux/core').AgentPromptInputBinding }; result: Awaited<ReturnType<import('@agentmux/core/space-member-client').SpaceMemberClient['submitAgentPrompt']>> }
-  inspectInput: { input: { key: import('@agentmux/core').AgentPromptInputKey }; result: import('@agentmux/core').AgentInputSubmissionReceipt | null }
   inspectInteraction: { input: { operationId: string }; result: import('@agentmux/core').AgentMuxInteractionOperationReceipt | null }
 }
 export type SpaceMountMemberSurface = {

@@ -1,4 +1,4 @@
-import { AgentMuxError, validateAgentPromptInputBinding, type AgentMuxRuntimeSubject } from '@agentmux/core'
+import { AgentMuxError, type AgentMuxRuntimeSubject } from '@agentmux/core'
 import { connectSpaceMember } from '@agentmux/core/space-member-client'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxRpcClient } from '@agentmux/core'
@@ -105,14 +105,6 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberTarget, po
     resize: async value => { check(); requireLease(value.attachmentId); const result = await client.resizeTerminal(input.target.expectedRun, value.cols, value.rows); check(); return { cols: result.cols, rows: result.rows } },
     write: async value => { check(); await client.writeAgent({ agentSessionId: input.target.agentSessionId, expectedRun: input.target.expectedRun, ...value }); check() },
     paste: async value => { check(); await client.pasteAgent({ agentSessionId: input.target.agentSessionId, expectedRun: input.target.expectedRun, ...value }); check() },
-    submitPrompt: async value => {
-      check(); const binding = validateAgentPromptInputBinding(value.binding)
-      if (binding.expectedRun.runId !== input.target.expectedRun.runId) throw new AgentMuxError('The original input binding belongs to another Run.', 'STALE_AGENT_SESSION_BINDING')
-      const result = await client.submitAgentPrompt({ agentSessionId: input.target.agentSessionId, ...binding, operationId: value.operationId, prompt: value.prompt,
-        ...('admissionIntent' in binding ? { execution: 'immediate' as const } : {}) })
-      check(); return result
-    },
-    inspectInput: async value => { check(); if (value.key.agentSessionId !== input.target.agentSessionId || value.key.expectedRun.runId !== input.target.expectedRun.runId) throw new AgentMuxError('This input key belongs to another original member.', 'SPACE_MEMBER_TARGET_MISMATCH'); return await client.inspectAgentInput({ key: value.key }) },
     inspectInteraction: async value => { check(); return await client.inspectAgentInteractionOperation({ agentSessionId: input.target.agentSessionId, operationId: value.operationId }) }
   }
   const dispose = async () => {
