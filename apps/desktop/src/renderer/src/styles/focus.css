@@ -272,6 +272,7 @@
 .focus-retained-projects__row:disabled { cursor: default; }
 .focus-source-loading { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--text-3); font-size: var(--fs-micro); }
 
+.global-focus-surface .global-focus-main:has(> .focus-search-results) > .global-board-columns { flex-basis: 0; }
 .focus-search-results { display: flex; flex-direction: column; overflow: hidden; flex: 0 1 auto; min-height: 0; min-width: 0; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); }
 .focus-search-results > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; padding: 6px 8px; }
 .focus-search-results > header > strong { font-weight: 600; }
