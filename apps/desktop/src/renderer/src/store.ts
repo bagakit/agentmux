@@ -9411,11 +9411,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     get().focusRegion(result.target.workspaceId, result.target.tabId, result.target.regionId)
   },
   splitRegion(workspaceId, tabId, regionId, direction, initialRequest) {
-    const unavailable = originalSourceActionUnavailable(get(), workspaceId, 'split')
-    if (unavailable) { get().reportError(unavailable); return }
     const current = get()
-    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const tab = current.tabs[tabId]
+    const unavailable = originalSourceActionUnavailable(current, workspaceId, 'split', tab)
+    if (unavailable) { get().reportError(unavailable); return }
+    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     if (!tab || tab.workspaceId !== workspaceId || !tab.regions[regionId]) return
     const addedRegionId = newRegionId()
     const launcher: LauncherWorkbenchSurface = {

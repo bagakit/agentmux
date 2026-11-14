@@ -439,8 +439,9 @@ export function originalSourceMember(state: OriginalSpaceSelectionState, referen
   const result = project(); cache.set(cacheKey, result); return result
 }
 
-export function originalSourceActionUnavailable(state: OriginalSpaceSelectionState, workspaceId: string, action: string): Error | undefined {
-  return originalSourceEntryForSelection(state, workspaceId)
+export function originalSourceActionUnavailable(state: OriginalSpaceSelectionState, workspaceId: string, action: string, tab?: WorkbenchTab): Error | undefined {
+  const source = tab?.workspaceId === workspaceId ? tab.source : originalSourceEntryForSelection(state, workspaceId)
+  return source
     ? Error(`The original Source ${action} is unavailable here. Use the original Core controls; the local workface was not changed.`)
     : undefined
 }
