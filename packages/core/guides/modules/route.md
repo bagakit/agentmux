@@ -15,6 +15,8 @@ It is not a mesh, a global user account, a Node alias or an SSH ProxyJump trace.
 <!-- amux:generated command:route.inspect -->
 <!-- amux:generated command:route.edges -->
 <!-- amux:generated command:route.edge.inspect -->
+<!-- amux:generated command:route.choices -->
+<!-- amux:generated command:route.executors -->
 <!-- amux:generated command:route.configure -->
 
 `route edges` reads only this owner's saved outgoing edge IDs, labels, kind and
@@ -34,6 +36,23 @@ keeps the draft and original work; ask that receiver's actual owner to configure
 Discovery never saves a prefix, imports remote Hosts, recursively walks the network
 or authorizes execution. `route.inspect` and `route.configure` remain restricted to
 their actual original user/device and cannot be carried as delegated policy access.
+
+`route choices` reads this source's saved whole Agent targets without receiver grants,
+endpoints or connections. Keep the returned `agentTarget` unchanged; its `hostId` is
+the source's execution carrier selector, and its Runtime/key pins and `adoptedRoute`
+identify the actual destination. It does not create a saved Host or authorize transit.
+Direct Hosts and routes with the same label or ID remain distinct choices.
+
+`route executors --input FILE|-` accepts `{agentTarget,executorId?,refresh?}` and
+reads that destination's original executor inventory. `refresh` defaults to false;
+only an explicit refresh invokes the executor owner's probe. A current-viewer readonly
+child binds this exact saved route, target and selector. It cannot borrow creation
+preparation, reveal executor environment/arguments, read Sessions or grant input.
+Every receiver still grants the original actor the two finite reads
+`runtime.owner.identity` and `runtime.invoke/listHostExecutors` independently.
+Executable availability is an observation, not Provider or split-execution
+qualification. Unknown/check-failed checks do not disable explicit Start; the
+original selected-executor prepare and formal admission remain authoritative.
 
 Read the actual participating owners before approving a chain. The source saves a
 route definition; every receiving Core separately approves its immediate delegator,
