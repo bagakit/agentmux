@@ -15,11 +15,30 @@ import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 import type { AgentMuxRuntimeSubject } from '../../src/runtime.js'
 import type { AgentMuxRpcCoreClient } from '../../src/public-rpc-service.js'
 
+function isolatedCore(root: string) {
+  const keys = Object.keys(process.env).filter(key => /^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_'))
+  const previous = new Map(keys.map(key => [key, process.env[key]]))
+  const privateEnvironment = {
+    AGENTMUX_STATE_DIRECTORY: join(root, 'state'),
+    AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'),
+    AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson')
+  }
+  // Core captures its own queue, Runtime and auxiliary writers at construction.
+  // Keep caller test instrumentation and restore the ambient environment before yielding.
+  try {
+    for (const key of keys) delete process.env[key]
+    Object.assign(process.env, privateEnvironment)
+    return new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore(), providers: [], controlSocketPath: join(root, 'rpc.sock') })
+  } finally {
+    for (const key of Object.keys(privateEnvironment)) delete process.env[key]
+    for (const [key, value] of previous) process.env[key] = value
+  }
+}
 
 async function coreFixture(cleanup: Array<() => unknown | Promise<unknown>>, runtimeId: string, clients: () => AgentMuxRpcCoreClient[] = () => [], authoritySocketPath?: string) {
   const root = await mkdtemp(join(tmpdir(), 'amx-space-sessions-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
-  const core = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore(), providers: [] }); cleanup.push(() => core.dispose())
+  const core = isolatedCore(root); cleanup.push(() => core.dispose())
   const inner = core as unknown as { registry: AgentMuxAgentSessionRegistry; publishSession(session: AgentMuxStoredAgentSession): void }
   const owner = { runtimeId, ownerInstanceId: runtimeId + '-instance', protocolVersion: 2 as const, processId: process.pid, ctxmux: null, availability: 'connected' as const }
   vi.spyOn(core, 'connectRuntime').mockResolvedValue()
