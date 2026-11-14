@@ -233,41 +233,41 @@
 .global-survey-surface .survey-item-shortcuts button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); cursor: pointer; }
 .global-survey-surface .survey-item-shortcuts button:hover { color: var(--text); background: var(--wash-2); }
 .global-survey-surface .survey-item-row > .survey-item { padding-right: 34px; }
-.survey-item-tabs { position: relative; display: grid; gap: 2px; margin: 0 0 var(--sp-1); }
-.survey-item-tabs::before { content: ''; position: absolute; left: 1px; top: 12px; bottom: 12px; width: 1px; background: var(--survey-edge); pointer-events: none; }
-.survey-tab-column { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; min-height: 32px; padding: var(--sp-2) 32px var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; text-align: left; font: inherit; font-size: var(--fs-body); }
-.survey-tab-column__marks { display: flex; flex: none; align-items: center; gap: 2px; min-width: 16px; min-height: 16px; }
+.survey-item-tabs { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); align-items: stretch; gap: 3px; margin: 0 0 var(--sp-1); }
+.survey-tab-column { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 6px; min-width: 0; min-height: 66px; padding: 8px 4px 6px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; text-align: center; font: inherit; font-size: var(--fs-body); }
+.survey-tab-column__marks { display: flex; flex: none; align-items: center; justify-content: center; gap: 2px; width: calc(100% - 18px); min-width: 16px; min-height: 18px; }
 .survey-tab-column__marks .workbench-tab__marks { flex-wrap: nowrap; }
-.survey-tab-label { display: flex; flex: 1; align-items: center; gap: var(--sp-2); max-width: 100%; min-width: 0; }
-.survey-tab-label > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.survey-tab-label { display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 100%; min-width: 0; line-height: 1.3; }
+.survey-tab-label > .survey-status-label { max-width: 100%; }
+.survey-tab-label > span:first-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-width: 0; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; }
 .survey-tab-column:hover { background: var(--wash-1); color: var(--text); }
 .survey-tab-column[aria-current="true"] { background: var(--wash-2); box-shadow: inset 0 0 0 1px var(--survey-edge); color: var(--text); font-weight: 600; }
 .survey-tab-column:focus-visible, .survey-item-shortcuts button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .survey-tab-cell { position: relative; min-width: 0; }
 .survey-tab-cell .survey-tab-column { width: 100%; height: 100%; }
-.survey-tab-close { position: absolute; top: 4px; right: 3px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; opacity: 0; pointer-events: none; }
+.survey-tab-close { position: absolute; top: 3px; right: 0; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; opacity: 0; pointer-events: none; }
 .survey-tab-cell:is(:hover, :focus-within) .survey-tab-close { opacity: 1; pointer-events: auto; }
 .survey-tab-close:hover { background: var(--wash-2); color: var(--text); }
 .survey-tab-close:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .global-survey-surface .survey-item-row:has(.survey-item-tab-close) > .survey-item { padding-right: 60px; }
 .global-survey-surface .survey-item-shortcuts .survey-item-tab-close { opacity: 0; pointer-events: none; }
 .global-survey-surface .survey-item-row:is(:hover, :focus-within) .survey-item-tab-close { opacity: 1; pointer-events: auto; }
-.global-survey-surface .survey-item-row[data-headerless="true"] > .survey-item-tabs { margin: 0; }
-.global-survey-surface .survey-item-row[data-headerless="true"] .survey-tab-cell:first-child .survey-tab-column { padding-right: 60px; }
-.global-survey-surface .survey-item-row[data-headerless="true"] .survey-tab-cell:first-child .survey-tab-close { right: 29px; }
+.global-survey-surface .survey-item-row[data-headerless="true"] > .survey-item-tabs { margin: 0 28px 0 0; }
+
+
 .global-survey-surface .survey-item-row[data-multi-tab="true"][data-headerless="false"] > .survey-item { min-height: 28px; color: var(--text-3); }
 .global-survey-surface .survey-item-row[data-multi-tab="true"][data-headerless="false"] > .survey-item strong { font-size: var(--fs-meta); font-weight: 500; }
 .survey-item-compact-activity { display: flex; align-items: center; justify-content: flex-end; padding-inline: var(--sp-3); color: var(--text-3); }
 .survey-item-compact-activity:empty { display: none; }
 .survey-status-label { flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
 .survey-item-activity .survey-status-label { max-width: none; }
-.global-survey-surface .survey-item-row[data-headerless="true"] > .survey-drag-handle { left: 8px; top: 2px; }
-.global-survey-surface .survey-item-row[data-headerless="true"]:is(:hover, :focus-within) .survey-tab-cell:first-child .survey-tab-column__marks { visibility: hidden; }
+.global-survey-surface .survey-item-row[data-headerless="true"] > .survey-drag-handle { left: auto; right: 3px; top: 32px; }
+
 @container survey-navigation (max-width: 220px) {
   .survey-tab-label:has(.survey-status-label) { flex-direction: column; align-items: flex-start; gap: 1px; }
   .survey-tab-label:has(.survey-status-label) > span { max-width: 100%; }
-  .survey-tab-column:has(.survey-status-label) { align-items: flex-start; }
-  .survey-tab-column:has(.survey-status-label) .survey-tab-column__marks { margin-top: 2px; }
+  .survey-tab-column:has(.survey-status-label) { align-items: stretch; }
+  .survey-tab-column .survey-status-label { max-width: 100%; }
   .survey-item:has(.survey-status-label) { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: var(--sp-3); row-gap: 1px; }
   .survey-item:has(.survey-status-label) > .survey-item-glyph { grid-column: 1; grid-row: 1 / span 2; align-self: start; padding-top: 2px; }
   .survey-item:has(.survey-status-label) > strong { grid-column: 2; grid-row: 1; }
@@ -297,7 +297,7 @@
 .survey-page-favicon:has(> img:not([hidden])) > svg { visibility: hidden; }
 
 /* Survey list groups organize references; drag handles do not intercept row navigation. */
-.survey-list-ungrouped, .survey-list-group-items { display: flex; flex-direction: column; gap: var(--sp-1); min-height: 12px; }
+.survey-list-ungrouped, .survey-list-group-items { flex: none; display: flex; flex-direction: column; gap: var(--sp-1); min-height: 12px; }
 .survey-list-group { flex: none; min-width: 0; margin-top: var(--sp-2); border-top: 1px solid var(--survey-edge); }
 .survey-list-label, .survey-list-empty { display: block; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-meta); color: var(--text-3); }
 .survey-list-ungrouped[data-drop-over="true"], .survey-list-group[data-drop-over="true"] { background: var(--wash-1); border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--focus-line); }
@@ -374,3 +374,9 @@
 
 .survey-composition-details dd { margin: 2px 0 8px; overflow-wrap: anywhere; }
 .survey-composition-details dt { margin-top: 6px; color: var(--text-3); }
+
+/* The left Survey navigator already names these same Tabs; keep the original Group actions. */
+.global-survey-surface .workbench-zone .pane-tabbar .workbench-tab-strip { display: none; }
+.survey-pin-mark { display: grid; flex: none; place-items: center; width: 12px; color: var(--text-3); }
+.survey-tab-cell .survey-tab-close { width: 20px; height: 20px; }
+.survey-tab-cell[data-selectable="true"] > .survey-tab-column { padding-left: 4px; padding-top: 30px; }

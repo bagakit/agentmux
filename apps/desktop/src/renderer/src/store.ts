@@ -5302,10 +5302,15 @@ function surveyPresentationAfterClose(state: AppState, tabs: AppState['tabs']) {
     const retained = coreSpatialPersistence.current!.graph.tabs.filter(tab => !state.tabs[tab.tabId] && !coreSpatialPersistence!.removedEntities.has(tab.tabId))
     surveyCollectedZones = surveyCollectionAfterClose(state.tabs, tabs, surveyCollectedZones, { ...catalog, tabs: [...catalog.tabs, ...retained] })
   }
+  // Only a close transition from this exact original Browser/Region removes its saved page reference.
+  // A reference that was already unavailable, or whose Region still exists, remains recoverable.
+  const pageClosed = (page: { regionId: string; browserId: string }) => Boolean(surveyPageOwner(state.tabs, page) && !findWorkbenchRegion(tabs, page.regionId))
+  const surveyPageReferences = state.surveyPageReferences.filter(page => !pageClosed(page))
   return { recallNoteId: closedPage ? null : state.recallNoteId,
     recallZoneSelection: closedPage ? null : surveySelectionAfterClose(state.tabs, tabs, state.recallZoneSelection),
     surveyCollectedZones,
-    surveyZoneSelection: !isSurveyPage(state.surveyZoneSelection) && state.surveyZoneSelection && state.surveyCollectedZones[state.surveyZoneSelection.zoneId] && !surveyCollectedZones[state.surveyZoneSelection.zoneId]
+    surveyPageReferences: surveyPageReferences.length === state.surveyPageReferences.length ? state.surveyPageReferences : surveyPageReferences,
+    surveyZoneSelection: isSurveyPage(state.surveyZoneSelection) && pageClosed(state.surveyZoneSelection) ? null : !isSurveyPage(state.surveyZoneSelection) && state.surveyZoneSelection && state.surveyCollectedZones[state.surveyZoneSelection.zoneId] && !surveyCollectedZones[state.surveyZoneSelection.zoneId]
       ? null : isSurveyPage(state.surveyZoneSelection) ? state.surveyZoneSelection : surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
 }
 

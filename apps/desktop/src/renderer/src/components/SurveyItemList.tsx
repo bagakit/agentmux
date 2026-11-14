@@ -30,8 +30,9 @@ function acceptsContainer(from: Target | undefined, groupId: string | null): boo
 }
 
 /** List organization alone owns drag behavior; each original row retains its existing content/actions. */
-export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId, leading, composition }: {
+export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId, leading, trailing, composition }: {
   leading?: ReactNode
+  trailing?: ReactNode
   composition?: { start(reference: SurveyContentReference): string | null; canDrop(target: SurveyCompositionDropTarget): boolean; drop(target: SurveyCompositionDropTarget | null): void }
   model: SurveyListOrganizationModel
   titles: ReadonlyMap<string, string>
@@ -159,6 +160,7 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
           {rows(group.zoneIds, group.groupId, visible && !group.collapsed)}
         </SurveyListGroup>)}
       </SortableContext>
+      {trailing}
       {contentLabel.current ? <DragOverlay dropAnimation={null} modifiers={[({ transform, activeNodeRect, activatorEvent }) => {
         const point = activatorEvent && getEventCoordinates(activatorEvent)
         if (!activeNodeRect) return transform

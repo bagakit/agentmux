@@ -19,6 +19,7 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const PinIcon = semanticIconComponent('action.pin')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 
@@ -51,6 +52,9 @@ export type SurveyItemOptionsProps = {
   onMovePage?: () => void
   onRemovePageReference?: () => void
   onClose?: () => void
+  onClosePage?: (() => void) | undefined
+  pinned?: boolean
+  onPinChange?(pinned: boolean): void
   grouping?: SurveyItemGrouping | undefined
 }
 
@@ -99,7 +103,7 @@ export function SurveyItemContextMenu({ children, returnFocus, ...props }: Surve
   </ContextMenu.Root>
 }
 
-function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onNewBrowser, onNewTab, onSelectContent, onMoveTab, onMovePage, onRemovePageReference, onClose, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
+function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onNewBrowser, onNewTab, onSelectContent, onMoveTab, onMovePage, onRemovePageReference, onClose, onClosePage, pinned, onPinChange, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
   const displayPath = usePathDisplay()
   return <>
       <M.Label className="survey-topic-menu__label">{title}</M.Label>
@@ -112,6 +116,8 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
       {onMoveTab ? <M.Item className="tab-context-menu__item" onSelect={() => run(onMoveTab)}><ThemeNavigationSpaceIcon size={14} /><span>Move Tab to research…</span></M.Item> : null}
       {onMovePage ? <M.Item className="tab-context-menu__item" onSelect={() => run(onMovePage)}><ThemeNavigationSpaceIcon size={14} /><span>Move page to research…</span></M.Item> : null}
       {onSelectContent ? <M.Item className="tab-context-menu__item" onSelect={() => run(onSelectContent)}><ThemeNavigationSpaceIcon size={14} /><span>Select content to combine…</span></M.Item> : null}
+      {onPinChange ? <M.Item className="tab-context-menu__item" onSelect={() => run(() => onPinChange(!pinned))}><PinIcon size={14} /><span>{pinned ? 'Unpin' : 'Pin'}</span></M.Item> : null}
+      {onClosePage ? <M.Item className="tab-context-menu__item" onSelect={() => run(onClosePage)}><ThemeActionCloseIcon size={14} /><span>Close page</span></M.Item> : null}
       {onRemovePageReference ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRemovePageReference)}><ThemeActionRemoveIcon size={14} /><span>Remove page from Survey</span></M.Item> : null}
       {zone && onClose ? <M.Item className="tab-context-menu__item" onSelect={() => run(onClose)}><ThemeActionCloseIcon size={14} /><span>Close in Survey</span></M.Item> : null}
       {grouping ? <M.Sub><M.SubTrigger className="tab-context-menu__item"><span className="survey-topic-menu__indicator" /><span>Move to group</span><ThemeNavigationDisclosureIcon size={12} /></M.SubTrigger>

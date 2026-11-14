@@ -11,12 +11,14 @@ import { currentDisplayNameRevision } from '../store'
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const PinIcon = semanticIconComponent('action.pin')
 
 
 export type SurveyItemNameDraft = { value: string; focusOnMount: boolean; revision: { revision: number }; selection: { start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null }
 
 /** Both navigation and shortcuts address this row’s original Zone. */
-export function SurveyZoneItem({ zone, title, glyph, selected, activity, activityDescription, editing = false, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onCloseSingleTab, onContextMenu, compositionEnabled = false, selection }: {
+export function SurveyZoneItem({ zone, title, glyph, selected, activity, activityDescription, editing = false, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onCloseSingleTab, onContextMenu, compositionEnabled = false, selection, pinned }: {
+  pinned?: boolean; onPinChange?(pinned: boolean): void
   selection?: SurveyCompositionSelectionControl | undefined
   compositionEnabled?: boolean
   zone: AgentMuxZoneFact
@@ -90,6 +92,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, activit
     {!editing ? tabColumns : null}
     {compact ? <span className="survey-item-compact-activity survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span> : null}
     {!editing ? <div className="survey-item-shortcuts" aria-label={`Actions for ${title}`}>
+      {pinned ? <span className="survey-pin-mark" aria-label="Pinned"><PinIcon size={11} /></span> : null}
       {onCloseSingleTab ? <button type="button" className="survey-item-tab-close" aria-label={`Close survey tab: ${title}`} title={`Close ${title}`} onClick={onCloseSingleTab}><ThemeActionCloseIcon size={12} /></button> : null}
       {options}
     </div> : null}

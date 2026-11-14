@@ -43,7 +43,7 @@ export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedB
         ? <img key={surface.faviconDataUrl} src={surface.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span> : null}
       <WorkbenchTabMarks marks={customPrimary ? marks.filter(mark => mark.regionId !== surface.regionId) : marks} />
     </span>
-    <span className="survey-tab-label"><span>{title}</span>{unknown ? <span className="survey-status-label" aria-hidden="true">Unconfirmed</span> : null}</span>
+    <span className="survey-tab-label"><span>{title}</span>{unknown ? <span className="survey-status-label" aria-hidden="true">Unknown</span> : null}</span>
   </button><button type="button" className="survey-tab-close" aria-label={`Close survey tab: ${title}`} title={`Close ${title}`}
     onClick={() => onClose(title)}><CloseIcon size={12} /></button></div>
 }

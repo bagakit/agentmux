@@ -8,8 +8,11 @@ import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { surveyContentKey, useSurveyContentDrag, type SurveyPageDrop } from '../lib/survey-composition-drag'
 
 const BrowserIcon = semanticIconComponent('object.browser')
+const CloseIcon = semanticIconComponent('action.close')
+const PinIcon = semanticIconComponent('action.pin')
 /** One saved reference, distinct from every sibling in its original project or Tab. */
-export function SurveyPageItem({ page, browser, selected, enabled, actions, onSelect, selection }: {
+export function SurveyPageItem({ page, browser, selected, enabled, actions, onSelect, onClose, selection, pinned }: {
+  pinned?: boolean; onPinChange?(pinned: boolean): void; onClose?: (() => void) | undefined
   selection?: SurveyCompositionSelectionControl | undefined
   page: AgentMuxSurveyPageReference; browser: BrowserWorkbenchSurface | null; selected: boolean; enabled: boolean; actions: ReactNode; onSelect(): void
 }) {
@@ -25,7 +28,11 @@ export function SurveyPageItem({ page, browser, selected, enabled, actions, onSe
       <span className="survey-item-glyph" aria-hidden="true"><span className="survey-page-favicon"><BrowserIcon size={16} />{browser?.faviconDataUrl
         ? <img key={browser.faviconDataUrl} src={browser.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span></span><strong>{title}</strong>
     </button>
-    <div className="survey-item-shortcuts">{actions}</div>
+    <div className="survey-item-shortcuts">
+      {pinned ? <span className="survey-pin-mark" aria-label="Pinned"><PinIcon size={11} /></span> : null}
+      {onClose ? <button type="button" className="survey-item-tab-close" aria-label={`Close survey page: ${title}`} title={`Close ${title}`} onClick={onClose}><CloseIcon size={12} /></button> : null}
+      {actions}
+    </div>
     {drop.isOver ? <span className="survey-compose-cue" aria-hidden="true">Combine into new research</span> : null}
     {!browser ? <span role="status" className="survey-relation-notice">The original Browser is unconfirmed. Its exact reference is kept.</span> : null}
   </div>
