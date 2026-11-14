@@ -224,9 +224,29 @@ function retainedExecutorReference(sessions: readonly AgentMuxStoredAgentSession
     reservations.some(value => value.kind === 'create' && value.preparedCreation && executorDepends(value.preparedCreation, hostId, executorId))
 }
 
+/** Original execution/recovery paths only; no Run adoption or history-body hydration. */
+function retainedExecutionDirectories(sessions: readonly AgentMuxStoredAgentSession[], retired: readonly AgentMuxRetiredAgentSession[],
+  reservations: readonly AgentMuxLifecycleReservation[], hostId: string): readonly string[] {
+  const paths = new Set<string>()
+  const keep = (value: { hostId: string; workspacePath: string } | undefined) => { if (value?.hostId === hostId) paths.add(value.workspacePath) }
+  for (const session of sessions) keep(session)
+  for (const session of retired) if (session.history && session.recordDeletion?.phase !== 'complete') keep({ hostId: session.hostId, workspacePath: session.history.workspacePath })
+  for (const value of reservations) {
+    if (value.kind === 'create') keep(value.preparedCreation)
+    else if (value.kind === 'resume' || value.kind === 'reopen') {
+      keep(value.preparedSession)
+      if (value.kind === 'reopen' && value.expectedRetirement.history) keep({ hostId: value.expectedRetirement.hostId, workspacePath: value.expectedRetirement.history.workspacePath })
+    }
+  }
+  return [...paths]
+}
+
 export type AgentMuxAgentSessionStore = {
   /** Exact active/retired Run ownership, including preceding admitted binding writes. */
   hasAgentRun(run: AgentMuxRunRef): Promise<boolean>
+  /** Cold Files mutation admission; distinct paths from the original metadata owner. */
+  retainedExecutionDirectories?(hostId: string): Promise<readonly string[]>
+
   /** Exact executing-Host dependency, including durable no-Run creation seeds. */
   hostExecutorReferenced?(hostId: string, executorId: string): Promise<boolean>
   /** Optional read-only observation. Missing support never triggers Session hydration or repair. */
@@ -2914,6 +2934,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return [...this.sessions.values()].map((session) => structuredClone(session))
   }
 
+  async retainedExecutionDirectories(hostId: string): Promise<readonly string[]> {
+    return retainedExecutionDirectories([...this.sessions.values()], this.retiredAgentSessions, [...this.reservations.values()], hostId)
+  }
+
   async hostExecutorReferenced(hostId: string, executorId: string): Promise<boolean> {
     return retainedExecutorReference([...this.sessions.values()], this.retiredAgentSessions, [...this.reservations.values()], hostId, executorId)
   }
@@ -3743,6 +3767,22 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const result = await this.withReadDatabase(db => db.prepare('SELECT id FROM sessions ORDER BY rowid').all()
       .map(row => this.completeSession(db, String(row.id))!), document => document.sessions)
     return result
+  }
+
+  async retainedExecutionDirectories(hostId: string): Promise<readonly string[]> {
+    await this.tail
+    // DISTINCT path projection stays in this Store; no Session/Run/input hydration.
+    return await this.withReadDatabase(db => db.prepare(`SELECT DISTINCT cwd FROM (
+      SELECT json_extract(json,'$.workspacePath') AS cwd FROM sessions WHERE json_extract(json,'$.hostId')=?
+      UNION ALL SELECT json_extract(json,'$.history.workspacePath') FROM retired_sessions
+        WHERE json_extract(json,'$.hostId')=? AND COALESCE(json_extract(json,'$.recordDeletion.phase'),'')!='complete'
+      UNION ALL SELECT json_extract(json,'$.preparedCreation.workspacePath') FROM reservations WHERE json_extract(json,'$.preparedCreation.hostId')=?
+      UNION ALL SELECT json_extract(json,'$.preparedSession.workspacePath') FROM reservations WHERE json_extract(json,'$.preparedSession.hostId')=?
+      UNION ALL SELECT json_extract(json,'$.expectedRetirement.history.workspacePath') FROM reservations WHERE json_extract(json,'$.expectedRetirement.hostId')=?
+    ) WHERE cwd IS NOT NULL`).all(hostId, hostId, hostId, hostId, hostId).map(row => {
+      if (typeof row.cwd !== 'string' || !row.cwd.length || row.cwd.includes('\0')) throw new AgentMuxError('An original execution directory reference is unreadable.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
+      return row.cwd
+    }), document => retainedExecutionDirectories(document.sessions, document.retiredAgentSessions, document.reservations, hostId), undefined, true)
   }
 
   async hostExecutorReferenced(hostId: string, executorId: string): Promise<boolean> {

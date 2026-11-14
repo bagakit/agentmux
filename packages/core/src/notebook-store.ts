@@ -4,8 +4,8 @@ import { basename, dirname, isAbsolute, join } from 'node:path'
 import { durableWriteFile } from './durable-write.js'
 import { AgentMuxNotesStorage, defaultNotesDirectory, withNotesStorageFileLock } from './notes-storage.js'
 import { AgentMuxError } from './errors.js'
-import { applyNotebookChange, emptyNotebookState, notebookFingerprint, parseNotebookState, type NoteResource, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
-import { NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFilesLocated, initializeNotebookFiles, readNotebookFiles, readNotebookProvenance, writeNotebookFiles, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch } from './notebook-files.js'
+import { applyNotebookChange, applyNotebookFileRelocations, emptyNotebookState, notebookFingerprint, parseNotebookState, type NoteResource, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
+import { NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFilesLocated, initializeNotebookFiles, readNotebookFiles, readNotebookProvenance, writeNotebookFiles, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch, planNotebookFileRelocation, parseNotebookFileRelocationPlan, notebookFileRelocationRows, type NotebookFileRelocationPlan } from './notebook-files.js'
 import { parseNoteProvenanceWrite, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
 import { parseNoteFileTitle, parseNoteTitleIntent, parseNoteTitleOperation, type NoteTitlePort, type NoteTitleIntent, type NoteTitleOperation, type NoteFileTitle, type NoteTitleProjection, type NoteTitleInspection } from './note-title.js'
 import { noteProvenanceResourceKey } from './note-provenance.js'
@@ -15,6 +15,7 @@ export * from './public-rpc-notes-storage.js'
 export * from './notebook-catalog.js'
 export * from './note-provenance.js'
 export * from './note-history.js'
+export { parseNotebookFileRelocationPlan, type NotebookFileRelocationPlan } from './notebook-files.js'
 /** The stable original catalog lock also serializes attribution and directory publication. */
 export async function withNotebookFileLock<T>(path: string, work: () => Promise<T>): Promise<T> {
   return withNotesStorageFileLock(path, work)
@@ -95,6 +96,29 @@ export class AgentMuxNotebookStore {
   async runWithWriteLease<T>(work: () => Promise<T>): Promise<T> {
     await this.ready()
     return this.storage ? this.storage.withLock(work) : this.withWriteLock(work)
+  }
+  /** Compact original-resource projection, under the existing Files/Notes lease. */
+  async planFileRelocation(from: NoteResource, to: NoteResource): Promise<NotebookFileRelocationPlan> {
+    await this.ensureReadableFiles()
+    const resource = (value: NoteResource): NoteResource => ({ hostId: value.hostId, workspaceId: value.workspaceId, workspacePath: value.workspacePath, path: value.path })
+    return planNotebookFileRelocation(this.path, resource(from), resource(to))
+  }
+  /** One original root publication; Note IDs, creators and history events are retained. */
+  async applyFileRelocation(plan: NotebookFileRelocationPlan, operationId: string, actor: NotebookActor): Promise<void> {
+    const ownedPlan = parseNotebookFileRelocationPlan(plan), originalActor = structuredClone(actor)
+    const relocations = notebookFileRelocationRows(ownedPlan)
+    if (!relocations.length) return
+    if (!ownedPlan.root) throw new AgentMuxError('The original Note relocation root is unconfirmed.', 'NOTE_METADATA_RELOCATION_CONFLICT')
+    await this.locate(true)
+    await this.withWriteLock(async () => {
+      const before = (await readNotebookFiles(this.path, false))?.state
+      if (!before) throw new AgentMuxError('The original Note relocation catalog is missing.', 'NOTE_METADATA_RELOCATION_CONFLICT')
+      const state = applyNotebookFileRelocations(before, relocations, operationId, originalActor, Date.now())
+      if (state !== before) await durableWriteFile(this.path + '.previous', JSON.stringify(before) + '\n', { requireDirectorySync: true })
+      await writeNotebookFiles(this.path, { state, relocations, expectedRoot: ownedPlan.root! })
+      if (this.storage) await this.storage.confirmCatalog()
+      this.emit({ state })
+    })
   }
   async apply(input: NotebookWrite, actor: NotebookActor): Promise<NotebookState> {
     const original = structuredClone(input), originalActor = structuredClone(actor)

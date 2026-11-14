@@ -19,8 +19,23 @@ export type FileMkdirParams = Omit<FileStatParams, 'expectedResource'> & {
   operationId: string; expectedResource: FileReadResource; expectedAbsent: true; expected: FilePathScopeWitness
 }
 export type FileMutationInspectParams = Omit<FileStatParams, 'expectedResource'> & { operationId: string; expectedResource: FileReadResource }
+export type FileMoveEntry = Exclude<FilePathObservation['entry'], { kind: 'absent' }>
+export type FileMoveParams = FileMutationInspectParams & {
+  expected: FilePathScopeWitness & { entry: FileMoveEntry }
+  destination: Omit<FileMutationInspectParams, 'operationId'> & { expectedAbsent: true; expected: FilePathScopeWitness }
+}
+export type FileMoveReceipt = {
+  action: 'move'; phase: 'prepared' | 'claimed' | 'published' | 'settled'
+  filesystem: 'moved' | 'not-applied' | 'unknown'; durability: 'confirmed' | 'unconfirmed'
+  movedWitness?: FileEntryWitness
+  nameAudit?: { operationId: string; status: 'recorded' | 'unconfirmed'; message?: string }
+  noteMetadata?: { status: 'recorded' | 'unconfirmed'; message?: string }
+  code?: string; message?: string
+}
+export type FileMoveResult = { operationId: string; resource: FileReadResource | null; destination: FileReadResource | null; result: FileMoveReceipt }
+
 /** Original transport provenance is supplied by the Host, never by a JSON request. */
-export type FilePathMutationContext = FileWriteContext & { callerHostId?: string }
+export type FilePathMutationContext = FileWriteContext & { callerHostId?: string; transport?: string }
 export type FilePathMutationReceipt = {
   action: 'mkdir'; phase: 'prepared' | 'published' | 'settled'
   filesystem: 'created' | 'not-applied' | 'unknown'; durability: 'confirmed' | 'unconfirmed'
@@ -29,10 +44,12 @@ export type FilePathMutationReceipt = {
 export type FileMkdirResult = { operationId: string; resource: FileReadResource | null; result: FilePathMutationReceipt }
 export type FileMutationInspectResult = { operationId: string; resource: FileReadResource | null; result:
   | (FilePathMutationReceipt & { original: FileMkdirParams })
-  | { action: 'mkdir'; phase: 'absent' | 'unavailable'; filesystem: 'unknown'; durability: 'unconfirmed'; code: string; message: string } }
+  | (FileMoveReceipt & { original: FileMoveParams })
+  | { action: 'unknown'; phase: 'absent' | 'unavailable'; filesystem: 'unknown'; durability: 'unconfirmed'; code: string; message: string } }
 
 export interface AgentMuxRpcFilePathsOwner {
   stat(params: FileStatParams): Promise<FileStatResult>
+  move(params: FileMoveParams, context?: FilePathMutationContext): Promise<FileMoveResult>
   mkdir(params: FileMkdirParams, context?: FilePathMutationContext): Promise<FileMkdirResult>
   inspectMutation(params: FileMutationInspectParams, context?: FilePathMutationContext): Promise<FileMutationInspectResult>
 }
@@ -84,6 +101,61 @@ function mutationParams(value: unknown, mkdir: boolean): FileMkdirParams | FileM
 }
 export const parseFileMkdirParams = (value: unknown): FileMkdirParams => mutationParams(value, true) as FileMkdirParams
 export const parseFileMutationInspectParams = (value: unknown): FileMutationInspectParams => mutationParams(value, false) as FileMutationInspectParams
+
+export function parseFileMoveParams(value: unknown): FileMoveParams {
+  const code = 'INVALID_CONTROL_REQUEST'
+  const p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'operationId', 'expected', 'destination'], code)
+  const { expected, destination, ...source } = p
+  const original = parseFileMutationInspectParams(source)
+  const e = rpcRecord(expected, ['root', 'parent', 'entry'], code)
+  parseFilePathScopeWitness({ root: e.root, parent: e.parent }, code)
+  const entry = rpcRecord(e.entry, ['kind', 'witness'], code)
+  if (!['file', 'directory', 'symlink', 'other'].includes(entry.kind as string)) invalid('Move requires one observed original entry.', code)
+  parseFileEntryWitness(entry.witness, code)
+  const d = rpcRecord(destination, ['zoneId', 'spaceId', 'path', 'expectedResource', 'expectedAbsent', 'expected'], code)
+  const { expectedAbsent, expected: scope, ...target } = d
+  const to = parseFileMutationInspectParams({ ...target, operationId: original.operationId })
+  parseFilePathScopeWitness(scope, code)
+  if (expectedAbsent !== true) invalid('Move requires an explicitly absent destination.', code)
+  if (['hostId', 'workspaceId', 'workspacePath'].some(key => original.expectedResource[key as keyof FileReadResource] !== to.expectedResource[key as keyof FileReadResource])) invalid('Move must stay in its original Host and Workspace.', code)
+  if (['', '.'].includes(original.expectedResource.path) || ['', '.'].includes(to.expectedResource.path) || original.expectedResource.path === to.expectedResource.path) invalid('Move requires two distinct non-root entries.', code)
+  return p as FileMoveParams
+}
+export function sameFileEntryIdentity(left: FileEntryWitness, right: FileEntryWitness): boolean {
+  return left.device === right.device && left.inode === right.inode && left.birthtimeNs !== null && left.birthtimeNs === right.birthtimeNs
+}
+export function parseFileMoveReceipt(value: unknown, expected: FileEntryWitness, code = 'CONTROL_PROTOCOL_ERROR'): FileMoveReceipt {
+  const r = rpcRecord(value, ['action', 'phase', 'filesystem', 'durability', 'movedWitness', 'nameAudit', 'noteMetadata', 'code', 'message'], code)
+  if (r.action !== 'move' || !['prepared', 'claimed', 'published', 'settled'].includes(r.phase as string) ||
+      !['moved', 'not-applied', 'unknown'].includes(r.filesystem as string) || !['confirmed', 'unconfirmed'].includes(r.durability as string)) invalid('The original move receipt is invalid.', code)
+  if (r.filesystem === 'moved') {
+    if (!sameFileEntryIdentity(parseFileEntryWitness(r.movedWitness, code), expected)) invalid('The moved object is not the original source generation. Preserve the original request and inspect without replaying.', code)
+  } else if (r.movedWitness !== undefined) invalid('An unconfirmed move cannot claim a destination identity.', code)
+  if (r.nameAudit !== undefined) {
+    const audit = rpcRecord(r.nameAudit, ['operationId', 'status', 'message'], code); text(audit.operationId, code)
+    if (!['recorded', 'unconfirmed'].includes(audit.status as string)) invalid('The original name audit result is invalid.', code)
+    if (audit.message !== undefined) message(audit.message, code)
+  }
+  if (r.noteMetadata !== undefined) {
+    const notes = rpcRecord(r.noteMetadata, ['status', 'message'], code)
+    if (!['recorded', 'unconfirmed'].includes(notes.status as string)) invalid('The original Note relocation result is invalid.', code)
+    if (notes.message !== undefined) message(notes.message, code)
+  }
+  if (r.code !== undefined) text(r.code, code)
+  if (r.message !== undefined) message(r.message, code)
+  if (r.filesystem === 'unknown' && (r.durability !== 'unconfirmed' || !r.code || !r.message)) invalid('An unknown move needs its original recovery reason.', code)
+  return r as FileMoveReceipt
+}
+export function parseFileMoveResult(value: unknown, params: FileMoveParams): FileMoveResult {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId', 'resource', 'destination', 'result'], code)
+  if (p.operationId !== params.operationId) invalid('Another Files move was returned.', code)
+  const resource = resultResource(p.resource, params, code), destination = resultResource(p.destination, params.destination, code)
+  for (const [actual, expected] of [[resource, params.expectedResource], [destination, params.destination.expectedResource]] as const)
+    if (actual && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => actual[key as keyof FileReadResource] !== expected[key as keyof FileReadResource])) invalid('Another original move resource was returned.', code)
+  const result = parseFileMoveReceipt(p.result, params.expected.entry.witness, code)
+  if (result.filesystem !== 'unknown' && (!resource || !destination)) invalid('A known move result requires both original resources.', code)
+  return { operationId: params.operationId, resource, destination, result }
+}
 
 function resultResource(value: unknown, params: FileStatParams, code: string): FileReadResource | null {
   if (value === null) return null
@@ -137,12 +209,13 @@ export function parseFileMutationInspectResult(value: unknown, params: FileMutat
   if (resource && ['hostId','workspaceId','workspacePath','zoneId','zonePath','path','logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) invalid('Another original mutation resource was returned.', code)
   if (r.phase === 'absent' || r.phase === 'unavailable') {
     rpcRecord(r, ['action', 'phase', 'filesystem', 'durability', 'code', 'message'], code)
-    if (r.action !== 'mkdir' || r.filesystem !== 'unknown' || r.durability !== 'unconfirmed') invalid('An absent operation cannot claim an original effect.', code)
+    if (r.action !== 'unknown' || r.filesystem !== 'unknown' || r.durability !== 'unconfirmed') invalid('An absent operation cannot claim an original effect.', code)
     text(r.code, code); message(r.message, code)
   } else {
     const { original, ...receipt } = r
-    parseFilePathMutationReceipt(receipt, code)
-    const input = parseFileMkdirParams(original)
+    const input = r.action === 'move' ? parseFileMoveParams(original) : parseFileMkdirParams(original)
+    if (r.action === 'move') parseFileMoveReceipt(receipt, (input as FileMoveParams).expected.entry.witness, code)
+    else parseFilePathMutationReceipt(receipt, code)
     if (input.operationId !== params.operationId || params.spaceId !== undefined && input.spaceId !== params.spaceId || input.zoneId !== params.zoneId || input.path !== params.path ||
         ['hostId','workspaceId','workspacePath','zoneId','zonePath','path','logicalDirectory'].some(key => input.expectedResource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) invalid('The retained Files intent belongs to another target.', code)
   }

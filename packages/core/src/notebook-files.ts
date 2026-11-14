@@ -4,6 +4,7 @@ import { dirname, join, isAbsolute, resolve, relative } from 'node:path'
 import { readNoteMarkdownHeader } from './note-format.js'
 import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
+import { rpcRecord } from './rpc-data.js'
 import { durableWriteFile } from './durable-write.js'
 import { emptyNotebookState, notebookFingerprint, parseNotebookState, type NotebookState, type NoteResource } from './notebook-catalog.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteAuthorship, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
@@ -392,14 +393,62 @@ export async function writeNotebookHistory(path: string, candidate: NoteHistoryR
   await saveMetadata(path, root, metadataValue); await indexEvent(path, root, value.eventId, originalKey(value.noteId, value.resource)); await commit(path, root)
   return value
 }
-type Relocation = { noteId: string; from: NoteResource; to: NoteResource }
-export async function writeNotebookFiles(path: string, update: { state?: NotebookState; provenance?: NoteProvenanceWrite; relocation?: Relocation }): Promise<void> {
+export type NotebookFileRelocation = { noteId: string; from: NoteResource; to: NoteResource }
+type Relocation = NotebookFileRelocation
+export type NotebookFileRelocationPlan = {
+  root: string | null; from: NoteResource; to: NoteResource
+  entries: { noteId: string; suffix: string }[]
+}
+/** One original owner codec; Files stores this plan without a second representation. */
+export function parseNotebookFileRelocationPlan(value: unknown): NotebookFileRelocationPlan {
+  const code = 'NOTE_METADATA_RELOCATION_CONFLICT', plan = rpcRecord(value, ['root', 'from', 'to', 'entries'], code)
+  if (plan.root !== null && (typeof plan.root !== 'string' || !validHash(plan.root)) || !Array.isArray(plan.entries) || plan.entries.length > 0 && plan.root === null) throw failure('The original Note relocation plan is invalid.')
+  const from = plan.from as NoteResource, to = plan.to as NoteResource
+  noteProvenanceResourceKey(from); noteProvenanceResourceKey(to)
+  const seen = new Set<string>()
+  for (const raw of plan.entries) {
+    const entry = rpcRecord(raw, ['noteId', 'suffix'], code)
+    if (typeof entry.noteId !== 'string' || !entry.noteId || entry.noteId.includes('\0') || typeof entry.suffix !== 'string' || entry.suffix.includes('\0') || entry.suffix !== '' && !entry.suffix.startsWith('/')) throw failure('The original Note relocation member is invalid.')
+    const pair = JSON.stringify([entry.noteId, entry.suffix])
+    if (seen.has(pair)) throw failure('The original Note relocation member is duplicated.')
+    seen.add(pair)
+    noteProvenanceResourceKey({ ...from, path: from.path + entry.suffix }); noteProvenanceResourceKey({ ...to, path: to.path + entry.suffix })
+  }
+  return structuredClone(plan) as NotebookFileRelocationPlan
+}
+/** The original owner alone expands its compact exact-resource plan. */
+export function notebookFileRelocationRows(value: NotebookFileRelocationPlan): NotebookFileRelocation[] {
+  const plan = parseNotebookFileRelocationPlan(value)
+  return plan.entries.map(entry => ({ noteId: entry.noteId, from: { ...plan.from, path: plan.from.path + entry.suffix }, to: { ...plan.to, path: plan.to.path + entry.suffix } }))
+}
+export async function planNotebookFileRelocation(path: string, from: NoteResource, to: NoteResource): Promise<NotebookFileRelocationPlan> {
+  const root = await readRoot(path)
+  if (!root) return { root: null, from, to, entries: [] }
+  const state = await catalog(path, root), originals = new Map<string, { noteId: string; resource: NoteResource }>()
+  for (const original of [...Object.values(root.originals), ...Object.values(state.pages)]) originals.set(originalKey(original.noteId, original.resource), original)
+  const entries: NotebookFileRelocationPlan['entries'] = [], pageKeys = new Set(Object.values(state.pages).map(page => originalKey(page.noteId, page.resource)))
+  for (const original of originals.values()) {
+    const resource = original.resource
+    if (resource.hostId !== from.hostId || resource.workspaceId !== from.workspaceId || resource.workspacePath !== from.workspacePath || resource.path !== from.path && !resource.path.startsWith(from.path + '/')) continue
+    const suffix = resource.path.slice(from.path.length), destination = { ...to, path: to.path + suffix }
+    const destinationKey = originalKey(original.noteId, destination)
+    if (root.originals[destinationKey] || pageKeys.has(destinationKey)) throw new AgentMuxError('The destination already retains metadata for this original Note.', 'NOTE_METADATA_RELOCATION_CONFLICT')
+    entries.push({ noteId: original.noteId, suffix })
+  }
+  const plan = { root: hash(encoded(root)), from, to, entries }
+  notebookFileRelocationRows(plan)
+  return plan
+}
+export async function writeNotebookFiles(path: string, update: { state?: NotebookState; provenance?: NoteProvenanceWrite; relocation?: Relocation; relocations?: Relocation[]; expectedRoot?: string }): Promise<void> {
   const root = await readRoot(path)
   if (!root) throw failure('The original Notebook root is missing.')
+  if (update.expectedRoot !== undefined && hash(encoded(root)) !== update.expectedRoot) throw new AgentMuxError('The original Note metadata changed during this file operation. Its metadata and original request are retained.', 'NOTE_METADATA_RELOCATION_CONFLICT')
   const state = update.state && parseNotebookState(update.state)
-  if (update.relocation) {
-    const { noteId, from, to } = update.relocation, before = await catalog(path, root), fromKey = originalKey(noteId, from), toKey = originalKey(noteId, to)
-    if (!state || !before.pages[noteId] || !state.pages[noteId] || noteProvenanceResourceKey(before.pages[noteId]!.resource) !== noteProvenanceResourceKey(from) || noteProvenanceResourceKey(state.pages[noteId]!.resource) !== noteProvenanceResourceKey(to)) throw failure('The original relocation and catalog resources cannot be confirmed.')
+  const relocations = [...update.relocations ?? [], ...update.relocation ? [update.relocation] : []]
+  const before = relocations.length ? await catalog(path, root) : undefined
+  for (const relocation of relocations) {
+    const { noteId, from, to } = relocation, fromKey = originalKey(noteId, from), toKey = originalKey(noteId, to)
+    if ((update.relocation || before!.pages[noteId] && noteProvenanceResourceKey(before!.pages[noteId]!.resource) === noteProvenanceResourceKey(from)) && (!state || !state.pages[noteId] || noteProvenanceResourceKey(before!.pages[noteId]!.resource) !== noteProvenanceResourceKey(from) || noteProvenanceResourceKey(state.pages[noteId]!.resource) !== noteProvenanceResourceKey(to))) throw failure('The original relocation and catalog resources cannot be confirmed.')
     if (fromKey !== toKey) {
       if (root.originals[toKey]) throw new AgentMuxError('The destination already has metadata for this Note. Original catalog and metadata are retained.', 'NOTE_METADATA_RELOCATION_CONFLICT')
       if (root.originals[fromKey]) {

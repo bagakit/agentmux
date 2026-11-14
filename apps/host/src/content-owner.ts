@@ -1,11 +1,14 @@
 import { dirname, join } from 'node:path'
-import { AgentMuxError, spatialCatalog, type AgentMuxSpatialStateStore, type AgentMuxRpcServiceOptions, type AgentMuxRpcFilesOwner, type NotebookObservationPort } from '@agentmux/core'
+import { AgentMuxError, spatialCatalog, type AgentMuxClient, type AgentMuxSpatialStateStore, type AgentMuxRpcServiceOptions, type AgentMuxRpcFilesOwner, type NotebookObservationPort } from '@agentmux/core'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
 import type { NoteResource } from '@agentmux/core/notebook-catalog'
 import { createHostWorkspaceResources, type HostWorkspaceResources } from './workspace-resources.js'
 import { OrdinaryWorkspaceFiles } from './ordinary-files.js'
 import type { WorkspaceRecord, WorkspaceFiles } from './content-types.js'
 import { FileReadOwner } from './file-read-owner.js'
+import { NameChangeAudit } from './name-change-audit.js'
+import { assertPrimaryMoteRetained } from './workspace-retention.js'
+import { resolve } from 'node:path'
 import { FilePathMutations } from './file-path-mutations.js'
 import { NoteFileWriter } from './note-file-writer.js'
 import { NoteTitleFileWriter } from './note-title-file-writer.js'
@@ -29,6 +32,7 @@ export function createHostContent(options: {
   storage?: AgentMuxNotesStorage
   files?: OrdinaryWorkspaceFiles
   resources?: HostWorkspaceResources
+  directoryScope?: (isRelated: (cwd: string) => Promise<boolean>) => ReturnType<AgentMuxClient['retainExecutionDirectoryMutation']>
 }): ContentPorts {
   const storage = options.storage ?? new AgentMuxNotesStorage()
   const ordinary = options.files ?? new OrdinaryWorkspaceFiles()
@@ -68,7 +72,17 @@ export function createHostContent(options: {
   } })
   const titleWriter: NoteTitleFileWriter = new NoteTitleFileWriter(files, notebookStore)
   const pathMutations = new FilePathMutations({ directory: join(dirname(options.configurationPath), 'file-path-mutations'), files: ordinary,
-    noteLease: work => notebookStore.runWithWriteLease(work) })
+    noteLease: work => notebookStore.runWithWriteLease(work),
+    retainPath: async (workspace, path) => assertPrimaryMoteRetained(workspace, resolve(workspace.path, path), async () => {
+      const current = await configuration()
+      if (!current.complete) throw new AgentMuxError('The original primary Mote configuration is unconfirmed.', 'FILE_WORKSPACE_UNAVAILABLE')
+      const primary = current.workspaces.filter(item => item.id === SCRATCH_WORKSPACE_ID)
+      if (primary.length > 1) throw new AgentMuxError('The original primary Mote Workspace is ambiguous.', 'FILE_WORKSPACE_UNAVAILABLE')
+      return primary[0]
+    }),
+    notes: { plan: (from, to) => notebookStore.planFileRelocation(from, to), apply: (plan, operationId, actor) => notebookStore.applyFileRelocation(plan, operationId, actor) },
+    nameAudit: new NameChangeAudit(options.spatial),
+    ...(options.directoryScope ? { directoryScope: options.directoryScope } : {}) })
   const owners = async () => {
     // One original metadata observation per operation, never a competing configuration owner.
     const current = await configuration()
@@ -81,6 +95,7 @@ export function createHostContent(options: {
       paths: {
         stat: (owner, path) => pathMutations.stat(local(owner), path),
         mkdir: (owner, input, context) => pathMutations.mkdir(local(owner), input, context),
+        move: (owner, input, context) => pathMutations.move(local(owner), input, context),
         inspect: (input, context, owner) => pathMutations.inspect(input, context, owner ? local(owner) : undefined)
       },
       catalog: async () => { const state = await options.spatial.read(); return state ? spatialCatalog(state.graph) : null },
@@ -114,6 +129,7 @@ export function createHostContent(options: {
   const publicFiles: AgentMuxRpcFilesOwner = {
     stat: async (...args) => (await owners()).files.stat(...args),
     mkdir: async (...args) => (await owners()).files.mkdir(...args),
+    move: async (...args) => (await owners()).files.move(...args),
     inspectMutation: async (...args) => (await owners()).files.inspectMutation(...args),
     read: async (...args) => (await owners()).files.read(...args),
     list: async (...args) => (await owners()).files.list(...args),

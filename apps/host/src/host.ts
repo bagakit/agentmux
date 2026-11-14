@@ -145,7 +145,13 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   }
   const spatialState = connectionOwner?.spatial ?? new AgentMuxSpatialStateStore()
   const workspaceResources = configurationPath ? createHostWorkspaceResources(configurationPath,spatialState,()=>originalRuntime().ownerIdentity().runtimeId) : undefined
-  const content = configurationPath ? createHostContent({ configurationPath, spatial: spatialState, ...(workspaceResources ? { resources: workspaceResources } : {}) }) : undefined
+  const content = configurationPath ? createHostContent({ configurationPath, spatial: spatialState,
+    ...(workspaceResources ? { resources: workspaceResources } : {}),
+    directoryScope: isRelated => {
+      if (!runtime) throw new AgentMuxError('The original Core directory admission is not yet available. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
+      return runtime.client.retainExecutionDirectoryMutation(isRelated)
+    }
+  }) : undefined
   const originalRuntime = () => {
     if (!runtime) throw new AgentMuxError('The original Host is not yet available. Original operations and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
     return runtime

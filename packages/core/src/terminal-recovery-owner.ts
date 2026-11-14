@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, open, readFile } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -19,6 +19,7 @@ type Intent = {
   retiredAttempts: Array<{ prepared: AgentMuxPreparedTerminal; runtime: AgentMuxCreationRuntime; continuationOperationId: string }>
 }
 type Port = {
+  directoryAdmission?<T>(cwd: string, write: () => Promise<T>): Promise<T>
   runtime(): AgentMuxCreationRuntime
   /** Confirms raw ownership from durable Core bindings and exact Native status. */
   original(input: AgentMuxTerminalRecoveryInput): Promise<AgentMuxRun | null>
@@ -56,6 +57,18 @@ function parseIntent(value: unknown): Intent {
 /** Private Host material only. No frozen environment enters the spatial graph or public receipt. */
 export class TerminalRecoveryOwner {
   constructor(private readonly directory: string, private readonly port: Port) {}
+  /** Original recoveries remain references even before a replacement Run exists. */
+  async retainedExecutionDirectories(): Promise<readonly string[]> {
+    let names: string[]
+    try { names = await readdir(this.directory) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+    const paths = new Set<string>()
+    for (const name of names) if (/^[0-9a-f]{64}\.json$/u.test(name)) {
+      const value = await this.read(join(this.directory, name))
+      if (!value || this.path(value) !== join(this.directory, name)) throw failure('An original terminal directory reference changed.')
+      paths.add(value.workspacePath)
+    }
+    return [...paths]
+  }
   private path(input: AgentMuxTerminalRecoveryInput): string {
     return join(this.directory, createHash('sha256').update(input.expectedRun.runId).digest('hex') + '.json')
   }
@@ -111,7 +124,8 @@ export class TerminalRecoveryOwner {
       if (prior) { this.assertIntent(prior, input); return prior }
       const created: Intent = { schemaVersion: 1, expectedRun: input.expectedRun, runtimeId: input.runtimeId,
         workspacePath: input.workspacePath, operationId: input.operationId, prepared: prepared!, phase: 'prepared', run: null, continuedBy: [], retirement: null, retiredAttempts: [] }
-      await this.save(path, created); return created
+      const write = async () => { await this.save(path, created); return created }
+      return this.port.directoryAdmission ? await this.port.directoryAdmission(created.workspacePath, write) : await write()
     })
     this.assertIntent(intent, input)
     // Each update is bound to the attempt observed before its Native await. A lost

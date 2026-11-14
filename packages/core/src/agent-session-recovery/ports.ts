@@ -34,6 +34,8 @@ export type AgentSessionRecoveryPorts = {
     retainUnconfirmedLifecycle(error: unknown, expected: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession;
   };
   runtime: {
+    /** Borrow the original Core creation admission; never a second Runtime owner. */
+    directoryAdmission?<T>(cwd: string, work: () => Promise<T>): Promise<T>;
     prepareExecutionEnvironment?(): Promise<void>;
     readonly kernel: Pick<CtxmuxRunAdapter, "prepareStart" | "startPrepared" | "creationRuntimeIdentity" | "inspectPreparedStart" | "inspectRetainedStart" | "retirePreparedStart" | "observePreparedStartRetirement" | "inspectCreation" | "list" | "prepareStop" | "status" | "launchIdentity" | "start" | "observeLifecycle">;
     assertAgentRun(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, durableSessions?: readonly AgentMuxAgentSession[]): void;

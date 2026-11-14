@@ -53,6 +53,10 @@ export class AgentSessionRunLifecycle {
     private readonly signal: AbortSignal
   ) {}
 
+  private admitDirectory<T>(cwd: string, work: () => Promise<T>): Promise<T> {
+    return this.ports.runtime.directoryAdmission ? this.ports.runtime.directoryAdmission(cwd, work) : work()
+  }
+
   // Per-Agent-Session serialization of continuity attempts. NOT what bounds new Runs to one — the
   // store's `reserveLifecycle` is an atomic check-and-set, so a concurrent loser fails its
   // reservation before ever reaching `kernel.start` even with this tail removed (measured).
@@ -566,11 +570,12 @@ export class AgentSessionRunLifecycle {
       const workspaceTrust = await this.ports.hooks.prepareOwnedWorkspaceTrust(provider, current.workspacePath, current.agentSessionId, input.env ?? {}, lifecycleOperationId)
       if (continuity && workspaceTrust) continuity.workspaceTrust = workspaceTrust
       if (reservation.kind === 'reopen') {
+        const admittedReservation = reservation
         const preparedSession: AgentMuxStoredAgentSession = { ...nativeSession, kind: 'agent', run: current.run, retiredRuns: reopenedPriorRuns(reservation.expectedRetirement),
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability), updatedAt: Date.now(), nativeHandle: structuredClone(current.nativeHandle) }
         delete preparedSession.nativePromptPredecessor
-        reservation = await this.ports.sessions.registry.prepareReopen(reservation, preparedSession)
+        reservation = await this.admitDirectory(preparedSession.workspacePath, () => this.ports.sessions.registry.prepareReopen(admittedReservation, preparedSession))
         this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
       }
       if (reopening && this.signal.aborted) throw new AgentMuxError('Continue owner was disposed before dispatch.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
@@ -617,9 +622,10 @@ export class AgentSessionRunLifecycle {
           continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability) }
-        reservation = resolutionHandoff
-          ? await this.ports.sessions.registry.handoffResumeResolution(resolutionHandoff.reservation, prepared, dispatch, resolutionHandoff.runtime)
-          : await this.ports.sessions.registry.prepareResume(reservation, prepared, dispatch)
+        const admittedReservation = reservation, admittedHandoff = resolutionHandoff, admittedDispatch = dispatch
+        reservation = admittedHandoff
+          ? await this.admitDirectory(prepared.workspacePath, () => this.ports.sessions.registry.handoffResumeResolution(admittedHandoff.reservation, prepared, admittedDispatch, admittedHandoff.runtime))
+          : await this.admitDirectory(prepared.workspacePath, () => this.ports.sessions.registry.prepareResume(admittedReservation, prepared, admittedDispatch))
         if (resolutionHandoff) continuity = structuredClone(reservation.preparedSession!.continuity!)
         if (reservation.kind !== 'resume' || !isDeepStrictEqual(reservation.preparedDispatch, dispatch)) throw new AgentMuxError(
           'The complete original resume dispatch was not durably retained. No Start was dispatched.', 'AGENT_RESUME_UNCONFIRMED')
@@ -635,10 +641,13 @@ export class AgentSessionRunLifecycle {
           throw error
         }
       }
-      launchAttempted = true
-      const run = await (dispatch
-        ? this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, lifecycleOperationId, dispatch.runtime)
-        : this.ports.runtime.kernel.start({ operationKey: lifecycleOperationId, ...launch })).catch(async error => {
+      const run = await this.admitDirectory(current.workspacePath, () => {
+        launchAttempted = true
+        return dispatch
+          ? this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, lifecycleOperationId, dispatch.runtime)
+          : this.ports.runtime.kernel.start({ operationKey: lifecycleOperationId, ...launch })
+      }).catch(async error => {
+        if (!launchAttempted) throw error
         if (!(error instanceof AgentMuxError && error.creationFailure?.operationId === lifecycleOperationId &&
           error.creationFailure.disposition === 'not_applied')) {
           // A lost start ACK may already own a Run. Keep the one reservation until authoritative reconciliation.
@@ -1050,11 +1059,14 @@ export class AgentSessionRunLifecycle {
     const observed = await this.inspectPreparedResume(reservation)
     if (observed) throw new AgentMuxError('A Start witness has no matching original input claim. Retain and inspect the original operation.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     await this.ports.input.claimContinuityMessage(recipe, recipe.plan)
-    let run: CtxmuxAdapterRun
+    let run: CtxmuxAdapterRun, dispatched = false
     try {
-      run = await this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, reservation.operationId, dispatch.runtime)
+      run = await this.admitDirectory(prepared.workspacePath, () => {
+        dispatched = true
+        return this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, reservation.operationId, dispatch.runtime)
+      })
     } catch (error) {
-      const notApplied = error instanceof AgentMuxError && error.creationFailure?.operationId === reservation.operationId && error.creationFailure.disposition === 'not_applied'
+      const notApplied = !dispatched || error instanceof AgentMuxError && error.creationFailure?.operationId === reservation.operationId && error.creationFailure.disposition === 'not_applied'
       await this.settleContinuityMessageInput(prepared.continuity!, { outcome: notApplied ? 'not-applied' : 'unknown' })
       throw error
     }

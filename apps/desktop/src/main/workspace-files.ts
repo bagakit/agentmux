@@ -1,11 +1,11 @@
+import { assertPrimaryMoteRetained } from '../../../host/src/workspace-retention.js'
 import { OrdinaryWorkspaceFiles, WorkspaceFileWriteScope, localPathWithin, localFileScope, localExistingPathWithin, localReadablePath, localMutablePathWithin,
   assertRealPathWithin, assertMutableRelativePath, fileBytesAreBinary, revisionFor, resultError,
   runWorkspaceFileWorker, type WorkspaceFileWorkerRequest as LocalWorkerRequest } from '@agentmux/host/ordinary-files'
 import { gitIgnoredNames } from './workspace-git-ignore.js'
 import { LOCAL_FILE_LIST_SOURCE } from '@agentmux/host/ordinary-files'
 import type { FileNameListing } from '@agentmux/core'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicStorageRoots } from '@agentmux/host/mote-model'
-import { resolveScratchTopicDirectory, scratchConfirmedDirectoryPaths } from '@agentmux/host/mote-resources'
+import { SCRATCH_WORKSPACE_ID, scratchTopicStorageRoots } from '@agentmux/host/mote-model'
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
@@ -682,35 +682,7 @@ export class WorkspaceFiles {
   ) { this.ordinary = new OrdinaryWorkspaceFiles({ helperPath: WORKSPACE_MOVE_HELPER, hostFor, ...options }, this.writeScope) }
 
   private async assertPrimaryMoteRetained(workspace: WorkspaceRecord, target: string): Promise<void> {
-    const primary = await this.options.primaryMoteWorkspace?.()
-    if (!primary || primary.hostId !== workspace.hostId) return
-    // Resolve aliases, including a missing final component of an overwrite destination.
-    const canonical = async (path: string): Promise<string> => {
-      try { return await realpath(path) }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || dirname(path) === path) throw error
-        return resolve(await canonical(dirname(path)), basename(path))
-      }
-    }
-    // Delete unlinks a leaf symlink; resolve only its parent, matching the actual worker operation.
-    const address = resolve(await canonical(dirname(target)), basename(target))
-    const primaryName = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
-    const physicalPrimary = await resolveScratchTopicDirectory(primary.path, PMO_TEAMS_TOPIC_ID)
-    const protectedAddress = physicalPrimary ?? resolve(await canonical(primary.path), primaryName)
-    let protectedEntry = address === protectedAddress || protectedAddress.startsWith(address + sep)
-    if (physicalPrimary) for (const path of await scratchConfirmedDirectoryPaths(primary.path, PMO_TEAMS_TOPIC_ID, physicalPrimary)) {
-      const entry = resolve(await canonical(dirname(path)), basename(path))
-      if (address === entry || entry.startsWith(address + sep)) protectedEntry = true
-    }
-    // The original config path must also remain reachable if it uses a backing-root alias.
-    for (let entry = resolve(primary.path, primaryName); !protectedEntry && dirname(entry) !== entry; entry = dirname(entry)) {
-      protectedEntry = address === resolve(await canonical(dirname(entry)), basename(entry))
-    }
-    if (protectedEntry) {
-      throw Object.assign(new Error('The primary Mote cannot be deleted, moved or replaced. Its title and files inside it can still be managed.'), {
-        code: 'PRIMARY_MOTE_PROTECTED', definitelyUnchanged: true
-      })
-    }
+    return assertPrimaryMoteRetained(workspace, target, this.options.primaryMoteWorkspace)
   }
 
   private disposeObserver(entry: LocalObserverEntry): Promise<void> {

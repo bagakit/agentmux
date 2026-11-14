@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'node:child_process'
 /** Public Client operation contracts; runtime behavior and state remain in the Client owner. */
 import type { AgentMuxAgentForkSource } from './agent-fork.js'
 import type { AgentNativeResumeSource, AgentProviderId, AgentExecutorId, AgentMuxRunRef, AgentSessionHistorySource, AgentSessionHistoryQuestionAnswer, AgentMuxInteractionOperationIntent, AgentMuxInteractionResponse, AgentMuxAgentSession, AgentMuxRunAttachment, AgentExecutorConfig, AgentMuxRun, AgentCapabilitySnapshot } from './types.js'
@@ -175,6 +176,12 @@ export type AgentMuxAgentAttachment = {
 }
 
 export type AgentMuxClientOptions = {
+  /** Same-turn original semantic-lease borrow; finite Files producers only, never long-lived Runs. */
+  spawnFiniteFileProducer?: (spawn: (ownerLeaseFd: number) => ChildProcess) => ChildProcess
+
+  /** Original assembly-owned Capsule seed projection; explicit Files cold path only. */
+  retainedServiceExecutionDirectories?: () => Promise<readonly { workspacePath: string; runtimeId: string | null }[]>
+
   moteInputResolver?: AgentInputMoteResolver
   inputResources?: AgentInputResourceOwner
   /** Complete Host exports before freezing a new execution; original reads and healthy Runs stay available. */

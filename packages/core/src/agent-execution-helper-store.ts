@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, open, readFile } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -82,6 +82,18 @@ export class AgentExecutionHelperStore {
     try { return recordValue(JSON.parse(raw)) }
     catch { throw fail('The original private execution helper preparation is invalid; it was not replaced', 'AGENT_EXECUTION_HELPER_STORAGE_UNCONFIRMED') }
   }
+  /** Cold original preparation references only; never starts or acknowledges a helper. */
+  async retainedExecutionDirectories(): Promise<readonly string[]> {
+    let names: string[]
+    try { names = await readdir(this.directory) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+    const paths = new Set<string>()
+    for (const name of names) if (/^[0-9a-f]{64}\.json$/u.test(name)) {
+      const value = await this.readPath(join(this.directory, name))
+      if (!value || this.path(value.input.bindingId, value.input.role) !== join(this.directory, name)) throw fail('An original helper directory reference changed', 'AGENT_EXECUTION_HELPER_STORAGE_UNCONFIRMED')
+      paths.add(value.input.workspacePath)
+    }
+    return [...paths]
+  }
   async read(bindingId: string, role: AgentExecutionHelperInput['role']): Promise<AgentExecutionHelperRecord | null> {
     const record = await this.readPath(this.path(bindingId, role))
     if (!record) return null
@@ -107,7 +119,7 @@ export class AgentExecutionHelperStore {
     pins.set(path, result)
     try { return structuredClone(await result) } finally { if (pins.get(path) === result) pins.delete(path) }
   }
-  async prepare(value: AgentExecutionHelperInput, build: () => Promise<AgentExecutionHelperPreparation>): Promise<AgentExecutionHelperPreparation> {
+  async prepare(value: AgentExecutionHelperInput, build: () => Promise<AgentExecutionHelperPreparation>, admit?: (write: () => Promise<AgentExecutionHelperPreparation>) => Promise<AgentExecutionHelperPreparation>): Promise<AgentExecutionHelperPreparation> {
     const input = inputValue(value), path = this.path(input.bindingId, input.role)
     const prior = flights.get(path)
     if (prior) {
@@ -122,10 +134,13 @@ export class AgentExecutionHelperStore {
         await durableWriteFile(path, JSON.stringify(retained) + '\n', { mode: 0o600, requireDirectorySync: true })
         return retained.preparation
       }
-      const preparation = await build()
-      const record = recordValue({ schemaVersion: 1, input, preparation })
-      await durableWriteFile(path, JSON.stringify(record) + '\n', { mode: 0o600, requireDirectorySync: true })
-      return record.preparation
+      const write = async () => {
+        const preparation = await build()
+        const record = recordValue({ schemaVersion: 1, input, preparation })
+        await durableWriteFile(path, JSON.stringify(record) + '\n', { mode: 0o600, requireDirectorySync: true })
+        return record.preparation
+      }
+      return admit ? await admit(write) : await write()
     })
     const flight = { input, result }; flights.set(path, flight)
     try { return structuredClone(await result) } finally { if (flights.get(path) === flight) flights.delete(path) }

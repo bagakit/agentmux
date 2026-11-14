@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, open, readFile, realpath } from 'node:fs/promises'
+import { mkdir, open, readFile, realpath, readdir } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { capsuleRuntimeEntrypoint, connectCapsuleRuntime } from '@agentmux/capsule/runtime'
@@ -57,13 +57,36 @@ export class CapsuleRunManager {
   private readonly connections = new Set<Awaited<ReturnType<typeof connectCapsuleRuntime>>>()
   readonly stateDirectory: string
   readonly socketPath: string
-  readonly runtime: CapsuleRuntimePort = { call: (method, params) => this.serial(() => this.manage(method, params)) }
+  readonly runtime: CapsuleRuntimePort = { call: (method, params) => method === 'capsule.runtime.start'
+    ? this.client.withExecutionDirectoryAdmission(this.stateDirectory, () => this.serial(() => this.manage(method, params)))
+    : this.serial(() => this.manage(method, params)) }
 
   constructor(private readonly client: AgentMuxClient, coreStateDirectory: string, private readonly adapters?: CapsuleDesktopAdapters) {
     this.stateDirectory = resolve(coreStateDirectory, 'capsules')
     this.path = join(coreStateDirectory, 'capsule-service.json')
     this.commandsDirectory = join(coreStateDirectory, 'capsule-service-operations')
     this.socketPath = join(defaultAgentMuxRuntimeDirectory(), `capsule-${createHash('sha256').update(this.stateDirectory).digest('hex').slice(0, 12)}.sock`)
+  }
+  /** Original binding/command seeds only; never hydrate or adopt a Run. */
+  async retainedExecutionDirectories(): Promise<{ workspacePath: string; runtimeId: string | null }[]> {
+    const retained: { workspacePath: string; runtimeId: string | null }[] = []
+    try {
+      const binding = await this.load()
+      if (binding && (binding.desired === 'running' || binding.launch || binding.run)) retained.push({ workspacePath: binding.stateDirectory, runtimeId: binding.launchRuntime?.runtimeId ?? null })
+      let names: string[]
+      try { names = await readdir(this.commandsDirectory) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return retained; throw error }
+      for (const name of names) {
+        if (!/^[A-Za-z0-9_-]{1,128}\.json$/u.test(name)) continue
+        const record = await this.commandRecord(name.slice(0, -5))
+        if (record?.command.kind === 'start' && !record.recoveryLaunch && (!binding || record.phase === 'prepared')) retained.push({ workspacePath: this.stateDirectory, runtimeId: null })
+        if (record?.recoveryLaunch) retained.push({ workspacePath: record.recoveryLaunch.workspacePath, runtimeId: record.recovery?.target.runtime.runtimeId ?? null })
+      }
+      return retained
+    } catch {
+      // This owner only ever seeds its fixed service directory. Unknown original
+      // records constrain that directory, never unrelated Files or healthy Runs.
+      return [...retained, { workspacePath: this.stateDirectory, runtimeId: null }]
+    }
   }
   /** Restore only an existing intent. An empty Core never eagerly starts a page service. */
   start(): void { this.schedule(0) }
@@ -408,6 +431,7 @@ export class CapsuleRunManager {
     }
     if (!b.run) {
       if (!b.launch) {
+        await this.client.withExecutionDirectoryAdmission(b.stateDirectory, async () => {
         await mkdir(b.stateDirectory, { recursive: true, mode: 0o700 })
         b.launch = await this.client.prepareTerminal({ command: process.execPath,
           args: [capsuleRuntimeEntrypoint(), 'serve', '--state-directory', b.stateDirectory, '--socket', b.socketPath],
@@ -416,7 +440,9 @@ export class CapsuleRunManager {
         b.launchRuntime = await this.client.terminalCreationRuntimeIdentity()
         b.launchCommandId = b.command?.kind === 'start' ? b.command.params.operationId : null
         await this.save(b)
+        })
       }
+      if (!b.launch) throw unavailable('The original service launch seed is unconfirmed.', 'CAPSULE_RUNTIME_CREATION_UNKNOWN')
       if (b.launchPhase === 'prepared') {
         await this.dispatch(b, 'start')
         b = await this.load() ?? b

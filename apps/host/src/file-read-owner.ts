@@ -8,7 +8,7 @@ import type { WorkspaceFiles } from './content-types.js'
 import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult, parseFileRestoreParams, parseFileUndoParams, type FileRestoreParams, type FileRestoreResult, type FileUndoParams, type FileUndoResult } from '@agentmux/core/files'
 import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-history'
 import { fileUploadRevision, parseFileImportParams, type FileImportParams, type FileImportResult } from '@agentmux/core/files'
-import { parseFileStatParams, parseFileMkdirParams, parseFileMutationInspectParams, type FileStatParams,
+import { parseFileStatParams, parseFileMkdirParams, parseFileMutationInspectParams, parseFileMoveParams, type FileMoveParams, type FileMoveResult, type FileStatParams,
   type FileStatResult, type FileMkdirParams, type FileMkdirResult, type FileMutationInspectParams,
   type FileMutationInspectResult, type FilePathMutationContext } from '@agentmux/core/files'
 import type { FilePathMutations } from './file-path-mutations.js'
@@ -18,7 +18,7 @@ const publicWrite = (value: WorkspaceFileWriteResult): WorkspaceFileWriteResult 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
 export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends FileResourceOwner<W> implements AgentMuxRpcFilesOwner {
   constructor(protected override readonly ports: {
-    paths?: Pick<FilePathMutations, 'stat' | 'mkdir' | 'inspect'>
+    paths?: Pick<FilePathMutations, 'stat' | 'mkdir' | 'move' | 'inspect'>
     share?: AgentMuxRpcFileShareOwner
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     /** Original closed Zone descriptor from the same durable spatial resource owner. */
@@ -54,10 +54,20 @@ export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends 
       throw new AgentMuxError('The original directory target changed before mkdir.', 'FILE_RESOURCE_MISMATCH')
     return this.ports.paths.mkdir(resolved.workspace, params, context)
   }
+  async move(input: FileMoveParams, context?: FilePathMutationContext): Promise<FileMoveResult> {
+    const params = parseFileMoveParams(input), source = await this.resolve(params), destination = await this.resolve(params.destination)
+    if ('message' in source || 'message' in destination || !this.ports.paths) return {
+      operationId: params.operationId, resource: 'message' in source ? null : source.resource, destination: 'message' in destination ? null : destination.resource,
+      result: { action: 'move', phase: 'prepared', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_MOVE_OWNER_UNAVAILABLE', message: 'The exact original move owners are unavailable. Its request is retained; no move was issued.' }
+    }
+    for (const [actual, expected] of [[source.resource, params.expectedResource], [destination.resource, params.destination.expectedResource]] as const)
+      if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => actual[key as keyof FileReadResource] !== expected[key as keyof FileReadResource])) throw new AgentMuxError('The original move resource changed.', 'FILE_RESOURCE_MISMATCH')
+    return this.ports.paths.move(source.workspace, params, context)
+  }
   async inspectMutation(input: FileMutationInspectParams, context?: FilePathMutationContext): Promise<FileMutationInspectResult> {
     const params = parseFileMutationInspectParams(input)
     if (!this.ports.paths) return { operationId: params.operationId, resource: null,
-      result: { action: 'mkdir', phase: 'unavailable', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_PATH_OWNER_UNAVAILABLE', message: 'The original Host mutation record owner is unavailable. Keep the original request; no action was replayed.' } }
+      result: { action: 'unknown', phase: 'unavailable', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_PATH_OWNER_UNAVAILABLE', message: 'The original Host mutation record owner is unavailable. Keep the original request; no action was replayed.' } }
     // Retained actor+target records remain readable after the live Zone mapping
     // disappears. A native probe still requires the exact current original map.
     let workspace: W | undefined

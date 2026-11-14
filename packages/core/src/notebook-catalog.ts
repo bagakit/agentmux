@@ -132,6 +132,24 @@ export function parseNotebookState(value: unknown): NotebookState {
 }
 /** One semantic writer shared by Node persistence and the explicitly labelled Renderer preview. */
 export function applyNotebookChange(state: NotebookState, input: NotebookWrite, recordedBy: NotebookActor, at: number): NotebookState {
+  return applyNotebookChangeOwned(state, input, recordedBy, at, true)
+}
+/** Files owns one atomic relocation; reuse each original mutation on one private clone. */
+export function applyNotebookFileRelocations(state: NotebookState, rows: readonly { noteId: string; from: NoteResource; to: NoteResource }[], operationId: string, recordedBy: NotebookActor, at: number): NotebookState {
+  let next: NotebookState | undefined
+  for (const [index, row] of rows.entries()) {
+    const from = resource(row.from), to = resource(row.to), page = (next ?? state).pages[row.noteId]
+    if (!page || !(['hostId', 'workspaceId', 'workspacePath', 'path'] as const).every(key => page.resource[key] === from[key])) continue
+    next ??= parseNotebookState(state)
+    // Serialization order is not a resource identity; the mutation keeps its
+    // original exact from check after canonicalizing this owned resource only.
+    next.pages[row.noteId]!.resource = resource(next.pages[row.noteId]!.resource)
+    next = applyNotebookChangeOwned(next, { expectedRevision: next.revision, operationId: operationId + '/note/' + index,
+      change: { kind: 'relocate', noteId: row.noteId, from, resource: to } }, recordedBy, at, false)
+  }
+  return next ? parseNotebookState(next) : state
+}
+function applyNotebookChangeOwned(state: NotebookState, input: NotebookWrite, recordedBy: NotebookActor, at: number, validate: boolean): NotebookState {
   object(input, ['operationId', 'expectedRevision', 'change'])
   const fields: Record<string, readonly string[]> = { create: ['notebookId', 'name', 'workface'], rename: ['notebookId', 'name'], delete: ['notebookId'], bind: ['notebookId', 'workface'], register: ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'source'], move: ['noteId', 'notebookId', 'parentNoteId'], 'rename-page': ['noteId', 'title'], archive: ['noteId'], restore: ['noteId'], follow: ['noteId'], unfollow: ['noteId'], source: ['noteId', 'source'], organize: ['noteId', 'topic'], relocate: ['noteId', 'resource', 'from'] }
   const changeKind = object(input.change).kind
@@ -145,7 +163,7 @@ export function applyNotebookChange(state: NotebookState, input: NotebookWrite, 
   }
   if (input.expectedRevision !== state.revision) throw Object.assign(new Error('The Notebook changed. Refresh its directory before retrying this same operation; the Note file is kept.'), { code: 'NOTEBOOK_CONFLICT' })
   timestamp(at)
-  const next = parseNotebookState(state), location = (p: NotebookPage) => ({ notebookId:p.notebookId,notebookName:next.notebooks[p.notebookId]!.name,parentNoteId:p.parentNoteId,title:p.title,resource:structuredClone(p.resource),...(p.archivedAt !== undefined ? { archivedAt: p.archivedAt } : {}) })
+  const next = validate ? parseNotebookState(state) : state, location = (p: NotebookPage) => ({ notebookId:p.notebookId,notebookName:next.notebooks[p.notebookId]!.name,parentNoteId:p.parentNoteId,title:p.title,resource:structuredClone(p.resource),...(p.archivedAt !== undefined ? { archivedAt: p.archivedAt } : {}) })
   const getPage = (id: unknown): NotebookPage => { const p = next.pages[text(id,'Note ID')]; if(!p)return invalid('The exact Note is not in the catalog. Keep its file and refresh the directory.'); return p }
   const getBook = (id: unknown): Notebook => { const n = next.notebooks[text(id,'Notebook ID')]; if(!n)return invalid('The exact Notebook is unavailable. Its pages and resources are kept.'); return n }
   const event = (p: NotebookPage, action: NoteTrailEvent['action'], before: NoteTrailEvent['before'], extra: Partial<Pick<NoteTrailEvent,'source'|'topic'>> = {}) => { p.updatedAt=at;next.trail.push({eventId:operationId+':'+p.noteId,operationId,noteId:p.noteId,at,actor:recorded,action,before,after:location(p),...extra}) }
@@ -208,7 +226,7 @@ export function applyNotebookChange(state: NotebookState, input: NotebookWrite, 
     default: invalid('Unknown Notebook action. Original knowledge is kept.')
   }
   next.operations[operationId]={fingerprint,actor:recorded};next.revision=state.revision+1
-  return parseNotebookState(next)
+  return validate ? parseNotebookState(next) : next
 }
 
 /** Exact result selection shared by the public owner and its response consumer. */

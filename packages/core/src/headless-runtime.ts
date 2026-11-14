@@ -75,6 +75,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
   const authority = createHash('sha256').update(JSON.stringify({ stateDirectory, storePath,
     ctxmuxSocket: defaultCtxmuxSocketPath(), ctxmuxState: defaultCtxmuxStateDirectory(), hookPort: defaultAgentMuxHookPort() })).digest('hex')
   const semanticLease = await acquireOwner(join(stateDirectory, 'semantic-owner.lock'))
+  let producerLeaseActive = true
   let endpointLease: FileHandle | undefined, client: AgentMuxClient | undefined, server: AgentMuxControlServer | undefined
   let hosted: AgentMuxHostedRuntimeService | undefined, stopping: Promise<void> | undefined
   let capsules: CapsuleRunManager | undefined
@@ -104,15 +105,28 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_DISCONNECTED') throw error }
       return { runtimeId, ownerInstanceId, protocolVersion: AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION, processId: process.pid, ctxmux, availability: 'connected' }
     }
-    const stop = (): Promise<void> => stopping ??= (async () => {
+    const stop = (): Promise<void> => {
+      producerLeaseActive = false // revoke borrowing synchronously, before any close/observer await
+      return stopping ??= (async () => {
       try { await server?.stop() }
       finally { try { try { hostRoutes?.dispose(); await executionBindings?.dispose(); await (await executionReader)?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
         finally { await endpointLease?.close(); await semanticLease.close() } }
-    })()
+      })()
+    }
     // Both namespace leases are already held. One Client owns metadata and Native observation;
     // a caller's unconfirmed Native startup must not dispose this semantic authority.
     const creationAuthority = options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId })
     client = new AgentMuxClient({ ...options, store, controlSocketPath: socketPath,
+      retainedServiceExecutionDirectories: async () => [
+        ...await options.retainedServiceExecutionDirectories?.() ?? [],
+        ...await capsules?.retainedExecutionDirectories() ?? []
+      ],
+      spawnFiniteFileProducer: spawn => {
+        // Never cache a scalar fd across awaits: close/reuse must be observed at
+        // the actual spawn in this same turn. Only scoped finite Files uses it.
+        if (!producerLeaseActive || semanticLease.fd < 0) throw new AgentMuxError('The original semantic owner is closing. This finite Files producer was not spawned.', 'RUNTIME_OWNER_CLOSING')
+        return spawn(semanticLease.fd)
+      },
       diagnosticOwner: { authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, ownerInstanceId },
       ...(options.externalInputAuthority?.resolveConversationMessage ? { externalConversationAuthority: { resolveConversationMessage: ref => options.externalInputAuthority!.resolveConversationMessage!(ref) } } : {}),
       hostExecutorOwner: options.hostExecutorOwner ?? new AgentMuxHostExecutorOwner({
@@ -224,6 +238,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     return { client, hosted, server, socketPath, hostRoutes: options.service?.hostRoutes ?? hostRoutes!, ownerIdentity, executionHost,
       executionBindings: options.service?.executionBindings ?? executionBindings!, stop }
   } catch (error) {
+    producerLeaseActive = false
     await server?.stop().catch(() => {}); hostRoutes?.dispose(); await executionBindings?.dispose().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
     await endpointLease?.close().catch(() => {}); await semanticLease.close().catch(() => {})
     throw error

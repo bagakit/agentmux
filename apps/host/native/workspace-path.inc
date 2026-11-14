@@ -172,13 +172,15 @@ static void path_offer_stage(const path_info *stage, const path_info *entry) {
   if (read(4, &ack, 1) != 1 || ack != 'G') workspace_error("FILE_PATH_STAGE_UNCONFIRMED", "The original Host did not confirm its stage witness; publication was not released");
 }
 
-static int path_move_new_directory(const path_scope *scope, int stage_fd) {
+static int path_move_between(int from_fd, const char *from, int to_fd, const char *to) {
 #if defined(__APPLE__)
-  return renameatx_np(stage_fd, "entry", scope->parent, scope->name,
-    RENAME_EXCL | RENAME_NOFOLLOW_ANY | RENAME_RESOLVE_BENEATH);
+  return renameatx_np(from_fd, from, to_fd, to, RENAME_EXCL | RENAME_NOFOLLOW_ANY | RENAME_RESOLVE_BENEATH);
 #else
-  return renameat2(stage_fd, "entry", scope->parent, scope->name, RENAME_NOREPLACE);
+  return renameat2(from_fd, from, to_fd, to, RENAME_NOREPLACE);
 #endif
+}
+static int path_move_new_directory(const path_scope *scope, int stage_fd) {
+  return path_move_between(stage_fd, "entry", scope->parent, scope->name);
 }
 
 static int path_original_directory(const path_info *info, const char *witness) {
@@ -277,8 +279,163 @@ static void path_mkdir(path_scope *scope, const char *stage_name,
   path_created(&target, 1); close(entry_fd); close(stage);
 }
 
+
+/* Compare pinned directory ancestors, including a Workspace-external alias and
+ * an original object now held under its own claim name. No Run fact is inferred. */
+static int path_ancestor_relation(int directory, const char *entry_witness) {
+  int current = dup(directory); if (current < 0) return -1;
+  for (int depth = 0; depth < 4096; depth++) {
+    path_info info, parent_info;
+    if (path_fd_info(current, &info)) { close(current); return -1; }
+    char identity_prefix[96];
+    snprintf(identity_prefix, sizeof(identity_prefix), "%llu:%llu:", (unsigned long long)info.file.st_dev, (unsigned long long)info.file.st_ino);
+    if (!info.birthtime_known && !strncmp(entry_witness, identity_prefix, strlen(identity_prefix))) { close(current); errno = ENOTSUP; return -1; }
+    if (path_original_directory(&info, entry_witness)) { close(current); return 1; }
+    const int parent = openat(current, "..", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (parent < 0 || path_fd_info(parent, &parent_info)) { if (parent >= 0) close(parent); close(current); return -1; }
+    const int root = path_identity_equal(&info, &parent_info);
+    close(current); current = parent;
+    if (root) { close(current); return 0; }
+  }
+  close(current); errno = ELOOP; return -1;
+}
+static void path_directory_relation(const char *witness, const char *cwd) {
+  const int directory = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (directory < 0) {
+    printf("{\"status\":\"%s\"}", errno == ENOENT || errno == ENOTDIR ? "missing" : "unavailable"); return;
+  }
+  const int related = path_ancestor_relation(directory, witness); close(directory);
+  printf("{\"status\":\"%s\"}", related < 0 ? "unavailable" : related ? "related" : "unrelated");
+}
+static void path_move_receipt(const char *phase, const char *effect, int confirmed,
+                              const path_info *entry, const char *code, const char *message) {
+  printf("{\"action\":\"move\",\"phase\":\"%s\",\"filesystem\":\"%s\",\"durability\":\"%s\"",
+    phase, effect, confirmed ? "confirmed" : "unconfirmed");
+  if (entry) { printf(",\"movedWitness\":"); path_witness_json(entry); }
+  if (code) { printf(",\"code\":"); workspace_json_string(stdout, code); }
+  if (message) { printf(",\"message\":"); workspace_json_string(stdout, message); }
+  printf("}");
+}
+static void path_offer_move(const char *phase, const path_info *stage, const path_info *entry) {
+  FILE *output = fdopen(dup(3), "w"); if (!output) workspace_errno();
+  fprintf(output, "{\"phase\":\"%s\",\"stage\":", phase); path_witness_output(output, stage);
+  fprintf(output, ",\"entry\":"); path_witness_output(output, entry); fprintf(output, "}\n");
+  if (fflush(output) || fclose(output)) workspace_errno();
+  char ack;
+  if (read(4, &ack, 1) != 1 || ack != 'G') workspace_error("FILE_MOVE_PHASE_UNCONFIRMED", "The original Host did not release this exact move phase");
+}
+static int path_return_claim(const path_scope *source, int stage, const path_info *claimed) {
+  if (path_move_between(stage, "entry", source->parent, source->name)) return 0;
+  path_info restored;
+  return !fsync(stage) && !fsync(source->parent) && path_scope_current(source) &&
+    !path_entry_info(source->parent, source->name, &restored) && path_identity_equal(claimed, &restored);
+}
+static void path_move(path_scope *source, path_scope *destination, const char *stage_name,
+                      const char *source_root, const char *source_parent, const char *entry_witness,
+                      const char *entry_kind, const char *destination_root, const char *destination_parent,
+                      const char *fault) {
+  if (!source->root_info.birthtime_known || !source->parent_info.birthtime_known || !destination->root_info.birthtime_known || !destination->parent_info.birthtime_known) {
+    path_move_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_GENERATION_UNAVAILABLE", "The exact original directory generation is unavailable"); return;
+  }
+  if (!path_original_directory(&source->root_info, source_root) || !path_original_directory(&source->parent_info, source_parent) ||
+      !path_original_directory(&destination->root_info, destination_root) || !path_original_directory(&destination->parent_info, destination_parent) ||
+      !path_scope_current(source) || !path_scope_current(destination)) {
+    path_move_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_SCOPE_CONFLICT", "The original source or destination scope changed"); return;
+  }
+  path_info entry, occupied;
+  if (path_entry_info(source->parent, source->name, &entry)) {
+    path_move_receipt("settled", "not-applied", 1, NULL, "FILE_MOVE_SOURCE_CONFLICT", "The exact original source entry is unavailable"); return;
+  }
+  if (!entry.birthtime_known) {
+    path_move_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_GENERATION_UNAVAILABLE", "The original source generation is unavailable"); return;
+  }
+  if (!path_original_directory(&entry, entry_witness) || strcmp(path_kind(&entry), entry_kind)) {
+    path_move_receipt("settled", "not-applied", 1, NULL, "FILE_MOVE_SOURCE_CONFLICT", "The exact original source entry changed"); return;
+  }
+  if (entry.file.st_dev != destination->parent_info.file.st_dev) {
+    path_move_receipt("settled", "not-applied", 1, NULL, "FILE_MOVE_CROSS_DEVICE", "Move requires one original filesystem; no copy-delete was attempted"); return;
+  }
+  if (S_ISDIR(entry.file.st_mode)) {
+    const int inside = path_ancestor_relation(destination->parent, entry_witness);
+    if (inside) { path_move_receipt("settled", "not-applied", 1, NULL, inside < 0 ? "FILE_MOVE_SCOPE_UNAVAILABLE" : "FILE_MOVE_INTO_SELF", "The destination is inside the original source or its ancestry is unconfirmed"); return; }
+  }
+  if (!path_entry_info(destination->parent, destination->name, &occupied) || errno != ENOENT) {
+    path_move_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_OCCUPIED", "The destination entry was preserved"); return;
+  }
+  if (mkdirat(source->parent, stage_name, 0700)) workspace_errno();
+  const int stage = openat(source->parent, stage_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  path_info stage_info;
+  if (stage < 0 || path_fd_info(stage, &stage_info) || fsync(stage) || fsync(source->parent)) workspace_errno();
+  if (!stage_info.birthtime_known) { close(stage); path_move_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_GENERATION_UNAVAILABLE", "The original claim generation is unavailable"); return; }
+  path_offer_move("staged", &stage_info, &entry);
+  if (!strcmp(fault, "move-after-stage-crash")) _exit(101);
+  commit_barrier(!strcmp(fault, "before-move-claim-barrier"), 5, 6, "before-path-move-claim");
+  if (!path_scope_current(source) || !path_scope_current(destination)) {
+    close(stage); path_move_receipt("settled", "not-applied", 1, NULL, "FILE_PATH_SCOPE_CONFLICT", "The original scope changed before claim"); return;
+  }
+  path_info current_stage;
+  if (path_entry_info(source->parent, stage_name, &current_stage) || !path_identity_equal(&current_stage, &stage_info)) workspace_error("FILE_MOVE_STAGE_CHANGED", "The original claim container changed");
+  if (path_move_between(source->parent, source->name, stage, "entry")) {
+    const int saved = errno; close(stage);
+    path_move_receipt("settled", "not-applied", 1, NULL, saved == ENOSYS || saved == ENOTSUP || saved == EOPNOTSUPP ? "FILE_PATH_NATIVE_UNSUPPORTED" : "FILE_MOVE_CLAIM_REFUSED", "The original source was not claimed"); return;
+  }
+  workspace_write_published = 1;
+  path_info claimed;
+  if (path_entry_info(stage, "entry", &claimed)) workspace_errno();
+  if (!path_identity_equal(&entry, &claimed) || strcmp(path_kind(&claimed), entry_kind)) {
+    const int restored = path_return_claim(source, stage, &claimed); close(stage);
+    path_move_receipt(restored ? "settled" : "claimed", restored ? "not-applied" : "unknown", restored, NULL,
+      "FILE_MOVE_SOURCE_CONFLICT", restored ? "A late replacement was returned without overwriting another entry" : "The late replacement is retained in the original claim; no destination publication was issued"); return;
+  }
+  if (fsync(stage) || fsync(source->parent) || path_fd_info(stage, &stage_info)) workspace_errno();
+  if (!strcmp(fault, "move-after-claim-crash")) _exit(102);
+  path_offer_move("claimed", &stage_info, &claimed);
+  if (!strcmp(fault, "move-after-claim-ack-crash")) _exit(103);
+  if (!path_scope_current(source) || !path_scope_current(destination)) {
+    close(stage); path_move_receipt("claimed", "unknown", 0, NULL, "FILE_PATH_SCOPE_CONFLICT", "The original scope changed after claim; no destination publication was issued"); return;
+  }
+  path_info final_entry;
+  if (path_entry_info(stage, "entry", &final_entry) || !path_identity_equal(&claimed, &final_entry)) workspace_error("FILE_MOVE_CLAIM_CHANGED", "The exact original claimed source changed");
+  commit_barrier(!strcmp(fault, "at-move-publish-barrier"), 5, 6, "at-path-move-publish");
+  if (path_move_between(stage, "entry", destination->parent, destination->name)) {
+    const int saved = errno, restored = path_return_claim(source, stage, &claimed); close(stage);
+    path_move_receipt(restored ? "settled" : "claimed", restored ? "not-applied" : "unknown", restored, NULL,
+      saved == EEXIST || saved == ENOTEMPTY ? "FILE_PATH_OCCUPIED" : "FILE_MOVE_PUBLICATION_REFUSED",
+      restored ? "The destination was preserved and the original source returned" : "The original source remains in its claim; inspect without replaying"); return;
+  }
+  if (!strcmp(fault, "move-after-publish-crash")) _exit(104);
+  if (!strcmp(fault, "move-directory-sync")) workspace_error("EIO", "Injected original move confirmation failure");
+  if (fsync(stage) || fsync(source->parent) || fsync(destination->parent) || fsync(source->root) || fsync(destination->root)) workspace_errno();
+  if (!path_scope_current(source) || !path_scope_current(destination) || path_entry_info(destination->parent, destination->name, &final_entry) || !path_identity_equal(&claimed, &final_entry))
+    workspace_error("FILE_MOVE_SCOPE_CHANGED", "The original scope or moved identity changed after publication");
+  path_retire_empty_stage(source, stage_name, &stage_info);
+  path_move_receipt("published", "moved", 1, &final_entry, NULL, NULL); close(stage);
+}
+static void path_move_inspect(path_scope *source, path_scope *destination,
+                              const char *source_root, const char *source_parent, const char *entry_witness,
+                              const char *destination_root, const char *destination_parent, int claimed) {
+  path_info target, old;
+  if (claimed && path_original_directory(&source->root_info, source_root) && path_original_directory(&source->parent_info, source_parent) &&
+      path_original_directory(&destination->root_info, destination_root) && path_original_directory(&destination->parent_info, destination_parent) &&
+      path_scope_current(source) && path_scope_current(destination) && !path_entry_info(destination->parent, destination->name, &target) && path_original_directory(&target, entry_witness) &&
+      (path_entry_info(source->parent, source->name, &old) ? errno == ENOENT : !path_original_directory(&old, entry_witness)))
+    path_move_receipt("published", "moved", 0, &target, NULL, NULL);
+  else path_move_receipt(claimed ? "claimed" : "prepared", "unknown", 0, NULL, "FILE_MOVE_UNCONFIRMED", "The original claimed move is not confirmed at its destination. Its request and claim are retained; no action was replayed.");
+}
+
 static int workspace_path_operation(int argc, char **argv) {
   if (argc < 2 || strcmp(argv[1], "--workspace-path")) return 0;
+  if (argc == 5 && !strcmp(argv[2], "related")) { path_directory_relation(argv[3], argv[4]); return 1; }
+  if (argc == 16 && (!strcmp(argv[2], "move") || !strcmp(argv[2], "move-inspect"))) {
+    validate_relative_path(argv[7]);
+    if (strchr(argv[7], '/')) workspace_error("FILE_MOVE_INVALID_STAGE", "An exact direct claim name is required");
+    path_scope source = path_open_scope(argv[3], argv[4], 0), destination = path_open_scope(argv[5], argv[6], 0);
+    fprintf(stderr, "%s\n", "AGENTMUX_WORKSPACE_READY"); fflush(stderr);
+    size_t input_length; unsigned char *input = workspace_input(STDIN_FILENO, &input_length); free(input);
+    if (!strcmp(argv[2], "move")) path_move(&source, &destination, argv[7], argv[8], argv[9], argv[10], argv[11], argv[12], argv[13], argv[15]);
+    else path_move_inspect(&source, &destination, argv[8], argv[9], argv[10], argv[12], argv[13], !strcmp(argv[14], "claimed"));
+    path_scope_close(&destination); path_scope_close(&source); return 1;
+  }
   if (argc < 5 || (strcmp(argv[2], "stat") && strcmp(argv[2], "mkdir") && strcmp(argv[2], "inspect")))
     workspace_error("FILE_PATH_INVALID_REQUEST", "Invalid original path helper action");
   const int observe = !strcmp(argv[2], "stat"), inspect = !strcmp(argv[2], "inspect");

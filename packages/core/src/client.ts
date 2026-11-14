@@ -689,6 +689,70 @@ export class AgentMuxClient {
     return await this.readNativeAgentHistoryResource({ ...request, nativeSource, commandOverride: config.command, args: config.args, env: config.env })
   }
 
+  /** Cold explicit Files mutation scope; the producer owner releases only after native quiescence. */
+  retainExecutionDirectoryMutation(isRelated: (cwd: string) => Promise<boolean>): {
+    assertUnreferenced(): Promise<void>; release(): void
+    spawnFileProducer: NonNullable<AgentMuxClientOptions['spawnFiniteFileProducer']>
+  } {
+    const token = Symbol()
+    this.executionDirectoryMutations.set(token, isRelated)
+    // Freeze pre-scope admissions before any await: they can finish and leave
+    // memory while later metadata/catalog reads are still in progress.
+    const admitted = [
+      ...[...this.activeCreations.values()].map(creation => creation.input.workspacePath),
+      ...this.activeExecutionDirectories.values()
+    ]
+    return {
+      assertUnreferenced: async () => {
+        if (!this.store.retainedExecutionDirectories) throw new AgentMuxError('The original execution directory reference owner is unavailable. Existing work remains available.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
+        const paths = new Set([...admitted, ...await this.store.retainedExecutionDirectories('local')])
+        for (const cwd of await this.executionHelperStore().retainedExecutionDirectories()) paths.add(cwd)
+        for (const cwd of await this.terminalRecoveryOwner().retainedExecutionDirectories()) paths.add(cwd)
+        const services = await this.retainedServiceExecutionDirectories?.() ?? []
+        for (const service of services) if (await isRelated(service.workspacePath)) {
+          if (!service.runtimeId || service.runtimeId !== (await this.terminalCreationRuntimeIdentity()).runtimeId) throw new AgentMuxError('The original service execution Runtime reference is unconfirmed.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
+          paths.add(service.workspacePath)
+        }
+        this.requireConnected()
+        const identity = this.kernel.identity().daemonInstanceId
+        let after: string | null = null
+        do {
+          const page = await this.kernel.listPage(after, 1000)
+          for (const run of page.runs) {
+            if (typeof run.workspacePath !== 'string' || !run.workspacePath) throw new AgentMuxError('An original Run execution directory is unobserved.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
+            paths.add(run.workspacePath)
+          }
+          after = page.nextCursor
+        } while (after !== null)
+        if (this.kernel.identity().daemonInstanceId !== identity) throw new AgentMuxError('The original Runtime changed while reading directory references.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
+        // This snapshot is after scope publication; new dispatches must consume that same scope.
+        for (const creation of this.activeCreations.values()) paths.add(creation.input.workspacePath)
+        for (const cwd of this.activeExecutionDirectories.values()) paths.add(cwd)
+        const queue = [...paths]
+        await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
+          while (queue.length) if (await isRelated(queue.pop()!)) throw new AgentMuxError('The original directory is retained by an execution or recovery reference. Existing work remains available.', 'EXECUTION_DIRECTORY_REFERENCED')
+        }))
+      },
+      spawnFileProducer: spawn => {
+        if (!this.executionDirectoryMutations.has(token) || !this.spawnFiniteFileProducer) throw new AgentMuxError('The original finite Files producer admission is unavailable. No helper was spawned.', 'FILE_PRODUCER_ADMISSION_UNAVAILABLE')
+        return this.spawnFiniteFileProducer(spawn)
+      },
+      release: () => { this.executionDirectoryMutations.delete(token) }
+    }
+  }
+
+  private async assertExecutionDirectoryCreationAllowed(cwd: string): Promise<void> {
+    for (const isRelated of [...this.executionDirectoryMutations.values()]) if (await isRelated(cwd)) throw new AgentMuxError('The requested execution directory has an in-flight file mutation. This new launch was not dispatched; inspect the original mutation before deciding another launch.', 'EXECUTION_DIRECTORY_MUTATION_IN_PROGRESS')
+  }
+
+  private async retainExecutionDirectoryIntent<T>(cwd: string, work: () => Promise<T>): Promise<T> {
+    const key = Symbol(); this.activeExecutionDirectories.set(key, cwd)
+    try { return await work() } finally { this.activeExecutionDirectories.delete(key) }
+  }
+  async withExecutionDirectoryAdmission<T>(cwd: string, work: () => Promise<T>): Promise<T> {
+    return this.retainExecutionDirectoryIntent(cwd, async () => { await this.assertExecutionDirectoryCreationAllowed(cwd); return await work() })
+  }
+
   async configureHostExecutor(input: AgentMuxHostExecutorConfigureInput) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     return await this.hostExecutorOwner.configure(input)
@@ -717,8 +781,7 @@ export class AgentMuxClient {
     }
     let admitted: AgentCreationAdmission | undefined
     let resolved: AgentMuxAgentCreateInput | undefined
-    const release = await this.hostExecutorOwner.retainLaunch(input.executorId)
-    try { return await this.runAgentCreation('host', input, async (request, execution) => {
+    return await this.runAgentCreation('host', input, async (request, execution) => {
       const input = request as AgentMuxHostAgentCreateInput
       const { preparation } = execution
       const intentDigest = hostAgentCreationIntent(input)
@@ -779,7 +842,7 @@ export class AgentMuxClient {
         }
       }
       return await this.createAgentWithDeliveryAttempt(resolved!, admitted, execution)
-    }) } finally { release() }
+    }, () => this.hostExecutorOwner!.retainLaunch(input.executorId))
   }
 
   readonly providers: AgentProviderRegistry
@@ -791,6 +854,10 @@ export class AgentMuxClient {
   private readonly store: AgentMuxAgentSessionStore
   /** CID exists before the first asynchronous read; SID indexes this same owner. */
   private readonly activeCreations = new Map<string, ActiveAgentCreation>()
+  /** Original creation admission only; physical checks remain with the Files owner. */
+  private readonly executionDirectoryMutations = new Map<symbol, (cwd: string) => Promise<boolean>>()
+  private readonly activeExecutionDirectories = new Map<symbol, string>()
+
   private readonly activeCreationSessions = new Map<string, ActiveAgentCreation>()
   /** Only concurrent Provider reads are shared; every caller projects its own Core ownership. */
   private readonly nativeSessionCatalogReads = new WeakMap<AgentProvider, Map<string, Promise<Omit<AgentNativeSessionCatalog, 'capabilities'>>>>()
@@ -962,9 +1029,13 @@ export class AgentMuxClient {
     return projectRunWith(this.endedRuns.get(run.runId), run, agentSession)
   }
 
+  private readonly retainedServiceExecutionDirectories: AgentMuxClientOptions['retainedServiceExecutionDirectories']
+  private readonly spawnFiniteFileProducer: AgentMuxClientOptions['spawnFiniteFileProducer']
   private readonly prepareExecutionEnvironment: () => Promise<void>
 
   constructor(options: AgentMuxClientOptions = {}) {
+    this.spawnFiniteFileProducer = options.spawnFiniteFileProducer
+    this.retainedServiceExecutionDirectories = options.retainedServiceExecutionDirectories
     this.inputResources = options.inputResources
     this.prepareExecutionEnvironment = options.prepareExecutionEnvironment ?? (async () => {})
     this.externalConversationAuthority = options.externalConversationAuthority
@@ -1159,6 +1230,7 @@ export class AgentMuxClient {
       runtime: {
         prepareExecutionEnvironment: () => this.prepareExecutionEnvironment(),
         kernel: this.kernel,
+        directoryAdmission: (cwd, work) => this.withExecutionDirectoryAdmission(cwd, work),
         assertAgentRun: (...args) => this.assertAgentRun(...args),
         requireCurrentAgentRun: (...args) => this.requireCurrentAgentRun(...args),
         retireUncommittedRun: (...args) => this.retireUncommittedRun(...args),
@@ -4488,7 +4560,7 @@ export class AgentMuxClient {
       input.toolExecution = parseAgentToolExecutionBinding(input.toolExecution)
       if (input.toolExecution.bindingId !== input.bindingId) throw new AgentMuxError('Frontend and resource binding identities differ.', 'EXECUTION_BINDING_MISMATCH')
     }
-    return await this.executionHelperStore().prepare(input, async () => {
+    return await this.retainExecutionDirectoryIntent(input.workspacePath, () => this.executionHelperStore().prepare(input, async () => {
       const journalDirectory = join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'agent-execution', input.bindingId)
       let journalIdentity: string | undefined
       if (input.role === 'executor') {
@@ -4501,7 +4573,7 @@ export class AgentMuxClient {
         command: plan.command, args: plan.args, env: plan.env })
       return { bindingId: input.bindingId, role: input.role, providerId: input.providerId, prepared,
         ...(plan.notices === undefined ? {} : { notices: parseAgentExecutionNotices(plan.notices, { providerId: input.providerId, role: input.role }) }), ...(journalIdentity ? { journalIdentity } : {}) }
-    })
+    }, write => this.withExecutionDirectoryAdmission(input.workspacePath, write)))
   }
 
   /** Capture this Host's complete launch request without starting or observing a Run. */
@@ -4525,16 +4597,23 @@ export class AgentMuxClient {
 
   async createTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxRun> {
     this.requireConnected()
-    return await this.createPreparedTerminal(await this.prepareTerminal(input))
+    return await this.withExecutionDirectoryAdmission(input.workspacePath, async () => await this.createPreparedTerminal(await this.prepareTerminal(input)))
   }
 
   /** One durable raw-Terminal recovery owner, shared by Desktop, SDK and public RPC. */
   async recoverTerminal(value: AgentMuxTerminalRecoveryInput): Promise<AgentMuxTerminalRecoveryResult> {
     this.requireConnected()
     const input = parseTerminalRecoveryInput(value)
+    const owner = this.terminalRecoveryOwner()
+    if (input.action === 'inspect') return await owner.recover(input)
+    return await this.retainExecutionDirectoryIntent(input.workspacePath, () => owner.recover(input))
+  }
+
+  private terminalRecoveryOwner(): TerminalRecoveryOwner {
     const rawOwnership = (ref: AgentMuxRunRef) => this.assertRawTerminal(ref)
 
-    const owner = new TerminalRecoveryOwner(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'terminal-recoveries'), {
+    return new TerminalRecoveryOwner(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'terminal-recoveries'), {
+      directoryAdmission: (cwd, write) => this.withExecutionDirectoryAdmission(cwd, write),
       runtime: () => this.terminalCreationRuntimeIdentity(),
       original: async request => {
         await rawOwnership(request.expectedRun)
@@ -4551,17 +4630,18 @@ export class AgentMuxClient {
       retire: (prepared, runtime) => this.retirePreparedTerminalCreation(prepared, runtime),
       observeRetirement: (prepared, runtime) => this.observePreparedTerminalCreationRetirement(prepared, runtime)
     })
-    return await owner.recover(input)
   }
 
   async createPreparedTerminal(input: AgentMuxPreparedTerminal): Promise<AgentMuxRun> {
     const { prepared, request } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
-    const run = await this.kernel.startPrepared(request, prepared.createOperationId)
-    this.runPids.set(run.runId, run.pid)
-    const projected = this.projectRun(run)
-    this.publisher.publishRunState(projected)
-    return projected
+    return await this.withExecutionDirectoryAdmission(prepared.workspacePath, async () => {
+      const run = await this.kernel.startPrepared(request, prepared.createOperationId)
+      this.runPids.set(run.runId, run.pid)
+      const projected = this.projectRun(run)
+      this.publisher.publishRunState(projected)
+      return projected
+    })
   }
 
   /** Without an exact ref, null means unconfirmed. With a ref, null confirms that original Run is absent. Never submits Start. */
@@ -5401,7 +5481,8 @@ export class AgentMuxClient {
   }
 
   private async runAgentCreation(kind: ActiveAgentCreation['kind'], input: ActiveAgentCreation['input'],
-    execute: (input: ActiveAgentCreation['input'], execution: AgentCreationExecution) => ReturnType<AgentMuxClient['createAgentWithDelivery']>
+    execute: (input: ActiveAgentCreation['input'], execution: AgentCreationExecution) => ReturnType<AgentMuxClient['createAgentWithDelivery']>,
+    retainAdmission?: () => Promise<() => void>
   ): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
     const frozen = structuredClone(input)
     if (frozen.toolExecution !== undefined) frozen.toolExecution = parseAgentToolExecutionBinding(frozen.toolExecution)
@@ -5427,8 +5508,9 @@ export class AgentMuxClient {
     let waiting = false
     // Defer execution so CID/controller/Promise are installed before any Store or authority read.
     const pending = Promise.resolve().then(async () => {
+      const release = retainAdmission ? await retainAdmission() : undefined
       let execution: AgentCreationExecution | undefined
-      return await retryAgentCreationResources({
+      try { return await retryAgentCreationResources({
         operationId: () => entry.agentSessionId ? agentLifecycleOperationIdentity('create', entry.agentSessionId, cid) : undefined,
         signal: controller.signal,
         setWake: wake => { if (wake) entry.wake = wake; else delete entry.wake },
@@ -5441,7 +5523,7 @@ export class AgentMuxClient {
           ...(entry.agentSessionId ? { agentSessionId: entry.agentSessionId } : {}), code: 'AGENT_CREATION_WAITING_FOR_STORAGE',
           message: `Storage is unavailable while checking and preparing the original creation. Its request and input are retained; retrying in ${retryAfterMs / 1_000}s. ${error instanceof Error ? error.message : String(error)}`,
           evidence: { source: 'agentmux', observedAt: Date.now() } }) }
-      })
+      }) } finally { release?.() }
     })
     entry.pending = pending
     this.activeCreations.set(cid, entry)
@@ -5522,6 +5604,7 @@ export class AgentMuxClient {
       const session = await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId))
       return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!, contextRequested) }
     }
+    await preparation(() => this.assertExecutionDirectoryCreationAllowed(input.workspacePath))
     if (forkSource) {
       // A new fork needs only its exact source adopted. Original receipts and prepared
       // operations above remain readable even after that source later changes.
@@ -5711,6 +5794,7 @@ export class AgentMuxClient {
         await execution.assertHostCurrent?.()
       } while (checkedRevision !== execution.waitRevision())
       signal?.throwIfAborted()
+      await preparation(() => this.assertExecutionDirectoryCreationAllowed(input.workspacePath))
       preservePreparedCreation = true
       startAttempted = true
       const run = await this.kernel.start(startInput).catch(error => {
@@ -6329,7 +6413,8 @@ export class AgentMuxClient {
       if (!reservation?.preparedSession || !reservation.preparedDispatch ||
           !isDeepStrictEqual(reservation.preparedSession.continuity?.messageInput, { ...recipe, plan })) throw new AgentMuxError(
         'The original prepared message lifecycle is unavailable. No Start was dispatched.', 'AGENT_INPUT_READ_UNCONFIRMED')
-      await this.store.prepareResume(reservation, reservation.preparedSession, reservation.preparedDispatch)
+      const preparedSession = reservation.preparedSession, preparedDispatch = reservation.preparedDispatch
+      await this.withExecutionDirectoryAdmission(preparedSession.workspacePath, () => this.store.prepareResume(reservation, preparedSession, preparedDispatch))
       const carrier = { kind: 'launch' as const, lifecycleOperationId: recipe.lifecycleOperationId, reservationId: reservation.reservationId }
       const assertTarget = (session: AgentMuxAgentSession) => {
         if (!sameRun(session.run, key.expectedRun) || saved.intent.environment.providerId !== session.providerId ||

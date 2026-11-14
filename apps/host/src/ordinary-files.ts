@@ -1,7 +1,8 @@
+import type { ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { basename, dirname, relative, resolve, sep, posix } from 'node:path'
-import type { FileDocumentReadResult, FileWriteReceipt, FileNameListing, FilePathObservation, FilePathScopeWitness, FilePathMutationReceipt, FileEntryWitness } from '@agentmux/core/files'
+import type { FileDocumentReadResult, FileWriteReceipt, FileNameListing, FilePathObservation, FilePathScopeWitness, FilePathMutationReceipt, FileEntryWitness, FileMoveReceipt, FileMoveParams } from '@agentmux/core/files'
 import type { NoteFileWitness } from '@agentmux/core/note-history'
 import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromDirectoryName, scratchTopicDirectoryName } from './mote-topic-model.js'
 import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './mote-directories.js'
@@ -20,6 +21,9 @@ type LocalMutablePath = { root: string; parent: string; name: string }
 export type OrdinaryFileWriteInput = { path: string; content: string; expectedRevision: string | null; baseContent?: string; operationId?: string }
 export type OrdinaryFileWriteResult = FileWriteReceipt & { fileWitness?: NoteFileWitness }
 export type OrdinaryWorkspaceFilesOptions = {
+  beforeMoveClaim?: () => Promise<void>
+  beforeMovePublish?: () => Promise<void>
+  moveFault?: string
   beforePathPublish?: () => Promise<void>
   beforePathRename?: () => Promise<void>
   pathMutationFault?: string
@@ -192,6 +196,7 @@ export class OrdinaryWorkspaceFiles {
     const entry = await localParentEntryWithin(scope.root, scope.requested)
     return { root: entry.root, requested: posix.join(relative(entry.root, entry.parent).split(sep).join('/'), entry.name) }
   }
+  pathMutationLocation(workspace: FileWorkspace, path: string): Promise<{ root: string; requested: string }> { return this.pathScope(workspace, path) }
   async statPath(workspace: FileWorkspace, path: string): Promise<FilePathObservation> {
     const scope = await this.pathScope(workspace, path)
     return JSON.parse((await this.run(scope.root, scope.root, { action: 'path-stat', path: scope.requested })).toString('utf8'))
@@ -213,6 +218,32 @@ export class OrdinaryWorkspaceFiles {
     // This location was captured by the original namespace resolver before its
     // native producer was released, not reconstructed from a changed alias.
     return JSON.parse((await this.run(scope.root, scope.root, { ...input, path: scope.path, action: 'path-inspect' })).toString('utf8'))
+  }
+  async movePath(workspace: FileWorkspace, input: { request: FileMoveParams; stage: string; retainProducer(value: unknown): Promise<void>; spawnFileProducer?: (spawn: (fd: number) => ChildProcess) => ChildProcess }): Promise<FileMoveReceipt> {
+    const source = await this.pathScope(workspace, input.request.expectedResource.path)
+    const destination = await this.pathScope(workspace, input.request.destination.expectedResource.path)
+    const before = this.options.beforeMovePublish ?? this.options.beforeMoveClaim
+    const result = await runWorkspaceFileWorker(source.root, source.root, {
+      action: 'path-move', path: source.requested, destination: { root: destination.root, path: destination.requested }, stage: input.stage,
+      expected: input.request.expected, destinationExpected: input.request.destination.expected,
+      ...(before || this.options.moveFault ? { fault: this.options.beforeMovePublish ? 'at-move-publish-barrier' : before ? 'before-move-claim-barrier' : this.options.moveFault! } : {})
+    }, { helperPath: this.options.helperPath ?? helperPath, workerSource: FILE_NAME_WORKER_SOURCE, ...(input.spawnFileProducer ? { spawnFiniteFileProducer: input.spawnFileProducer } : {}) }, undefined, undefined,
+      { stage: value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['phase', 'stage', 'entry'].includes(key)) || !['staged', 'claimed'].includes((value as { phase: string }).phase)) throw new Error('The original native move phase is invalid.')
+        return input.retainProducer({ ...value, location: { root: source.root, path: source.requested }, destination: { root: destination.root, path: destination.requested } })
+      }, ...(before ? { after: before } : {}) })
+    return JSON.parse(result.toString('utf8'))
+  }
+  async inspectMovePath(input: { request: FileMoveParams; stage: string; location: { root: string; path: string }; destination: { root: string; path: string }; claimed: boolean }): Promise<FileMoveReceipt> {
+    return JSON.parse((await this.run(input.location.root, input.location.root, {
+      action: 'path-move-inspect', path: input.location.path, destination: input.destination, stage: input.stage,
+      expected: input.request.expected, destinationExpected: input.request.destination.expected, claimed: input.claimed
+    })).toString('utf8'))
+  }
+  async executionDirectoryRelated(cwd: string, entry: FileEntryWitness): Promise<'related' | 'unrelated' | 'missing' | 'unavailable'> {
+    const result = JSON.parse((await this.run('/', '/', { action: 'path-related', path: cwd, entry })).toString('utf8')) as { status?: string }
+    if (!['related', 'unrelated', 'missing', 'unavailable'].includes(result.status ?? '')) throw new Error('The original native directory relation is unconfirmed.')
+    return result.status as 'related' | 'unrelated' | 'missing' | 'unavailable'
   }
   async read(workspace: FileWorkspace, requestedPath: string, budget?: WorkspaceFileReadBudget): Promise<FileDocumentReadResult> {
     budget?.signal?.throwIfAborted()
