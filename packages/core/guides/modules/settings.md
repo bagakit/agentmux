@@ -88,9 +88,11 @@ existing one. The result's created flag distinguishes new from reused; only the 
 returns a public key as its connection code. Private keys stay in their original files.
 Saved server keys include a PSK and fixed relay. Never publish the listener's private address.
 The Desktop part is the person's: ask them to complete it at these locations. On the
-receiving machine, This Mac → Connection takes the saved server key, the client public key
-under Allowed clients and the Allow Tailcat connections switch; its refreshed status reads
-the original listener. On the sending machine, that Host's Tailcat field takes the
+receiving machine, Settings → Environment → Network node → Incoming connections takes
+the saved server key, the client public key under Allowed clients and the Allow Tailcat
+connections switch. Save incoming connections applies that original local Host config; its refreshed status reads
+the original listener. Node publication has its own separate Save publication and Core
+policy receipt; neither save claims to commit the other domain. On the sending machine, that Host's Tailcat field takes the
 listener's private address and the saved client key; then that exact Host is saved and tested.
 Missing CLI, invalid saved key or listener failure is visible; a listening receipt does not
 prove a client connected. Disabling only stops this listener and retains existing work.
