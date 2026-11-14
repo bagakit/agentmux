@@ -1,13 +1,43 @@
 # macOS 打包与安装
 
-本页面向并行开发中的一次打包交付。成本与验收范围由 [AGENTS](../../AGENTS.md#并行协作与交付) 定义；构建、更新路由及进程机制见 [Desktop 更新架构](../architecture/desktop-updates.md)，数据与恢复要求见 [Session 恢复](../design/behavior/session-recovery.md#更新安装与恢复验收)。本页不增加发布门禁，也不把某轮临时安装脚本当成正式入口。
+本页面向并行开发中的一次打包交付，唯一持有打包的步骤、可复用的结果与补查条件；打包原则见 [AGENTS](../../AGENTS.md#打包)。构建、更新路由及进程机制见 [Desktop 更新架构](../architecture/desktop-updates.md)，数据与恢复要求见 [Session 恢复](../design/behavior/session-recovery.md#更新安装与恢复验收)。本页不增加发布门禁，也不把某轮临时安装脚本当成正式入口。
 
 ## 最短交付路径
 
-1. **锁定开包时最新的 committed main。** 记录 commit 与 tree；共享工作区有并行修改时，在该提交的独立干净 worktree 构建。可复用一份明确由打包流程持有的专用 worktree，其可选的本机记录位于 `.local/package-delivery/reusable-worktree.json`（仅本机，不随仓库分发）：先确认它仍为本仓库注册的 worktree，且没有在途构建、未提交或未跟踪工作，再只在该 worktree 更新到锁定的提交；记录缺失或状态不明时保留原内容并新建隔离 worktree。保留他人的修改，不用 stash、切共享分支或清场换取干净目录。构建中 main 继续前进不触发自动重打；交付时说明本包锁定提交，不能称其包含开包后的提交。
-2. **准备锁定依赖，选择一个入口。** 复用专用 worktree 中与锁定依赖相符的 `node_modules` 和原路径的原生构建缓存；依赖输入变化时按锁文件重新安装。本地 `file:` 归档内容变化也属于依赖输入变化；pnpm 的重复安装优化可能漏刷同路径归档，此时用 `--config.optimistic-repeat-install=false` 更新受影响依赖。缓存齐全时可用 `pnpm install --offline --frozen-lockfile`；缓存缺项则由正常锁定依赖安装补齐。只出包用 `pnpm package:mac`，同时安装用 `pnpm package:mac:install`。打包入口本身已执行依赖构建、组包、签名和产物检查，外层不再先跑一遍完整 build、typecheck 或测试套件。已有签名候选的安装续做不重新调用整条打包命令。
+影响当前操作的修复（例如 Terminal／TUI 的使用问题）在自身验证通过后及时打包安装，不等待无关功能收口；安装仍保留原工作面和健康 Run，安装成功与用户问题已解决分别验收。
+
+1. **锁定开包时最新的 committed main。** 记录 commit 与 tree；共享工作区有并行修改时，在该提交的独立干净 worktree 构建。可复用一份明确由打包流程持有的专用 worktree，其可选的本机记录位于 `.local/package-delivery/reusable-worktree.json`（仅本机，不随仓库分发；仓库中没有脚本读写它，由执行打包的 Agent 自行维护）：先确认它仍为本仓库注册的 worktree，且没有在途构建、未提交或未跟踪工作，再只在该 worktree 更新到锁定的提交；记录缺失或状态不明时保留原内容并新建隔离 worktree。保留他人的修改，不用 stash、切共享分支或清场换取干净目录。构建中 main 继续前进不触发自动重打；交付时说明本包锁定提交，不能称其包含开包后的提交。
+2. **准备锁定依赖，选择一个入口。** 复用专用 worktree 中与锁定依赖相符的 `node_modules` 和原路径的原生构建缓存；依赖输入变化时按锁文件重新安装。本地 `file:` 归档内容变化也属于依赖输入变化；pnpm 的重复安装优化可能漏刷同路径归档，此时用 `--config.optimistic-repeat-install=false` 更新受影响依赖。缓存齐全时可用 `pnpm install --offline --frozen-lockfile`；缓存缺项则由正常锁定依赖安装补齐。运行时同样沿锁定依赖的官方安装入口准备，不依赖开发目录残留，不另造下载器，也不借用其他 App。然后按下文[《入口、产物与安装位置》](#入口产物与安装位置)选一个入口。打包入口本身已执行依赖构建、组包、签名和产物检查，外层不再先跑一遍完整 build、typecheck 或测试套件。整条打包命令每次都要求干净源码树并重新构建，所以已有签名候选的安装续做不重新调用它；当前没有命令行续做入口，续做方式见下文「失败后从准确阶段续做」。
 3. **复用同一候选与已有结果。** App、DMG 和安装副本来自同次构建；按已完成阶段核对准确身份，复用功能任务已有验收。DMG 压缩和 App 复制会争用磁盘，不默认同时启动多个重 I/O 任务；同机其他 Agent 正在工作时优先控制并发和重复副本。只在阶段转换或具体失败时读取相关日志，不高频扫描全局进程、目录、工作面或重算整包散列。DMG 的输入副本在镜像创建、准确卸载和验证均成功后应立即释放，再创建核验副本；失败沿原诊断与暂存保全路径处理，不提前删除输入或改变已签源。
-4. **安装后核对实际加载，再清理。** 从 `~/Applications/AgentMux.app` 正常启动，核对实际 Main、Renderer、必要持久保存、原工作面和相关 Runtime／Run 事实；磁盘身份或版本号不能代替已加载身份。然后清理本次不用的中间产物与 worktree；可保留一份明确供后续打包复用的专用 worktree 和构建缓存，并保留在用映像、未保存工作和必要原始回执。清理不能成为安装前置条件。
+4. **安装后核对实际加载，再清理。** 从 `~/Applications/AgentMux.app` 经 LaunchServices 正常启动并通过就绪检查，核对实际 Main、Renderer、必要持久保存、原工作面和相关 Runtime／Run 事实；磁盘身份或版本号不能代替已加载身份，核对方法见[《安装后的身份核对》](#安装后的身份核对)。然后清理本次不用的中间产物与 worktree；可保留一份明确供后续打包复用的专用 worktree 和构建缓存，并保留在用映像、未保存工作和必要原始回执。清理不能成为安装前置条件。
+
+## 入口、产物与安装位置
+
+打包需要干净的已提交 checkout；开发树里有未完成的工作时，在独立 worktree 打包。
+
+| 入口 | 做什么 | 边界 |
+| --- | --- | --- |
+| `pnpm package:mac` | 只产生 `apps/desktop/release/mac/AgentMux.app` 与同批 DMG | 不安装 |
+| `pnpm package:mac:install` | 再把这份候选原子替换到 `~/Applications/AgentMux.app`；旧副本移入 `~/.Trash`，可恢复 | 默认是完整安装。随包 CtxMux Runtime 与已安装 App 内的 Runtime 产物不同（按实际 runtime 树比较）时，必须先完成同 Runtime 的 Run／resume 评审，并以 `--runtime-reviewed=<评审记录路径>` 传入非空记录，否则在改动任何运行中应用之前拒绝。`--ui-only`（须与 `--install` 同用）只替换 App／Renderer，保留兼容的现有 Runtime 服务 |
+| `pnpm update:local [--ui-only]` | 先构建，再按实际差异选择更新路线 | 只用于已经由 `package:mac:install` 装好前端 loader 之后的兼容改动；ctxmux 变化且未加 `--ui-only` 时拒绝，不停止任何应用或 Agent |
+| `pnpm update:renderer` | 先构建，再只更新前端 | Host 或 Runtime 有变化时拒绝，改用应用安装 |
+| `pnpm update:renderer:rollback` | 撤回上一次前端更新 | 同一动作也在应用菜单 View > Revert frontend update |
+| `pnpm package:mac:report` | 读取本次真实构建输出，列出 canonical App、`/Applications`、开发缓存 App 与当前运行实例中发现的同名副本及其身份，并标出与候选身份不符的副本 | 候选缺失或输出不完整时只给一条诊断，说明缺少的路径；只告警，不删除任何副本或用户数据 |
+
+`apps/desktop/out`、DMG 挂载目录和任意临时或旧的 `.app` 都不能安装；只有同一次 clean build 产生的 `release/mac/AgentMux.app` 能进入安装动作。候选在签名、身份核对或安装前启动验证的任一步失败时，入口保留现有 canonical 安装并报告失败阶段，不能把旧包或半成品报告为新版本。清理旧副本只移入 Trash 或经用户确认，不删除 Application Support、Session、Run 或工作区数据。两条安装路线的机制见 [Desktop 更新架构](../architecture/desktop-updates.md)。
+
+### 签名身份
+
+- 正式签名：把 `AGENTMUX_MACOS_SIGN_IDENTITY` 设为可用 Developer ID Application 证书的准确 SHA1；未设置时读取本机记录 `~/.agentmux/signing/identity.json`。
+- 本机签名身份：先运行一次 `node apps/desktop/scripts/macos-local-signing.mjs --setup` 建立身份，再运行 `--trust`，由本人认证当前用户的代码签名信任策略。
+- 开发打包须显式加 `--ad-hoc`。它与环境变量中的证书互斥，也不能与 `--install` 一起使用（每次构建都会改变隐私授权身份）；不确认授权连续性，并跳过 LaunchServices 检查。
+
+### 安装后的身份核对
+
+- 候选携带来源身份 `package-identity.json`：源码 commit、tree、应用版本、平台与架构。安装前后核对同一身份；版本号相同不等于产物相同，排障不能只看 `CFBundleVersion`。
+- 重启从 `~/Applications/AgentMux.app` 发起，把运行进程的真实 executable path 与 bundle 内的 `package-identity.json` 对上；对不上时报告「启动了其他副本」，不能解释成代码回滚。
+- 当前 UI 的身份和完整工作面经 `connectAgentMuxRpc()` 的只读 `app.inspect` 确认，观察连接在成功与失败后都释放。观察失败只说明这一步未确认，不代表健康 Main、Session 或 Run 已失效，也不授权停止它们。
+- 交付说明里的关键用户能力沿用任务验收已有的「设计约束 → 生产实现 → 测试调用者」三段证据。删除了实现文件时，指出替代实现与仍在生产路径上的调用者，或标为待人工复核；单元测试本身不能证明能力没有被并发改动从产品路径上去掉。
 
 ## 必要核对与触发式补查
 
@@ -18,11 +48,13 @@
 | 安装与重启 | 原安装动作结果、实际加载的包和 Renderer、工作面及相关 Runtime 事实 | 退出、加载或保全出现具体失败／差异 |
 | 清理 | 本次准确目录的提交、未保存内容与占用事实 | 目录存在独有工作、在用引用或归属未知 |
 
-这不是让操作者再手工执行一遍同名检查。入口已有准确结果时直接复用；缺口只补该项。安装不重新证明全部功能、打开隐藏 Browser 页面、等待所有页面联网或要求同事停止开发。候选未变时不在原流程外重复全量回归、图审、深度签名核验、全文件比对或全仓资源盘点；原安装入口对新复制目标的签名与身份核对仍有自己的范围。
+这不是让操作者再手工执行一遍同名检查。入口已有准确结果时直接复用；缺口只补该项。打包复用各任务已完成的功能与视觉验收：除用户明确要求，不把全量回归、功能 E2E、重复图审、深度签名核验、多轮全文件比对、全仓资源盘点、无关验收或等待后续提交加成前置条件；候选未变且没有具体失败依据时，不以「多验一次总没错」重复构建、扫描或校验。安装不重新证明全部功能、打开隐藏 Browser 页面、等待所有页面联网或要求同事停止开发。原安装入口对新复制目标的签名与身份核对仍有自己的范围。
 
 ## 失败后从准确阶段续做
 
-- **先保留原 operation 与结果。** 区分未开始、暂存完成、已替换、已启动和观察未知。确认原进程及实际副作用后再决定下一步；未知不自动重放，后续成功不覆盖原失败。只修复失败阶段，复用仍有效的构建、签名候选和暂存副本。原 `installApplication` 的 `preparedApplicationPath` 可显式采用原暂存目录，核对它与选定签名源的包身份、主程序和签名封印，继续原验签与后续检查；此路不删除或重新复制暂存，不把 canonical App 当作暂存。
+以下各条的共同原则：只修复失败的那个阶段，复用仍有效的构建、签名候选和暂存副本；时限只约束它准确保护的对象，观察未知不授权停止进程、重放操作或重构未变化的候选。
+
+- **先保留原 operation 与结果。** 区分未开始、暂存完成、已替换、已启动和观察未知。确认原进程及实际副作用后再决定下一步；未知不自动重放，后续成功不覆盖原失败。只修复失败阶段，复用仍有效的构建、签名候选和暂存副本。当前没有命令行续做入口：[package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs) 导出的 `installApplication` 接受 `preparedApplicationPath`，可显式采用原暂存目录，核对它与选定签名源的包身份、主程序和签名封印，继续原验签与后续检查；此路不删除或重新复制暂存，不把 canonical App 当作暂存。`package:mac*` 命令不暴露这个参数，调用它需要直接调用该函数。
 - **复制慢不等于 App 故障。** 不给额外包装器随意套一个比真实复制更短的总超时；原安装入口的复制并未使用 GUI 就绪时窗。超时后先确认复制进程已结束、canonical App 是否变化，再处理该次不完整暂存目录。不要因复制失败重编译或重签未变化的候选，也不要改大 GUI／Runtime 时窗来处理磁盘复制问题。
 - **启动烟测等待原消费者的真实就绪。** Hosted consumer 初次连接尚未确认时，保留原诊断并等待其既有后台重连；恢复通知只唤醒同一消费者的完整 bootstrap 确认，不直接代签 ready。父级原总时窗继续约束烟测，不另加重连循环、预算或 Runtime；准确终局与取消仍释放本次观察。
 - **Host 身份与 UI 读取不另套固定子进程总时窗。** 续做原安装时，消费原 fenced bootstrap／`app.inspect` 的真实回复或失败，不提前杀掉仍可完成的查询。保留原 UI activation 的轮次等待范围，不把它宣称为已实现的在途取消。原 Runtime、PID、UID、出生时间与映像归属核对继续有效；观察未知不授权停止未知进程，也不要求重构未变化的已签候选。

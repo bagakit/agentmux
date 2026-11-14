@@ -4,18 +4,20 @@
 
 ## 目标与优先级
 
-1. **通用本地 Agent 核心包优先。** `packages/core` 可独立发布、无 UI 依赖、与宿主框架无关。它以类型安全的公共 API 统一 Agent CLI 的发现、配置、Session、输入输出、状态、权限与语义恢复；新增 Agent 原则上只增加 Provider，不迫使 client 改写交互。持久 Session 与原身份可恢复是项目 P00 基础，行为合同归[Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康)，不能用能启动新进程或当前画面正常代签。
+1. **通用本地 Agent 核心包优先。** `packages/core` 可独立发布、无 UI 依赖、与宿主框架无关。它以类型安全的公共 API 统一 Agent CLI 的发现、配置、Session、输入输出、状态、权限与语义恢复；新增 Agent 原则上只增加 Provider，不迫使 client 改写交互。持久 Session 与原身份可恢复是项目的 P00 基础，行为合同归[Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康)；「能启动新进程」或「当前画面正常」都不能当作恢复成功的证明。
 2. **编辑器是第一方 client 和参考实现。** Desktop 用真实编辑、终端、工作区、worktree 与多 Agent 流程验证 Core，保持 Agent-first、terminal-first，并达到成熟产品的交互与视觉质量。全部 Agent 生命周期经过 Core 公共 API。
+
+本文的 P00、P0 是产品优先级：P00 是全局底线（见[低资源下的正确性与可恢复性](docs/design/behavior/shared-rules.md#低资源下的正确性与可恢复性)），P0 是必须优先保证的能力。它们不同于复盘用的[事故等级](docs/guides/incident-writing.md#1-定性--事故等级)和评审用的[评审严重度](docs/testing/strategy.md#任务验收与假绿防护)，不互相换算。
 
 ## 分层与身份
 
 | 唯一 owner | 持有的事实 |
 | --- | --- |
 | ctxmux | 通用 Run Runtime：PTY、进程、Run lifecycle、ordered bytes、Replay、Gap、Attachment 与权威 Runtime 状态 |
-| AgentMux Core | Provider, AgentSession, Hook, Permission, readiness, semantic recovery, and frontend-independent durable spatial identities, topology and bindings |
-| Desktop / client | Screen presentation, focus and host editing, files, Git and Browser capabilities; consumes Core positions and operates Agents through Core |
+| AgentMux Core | Provider、AgentSession、Hook、Permission、readiness、语义恢复，以及与前端无关的持久空间身份、拓扑和绑定 |
+| Desktop / client | 屏幕呈现、焦点与宿主编辑，文件、Git 和 Browser 能力；消费 Core 给出的位置，并经 Core 操作 Agent |
 
-Core 不得依赖 Electron、React 或编辑器实现；任一侧不得复制另一侧的 Runtime 或语义实现。空间身份与执行身份按 [交互 SSOT《统一概念与空间寻址》](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址) 区分，移动展示不改变执行 cwd。请求 Level B 语义恢复时，不得暗中降为 Level A 重启。
+Core 不得依赖 Electron、React 或编辑器实现；任一侧不得复制另一侧的 Runtime 或语义实现。空间身份与执行身份按 [交互 SSOT《统一概念与空间寻址》](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址) 区分，移动展示不改变执行 cwd。请求原上下文续接（Level B 语义恢复，定义见 [Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康)）时，不得暗中降为新建空会话的 Level A 重启。
 
 ## 不可破坏的行为
 
@@ -41,7 +43,13 @@ Core 不得依赖 Electron、React 或编辑器实现；任一侧不得复制另
 
 ### 通用机制与 Provider 适配
 
-**控制事实不得依赖展示文案或假定。** Agent／Runtime 的输入资格、权限、身份、状态迁移、语义恢复、操作完成和自动动作，以准确对象上的权威 Runtime／Provider 协议事实与真实操作回执为依据；不能从给人看的文案、标题、图标、排版、颜色、阅读位置或其正则匹配授予、撤销或猜测这些事实。显示方式变化不得改变已确认的业务能力。来源或合同缺失保持未知，守本次操作的真实目标与授权边界，并保留原身份、请求、已有可用能力和恢复路径；不能用观察失败关闭健康 Agent。稳定机器协议的文本编码与终端控制序列可按其明确合同解析，但须核对原来源、主体和用途，不能把展示字符串改名为“协议”绕过这条边界。
+控制事实指 Agent／Runtime 的输入资格、权限、身份、状态迁移、语义恢复、操作完成和自动动作。它们只以准确对象上的权威 Runtime／Provider 协议事实与真实操作回执为依据。以下内容不能授予、撤销或用来猜测控制事实：
+
+- 给人看的文案、标题、图标、排版、颜色或阅读位置；
+- 对这些展示内容的正则匹配或其他识别结果；
+- 显示方式的变化——它不得改变已确认的业务能力。
+
+来源或合同缺失时保持未知：守住本次操作的真实目标与授权边界，保留原身份、请求、已有可用能力和恢复路径；不能用观察失败关闭健康 Agent。唯一的例外是稳定机器协议：其文本编码与终端控制序列可以按明确合同解析，但须核对原来源、主体和用途；把展示字符串改称「协议」不构成例外。
 
 Provider 在 Core 内提供基于原生协议的可复用语义能力，Core 组合原对象、权限、意图、回执与恢复判定；工具和客户端消费同一边界，不各造检测器或事实 Store。消息输入的具体责任与高阶输入环境语义归[输入环境判定与复用边界](docs/design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)，新增拦截仍执行 [RED-LINES](RED-LINES.md#写拦截前回答四个问题)。
 
@@ -60,26 +68,40 @@ Browser、Runtime 与编辑器公共机制按协议和行为泛化；在 Core、
 
 1. 有价值的需求、思路或体验反馈先在 `docs/ideas/` 记录，并整合到同一主题；具体写法见[以 idea 为原点记录和整合](docs/guides/document-truth-and-maintenance.md#以-idea-为原点记录和整合)。尚未安排执行也要保留，记录 idea 不自动创建执行任务。
 2. 从 `docs/design/agentmux-desktop-interaction.md` 定位 owning 行为专题并原位合入用户确认约束；视觉、密度与控件语言从 `docs/design/agentmux-surface-density.md` 定位 owning 呈现专题。两入口只维护范围和导航；同一约束只定义一次，相邻文档引用，不把聊天过程或实现步骤追加成设计合同。
-3. 决定推进执行后、动手改实现前，通过 `feature-tracker.sh` 建或更新同一用户目标的 Feature。新计划使用 `bagakit.feature-task-plan.v1` 与 approved review artifact；每项 Task 有可证伪 acceptance 和 verification command。脚本从已安装的 feature-tracker skill 定位，走 `.sh`；路径失效时重新查找，排除 `node_modules/`、`.tmp/` 和 `-adopt-worktree` 副本。
+3. 决定推进执行后、动手改实现前，通过 `feature-tracker.sh` 建或更新同一用户目标的 Feature。新计划使用 `bagakit.feature-task-plan.v1` 与 approved review artifact；每项 Task 有可证伪 acceptance 和 verification command。脚本在已安装的 feature-tracker skill 中查找并使用 `.sh` 入口；路径失效时重新查找，排除 `node_modules/`、`.tmp/` 和 `-adopt-worktree` 副本。
 
 新增功能或修改行为时，作者必须按[公共能力贡献约定](docs/guides/public-capability-contributions.md)在同一计划中判断 JSON-RPC／CLI 的复用、修改或新增，以及受影响的发现、回执与真实消费；无需变更也须说明理由。交付和 review 核对该判断已兑现，不能只完成 GUI 或 help 就将受影响的公共能力标 done。
 
 验收随改动类型成立，不能用一种证据代替另一种：
 
 - 实现任务同时通过变异测试与真实产品调用链检查；未接到产品消费者是竖切未闭合，标 blocked。调用链不以文件边界或符号是否导出判断。具体方法及源码扫描、空集合假绿守护归 [测试策略](docs/testing/strategy.md#任务验收与假绿防护)。
-- 视觉改动按 [独立 Agent 看图评审](docs/guides/agent-visual-e2e-review.md) 实际操作、采图、独立评审；修正后复拍复验至明确可交付。打包或更新 Renderer 消费本批结论，采图成功不代替审美通过。
+- 视觉改动须由独立 Agent 实际看图评审，修正后复拍，直至明确可交付；采图成功不代替审美通过。流程、复拍与交付前消费意见唯一见[独立 Agent 看图评审](docs/guides/agent-visual-e2e-review.md)。
 - 布局或 Session 生命周期改动，须验证真实进程重启后原工作面仍可见且可恢复；热路径另核相关消费者成本。
 - 纯文档任务核对来源、链接、冲突和语义保全；不为不存在的实现制造代码调用者或变异通过。夹带实现时仍完整执行对应实现验收。
 
 ## 并行协作与交付
 
-- 并发以保持质量和品位的同时提高效率为目标。提前判断改动范围与风险，明确可以独立推进的切片和需要谨慎核对的交叠；不以减少验收或牺牲产品品质换取并发速度。
-- 协作消息默认中文，代码、命令、标识符与原始证据保留原文。用户反馈由下属先记录整合 idea、调研并更新设计 SSOT；决定执行后再登记 Tracker，Root 在交付节点安排实现、评审和验收。
-- 协调者管理目标、优先级、依赖、交付节点、冲突和集成；同事保有实现自主权。下属主要承担稳定切片的独立 review、关键行为、回归与性能检查，必要时做明确小切片。方向一致时不逐步催报或重复指挥；只在失配、跑偏、长期不响应或交付节点介入，不以冻结同事强制串行。
+并发的目标是在保持质量和品位的同时提高效率。提前判断改动范围与风险，明确可以独立推进的切片和需要谨慎核对的交叠；不以减少验收或牺牲产品品质换取并发速度。协作消息默认中文，代码、命令、标识符与原始证据保留原文。
+
+### 角色
+
+- **协调者**（也称 Root）：负责本轮的目标、优先级、依赖、交付节点、冲突和集成，在交付节点安排实现、评审和验收。方向一致时不逐步催报或重复指挥；只在失配、跑偏、长期不响应或交付节点介入，不以冻结同事强制串行。
+- **下属**：由协调者派出的 Agent。用户反馈先由下属按「需求与验收」的顺序记录整合 idea、调研并更新设计 SSOT，决定执行后再登记 Tracker；平时主要承担稳定切片的独立 review、关键行为、回归与性能检查，必要时做明确的小切片。
+- **同事**：并行工作的其他 Agent 或人，保有实现自主权。
+
+### Git 提交与冲突
+
 - 过程性文档不提交；调研、计划、评审与任务证据留本机，已有暂存或跟踪内容先保全再移出 Git，边界见[过程资料规则](docs/process-directories.md)。
-- 每个提交只承载一个职责；可独立验收的改动分别提交，验收后尽早基于最新 main HEAD 以单亲提交合入，不积攒最终大提交。
-- 提交、rebase 与合码一律跳过 Git 钩子（`git commit --no-verify`、`git rebase --no-verify`、`git merge --no-verify`），不论钩子是否正常。钩子属于仓库外的本机环境，卡死、交互或等待网络时会让所有 Agent 的提交排队；验收由本文的测试、变异与调用链负责，不由钩子代签。钩子进程卡住时可以结束它，不手动删除仍有进程持有的 `.git/index.lock`。
-- 并发可带上他人的提交，先确认影响，完整保全工作。发现他人的修改已提交，或自己的提交混入他人的改动，核对影响后继续推进。小修改优先在当前树做小闭环，在符合当前需求的前提下通过结构调整减少冲突；大改动用 worktree，频繁将已验收完整切片合入 main，合入后及时清理。不得用 stash、切分支或破坏性清场处理冲突，不得要求同事停工或放弃任务来强制串行。
-- 打包前将本批已验收改动集成 main，从 main 构建完整交付物，核对源码、编译内容与实际安装包身份。及时合入 main, 未合入 main 的改动容易被丢弃。
-- 打包安装只做构建、组装、签名、身份核对及保护用户数据的安装动作，复用任务验收。并行开发时，交付速度与 CPU、内存、磁盘占用也是打包责任；不能以「多验一次总没错」重复构建、扫描或校验。除用户明确要求，不把全量回归、功能 E2E、重复图审、多轮全文件比对、无关验收或等待后续提交加成前置条件。候选未变且没有具体失败依据时不追加检查；具体操作见[macOS 打包指南](docs/guides/macos-packaging.md)。
-- 合码、打包和收尾后清理不用的产物、缓存、临时 worktree 与副本。先核对提交、未提交和未跟踪内容，保全未保存工作、在用内容与必要证据；清理不成为安装前置门。
+- 每个提交只承载一个职责；可独立验收的改动分别提交，验收后尽早基于最新 main HEAD 以单亲提交合入，不积攒最终大提交。未合入 main 的改动容易被丢弃，应及时合入。
+- 提交、rebase 与合码一律跳过 Git 钩子（`git commit --no-verify`、`git rebase --no-verify`、`git merge --no-verify`），不论钩子是否正常：钩子属于仓库外的本机环境，卡死、交互或等待网络时会让所有 Agent 的提交排队；验收由本文的测试、变异与调用链负责，钩子不能替代。钩子进程卡住时可以结束它；仍有进程持有的 `.git/index.lock` 不手动删除。
+- 并发时可能带上他人的提交：先确认影响，完整保全对方工作。发现他人的修改已提交，或自己的提交混入他人的改动，核对影响后继续推进。
+- 小修改优先在当前树做小闭环，在符合当前需求的前提下通过结构调整减少冲突；大改动用 worktree，频繁将已验收的完整切片合入 main，合入后及时清理。
+- 不得用 stash、切分支或破坏性清场处理冲突，不得要求同事停工或放弃任务来强制串行。
+
+### 打包
+
+打包前把本批已验收改动集成到 main，从 main 构建完整交付物，并核对源码、编译内容与实际安装包身份。打包只做构建、组装、签名、身份核对和保护用户数据的安装动作，复用任务验收，除用户明确要求外不追加前置检查；交付速度与 CPU、内存、磁盘占用也是打包责任。可复用的结果、何时才补查及具体步骤唯一见 [macOS 打包指南](docs/guides/macos-packaging.md)。
+
+### 清理
+
+合码、打包和收尾后清理不用的产物、缓存、临时 worktree 与副本。先核对提交、未提交和未跟踪内容，保全未保存工作、在用内容与必要证据；清理不成为安装前置门。
