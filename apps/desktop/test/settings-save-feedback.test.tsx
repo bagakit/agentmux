@@ -59,7 +59,7 @@ it('keeps an unsaved SSH host across cloned configuration and saves the original
   await input('[placeholder="devbox or dev.example.com"]', 'host.example.test')
   await dom.render(<HostSettingsPane active={true} config={structuredClone(composerConfig)} onSave={onSave} />)
   expect(dom.container.querySelector<HTMLInputElement>('[placeholder="devbox or dev.example.com"]')!.value).toBe('host.example.test')
-  await dom.click('.primary-button')
+  await dom.click('[data-resource-view] > [data-settings-save-bar] button')
   expect(onSave).toHaveBeenCalledWith([
     composerConfig.hosts[0],
     expect.objectContaining({ kind: 'ssh', hostname: 'host.example.test', label: 'Remote host' })

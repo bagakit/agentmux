@@ -35,11 +35,12 @@ it('the original narrow menu consumes the same accessible publication state with
  const entry=document.querySelector<HTMLElement>('.settings-section-menu [data-settings-target="network-node"] [data-node-publication]')!
  expect(entry.dataset.nodePublication).toBe('published');expect(entry.getAttribute('aria-label')).toContain('Runtime local-runtime');expect(entry.getAttribute('aria-hidden')).not.toBe('true');expect(read).toHaveBeenCalledTimes(1)
 })
-it('drafts, selection and listener edits do not enable publication; an unconfirmed save is unknown until an independent owner read confirms current policy',async()=>{
+it('drafts and selection do not enable publication; an unconfirmed save is unknown until an independent owner read confirms current policy',async()=>{
  const{read,owner}=leaves(false);let current=settings(false)
  owner.mockImplementation(async(_target,method,input)=>{if(method==='settings.node.configure'){current={...settings(true),operation:{operationId:(input as{operationId:string}).operationId,expectedRevision:'revision',revision:'revision-next',status:'unknown',updatedAt:2}};return current as never}return current as never})
  await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>);await ready();expect(icon().dataset.nodePublication).toBe('private')
- await act(async()=>dom.container.querySelector<HTMLInputElement>('[aria-label="Share system resources"]')!.click());await input('edited-alias');await act(async()=>dom.container.querySelector<HTMLInputElement>('[aria-label="Allow Tailcat connections"]')!.click())
+ expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull()
+ await act(async()=>dom.container.querySelector<HTMLInputElement>('[aria-label="Share system resources"]')!.click());await input('edited-alias')
  expect(icon().dataset.nodePublication).toBe('private');expect(icon().querySelector('[data-icon-animation="stream"]')).toBeNull();expect(read).toHaveBeenCalledTimes(1)
  await dom.click('.network-node-save button');expect(icon().dataset.nodePublication).toBe('unknown');expect(icon().getAttribute('aria-label')).toContain('Last confirmed private');expect(icon().querySelector('[data-icon-animation="stream"]')).toBeNull()
  await dom.click('[data-settings-field="publishing"] > header button')

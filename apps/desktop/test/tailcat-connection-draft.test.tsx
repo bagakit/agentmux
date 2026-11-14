@@ -2,13 +2,16 @@
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
-import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
+import { MeshSettingsPane } from '../src/renderer/src/components/settings/MeshSettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { tailcatConnectionDraft } from '../src/renderer/src/lib/tailcat-connection-draft'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
-import type { AppConfig, HostConfig, SshHostConfig } from '../src/shared/contracts'
+import type { AppConfig, HostConfig, SshHostConfig, ScratchTopicSnapshot } from '../src/shared/contracts'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
+import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 
 const dom=composerDOM(),remote:SshHostConfig={id:'studio',kind:'ssh',label:'Studio',hostname:'',transport:'tailcat',runtimeId:'original-runtime',tailcat:{address:'tc-original-private',keyFile:'original-client'}}
 let config:AppConfig
@@ -16,12 +19,14 @@ const save=vi.fn(async(_hosts:HostConfig[],_workspaces:AppConfig['workspaces'],_
 beforeEach(()=>{
  installNoteCanvasGeometry();config={...structuredClone(composerConfig),hosts:[structuredClone(composerConfig.hosts[0]!),structuredClone(remote)]}
  useAppStore.setState({config,tailcatConnectionDrafts:{},sessions:[],hostChecks:{}});save.mockReset()
- vi.spyOn(api.hosts,'inspect').mockImplementation(async host=>({routeHostId:host.id,configuration:host,tailcat:{state:'disabled'}}) as never)
+ vi.spyOn(api.hosts,'inspect').mockImplementation(async host=>({routeHostId:host.id,configuration:host,tailcat:{state:'disabled'},owner:{state:'unavailable',message:'Runtime observation is outside this draft test',readAt:1},nativeIdentity:{state:'unavailable',message:'Native identity is outside this draft test',readAt:1},diagnostics:{state:'unavailable',message:'Diagnostics are outside this draft test',readAt:1},resources:{state:'unavailable',message:'Resources are outside this draft test',readAt:1}}) as never)
  vi.spyOn(api.hosts,'network').mockRejectedValue(Error('Not observed in this private edit fixture'))
  vi.spyOn(api.nodePublishing,'call').mockRejectedValue(Error('Publication is independent of incoming edits'))
+ vi.spyOn(api.mesh,'call').mockRejectedValue(Error('Network observation is independent of retained incoming edits'))
 })
 const show=()=>dom.render(<HostSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId:'studio'}}/>)
-const node=()=>dom.render(<NetworkNodeSettingsPane config={config} active onSave={async()=>{}} onNavigate={()=>{}} navigationRequest={{section:'network-node',hostId:'local'}}/>)
+const host=(hostId='local')=>dom.render(<HostSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId}}/>)
+const mesh=(hostId='local')=>dom.render(<MeshSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId}}/>)
 async function fill(label:string,value:string){const input=dom.container.querySelector<HTMLInputElement|HTMLTextAreaElement>(`[aria-label="${label}"]`)!;expect(input).not.toBeNull();await act(async()=>{const detail=input.closest('details');if(detail)detail.open=true;Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}))})}
 async function click(text:string){const button=[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===text);expect(button).toBeDefined();await act(async()=>button!.click())}
 const value=(label:string)=>dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!.value
@@ -46,7 +51,8 @@ it('a changed Runtime or reused route never inherits the original retained conne
   await fill('Tailcat client key','replacement-unsent-key')
   expect(read('hosts','studio')?.value.tailcat?.keyFile).toBe('replacement-unsent-key')
   expect(read('hosts','studio')?.retained).toHaveLength(1)
-  expect(tailcatConnectionDraft(read('hosts','studio')?.retained?.[0])?.value.tailcat?.address).toBe('tc-private-original-edit')
+  const retainedEdit=tailcatConnectionDraft(read('hosts','studio')?.retained?.[0])
+  expect(retainedEdit?.value.kind==='ssh' ? retainedEdit.value.tailcat?.address : undefined).toBe('tc-private-original-edit')
   const partial=useAppStore.persist.getOptions().partialize!(useAppStore.getState()) as {tailcatConnectionDrafts:unknown}
   await dom.render(null);useAppStore.setState({tailcatConnectionDrafts:JSON.parse(JSON.stringify(partial.tailcatConnectionDrafts))});await show()
   expect(value('Tailcat client key')).toBe('replacement-unsent-key');expect(read('hosts','studio')?.retained).toHaveLength(1)
@@ -61,10 +67,63 @@ it('a new unsaved Tailcat Host is restored as a draft with no invented saved bas
  await click('Save hosts');expect(save.mock.calls[0]![0]).toContainEqual(authored);expect(save.mock.calls[0]![2].hosts).not.toContainEqual(expect.objectContaining({id:'new-host'}))
 })
 it('the real receiving editor retains literal allowed-code text and key input across remount',async()=>{
- await node();const text='  nodekey:'+ 'cd'.repeat(32)+'  \n\n';await fill('Tailcat allowed clients',text);await fill('Tailcat server key','retained-server')
- expect(read('incoming','local')?.allowedText).toBe(text);await dom.render(null);await node()
+ await host();const text='  nodekey:'+ 'cd'.repeat(32)+'  \n\n';await fill('Tailcat allowed clients',text);await fill('Tailcat server key','retained-server')
+ expect(read('incoming','local')?.allowedText).toBe(text);await dom.render(null);await host()
  expect(value('Tailcat allowed clients')).toBe(text);expect(value('Tailcat server key')).toBe('retained-server')
  expect(save).not.toHaveBeenCalled();expect((useAppStore.getState().config!.hosts[0]!).tailcat).toBeUndefined()
+})
+it('saved clean listener stops helper I/O while hidden and resumes it on the real local Connection',async()=>{
+ const scratch={...composerConfig.workspaces[0]!,id:SCRATCH_WORKSPACE_ID,name:'Motes'}
+ const leader:ScratchTopicSnapshot={id:PMO_TEAMS_TOPIC_ID,title:'Mote',summary:'',collaborators:[],kind:'mote',directoryPath:scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID),topicPath:scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)+'/topic.md',soul:{path:scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)+'/SOUL.md',content:'Helper',version:'v1'}}
+ const plain:SshHostConfig={id:'studio',kind:'ssh',label:'Studio',hostname:'studio.invalid',runtimeId:'original-runtime'}
+ config={...structuredClone(composerConfig),hosts:[structuredClone(composerConfig.hosts[0]!),plain],workspaces:[...composerConfig.workspaces,scratch]}
+ const target=topicSpaceIconTarget(scratch,leader)!,fileName='a'.repeat(64)+'.png'
+ useLauncherState.setState({moteTopicId:null})
+ useAppStore.setState({config,spaceObjectIcons:{[target.key]:{kind:'image',fileName}},workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:0},scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:JSON.stringify([scratch.hostId,scratch.path]),revision:0,reading:true,error:null,topics:[leader]}}})
+ const listTopics=vi.spyOn(api.scratch,'listTopics').mockResolvedValue([leader] as never)
+ let rejectAvatar!:(cause:unknown)=>void
+ const readAvatar=vi.spyOn(api.scratch,'readMoteAvatar').mockImplementationOnce(()=>new Promise<never>((_,reject)=>{rejectAvatar=reject})).mockResolvedValue({dataUrl:'data:image/png;base64,AA==',width:1,height:1})
+ const report=vi.spyOn(useAppStore.getState(),'reportError'),inspect=vi.mocked(api.hosts.inspect)
+ let signal:AbortSignal|undefined
+ inspect.mockImplementationOnce(async(_host,context)=>{signal=context?.signal;return await new Promise<never>(()=>{})})
+ await mesh()
+ await vi.waitFor(()=>{expect(inspect).toHaveBeenCalledTimes(1);expect(listTopics).toHaveBeenCalledTimes(1);expect(readAvatar).toHaveBeenCalledTimes(1)})
+ expect(signal?.aborted).toBe(false)
+ await dom.click('[data-resource-editor] [data-host-panel="agents"]')
+ expect(signal?.aborted).toBe(true)
+ await act(async()=>useAppStore.setState({workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:1},scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:JSON.stringify([scratch.hostId,scratch.path]),revision:1,reading:true,error:null,topics:[leader]}}}))
+ await mesh('studio')
+ await act(async()=>useAppStore.setState({workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:2}}))
+ await dom.click('.mesh-view-tabs button:first-child')
+ expect(inspect).toHaveBeenCalledTimes(1);expect(listTopics).toHaveBeenCalledTimes(1);expect(readAvatar).toHaveBeenCalledTimes(1)
+ await act(async()=>rejectAvatar(new Error('Hidden avatar read failed')))
+ expect(report.mock.calls.filter(call=>String(call[0]).includes('Mote avatar'))).toHaveLength(0)
+ await dom.click('.mesh-view-tabs button:nth-child(2)')
+ await act(async()=>useAppStore.setState({workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:3},scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:JSON.stringify([scratch.hostId,scratch.path]),revision:3,reading:true,error:null,topics:[leader]}}}))
+ await mesh('local')
+ await vi.waitFor(()=>{expect(inspect).toHaveBeenCalledTimes(2);expect(listTopics).toHaveBeenCalledTimes(2);expect(readAvatar).toHaveBeenCalledTimes(2)})
+ expect(report.mock.calls.filter(call=>String(call[0]).includes('Mote avatar'))).toHaveLength(0)
+})
+it('retains an in-flight incoming save and later literal edits across Host, panel and Mesh switches without hidden inspection',async()=>{
+ let finish!:()=>void
+ const configure=vi.spyOn(api.hosts,'configureTailcat').mockImplementation(()=>new Promise<never>(resolve=>{finish=()=>resolve({} as never)}))
+ const inspect=vi.mocked(api.hosts.inspect)
+ await mesh();const initialReads=inspect.mock.calls.length
+ await fill('Tailcat server key','submitted-server');await click('Save incoming connections')
+ const text='  nodekey:'+'ef'.repeat(32)+'  \n\n';await fill('Tailcat allowed clients',text);await fill('Tailcat server key','later-server')
+ await dom.click('[data-resource-editor] [data-host-panel="agents"]');expect(inspect).toHaveBeenCalledTimes(initialReads)
+ await mesh('studio');expect(inspect).toHaveBeenCalledTimes(initialReads)
+ const retainedIncoming=[...dom.container.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
+ expect(retainedIncoming).toHaveLength(1)
+ expect(retainedIncoming.every(node=>node.hidden||node.closest('[hidden]')||node.inert||node.closest('[inert]'))).toBe(true)
+ await mesh('local');await dom.click('.mesh-view-tabs button:first-child');expect(inspect).toHaveBeenCalledTimes(initialReads)
+ await dom.click('.mesh-view-tabs button:nth-child(2)')
+ expect(value('Tailcat allowed clients')).toBe(text);expect(value('Tailcat server key')).toBe('later-server')
+ expect(dom.container.querySelector('[data-settings-field="incoming"] [data-settings-save-bar]')?.textContent).toContain('Saving Incoming connections')
+ await act(async()=>finish())
+ expect(configure).toHaveBeenCalledTimes(1);expect(save).not.toHaveBeenCalled()
+ expect(value('Tailcat allowed clients')).toBe(text);expect(value('Tailcat server key')).toBe('later-server')
+ expect(read('incoming','local')?.allowedText).toBe(text);expect(read('hosts','local')).toBeNull()
 })
 it('opaque original edit bytes survive while the current editor and healthy work remain available',async()=>{
  const raw={hosts:{studio:{unrecognized:'retain-this-input'}},incoming:'future-format'};useAppStore.setState({tailcatConnectionDrafts:raw})
@@ -72,7 +131,7 @@ it('opaque original edit bytes survive while the current editor and healthy work
  expect(value('Tailcat client key')).toBe('current-edit');expect(read('hosts','studio')?.retained?.[0]).toBe(raw.hosts.studio)
  expect(read('hosts','studio')?.value.tailcat?.keyFile).toBe('current-edit')
  expect(dom.container.textContent).toContain('retained edit');expect(save).not.toHaveBeenCalled()
- await dom.render(null);await node();await fill('Tailcat server key','new-receiving-edit')
+ await dom.render(null);await host();await fill('Tailcat server key','new-receiving-edit')
  const rawScope=(useAppStore.getState().tailcatConnectionDrafts as {incoming:Record<string,unknown>}).incoming
  expect(Object.values(rawScope)).toContain('future-format');expect(read('incoming','local')?.value.tailcat?.keyFile).toBe('new-receiving-edit')
 })
@@ -144,9 +203,9 @@ it('maintenance branch changes and a late receipt preserve the selected SSH Host
  expect(upgrade).toHaveBeenCalledOnce()
  const input=dom.container.querySelector<HTMLInputElement>('[data-host-name]')!
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Keep the newer SSH edit');input.dispatchEvent(new Event('input',{bubbles:true}))})
- await dom.click('[data-host-panel="overview"]')
+ await dom.click('[data-resource-editor] [data-host-panel="overview"]')
  await act(async()=>finish())
- await dom.click('[data-host-panel="connection"]')
+ await dom.click('[data-resource-editor] [data-host-panel="connection"]')
  expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe(ssh.id)
  expect(dom.container.querySelector<HTMLInputElement>('[data-host-name]')?.value).toBe('Keep the newer SSH edit')
  expect(read('hosts',ssh.id)?.expected).toEqual(ssh)

@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig, HostConfig, SshHostConfig } from '../src/shared/contracts'
 import { parseHostConfiguration, parseHostConfigurations } from '@agentmux/host/host-configuration'
 import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -24,7 +25,9 @@ beforeEach(() => {
   vi.spyOn(api.hosts, 'network').mockRejectedValue(new Error('No local network fixture'))
   vi.spyOn(api.nodePublishing, 'call').mockRejectedValue(new Error('No Node publication fixture'))
 })
-const show = (hostId = remote.id) => hostId === 'local' ? dom.render(<NetworkNodeSettingsPane config={config} active={true} onSave={async () => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />) : dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
+const show = (hostId = remote.id) => dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
+const node = (hostId = 'local') => dom.render(<NetworkNodeSettingsPane config={config} active={true} onClose={() => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />)
+const visibleIncoming = () => [...dom.container.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')].filter(node => !node.hidden && !node.closest('[hidden]') && !node.inert && !node.closest('[inert]'))
 function input(label: string) {
   const node = dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)
   expect(node).not.toBeNull()
@@ -111,10 +114,53 @@ it('the local switch remains a draft until Save incoming connections and display
   expect(onSave).not.toHaveBeenCalled()
   await act(async () => input('Allow Tailcat connections').click())
   expect(dom.container.querySelector('[data-tailcat-listener]')!.textContent).toContain('Save incoming connections to apply')
+  const literalAllowed = '  nodekey:fixture  \n'
+  await fill(input('Tailcat allowed clients'), literalAllowed)
+  const drafts = useAppStore.getState().tailcatConnectionDrafts as { incoming?: Record<string, { value?: HostConfig; allowedText?: string }>; hosts?: Record<string, unknown> }
+  expect(drafts.incoming?.local?.value).toMatchObject({ kind: 'local', tailcat: { ...local.tailcat, enabled: false } })
+  expect(drafts.incoming?.local?.allowedText).toBe(literalAllowed)
+  expect(drafts.hosts?.local).toBeUndefined()
+  const saveHosts = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Save hosts')!
+  expect(saveHosts.disabled).toBe(true)
   await button('Save incoming connections')
   expect(api.hosts.configureTailcat).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', expected: local.tailcat, candidate: { ...local.tailcat, enabled: false } })
   expect(onSave).not.toHaveBeenCalled()
   expect(useAppStore.getState().sessions).toEqual([original])
+})
+
+it('relocates the only visible local listener into the local Host Connection while remote and Node keep their own editors', async () => {
+  const local = { ...config.hosts[0]!, tailcat: { enabled: false, keyFile: 'saved-server', allowedClients: [] } } as HostConfig
+  config.hosts[0] = local
+  vi.spyOn(api.hosts, 'inspect').mockImplementation(async host => ({ routeHostId: host.id, configuration: host, tailcat: { state: 'disabled' } }) as never)
+  await show('local')
+  expect(dom.container.querySelector('[data-resource-editor="local"][data-host-view="connection"]')).not.toBeNull()
+  expect(visibleIncoming()).toHaveLength(1)
+  expect(visibleIncoming()[0]!.querySelector('[data-tailcat-listener]')).not.toBeNull()
+  await show(remote.id)
+  expect(dom.container.querySelector('[data-resource-editor="remote-tailcat"][data-host-view="connection"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-host-name]')).not.toBeNull()
+  expect(visibleIncoming()).toHaveLength(0)
+})
+
+it('removes the incoming editor from local and remote Node without removing Node management', async () => {
+  await node()
+  expect(dom.container.querySelector('[aria-label="Node to manage"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull()
+  config.hosts[1] = { ...remote, runtimeId: 'original-runtime' }
+  await node(remote.id)
+  expect(dom.container.querySelector('[aria-label="Node to manage"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull()
+})
+
+it('the local Node assistance link targets publishing while the listener stays in Connection', async () => {
+  vi.spyOn(api.hosts, 'inspect').mockImplementation(async host => ({ routeHostId: host.id, configuration: host, tailcat: { state: 'disabled' } }) as never)
+  const open = vi.fn()
+  await dom.render(<SettingsNavigation.Provider value={{ open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [], channelPresentation: () => null, openMoteLark: vi.fn(), chooseAgent: vi.fn() }}>
+    <HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId: 'local' }} />
+  </SettingsNavigation.Provider>)
+  expect(visibleIncoming()).toHaveLength(1)
+  await button('Open Node publishing')
+  expect(open).toHaveBeenCalledExactlyOnceWith('network-node', undefined, 'publishing', 'local')
 })
 
 it('listener address is a masked credential and Copy uses the existing clipboard owner', async () => {

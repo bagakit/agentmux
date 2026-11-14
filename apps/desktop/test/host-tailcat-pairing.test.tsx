@@ -4,7 +4,6 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { TailcatKeyPreparation } from '@agentmux/core'
 import type { AppConfig, HostConfig, SshHostConfig } from '../src/shared/contracts'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
-import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -24,9 +23,7 @@ beforeEach(() => {
   vi.spyOn(api.config, 'save').mockImplementation(async next => next)
   vi.spyOn(api.hosts, 'configureTailcat').mockResolvedValue({} as never)
 })
-const show = (hostId = 'studio') => hostId === 'local'
-  ? dom.render(<NetworkNodeSettingsPane config={config} active={true} onSave={async () => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />)
-  : dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
+const show = (hostId = 'studio') => dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
 const input = (label: string) => dom.container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!
 async function click(text: string) {
   const buttons = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent?.trim() === text)

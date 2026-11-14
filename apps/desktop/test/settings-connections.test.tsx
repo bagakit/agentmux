@@ -17,12 +17,13 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { connectionsConfig, deviceInvitation, deviceList } from '../scripts/fixtures/settings-connections/data'
 
 const dom = composerDOM(), H = 'host-01', J = 'host-02'
+const hostRoute = { section: 'hosts', hostId: 'local' } as const
 const originalCheckHost = useAppStore.getState().checkHost
 let config: AppConfig, unsubscribe: (() => void) | undefined
 beforeEach(async () => {
   const before = await api.config.get()
   config = await api.config.save(connectionsConfig(before), before)
-  useAppStore.setState({ config, providerCatalog: await api.providers.list(), sessions: [], sessionSnapshots: {},
+  useAppStore.setState({ config, providerCatalog: await api.providers.list(), sessions: [],
     activeWorkspaceId: 'project-a', hostChecks: {}, checkHost: originalCheckHost })
   unsubscribe = api.config.onChange(next => useAppStore.setState({ config: next }))
   vi.spyOn(api.deviceManagement, 'ls').mockResolvedValue(structuredClone(deviceList))
@@ -30,10 +31,10 @@ beforeEach(async () => {
 afterEach(() => unsubscribe?.())
 function LiveHost() {
   const current = useAppStore(state => state.config)!, Pane = hostsSettingsModule.Pane
-  return <div className="settings-page"><Pane config={current} active={true} onClose={() => {}} /></div>
+  return <div className="settings-page"><Pane config={current} active={true} onClose={() => {}} onNavigate={() => {}} navigationRequest={hostRoute} /></div>
 }
 function Shell({ section }: { section: SettingsPageId }) {
-  return <SettingsPanel initialSection={section} onClose={() => {}} />
+  return <SettingsPanel initialSection={section} navigationRequest={section === 'hosts' ? hostRoute : undefined} onClose={() => {}} />
 }
 const pane = () => dom.container.querySelector<HTMLElement>('[data-settings-pane="hosts"]') ?? dom.container
 const editor = () => pane().querySelector<HTMLElement>('[data-resource-editor]')!
@@ -64,6 +65,7 @@ async function toggleAdvanced(open: boolean) {
   await act(async () => { node.open = open; node.dispatchEvent(new Event('toggle')) })
 }
 async function save() { await dom.click('[data-settings-save-bar] button'); await act(async () => {}) }
+async function saveHosts() { await dom.click('[data-resource-view] > [data-settings-save-bar] button'); await act(async () => {}) }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 
 describe('Conversation Channels settings', () => {
@@ -71,13 +73,13 @@ describe('Conversation Channels settings', () => {
     const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'conversation-channels')
     expect(groups.find(group => group.id === 'cluster')?.items.map(item => item.id), 'Cluster groups Node publication, Host connections and Remote work').toEqual(['network-node', 'hosts', 'remote-execution'])
     expect(connections?.items.map(item => item.id), 'Conversation Channels owns only the in-app and external conversations').toEqual(['inapp-conversation', 'lark', 'discord', 'telegram'])
-    expect(hostsSettingsModule.title).toBe('Hosts')
+    expect(hostsSettingsModule.title).toBe('Mesh')
     expect(groups.find(group => group.id === 'cluster')?.title).toBe('Cluster')
     expect(groups.find(group => group.id === 'preferences')?.items.slice(0, 2).map(item => item.id)).toEqual(['profile', 'mobile'])
     expect(groups.find(group => group.id === 'cluster')?.items.find(item => item.id === 'network-node')?.title).toBe('Node')
     expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id)).not.toContain('lark')
-    expect(groups.some(group => group.id === 'connections')).toBe(false)
-    expect(groups.flatMap(group => group.id === 'resources' ? group.items : []).some(item => ['hosts', 'mobile', 'inapp-conversation'].includes(item.id))).toBe(false)
+    expect(groups.some(group => (group.id as string) === 'connections')).toBe(false)
+    expect(groups.flatMap(group => (group.id as string) === 'resources' ? group.items : []).some(item => ['hosts', 'mobile', 'inapp-conversation'].includes(item.id))).toBe(false)
     const phoneResults = visibleSettingsSections('手机').map(item => item.id)
     expect(phoneResults).toContain('mobile')
     expect(phoneResults).not.toContain('inapp-conversation')
@@ -131,7 +133,7 @@ describe('Conversation Channels settings', () => {
       expect(field('User')).toBe(input); expect(input.isConnected).toBe(true); expect(document.activeElement).toBe(input)
       expect(editor().querySelector<HTMLDetailsElement>('.host-edit-disclosure')!.open).toBe(true)
     }
-    await save()
+    await saveHosts()
     expect((await api.config.get()).hosts.find(host => host.id === H)).toMatchObject({ label: values.Name, hostname: values['Host or SSH alias'],
       user: 'xyz', port: 2201, identityFile: values['Identity file path'], remoteCommand: values['Service command'], remoteSocketPath: values['Service socket path'] })
   })
@@ -286,19 +288,19 @@ describe('Conversation Channels settings', () => {
     await fill(name(), 'First submission')
     const held = deferred<void>(), realSave = api.config.save.bind(api.config)
     const spy = vi.spyOn(api.config, 'save').mockImplementationOnce(async (next, expected) => { const accepted = await realSave(next, expected); await held.promise; return accepted })
-    await dom.click('[data-settings-save-bar] button'); await fill(name(), 'Development')
+    await saveHosts(); await fill(name(), 'Development')
     await act(async () => held.resolve()); await act(async () => {})
-    expect(name().value).toBe('Development'); await save()
+    expect(name().value).toBe('Development'); await saveHosts()
     expect(spy.mock.calls[1]![1]!.hosts.find(host => host.id === H)!.label).toBe('First submission')
     await fill(name(), 'Local authored')
     let current = await api.config.get()
-    await act(async () => realSave({ ...current, hosts: current.hosts.map(host => host.id === H && host.kind === 'ssh' ? { ...host, user: 'external-clean' } : host) }, current)); await save()
+    await act(async () => realSave({ ...current, hosts: current.hosts.map(host => host.id === H && host.kind === 'ssh' ? { ...host, user: 'external-clean' } : host) }, current)); await saveHosts()
     expect(spy.mock.calls.at(-1)![1]!.hosts.find(host => host.id === H)).toMatchObject({ user: 'external-clean' })
     await fill(name(), 'Local conflict'); current = await api.config.get()
-    await act(async () => realSave({ ...current, hosts: current.hosts.map(host => host.id === H ? { ...host, label: 'External conflict' } : host) }, current)); await save()
+    await act(async () => realSave({ ...current, hosts: current.hosts.map(host => host.id === H ? { ...host, label: 'External conflict' } : host) }, current)); await saveHosts()
     expect(name().value).toBe('Local conflict'); expect(pane().querySelector('[data-settings-save-bar] [role="alert"]')!.textContent).toContain(`hosts.${H}.label`)
     current = await api.config.get()
-    await act(async () => realSave({ ...current, hosts: current.hosts.filter(host => host.id !== H) }, current)); await save()
+    await act(async () => realSave({ ...current, hosts: current.hosts.filter(host => host.id !== H) }, current)); await saveHosts()
     expect(name().value).toBe('Local conflict'); expect(pane().querySelector('[data-settings-save-bar] [role="alert"]')!.textContent).toContain(`hosts.${H}`)
   })
   it('preserves exact workspace removal confirmation, cancel and Session reference protection', async () => {

@@ -1,0 +1,41 @@
+{
+  "extends": "../tsconfig.test.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "declaration": false
+  },
+  "include": [    "../src/renderer/src/global.d.ts",
+    "../src/renderer/src/components/settings/LocalIncomingConnections.tsx",
+    "../src/renderer/src/components/settings/HostSettingsPane.tsx",
+    "../src/renderer/src/components/settings/NetworkNodeSettingsPane.tsx",
+    "../src/renderer/src/components/settings/HostTailcatListenerFields.tsx",
+    "../src/renderer/src/components/settings/TailcatKeyPreparation.tsx",
+    "../src/renderer/src/components/settings/TailcatSetupHelp.tsx",
+    "../src/renderer/src/components/settings/use-tailcat-connection-drafts.tsx",
+    "../src/renderer/src/components/MoteTaskAction.tsx",
+    "../src/renderer/src/components/MoteActionChooser.tsx",
+    "../src/renderer/src/components/SpaceObjectIcon.tsx",
+    "../src/renderer/src/hooks/useScratchTopics.ts",
+    "./host-tailcat-settings.test.tsx",
+    "./host-tailcat-pairing.test.tsx",
+    "./tailcat-connection-draft.test.tsx",
+    "./settings-close-continuity.test.tsx",
+    "./network-node-settings.test.tsx",
+    "./node-publication-navigation.test.tsx",
+    "./host-tailcat-settings-product.test.tsx",
+    "./connection-settings-persistence.test.tsx",
+    "./settings-save-feedback.test.tsx",
+    "./settings-connections.test.tsx",
+    "./settings-resource-library.test.tsx",
+    "./node-owner-target.test.tsx",
+    "./tailcat-mote-assistance.test.tsx",
+    "./host-settings-navigation.test.tsx",
+    "./mesh-network-ipc.test.ts",
+    "./focus-timeline-identity.test.tsx",
+    "./mote-avatar-read-retry.test.tsx"
+  ],
+  "references": [
+    { "path": "../../../packages/core/tsconfig.build.json" }
+  ]
+}

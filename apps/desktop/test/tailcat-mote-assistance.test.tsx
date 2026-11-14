@@ -5,7 +5,6 @@ import type { MoteDialoguePage, MoteDialogueRead } from '@agentmux/core/mote-dia
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { AppConfig, HostConfig, ScratchTopicSnapshot } from '../src/shared/contracts'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
-import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
 import { MoteTaskAction } from '../src/renderer/src/components/MoteTaskAction'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -53,11 +52,9 @@ beforeEach(() => {
   vi.spyOn(api.nodePublishing, 'call').mockRejectedValue(new Error('Publication identity is outside this setup-help test'))
   requestPmoTeamsTopicFloatingClose()
 })
-const show = (hostId = 'studio') => hostId === 'local'
-  ? dom.render(<NetworkNodeSettingsPane config={config} active={true} onSave={async () => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />)
-  : dom.render(<HostSettingsPane config={config} active={true} onSave={vi.fn()} navigationRequest={{ section: 'hosts', hostId }} />)
+const show = (hostId = 'studio') => dom.render(<HostSettingsPane config={config} active={true} onSave={vi.fn()} navigationRequest={{ section: 'hosts', hostId }} />)
 async function button(text: string) {
-  const found = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent?.trim() === text)
+  const found = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent?.trim() === text && !node.closest('[hidden], [inert]'))
   expect(found).toHaveLength(1); await act(async () => { found[0]!.focus(); found[0]!.click() })
 }
 

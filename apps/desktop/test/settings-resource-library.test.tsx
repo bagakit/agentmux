@@ -19,6 +19,7 @@ const section = process.env.AGENTMUX_RESOURCE_LIBRARY_SECTION
 const originalCheckHost = useAppStore.getState().checkHost
 let config: AppConfig, unsubscribe: (() => void) | undefined
 const A = 'executor-001', B = 'executor-002', H = 'host-01', J = 'host-02'
+const hostRoute = { section: 'hosts', hostId: 'local' } as const
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 beforeEach(async () => {
   const before = await api.config.get(), templates = Object.values(before.executors)
@@ -34,7 +35,7 @@ beforeEach(async () => {
     workspaces: [{ id: 'project-a', name: 'A', kind: 'folder', hostId: H, path: _hygiene_fixturePath("controlled/a") },
       { id: 'project-b', name: 'B', kind: 'folder', hostId: H, path: _hygiene_fixturePath("controlled/b") }]
   }, before)
-  useAppStore.setState({ config, sessions: [], sessionSnapshots: {}, activeWorkspaceId: 'project-a',
+  useAppStore.setState({ config, sessions: [], activeWorkspaceId: 'project-a',
     providerCatalog: await api.providers.list(), executorDetections: {}, hostChecks: {},
     detectExecutors: vi.fn(async () => {}), checkHost: originalCheckHost })
   unsubscribe = api.config.onChange(next => useAppStore.setState({ config: next }))
@@ -44,7 +45,7 @@ afterEach(() => unsubscribe?.())
 function LivePane({ kind, active = true }: { kind: 'agents' | 'hosts' | 'mobile'; active?: boolean }) {
   const current = useAppStore(state => state.config)!
   const Pane = kind === 'agents' ? agentsSettingsModule.Pane : kind === 'hosts' ? hostsSettingsModule.Pane : mobileSettingsModule.Pane
-  return <div className="settings-page"><Pane config={current} active={active} onClose={() => {}} /></div>
+  return <div className="settings-page"><Pane config={current} active={active} onClose={() => {}} onNavigate={() => {}} navigationRequest={kind === 'hosts' ? hostRoute : undefined} /></div>
 }
 const editor = () => dom.container.querySelector<HTMLElement>('[data-resource-editor]')!
 const name = () => editor().querySelector<HTMLInputElement>('[data-executor-name],[data-host-name]')!
@@ -71,6 +72,7 @@ async function toggle(selector: string, open: boolean) {
   await act(async () => { node.open = open; node.dispatchEvent(new Event('toggle')) })
 }
 async function save() { await dom.click('[data-settings-save-bar] button'); await act(async () => {}) }
+async function saveHosts() { await dom.click('[data-resource-view] > [data-settings-save-bar] button'); await act(async () => {}) }
 
 describe.skipIf(section !== 'agents')('Agents resource library', () => {
   it('single: only mounts the accurate selected field subtree among 128 real records', async () => {
@@ -233,7 +235,7 @@ describe.skipIf(section !== 'hosts')('Hosts resource library', () => {
       expect(field('User')).toBe(input); expect(document.activeElement).toBe(input); expect(input.isConnected).toBe(true)
       expect(editor().querySelector<HTMLDetailsElement>('.host-edit-disclosure')!.open).toBe(true)
     }
-    await save()
+    await saveHosts()
     expect((await api.config.get()).hosts.find(host => host.id === H)).toMatchObject({ hostname: 'literal-alias', user: 'abc', port: 2201,
       identityFile: '~/.ssh/authored key', remoteCommand: (_hygiene_fixturePath("opt/custom") + " --literal"), remoteSocketPath: _hygiene_fixturePath("srv/authored.sock"), runtimeId: 'bound-runtime' })
   })
@@ -281,13 +283,16 @@ describe.skipIf(section !== 'hosts')('Hosts resource library', () => {
     expect(editor().dataset.resourceEditor).toBe(H)
     // Delete a saved, non-current neighbor so this step does not silently save the invalid new draft.
     await fill(field('Host or SSH alias'), 'controlled-host')
-    const first = config.hosts.find(host => host.id === H)!
-    await dom.render(<HostSettingsPane config={{ ...config, hosts: [config.hosts[0]!, first], workspaces: config.workspaces }} active={true} onSave={async () => {}} />)
+    const first = config.hosts.find(host => host.id === H)!, saveRemoved = vi.fn(async () => {})
+    useAppStore.setState({ tailcatConnectionDrafts: {} })
+    await dom.render(<HostSettingsPane config={{ ...config, hosts: [config.hosts[0]!, first], workspaces: config.workspaces }} active={true} onSave={saveRemoved} />)
     await select(H)
     await fill(dom.container.querySelector<HTMLInputElement>('[aria-label="Filter hosts"]')!, 'Remote 01')
     await dom.click(`[aria-label="Remove ${first.label}"]`)
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('2 linked workspace registrations')
     await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Remove Host"]')!.click())
-    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Filter hosts"]')!.value).toBe('')
+    expect(saveRemoved, dom.container.textContent ?? '').toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Filter hosts"]')!.value).toBe(''))
     expect(dom.container.querySelectorAll('.host-connection-fields')).toHaveLength(0)
     expect(editor().dataset.resourceEditor).toBe('local')
     expect(document.activeElement).toBe(dom.container.querySelector('[data-resource-row="local"]'))
@@ -297,21 +302,21 @@ describe.skipIf(section !== 'hosts')('Hosts resource library', () => {
     await fill(name(), 'First Host submission')
     const held = deferred<void>(), realSave = api.config.save.bind(api.config)
     const spy = vi.spyOn(api.config, 'save').mockImplementationOnce(async (next, expected) => { const accepted = await realSave(next, expected); await held.promise; return accepted })
-    await dom.click('[data-settings-save-bar] button'); await fill(name(), 'Remote 01')
+    await saveHosts(); await fill(name(), 'Remote 01')
     await act(async () => held.resolve()); await act(async () => {})
-    expect(name().value).toBe('Remote 01'); await save()
+    expect(name().value).toBe('Remote 01'); await saveHosts()
     expect(spy.mock.calls[1]![1]!.hosts.find(host => host.id === H)!.label).toBe('First Host submission')
     await fill(name(), 'Local authored Host')
     let current = await api.config.get()
     const change = (host: HostConfig): HostConfig => host.id === H && host.kind === 'ssh' ? { ...host, user: 'external-clean' } : host
-    await act(async () => realSave({ ...current, hosts: current.hosts.map(change) }, current)); await save()
+    await act(async () => realSave({ ...current, hosts: current.hosts.map(change) }, current)); await saveHosts()
     expect(spy.mock.calls.at(-1)![1]!.hosts.find(host => host.id === H)).toMatchObject({ user: 'external-clean' })
     await fill(name(), 'Local Host conflict')
     current = await api.config.get()
-    await act(async () => realSave({ ...current, hosts: current.hosts.map(host => host.id === H ? { ...host, label: 'External Host conflict' } : host) }, current)); await save()
+    await act(async () => realSave({ ...current, hosts: current.hosts.map(host => host.id === H ? { ...host, label: 'External Host conflict' } : host) }, current)); await saveHosts()
     expect(name().value).toBe('Local Host conflict'); expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain(`hosts.${H}.label`)
     current = await api.config.get()
-    await act(async () => realSave({ ...current, hosts: current.hosts.filter(host => host.id !== H) }, current)); await save()
+    await act(async () => realSave({ ...current, hosts: current.hosts.filter(host => host.id !== H) }, current)); await saveHosts()
     expect(name().value).toBe('Local Host conflict'); expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain(`hosts.${H}`)
   })
 })

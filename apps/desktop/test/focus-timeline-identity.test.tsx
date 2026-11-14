@@ -1,7 +1,11 @@
 import { fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import type { AgentMuxNameContext, AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import * as UserMessages from '@agentmux/core/session-user-messages'
 import * as SenderMetadata from '../src/renderer/src/lib/conversation-sender-details'
 import { RecentFocusTimeline } from '../src/renderer/src/components/RecentFocusTimeline'
@@ -19,15 +23,57 @@ import { ConversationSpeakerAvatar } from '../src/renderer/src/components/Conver
 import { renderToStaticMarkup } from 'react-dom/server'
 import { DEFAULT_MOTE_FACE, type MoteAvatarImage } from '../src/shared/mote-avatars'
 
+vi.mock('@agentmux/client-ui/use-conversation-view', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/client-ui/use-conversation-view')>()
+  const { projectConversationReading } = await import('@agentmux/client-ui/conversation-records')
+  const { useAppStore } = await import('../src/renderer/src/store')
+  const { useMemo } = await import('react')
+  const noop = () => {}, asyncNoop = async () => null
+  return { ...actual, useConversationView: (...args: Parameters<typeof actual.useConversationView>) => {
+    if (process.env.AGENTMUX_FOCUS_IDENTITY_SLICE !== 'mote-avatar') return actual.useConversationView(...args)
+    const [_client, reference] = args
+    const timeline = reference ? useAppStore.getState().timelines[reference.agentSessionId] : undefined
+    const reading = useMemo(() => timeline && reference ? projectConversationReading({ agentSessionId: reference.agentSessionId, timeline }) : null, [timeline, reference?.agentSessionId])
+    return { snapshot: null, reading, loading: false, hasMore: false, hasNewer: false, readProcessDetail: asyncNoop,
+      earlier: asyncNoop, newer: asyncNoop, refresh: asyncNoop, resume: asyncNoop, settle: asyncNoop, changes: asyncNoop, retry: asyncNoop,
+      inspect: () => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null,
+        sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false, pending: null,
+        dirty: null, inFlight: false, watch: { binding: false, bound: false, closed: null, windowId: null, invalidations: 0, unavailable: 0 } }),
+      acceptHeld: noop, selectSource: asyncNoop, selectRecord: asyncNoop, reveal: asyncNoop, noteDiagnostic: noop,
+      error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false, sourceRead: null }
+  } }
+})
+
 const moteIdentity = (target: SpaceIconTarget, icon: SpaceIconChoice): MoteConversationIdentity => ({ workspaceId: target.avatarTarget!.workspaceId, topicId: target.avatarTarget!.topicId, objectKey: target.key, name: 'Mote', icon })
 
 const dom = composerDOM(), NOW = Date.parse(_hygiene_fixtureIso(23958000000, "second"))
 const observed: AgentFocusHistoryEntry = { sessionId: 'agent-1', focusedAt: NOW - 60_000,
   identity: { name: 'Observed worker', kind: 'agent', providerId: 'codex', hostId: 'local',
     workspacePath: _hygiene_fixturePath("old-project"), project: { id: 'old-project', name: 'Observed project' }, branch: 'observed-branch' } }
+const nameDirectory = await mkdtemp('/tmp/focus-avatar-names-'), nameOwner = new AgentMuxSpatialStateStore(join(nameDirectory, 'spatial.json'))
+const nameGraph: AgentMuxSpatialGraph = { spaces: [], zones: [], bindings: [], layouts: {},
+  tabs: [{ tabId: 'default-tab', workspaceId: scratchWorkspace.id, zoneId: null, name: null, regionIds: ['default-region'] }],
+  regions: [{ regionId: 'default-region', tabId: 'default-tab', kind: 'agent', agentSessionId: defaultAgent.id,
+    runId: defaultAgent.control.run.runId, execution: { hostId: 'local', cwd: defaultAgent.workspacePath } }],
+  tabLayouts: { 'default-tab': { root: { type: 'leaf', regionId: 'default-region' }, activeRegionId: 'default-region' } }, resources: {} }
+const nameContext: AgentMuxNameContext = { actor: { kind: 'device', id: 'private-device', verified: true }, source: 'desktop-ui', entryPoint: 'spatial:renameLabel', transport: 'electron-ipc', location: { windowId: 'private-window' } }
+let disposeStore: (() => void) | undefined
+beforeAll(async () => {
+  if (process.env.AGENTMUX_FOCUS_IDENTITY_SLICE !== 'mote-avatar') return
+  await nameOwner.commit({ expectedRevision: 0, graph: nameGraph })
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => nameOwner.readForLayout())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(value => nameOwner.commit(value))
+  vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => nameOwner.retainDisplayLabels(values))
+  vi.spyOn(api.spatial, 'confirmNameCommit').mockImplementation(operationId => nameOwner.confirmNameCommit(operationId))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => nameOwner.subscribe(listener))
+  vi.spyOn(api.spatial, 'renameLabel').mockImplementation(input => nameOwner.mutateDisplayLabel(input, nameContext))
+  disposeStore = await useAppStore.getState().initialize()
+})
+afterAll(async () => { disposeStore?.(); await rm(nameDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) })
 beforeEach(() => {
+  if (process.env.AGENTMUX_FOCUS_IDENTITY_SLICE === 'mote-avatar') vi.spyOn(api.spatial, 'renameLabel').mockImplementation(input => nameOwner.mutateDisplayLabel(input, nameContext))
   vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] }); vi.setSystemTime(NOW)
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [], warnings: [] })
   vi.spyOn(api.sessions, 'timeline').mockResolvedValue({ agentSessionId: 'agent-1', revision: 1, items: [] })
   useAppStore.setState({ sessions: [composerSession(), composerSession('same-name')], timelines: {},
     agentNames: {}, tabs: {}, layouts: {}, scratchTopicSnapshots: {},
@@ -107,7 +153,7 @@ if (!slice || slice === 'current-name') describe('current-name', () => {
 })
 
 if (!slice || slice === 'mote-avatar') describe('mote-avatar', () => {
-  const primary = topicSpaceIconTarget(scratchWorkspace, moteTopics[0]!), custom = topicSpaceIconTarget(scratchWorkspace, moteTopics[1]!)
+  const primary = topicSpaceIconTarget(scratchWorkspace, moteTopics[0]!)!, custom = topicSpaceIconTarget(scratchWorkspace, moteTopics[1]!)!
   const primaryRef = { kind: 'image' as const, fileName: 'a'.repeat(64) + '.png' }, customRef = { kind: 'image' as const, fileName: 'b'.repeat(64) + '.png' }
   const item = (id: string, author?: string, human = false) => ({ id, agentSessionId: executionAgent.id,
     kind: 'user_message' as const, source: 'user' as const, status: 'complete' as const,
@@ -160,7 +206,7 @@ if (!slice || slice === 'mote-avatar') describe('mote-avatar', () => {
     expect(metadata).not.toHaveBeenCalled()
     expect(useAppStore.getState().timelines[executionAgent.id]).toBe(timeline)
     expect(useAppStore.getState().agentComposerDrafts[executionAgent.id]).toBe('Keep the original draft')
-    await click(dom.container.querySelector<HTMLElement>('[aria-label="View input records"]')!)
+    await click(dom.container.querySelector<HTMLElement>('[aria-label="View conversation records"]')!)
     expect(document.querySelector('.recent-focus__input-list [data-speaker-id="default-agent"][data-speaker-avatar="mote"]')).not.toBeNull()
     expect(read).toHaveBeenCalledTimes(2)
     // Mounted promises are released rather than retained as a second image cache.
@@ -189,11 +235,11 @@ if (!slice || slice === 'mote-avatar') describe('mote-avatar', () => {
     expect(marker('primary1').dataset.messageAuthor).toBe('agent')
     expect(useAppStore.getState().timelines[executionAgent.id]).toBe(timeline)
   })
-  it('keeps saved choice and current work on image failure and reports a shared read once', async () => {
+  it('keeps saved choice and current work when every shared avatar read fails', async () => {
     vi.spyOn(api.scratch, 'readMoteAvatar').mockRejectedValue(new Error('asset temporarily unavailable'))
     const report = vi.spyOn(useAppStore.getState(), 'reportError')
     await mount(); await click(marker('primary1'))
-    expect(report).toHaveBeenCalledTimes(2)
+    expect(report.mock.calls.filter(call => String(call[0]).includes('Mote avatar could not be read'))).toHaveLength(3)
     expect(useAppStore.getState().spaceObjectIcons[primary.key]).toBe(primaryRef)
     expect(marker('primary1').querySelector('[data-space-icon-source="image"]')?.getAttribute('title')).toContain('saved choice is retained')
     expect(useAppStore.getState().sessions.find(session => session.id === executionAgent.id)?.control?.run.runId).toBe(executionAgent.control!.run.runId)

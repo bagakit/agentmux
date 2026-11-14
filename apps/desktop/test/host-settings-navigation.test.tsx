@@ -48,7 +48,7 @@ it('does not select an arbitrary connection when an explicitly requested Host no
 
 it('does not launch maintenance for a hidden connection editor after returning to the library', async () => {
   const call = vi.spyOn(api.hosts, 'upgradeCheck').mockImplementation(async input => ({ input, eligible: false, reason: 'unverified',
-    detail: 'Controlled observation', current: { state: 'unavailable', observedAt: Date.now(), detail: 'Private observation unavailable' }, candidate: { digest: 'a'.repeat(64), sourceCommit: 'b'.repeat(40), protocolVersion: 22 } }))
+    detail: 'Controlled observation', current: { state: 'unavailable', observedAt: Date.now(), code: 'CONTROL_UNAVAILABLE', detail: 'Private observation unavailable' }, candidate: null }))
   const request: SettingsNavigationRequest = { section: 'hosts', hostId: 'a' }
   await render(request)
   expect(call).toHaveBeenCalledTimes(1)
@@ -65,7 +65,7 @@ it('does not launch maintenance for a hidden connection editor after returning t
 
 it('automatically checks a newly added SSH connection only after its exact input is saved', async () => {
   const call = vi.spyOn(api.hosts, 'upgradeCheck').mockImplementation(async input => ({ input, eligible: false, reason: 'unverified',
-    detail: 'Controlled observation', current: { state: 'unavailable', observedAt: Date.now(), detail: 'Private observation unavailable' }, candidate: { digest: 'a'.repeat(64), sourceCommit: 'b'.repeat(40), protocolVersion: 22 } }))
+    detail: 'Controlled observation', current: { state: 'unavailable', observedAt: Date.now(), code: 'CONTROL_UNAVAILABLE', detail: 'Private observation unavailable' }, candidate: null }))
   const onSave = vi.fn(async (hosts: AppConfig['hosts']) => { config = { ...config, hosts } })
   const show = () => dom.render(<HostSettingsPane config={config} active onSave={onSave} />)
   await show()
@@ -73,7 +73,7 @@ it('automatically checks a newly added SSH connection only after its exact input
   const id = dom.container.querySelector('[data-resource-editor]')!.getAttribute('data-resource-editor')!
   await fill(dom.container.querySelectorAll<HTMLInputElement>('.host-edit-grid--basic input')[1]!, 'new-saved.invalid')
   expect(call).not.toHaveBeenCalled()
-  await dom.click('[data-settings-save-bar] button')
+  await dom.click('[data-resource-view] > [data-settings-save-bar] button')
   expect(onSave).toHaveBeenCalledTimes(1)
   await show()
   expect(call).toHaveBeenCalledTimes(1)
