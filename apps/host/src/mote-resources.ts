@@ -246,12 +246,14 @@ export type PreparedScratchAgentTopic = {
   identityCreated: boolean
 }
 
+// Several owners in one process reach the same Scratch files, so their write queues are process-wide.
+const moteStateWrites = new Map<string, Promise<unknown>>()
+const titleWrites = new Map<string, Promise<unknown>>()
+const pendingEnsures = new Map<string, Promise<ScratchTopicSnapshot>>()
+const pendingBehaviorScaffolds = new Set<string>()
+
 export class ScratchTopics {
   constructor(private readonly options: { directoryIdentityHelper?: string } = {}) {}
-  private readonly moteStateWrites = new Map<string, Promise<unknown>>()
-  private readonly titleWrites = new Map<string, Promise<unknown>>()
-  private readonly pendingEnsures = new Map<string, Promise<ScratchTopicSnapshot>>()
-  private readonly pendingBehaviorScaffolds = new Set<string>()
   private nameAudit: NameChangeAudit | undefined
   setNameAudit(audit: NameChangeAudit): void { this.nameAudit = audit }
 
@@ -337,7 +339,7 @@ export class ScratchTopics {
     await this.requireAvatarObject(workspace, topicId, objectKey)
     const directory = await this.avatarMoteDirectory(workspace, topicId)
     // Only concurrent mutations of this actual directory are serialized. No persistent registry.
-    const previous = this.moteStateWrites.get(directory)
+    const previous = moteStateWrites.get(directory)
     const job = Promise.resolve(previous).catch(() => {}).then(async () => {
       await this.requireAvatarObject(workspace, topicId, objectKey)
       if (await this.avatarMoteDirectory(workspace, topicId) !== directory) throw new Error('The original Mote directory changed.')
@@ -352,9 +354,9 @@ export class ScratchTopics {
         throw new Error('The archive write could not be confirmed. Refresh this Mote to inspect its saved state.')
       return confirmed
     })
-    this.moteStateWrites.set(directory, job)
+    moteStateWrites.set(directory, job)
     try { return await job }
-    finally { if (this.moteStateWrites.get(directory) === job) this.moteStateWrites.delete(directory) }
+    finally { if (moteStateWrites.get(directory) === job) moteStateWrites.delete(directory) }
   }
 
   /** Current cwd only: no library scan, guessed hash ID, or saved Session change. */
@@ -484,12 +486,12 @@ export class ScratchTopics {
   async ensure(workspace: WorkspaceRecord, topicId: string, initialTitle?: string, mote = topicId === PMO_TEAMS_TOPIC_ID): Promise<ScratchTopicSnapshot> {
     requireScratchWorkspace(workspace)
     const key = JSON.stringify([workspace.hostId, workspace.path, topicId, mote])
-    const pending = this.pendingEnsures.get(key)
+    const pending = pendingEnsures.get(key)
     if (pending) return await pending
     const job = this.ensureTopic(workspace, topicId, initialTitle, mote)
-    this.pendingEnsures.set(key, job)
+    pendingEnsures.set(key, job)
     try { return await job }
-    finally { if (this.pendingEnsures.get(key) === job) this.pendingEnsures.delete(key) }
+    finally { if (pendingEnsures.get(key) === job) pendingEnsures.delete(key) }
   }
 
   private async ensureTopic(workspace: WorkspaceRecord, topicId: string, initialTitle: string | undefined, mote: boolean): Promise<ScratchTopicSnapshot> {
@@ -545,11 +547,11 @@ export class ScratchTopics {
     if (mote) {
       const createdSoul = await ensureRegularFile(join(absolutePath, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
       const scaffoldKey = JSON.stringify([workspace.id, workspace.hostId, workspace.path, topicId, absolutePath])
-      if (createdSoul) this.pendingBehaviorScaffolds.add(scaffoldKey)
+      if (createdSoul) pendingBehaviorScaffolds.add(scaffoldKey)
       // Retry only this owner's observed partial creation, never infer an old Mote from SOUL prose.
-      if (this.pendingBehaviorScaffolds.has(scaffoldKey)) {
+      if (pendingBehaviorScaffolds.has(scaffoldKey)) {
         await ensureRegularFile(join(absolutePath, MOTE_BEHAVIOR_PATH), DEFAULT_MOTE_BEHAVIOR)
-        this.pendingBehaviorScaffolds.delete(scaffoldKey)
+        pendingBehaviorScaffolds.delete(scaffoldKey)
       }
     }
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
@@ -593,7 +595,7 @@ export class ScratchTopics {
     title: string
   ): Promise<ScratchTopicSnapshot> {
     const key = `${workspace.id}\0${topicId}`
-    const job = Promise.resolve(this.titleWrites.get(key)).catch(() => {}).then(async () => {
+    const job = Promise.resolve(titleWrites.get(key)).catch(() => {}).then(async () => {
       const snapshot = await this.read(workspace, topicId)
       if (!snapshot) throw new Error('Scratch Topic no longer exists')
       const topicPath = join(snapshot.physicalDirectoryPath!, 'topic.md')
@@ -609,9 +611,9 @@ export class ScratchTopics {
       return this.nameAudit ? await this.nameAudit.run([change], apply,
         result => ({ actual: result.title, ownerRevision: wikiVersion(replacement) })) : await apply()
     })
-    this.titleWrites.set(key, job)
+    titleWrites.set(key, job)
     try { return await job }
-    finally { if (this.titleWrites.get(key) === job) this.titleWrites.delete(key) }
+    finally { if (titleWrites.get(key) === job) titleWrites.delete(key) }
   }
 
   async setWikiEnabled(workspace: WorkspaceRecord, topicId: string, enabled: boolean): Promise<ScratchTopicSnapshot> {
