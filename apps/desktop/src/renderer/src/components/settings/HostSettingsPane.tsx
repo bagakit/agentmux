@@ -31,6 +31,7 @@ import { HostNetworkMap } from './HostNetworkMap'
 import { currentHostNetwork, useHostNetworkObservation } from './use-host-network-observation'
 import { HostApplicationAccessPanel } from './HostApplicationAccessPanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
+import { SelectionField } from '../SelectionField'
 import './hosts-settings.css'
 
 const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')
@@ -436,12 +437,12 @@ function HostConnectionFields({ host, open, onOpenChange, onChange, onClear }: {
         <label><span>Name</span><TextInput data-host-name value={host.label} onChange={(event) => onChange({ label: event.target.value })} /></label>
         <label><span>Host or SSH alias {transport === 'tailcat' ? <small>optional</small> : null}</span><TextInput value={host.hostname} onChange={(event) => onChange({ hostname: event.target.value })} placeholder="devbox or dev.example.com" /></label>
       </div>
-      <label className="host-transport-field"><span>Connection transport</span><select aria-label="Connection transport" value={transport} onChange={event => {
-        const next = event.target.value as NonNullable<SshHostConfig['transport']>
+      <label className="host-transport-field"><span>Connection transport</span><SelectionField label="Connection transport" describedBy="host-transport-hint" value={transport} searchable={false} options={[{ value: 'ssh', label: 'SSH' }, { value: 'ssh-tailcat', label: 'SSH first, Tailcat backup' }, { value: 'tailcat', label: 'Tailcat only' }]} onValueChange={value => {
+        const next = value as NonNullable<SshHostConfig['transport']>
         onChange({ transport: next, ...(next !== 'ssh' && host.tailcat === undefined ? { tailcat: { address: '', keyFile: '' } } : {}) })
-      }}><option value="ssh">SSH</option><option value="ssh-tailcat">SSH first, Tailcat backup</option><option value="tailcat">Tailcat only</option></select></label>
+      }} /></label>
       {transport !== 'ssh' ? <HostTailcatClientFields host={host} onChange={tailcat => onChange({ tailcat })} /> : null}
-      <p className="settings-group-note">{transport === 'ssh' ? 'Use an alias from your SSH config, or a hostname. ' : transport === 'ssh-tailcat' ? 'Try SSH first; use Tailcat when channel setup fails. ' : 'Connect using the other Host’s private Tailcat address and your saved client key. '}Connects to an existing AgentMux service; Test verifies this connection.</p>
+      <p id="host-transport-hint" className="settings-group-note">{transport === 'ssh' ? 'Use an alias from your SSH config, or a hostname. ' : transport === 'ssh-tailcat' ? 'Try SSH first; use Tailcat when channel setup fails. ' : 'Connect using the other Host’s private Tailcat address and your saved client key. '}Connects to an existing AgentMux service; Test verifies this connection.</p>
       <details className="host-edit-disclosure" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
         <summary><span><strong>Connection options</strong><small>User, key, and service overrides</small></span><ThemeNavigationDownIcon size={13} /></summary>
         <div className="host-edit-grid">
