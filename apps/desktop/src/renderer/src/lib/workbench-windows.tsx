@@ -5,7 +5,7 @@ import { useNativeOverlayChrome } from '../hooks/useNativeOverlayChrome'
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { AppWindowDescriptor, AppWindowTarget, AppWindowOperation, AppWindowPage } from '@agentmux/core/control'
-import { readWorkbenchReturnContext, workbenchReturnLabel, type WorkbenchReturnContext, type WorkbenchWindowRequest, type WorkbenchWindowDocument, type WorkbenchWindowStage } from '../../../shared/workbench-windows'
+import { readWorkbenchReturnContext, type WorkbenchReturnContext, type WorkbenchWindowRequest, type WorkbenchWindowDocument, type WorkbenchWindowStage } from '../../../shared/workbench-windows'
 import { api } from './api'
 import { useAppStore } from '../store'
 import { awaitOriginalWorkbenchHost, originalWorkbenchHost, placeWorkbenchWindow, registerWorkbenchDocument, workbenchTargetKey, workbenchDocumentReturning, observeWorkbenchNativeVisibility, registerWorkbenchNavigationStamp, workbenchNavigationStamp, type WorkbenchSurface } from './workbench-window-registry'
@@ -196,7 +196,6 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
     slot.id = 'workbench-window-' + request.windowId
     slot.dataset.workbenchDocumentRoot = ''
     child.document.body.classList.add('workbench-detached-window')
-    if (request.target.kind === 'surface') child.document.title = request.target.surface === 'survey' ? 'Survey · AgentMux' : 'Recall · AgentMux'
     const disposeStyle = mirrorStyles(child.document), disposeDocument = registerWorkbenchDocument(child.document, identity), disposeEvents = documentEvents(child.document)
     const record: OpenWindow = { window: child, document: child.document, identity, target: request.target, returnContext: readWorkbenchReturnContext(request.returnContext, request.target), slot, returned: false, dispose: () => { disposeStyle(); disposeDocument(); disposeEvents() } }
     opened.set(request.windowId, record); child.addEventListener('unload', () => { if (opened.get(request.windowId) === record) { record.dispose(); notify() } }, { once: true }); notify()
@@ -260,11 +259,9 @@ export function useWorkbenchWindows(ready: boolean, onReturn?: (context: Workben
   }, [ready])
   return windows
 }
-function WorkbenchWindowToolbar({ record }: { record: OpenWindow }) {
+function WorkbenchWindowOverlayNotice({ record }: { record: OpenWindow }) {
   const warning = useNativeOverlayChrome(record.document, record.identity)
-  const target = record.target
-  const title = target.kind === 'surface' ? (target.surface === 'survey' ? 'Survey' : 'Recall') : 'AgentMux'
-  return <><header className="workbench-window-toolbar"><strong>{title}</strong><button className="small-button" onClick={() => void returnWorkbenchWindow(record.identity)}>{target.kind === 'surface' ? 'Return to main window' : workbenchReturnLabel(record.returnContext)}</button></header>{warning ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Window overlay presentation', mode: warning, restore: 'Keep using the original Browser; close and reopen the floating control.' } }} /> : null}</>
+  return warning ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Window overlay presentation', mode: warning, restore: 'Keep using the original Browser; close and reopen the floating control.' } }} /> : null
 }
 export function WorkbenchWindowNotices() {
   const state = useSyncExternalStore(subscribe, () => snapshot)
@@ -285,5 +282,5 @@ export function WorkbenchWindowNotices() {
         <button className="small-button" onClick={() => void inspect(operationId)}>Inspect original open</button></div>)}
     </details> : null}
     </WorkbenchWindowNotice>
-    {windows.map(record => createPortal(<WorkbenchWindowToolbar record={record} />, record.document.body, record.identity.windowId))}</>
+    {windows.map(record => createPortal(<WorkbenchWindowOverlayNotice record={record} />, record.document.body, record.identity.windowId))}</>
 }

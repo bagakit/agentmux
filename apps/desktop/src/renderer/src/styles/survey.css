@@ -121,8 +121,39 @@
 }
 @container survey-list (max-width: 112px) {
   /* A narrow rail puts its toggle below the shared macOS window-control row. */
-  :is(.global-survey-surface, .global-recall-surface)[data-native-window-controls="true"] .survey-titlebar { height: 72px; flex-basis: 72px; align-items: flex-end; padding: 0 0 var(--sp-2); }
+  :is(.global-survey-surface, .global-recall-surface)[data-native-window-controls="true"] .survey-titlebar:not([data-knowledge-window]) { height: 72px; flex-basis: 72px; align-items: flex-end; padding: 0 0 var(--sp-2); }
 }
+/* When the 40px rail leaves traffic lights over the body, the first row clears the remaining inset. */
+.global-recall-surface[data-windowed][data-native-window-controls="true"][data-sidebar-collapsed="true"] .recall-return-note {
+  margin-left: max(var(--sp-6), calc(var(--window-controls-inset) - var(--survey-navigation-width)));
+}
+/* A projected file Region brings its editor or preview header directly to the window edge. */
+.global-recall-surface[data-windowed][data-native-window-controls="true"][data-sidebar-collapsed="true"] .workspace-workbench > .pane-body > .workbench-region-slot .editor-header {
+  padding-left: max(var(--sp-5), calc(var(--window-controls-inset) - var(--survey-navigation-width)));
+}
+.global-recall-surface[data-windowed][data-native-window-controls="true"][data-sidebar-collapsed="true"] .survey-notebook-home:has(.note-canvas) { padding-top: 32px; }
+/* The window name, Return and rail toggle share the knowledge surface’s own first row. */
+.survey-titlebar[data-knowledge-window] { gap: var(--sp-1); padding-inline: var(--sp-5) var(--sp-3); }
+.survey-titlebar[data-knowledge-window][data-native-controls="true"] { padding-left: var(--window-controls-inset); }
+.knowledge-window-title { flex: 1; min-width: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 600; white-space: nowrap; }
+@container (max-width: 190px) {
+  .survey-titlebar[data-knowledge-window][data-native-controls="true"] {
+    height: auto; flex-basis: auto; min-height: 60px; align-items: center; padding: 28px var(--sp-3) var(--sp-2) var(--sp-4);
+  }
+}
+@container (max-width: 112px) {
+  .survey-titlebar[data-knowledge-window], .survey-titlebar[data-knowledge-window][data-native-controls="true"] {
+    height: auto; flex: none; flex-direction: column; align-items: center; padding: var(--sp-2) 0; gap: 0;
+  }
+  .survey-titlebar[data-knowledge-window][data-native-controls="true"] { padding-top: 32px; }
+  .knowledge-window-title { flex: none; font-size: var(--fs-meta); line-height: 18px; }
+}
+.survey-management > header[data-knowledge-window-tools] { gap: var(--sp-2); -webkit-app-region: drag; }
+.survey-management > header[data-knowledge-window-tools][data-native-controls="true"] {
+  padding-left: max(0px, calc(var(--window-controls-inset) - var(--survey-navigation-width) - var(--sp-4)));
+}
+.survey-management > header[data-knowledge-window-tools] > strong { flex: 1; }
+.survey-management > header[data-knowledge-window-tools] > button { flex: none; -webkit-app-region: no-drag; }
 @supports not (backdrop-filter: blur(1px)) { :is(.global-survey-surface, .global-recall-surface), .survey-topic-menu { --survey-glass: var(--surface-1); } }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { :is(.global-survey-surface, .global-recall-surface), .survey-topic-menu { --survey-glass: var(--surface-1); --survey-edge: var(--line); } }
 

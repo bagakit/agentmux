@@ -1,5 +1,7 @@
 import { isWorkbenchSurfaceDetached } from '../lib/workbench-window-registry'
 import { useWorkbenchDocument } from '../lib/workbench-document'
+import { WindowReturnButton } from './SpatialWindowGrip'
+import { KnowledgeSurfaceTitlebar, useKnowledgeWindowChrome } from './KnowledgeSurfaceWindow'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { surveyThumbnailStyle } from '../../../shared/survey-thumbnail-layout'
 import * as Menu from '@radix-ui/react-dropdown-menu'
@@ -72,8 +74,6 @@ const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosu
 const ThemeObjectNoteIcon = semanticIconComponent('object.note')
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
-const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
-const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
 const ThemeActionCreateBrowserIcon = semanticIconComponent('action.create-browser')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionCollectSourcesIcon = semanticIconComponent('action.collect-sources')
@@ -278,6 +278,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const tabClose = useWorkbenchTabsClose()
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const ownerDocument = useWorkbenchDocument()
+  const windowChrome = useKnowledgeWindowChrome('survey')
+  const nativeWindowControls = windowChrome?.nativeControls ?? (isMacPlatform() && ownerDocument === document)
   const surfaceRef = useRef<HTMLElement>(null)
   const managementRef = useRef<HTMLElement>(null)
   const resizeHandle = useRef<HTMLDivElement>(null)
@@ -745,14 +747,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
     </> : null}
   </div> : null
 
-  const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
+  const returnInTools = Boolean(windowChrome && controlsCoverPage && workspace && toolsOpen)
+  const windowControlsInset = nativeWindowControls ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
-  return <section ref={surfaceRef} data-knowledge-surface="survey" className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform() && ownerDocument === document}
+  return <section ref={surfaceRef} data-knowledge-surface="survey" className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={nativeWindowControls} data-windowed={windowChrome ? '' : undefined}
     style={{ ...surveyThumbnailStyle(config?.browser.surveyThumbnails), '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
-    <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={controlsCoverPage}>
-      <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">{!sidebarCollapsed && windowAction}
-        <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>
-      </div>
+    <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={windowChrome ? returnInTools : controlsCoverPage}>
+      <KnowledgeSurfaceTitlebar surface="survey" chrome={windowChrome} collapsed={sidebarCollapsed} windowAction={windowAction}
+        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} returnInTools={returnInTools} />
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
         <SurveyProfilePicker active={visible && !controlsCoverPage} value={profileView} profiles={profiles} unknown={Boolean(profileViewRecovery)} collapsed={sidebarCollapsed} onExpand={() => setSidebarCollapsed(false)}
           onChange={view => { intent.current += 1; setError(null); void useAppStore.getState().setSurveyProfileView(view).then(save => { if (save.reason) setError('The environment view is kept; saving is unconfirmed. ' + save.reason) }).catch(cause => setError(presentError(cause))) }}
@@ -865,7 +867,12 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
         </>}
       </div>
       {workspace && (toolsVisited || toolsOpen) ? <aside ref={managementRef} id="survey-management" className="survey-management" aria-label="Browser management controls" hidden={!toolsOpen} inert={!toolsOpen || !visible} aria-hidden={!toolsOpen || !visible}>
-        <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><ThemeActionCloseIcon size={14} /></button></header><BrowserToolsPanel workspace={workspace} visible={observeWork && toolsOpen} />
+        <header data-knowledge-window-tools={returnInTools ? '' : undefined} data-native-controls={windowChrome?.nativeControls}>
+          <strong>Browser tools · {workspace.name}</strong>
+          {returnInTools && windowChrome && <WindowReturnButton chrome={windowChrome} className="survey-icon-button" />}
+          <button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><ThemeActionCloseIcon size={14} /></button>
+        </header>
+        <BrowserToolsPanel workspace={workspace} visible={observeWork && toolsOpen} />
       </aside> : null}
     </div>
     <SurveyRecallCapture target={visible && !controlsCoverPage ? recallCapture : null} onClose={() => setRecallCapture(null)} />

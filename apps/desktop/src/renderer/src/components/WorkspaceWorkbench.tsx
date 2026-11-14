@@ -11,7 +11,7 @@ import { agentWorkPlacement, workReferenceHostId } from '../lib/agent-work-mode'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { useWorkbenchWindowRevision, workbenchWindowPlacement, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { openWorkbenchWindow } from '../lib/workbench-windows'
-import { useWorkbenchDocument, useWorkbenchWindowDocument } from '../lib/workbench-document'
+import { useWorkbenchDocument, useWorkbenchWindowDocument, useWorkbenchWindowChrome, useWorkbenchWindowTitle } from '../lib/workbench-document'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -746,6 +746,18 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
     </StableWorkbenchView>
 }
 
+function SpatialRegionWindowTitle({ title }: { title: string | null }) {
+  useWorkbenchWindowTitle(title)
+  return null
+}
+function SpatialTabWindowTitle({ tab }: { tab: WorkbenchTab }) {
+  const sessions = useWorkbenchTabSessions(tab), note = useTabNoteName(tab)
+  const metadata = useWorkbenchTabNameMetadata(tab)
+  const names = useWorkbenchTabRecord('agentNames', tab), timelines = useWorkbenchTabRecord('timelines', tab)
+  useWorkbenchWindowTitle(workbenchTabDisplayName(tab, sessions, names, timelines, metadata, note))
+  return null
+}
+
 function WorkbenchRegionContent({
   node,
   tab,
@@ -787,6 +799,9 @@ function WorkbenchRegionContent({
   const [confirmingClose, setConfirmingClose] = useState<{ confirmation: LastViewCloseConfirmation; record: SpaceCloseReceipt; keep: SpaceCloseReceipt | null } | null>(null)
   const [closingRegion, setClosingRegion] = useState(false)
   const sourceClose = useSourceWorkbenchClose()
+  const chrome = useWorkbenchWindowChrome()
+  const leading = chrome?.target.kind === 'region' ? chrome.target.regionId === node.regionId
+    : chrome?.target.kind === 'tab' && chrome.target.tabId === tab.id && swapTargets[0]?.regionId === node.regionId
   const surface = tab.regions[node.regionId]
   const projectionSource = sourceRegionProjectionReference(surface)
   const source = useAppStore(state => projectionSource ? originalSourceEntryByKey(state, spaceMountKey(projectionSource.reference)) : undefined)
@@ -939,6 +954,7 @@ function WorkbenchRegionContent({
     <section
       className={`${REGION_CLASS} ${focusForPresentation(target).className}`}
       data-workbench-region-id={node.regionId}
+      data-window-leading-region={leading ? surface.kind : undefined}
       data-source-region={projectionSource ? mountedRegionKey(projectionSource.reference, projectionSource.tabId, projectionSource.regionId) : undefined}
       // tabIndex={-1}：可编程聚焦但不进 Tab 序（理由见 openRegionMenuFromKeyboard 上方注释）。
       tabIndex={-1}
@@ -973,7 +989,9 @@ function WorkbenchRegionContent({
     </section>
     </RegionContextMenu>
   }
-  return <>{connector.dialog}{renderFrame(
+  return <>{leading && chrome?.target.kind === 'tab' ? <SpatialTabWindowTitle tab={tab} /> : null}
+    {leading && chrome?.target.kind === 'region' ? <SpatialRegionWindowTitle title={swapTargets.find(row => row.regionId === node.regionId)?.label ?? null} /> : null}
+    {connector.dialog}{renderFrame(
       <SessionRegionHost arrangement="columns" className="workbench-session-region-host">
         <SurfaceContent
           surface={surface}

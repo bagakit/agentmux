@@ -1,4 +1,6 @@
 import { returnWorkbenchWindow, focusWorkbenchWindow, openWorkbenchWindow } from '../lib/workbench-windows'
+import { SpatialWindowGrip } from './SpatialWindowGrip'
+import { isMacPlatform } from '../lib/host-platform'
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { Component, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -8,7 +10,7 @@ import { workbenchReturnContext } from '../lib/workbench-return-context'
 import { workbenchReturnLabel, type WorkbenchReturnSelection } from '../../../shared/workbench-windows'
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
-import { WorkbenchDocumentContext, useWorkbenchDocument } from '../lib/workbench-document'
+import { WorkbenchDocumentContext, useWorkbenchDocument, useWorkbenchWindowChrome } from '../lib/workbench-document'
 import { registerWorkbenchHost, workbenchDocumentIdentity, useWorkbenchDocumentVisibility, useWorkbenchSurfaceDocument, type WorkbenchSurface, type WorkbenchWindowPlacement } from '../lib/workbench-window-registry'
 import type { AppWindowTarget } from '@agentmux/core/control'
 import { markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
@@ -164,6 +166,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   children: ReactNode
 }) {
   const parentDocument = useWorkbenchDocument()
+  const parentChrome = useWorkbenchWindowChrome()
   const surfaceDocument = useWorkbenchSurfaceDocument(surface)
   const [host] = useState(() => {
     const element = document.createElement('div')
@@ -217,7 +220,16 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const windowActive = windowPlacement !== null
   const presentedActive = (windowActive || active) && documentVisible
   const presentedVisible = (windowActive || visible) && documentVisible
-  const documentContext = useMemo(() => ({ document: hostDocument, window: windowPlacement?.window ?? workbenchDocumentIdentity(hostDocument) }), [hostDocument, windowPlacement])
+  const chrome = useMemo(() => {
+    if (windowPlacement && originalTarget && hostDocument !== document && windowPlacement.destination.ownerDocument === hostDocument) {
+      return { identity: windowPlacement.window, target: originalTarget, nativeControls: isMacPlatform(),
+        returnLabel: originalTarget.kind === 'surface' ? 'Return to main window' : workbenchReturnLabel(windowPlacement.returnContext),
+        onReturn: () => { void returnWorkbenchWindow(windowPlacement.window) } }
+    }
+    return parentDocument === hostDocument ? parentChrome : null
+  }, [hostDocument, originalTarget, parentChrome, parentDocument, windowPlacement])
+  const documentContext = useMemo(() => ({ document: hostDocument, window: windowPlacement?.window ?? workbenchDocumentIdentity(hostDocument), chrome }), [hostDocument, windowPlacement, chrome])
+  const spatialChrome = windowPlacement && chrome && chrome.target.kind !== 'surface' && chrome.identity === windowPlacement.window ? chrome : null
   const displayReference = useMemo(() => windowPlacement && frozenTarget.current && frozenTarget.current.kind !== 'surface' && reference
     ? { ...reference, displayWorkspaceId: frozenTarget.current.displayWorkspaceId, groupId: frozenTarget.current.groupId, tabId: frozenTarget.current.tabId,
       ...(frozenTarget.current.kind === 'region' ? { regionId: frozenTarget.current.regionId } : {}) } : reference, [windowPlacement, reference])
@@ -323,7 +335,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   }) // The original layout can replace a slot without changing its exact address.
   useLayoutEffect(() => () => host.remove(), [host])
   const content = <WorkbenchDocumentContext.Provider value={documentContext}><WorkbenchPresentationContext.Provider value={presentation}>
-    <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(<DesktopClientUiProvider document={hostDocument}><MotePresentationContext contextKey={moteContextKey} isolated={surface === 'mote'}>{children}</MotePresentationContext></DesktopClientUiProvider>, host)}
+    <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(<DesktopClientUiProvider document={hostDocument}><MotePresentationContext contextKey={moteContextKey} isolated={surface === 'mote'}>{spatialChrome ? <SpatialWindowGrip chrome={spatialChrome} /> : null}{children}</MotePresentationContext></DesktopClientUiProvider>, host)}
     {windowPlacement && noticeHome ? createPortal(<div className="workbench-restore-notice" role="status">{originalTarget?.kind === 'surface' ? (originalTarget.surface === 'survey' ? 'Survey is open in its own window.' : 'Recall is open in its own window.') : `Original ${kind === 'tab' ? 'Tab' : 'Region'} is in its independent window.`}
       <button className="small-button" onClick={() => void focusWorkbenchWindow(windowPlacement.window)}>Show window</button>
       <button className="small-button" onClick={() => void returnWorkbenchWindow(windowPlacement.window)}>{originalTarget?.kind === 'surface' ? 'Return to main window' : workbenchReturnLabel(windowPlacement.returnContext)}</button>

@@ -1,6 +1,33 @@
-
-/* Native workface shells host the original retained tree and local window chrome. */
+/* The shell only sizes the retained content. Each workface owns its title and window controls. */
 body.workbench-detached-window { margin: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-0); color: var(--text); }
-.workbench-detached-window > [id^="workbench-window-"] { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; order: 1; }
-.workbench-window-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 6px 12px 6px 76px; -webkit-app-region: drag; border-bottom: 1px solid var(--line); }
-.workbench-window-toolbar button { -webkit-app-region: no-drag; }
+.workbench-detached-window > [data-workbench-document-root] { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; order: 1; }
+
+/* A Tab/Region's grip fits inside its top-left workface. Only that Region's own header gives it room. */
+.workbench-detached-window {
+  --spatial-grip-leading: 10px;
+  --spatial-grip-width: calc(var(--spatial-grip-leading) + 44px);
+  --spatial-grip-height: 32px;
+}
+.workbench-detached-window:has(.spatial-window-grip[data-native-window-controls="true"]) { --spatial-grip-leading: var(--window-controls-inset); }
+.spatial-window-grip {
+  position: absolute; z-index: 42; inset: 0 auto auto 0; box-sizing: border-box; width: var(--spatial-grip-width); height: var(--spatial-grip-height);
+  display: flex; align-items: center; padding-inline-start: var(--spatial-grip-leading); -webkit-app-region: drag;
+}
+.spatial-window-return {
+  display: inline-grid; place-items: center; width: 26px; height: 24px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-muted); cursor: pointer; -webkit-app-region: no-drag;
+}
+.spatial-window-return:hover, .spatial-window-return:focus-visible { background: var(--surface-3); color: var(--text); }
+.workbench-detached-window [data-window-leading-region] :is(.browser-toolbar, .editor-header, .git-workbench__header, .ordinary-space-member__header) {
+  padding-inline-start: var(--spatial-grip-width);
+}
+.workbench-detached-window [data-window-leading-region] .agent-region-header-home {
+  max-width: calc(100% - var(--spatial-grip-width)); min-height: var(--spatial-grip-height);
+}
+.workbench-detached-window [data-window-leading-region] .agent-surface {
+  --agent-region-reading-inset: var(--spatial-grip-height);
+}
+.workbench-detached-window [data-window-leading-region] .terminal-view__xterm {
+  --agent-region-reading-inset: var(--spatial-grip-height);
+}
+.workbench-detached-window [data-window-leading-region] .launch-surface { padding-block-start: max(var(--spatial-grip-height), 4%); }
