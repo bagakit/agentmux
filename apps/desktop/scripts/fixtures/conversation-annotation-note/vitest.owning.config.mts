@@ -23,7 +23,7 @@ export default defineConfig({
         'copy-note': { file: 'ConversationAnnotationNote.tsx', from: 'platform.copyText(original.target.quote,', to: "platform.copyText('wrong selection'," },
         'retarget-draft': { file: 'ConversationAnnotationNote.tsx', from: 'if (edit && note.trim() && !sameTarget(edit, selection))', to: 'if (false && edit && note.trim() && !sameTarget(edit, selection))' },
         'close-discards': { file: 'ConversationAnnotationNote.tsx', from: 'onClick={close}><X', to: 'onClick={discard}><X' },
-        'clear-failure': { file: 'ConversationAnnotationNote.tsx', from: 'catch (failure) { setError(`无法将批注', to: "catch (failure) { setNote(''); setError(`无法将批注" },
+        'clear-failure': { file: 'ConversationAnnotationNote.tsx', from: 'setError(`无法将批注加入回复草稿', to: "setNote(''); setError(`无法将批注加入回复草稿" },
         'wrong-range': { file: 'ConversationAnnotationNote.tsx', from: 'left: rect.left, top: rect.bottom - 1', to: 'left: 0, top: rect.bottom - 1' },
         'wrong-recipient': { file: 'ConversationAnnotationDelivery.tsx', from: '.send(recipient.id, formatConversationAnnotation', to: '.send(sessionId, formatConversationAnnotation' },
         'retain-hidden-menu': { file: 'ConversationAnnotationDelivery.tsx', from: 'open={active && recipientOpen} onOpenChange={setRecipientOpen}', to: 'open={recipientOpen || !active} onOpenChange={setRecipientOpen}' },

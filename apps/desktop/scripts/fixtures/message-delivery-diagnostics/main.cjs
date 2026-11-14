@@ -153,6 +153,19 @@ async function annotationEditorScene(width, appearance) {
   await waitFor("document.querySelector('.conversation-selection-actions')?.style.visibility==='visible'")
   await click("document.querySelector('.conversation-selection-actions button:first-child')")
   await waitFor(`${editor}?.style.visibility==='visible' && document.activeElement===${field}`)
+  const readField = () => evaluate(`(() => {
+    const field=${field}
+    const ids=field.getAttribute('aria-describedby')?.split(' ')??[]
+    return {label:field.ownerDocument.getElementById(field.getAttribute('aria-labelledby'))?.textContent,
+      nativeLabel:field.closest('label')?.control===field,
+      descriptions:ids.map(id=>{const node=field.ownerDocument.getElementById(id);return {text:node?.textContent,role:node?.getAttribute('role')}}),
+      invalid:field.getAttribute('aria-invalid')}
+  })()`)
+  const initialField = await readField()
+  assert.equal(initialField.label,'批注内容')
+  assert.equal(initialField.nativeLabel,true)
+  assert.ok(initialField.descriptions.some(item=>item.text?.includes('回车换行')), 'Original annotation field must describe its help')
+  await evaluate(`(() => {window.annotationOriginalField=${field};window.annotationOriginalPassage=${passage};window.annotationOriginalText=annotationOriginalPassage.firstChild})()`)
   assert.equal(await evaluate(`${send}.disabled && ${add}.disabled`), true)
   const draft = await evaluate('annotationPreview.draft()')
   const note = width === 320
@@ -180,10 +193,39 @@ async function annotationEditorScene(width, appearance) {
   await waitFor(`${editor}?.style.visibility==='visible' && ${field}.value===${JSON.stringify(note)}`)
   assert.equal(await evaluate('annotationPreview.draft()'), draft)
   if (width === 320 && appearance === 'light') {
+    await evaluate(`(() => {
+      const field=${field};field.focus({preventScroll:true});field.setSelectionRange(field.value.length,field.value.length)
+      window.nativeAnnotationComposition=[]
+      for(const type of ['compositionstart','compositionend']) field.addEventListener(type,event=>nativeAnnotationComposition.push({type,trusted:event.isTrusted}))
+    })()`)
+    await win.webContents.debugger.sendCommand('Input.imeSetComposition', { text:'校对', selectionStart:2, selectionEnd:2 })
+    await waitFor(`${field}.value===${JSON.stringify(note+'校对')}`)
+    await win.webContents.debugger.sendCommand('Input.insertText',{text:'校对'})
+    await waitFor(`nativeAnnotationComposition.length===2`)
+    const composition = await evaluate('nativeAnnotationComposition')
+    assert.deepEqual(composition[0],{type:'compositionstart',trusted:true})
+    assert.equal(composition[1].type,'compositionend')
+    assert.equal(await evaluate(`${field}.value`),note+'校对')
+    for(const type of ['keyDown','keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{
+      type,key:'z',code:'KeyZ',modifiers:4,windowsVirtualKeyCode:90,...(type==='keyDown'?{commands:['undo']}:{}),
+    })
+    await waitFor(`${field}.value===${JSON.stringify(note)}`)
+    await evaluate(`${field}.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}))`)
+    assert.equal(await evaluate(`${field}===annotationOriginalField && ${editor}?.style.visibility==='visible'`),true, 'Composing Escape keeps the original editor visible')
+    await evaluate(`${field}.setSelectionRange(2,6)`)
     await evaluate('annotationPreview.failNextAdd()')
     await click(add)
     await waitFor(`${editor}?.querySelector('[role="alert"]')?.textContent.includes('Private draft handoff rejected')`)
-    assert.equal(await evaluate(`${field}.value`), note)
+    await waitFor(`document.activeElement===${field}`)
+    const rejectedField = await readField()
+    assert.ok(rejectedField.descriptions.some(item=>item.role==='alert' && item.text?.includes('Private draft handoff rejected')), 'Original annotation field must describe the original rejection')
+    assert.equal(rejectedField.invalid,null,'An owner rejection does not invalidate the user’s text')
+    const retained = await evaluate(`({node:${field}===annotationOriginalField,passage:${passage}===annotationOriginalPassage,
+      text:${passage}.firstChild===annotationOriginalText, caret:[${field}.selectionStart,${field}.selectionEnd],
+      value:${field}.value, quote:${editor}.querySelector('blockquote').textContent, draft:annotationPreview.draft()})`)
+    assert.deepEqual(retained,{node:true,passage:true,text:true,caret:[2,6],value:note,
+      quote:'The second repeated phrase is the passage we want to discuss.',draft})
+    result.rejectedAnnotationField = { initialField, rejectedField, retained, composition }
     await capture(width, 'annotation-editor-draft-rejected')
   }
   await click(add)

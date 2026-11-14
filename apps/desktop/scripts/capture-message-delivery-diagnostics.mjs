@@ -10,6 +10,10 @@ const desktop = resolve(import.meta.dirname, '..'), root = resolve(desktop, '../
 const require = createRequire(import.meta.url)
 const only = process.argv.find(arg => arg.startsWith('--only='))?.slice(7)
 const annotationEditor = only === 'annotation-editor'
+const brokenField = process.argv.includes('--break-annotation-field-description')
+assert.ok(!brokenField || annotationEditor)
+const annotationSource = 'apps/desktop/src/renderer/src/components/ConversationAnnotationNote.tsx'
+let appliedMutation = false
 const fixture = join(desktop, 'scripts/fixtures', annotationEditor ? 'conversation-annotation-note' : 'message-delivery-diagnostics')
 const requestedEvidence = process.argv.find(arg => arg.startsWith('--evidence='))?.slice(11)
 const privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-message-diagnostic-")), directory = requestedEvidence ? resolve(root, requestedEvidence) : join(root, ".local/state/message-recovery-fixture", ("visual-" + (globalThis.crypto.randomUUID()) + ""))
@@ -21,6 +25,14 @@ try {
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, resolve: { alias: aliases },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'actual-source-identities', enforce: 'pre', transform(source, id) {
+      if (brokenField && id === join(root, annotationSource)) {
+        const before = '<ComposerTextarea {...field} variant="compact"'
+        assert.equal(source.split(before).length, 2, 'The actual annotation field is uniquely loaded')
+        source = source.replace(before, '<ComposerTextarea {...field} aria-describedby={undefined} variant="compact"')
+        inputs[annotationSource] = hash(source)
+        appliedMutation = true
+        return source
+      }
       if (!id.includes('?') && (id.startsWith(join(root, 'apps/desktop/src') + '/') || id.startsWith(join(root, 'packages/client-ui/src') + '/') || id.startsWith(fixture + '/'))) inputs[id.slice(root.length + 1)] = hash(source)
     }, async generateBundle() {
       for (const file of this.getWatchFiles()) if (file.startsWith(root + '/') && file.endsWith('.css') && !file.includes('/node_modules/')) inputs[file.slice(root.length + 1)] = hash(await readFile(file))
@@ -34,11 +46,19 @@ try {
     temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 90000, onLine: line => lines.push(line) })
   await writeFile(join(directory, 'process.log'), lines.join('\n'))
   const receipt = JSON.parse(await readFile(join(directory, 'render.json'), 'utf8'))
-  assert.equal(outcome.exitCode, 0, JSON.stringify(receipt.failure)); assert.equal(receipt.passed, true)
-  await writeFile(join(directory, 'review.md'), ['# 等待独立看图评审', '',
-    annotationEditor ? '真实 SessionPane / 对话批注与产品 CSS，数据来自私有 preview。未发送用户消息，未操作用户 Run。'
-      : '真实 WorkspaceWorkbench / Message Tool 与产品 CSS；数据由既有 preview API / queue / diagnostic journal 提供。未发送用户消息，未操作用户 Run。',
-    '请读取 fixture scene.md 与 owning SSOT，逐张打开以下完整截图并评审任务主次、信息可读性、留白、操作和窄屏表现。采图成功不代签审美通过。', '',
-    ...receipt.frames.map(frame => `- ${frame.width}px / ${frame.state}: [截图](${frame.file})`), ''].join('\n'))
-  console.log(directory)
+  assert.equal(outcome.exitConfirmed, true)
+  if (brokenField) {
+    assert.equal(appliedMutation, true)
+    assert.equal(outcome.exitCode, 1)
+    assert.match(receipt.failure?.message, /Original annotation field must describe its help/)
+    console.log(directory)
+  } else {
+    assert.equal(outcome.exitCode, 0, JSON.stringify(receipt.failure)); assert.equal(receipt.passed, true)
+    await writeFile(join(directory, 'review.md'), ['# 等待独立看图评审', '',
+      annotationEditor ? '真实 SessionPane / 对话批注与产品 CSS，数据来自私有 preview。未发送用户消息，未操作用户 Run。'
+        : '真实 WorkspaceWorkbench / Message Tool 与产品 CSS；数据由既有 preview API / queue / diagnostic journal 提供。未发送用户消息，未操作用户 Run。',
+      '请读取 fixture scene.md 与 owning SSOT，逐张打开以下完整截图并评审任务主次、信息可读性、留白、操作和窄屏表现。采图成功不代签审美通过。', '',
+      ...receipt.frames.map(frame => `- ${frame.width}px / ${frame.state}: [截图](${frame.file})`), ''].join('\n'))
+    console.log(directory)
+  }
 } finally { await rm(privateRoot, { recursive: true, force: true }) }

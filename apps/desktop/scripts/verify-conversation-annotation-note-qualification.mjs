@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
+if (process.argv.length === 2) {
+  const capture = resolve(import.meta.dirname, 'capture-message-delivery-diagnostics.mjs')
+  for (const overrides of [[], ['--break-annotation-field-description']]) {
+    execFileSync(process.execPath, [capture, '--only=annotation-editor', ...overrides], { cwd: root, stdio: 'inherit' })
+  }
+  process.exit(0)
+}
 assert.equal(process.argv[2], '--proof')
 assert.equal(process.argv.length, 4, 'provide the existing T003 proof file')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
