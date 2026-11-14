@@ -70,8 +70,10 @@ function NativeReplacementReview({ review, busy, onConfirm, onCancel }: { review
   </div>
 }
 
-/** Local review intent only. The original maintenance owner retains every operation. */
-export function HostUpgradePanel({ host, committed, active }: { host: SshHostConfig; committed: SshHostConfig | undefined; active: boolean }) {
+/** One local update controller. The original maintenance owner retains every operation. */
+export function useHostUpgrade({ host, committed, active, installationDetail }: {
+  host: SshHostConfig; committed: SshHostConfig | undefined; active: boolean; installationDetail?: string | undefined
+}) {
   const [entries, setEntries] = useState<State[]>([])
   const state = entries.find(item => belongs(item, host))
   const currentHost = useRef(host), currentCommitted = useRef(committed)
@@ -117,12 +119,15 @@ export function HostUpgradePanel({ host, committed, active }: { host: SshHostCon
   async function inspectVersions() {
     if (!active || !saved || busy) return
     const input = structuredClone(host)
+    let observed: RemoteCoreUpgradeCheck | undefined
     await run(input, 'checking', async () => {
       const result = await api.hosts.upgradeCheck(input)
+      observed = result
       update(input, previous => ({ ...previous, check: result, checkApplied: false, review: undefined,
         ...(result.latestOperation ? { operation: { ...(previous.operation?.id === result.latestOperation.operationId ? previous.operation : {}), input: result.latestOperation.input as SshHostConfig, id: result.latestOperation.operationId,
           receipt: result.latestOperation, candidate: result.latestOperation.candidate ?? (previous.operation?.id === result.latestOperation.operationId ? previous.operation.candidate : undefined) } } : {}) }))
     })
+    return observed
   }
   useEffect(() => {
     if (!active || !saved) { autoChecked.current = undefined; return }
@@ -133,11 +138,15 @@ export function HostUpgradePanel({ host, committed, active }: { host: SshHostCon
   function beginReview() {
     if (!ready || !check?.candidate || !admitted(host) || busy || unresolved) return
     const input = structuredClone(host)
-    update(input, previous => ({ ...previous, review: { input, check: { ...structuredClone(check), candidate: structuredClone(check.candidate!) } } }))
+    const captured: Review = { input, check: { ...structuredClone(check), candidate: structuredClone(check.candidate) } }
+    if (replacement) update(input, previous => ({ ...previous, review: captured }))
+    else void applyUpgrade(captured)
   }
   async function confirmUpgrade() {
-    if (!review?.check.expected || !admitted(review.input) || busy || unresolved) return
-    const captured = review
+    if (review) await applyUpgrade(review)
+  }
+  async function applyUpgrade(captured: Review) {
+    if (!captured.check.expected || !admitted(captured.input) || busy || unresolved) return
     // Confirmation applies exactly the reviewed tuple. A new check cannot replace it here.
     await run(captured.input, 'upgrading', async () => {
       const operationId = mintObjectId()
@@ -172,7 +181,7 @@ export function HostUpgradePanel({ host, committed, active }: { host: SshHostCon
   const status = !saved ? 'Save the connection first' : state?.busy === 'checking' ? 'Checking versions' : state?.busy === 'upgrading' ? replacing ? 'Upgrading Core and Native Runtime' : 'Upgrading Core'
     : state?.busy === 'inspecting' ? 'Checking original result' : state?.busy === 'reconnecting' ? 'Reconnecting to updated Core' : state?.error ? 'Upgrade check unconfirmed' : state?.refused ? 'Upgrade not started'
       : attemptFeedback && !ready ? operation?.errorAction === 'reconnect' ? 'Connection attempt unconfirmed' : operation?.errorAction === 'upgrade' ? 'Upgrade response unconfirmed' : 'Original result check unconfirmed'
-        : unresolved ? 'Original upgrade needs checking' : adoptionNeeded && !ready ? 'Connection confirmation needed' : candidateUnavailable ? 'App update candidate unavailable' : check?.reason === 'up-to-date' ? 'Up to date' : runtimeBlocked ? 'Automatic upgrade unavailable' : ready ? replacement ? 'Ready for review · Native Runtime restart' : 'Ready for review' : receipt?.status === 'completed' ? 'Deployment completed' : 'Version check unconfirmed'
+        : unresolved ? 'Original upgrade needs checking' : adoptionNeeded && !ready ? 'Connection confirmation needed' : candidateUnavailable ? 'App update candidate unavailable' : check?.reason === 'up-to-date' ? 'Up to date' : runtimeBlocked ? 'Automatic upgrade unavailable' : ready ? replacement ? 'Native Runtime update required' : 'Update available' : receipt?.status === 'completed' ? 'Deployment completed' : 'Version check unconfirmed'
   const detail = state?.error ?? state?.refused ?? operation?.error ?? receipt?.detail ?? check?.detail
   const diagnostics = state && (check || operation || state.error || state.refused) ? [
     `Host: ${host.label} (${host.id})`, `Status: ${status}`, detail ? `Details: ${detail}` : undefined,
@@ -184,6 +193,7 @@ export function HostUpgradePanel({ host, committed, active }: { host: SshHostCon
     check?.candidate ? `App Core owner API protocol: ${check.candidate.ownerProtocolVersion ?? 'Unknown'}` : undefined,
     check?.candidate ? `Required Native protocol: ${check.candidate.requiredNativeProtocolVersion}` : undefined,
     check?.candidateUnavailable ? `App candidate unavailable: ${check.candidateUnavailable.code} · ${check.candidateUnavailable.detail}` : undefined,
+    check?.current.state !== 'available' && installationDetail ? 'Installation check: ' + installationDetail : undefined,
     operation ? `Operation: ${operation.id}` : undefined,
     operation ? `Original candidate version: ${version(operation.candidate?.version)}` : undefined,
     operation ? `Original candidate digest: ${receipt?.expected.candidateDigest ?? operation.candidate?.digest ?? 'Unknown'}` : undefined,
@@ -204,6 +214,17 @@ export function HostUpgradePanel({ host, committed, active }: { host: SshHostCon
     const copied = await copyTextToClipboard(captured.text, error => { failure = message(error) })
     if (latestCopy.current === captured) setCopyState({ ...captured, status: copied ? 'copied' : 'failed', ...(failure ? { error: failure } : {}) })
   }
+  return { host, state, check, operation, receipt, review, busy, saved, unresolved, adoptionNeeded, runtimeBlocked, candidateUnavailable, unreadable, adoptionDetail, replacement, ready, attemptFeedback, otherOperationHost, status, detail, diagnostics, copy, replacing, inspectVersions, beginReview, confirmUpgrade, readOriginal, update, copyDiagnostics }
+}
+
+/** Presentation only; the Host maintenance composition owns the single controller. */
+export function HostUpgradePanel({ maintenance, onCheck, installationDetail, checkingInstallation }: {
+  maintenance: ReturnType<typeof useHostUpgrade>; onCheck: () => Promise<void>; installationDetail?: string | undefined; checkingInstallation: boolean
+}) {
+  const { host, state, check, operation, receipt, review, busy: upgradeBusy, saved, unresolved, adoptionNeeded, runtimeBlocked, candidateUnavailable, unreadable, adoptionDetail, replacement, ready, attemptFeedback, otherOperationHost, status: updateStatus, detail, diagnostics, copy, replacing, beginReview, confirmUpgrade, readOriginal, update, copyDiagnostics } = maintenance
+  const busy = upgradeBusy || checkingInstallation
+  const status = checkingInstallation ? 'Checking Core' : updateStatus
+  const installationDiagnostic = check?.current.state !== 'available' ? installationDetail : undefined
   return <section className="host-upgrade" data-host-upgrade={host.id} aria-label="Remote Core update">
     <div className="host-upgrade__heading"><span className="host-upgrade__title">{busy ? <LoadingIcon size={14} animation="spin" /> : <UpgradeIcon size={14} />}<strong role="status">{status}</strong></span></div>
     <dl className="host-upgrade__versions" aria-label="Current and target Core versions">
@@ -211,12 +232,12 @@ export function HostUpgradePanel({ host, committed, active }: { host: SshHostCon
       <span aria-hidden="true">→</span>
       <div><dt>Bundled with this app</dt><dd data-upgrade-candidate-version>{candidateUnavailable ? 'Unavailable' : version(check?.candidate?.version)}<small>{contentLabel(check?.candidate?.sourceCommit, check?.candidate?.digest)}</small></dd></div>
     </dl>
-    <p className="field-hint host-upgrade__description" data-upgrade-candidate-unavailable={candidateUnavailable || undefined}>{!saved ? 'Save this connection before checking or upgrading.' : state?.busy === 'upgrading' ? replacing ? 'Saving a copy of the Native state, restarting the Native Runtime and starting the updated Core. Running processes end; Sessions and their history are kept.' : 'Updating the original Core service and verifying its retained Runtime. Existing Agent runs are retained.' : state?.busy === 'inspecting' ? 'Reading the original operation result. This does not start another upgrade.' : state?.busy === 'reconnecting' ? 'Connecting this app to the original completed deployment. No new upgrade starts.' : state?.busy === 'checking' ? 'Reading the original service and this app’s candidate. No upgrade starts during a check.' : state?.error ? 'The latest check did not confirm new facts. Existing work remains available.' : state?.refused ? 'The upgrade did not start, and the deployed Core is unchanged. Check versions to try again.' : candidateUnavailable ? operation ? 'A new update candidate is unavailable. The original operation below is retained.' : 'The local update bundle could not be prepared. This read did not change the deployed Core. Use Check versions to try again; Technical details has the cause.' : unresolved ? 'The original upgrade has no confirmed final result. Current version facts remain separate.' : adoptionNeeded && !ready ? 'The original deployment completed. Reconnect to confirm this app’s connection to it.' : runtimeBlocked ? 'This host needs a Native Runtime update that this app cannot safely perform. Existing Agents are retained.' : check?.reason === 'up-to-date' ? 'The deployed Core matches this app’s candidate. No update is needed.' : ready ? replacement ? 'This upgrade also restarts the Native Runtime. Review what ends before confirming.' : 'Review the target and maintenance impact before confirming an upgrade.' : receipt?.status === 'completed' ? 'The original deployment completed. Check versions to read current deployment and app candidate facts.' : 'Read the original service and this app’s update candidate. No upgrade starts during a check.'}</p>
+    <p className="field-hint host-upgrade__description" data-upgrade-candidate-unavailable={candidateUnavailable || undefined}>{checkingInstallation ? 'Checking this Host’s original installation facts. Nothing is installed during a check.' : !saved ? 'Save this connection before checking or upgrading.' : state?.busy === 'upgrading' ? replacing ? 'Saving a copy of the Native state, restarting the Native Runtime and starting the updated Core. Running processes end; Sessions and their history are kept.' : 'Updating the original Core service and verifying its retained Runtime. Existing Agent runs are retained.' : state?.busy === 'inspecting' ? 'Reading the original operation result. This does not start another upgrade.' : state?.busy === 'reconnecting' ? 'Connecting this app to the original completed deployment. No new upgrade starts.' : state?.busy === 'checking' ? 'Reading the original service and this app’s candidate. No upgrade starts during a check.' : state?.error ? 'The latest check did not confirm new facts. Existing work remains available.' : state?.refused ? 'The upgrade did not start, and the deployed Core is unchanged. Check Core to try again.' : candidateUnavailable ? operation ? 'A new update candidate is unavailable. The original operation below is retained.' : 'The local update bundle could not be prepared. This read did not change the deployed Core. Use Check Core to try again; Technical details has the cause.' : unresolved ? 'The original upgrade has no confirmed final result. Current version facts remain separate.' : adoptionNeeded && !ready ? 'The original deployment completed. Reconnect to confirm this app’s connection to it.' : runtimeBlocked ? 'This host needs a Native Runtime update that this app cannot safely perform. Existing Agents are retained.' : check?.reason === 'up-to-date' ? 'The deployed Core matches this app’s candidate. No update is needed.' : ready ? replacement ? 'This upgrade also restarts the Native Runtime. Review what ends before confirming.' : 'Update only the Core service. Native Runtime, Sessions and running processes are kept.' : receipt?.status === 'completed' ? 'The original deployment completed. Check Core to read current deployment and app candidate facts.' : 'The Core check is not confirmed. Check this Host again; existing work is retained.'}</p>
     {check ? <div className="host-upgrade__read-time"><ReadTime at={check.current.observedAt} label={state?.checkApplied ? 'Last read before upgrade' : state?.error ? 'Last confirmed check' : 'Checked'} /></div> : null}
     {operation ? <div className="host-upgrade__original" aria-label="Original update receipt">
       <strong>{receipt?.status === 'completed' ? 'Deployment completed' : receipt?.status === 'failed' ? 'Original upgrade did not complete' : receipt?.status === 'running' || !receipt && state?.busy === 'upgrading' ? 'Original upgrade is in progress' : 'Original upgrade result unconfirmed'}</strong>
       {attemptFeedback ? <p className="field-hint" role="status" data-upgrade-attempt-feedback>{attemptFeedback}</p> : null}
-      {otherOperationHost ? <p className="field-hint">Original Host: {operation.input.label} ({operation.input.id}). Actions below address that original Host.</p> : null}
+      {operation && otherOperationHost ? <p className="field-hint">Original Host: {operation.input.label} ({operation.input.id}). Actions below address that original Host.</p> : null}
       {receipt ? <dl className="host-upgrade__observation"><div><dt>Last reported stage</dt><dd data-upgrade-stage={receipt.stage}>{STAGE_LABELS[receipt.stage]}</dd></div><div><dt>Receipt updated</dt><dd><ReadTime at={receipt.updatedAt} label="" /></dd></div></dl> : null}
       {receipt?.status === 'completed' && receipt.nativeReplacement ? <p className="field-hint" data-upgrade-ended-runs>{receipt.nativeReplacement.endedRunIds.length
         ? `The Native Runtime was replaced and ${plural(receipt.nativeReplacement.endedRunIds.length, 'running process', 'running processes')} ended. Open an ended Session and choose Restore original to continue it; a terminal starts a new shell when you open it.`
@@ -224,25 +245,22 @@ export function HostUpgradePanel({ host, committed, active }: { host: SshHostCon
       {state?.busy === 'upgrading' && !receipt ? null : <p className="field-hint">{unresolved ? 'Check this original operation before starting another upgrade.' : receipt?.status === 'completed' ? receipt.connectionAdoption?.state === 'connected' ? 'Connection verified at the time below. Current channel status is shown by the Host connection hint.' : 'The deployment is complete. This app’s connection to it is not confirmed.' : 'Check current versions before reviewing another upgrade.'}</p>}
       {receipt?.status === 'completed' ? <div className="host-upgrade__read-time">Connection: {receipt.connectionAdoption?.state === 'connected' ? 'verified' : receipt.connectionAdoption?.state === 'pending-confirmation' ? 'waiting for confirmation' : 'unconfirmed'}{receipt.connectionAdoption ? <> · <ReadTime at={receipt.connectionAdoption.readAt} /></> : null}</div> : null}
     </div> : null}
-    {review && matches(review.input, host) ? review.check.nativeReplacement ? <NativeReplacementReview review={review} busy={busy || !saved}
+    {review && matches(review.input, host) && review.check.nativeReplacement ? <NativeReplacementReview review={review} busy={busy || !saved}
         onConfirm={() => void confirmUpgrade()} onCancel={() => update(review.input, previous => ({ ...previous, review: undefined }))} />
-      : <div className="host-upgrade__review" aria-label="Review upgrade">
-      <strong>Review upgrade for {review.input.label}</strong><span>{review.input.hostname} · {contentLabel(review.check.candidate.sourceCommit, review.check.candidate.digest)}</span>
-      <p>Install Core {version(review.check.candidate.version)} on this device. The Core service will restart and this app will reconnect. Existing Agent runs and Sessions are retained.</p>
-      <div className="host-upgrade__actions"><button type="button" className="primary-button" data-upgrade-confirm disabled={busy || !saved} onClick={() => void confirmUpgrade()}>Confirm upgrade</button><button type="button" className="small-button" data-upgrade-cancel disabled={busy} onClick={() => update(review.input, previous => ({ ...previous, review: undefined }))}>Cancel</button></div>
-    </div> : <div className="host-upgrade__actions">
-      <button type="button" data-upgrade-action className={state?.busy === 'upgrading' || ready && !unresolved ? 'primary-button' : 'small-button'} disabled={busy || !saved} onClick={() => void (unresolved ? readOriginal() : ready ? beginReview() : adoptionNeeded ? readOriginal(true) : inspectVersions())}>
-        {busy ? state?.busy === 'checking' ? 'Checking…' : state?.busy === 'inspecting' ? 'Checking original result…' : state?.busy === 'reconnecting' ? 'Reconnecting…' : 'Upgrading…' : unresolved ? 'Check original result' : ready ? 'Review upgrade' : adoptionNeeded ? otherOperationHost ? `Reconnect ${operation.input.label}` : 'Reconnect to updated Core' : 'Check versions'}
+: <div className="host-upgrade__actions">
+      <button type="button" data-upgrade-action className={state?.busy === 'upgrading' || ready && !unresolved ? 'primary-button' : 'small-button'} disabled={busy || !saved} onClick={() => void (unresolved ? readOriginal() : ready ? beginReview() : adoptionNeeded ? readOriginal(true) : onCheck())}>
+        {busy ? checkingInstallation || state?.busy === 'checking' ? 'Checking…' : state?.busy === 'inspecting' ? 'Checking original result…' : state?.busy === 'reconnecting' ? 'Reconnecting…' : 'Upgrading…' : unresolved ? 'Check original result' : ready ? replacement ? 'Review update' : 'Update Core' : adoptionNeeded ? operation && otherOperationHost ? `Reconnect ${operation.input.label}` : 'Reconnect to updated Core' : 'Check Core'}
       </button>
-      {check && !unresolved && !adoptionNeeded && ready ? <button type="button" className="small-button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void inspectVersions()}>Check again</button> : null}
-      {ready && !unresolved && adoptionNeeded ? <button type="button" className="small-button" data-upgrade-reconnect disabled={busy || !saved} onClick={() => void readOriginal(true)}>Reconnect original update{otherOperationHost ? ` · ${operation.input.label}` : ''}</button> : null}
-      {!ready && !unresolved && adoptionNeeded ? <button type="button" className="small-button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void inspectVersions()}>Check versions</button> : null}
+      {check && !unresolved && !adoptionNeeded && ready ? <button type="button" className="small-button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void onCheck()}>Check again</button> : null}
+      {ready && !unresolved && adoptionNeeded ? <button type="button" className="small-button" data-upgrade-reconnect disabled={busy || !saved} onClick={() => void readOriginal(true)}>Reconnect original update{operation && otherOperationHost ? ` · ${operation.input.label}` : ''}</button> : null}
+      {!ready && !unresolved && adoptionNeeded ? <button type="button" className="small-button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void onCheck()}>Check Core</button> : null}
     </div>}
     {unreadable ? <p className="field-hint host-upgrade__next-step" data-upgrade-unreadable-records>Could not read update record {unreadable}. Its Host and result are unknown, and it will not run again. To report it, copy diagnostics from Technical details.</p> : null}
     {runtimeBlocked ? <p className="field-hint host-upgrade__next-step">Share the diagnostics with this host’s maintainer to arrange a supported Native Runtime update.</p> : null}
     {diagnostics ? <details className="host-upgrade__details"><summary>Technical details <DownIcon size={13} /></summary><div className="host-upgrade__diagnostics">
       {check?.candidateUnavailable ? <div><span className="host-upgrade__detail-label">App candidate unavailable · {check.candidateUnavailable.code}</span><p className="host-upgrade__diagnostic-message">{check.candidateUnavailable.detail}</p></div> : null}
       {detail ? <div><span className="host-upgrade__detail-label">Original diagnostic</span><p className="host-upgrade__diagnostic-message">{detail}</p></div> : null}
+      {installationDiagnostic ? <div><span className="host-upgrade__detail-label">Installation check</span><p className="host-upgrade__diagnostic-message">{installationDiagnostic}</p></div> : null}
       {adoptionDetail ? <div><span className="host-upgrade__detail-label">Connection detail</span><p className="host-upgrade__diagnostic-message" data-upgrade-connection-detail>{adoptionDetail}</p></div> : null}
       <dl className="host-upgrade__facts">
         {check?.current.state === 'available' ? <><div><dt>Deployed Core source</dt><dd><code>{check.current.sourceCommit ?? 'Unknown'}</code></dd></div><div><dt>Deployed content digest</dt><dd><code>{check.current.deploymentDigest}</code></dd></div></> : null}

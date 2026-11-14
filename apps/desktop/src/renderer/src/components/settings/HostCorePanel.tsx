@@ -1,19 +1,43 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { SshHostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
-import { HostUpgradePanel } from './HostUpgradePanel'
-import { HostInstallPanel } from './HostInstallPanel'
+import { HostUpgradePanel, useHostUpgrade } from './HostUpgradePanel'
+import { HostInstallPanel, HostInstallRecords, useHostInstall } from './HostInstallPanel'
 
-/** Installation and update share one maintenance workface; the probe decides which review applies. */
+function matches(a: SshHostConfig, b: SshHostConfig) {
+  const { label: _a, ...left } = a, { label: _b, ...right } = b
+  return configValuesEqual(left, right)
+}
+
+/** One maintenance surface; the original owners decide update versus first install. */
 export function HostCorePanel(props: { host: SshHostConfig; committed: SshHostConfig | undefined; active: boolean }) {
-  const [firstInstall, setFirstInstall] = useState<SshHostConfig[]>([])
   const [updates, setUpdates] = useState<SshHostConfig>()
-  const { label: _label, ...route } = props.host
-  const installing = firstInstall.some(({ label: _name, ...input }) => configValuesEqual(input, route))
-  const updating = updates && (() => { const { label: _name, ...input } = updates; return configValuesEqual(input, route) })()
-  return <div>
-    <div hidden={installing && !updating} inert={installing && !updating}><HostUpgradePanel {...props} active={props.active && (!installing || Boolean(updating))} /></div>
-    <div hidden={Boolean(updating)} inert={Boolean(updating)}><HostInstallPanel {...props} active={props.active && !updating}
-      onFirstInstall={setFirstInstall} onManageUpdates={() => setUpdates(structuredClone(props.host))} /></div>
+  const current = useRef(props); current.current = props
+  const checking = useRef(false)
+  const installation = useHostInstall({ ...props, onManageUpdates: () => setUpdates(structuredClone(props.host)) })
+  const installing = Boolean(installation.operation || !installation.state?.error && installation.check?.eligible)
+  const updating = updates && matches(updates, props.host)
+  const showInstall = installing && !updating
+  const installationDetail = installation.state?.error ?? installation.check?.detail
+  const upgrade = useHostUpgrade({ ...props, active: props.active && !showInstall, installationDetail })
+  async function checkCore() {
+    if (checking.current) return
+    checking.current = true
+    const input = props.host
+    try {
+      const result = await upgrade.inspectVersions()
+      // Only the original first-install owner can prove absence. A missing
+      // version observation or an unresolved upgrade cannot authorize installation.
+      const now = current.current
+      if (!result || result.current.state === 'available' || input.runtimeId || upgrade.unresolved ||
+        result.latestOperation?.status === 'unknown' || result.latestOperation?.status === 'running' ||
+        !now.active || !now.committed || !matches(input, now.host) || !matches(input, now.committed)) return
+      await installation.checkMachine()
+    } finally { checking.current = false }
+  }
+  return <div className="host-core">
+    {showInstall ? <HostInstallPanel maintenance={installation} />
+      : <HostUpgradePanel maintenance={upgrade} onCheck={checkCore} installationDetail={installationDetail} checkingInstallation={installation.busy} />}
+    {!showInstall ? <HostInstallRecords maintenance={installation} /> : null}
   </div>
 }

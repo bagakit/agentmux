@@ -67,10 +67,15 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const setHosts = (update: (current: HostConfig[]) => HostConfig[]) => resource.setValue((current) =>
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
   const requestedHostId = navigationRequest?.section === 'hosts' ? navigationRequest.hostId : undefined
-  const [selectedId, setSelectedId] = useState<string | null>(() => requestedHostId ?? config.hosts[0]?.id ?? null)
-  const [panel, setPanel] = useState<HostConnectionPanel>(() => requestedHostId === undefined ? 'overview' : 'connection')
+  const appliedNavigation = useRef<SettingsNavigationRequest | undefined>(undefined)
+  const pendingHostNavigation = requestedHostId !== undefined && appliedNavigation.current !== navigationRequest
+  const selectedId = pendingHostNavigation ? requestedHostId : resource.selectedHostId !== undefined
+    ? resource.selectedHostId : requestedHostId ?? config.hosts[0]?.id ?? null
+  const setSelectedId = resource.selectHost
+  const initialHost = requestedHostId ?? resource.selectedHostId
+  const [panel, setPanel] = useState<HostConnectionPanel>(() => initialHost == null ? 'overview' : 'connection')
   const [projectHosts, setProjectHosts] = useState<string[]>([])
-  const [maintenanceHosts, setMaintenanceHosts] = useState<string[]>([])
+  const [maintenanceHosts, setMaintenanceHosts] = useState<string[]>(() => initialHost == null ? [] : [initialHost])
   const [mode, setMode] = useState<'topology' | 'list'>('topology')
   const [measuredWide, setWide] = useState<boolean | null>(null)
   const wide = measuredWide !== false
@@ -85,7 +90,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  const [view, setView] = useState<'library' | 'editor'>(() => requestedHostId === undefined ? 'library' : 'editor')
+  const [view, setView] = useState<'library' | 'editor'>(() => initialHost == null ? 'library' : 'editor')
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
@@ -97,8 +102,6 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     setSectionsOpen(current => current[key] === open ? current : { ...current, [key]: open })
   }
   const [requestedHost, setRequestedHost] = useState<string | null>(null)
-  const appliedNavigation = useRef(navigationRequest)
-  const pendingHostNavigation = requestedHostId !== undefined && appliedNavigation.current !== navigationRequest
   const network = useHostNetworkObservation(active && panel === 'overview' && !pendingHostNavigation && (measuredWide === true || view === 'editor')
     ? hosts.find(host => host.id === selectedId) ?? null : null,
     active ? config.hosts.find(host => host.kind === 'local') ?? null : null)

@@ -1,13 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { HostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { useAppStore } from '../../store'
-import { tailcatDraftRecord, tailcatConnectionDraft, tailcatDraftMatchesSaved, isTailcatDraftHost, type TailcatDraftScope } from '../../lib/tailcat-connection-draft'
+import { tailcatDraftRecord, tailcatConnectionDraft, tailcatDraftMatchesSaved, isTailcatDraftHost, hostConnectionSelection, type TailcatDraftScope } from '../../lib/tailcat-connection-draft'
 import { useResourceDrafts } from './use-resource-drafts'
 
-/** An edit leaf in the original native user document, never a settings writer. */
+/** The existing native connection-edit leaf: SSH/Tailcat in Hosts, Tailcat only for incoming. */
 export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, scope: TailcatDraftScope) {
   const raw = useAppStore(state => state.tailcatConnectionDrafts)
+  const selectedHostId = scope === 'hosts' ? hostConnectionSelection(raw) : undefined
+  const selectHost = useCallback((hostId: string | null) => {
+    if (scope !== 'hosts') return
+    const state = useAppStore.getState(), original = state.tailcatConnectionDrafts
+    const all: Record<string, unknown> = tailcatDraftRecord(original) ?? { retainedUnparsed: [original] }
+    const existing = all.hostSelection, record = tailcatDraftRecord(existing)
+    const next = { ...(record ?? (existing === undefined ? {} : { retained: [existing] })), hostId }
+    if (!configValuesEqual(existing, next)) useAppStore.setState({ tailcatConnectionDrafts: { ...all, hostSelection: next } })
+  }, [scope])
+  const retainsHost = (host: HostConfig | undefined) => isTailcatDraftHost(host) || scope === 'hosts' && host?.kind === 'ssh'
   const [restored] = useState(() => {
     const entries = tailcatDraftRecord(tailcatDraftRecord(raw)?.[scope]), value = { ...saved }, expected = { ...saved }, withheld = new Set<string>()
     for (const [id, rawEntry] of Object.entries(entries ?? {})) {
@@ -38,7 +48,7 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
     : retainedEntries.length ? 'An original connection changed or its edit is unreadable. The retained edit was not applied to another target.' : undefined
   useEffect(() => {
     const state = useAppStore.getState(), original = state.tailcatConnectionDrafts, readable = tailcatDraftRecord(original)
-    const authored = Object.keys(resource.value).some(id => isTailcatDraftHost(resource.value[id]) && (!configValuesEqual(resource.value[id], resource.expected[id]) || allowedText[id] !== undefined))
+    const authored = Object.keys(resource.value).some(id => retainsHost(resource.value[id]) && (!configValuesEqual(resource.value[id], resource.expected[id]) || allowedText[id] !== undefined))
     if (!readable && !authored) return
     const all: Record<string, unknown> = readable ?? { retainedUnparsed: [original] }, scopeRecord = tailcatDraftRecord(all[scope])
     if (!scopeRecord && !authored) return
@@ -48,7 +58,7 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
     const next = { ...previous }
     for (const id of new Set([...Object.keys(resource.value), ...Object.keys(resource.expected)])) {
       const value = resource.value[id], expected = resource.expected[id]
-      if (!isTailcatDraftHost(value) && !isTailcatDraftHost(expected)) continue
+      if (!retainsHost(value) && !retainsHost(expected)) continue
       const literalEdit = value?.kind === 'local' && allowedText[id] !== undefined && allowedText[id] !== (expected?.kind === 'local' ? expected.tailcat?.allowedClients.join('\n') ?? '' : '')
       const old = tailcatConnectionDraft(previous[id]), holder = tailcatDraftRecord(previous[id])
       const retained = Array.isArray(holder?.retained) ? holder.retained : []
@@ -68,8 +78,10 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
     {entries ? retainedEntries.map(({id,index,entry:original}) => {
       const entry = tailcatConnectionDraft(original)
       return <details key={id+index}><summary>Retained edit · {entry?.value.label ?? id}</summary>
-        {entry ? <><p>Original key: <code>{entry.value.tailcat?.keyFile ?? 'Default key'}</code></p>
-          {entry.value.kind === 'ssh' ? <label>Private destination<input type="password" readOnly value={entry.value.tailcat?.address ?? ''} /></label>
+        {entry ? <>{entry.value.tailcat ? <p>Original key: <code>{entry.value.tailcat.keyFile}</code></p> : null}
+          {entry.value.kind === 'ssh' ? entry.value.tailcat
+            ? <label>Private destination<input type="password" readOnly value={entry.value.tailcat.address} /></label>
+            : <p>Original SSH Host: <code>{entry.value.hostname}</code></p>
             : <pre>{entry.allowedText ?? entry.value.tailcat?.allowedClients.join('\n') ?? ''}</pre>}</> : <p>The original record is kept without rewriting it.</p>}
         <button type="button" className="small-button" onClick={() => {
           const state=useAppStore.getState(),all=tailcatDraftRecord(state.tailcatConnectionDrafts),current=all&&tailcatDraftRecord(all[scope]);if(!all||!current)return
@@ -79,5 +91,5 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
           useAppStore.setState({tailcatConnectionDrafts:{...all,[scope]:next}})
         }}>Discard this retained edit</button></details>
     }) : null}</div> : null}</>
-  return { ...resource, retained, allowedText, setAllowedText: (id: string, value: string) => setAllowedText(current => ({ ...current, [id]: value })) }
+  return { ...resource, retained, selectedHostId, selectHost, allowedText, setAllowedText: (id: string, value: string) => setAllowedText(current => ({ ...current, [id]: value })) }
 }

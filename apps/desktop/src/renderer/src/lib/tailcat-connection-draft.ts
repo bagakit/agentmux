@@ -30,3 +30,9 @@ export function tailcatDraftMatchesSaved(entry: TailcatConnectionDraft, saved: H
 export function isTailcatDraftHost(host: HostConfig | undefined): boolean {
   return Boolean(host && (host.tailcat !== undefined || host.kind === 'ssh' && host.transport === 'tailcat'))
 }
+
+/** Private Host navigation, not a route or maintenance authorization. */
+export function hostConnectionSelection(value: unknown): string | null | undefined {
+  const selected = tailcatDraftRecord(tailcatDraftRecord(value)?.hostSelection)
+  return selected?.hostId === null || typeof selected?.hostId === 'string' ? selected.hostId : undefined
+}

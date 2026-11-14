@@ -26,8 +26,8 @@ function belongs(entry: Entry, host: SshHostConfig): boolean {
 }
 
 /** The Core owns the operation; this view retains its original input and ID through observation failures. */
-export function HostInstallPanel({ host, committed, active, onFirstInstall, onManageUpdates }: {
-  host: SshHostConfig; committed: SshHostConfig | undefined; active: boolean; onFirstInstall?: ((inputs: SshHostConfig[]) => void) | undefined; onManageUpdates?: (() => void) | undefined
+export function useHostInstall({ host, committed, active, onManageUpdates }: {
+  host: SshHostConfig; committed: SshHostConfig | undefined; active: boolean; onManageUpdates?: (() => void) | undefined
 }) {
   const [entries, setEntries] = useState<Entry[]>([])
   const checkHost = useAppStore(state => state.checkHost)
@@ -43,17 +43,12 @@ export function HostInstallPanel({ host, committed, active, onFirstInstall, onMa
   const saved = committed !== undefined && matches(host, committed)
   const busy = Boolean(state?.busy)
   const unresolved = Boolean(operation && (!receipt || receipt.status === 'running' || receipt.status === 'unknown'))
-  const ready = saved && active && !busy && !operation && check?.eligible && check.expected
+  const ready = saved && active && !busy && !state?.error && !operation && check?.eligible && check.expected
   function update(input: SshHostConfig, change: (entry: Entry) => Entry) {
     setEntries(previous => {
       const index = previous.findIndex(entry => belongs(entry, input))
       return index < 0 ? [...previous, change({ input })] : previous.map((entry, i) => i === index ? change(entry) : entry)
     })
-  }
-  function presentInstall(input: SshHostConfig, original?: RemoteCoreInstallReceipt) {
-    const installed = original?.installed
-    onFirstInstall?.([input, ...(installed ? [{ ...input, remoteCommand: installed.remoteCommand,
-      remoteSocketPath: installed.remoteSocketPath, runtimeId: installed.runtimeId }] : [])])
   }
   async function checkMachine() {
     if (!saved || !active || busy || unresolved) return
@@ -64,8 +59,6 @@ export function HostInstallPanel({ host, committed, active, onFirstInstall, onMa
       update(input, entry => ({ ...entry, check: result, ...(result.latestOperation && !(result.eligible && result.latestOperation.status === 'failed') ? { operation: {
         input: result.latestOperation.input as SshHostConfig, id: result.latestOperation.operationId, receipt: result.latestOperation
       } } : { operation: undefined }) }))
-      if (result.eligible || result.latestOperation) presentInstall(input, result.latestOperation)
-      else onFirstInstall?.([])
     } catch (error) { update(input, entry => ({ ...entry, error: message(error) })) }
     finally { update(input, entry => ({ ...entry, busy: undefined })) }
   }
@@ -73,7 +66,6 @@ export function HostInstallPanel({ host, committed, active, onFirstInstall, onMa
     if (manual) update(original.input, entry => ({ ...entry, busy: 'inspect' }))
     try {
       const result = await api.hosts.installInspect(original.input, original.id)
-      if (result) presentInstall(original.input, result)
       update(original.input, entry => {
         if (result && entry.operation?.receipt && (entry.operation.receipt.updatedAt > result.updatedAt || entry.operation.receipt.status === 'completed' && result.status !== 'completed')) return entry
         return { ...entry, operation: { ...original, ...(result ? { receipt: result } : {}),
@@ -103,31 +95,31 @@ export function HostInstallPanel({ host, committed, active, onFirstInstall, onMa
     update(input, entry => ({ ...entry, busy: 'install', error: undefined, operation: { input, id } }))
     try {
       const result = await api.hosts.install(input, expected, id)
-      presentInstall(input, result)
       update(input, entry => ({ ...entry, operation: { input, id, receipt: result } }))
     } catch (error) { update(input, entry => ({ ...entry, operation: { ...entry.operation!, error: message(error) } })) }
     finally { update(input, entry => ({ ...entry, busy: undefined })) }
   }
   const step = receipt ? stages.findIndex(([key]) => key === receipt.stage) : -1
   const systemd = check?.keepRunning?.find(option => option.mode === 'systemd')
+  return { host, active, entries, state, operation, receipt, check, saved, busy, unresolved, ready, mode, setMode, systemd, step, connection, connectionFeedback, update, checkMachine, confirm, inspect, checkHost, onManageUpdates }
+}
+
+/** Installation review and original receipt; the composition owns its controller. */
+export function HostInstallPanel({ maintenance }: { maintenance: ReturnType<typeof useHostInstall> }) {
+  const { host, active, state, operation, receipt, check, saved, busy, unresolved, ready, mode, setMode, systemd, step, connection, connectionFeedback, update, checkMachine, confirm, inspect, checkHost, onManageUpdates } = maintenance
   return <section className="host-install" data-host-install aria-label="First Core installation" aria-busy={busy}>
     <header className="host-install__header">
-      <div><span className="host-install__eyebrow">REMOTE CORE</span><h3>Set up this machine</h3></div>
+      <div><span className="host-install__eyebrow">CORE</span><h3>{operation ? 'Core installation' : 'Ready to install Core'}</h3></div>
       <span className="host-install__badge">Linux x64 · SSH</span>
     </header>
-    <p className="host-install__intro">Install the Core bundled with this app, then manage updates here.</p>
+    <p className="host-install__intro">{operation ? 'The original installation and its result are retained.' : 'No Core is installed at the checked location. Review how it stays running, then install.'}</p>
     {!operation && <div className="host-install__actions">
       <button className="small-button" type="button" data-install-check disabled={!saved || !active || busy} onClick={() => void checkMachine()}>
         {state?.busy === 'check' ? 'Checking machine…' : check ? 'Check again' : 'Check installation'}</button>
       {!saved && <span>Save this Host before checking.</span>}
     </div>}
     {state?.error && <p role="status" className="host-install__notice">{state.error}</p>}
-    {entries.filter(entry => entry.operation && !belongs(entry, host)).map(entry => <aside className="host-install__notice" key={entry.operation!.id}>
-      <h4>Original install on {entry.input.hostname}</h4>
-      <p>{entry.operation!.receipt?.detail ?? 'The original installation outcome is not confirmed.'}</p>
-      <code>{entry.operation!.id}</code>
-      <button type="button" className="small-button" disabled={!active} onClick={() => void inspect(entry.operation!, true)}>Check this original install</button>
-    </aside>)}
+    <HostInstallRecords maintenance={maintenance} />
     {check?.unreadableOperations?.length ? <details><summary>Unconfirmed installation records</summary>
       <p>These original records could not be read. Their targets and outcomes remain unknown; no installation is replayed.</p>
       <code>{check.unreadableOperations.join(', ')}</code></details> : null}
@@ -136,7 +128,7 @@ export function HostInstallPanel({ host, committed, active, onFirstInstall, onMa
         <strong>{host.label}</strong><span>{host.hostname}</span>
         {check.probe && <dl><div><dt>Platform</dt><dd>{check.probe.platform} · {check.probe.machine} · glibc {check.probe.glibc ?? 'unknown'}</dd></div>
           <div><dt>Install location</dt><dd><code>{check.probe.prefix}</code></dd></div></dl>}
-        <p role="status">{check.detail}</p>
+        <details><summary>Machine details</summary><p>{check.detail}</p></details>
       </div>
       {check.eligible && <div className="host-install__review" role="group" aria-label="Review Core installation">
         <div><h4>How should Core stay running?</h4><p>Choose what happens after this machine restarts.</p></div>
@@ -177,7 +169,6 @@ export function HostInstallPanel({ host, committed, active, onFirstInstall, onMa
           if (matches(original.input, host)) {
             // The original completed ID reads the retained deployment; only Main adopts its connection.
             const result = await api.hosts.install(original.input, receipt.expected, original.id)
-            presentInstall(original.input, result)
             update(original.input, entry => ({ ...entry, operation: { input: original.input, id: original.id, receipt: result } }))
             connectionFeedback(result.connectionAdoption?.detail ?? 'The original installation is retained. See this Host’s connection status.')
           } else {
@@ -195,4 +186,15 @@ export function HostInstallPanel({ host, committed, active, onFirstInstall, onMa
       <button type="button" className="small-button" data-install-inspect disabled={busy || !active} onClick={() => void inspect(operation, true)}>Check original install</button>
     </div>}
   </section>
+}
+
+/** Original operations stay discoverable after the current connection is edited. */
+export function HostInstallRecords({ maintenance }: { maintenance: ReturnType<typeof useHostInstall> }) {
+  const { entries, host, active, inspect } = maintenance
+  return <>{entries.filter(entry => entry.operation && !belongs(entry, host)).map(entry => <aside className="host-install__notice" key={entry.operation!.id}>
+      <h4>Original install on {entry.input.hostname}</h4>
+      <p>{entry.operation!.receipt?.detail ?? 'The original installation outcome is not confirmed.'}</p>
+      <code>{entry.operation!.id}</code>
+      <button type="button" className="small-button" disabled={!active} onClick={() => void inspect(entry.operation!, true)}>Check this original install</button>
+    </aside>)}</>
 }

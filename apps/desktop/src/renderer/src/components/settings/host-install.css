@@ -1,4 +1,4 @@
-.host-install { container-type: inline-size; display: grid; gap: var(--sp-4); margin-top: var(--sp-5); padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); }
+.host-install { container-type: inline-size; display: grid; gap: var(--sp-4); margin-top: var(--sp-6); padding-top: var(--sp-6); border-top: 1px solid var(--line-soft); }
 .host-install__header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
 .host-install__eyebrow { font-size: var(--fs-micro); color: var(--text-3); letter-spacing: .1em; }
 .host-install h3 { margin: var(--sp-1) 0 0; font-size: var(--fs-body); font-weight: 600; }
