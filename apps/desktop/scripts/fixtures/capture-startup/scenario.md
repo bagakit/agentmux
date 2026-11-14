@@ -1,44 +1,55 @@
 # Screenshot startup comparison
 
 The complete Task gate is `node apps/desktop/scripts/verify-capture-startup.mjs --mutations`.
-`--mutations --unit-only` is a development check for the six exact production mutations;
-its receipt explicitly keeps `passed:false` and cannot sign off the complete Task.
+`--mutations --unit-only` is a development check only; its receipt explicitly keeps
+`passed:false` and cannot sign off the complete Task.
 
 Before the complete gate, the execution owner writes the local, untracked
-`.local/state/capture-startup/baseline.json` with `{ref,sourceHash,source}` for the accepted
-pre-optimization CaptureSurface. The tool checks the hash and `git show ref:<source>`;
-a moving branch, invented source, identical source or a stale baseline file fails.
-Only this Main source is substituted by esbuild. Both candidates use the same current
-production preload, screenshot Renderer, shared annotation editor and image decoder.
+`.local/state/capture-startup/baseline.json` as `agentmux.capture-startup-baseline.v2`
+with the exact pre-optimization Git `ref`. A moving branch, invented tree, identical
+candidate or stale baseline fails. Baseline and candidate each build their own production
+Main, shared contracts, preload, screenshot Renderer and annotation editor from their own
+Git tree. The fixture driver may be shared, but every production input records its actual
+consumed hash. Mixing an old Main with the current Renderer is not a complete A/B proof.
 
-The six unit mutants remove window/native overlap, skip current-input readiness, strand
-an early load on cancel, drop diagnostics, close a healthy screenshot on diagnostic failure,
-and reorder the actual production IPC diagnostic writer. The loader records exact original
-and consumed source hashes. Nonempty owning AssertionRED is required; collection, transform,
-process timeout and external termination are infrastructure failures.
+The production mutation suite removes window/native overlap, skips current-input readiness,
+strands an early load on cancel, reorders background delivery, drops the final deferred
+diagnostic, lets an old request overwrite a new one, and breaks the real shortcut chain.
+The loader records exact original and consumed source hashes. Nonempty owning AssertionRED
+is required; collection, transform, process timeout and external termination are
+infrastructure failures.
 
-Four independent Electron processes compare baseline/candidate with one/two virtual displays.
-Each process has fresh temporary userData; the one/two-display orders are counterbalanced.
-Each process invokes production `present()` twice: its first and repeat capture. A real visible
-host begins at 65% opacity. Each actual Native-port invocation constructs a new solid PNG with
-a per-capture nonce using `nativeImage.createFromBitmap/toPNG`, then waits an actual 200 ms.
-The included exposure must see 65%; the excluded exposure must see 0. No clocks are mocked.
+For each initial background and virtual-display count, four independent baseline/candidate
+process pairs run in an alternating order. Every process has fresh temporary userData and
+invokes the real registered shortcut callback → GlobalScreenshot → ScreenCapture →
+CaptureSurface path twice, providing the first/repeat cells. Thus every
+first/repeat × one/two-display × included/excluded cell has four independent pairs and no
+outlier removal. The candidate's actualShown median must improve by at least 100 ms and 15%
+in every cell; a missing cell or a threshold miss fails without cross-cell averaging.
+
+Each actual Native-port invocation constructs a new solid PNG with a per-capture nonce using
+`nativeImage.createFromBitmap/toPNG`, then waits an actual 200 ms. Host opacity is never
+changed by the candidate; baseline behavior is measured, not copied into the candidate.
+No clocks are mocked. Controlled Native delay proves readiness and relative mechanics only,
+never actual OS capture speed.
 
 `browser-window-created` records actual shell construction relative to the capture trigger.
-The baseline must build after the last Native return; every candidate shell must be built
-before the first Native return. Independent `BrowserWindow.isVisible()` samples every 5 ms measure actual showing;
-the native `show` event offsets are retained separately because macOS inactive panels may omit that event.
-the logged phase is bounded by actual Native return/fresh-DOM observation and cannot
-fabricate the independently measured median gain. The older source logs just before showing;
-the candidate logs after showing, and the offset from first observed native visibility is retained. Shown overlays must reference this capture's exact PNG in
-the real DOM, have a decoded image and canvas, and report numeric `presentedMs` for every
-display. Real CDP Escape and exact preload cancellation separately restore opacity and
-release the current shells. The candidate writes its latest small timing JSON after showing;
-its fields cannot carry screenshot data, arbitrary text, paths or a draft body.
+Hidden Renderer startup overlaps the selected exposure. Independent `BrowserWindow.isVisible()`
+samples every 5 ms measure actual showing; native `show` event offsets remain separate because
+macOS inactive panels may omit that event. Shown overlays must reference this capture's exact
+PNG in the real DOM, have a decoded image and canvas, and report numeric `presentedMs` for every
+display. Deferred background delivery exercises the real preload subscription boundary without
+recapturing, changing the document or producing an output for a pending background.
 
-Receipts keep input/source hashes, source nonce hashes, measured phases, four matched
-first/repeat single/multi-display comparisons, and machine load/memory conditions. Both
-median shown time and measured Renderer tail must improve. There is no fixed latency target
-and no claim that controlled Native delay proves actual OS capture speed. No actual screen,
-clipboard, user draft, TCC/permission, physical display, package or installation is exercised.
-Temporary app/bundles/userData are removed; evidence stays under `.local/capture-startup/`.
+The production IPC `recordTiming` sink owns the small diagnostic writes. The selected first
+frame writes once after showing; completion of the deferred background writes exactly one final
+record for that same request with final native timings. A late result cannot overwrite a newer
+request. Fields cannot carry screenshot data, arbitrary text, paths or a draft body. Real CDP
+Escape and exact preload cancellation release current shells without waiting for the deferred
+producer; the Native lease still follows the real producer.
+
+Receipts keep the baseline ref, both trees' consumed hashes, every cell's raw samples,
+median/range, process order, and machine load/memory conditions. Temporary app/bundles/userData
+are removed; evidence stays under `.local/capture-startup/`. Real OS performance has its own
+integrated gate and thresholds; this controlled gate does not claim physical displays, TCC,
+clipboard, user drafts, packages or installation.
