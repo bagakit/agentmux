@@ -1,0 +1,128 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, expect, it, vi } from 'vitest'
+import type { ContinuousProgressLoop } from '@agentmux/core'
+import { openDemandStore } from '@agentmux/demand'
+import type { DemandDelegationIntent } from '@agentmux/demand/delegations'
+import type { GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
+import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopStore } from '../../host/src/continuous-progress-loop-store.js'
+import { deliverContinuousProgress } from '../../host/src/continuous-progress-delivery.js'
+import { createGoalRuntime } from '../../host/src/goal-runtime.js'
+import { injectedContextCore } from './helpers/injected-context-core.js'
+
+const cleanup: Array<() => Promise<unknown>> = []
+afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+const supervisor = { kind: 'agent' as const, id: 'supervisor' }
+const criteria = [{ id: 'accepted', text: 'The original criterion' }]
+const node = (id: string, patch: Partial<GoalPlanNodeInput> = {}): GoalPlanNodeInput => ({ id, title: id, outcome: `Read the original body of ${id}`, check: `check ${id}`,
+  criterionIds: ['accepted'], dependsOn: [], executor: { hostId: 'worker-host', agentSessionId: 'worker' }, ...patch })
+const task = (nodeId: string): DemandDelegationIntent => ({ operationId: `delegate-${nodeId}`, sourceMessageId: `source-${nodeId}`, threadId: `thread-${nodeId}`,
+  hostId: 'local', workerHostId: 'worker-host', ownerAgentSessionId: 'supervisor', ownerRunId: 'original-run', workerAgentSessionId: 'worker', workerRunId: 'worker-run',
+  text: `Original task body ${nodeId}`, alignmentRevision: 1, criterionIds: ['accepted'], planNodeId: nodeId })
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), 'amux-plan-continuation-'))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  let now = Date.now(), beforeObserve: (() => Promise<void>) | undefined
+  const native = await injectedContextCore(root, { kind: 'agent', agentSessionId: 'supervisor', providerId: 'codex', executorId: 'fixture', hostId: 'local', workspacePath: root,
+    run: { runId: 'original-run' }, retiredRuns: [], hookBindingId: 'binding', hookToken: 'token', createdAt: now - 1000, updatedAt: now - 1000,
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt: now - 1000 },
+    terminalPromptReadiness: { source: 'native-stop', id: 'original-completion', run: { runId: 'original-run' }, observedAt: now - 1000, outputCursorBytes: 0, readyThroughByte: 0 } })
+  cleanup.push(native.dispose)
+  vi.spyOn((native.core as unknown as { screenEvidence: { wait(): Promise<number> } }).screenEvidence, 'wait').mockResolvedValue(0)
+  const runtime = createGoalRuntime({ clients: () => [{ hostId: 'local', client: native.core }], inputOccupied: async () => false,
+    checkIn: async () => ({ known: false, reason: 'This original Goal is not a check-in schedule.' }) })
+  const goals = openDemandStore({ root: join(root, 'goals') })
+  await goals.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', sessionIds: ['supervisor', 'worker', 'reviewer'], assigneeSessionIds: ['supervisor', 'worker', 'reviewer'], supervisorSessionId: 'supervisor' })
+  await goals.proposeAlignment('goal', { summary: 'Original scope', criteria, openQuestions: [] }); await goals.confirmAlignment('goal', 1)
+  const loops = new ContinuousProgressLoopStore(join(root, 'loops.json'))
+  const loop: ContinuousProgressLoop = { loopId: 'original-loop', creationOperationId: 'original-start', revision: 1, hostId: 'local', agentSessionId: 'supervisor', providerId: 'codex', workspacePath: root,
+    intervalMs: 60_000, nextCheckAt: now, status: 'active', prompt: 'Original no-plan continuation body\r\n ', taskSource: { kind: 'goal', goalId: 'goal', alignmentRevision: 1 },
+    initialDelivery: { operationId: 'original-start', startedAt: now - 1000, state: 'confirmed', prompt: 'Original first input', condition: { expectedRun: { runId: 'original-run' }, afterSubmissionId: null } } }
+  await loops.save([loop])
+  const read = vi.fn((id: string) => goals.get(id)), originalSubmit = runtime.submitPrompt, submitted = vi.spyOn(runtime, 'submitPrompt')
+  const manager = new ContinuousProgressLoopManager(loops, (saved, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, saved, operationId, isCurrent, signal), () => now,
+    async (saved, tickId, at, signal) => { const action = beforeObserve; beforeObserve = undefined; await action?.(); return runtime.observeContinuousProgress(saved, tickId, at, signal) },
+    undefined, { read, inspectInitial: async () => 'confirmed' })
+  cleanup.push(() => manager.stop()); await manager.start()
+  const revise = async (nodes: GoalPlanNodeInput[]) => { const original = await goals.get('goal'); return goals.revisePlan('goal', { operationId: `plan-${(original!.plan?.revision ?? 0) + 1}`, expectedRevision: original!.plan?.revision ?? 0, alignmentRevision: 1, nodes }, supervisor) }
+  const report = async (id: string, verdict?: 'pass' | 'changes') => {
+    const original = task(id)
+    await goals.submitDelegationReport('goal', original.operationId, { operationId: `report-${id}`, replyMessageId: `reply-${id}`, authorAgentSessionId: 'worker',
+      grounding: { alignmentRevision: 1, summary: `Delivered ${id}`, checks: [{ criterionId: 'accepted', outcome: 'met', evidence: [`logs/${id}.log`], note: '' }] } }, 'worker')
+    if (verdict) await goals.reviewPlanNode('goal', { operationId: `review-${id}`, nodeId: id, delegationOperationId: original.operationId, verdict,
+      check: { command: `check ${id}`, result: 'Actual result', evidence: [`checks/${id}.log`] }, note: verdict === 'changes' ? 'Return this change on the original thread.' : '' }, { kind: 'agent', id: 'reviewer' })
+  }
+  const delegate = async (id: string, linked = true) => { const original = task(id); await goals.prepareDelegation('goal', original, 'supervisor'); if (linked) await goals.linkDelegation('goal', original.operationId, original.sourceMessageId, 'supervisor') }
+  return { native, runtime, goals, loops, manager, read, submitted, originalSubmit, loop, revise, delegate, report, observeAfter: (action: () => Promise<void>) => { beforeObserve = action }, advance: () => { now += 60_000 } }
+}
+function handoff(prompt: string) { return JSON.parse(prompt.slice(prompt.indexOf('\n\n') + 2)) }
+
+it('a real planned tick reaches Core as a manager with every open node and its original thread', async () => {
+  const f = await fixture(), ready = Array.from({ length: 40 }, (_, i) => node(`ready-${i}`))
+  await f.revise([...ready, node('working'), node('review'), node('changes'), node('unknown'), node('done'), node('waiting', { dependsOn: ['working'] }), node('cancelled', { cancelled: true })])
+  for (const id of ['working', 'review', 'changes', 'done']) await f.delegate(id)
+  await f.delegate('unknown', false); await f.report('review'); await f.report('changes', 'changes'); await f.report('done', 'pass')
+  await f.manager.check()
+  expect(f.manager.list()[0]).toMatchObject({ lastOutcome: 'sent', lastCompletionId: expect.any(String) })
+  expect(f.read).toHaveBeenCalledOnce(); expect(f.submitted).toHaveBeenCalledOnce()
+  const [target, prompt, operationId, , , , , guidance] = f.submitted.mock.calls[0]!
+  expect(target).toMatchObject({ agentSessionId: 'supervisor', run: { runId: 'original-run' } })
+  expect(guidance).toContain('Goal role: manager'); expect(guidance).toContain('"operationId":' + JSON.stringify(operationId))
+  expect(prompt).toContain('Read amux goal plan --goal "goal"'); expect(prompt).not.toContain('Read the original body of')
+  const frozen = handoff(prompt)
+  expect(frozen).toMatchObject({ schema: 'agentmux.goal-plan-continuation.v1', goalId: 'goal', alignmentRevision: 1, planRevision: 1 })
+  expect(frozen.nodes.map((item: { id: string; state: string }) => [item.id, item.state])).toEqual([...ready.map(item => [item.id, 'ready']), ['working', 'working'], ['review', 'review'], ['changes', 'changes'], ['unknown', 'unknown']])
+  expect(frozen.nodes.at(-1)).toEqual({ id: 'unknown', state: 'unknown', executor: { hostId: 'worker-host', agentSessionId: 'worker' }, unknown: ['dispatch-link'],
+    attempt: { delegationOperationId: 'delegate-unknown', sourceMessageId: 'source-unknown', threadId: 'thread-unknown', workerHostId: 'worker-host', workerAgentSessionId: 'worker' } })
+  const original = await f.native.core.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: 'supervisor', expectedRun: { runId: 'original-run' }, submissionId: operationId })
+  expect(original?.admission).toMatchObject({ acknowledged: true, intent: { message: { userContent: prompt, systemContext: guidance } } })
+  expect(f.native.writes.length).toBeGreaterThan(0); expect(f.native.start).not.toHaveBeenCalled(); expect(f.native.stop).not.toHaveBeenCalled()
+})
+
+it('one new tick freezes the same Goal snapshot that decided to continue', async () => {
+  const f = await fixture(); await f.revise([node('original-ready')])
+  f.observeAfter(async () => { await f.revise([node('newer-ready')]) })
+  await f.manager.check()
+  expect(f.read).toHaveBeenCalledOnce(); expect(f.submitted).toHaveBeenCalledOnce()
+  expect(handoff(f.submitted.mock.calls[0]![1])).toMatchObject({ planRevision: 1, nodes: [{ id: 'original-ready', state: 'ready' }] })
+  expect((await f.goals.get('goal'))!.plan!.revision).toBe(2)
+})
+
+it('unknown delivery reconciles the frozen original manager input after the plan changes and a Host restart', async () => {
+  const f = await fixture(); await f.revise([node('original-ready')])
+  f.submitted.mockImplementationOnce(async (...args) => { await f.originalSubmit(...args); throw new Error('The saved Core ACK was lost') })
+  await f.manager.check()
+  const pending = f.manager.list()[0]!.pendingCompletion!
+  expect(f.manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', lastDecision: 'The saved Core ACK was lost' })
+  expect(f.native.writes.length).toBeGreaterThan(0)
+  expect(pending.prompt).toContain('original-ready'); expect(pending.agentMuxNote).toContain('Goal role: manager')
+  await f.revise([node('newer-ready')]); await f.manager.stop()
+  let now = Date.now() + 120_000
+  const second = new ContinuousProgressLoopManager(f.loops, (loop, operationId, isCurrent, signal) => deliverContinuousProgress(f.runtime, loop, operationId, isCurrent, signal), () => now,
+    (loop, tickId, at, signal) => f.runtime.observeContinuousProgress(loop, tickId, at, signal), undefined, { read: id => f.goals.get(id), inspectInitial: async () => 'confirmed' })
+  // The same original Runtime owner remains; only the Host scheduler is restarted.
+  cleanup.push(() => second.stop()); await second.start(); await second.goalAction('goal', 'original-loop', 'resume', 1, 'explicit-resume')
+  const writes = f.native.writes.length; now += 60_000; await second.check()
+  expect(f.submitted).toHaveBeenCalledTimes(2)
+  expect(f.submitted.mock.calls[1]!.slice(0, 4)).toEqual(f.submitted.mock.calls[0]!.slice(0, 4))
+  expect(f.submitted.mock.calls[1]![7]).toBe(pending.agentMuxNote)
+  expect(f.native.writes).toHaveLength(writes)
+  expect(second.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent' })
+})
+
+it('a Goal without a plan keeps its exact original prompt and executor guidance through Core', async () => {
+  const f = await fixture(); await f.manager.check()
+  expect(f.submitted).toHaveBeenCalledOnce(); expect(f.submitted.mock.calls[0]![1]).toBe(f.loop.prompt)
+  expect(f.submitted.mock.calls[0]![7]).toContain('Goal role: executor')
+  expect(f.submitted.mock.calls[0]![7]).not.toContain('Goal role: manager')
+})
+
+it('a plan whose live nodes passed review pauses without another Core input or human acceptance', async () => {
+  const f = await fixture(); await f.revise([node('done'), node('cancelled', { cancelled: true })]); await f.delegate('done'); await f.report('done', 'pass')
+  await f.manager.check()
+  expect(f.manager.list()[0]).toMatchObject({ status: 'paused', lastDecision: expect.stringContaining('Waiting for a person to accept') })
+  expect(f.submitted).not.toHaveBeenCalled(); expect((await f.goals.get('goal'))!.grounding?.acceptedAt).toBeUndefined()
+})

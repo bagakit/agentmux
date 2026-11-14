@@ -41,6 +41,16 @@ describe('Goal plan monitoring', () => {
     expect(decision.reason).toContain('Reconcile unknown nodes from their original delegation receipts')
   })
 
+  it('hands every unknown reason to management without replacing the original delegation identities', () => {
+    const { linkedAt: _linked, ...prepared } = attempt('a', { capturedCriteria: [{ id: 'api', text: 'An earlier criterion' }] })
+    const decision = decideGoalProgressSource(source, goal({ plan: plan([node('a')]), delegations: [prepared as DemandDelegation] }))
+    expect(decision.action).toBe('continue')
+    const handoff = JSON.parse(decision.continuation!.split('\n\n')[1]!)
+    expect(handoff.nodes).toEqual([{ id: 'a', state: 'unknown', executor: null, unknown: ['criteria', 'dispatch-link'],
+      attempt: { delegationOperationId: prepared.operationId, sourceMessageId: prepared.sourceMessageId, threadId: prepared.threadId,
+        workerHostId: prepared.hostId, workerAgentSessionId: prepared.workerAgentSessionId } }])
+  })
+
   it('pauses for human acceptance once every live node passed review', () => {
     const decision = decideGoalProgressSource(source, goal({ plan: plan([node('a'), node('b', [], { cancelled: true })], [pass('a')]), delegations: [attempt('a')] }))
     expect(decision).toEqual({ action: 'pause', reason: 'Goal goal: plan r3 1/1 done; every node passed review. Waiting for a person to accept the Goal results.' })
