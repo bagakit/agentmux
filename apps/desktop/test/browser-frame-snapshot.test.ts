@@ -7,7 +7,7 @@ import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 import type { BrowserScopedSnapshot } from '@agentmux/browser/model/browser-snapshot-query'
 import { isNativeScroll, nativeInputDouble } from './browser-native-input-double.js'
 
-function fixture(options: { failed?: string; empty?: string; changed?: string; discoveryFailed?: boolean; nestedAx?: boolean; wrongRoot?: boolean; pageInterference?: boolean; selectorInterference?: boolean; evaluationFailure?: 'exception' | 'missing-value'; realmFailed?: boolean } = {}) {
+function fixture(options: { failed?: string; empty?: string; changed?: string; discoveryFailed?: boolean; nestedAx?: boolean; wrongRoot?: boolean; pageInterference?: boolean; selectorInterference?: boolean; evaluationFailure?: 'exception' | 'missing-value'; realmFailed?: boolean; frameCovered?: boolean } = {}) {
   const calls: { session: string; method: string; params?: Record<string, unknown> }[] = []
   const actions: [string, number][] = []
   const backends = new Map([['doc-main', 11], ['doc-child', 21], ['doc-nested', 31], ['doc-remote', 11], ['doc-remote-child', 41]])
@@ -18,17 +18,32 @@ function fixture(options: { failed?: string; empty?: string; changed?: string; d
   ])
   let afterAx = false
   let hiddenEffects = 0
+  let actionRootUnavailable: 'missing' | 'failed' | null = null
   // Geometry is asked of the target's own sender; the press arrives on the top-level session.
   const native = nativeInputDouble(objectId => Number(objectId.split('-')[1]))
   const sender = (session: string): BrowserCdpSender => async (method, params) => {
     calls.push({ session, method, ...(params ? { params } : {}) })
+    if (method === 'DOM.getFrameOwner') {
+      if (session !== 'main' || params?.frameId !== 'doc-remote') throw new Error('Frame with given id does not belong to target')
+      return { backendNodeId: 900 }
+    }
+    if (method === 'DOM.getBoxModel') {
+      if (session !== 'main' || params?.backendNodeId !== 900) throw new Error('Unknown frame owner')
+      return { model: { content: [100, 200, 300, 200, 300, 400, 100, 400] } }
+    }
+    if (method === 'DOM.getNodeForLocation' && session === 'main' && Number(params?.x) >= 100) return { backendNodeId: options.frameCovered ? 901 : 900 }
     const answered = native.answer(method, params)
     if (answered !== undefined) {
+      if (method === 'DOM.getContentQuads' && session === 'remote-session' && params?.objectId === 'node-41') return { quads: [[40, 50, 80, 50, 80, 70, 40, 70]] }
       if (method === 'Input.dispatchMouseEvent' && params?.type === 'mousePressed') actions.push([session, native.presses.at(-1)!.target])
       return answered
     }
     if (method === 'Runtime.callFunctionOn' && isNativeScroll(params)) return { result: { value: null } }
     if (method === 'Page.getFrameTree') {
+      if (actionRootUnavailable && session === 'remote-session') {
+        if (actionRootUnavailable === 'failed') throw new Error('Original target root observation failed')
+        return {}
+      }
       if (options.discoveryFailed && session === 'main') throw new Error('native discovery unavailable')
       const frameTree = structuredClone(trees.get(session))!
       if (afterAx && options.changed) {
@@ -76,7 +91,7 @@ function fixture(options: { failed?: string; empty?: string; changed?: string; d
     if (method === 'DOM.resolveNode') return { object: { objectId: `node-${params?.backendNodeId}` } }
     if (method === 'DOM.describeNode') return { node: { backendNodeId: Number(String(params?.objectId).split('-')[1]) } }
     if (method === 'Runtime.callFunctionOn' && String(params?.functionDeclaration).includes('__agentmuxClickable.map')) return { result: { value: [] } }
-    if (method === 'Runtime.callFunctionOn') { actions.push([session, Number(String(params?.objectId).split('-')[1])]); return { result: { value: null } } }
+    if (method === 'Runtime.callFunctionOn') return { result: { value: null } }
     throw new Error(`Unmodelled protocol command ${method}`)
   }
   const send = sender('main')
@@ -87,10 +102,36 @@ function fixture(options: { failed?: string; empty?: string; changed?: string; d
     pageInfo: () => info, gotoUrl: async () => {}, captureScreenshot: async () => ({}),
     readLedger: async () => null, writeLedger: async () => {}, note: () => {}
   })
-  return { calls, actions, send, frames, dispatch, hiddenEffects: () => hiddenEffects, capture: () => captureBrowserPageSnapshot({ send, frames, ...info }) }
+  return { calls, actions, send, frames, dispatch, loseActionRoot: (mode: 'missing' | 'failed') => { actionRootUnavailable = mode }, hiddenEffects: () => hiddenEffects, capture: () => captureBrowserPageSnapshot({ send, frames, ...info }) }
 }
 
 describe('native document facts within the sole snapshot owner', () => {
+  it.each([
+    ['doc-remote', 11, 130, 220],
+    ['doc-remote-child', 41, 160, 260]
+  ] as const)('presses %s through its target root without adding a same-process child offset twice', async (frameId, backend, x, y) => {
+    const h = fixture()
+    const page = await h.dispatch('snapshot', []) as BrowserScopedSnapshot
+    expect(page.nodes).toHaveLength(5)
+    const node = page.nodes.find(node => node.frameId === frameId)!
+    await h.dispatch('click', [node.ref])
+    expect(h.actions).toEqual([['main', backend]])
+    expect(h.calls.filter(call => call.method === 'Input.dispatchMouseEvent' && call.params?.type === 'mousePressed')).toMatchObject([
+      { session: 'main', params: { x, y } }
+    ])
+  })
+
+  it.each(['root-missing', 'root-failed', 'covered'] as const)('keeps an OOPIF action not-dispatched when its target is %s', async cause => {
+    const h = fixture({ frameCovered: cause === 'covered' })
+    const page = await h.dispatch('snapshot', []) as BrowserScopedSnapshot
+    expect(page.nodes).toHaveLength(5)
+    const node = page.nodes.find(node => node.frameId === 'doc-remote')!
+    if (cause !== 'covered') h.loseActionRoot(cause === 'root-missing' ? 'missing' : 'failed')
+    await expect(h.dispatch('click', [node.ref])).rejects.toMatchObject({ fact: { effects: 'not-dispatched' } })
+    expect(h.calls.filter(call => call.method.startsWith('Input.'))).toEqual([])
+    expect(h.actions).toEqual([])
+  })
+
   it('reads same-process, nested and OOPIF documents exactly once through their actual sender', async () => {
     const h = fixture()
     const captured = await h.capture()
