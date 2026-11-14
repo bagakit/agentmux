@@ -139,7 +139,7 @@ async function test(label, mutation) {
   const selected = mutation ? [owningTests[owner]] : []
   const result = await command(label, process.execPath, [resolve('node_modules/vitest/vitest.mjs'), 'run', ...selected, '--config', 'apps/desktop/test/system-screenshot-editor.config.mts',
     '--reporter=json', '--outputFile=' + json], { AGENTMUX_SCREENSHOT_EDITOR_LOADED: loaded,
-      AGENTMUX_SCREENSHOT_EDITOR_MUTATION: mutation ? JSON.stringify(mutation) : '' })
+      AGENTMUX_SCREENSHOT_EDITOR_MUTATION: mutation ? JSON.stringify(mutation) : '' }, mutation ? 45000 : 120000)
   const report = JSON.parse(await readFile(json, 'utf8')), assertions = report.testResults.flatMap(file => file.assertionResults)
   assert.ok(assertions.length >= 7 && assertions.every(row => ['passed', 'failed'].includes(row.status)), label + ': nonempty executed original tests required')
   for (const file of report.testResults) assert.equal(file.message, '', label + ': collection failures do not prove a behavior mutation')
