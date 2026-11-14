@@ -7,7 +7,7 @@ vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { presentKnowledgeSurface } from '../src/renderer/src/lib/knowledge-surface-navigation'
 import { StableWorkbenchView, WorkbenchSurfaceHost } from '../src/renderer/src/components/StableWorkbenchView'
-import { useWorkbenchDocument, useWorkbenchWindowDocument, WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
+import { useWorkbenchDocument, useWorkbenchWindowDocument, useWorkbenchWindowChrome, useWorkbenchWindowTitle, WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
 import { isWorkbenchSurfaceDetached, placeWorkbenchWindow, registerWorkbenchDocument, registerWorkbenchHost, subscribeWorkbenchSurfaceDocument, useWorkbenchSurfaceDetached } from '../src/renderer/src/lib/workbench-window-registry'
 
 it('notifies only document consumers of the surface that physically moved', async () => {
@@ -59,6 +59,8 @@ it('rebinds a nested original workface document when its parent Tab crosses nati
   const committed: typeof seen = []
   function OriginalContent() {
     const owner = useWorkbenchDocument(), scope = useWorkbenchWindowDocument(), [identity] = useState({})
+    const chrome = useWorkbenchWindowChrome()
+    useWorkbenchWindowTitle(chrome?.target.kind === 'tab' ? 'Original unsent work' : null)
     seen.push({ document: owner, scope, identity })
     useLayoutEffect(() => { committed.push({ document: owner, scope, identity }) }, [owner, scope, identity])
     return createElement('input', { defaultValue: 'Original unsent content' })
@@ -89,6 +91,9 @@ it('rebinds a nested original workface document when its parent Tab crosses nati
     expect(seen.at(-1)!.identity).toBe(identity)
     expect(seen.at(-1)!.document === child).toBe(true)
     expect(seen.at(-1)!.scope).toEqual(childScope)
+    expect(child.title).toBe('Original unsent work · AgentMux')
+    expect(child.querySelectorAll('button[data-workbench-window-return]')).toHaveLength(1)
+    expect(container.querySelector('[data-workbench-window-grip]')).toBeNull()
   } finally {
     holdFrame.mockRestore()
     await act(async () => root.unmount())

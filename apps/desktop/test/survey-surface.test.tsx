@@ -10,6 +10,10 @@ import { join, resolve } from 'node:path'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { act } from 'react'
+import { createPortal } from 'react-dom'
+import { GlobalSurveySurface } from '../src/renderer/src/components/GlobalSurveySurface'
+import { GlobalRecallSurface } from '../src/renderer/src/components/GlobalRecallSurface'
+import { WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
@@ -148,6 +152,50 @@ afterEach(async () => {
   if (savedStorage === null) localStorage.removeItem('agentmux-workbench-v1'); else localStorage.setItem('agentmux-workbench-v1', savedStorage)
 })
 async function renderApp() { await dom.render(<DesktopClientUiProvider><App /></DesktopClientUiProvider>) }
+
+it.each(['survey', 'recall'] as const)('keeps %s window controls in its rail, including when collapsed or covered by tools', async surface => {
+  const frame = document.createElement('iframe')
+  dom.container.parentElement!.append(frame)
+  const child = frame.contentDocument!
+  const identity = { windowId: surface + '-window', documentGeneration: surface + '-document' }
+  const onReturn = vi.fn()
+  const chrome = { identity, target: { kind: 'surface' as const, surface }, returnLabel: 'Return to main window', onReturn, nativeControls: true }
+  const name = surface === 'survey' ? 'Survey' : 'Recall'
+  const props = { observeWork: false, catalog: null, projection: null, selection: null }
+  const render = (covered = false) => dom.render(createPortal(<DesktopClientUiProvider>
+    <WorkbenchDocumentContext.Provider value={{ document: child, window: identity, chrome }}>
+      {surface === 'survey' ? <GlobalSurveySurface {...props} controlsCoverPage={covered} /> : <GlobalRecallSurface {...props} />}
+    </WorkbenchDocumentContext.Provider></DesktopClientUiProvider>, child.body))
+  const mainTitle = document.title
+  try {
+    await render()
+    const rail = child.querySelector<HTMLElement>('.survey-navigation')!
+    const row = rail.querySelector<HTMLElement>('.survey-titlebar')!
+    expect(row.querySelector('.knowledge-window-title')?.textContent).toBe(name)
+    expect(child.title).toBe(name + ' · AgentMux')
+    expect(document.title).toBe(mainTitle)
+    const toggle = row.querySelector<HTMLButtonElement>(`[aria-label="Hide ${name} items"]`)!
+    await act(async () => toggle.click())
+    expect(rail.dataset.collapsed).toBe('true')
+    const button = row.querySelector<HTMLButtonElement>('button[data-workbench-window-return]')!
+    expect(button.getAttribute('aria-label')).toBe(chrome.returnLabel)
+    await act(async () => button.click())
+    expect(onReturn).toHaveBeenCalledOnce()
+    if (surface === 'survey') {
+      await act(async () => useAppStore.setState({ surveyToolsOpen: true }))
+      await render(true)
+      expect(rail.hasAttribute('inert')).toBe(true)
+      expect(child.querySelectorAll('button[data-workbench-window-return]')).toHaveLength(1)
+      const toolsReturn = child.querySelector<HTMLButtonElement>('.survey-management > header [data-workbench-window-return]')!
+      expect(toolsReturn.closest('[hidden], [inert]')).toBeNull()
+      await act(async () => toolsReturn.click())
+      expect(onReturn).toHaveBeenCalledTimes(2)
+    }
+  } finally {
+    await dom.render(null)
+    frame.remove()
+  }
+})
 
 it.each(['native-child', 'agent-region', 'whole-tab', 'two-regions'] as const)('[survey-native-child] prepares an alias-only %s from pending window descriptors without navigating Survey or Work', async kind => {
   type Target = import('@agentmux/core/control').AppWindowTarget

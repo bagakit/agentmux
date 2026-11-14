@@ -17,11 +17,12 @@ const evidence = resolve(root, '.local/ipc-document-boundary'), hash = bytes => 
 await mkdir(evidence, { recursive: true })
 const ipcPath = 'apps/desktop/src/main/ipc.ts', trustPath = 'apps/desktop/src/main/ipc-sender-trust.ts'
 const sourcesPath = 'apps/desktop/src/main/workbench-document-sources.ts'
+const gripPath = 'apps/desktop/src/renderer/src/components/SpatialWindowGrip.tsx'
 const callers = await ipcCallerInventory(root)
 const sources = [...new Set([...domainTests,'apps/desktop/test/capsule-client.test.ts','apps/desktop/scripts/fixtures/ipc-document-boundary/consumers.mjs',
   'apps/desktop/scripts/fixtures/ipc-document-boundary/variants.mjs', 'apps/desktop/test/ipc-document-boundary.config.mts',
   'apps/desktop/test/tsconfig.ipc-document-boundary.json', 'packages/capsule/src/types.ts', 'packages/capsule/src/parsers.ts',
-  'apps/desktop/src/renderer/src/lib/workbench-windows.tsx', ipcPath, trustPath, sourcesPath, 'apps/desktop/src/main/index.ts', 'apps/desktop/src/main/capsule-document-ipc.ts',
+  'apps/desktop/src/renderer/src/lib/workbench-windows.tsx', ipcPath, trustPath, sourcesPath, gripPath, 'apps/desktop/src/main/index.ts', 'apps/desktop/src/main/capsule-document-ipc.ts',
   'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/preload/capsule.ts',
   'apps/desktop/test/ipc-document-boundary.test.ts', 'apps/desktop/test/helpers/first-execution-ipc-bridge.ts',
   'apps/desktop/scripts/fixtures/ipc-document-boundary/native.ts',
@@ -101,19 +102,27 @@ async function native(name, variant, scope='all') {
     await build({ stdin: { resolveDir: join(root, 'apps/desktop'), loader: 'tsx', contents: `
       import React from 'react'; import {createRoot} from 'react-dom/client'; import {createPortal,flushSync} from 'react-dom';
       import {mintObjectId} from ${JSON.stringify(join(root, 'packages/core/src/object-id.ts'))};
-      const api=window.agentmux; let snapshot={}; const notify=()=>{};
-      const publishIssue=error=>{window.portalIssue=String(error)}; const useNativeOverlayChrome=()=>null;
+      import {SpatialWindowGrip} from ${JSON.stringify(join(root, gripPath))};
+      const api=window.agentmux; let snapshot={windows:[]}; const reads=new Set();
+      const notify=()=>{}; const observeOperation=()=>{};
+      const publishIssue=error=>{window.portalIssue=String(error)};
+      ${functionSource(windows, 'readWindowPage')}
       ${functionSource(windows, 'returnWorkbenchWindow')}
-      ${functionSource(windows, 'WorkbenchWindowToolbar')}
       window.installOriginalPortal=async()=>{const child=window.open(${JSON.stringify('file://' + shell)},'private-workbench');
         await new Promise(resolve=>child.addEventListener('load',resolve,{once:true}));
         if(typeof child.agentmux!=='undefined')throw Error('Child acquired an App bridge');
         const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
-        const record={document:child.document,identity:{windowId:'private-workbench-window',documentGeneration:'original-child-document'}};
-        flushSync(()=>root.render(createPortal(<WorkbenchWindowToolbar record={record}/>,child.document.body)));
-        child.document.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,20));
-        root.unmount();child.close();return true;};` },
+        const identity={windowId:'private-workbench-window',documentGeneration:'original-child-document'};
+        let returned;
+        const chrome={identity,target:{kind:'region',displayWorkspaceId:'private-workspace',groupId:'private-group',
+          tabId:'private-tab',regionId:'private-region'},nativeControls:false,
+          returnLabel:'Return to Space',onReturn:()=>{returned=returnWorkbenchWindow(identity)}};
+        flushSync(()=>root.render(createPortal(<SpatialWindowGrip chrome={chrome}/>,child.document.getElementById('workbench-window-root'))));
+        child.document.querySelector('button[data-workbench-window-return]').click();
+        if(!returned)throw Error('The window return control did not invoke its action');await returned;
+        root.unmount();child.close();if(window.portalIssue)throw Error(window.portalIssue);return true;};` },
       outfile: join(out, 'renderer/portal.js'), bundle: true, platform: 'browser', format: 'iife', jsx: 'automatic', logLevel: 'silent' })
+    loaded.push({ file: gripPath, original: inputs[gripPath], loaded: inputs[gripPath] })
     loaded.push({ file: 'apps/desktop/src/renderer/src/lib/workbench-windows.tsx', original: hash(windows), loaded: hash(windows) })
     loaded.push({ file: ipcPath, original: hash(await readFile(join(root, ipcPath))), loaded: hash(ipc) },
       { file: 'apps/desktop/src/main/index.ts', original: hash(await readFile(join(root, 'apps/desktop/src/main/index.ts'))), loaded: hash(index) })

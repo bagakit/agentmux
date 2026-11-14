@@ -126,12 +126,12 @@ try {
   receipt.phases.push('foreign-contents-denied')
   await contents.executeJavaScript(await readFile(join(import.meta.dirname, '../renderer/portal.js'), 'utf8'))
   assert.equal(await contents.executeJavaScript('window.installOriginalPortal()'), true)
-  await waitFor(() => receipt.portal.length === 1, 'Original Workbench toolbar event crosses its root preload from the native child portal')
+  await waitFor(() => receipt.portal.length === 1, 'Spatial workface return control crosses its root preload from the native child portal')
   assert.equal(receipt.portal[0].method, 'app.window.return')
   assert.equal(receipt.portal[0].input.windowId, 'private-workbench-window')
   assert.equal(receipt.portal[0].input.documentGeneration, 'original-child-document')
   assert.equal(new URL(receipt.portal[0].rootUrl).pathname, a)
-  receipt.phases.push('original-workbench-toolbar-portal')
+  receipt.phases.push('spatial-workface-return-portal')
   }
   server = createServer((_request, response) => {
     response.setHeader('x-agentmux-capsule-instance', instanceId)
