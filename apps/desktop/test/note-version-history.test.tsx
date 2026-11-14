@@ -297,7 +297,7 @@ it('shows a shared-file deletion as an absent after document without inventing a
   vi.mocked(api.files.historyPublic).mockImplementation(async params => history(params, [deleted]))
   await opened(); await dom.click('[aria-label="Preview version original-event-2"]')
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Version preview"]')?.textContent).toContain('It has no saved document after the change.'))
-  expect(dom.container.textContent).toContain('Shared file collected')
+  expect(dom.container.textContent).toContain('File deleted')
   expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Restore this entire version…')).toBe(false)
   expect(pairs).toHaveLength(0)
   expect(useAppStore.getState().applyNoteHistory).not.toHaveBeenCalled()
