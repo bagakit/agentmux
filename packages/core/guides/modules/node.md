@@ -27,7 +27,7 @@ Private owner measurements, trust and keys keep their separate permissions.
 
 Read the complete private policy before saving and preserve its allowed/denied/default
 paths. Published roots do not represent that complete policy. Policy is
-{alias,shareResources,allowedPaths,deniedPaths,defaultPath}. Alias may be empty; a declared
+{alias,shareResources,allowedPaths,deniedPaths,defaultPath,mapLocation?}. Alias may be empty; a declared
 alias is one lowercase DNS label. Owner paths are literal absolute paths. The default
 path is navigation, not an Agent working-directory change or an OS sandbox.
 
@@ -40,6 +40,33 @@ not a success receipt. A missing record named by current policy is unavailable, 
 reported absent. An authorized operator may explicitly start a new save; the old request is not replayed.
 Existing Agent, Run and
 full-owner SSH capabilities are independent of Node publication and remain available.
+
+Map publication is optional. In Settings → Node → Map location, enter a place name
+and latitude/longitude and save the publication. Read it with
+`amux node location --host ID [--expected-runtime RT]`. The result identifies the
+original Node and includes either `location:null` or latitude, longitude, label and
+source. `meshPeer`, when present, links that same runtime to its current network and
+peer ID. A private pin in the viewer's map is a separate annotation.
+
+The original Node uses the following sources in order.
+
+1. The owner policy's `mapLocation` object carries `coordinates` as “latitude, longitude”,
+   `label` and `estimatePublicEgress`. Empty coordinates clear the declared position.
+2. A fleet operator may set `AGENTMUX_NODE_SITE_CATALOG` in the original Core's
+   environment to a local JSON file. Each array entry has a label, numeric latitude and
+   longitude, and one or both of `runtimeIds` and `subnets`. Register known physical
+   sites and dedicated site networks only. For example, this illustrative entry uses a
+   documentation subnet: `[{"label":"Example site","latitude":51,"longitude":-2,"runtimeIds":["example-node"],"subnets":["192.0.2.0/24"]}]`.
+   An exact Runtime ID takes priority over any subnet. Otherwise the Core compares
+   its own non-loopback interface addresses against IPv4 or IPv6 CIDRs. A site match
+   must be unique. Remove a registration or unset the catalog to withdraw that source.
+3. If the operator enables **Estimate from this node’s internet connection**, a map
+   read can ask GeoJS about this Node's own public egress. A VPN or gateway can put
+   that region far from the device. Only the rounded point, place label and estimated
+   radius are published. Turning the option off takes effect on subsequent reads.
+
+An unconfigured or unavailable source leaves the location unknown when no other
+source applies. Map publication grants no additional device access.
 
 Published node.resources applies the sharing policy to every caller. Withheld contains
 no sample. settings node resources is a separate authenticated owner read. Measurements
