@@ -96,12 +96,14 @@ Read only the matching local help:
   neither an Agent request nor package text grants approval. Source identity changes are separate
   installs, never silent replacement of an old extension. A changed permission scope stays explicit.
   After a missing apply reply, `extension ls --profile ID --operation-id REVIEW` reads that original
-  durable change receipt. A null receipt does not prove that no native code ran. Unknown changes
+  durable change receipt and pending dispatch intent, including after a host restart. A null receipt
+  does not prove that no native code ran. Pending original operations cannot be dispatched again. Unknown changes
   are never automatically replayed. `remove` uses an exact extension, Profile token and original
   operation ID; native unload and metadata saving are separate confirmations. Site sign-ins and
   Profile data remain. `load --profile ID --extension ID` explicitly retries only the original
   approved package. Native loaded confirms its identity/version, not every Chrome API. Failure
-  keeps normal Browser controls and other Profiles available. Package signatures establish
+  keeps normal Browser controls and other Profiles available. Public source labels identify the source category; local filenames and paths stay in trusted host
+  confirmation. Package signatures establish
   integrity, not trusted publisher or store provenance; declared update sources remain visible.
 - amux browser targets --help: discover available exact targets and their readiness.
   A target's optional objectLink is its stable original resource reference; url remains the
