@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MoteIcon } from '../../../../packages/client-ui/src/components/MoteIcon.js'
-import { observeMoteMotion } from '../../../../packages/client-ui/src/lib/mote-face-motion.js'
+import { observeMoteMotion } from '@agentmux/client-ui/mote-face-motion'
 
 type MotePreviewOptions = { size?: number; interactive?: boolean }
 

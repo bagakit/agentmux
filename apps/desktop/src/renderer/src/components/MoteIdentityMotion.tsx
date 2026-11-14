@@ -3,7 +3,7 @@ import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { useShallow } from 'zustand/react/shallow'
 import { moteExpression, moteExpressionPresentation } from '../lib/mote-expression'
-import { observeMoteMotion } from '../lib/mote-face-motion'
+import { observeMoteMotion } from '@agentmux/client-ui/mote-face-motion'
 import type { MoteExpression } from '@agentmux/client-ui/components/MoteFace'
 
 export type MoteIdentityMotionProps = {

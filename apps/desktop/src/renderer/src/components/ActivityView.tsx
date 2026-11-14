@@ -23,7 +23,7 @@ import {
   shouldShowJumpToLatest,
   isNearBottom,
   type ScrollGeometry
-} from '../lib/activity-autoscroll'
+} from '@agentmux/client-ui/activity-autoscroll'
 import { createRulerScale, describeReadout, describeRulerAxis, describeSpan, describeActivityRecordTime, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
 import { formatClock } from '@agentmux/client-ui/conversation-time'
 import { showEmptyState, showWorkingIndicator } from '@agentmux/client-ui/activity-working-state'

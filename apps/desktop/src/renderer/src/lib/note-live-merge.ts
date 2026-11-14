@@ -1,5 +1,3 @@
-export { mergeLiveNote, type NoteLiveMerge } from '@agentmux/client-ui/note/note-live-merge'
-
 /** Live composition capabilities only; document bytes remain in the original File session. */
 const composing = new Map<string, Set<string>>()
 const completions = new Map<string, Set<() => void>>()
