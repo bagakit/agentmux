@@ -31,6 +31,18 @@ async function click(text: string) {
   await act(async () => { [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)!.click() })
 }
 
+it('shows a skipped attempt while the exact original arrangement stays active', async () => {
+  vi.mocked(api.schedule.list).mockResolvedValue(result([saved({ nextCheckAt: Date.now() + 60_000,
+    lastOutcome: 'skipped', lastDecision: 'stale-working' })]))
+  await dom.render(<CalendarScheduleControl target={target} />)
+  const row = dom.container.querySelector('[data-schedule-id="original-arrangement"]')!
+  expect(row.querySelector('details')?.open).toBe(false)
+  expect(row.querySelector('.schedule-arrangement__when')?.textContent).toContain('Active')
+  expect(row.querySelector('.schedule-arrangement__outcome')?.textContent).toBe('Last attempt skipped')
+  expect(row.querySelector('details')?.textContent).toContain('Its current activity is unconfirmed.')
+  expect(api.schedule.list).toHaveBeenCalledExactlyOnceWith({ target })
+})
+
 it('hidden retained Calendar consumers start no polling even with status callbacks and keep their original form on reveal', async () => {
   const targets = Array.from({ length: 32 }, (_, index) => ({ ...target, agentSessionId: `retained-agent-${index}` }))
   const status = vi.fn()

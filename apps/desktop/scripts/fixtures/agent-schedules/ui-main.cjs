@@ -3,6 +3,7 @@ const { app, BrowserWindow, Menu } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
 const [html, evidence] = process.argv.slice(2)
 const checkIn = process.argv.includes('--checkin')
+const skipped = process.argv.includes('--skipped')
 app.setPath('userData', path.join(evidence, 'userData'))
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const result = { passed: false, pid: process.pid, images: [], operations: [], errors: [] }
@@ -12,7 +13,7 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     win = new BrowserWindow({ width: 680, height: 840, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } })
     win.webContents.on('console-message', (_event, details) => { if (details.level === 'error') result.errors.push(details.message) })
-    await win.loadFile(html, checkIn ? { query: { checkin: '1' } } : {})
+    await win.loadFile(html, { query: { ...(checkIn ? { checkin: '1' } : {}), ...(skipped ? { skipped: '1' } : {}) } })
     const read = script => win.webContents.executeJavaScript(script)
     for (let i = 0; i < 100 && !(await read('document.querySelector("[data-schedule-id]")')); i++) await pause(30)
     assert.equal(await read('document.querySelectorAll("[data-schedule-id]").length'), 1)
@@ -25,6 +26,26 @@ app.whenReady().then(async () => {
       const facts = await read(`(()=>{const n=document.querySelector('.schedule-scene');return {overflow:n.scrollWidth>n.clientWidth,draft:document.querySelector('[aria-label="Manual message"]').value, state:document.querySelector('[data-schedule-state]').dataset.scheduleState}})()`)
       assert.equal(facts.overflow, false); assert.equal(facts.draft, '这段手动消息还没发，请保留。')
       await fs.writeFile(path.join(evidence, name + '.png'), (await win.webContents.capturePage()).toPNG()); result.images.push(name + '.png'); result.operations.push({ name, ...facts })
+    }
+    if (skipped) {
+      const selector = '[data-schedule-id="saved-calendar"]'
+      const snapshot = await read(`(() => { const row = document.querySelector(${JSON.stringify(selector)}); return {
+        state: row.querySelector('.automation-state').textContent,
+        outcome: row.querySelector('.schedule-arrangement__outcome').textContent,
+        detailsOpen: row.querySelector('details').open
+      } })()`)
+      assert.deepEqual(snapshot, { state: 'Active', outcome: 'Last attempt skipped', detailsOpen: false })
+      await capture('automation-wide-skipped')
+      await read('scheduleScene.theme("light")')
+      win.setContentSize(320, 720)
+      await capture('automation-narrow-skipped')
+      await click('document.querySelector(".schedule-arrangement__details > summary")')
+      assert.match(await read('document.querySelector(".schedule-arrangement__details[open]").textContent'), /current activity is unconfirmed/)
+      await capture('automation-narrow-original-reason')
+      assert.deepEqual(await read('scheduleScene.operations'), [])
+      assert.deepEqual(result.errors, [])
+      result.passed = true
+      return
     }
     await capture(checkIn ? 'checkin-wide-waiting' : 'calendar-wide-active')
     await read('scheduleScene.theme("light")'); await pause(100)

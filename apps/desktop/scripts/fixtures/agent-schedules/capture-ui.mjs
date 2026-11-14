@@ -7,6 +7,7 @@ import path from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..'), require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const checkIn = process.argv.includes('--checkin')
+const skipped = process.argv.includes('--skipped')
 const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const directory = path.join(root, '.tmp/agent-schedules/ui-renderer-' + globalThis.crypto.randomUUID()), compiled = path.join(directory, 'compiled')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
@@ -17,7 +18,7 @@ try {
     const directory = path.join(root, 'packages', name), manifest = JSON.parse(await fs.readFile(path.join(directory, 'package.json'), 'utf8'))
     for (const [subpath, target] of Object.entries(manifest.exports)) if (!subpath.includes('*')) alias['@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))] = path.join(directory, target.import.replace('./dist/', name === 'core' ? './src/' : './').replace(/\.js$/, '.ts'))
   }
-  const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'ui-entry.tsx')], outdir: compiled, bundle: true, format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, conditions: ['production'], loader: { '.png': 'file', '.svg': 'file', '.gif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
+  const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'ui-entry.tsx')], outdir: compiled, bundle: true, format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, conditions: ['production'], loader: { '.png': 'file', '.svg': 'file', '.gif': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
     plugins: [{ name: 'unrelated-preview-workers', setup(builder) {
       builder.onResolve({ filter: /\?(worker|url)$/ }, args => ({ path: args.path, namespace: 'preview-worker' }))
       builder.onLoad({ filter: /.*/, namespace: 'preview-worker' }, args => ({ contents: args.path.endsWith('?worker') ? 'export default class PreviewWorker {}' : 'export default ""', loader: 'js' }))
@@ -28,7 +29,8 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="ui-entry.css"></head><body><div id="root"></div><script type="module" src="ui-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'ui-main.cjs'), path.join(compiled, 'index.html'), directory, ...(checkIn ? ['--checkin'] : [])], { temporaryRoot: directory, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'ui-main.cjs'), path.join(compiled, 'index.html'), directory,
+    ...(checkIn ? ['--checkin'] : []), ...(skipped ? ['--skipped'] : [])], { temporaryRoot: directory, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
