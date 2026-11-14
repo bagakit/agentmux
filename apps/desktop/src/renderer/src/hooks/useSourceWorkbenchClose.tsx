@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { spaceCloseDecisions, type SpaceClosePrepare, type SpaceCloseReceipt } from '@agentmux/core/space-close'
 import type { SourceWorkbenchCloseDestination, SourceWorkbenchCloseLocations, SourceWorkbenchCloseMember } from '../../../shared/source-workbench-close'
@@ -13,6 +13,7 @@ import { sourceWorkbenchCloseReference } from '../lib/source-workbench-close'
 
 type Pending = {
   destination: SourceWorkbenchCloseDestination; member: SourceWorkbenchCloseMember; subject: string
+  onlyMember?: true
   choices: SourceWorkbenchCloseLocations; selected: string
   request?: SpaceClosePrepare; record?: SpaceCloseReceipt; issue?: string | undefined
   applied?: boolean; submitted?: boolean; reviewRequired?: boolean
@@ -24,23 +25,24 @@ export function useSourceWorkbenchClose() {
   const [pending, setPending] = useState<Pending | null>(null), [busy, setBusyState] = useState(false)
   const current = useRef<Pending | null>(null), resolve = useRef<((applied: boolean) => void) | null>(null)
   const running = useRef(false)
-  const setBusy = (value: boolean) => { running.current = value; setBusyState(value) }
+  const setBusy = useCallback((value: boolean) => { running.current = value; setBusyState(value) }, [])
   useEffect(() => () => { const done = resolve.current; resolve.current = null; done?.(false) }, [])
-  const update = (value: Pending | null) => { current.current = value; setPending(value) }
+  const update = useCallback((value: Pending | null) => { current.current = value; setPending(value) }, [])
   const finish = (applied: boolean) => { update(null); const done = resolve.current; resolve.current = null; done?.(applied) }
-  function failed(value: Pending, error: unknown) {
+  const failed = useCallback((value: Pending, error: unknown) => {
     const issue = error instanceof Error ? error.message : String(error)
     update({ ...value, issue, reviewRequired: Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'SOURCE_CLOSE_REVIEW_REQUIRED') })
     useAppStore.getState().reportError(new Error(`Original close ${value.request?.operationId ?? 'position lookup'} on ${value.destination.hostId}: ${issue}. Keep the original operation; no close was replayed.`), { kind: 'indeterminate' })
-  }
-  function accept(value: Pending, record: SpaceCloseReceipt): void {
+  }, [update])
+  const accept = useCallback((value: Pending, record: SpaceCloseReceipt): void => {
     const target = value.request?.target, actual = record.plan.target
     if (!target || record.operationId !== value.request?.operationId || !sourceWorkbenchCloseMemberMatches(record, value.member) ||
+      value.onlyMember && record.plan.projection.surfaces.length !== 1 ||
       target.kind !== actual.kind || target.displayWorkspaceId !== actual.displayWorkspaceId || target.groupId !== actual.groupId || target.tabId !== actual.tabId ||
       target.kind === 'region' && (actual.kind !== 'region' || target.regionId !== actual.regionId))
       throw Object.assign(Error('This original plan contains a changed member or position. Its operation is retained. Return to the workface and close its current position.'), { code: 'SOURCE_CLOSE_REVIEW_REQUIRED' })
-  }
-  async function prepare(value: Pending) {
+  }, [])
+  const prepare = useCallback(async (value: Pending) => {
     const location = value.choices.locations.find(location => choiceKey(location) === value.selected)
     if (!location) return
     const target = value.choices.kind === 'region' ? { kind: 'region' as const, ...location }
@@ -54,16 +56,12 @@ export function useSourceWorkbenchClose() {
       update({ ...attempt, record: operation })
     } catch (error) { failed(attempt, error) }
     finally { setBusy(false) }
-  }
-  async function request(reference: WorkbenchProjectionSelection, scope: 'tab' | 'region', subject: string): Promise<boolean> {
+  }, [accept, failed, setBusy, update])
+  const requestOriginal = useCallback(async (original: Pick<Pending, 'destination' | 'member' | 'onlyMember'>, subject: string): Promise<boolean> => {
     if (resolve.current) return false
-    let original: ReturnType<typeof sourceWorkbenchCloseReference>
-    try { original = sourceWorkbenchCloseReference(useAppStore.getState(), reference, scope) }
-    catch (error) { useAppStore.getState().reportError(error); return false }
-    if (!original) return false
     const { destination, member } = original
     const completed = new Promise<boolean>(done => { resolve.current = done })
-    const initial: Pending = { destination, member, subject, choices: { kind: 'tab-occurrence', locations: [] }, selected: '' }
+    const initial: Pending = { ...original, subject, choices: { kind: 'tab-occurrence', locations: [] }, selected: '' }
     update(initial); setBusy(true)
     try {
       const choices = await api.spaceMounts.call('closeLocations', { ...destination, member })
@@ -74,6 +72,12 @@ export function useSourceWorkbenchClose() {
     } catch (error) { failed(initial, error) }
     finally { setBusy(false) }
     return await completed
+  }, [failed, prepare, setBusy, update])
+  async function request(reference: WorkbenchProjectionSelection, scope: 'tab' | 'region', subject: string): Promise<boolean> {
+    let original: ReturnType<typeof sourceWorkbenchCloseReference>
+    try { original = sourceWorkbenchCloseReference(useAppStore.getState(), reference, scope) }
+    catch (error) { useAppStore.getState().reportError(error); return false }
+    return original ? requestOriginal(original, subject) : false
   }
   async function confirm() {
     const value = current.current
@@ -117,5 +121,5 @@ export function useSourceWorkbenchClose() {
       <details className="confirmation-dialog__description"><summary>Operation details</summary><p>{pending.request.operationId}</p></details>
     </> : undefined}
     onCancel={() => { if (!busy) finish(Boolean(pending?.applied)) }} onConfirm={() => void confirm()} />
-  return { request, dialog, busy }
+  return { request, requestOriginal, dialog, busy }
 }

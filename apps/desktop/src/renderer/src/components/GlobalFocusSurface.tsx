@@ -4,6 +4,7 @@ import type { FocusContextAccess } from '../lib/focus-context-access'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { originalSourceEntryForSelection } from '../lib/original-space-navigation'
 import { useFocusSources } from '../lib/use-focus-sources'
+import { useSourceWorkbenchClose } from '../hooks/useSourceWorkbenchClose'
 import { focusContextIdentityKey } from '../lib/focus-context-identity'
 import { SpaceSourceReaders } from './SpaceSourceReaders'
 import { LocalRetainedInputsPanel } from './LocalRetainedInputs'
@@ -133,7 +134,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       ...(project ? { project: { id: project.projectId, name: project.name } } : {})
     } })
   }, [])
-  const sourceFacts = useFocusSources({ visible, contexts: ordinaryRows, onFocusContext: recordSourceFocus, onChooseLocation: chooseSourceLocation, ...(onSelectLocation ? { onSelectLocation } : {}) })
+  const sourceClose = useSourceWorkbenchClose()
+  const sourceFacts = useFocusSources({ visible, contexts: ordinaryRows, onFocusContext: recordSourceFocus, onChooseLocation: chooseSourceLocation,
+    onCloseOriginal: sourceClose.requestOriginal, ...(onSelectLocation ? { onSelectLocation } : {}) })
   const executionRows = useMemo(() => [...ordinaryRows, ...sourceFacts.contexts], [ordinaryRows, sourceFacts.contexts])
   const laneContexts = useMemo(() => [...ordinaryLaneContexts, ...sourceFacts.contexts], [ordinaryLaneContexts, sourceFacts.contexts])
   const selectedSourceKey = useAppStore(state => {
@@ -721,5 +724,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     {visible && requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}
+  {sourceClose.dialog}
   </section></SpaceSourceReaders>
 }

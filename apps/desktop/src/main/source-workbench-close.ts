@@ -24,7 +24,7 @@ export function sourceWorkbenchClosePort(runtime: Pick<RuntimeController, 'callO
     const snapshot = await readSpaceSnapshot({ subscribe: (method, params, handlers) => runtime.subscribeOriginalCore(destination.hostId, method, params, handlers, context) }, destination.reference, context.signal ? { signal: context.signal } : {})
     const original = snapshot.scope.regions.find(region => region.tabId === member.tabId && region.regionId === member.regionId)
     const tab = snapshot.scope.tabs.find(tab => tab.tabId === member.tabId)
-    if (!tab || !original || original.kind !== member.kind || original.agentSessionId !== member.agentSessionId) throw new AgentMuxError('This original workface member changed. Its current content and inputs are retained; choose its current position.', 'WORKBENCH_CLOSE_STALE')
+    if (!tab?.regionIds.includes(member.regionId) || !original || original.kind !== member.kind || original.agentSessionId !== member.agentSessionId) throw new AgentMuxError('This original workface member changed. Its current content and inputs are retained; choose its current position.', 'WORKBENCH_CLOSE_STALE')
     const inspected = await runtime.callOriginalCore(destination.hostId, 'space.inspect', { target: { spaceId: destination.reference.spaceId, regionId: member.regionId } }, context)
     return { kind: member.scope === 'region' ? 'region' : 'tab-occurrence',
       locations: inspected.catalog.locations.filter(location => location.spaceId === destination.reference.spaceId && location.tabId === member.tabId && location.regionId === member.regionId)

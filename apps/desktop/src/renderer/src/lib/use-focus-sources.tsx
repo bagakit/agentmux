@@ -7,6 +7,7 @@ import type { AgentNameTarget, NameObservation } from '@agentmux/core/name-contr
 import type { ConversationObservation, projectConversationWindow } from '@agentmux/core/conversation'
 import type { ConversationReadApi } from '../../../shared/conversation-read'
 import type { HostConfig, SessionSnapshot } from '../../../shared/contracts'
+import type { SourceWorkbenchCloseDestination, SourceWorkbenchCloseMember } from '../../../shared/source-workbench-close'
 import { spaceMountKey, type SpaceMountMemberSurface, type SpaceMountMemberTarget, type SpaceMountRecord } from '../../../shared/space-mount'
 import { api } from './api'
 import { agentDisplayName, sourceRegionProjectionReference } from './workbench-tabs'
@@ -160,9 +161,10 @@ function openSourceLocation(location: Location, surface: 'agents' | 'workbench',
 }
 
 /** Joins source-qualified facts to the common Context pipeline; it owns no task UI. */
-export function useFocusSources({ visible, contexts, onSelectLocation, onChooseLocation, onFocusContext }: { visible: boolean; contexts: readonly FocusContext[];
+export function useFocusSources({ visible, contexts, onSelectLocation, onChooseLocation, onFocusContext, onCloseOriginal }: { visible: boolean; contexts: readonly FocusContext[];
   onSelectLocation?: (reference: WorkbenchProjectionSelection) => boolean | void; onChooseLocation?: (choice: SourceChoice) => void;
-  onFocusContext?: (context: FocusContext) => void }) {
+  onFocusContext?: (context: FocusContext) => void;
+  onCloseOriginal(input: { destination: SourceWorkbenchCloseDestination; member: SourceWorkbenchCloseMember; onlyMember: true }, subject: string): void }) {
   const inputs = useAppStore(state => state.mountedSpaceInputs), observations = useAppStore(state => state.mountedSpaceObservations)
   const metadata = useAppStore(state => state.mountedSpaceSessions), config = useAppStore(state => state.config)
   const history = useAppStore(state => state.agentFocus.execution.history)
@@ -246,7 +248,8 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       const sessionFacts = mountedSessionFacts(snapshot, metadata[key])
       for (const member of mountedSpaceRegions(snapshot)) {
         const sid = member.region.agentSessionId
-        if (!sid) continue
+        // A Source can retain Region facts for execution recovery after the Tab's current member changed.
+        if (!sid || !member.tab.regionIds.includes(member.region.regionId)) continue
         const fact = sessionFacts.get(member.key), current = fact?.current?.state
         const observed = current?.status === 'observed' ? current : fact?.last?.state.status === 'observed' ? fact.last.state : undefined
         // Source-local is explicitly defined by the original Core member contract.
@@ -348,7 +351,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
             return reference.tabId === location.tabId && reference.regionId === location.regionId && region?.kind === 'agent' && region.sessionId === candidate.sid
           })
         }
-        // Closing addresses an existing display occurrence; it never opens a Source to create one.
+        // Resolve a local display occurrence when available, otherwise ask the original owner.
         const locations = surface !== 'close' ? candidate.locations : candidate.locations.flatMap(location => {
           if (location.reference) return [location]
           const positions = [...rawLocations(location), ...sourceLocations.filter(reference => {
@@ -365,7 +368,13 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
           if (location) {
             if (surface === 'close') {
               const state = useAppStore.getState(), reference = location.reference
-              const current = reference && state.tabs[reference.tabId]?.regions[reference.regionId], source = sourceRegionProjectionReference(current)
+              if (!reference) {
+                onCloseOriginal({ destination: { hostId: location.source.hostId, reference: location.source.reference }, onlyMember: true,
+                  member: { tabId: location.tabId, regionId: location.regionId, kind: 'agent', agentSessionId: candidate.sid,
+                    scope: location.member.tab.regionIds.length === 1 ? 'tab' : 'region' } }, focusedContext?.name ?? 'Agent workface')
+                return
+              }
+              const current = state.tabs[reference.tabId]?.regions[reference.regionId], source = sourceRegionProjectionReference(current)
               const member = !source && reference && current?.kind === 'agent' ? ordinaryAgentSpaceMember({ tabId: reference.tabId, regionId: reference.regionId, sessionId: current.sessionId }) : undefined
               const original = source ? spaceMountKey(source.reference) === spaceMountKey(location.source.reference) &&
                 source.tabId === location.tabId && source.regionId === location.regionId && source.agentSessionId === candidate.sid
@@ -376,7 +385,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
                   member.metadataMember.runtimeId === candidate.runtimeId && member.metadataMember.agentSessionId === candidate.sid ||
                   reference && rawLocations(location).some(position => position.displayWorkspaceId === reference.displayWorkspaceId &&
                   position.groupId === reference.groupId && position.tabId === reference.tabId && position.regionId === reference.regionId))
-              if (!reference || !original) {
+              if (!original) {
                 state.reportError(Error('This original workface position is unconfirmed or changed. Its Agent and inputs are retained; choose its current exact position before closing.'))
                 return
               }
@@ -469,6 +478,6 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       readers.push(<MemberReader key={'member:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0}  />)
     }
     return { contexts: rows.length ? rows : NO_SOURCE_CONTEXTS, identities: identities.size ? identities : NO_SOURCE_IDENTITIES, aliases, issues, readers: <Fragment>{readers}</Fragment> }
-  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, historyNames, refreshes, inputs, layouts, sourceLocations, tabs, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
+  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, historyNames, refreshes, inputs, layouts, sourceLocations, tabs, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext, onCloseOriginal])
   return result
 }
