@@ -16,9 +16,9 @@
 | 新业务动作或新的可观察结果 | 优先复用或扩展原对象的方法与命令；没有合适入口时新增 typed RPC 和可发现的 CLI 使用方式。需要后续查询或持续观察的结果，沿原 inspect／operation／订阅 owner 表达。 |
 | 已有能力的参数、结果、错误或语义改变 | 同步修改原类型、严格解析、服务接线及受影响的 CLI／Client；成功字段、错误 detail、候选和 unknown 不能在输送中丢失。 |
 | 新配置项或 Provider 能力 | 配置沿[Settings 贡献约定](../settings-module-contributions.md)，Provider 沿原通用 Agent API；不能为配置字段或厂商另造一套业务命令。确有新的通用业务语义时，按前两行判断。 |
-| 纯视觉、动画、内部重构或性能优化 | 保持公开行为时无需新增 RPC／CLI；若改变可查询事实、导航／输入、副作用、错误或恢复语义，仍按受影响的原接口修改和验证，不能因代码在 Renderer 就略过。 |
+| 纯视觉、动画、内部重构或性能优化 | 保持公开行为时复用现有 RPC／CLI，不新增「重构」「预取」这类业务命令；若改变可查询事实、导航／输入、副作用、错误或恢复语义，仍按受影响的原接口修改和验证，不能因代码在 Renderer 就略过。为共同 diff、输入关系或分页等补充新语义时，回到 Core／Provider 及原公共类型、codec、RPC／CLI 和真实消费者，同一能力不能只在 GUI 成立。 |
 
-命令沿[对象优先 CLI](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)归属业务对象，不按 Feature 名新增顶层域、兼容别名或通用任意执行入口。只读手册可以引用能力，不能代替业务接线。需要人类确认的能力仍由原可信 owner 取得实际确认；公开命令或 RPC 参数不能让 Agent 冒充用户、升级权限或绕过确认。
+命令归属哪个业务对象、何时才新增对象入口，唯一见[命令按业务对象归域](../design/behavior/public-control.md#命令按业务对象归域)；实际命令树以当前执行版本的 `amux --help` 为准。只读手册可以引用能力，不能代替业务接线。需要人类确认的能力仍由原可信 owner 取得实际确认；公开命令或 RPC 参数不能让 Agent 冒充用户、升级权限或绕过确认。
 
 ## 接到唯一业务服务和实际命令
 
@@ -27,13 +27,13 @@
 - **业务与公共类型。** 行为在原 Core／Host／Client owner 实现；公共方法、参数、结果和流由 [public-rpc.ts](../../packages/core/src/public-rpc.ts)及其引用的领域类型定义。内部 Control DTO 不作为另一套公开 wire；Provider 只解释自己的原生协议。
 - **服务与严格解析。** [AgentMuxRpcService](../../packages/core/src/public-rpc-service.ts)接原 owner；核对受影响的[业务 codec](../../packages/core/src/rpc-business-codec.ts)或[原生结果 codec](../../packages/core/src/rpc-native-codec.ts)，以及实际宿主注入端口。CLI、HTTP 和 SSH 共用同一服务与授权合同，保留原业务身份和结果，不为传输复制业务逻辑、状态或 Runtime。
 - **命令与发现。** 在 [AGENTMUX_CLI_COMMANDS](../../packages/core/src/agentmux-cli-commands.ts)及其现有领域 parser 修改注册、参数和说明；[help／skill](../../packages/core/src/agentmux-cli-help.ts)从注册来源生成。新身份和结果须可原样用于后续精确命令；核对受影响的对象 ls／inspect、聚合观察、名片及运行指引，不从名称、cwd、焦点或首候选猜目标，也不把无关字段机械加入全部发现入口。
-- **真实消费。** CLI 仅通过[公共客户端](../../packages/core/src/public-rpc-client.ts)调用服务；GUI 与其他客户端消费同一业务 owner 的事实，不要求 GUI 绕行 CLI，也不在 CLI 直接读写本地 Store。新增命令须接到实际业务，不能只注册 help 或用固定结果充当实现。
+- **真实消费。** CLI 经[公共客户端](../../packages/core/src/public-rpc-client.ts)调用服务，GUI 与其他客户端消费同一业务 owner 的事实，不要求 GUI 绕行 CLI；CLI 与服务的分工（含不直接读写本机 Store）唯一见[对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)中的「公共业务协议先于 CLI」。新增命令须接到实际业务，不能只注册 help 或用固定结果充当实现。
 
 命令注册的 `method` 持有对象与动作拼写，`usage` 只描述其后的参数；help／skill 由原生成器组合两者。必需输入不用可选括号，描述须与原 parser 一致。验证实际生成的总帮助、对象／动作帮助与技能输出，不能只检查命令名出现过；这些输出仍须保留该候选原权限、只读／副作用及恢复说明。
 
 涉及系统手册时，沿 [Core 指南维护入口](../../packages/core/guides/README.md#maintaining-system-guides)选择模块、操作或共享正文，并接到实际读取者；自动收录 Markdown 不代表已接入 help 或其他消费者。本约定不另维护一份手册操作步骤。
 
-一次请求的 JSON-RPC `id` 与原业务 `operationId` 分开。需要对账的副作用沿原操作身份查询；回执未知不当作未发生，不盲目重做。持续观察保原顺序、Gap 和完成事实；取消或断线只释放该 reader，不能停止原业务或健康 Agent。选择、实际呈现、输入、投递、任务接受和磁盘耐久性继续按[公共控制合同](../design/behavior/public-control.md)分别报告。
+JSON-RPC `id` 与业务 `operationId` 的区别、丢回执后的对账和取消边界，唯一见[对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)中的「请求关联与业务操作身份分开」；持续观察的顺序、Gap 与完成事实见[传输、业务回执与持续读取](../design/behavior/public-control.md#传输业务回执与持续读取)。新接口须让这些事实与选择、实际呈现、输入、投递、任务接受和磁盘耐久性分别报告。
 
 ## 同一任务交付和验收
 

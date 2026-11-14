@@ -31,7 +31,7 @@
 
 ## Agent 操作桌面主画面与保留对话输入
 
-用户希望「Agent CLI 能操作 AgentMux 桌面应用本身」，Agent 和用户交流时能切换界面；理想情况下，Mote 在浮窗里交流的同时，可以改变主画面当前聚焦的 Space 或某个 Goal，也方便 Agent 自行迭代、调试和观察。该能力沿同一公共业务服务的 `app focus`／`app inspect`、`space focus` 与 `goal focus` 接入，具体呈现与输入仍由原 Client owner 执行；不把系统桌面 Computer Use、Browser 操作或 Agent／Run 生命周期并成另一条 Runtime。
+Agent CLI 能操作 AgentMux 桌面应用本身：Agent 和用户交流时能切换界面；理想情况下，Mote 在浮窗里交流的同时，可以改变主画面当前聚焦的 Space 或某个 Goal，也方便 Agent 自行迭代、调试和观察。该能力沿同一公共业务服务的 `app focus`／`app inspect`、`space focus` 与 `goal focus` 接入，具体呈现与输入仍由原 Client owner 执行；不把系统桌面 Computer Use、Browser 操作或 Agent／Run 生命周期并成另一条 Runtime。
 
 Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上下文动作的一次带入语义，只见[Work、Survey、Recall 与 Mote 的导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。本节公共动作继续分别报告选择、呈现和输入，不因入口或共享实体合并各上下文的目标。
 
@@ -47,15 +47,23 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 - **观察不改工作。** Agent 可只读取得准确主面与浮窗状态，输出能用于后续精确命令；不触发切换、聚焦、启动／停止、重投、refresh、展开或收起。观察仅含语义身份和呈现／输入状态，不读取草稿正文、终端输入、选区文字或剪贴板；缺事实明确 unknown，不能按配置或记忆填成已观察。
 - **失败保留原能力。** 目标不存在、关联未知、渲染尚未确认、overlay 阻挡或输入不可达分别报告，已应用的展示选择与未确认的真实结果不能混同；服务窗说明失败步骤和现有可用状态，不遮住原工作面、不抢输入，也不因流程观察失败关闭健康 Agent。普通进程重启先恢复原 durable 选择、工作面、浮窗固定目标与 Session 引用，继续原恢复路径；瞬时 caret 不冒充持久化事实。
 
-命令扩展、缺省建议、现有 source 缺口与实施验收见 [Agent 操作桌面主画面与保留对话输入](#agent-操作桌面主画面与保留对话输入)；桌面语义导航 CLI 合同（本机过程资料：`docs/plans/desktop-focus-navigation-cli-design.md`）。本项与 Agent 创建／空间移动、Mote 快捷面 hover 各有独立交付边界，复用各自已有 owner，不重做它们的生命周期。
+本项与 Agent 创建／空间移动、Mote 快捷面 hover 各有独立交付边界，复用各自已有 owner，不重做它们的生命周期。精确参数与缺省值以当前执行版本的 `amux app focus --help`、`amux space focus --help` 与 `amux goal focus --help` 为准，回执类型从[公共能力来源导航](../../specs/public-capabilities.md#按能力找到定义与消费者)的展示导航一行进入。
 
 Settings 是原主画面之上的覆盖面，`app focus` 可按原 Settings catalog 的准确 section ID 打开分节，`app inspect` 发现候选并报告实际已选分节；不把 Settings 另造为主 Surface，不复制配置、页面草稿或目录。默认 preserve 只保留仍可用的真实输入，不能通过 Panel 自动聚焦搜索或关闭复焦破坏它；原主面输入因覆盖而不可用时如实报告，Mote 浮窗的可用输入继续保留。未知分节只拒绝本次导航并保留原页面与草稿。显式关闭 Settings 也沿原覆盖面 owner，保留未保存编辑与仍可用输入，不用关闭后重新创建页面或强制复焦来伪造保全。
 
 自举像素观察和可停止录制沿[工作面自截图与录制](capture-and-recording.md#工作面自截图与录制)，原语义操作、像素和权限决定各自沿原 owner。
 
+### 对话消费者的只读观察
+
+`app.inspect` 可带 `conversation` 查询，CLI 以 `app inspect --input` 消费同一参数：准确 Host／Session、可选预期 Run／consumer，以及带来源身份的原记录引用。不带查询继续返回原客户端观察；带查询返回独立的 `agentmux.conversation-consumer-observation.v1`，只读取已挂载消费者。没有消费者返回空集合，身份或文档来源未知保持 unknown，不冒充 Session 不存在或记录缺失。
+
+观察沿现有 Main／Renderer 通道返回已加载 owner、实际 DOM 所属窗口与文档代次、原消费者的读取资格、已接受和因阅读保护暂缓提交的窗口、checkpoint／来源覆盖、在途与订阅状态，以及准确记录是否在原窗口中。挂载消息卡、正文是否被折叠／隐藏，以及原记录展开控件分别表达；正文未隐藏不证明处于屏幕可视范围或像素已经绘制。记录成员关系不证明原生采用、消息送达或正文已完整读到。
+
+查询不挂载、激活、重读、刷新或重试，不解除阅读保护，不改变焦点、草稿、Run 或输入资格。只保留挂载回调，不复制正文、窗口、来源账本或持久状态；DOM 扫描只随被查询消费者及准确引用发生，不新增 Reader、轮询或无关 Session 的工作。对话读取与重试行为仍由[同一对话阅读面](conversation-mode.md#连续统一的对话列表)约束。
+
 ## Agent 通过 CLI 打开文件与控制原工作面
 
-用户要求继续补齐「文件／Editor 打开、Region 展示模式切换、Region 交换」，让 Agent 能用本产品既有 CLI 操作原工作面。文件资源、Agent 的 Session 展示偏好与 Region 的空间表现必须按原 owner 分清，不复制文件服务、catalog、布局或 Runtime。
+Agent 能用本产品既有 CLI 打开文件／Editor、切换 Region 展示模式和交换 Region，操作原工作面。文件资源、Agent 的 Session 展示偏好与 Region 的空间表现必须按原 owner 分清，不复制文件服务、catalog、布局或 Runtime。
 
 - 文件按精确 Zone 的真实目录与字面目录相对路径打开，再沿原资源关系映射到既有 filesAPI 的 Workspace 相对路径；Topic 目录不能偷换成隐藏容器根。显示落点使用原 Space／Zone／display Workspace／group 身份，不能按 caller cwd、标题或当前主面猜位置。目录与原资源根映射未确认时如实未知，不改执行事实。文件入口打开或复用原 canonical File Tab／Region；零 Tab 的已有 Zone 可打开第一张 File Tab，不新建 Zone、Agent／Run，不替换 Launcher 或别人的内容。显式显示落点不能把资源根改成显示目录，也不能静默重归属已有 File Tab。
 - 文件默认后台放置，显式导航也默认保留仍合资格的现有 Mote／Terminal／Editor 输入、草稿和组字；旧输入因显示变化失去资格须如实未确认，不能 focus／blur 后恢复来补签。资源创建、读取、实际格式、精确落点与导航是否仍获授权分别说明；异步读取完成前用户已经导航，不能抢回主面或把晚回执指向替换者。文件面已建立但读取失败仍保留原面与准确原因，不能从未获导航授权推断未打开。目录不作为 File 打开，书签源码不顺带开 Browser；媒体和二进制沿真实预览，不冒可编辑 Editor。
@@ -67,82 +75,37 @@ Settings 是原主画面之上的覆盖面，`app focus` 可按原 Settings cata
 
 ## 自举：在 AgentMux 里开一个 Agent 优化 AgentMux
 
-用户原话：「在 AgentMax 里面提供方便调试 AgentMax、并且能获取相关信息的基础设施，方便它自举」「我希望能在 AgentMax 里面开一个 Agent 去优化 AgentMax 本身。这就需要它有方法能够快速操作 AgentMax，而不是仅仅通过 Computer Use 去点击；而且在它操作之后，AgentMax 的一些相关元信息和截图也要能给它看，用来加速」「这个对代码架构的挑战可能会相对比较高，需要深思熟虑」。
+目标是在 AgentMux 里开一个 Agent 调试和优化 AgentMux 本身：它要能快速操作 AgentMux，而不是只靠 Computer Use 点击界面；操作之后能取得相关元信息和截图来加速迭代。用户提醒这对代码架构的挑战较高，需要深思熟虑。
 
 自举沿产品公共能力完成三个环节：
 
-- **快速操作**：Agent 通过[对象优先公共服务](#对象优先-cli-与统一公共业务服务)调用原业务 owner；CLI、Unix、HTTP 与 SSH stdio 共用 JSON-RPC 2.0 方法。具体命令、参数及可用能力来自实际注册与运行时发现。`control.ts` 的内部 typed Client port 不充当另一种公开 wire。
+- **快速操作**：Agent 通过[对象优先公共服务](#对象优先-cli-与统一公共业务服务)调用原业务 owner；CLI 与各公开传输（见[服务传输与接入层](../../specs/public-capabilities.md#服务传输与接入层)）共用同一 JSON-RPC 2.0 方法。具体命令、参数及可用能力来自实际注册与运行时发现。`control.ts` 的内部 typed Client port 不充当另一种公开 wire。
 - **回看结果**：`app inspect` 观察真实展示选择、呈现和输入事实，`app snapshot` 聚合跨对象事实；各对象的 inspect 读取该对象。截图能力仍由 Desktop Main 持有，按下述目标和观察时刻合同扩展；暂不可用的观测如实报告。
 - **共同入口**：自举操作与观察复用同一公开服务、caller 校验、业务错误和权威事实，沿 Core 与 Client 原 owner 分工。
 
-三条硬边界，逐条都有它防的具体坏事：
+自举还必须守住四条边界，每条都对应一种具体的错误结果：
 
-- **观测归原对象的公共方法**。应用观察与对象 inspect 按[统一对象语言](#对象优先-cli-与统一公共业务服务)分域；截图与元信息扩展仍复用同一 caller 校验、错误事实及回执合同，保持原观察权限边界。
-- **截图是 Desktop Main 的职责，且必须标注它拍到的是什么时刻**。原生窗口能力只有 Main 持有（见[Owner 边界表](shared-rules.md#owner-边界)）。一张不带 `observedAt` 与目标 region 身份的截图，会让 Agent 拿一张操作前的旧图去判断操作成功了——**这比不给图更糟**，按[健康能力与未知状态](../../../AGENTS.md#健康能力与未知状态)，宁可如实说"这一刻抓不到"。
-- **元信息只投影既有真相，不为自举新建注册表**。布局树、Session 投影、Region 绑定都已经有唯一 Owner；观测接口读它们，绝不另存一份"给 Agent 看的状态"——两份状态一定会分叉，而分叉时 Agent 会照着错的那份改代码。
-- **自举 Agent 不享有特权**。它和任何 Agent 走同一套授权：能做什么由它启动时固定的 launch option 决定。一个"因为它在优化我们自己所以放开限制"的后门，是这个功能唯一真正危险的失败模式。
-
-
-
-### 对话消费者的只读观察
-
-`app.inspect` 可带 `conversation` 查询，CLI 以 `app inspect --input` 消费同一参数：准确 Host／Session、可选预期 Run／consumer，以及带来源身份的原记录引用。不带查询继续返回原客户端观察；带查询返回独立的 `agentmux.conversation-consumer-observation.v1`，只读取已挂载消费者。没有消费者返回空集合，身份或文档来源未知保持 unknown，不冒充 Session 不存在或记录缺失。
-
-观察沿现有 Main／Renderer 通道返回已加载 owner、实际 DOM 所属窗口与文档代次、原消费者的读取资格、已接受和因阅读保护暂缓提交的窗口、checkpoint／来源覆盖、在途与订阅状态，以及准确记录是否在原窗口中。挂载消息卡、正文是否被折叠／隐藏，以及原记录展开控件分别表达；正文未隐藏不证明处于屏幕可视范围或像素已经绘制。记录成员关系不证明原生采用、消息送达或正文已完整读到。
-
-查询不挂载、激活、重读、刷新或重试，不解除阅读保护，不改变焦点、草稿、Run 或输入资格。只保留挂载回调，不复制正文、窗口、来源账本或持久状态；DOM 扫描只随被查询消费者及准确引用发生，不新增 Reader、轮询或无关 Session 的工作。对话读取与重试行为仍由[同一对话阅读面](conversation-mode.md#连续统一的对话列表)约束。
+- **观测归原对象的公共方法。** 应用观察与对象 inspect 按[统一对象语言](#对象优先-cli-与统一公共业务服务)分域；截图与元信息扩展仍复用同一 caller 校验、错误事实及回执合同，保持原观察权限边界。
+- **截图由 Desktop Main 持有，并标明拍摄时刻与目标。** 原生窗口能力只有 Main 持有（见[Owner 边界表](shared-rules.md#owner-边界)）。截图必须带 `observedAt` 与目标 Region 身份；缺少它们时，Agent 可能拿操作前的旧图判断操作已经成功。这一刻取不到截图时如实说明取不到，沿[健康能力与未知状态](../../../AGENTS.md#健康能力与未知状态)，不用时刻不明的图代替。
+- **元信息只投影既有事实，不为自举新建注册表。** 布局树、Session 投影、Region 绑定已有唯一 owner；观测接口读取它们，不另存一份“给 Agent 看的状态”。两份状态会分叉，分叉后 Agent 会依据错误的副本修改代码。
+- **自举 Agent 不享有特权。** 它和其他 Agent 使用同一套授权：能做什么由其 Run 的调用凭据（capability）、原任务授权及启动时确定的 Provider 权限选项决定，不因“正在优化 AgentMux 自身”放宽任何限制；这类后门是本功能最危险的失败方式。
 
 ## Browser 通用能力协议与 CLI/Skill 接入
 
-选型论证、现状缺口与竖切顺序见
-[Browser 通用能力协议与 CLI/Skill 接入](#browser-通用能力协议与-cliskill-接入)；`browser-capability-protocol-and-cli-skill.md`（本机过程资料：`docs/reviews/browser-capability-protocol-and-cli-skill.md`）；
-本节只记约束。
+本节持有 Browser 能力的协议层，以及 CLI、Skill 与其他客户端怎样接入这一层。操作记录、人工接管与交还、历史入口和重复 `operationId` 的行为归[Browser 工作面](browser-workface.md#browser-工作面-1)，本节只引用。
 
-- **协议层是 Browser 能力的唯一事实入口。** 能力清单、权限、身份、requestId、operationId、
-  事件与进度、取消、历史、回放和 indeterminate 结果都从这一层给出。任何客户端——CLI、编辑器
-  自身、以及将来的 MCP/HTTP 适配器——都只能是这一层之上的平级客户端，不得绕过它直接驱动
-  Browser，也不得为自己保留一份第二语义。编辑器现有的停止、历史与回放入口属于"与协议重叠"
-  的那部分，必须收口到同一入口；与能力无关的视口、截图、DevTools 等本地控制不在此列。
-- **协议刻意放宽的类型，收窄点只能有一个。** 协议不持有 Desktop 的步骤语义，也不该为了 Desktop 多
-  一档状态就发一次版本，所以它把 phase 与 step 放宽。代价落在 Desktop：收窄必须只经一个门，两个门
-  就是两份词表，加一档时漏改一处会让那一档在其中一条路上静默降级。认不出的状态只能落到"不确定"
-  那一档，不得改写成一个眼熟的档位——那是拿一个我们没有的事实冒充。
-- **CLI 只做适配，不做判断。** 它把命令与 stdin 转成协议请求、把回执按稳定信封打印出来。
-  凡是"什么算合法请求"的判断都属于协议层：同一条规则不许在 CLI 与协议各写一遍，也不许只写在
-  CLI 里——后者会让直连协议的客户端拿到一个 CLI 客户端拿不到的不确定结局。
-  - Core 已区分的“另一条消息正在投递”与“Session Store 读取未确认”，经过公开 Control 与 CLI 后仍须保留对应错误类型；消息与原 Session/Run 保持，未确认不等于退休或进程故障。提示只给真实可执行的下一步，不指示重新创建、停止健康 Run 或盲重放未知投递。错误码由同一协议来源给出，不在 CLI 另抄清单；协议回执通过不替代 Desktop IPC 错误字段传输的实际证明。
-- **Agent 面向的能力说明必须从协议与运行时能力生成。** 机械部分——能调哪些页面能力、签名、
-  错误码——只能有一个来源，由它渲染出 Skill 文本。手抄一份再用扫描测试去对齐不算满足：
-  那只对齐名字，不对齐签名与错误信息，且扫描自身会在锚点消失时静默恒真。散文式的意图说明
-  仍由人维护，但不得与机械清单争夺真相。
-- **页面能力清单作为数据跨层流动，不作为操作进协议。** 协议表面保持 `browser` 命名空间下
-  那几个操作；`snapshot` / `click` / `js` / `cdp` 这类页面能力属于库层词汇，提升成协议操作会
-  让每次增删能力都变成一次协议版本变更。观察—行动—验证闭环写在脚本里，`js` / `cdp` 两个
-  逃生口是必须项。
-- **operation 的寿命长于任何一条连接。** 一次操作从可被引用的那一刻起就有稳定 identity，
-  并且要在操作还在跑的时候就能被别的连接查询、订阅进度和取消。CLI 断开、daemon 重启或
-  客户端换一条连接都不得让操作事实消失或变成"没有这回事"；已经无法继续的操作按既有 durable
-  历史表达为中断或不确定，不伪装成正在执行。operation identity 只能有一个铸造点。
-- **取消是对 operation 的取消，不是对请求的取消。** 判据是"那次操作是否停下了"，
-  而不是"我这条请求是否被放弃"。对一个已经结束的操作取消是幂等成功并答出它的终局，不是失败。
-- **人工接管优先，且拒绝必须是机器可判的。** 人在控制中时，Agent 的驱动请求被拒绝，
-  恢复只能由人明确发起；Agent 不得靠重试静默夺回页面。这条拒绝要带类型化的原因，
-  让协议客户端能把"人在用这一页"与"出故障了"分开，而不是收到一句散文。
-- **协议自身的流程失败不得拿走 Browser 已有的能力。** 订阅建立不成、进度流中断、查不到某条
-  operation、版本协商不一致——这些都属于我们的流程状态：操作照跑、页面照用，同时用服务窗说清
-  哪一步没走通、现在按什么状态在跑、要恢复完整能力该做什么。只有能力本身真的不可用
-  （页面没了、进程死了、注入清单读不出来）才允许阻断。进度有缺口时明说缺口，不静默丢事件。
-- **普通响应与进度订阅各守其合同。** 公开 JSON-RPC 连接可承载多个关联请求；每个普通请求只有对应响应，
-  订阅先回应其原操作与缺口事实，再以独立 notification 传递后续进度。Unix／SSH 采用严格 newline framing，
-  HTTP 由同一公开服务输送响应与事件，不能用流式需要放宽普通帧的合法性。事件游标只在**一个
-  进程的生命周期内**有意义——事件落盘时不带号，重启后拿旧游标接着要没有意义，客户端要么从头要、
-  要么接受一个明说的缺口。
-- **外部客户端要够得着这条协议。** 端点位置与协议版本必须可以从产品自身问出来，
-  而不是要求对方复算内部派生规则。这条服务的是"另一个语言写的客户端能接进来"，
-  不是某个具体客户端。
-- **全链站点/厂商无关。** 协议、CLI、生成出的能力说明与公共测试都只依赖通用事实
-  （页面能力名、通用逃生口、URL scheme、导航事件、人工输入）。不得在实现分支、公共测试或
-  验收条件里预设具体站点、按钮文案或厂商协议；真实站点只作黑盒验证输入。
+- **协议层是 Browser 能力的唯一事实入口。** 能力清单、权限、身份、requestId、operationId、事件与进度、取消、历史、回放和 indeterminate 结果都从这一层给出。CLI、编辑器自身以及后来的 MCP／HTTP 适配器都是这一层之上的平级客户端，不绕过它直接驱动 Browser，也不各自保留第二份语义。编辑器现有的停止、历史与回放入口与协议重叠，必须收口到同一入口；与能力无关的视口、截图、DevTools 等本地控制不在此列。
+- **协议放宽的类型只在一处收窄。** 协议不持有 Desktop 的步骤语义，也不为 Desktop 多一档状态而发版本，所以 phase 与 step 在协议中放宽。Desktop 收窄这些值时只经过一个入口：两个入口就是两份词表，新增一档时漏改一处会让这一档在其中一条路径上静默降级。认不出的状态落到“不确定”，不改写成一个看起来相近的已知档位。
+- **CLI 只做适配，不做判断。** CLI 把命令与 stdin 转成协议请求，按稳定信封打印回执。“什么算合法请求”只在协议层判断（通用规则见[公共业务协议先于 CLI](#对象优先-cli-与统一公共业务服务)）：既不在 CLI 与协议各写一遍，也不只写在 CLI，否则直连协议的客户端会得到 CLI 客户端得不到的不确定结局。
+- **面向 Agent 的能力说明从协议与运行时能力生成。** 页面能力名、签名和错误码这类机械部分只有一个来源，由它渲染 Skill 文本。手抄一份再用扫描测试对齐不算满足：扫描只对齐名字，不对齐签名与错误信息，并且会在锚点消失时静默恒真。意图说明仍由人维护，但不与机械清单争夺事实。
+- **页面能力清单作为数据跨层流动，不作为协议操作。** 协议表面保持 `browser` 命名空间下的少量操作；`snapshot`、`click`、`js`、`cdp` 这类页面能力属于库层词汇，提升为协议操作会让每次增删能力都变成一次协议版本变更。观察—行动—验证闭环写在脚本里，`js` 与 `cdp` 两个逃生口是必须项。
+- **operation 的寿命长于任何一条连接。** 一次操作从可被引用的那一刻起就有稳定身份，运行期间可被其他连接查询、订阅进度和取消。CLI 断开、daemon 重启或客户端换连接都不能让操作事实消失或变成“没有这回事”；无法继续的操作沿[Browser 工作面](browser-workface.md#browser-工作面-1)的历史合同表达为中断或不确定。operation 身份只有一个铸造点，重复提交由同一唯一日志 owner 裁决。
+- **取消针对 operation，不针对请求。** 判据是那次操作是否停下，而不是某条请求是否被放弃。对已经结束的操作取消是幂等成功，并返回它的终局。
+- **人工控制期间的拒绝必须机器可判。** 人工接管与交还的行为归[Browser 工作面](browser-workface.md#browser-工作面-1)。协议层要求：人在控制中时，Agent 的驱动请求被拒绝且带类型化原因，使协议客户端能区分“人在用这一页”与故障，而不是只收到一句说明文字；Agent 不能靠重试夺回页面。
+- **协议自身的流程失败不拿走 Browser 已有的能力。** 订阅建立失败、进度流中断、查不到某条 operation、版本协商不一致都属于流程状态：操作照常执行、页面照常可用，同时用服务窗说明哪一步没有走通、当前按什么状态运行、怎样恢复完整能力。只有能力本身不可用（页面已不存在、进程已退出、注入清单无法读取）才阻断。进度有缺口时说明缺口，不静默丢事件。
+- **事件游标只在一个进程生命周期内有效。** 普通响应与订阅的通用帧合同见[传输、业务回执与持续读取](#传输业务回执与持续读取)。Browser 事件落盘时不带序号，重启后用旧游标续读没有意义：客户端从头读取，或接受一个明确说明的缺口。
+- **外部客户端能接入这条协议。** 端点位置与协议版本必须可以从产品自身问出（`system endpoint`），不要求对方复算内部派生规则；目标是让另一种语言写的客户端能接入，而不是服务某个具体客户端。
+- **全链路与站点、厂商无关。** 协议、CLI、生成的能力说明与公共测试只依赖通用事实（页面能力名、通用逃生口、URL scheme、导航事件、人工输入）。实现分支、公共测试和验收条件不预设具体站点、按钮文案或厂商协议；真实站点只作黑盒验证输入。
 
 ## 本地页面托管
 
@@ -150,49 +113,53 @@ Settings 是原主画面之上的覆盖面，`app focus` 可按原 Settings cata
 
 ## 对象优先 CLI 与统一公共业务服务
 
-用户确认对象优先的统一 CLI，保留 `agent open` 和 `space mv`。PMO 仍是协调工作方法／角色，不把原 PMO 查询改名为 Mote 查询；跨对象观察归 `app snapshot`，各对象的 inspect 归其对象，原 PMO activity 来自 Goal 的活动事实，归 `goal activity`。本节定义新的统一目标；旧顶层动词与原公开 Demand 词汇在对应能力落地时直接替换，不留兼容别名。已有能力的当前来源不等于本目标已经实现。
+公开 CLI 按业务对象组织，`agent open` 与 `space mv` 是创建 Agent 与移动展示位置的主入口。PMO 仍是协调工作方法／角色，不把原 PMO 查询改名为 Mote 查询；跨对象观察归 `app snapshot`，各对象的 inspect 归其对象，原 PMO activity 来自 Goal 的活动事实，归 `goal activity`。公开词汇以 Goal 取代 Demand，旧顶层动词与原 Demand 词汇不保留兼容别名。
 
 **主公开 CLI 的可执行名统一为 `amux`。** 命令发现与帮助、版本输出、skill／运行时指引、复制与错误恢复动作、`AGENTMUX_CLI` 注入的可执行路径、默认远端 CLI 调用及打包安装产物必须使用同一真实 `amux` 入口，不依赖 shell alias 或保留另一主 CLI 名作为兼容用法。源码、编译产物、安装入口与实际消费分别核对，不能只改展示文本或用别名可执行代签一致。
 
 `AGENTMUX_CLI` 环境变量键名保持不变，其值仍须指向实际 `amux`。产品品牌 `AgentMux`、包作用域 `@agentmux`、内部文件与符号、环境变量、schema、协议及独立 helper 的身份各有原 owner，不随主 CLI 拼写机械替换。用户已保存的显式 command／path 保持原值；统一默认入口不改写这些配置，不停止、重启或替换健康 Run，也不更改原 Session、持久数据或工作面。
 
-- **公共业务协议先于 CLI。** 所有产品业务先由一套公开、类型化的 JSON-RPC 服务合同定义；CLI、HTTP 与 SSH 共用同一方法、授权、业务结果和错误事实。传输只承担请求／响应与流的输送，CLI 只解析参数、调用服务并呈现回执，不直接读写本机 Store 决定 Session、角色、Goal、消息或空间业务。公共方法不能要求调用者是 Electron／React 客户端，也不能要求当前 UI 焦点或本地目录才能解释精确目标。
+- **公共业务协议先于 CLI。** 所有产品业务先由一套公开、类型化的 JSON-RPC 服务合同定义；CLI 与各公开传输共用同一方法、授权、业务结果和错误事实。传输只承担请求／响应与流的输送，CLI 只解析参数、调用服务并呈现回执，不直接读写本机 Store 决定 Session、角色、Goal、消息或空间业务。公共方法不能要求调用者是 Electron／React 客户端，也不能要求当前 UI 焦点或本地目录才能解释精确目标。
 - **权威职责与空间来源。** Core 保持无 Electron／React 依赖，持有 Provider、AgentSession、权限、Hook、readiness、语义恢复，以及前端独立的持久空间身份、拓扑、布局、选择与全部绑定；空间与执行身份的含义见[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)。ctxmux 独占 Run、PTY、ordered bytes、Replay、Gap 与 Attachment。Client 消费 Core 空间事实，负责屏幕呈现与真实输入焦点；配置、编辑、文件／Topic 目录、Git 与 Browser 资源能力仍由原 Host／Client owner 提供，经同一公共服务接入。不新增一套 Runtime、Topic／Project／Space／Session registry、持久空间镜像或 CLI 专用业务判断。
-- **请求关联与业务操作身份分开。** JSON-RPC 关联 ID 只匹配请求与响应，不冒充 AgentSession／Run、持久创建身份或 Browser／Toolkit 等 operation ID。现有 operation 级查询、停止与输出流是业务能力，可由 JSON-RPC 方法调用，不因采用 RPC 而取消或混为 transport cancellation。丢回执时按原 owner 的精确业务身份对账；未知不当从未发生，不重复启动、移动或重投首句。健康 Agent 保留、重启恢复和流程降级继续沿原合同，不以 wire／握手失败关闭健康 Run。
-- **同一公开表达。** 下列对象命令树约束实际 CLI、help、技能输出、运行时指引、复制名片与 RPC 方法语义；不能只换 help 或把原本跨域能力藏到另一个别名。对象发现的结果须可原样用于精确输入，AgentSession、执行资源与展示位置分开返回；公开 Goal 词汇替换 Demand，沿用同一个原持久身份、已保存内容及关联，不造新 Goal、不改 ID 或用户数据。
+- **请求关联与业务操作身份分开。** JSON-RPC 关联 ID 只匹配一次 wire 请求与它的响应，换连接或重发时就会改变；业务 `operationId`（CLI `--operation-id`）跨连接、跨进程重启保持不变，丢回执后据此沿原 owner 对账。因此 JSON-RPC ID 不冒充 AgentSession／Run、持久创建身份或 Browser／Toolkit 等 operation ID。现有 operation 级查询、停止与输出流是业务能力，可由 JSON-RPC 方法调用，不因采用 RPC 而取消或混为 transport cancellation；取消或断线只释放相应 reader，不停止健康 Agent 或原业务 operation。丢回执时按原 owner 的准确业务身份对账；未知不当作从未发生，不重复启动、移动或重投首句。健康 Agent 保留、重启恢复和流程降级继续沿原合同，不以 wire／握手失败关闭健康 Run。
+- **业务错误经传输保真。** Core 已区分的错误类型（例如“另一条消息正在投递”与“Session Store 读取未确认”）经过公开 Control、RPC 与 CLI 后仍保留原类型、detail、候选与 unknown；消息与原 Session／Run 保持，未确认不等于退休或进程故障。提示只给真实可执行的下一步，不指示重新创建、停止健康 Run 或盲目重放未知投递。错误码由同一协议来源给出，不在 CLI 另抄清单；协议回执通过不替代 Desktop IPC 错误字段传输的实际证明。
+- **同一公开表达。** 对象命令树约束实际 CLI、help、技能输出、运行时指引、复制内容、错误恢复命令与 RPC 方法语义；不能只换 help 或把原本跨域能力藏到另一个别名。对象发现的结果须可原样用于准确输入，AgentSession、执行资源与展示位置分开返回；公开 Goal 词汇替换 Demand 时沿用同一个原持久身份、已保存内容及关联，不造新 Goal、不改 ID 或用户数据。
+- **展示导航沿原合同。** `app focus` 表达主 Surface 的选择，`space focus` 与 `goal focus` 表达精确对象导航；选择、真实呈现和输入 caret 仍分开报告，默认保原 Mote 对话输入、草稿和组字，不改执行 cwd、不关闭健康 Session。原展示 owner 及对象间职责唯一见[《Agent 操作桌面主画面与保留对话输入》](#agent-操作桌面主画面与保留对话输入)，不因命令归域再造 router 或 caret owner。
 
-统一命令树目标如下；表中每个动作仍须服从其原业务 owner 的权限、只读／副作用和恢复边界，是用户已授权实施的公开目标，不是当前已验收能力清单。
+### 命令按业务对象归域
 
-| 对象入口 | 统一动作 |
-| --- | --- |
-| `whoami` | 自身身份、空间位置与实际可用能力 |
-| `agent` | `ls`、`inspect`、`open`、`rename`、`view`、`output`、`send`、`discuss`、`handoff`、`interrupt`、`resume`、`stop`；`role ls/register/resolve` |
-| `space` | `ls`、`inspect`、`rename`、`mv`、`swap`、`bind`、`unbind`、`focus`、`promote`、`arrange` |
-| `file` | `open`、`view` |
-| `terminal` | `open` |
-| `browser` | `open`、`run`、`history`、`inspect`、`stop`、`follow`、`replay` |
-| `goal` | `ls`、`inspect`、`create`、`update`、`delete`、`assign`、`start`、`handoff`、`focus`、`link-session`、`link-project`、`decisions`、`activity` |
-| `message` | `inbox check/ack`；`dispatch open/report/inspect` |
-| `app` | `inspect`、`snapshot`、`search`、`focus` |
-| `mote` | `playbook pmo` |
-| `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/inspect/test`；`workspaces register`；`browser-links ls/forget` |
-| `system` | `doctor`、`endpoint`；`crash-log inspect/reveal`；`metrics get/watch` |
-| `device` | 本机用户管理：`ls`、`link`、`revoke`；已认证加密设备仅以 `hello` 命名自身。授权与撤销沿[手机版 Relay 连接](#手机版-relay-连接) |
-| `toolkit` | `ls`、`inspect`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |
+对象入口回答“操作哪一类业务对象”，动作回答“对它做什么”。以下几项只是说明归属的例子，不是完整清单：`agent` 承担 Agent Session 的发现、输入、对话与生命周期；`space` 承担持久空间身份、布局与准确导航；`goal` 承担 Goal 范围、执行责任与巡查；`app` 承担跨对象观察、全局搜索与主画面导航；`settings` 承担 Host、Executor 等配置；`system` 承担端点、诊断与指标；`device` 承担手机设备的接入与撤销。
+
+- 完整模块、动作与参数只以当前执行版本的 `amux --help`、`amux <对象> --help`、`--skill` 及其注册来源 [`AGENTMUX_CLI_COMMANDS`](../../../packages/core/src/agentmux-cli-commands.ts) 为准；本页不手抄模块或动作清单。
+- 新能力优先归入其业务对象已有的入口；只有出现新的业务对象时才新增对象入口。不按 Feature 名新增顶层域、兼容别名或通用任意执行入口。
+- 每个动作仍服从其原业务 owner 的权限、只读／副作用与恢复边界；命令已注册不等于能力已验收。
+
+### PMO 的发现与跨工作区工作流
 
 - **PMO 全局发现完整保留。** `app snapshot` 聚合原 PMO 跨对象观察：真实 Project 资源、Workspace、Topic／Mote／Space／Zone、配置 Executor、活动 Agent、Core Session、Goal、决策与活动事实；按各自来源保留已知、不可用和 unknown，不把不可用伪装成空列表。对象发现必须覆盖原 `list projects/active-agents/sessions` 与 PMO 全局观察的事实，不能只剩调用者的当前 Space／Workspace。配置 Executor 由 `settings executors` 发现，Agent 与 Session 由 `agent` 发现，空间与其资源绑定由 `space` 发现，各项 inspect 按对象提供；Project／Workspace 资源发现由原权威来源供给聚合及关联观察，不能从 Space 名称或单条 Workspace ID 伪造 Project。`goal activity` 只取原 Goal 活动来源，不把 Runtime 日志或跨域 snapshot 当成 Goal 已发生的活动。
 - **分类、Topic 与资料沿原事实发现。** 全局 Category／Topic／Mote 及其资料的发现复用原目录／文件 owner，分类描述、正文与修订来源明确；Topic 对应原 Zone，主分类关系只取 Core 空间图，不把当前活动 Tab、目录路径或调用者 cwd 当归属。未分类与局部 unknown 分别表达，宿主或范围不可用时显式 unknown／不可用，不补一个全局 registry，不借当前项目、默认 Mote 或另一份 Session 列表补齐事实。部分来源失败保留其他已经观察到的结果与原工作面，不宣称全局资料已经完整。知识对象的公共接入见[《Topics 知识库的公共接入》](#topics-知识库的公共接入)。
-- **PMO 从别处也能执行真实工作流。** 人或 PMO 位于其他 Workspace，显式指定真实项目资源及目标 Space 位置，通过同一 RPC 业务编排选择或创建 Git／目录 Zone、建立首张 Tab、打开指定 Executor 的 Agent 并交付首任务，取得精确 AgentSession／Run 与空间地址，随后可发送、观察和操作。Project 的资源身份／Host／目录与显示 Space／Zone 地址分别指定、校验和返回，不能从 Space、调用者 cwd 或焦点猜资源；目标没有现成 Tab 仍可开始，不要求锚点。资源创建、Workspace 登记、展示放置、Core 创建与首句投递分别保留真实事实；部分失败保留已建资源与健康 Agent，投递 confirmed 不抬升为 Agent 接受／开始／完成任务。新 Zone 的资源 input 须携带显式 Project 身份，沿原配置的 Host 与仓库／目录事实解析；展示 Space 可为 Folder、Mote 或知识库 Category，不限为资源目录 Space；具体 Topic 对应目标 Zone，层级只见[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)。已有 Zone 使用本 Zone 的真实资源，不要求重选 Project。回执分别给出 Project、资源来源 Workspace、Host／目录与展示地址；同一业务操作不能更换资源后复做。具体 carrier 沿下述已评审派生合同，不把尚未实施语法当成已可用。
-- **`mote playbook pmo` 只读。** 它是说明 PMO 方法、分工、目标与完成标准确认、发现资源、编排已有能力、回读事实及未知恢复方式的工作手册，引用实际公开 CLI 及其真实边界，不启动 Agent、不自动执行步骤、不投递任务、不改变角色注册；已存在的 SOUL／Wiki 与用户资料保持原样，不机械改写。能力尚未落地时明确说明，不把目标命令写成已经可用的操作承诺。
-- **展示导航沿原合同。** `app focus` 表达主 Surface 的选择，`space focus` 与 `goal focus` 表达精确对象导航；选择、真实呈现和输入 caret 仍分开报告，默认保原 Mote 对话输入、草稿和组字，不改执行 cwd、不关闭健康 Session。原展示 owner 及对象间职责唯一见[《Agent 操作桌面主画面与保留对话输入》](#agent-操作桌面主画面与保留对话输入)，不因命令归域再造 router 或 caret owner。
+- **PMO 从别处也能执行真实工作流。** 人或 PMO 位于其他 Workspace 时，经同一 RPC 业务编排完成下列流程；目标还没有 Tab 也能开始，不要求锚点：
+  1. 显式指定真实 Project 资源与目标显示位置。Project 的资源身份、Host 与目录，和显示用的 Space／Zone 地址分别指定、校验和返回，不从 Space、调用者 cwd 或焦点猜资源。
+  2. 选择已有 Zone，或创建 Git／目录 Zone。新 Zone 的资源输入须携带显式 Project 身份，规则见[《新 Zone 的资源来源》](#新-zone-的资源来源)；已有 Zone 使用本 Zone 的真实资源，不要求重选 Project。展示 Space 可以是 Folder、Mote 或知识库 Category，不限于资源目录 Space；具体 Topic 对应目标 Zone，层级只见[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)。
+  3. 建立首张 Tab，打开指定 Executor 的 Agent 并交付首句任务，取得准确 AgentSession／Run 与空间地址，随后可以发送、观察和操作。
 
-- **Host 的公开运行能力沿同一公共服务。** 长期无 UI Host 借原 Core，以 `runtime.bootstrap`、`runtime.invoke`、`runtime.events`、`runtime.history-watch`、`runtime.release-consumer` 提供有限、从原 SDK 类型派生的调用与观察；不复制 Provider、Session Store、Run Runtime、方法白名单或 wire codec。缺少 Host 端口时明确不可用，不隐式创建另一个 Core。五个 SDK 方法只接受传输 owner 实际认证／批准的用户或设备 principal；Agent capability 不能提升为用户输入权限，managed Agent 继续原 `agent.*` 语义与 A2A owner，调用 `runtime.*` 明确拒绝。真实连接的 signal 与 GUI 转发原 Agent caller 必须到达原业务 owner，不能由自由参数伪造；消费身份绑定稳定 principal，另一设备不能写入或释放它的观察。Unix 私有用户 endpoint、共享 HTTP 用户授权与实际设备授权分别如实表达，共享 token 不冒每设备身份，跨请求不以随机连接 ID 代稳定身份。原 SDK 参数、事件与 ordered bytes 保真，普通业务数据不能被当成连接控制字段剥除或协议 tag 重新解释，不同来源的事件不能因同名而丢失。GUI 转发保原业务 code 与 detail／details／candidates 字段，取消只收相关消费者，不停止健康 Run。 HTTP 认证明确拒绝与认证流程未完成必须区分：设备观察容量不足或认证服务暂不可用保持繁忙／不可用事实，不能冒凭证失效、撤销原授权或要求重新配对；原凭证、durable 状态与健康工作保留，未知回执不自动重试。`agent.output` 的初始事实必须来自同一次原 Attachment，保留真实 `terminal` continuation、`resizeRevision` 与 Run 字节边界；未知不能填零，不能另读一次状态冒同一快照。手机设备鉴别与管理权限沿本页《手机版 Relay 连接》。Node 与浏览器共用无 Node-only 运行依赖的 frame/parser 与 HTTP fetch/SSE 入口，支持真实 cookie credentials，并公开复用同一纯 value codec 保留原 bytes 与 tuple；浏览器有限 SDK adapter、TLS 与设备授权沿各自 Client owner，接入同一公共传输，不能另造 wire，未验收时不宣称可用。
+  回执分别给出 Project、资源来源 Workspace、Host／目录与展示地址，以及资源创建、Workspace 登记、展示放置、Core 创建与首句投递各自的真实事实。部分失败保留已建资源与健康 Agent；首句投递 confirmed 不抬升为 Agent 已接受、开始或完成任务。同一业务操作不能更换资源后再做一次。精确参数以当前 `amux agent open --help` 为准。
+- **`mote playbook pmo` 只读。** 它是说明 PMO 方法、分工、目标与完成标准确认、发现资源、编排已有能力、回读事实及未知恢复方式的工作手册，引用实际公开 CLI 及其真实边界，不启动 Agent、不自动执行步骤、不投递任务、不改变角色注册；已存在的 SOUL／Wiki 与用户资料保持原样，不机械改写。能力尚未落地时明确说明，不把目标命令写成已经可用的操作承诺。
+
+### 长期 Host 的公开运行能力
+
+长期无 UI Host 借原 Core，通过 `runtime.*` 方法族提供有限、从原 SDK 类型派生的调用与观察：会话消费者的建立、调用、事件、对话／历史／Attachment／Replay 观察与释放，以及 owner 身份、网络与 profile 等只读入口。准确方法表以 [`AGENTMUX_HOSTED_RPC_METHODS`](../../../packages/core/src/hosted-client-contract.ts) 为准；下列约束适用于该方法族全部方法，消费身份一条适用于其中带 consumer 的方法。
+
+- **不复制原 owner。** 不复制 Provider、Session Store、Run Runtime、方法白名单或 wire codec。缺少 Host 端口时明确不可用，不隐式创建另一个 Core。
+- **只接受用户或设备 principal。** `runtime.*` 只接受传输 owner 实际认证或批准的用户或设备 principal。Agent capability 不能提升为用户输入权限；managed Agent 继续使用原 `agent.*` 语义与 A2A owner，调用 `runtime.*` 明确拒绝。Unix 私有用户 endpoint、共享 HTTP 用户授权与实际设备授权分别如实表达；共享 token 不冒充每设备身份，跨请求不以随机连接 ID 代替稳定身份。
+- **消费身份与转发主体保真。** 消费身份绑定稳定 principal：同一 consumer 名在不同 principal 下是不同消费者，另一设备不能写入或释放它的观察。真实连接的取消信号与 GUI 转发的原 Agent caller 必须到达原业务 owner，不能由自由参数伪造；GUI 转发保留原业务 code 与 detail／details／candidates 字段，取消只收回相关消费者，不停止健康 Run。
+- **数据按原样输送。** 原 SDK 参数、事件与 ordered bytes 保真：普通业务数据不被当成连接控制字段剥除，也不被协议 tag 重新解释；不同来源的事件不因同名而丢失。`agent.output` 的初始事实来自同一次原 Attachment，保留真实 `terminal` continuation、`resizeRevision` 与 Run 字节边界；未知不填零，不另读一次状态冒充同一快照。
+- **认证拒绝与暂不可用分开。** HTTP 认证明确拒绝与认证流程未完成必须区分：设备观察容量不足或认证服务暂不可用保持繁忙／不可用事实，不冒充凭证失效、撤销原授权或要求重新配对；原凭证、durable 状态与健康工作保留，未知回执不自动重试。手机设备的鉴别与管理权限沿本页[《手机版 Relay 连接》](#手机版-relay-连接)。
+- **Node 与浏览器共用同一传输。** Node 与浏览器共用无 Node-only 运行依赖的 frame／parser 与 HTTP fetch／SSE 入口，支持真实 cookie credentials，并公开复用同一纯 value codec 保留原 bytes 与 tuple。浏览器有限 SDK adapter、TLS 与设备授权沿各自 Client owner 接入同一公共传输，不另造 wire；未验收时不宣称可用。
 
 - **设备管理沿原 Host Authority。** 接入、真实设备 principal、管理方法和撤销边界唯一沿[《手机版 Relay 连接》](#手机版-relay-连接)。传输来源和取消信号由实际 owner 提供，客户端参数不提升权限，未知副作用不自动重放。
 
-**当前实现与未实现范围。** 公共类型、CLI、传输和第一方消费链见[公共能力来源导航](../../specs/public-capabilities.md#cli-与服务的当前来源)。源码合同、构建、安装与实际运行分别核对；Source 不代替三传输的权限与独立观察者释放、真实 Client 调用或私有普通进程重启恢复的行为证据。内部 Client DTO 仍由原业务 owner 持有。五个 `runtime.*` 的有限端口、原 Host SDK 派生类型、真实上下文与权限隔离，以及 Node／浏览器共用的纯 HTTP/SSE 入口沿上文 Host 公开能力合同；手机 Host 组合、Relay、有限浏览器 SDK 和设备管理沿下述范围。构建不代替真实设备验收。
-
-**已评审的派生合同与实施边界。**
+**当前实现与验收边界。** 公共类型、CLI、传输和第一方消费链见[公共能力来源导航](../../specs/public-capabilities.md#cli-与服务的当前来源)。源码合同、构建、安装与实际运行分别核对；源码不代替各传输的权限与独立观察者释放、真实 Client 调用或私有普通进程重启恢复的行为证据。内部 Client DTO 仍由原业务 owner 持有。验收消费同一候选的公共 RPC、对象 CLI 与 Project／Space PMO 工作流，不以纯文档或 helper 通过交付；手机 Host 组合、Relay、有限浏览器 SDK 和设备管理的构建不代替真实设备验收。
 
 ### 基础 skill、模块发现与渐进加载
 
@@ -236,22 +203,16 @@ Context 某个来源暂不可读不表示已经读完：保留该来源的原位
 
 ### 传输、业务回执与持续读取
 
-HTTP 显式启用且同权，SSH stdio 只转发远端原 Unix 服务，不意味着 ctxmux 远程 Run 已实现。Unix／SSH 保持有界换行 framing，内容须为严格 JSON-RPC 2.0，不保旧 schema5 信封、原自定义 wire 或兼容别名。
+HTTP 显式启用且与 Unix 同权；SSH 与 Tailcat stdio 只转发远端原 Unix 服务，不意味着 ctxmux 远程 Run 已实现。Unix／SSH 保持有界换行 framing，内容须为严格 JSON-RPC 2.0，不保留旧 schema5 信封、原自定义 wire 或兼容别名。
 
-`--operation-id` 是沿原 owner 对账的业务操作身份，JSON-RPC `id` 只关联一次 wire 请求。订阅只有一次响应，先响应再通知；取消／断线只释放相应 reader，不停健康 Agent 或原业务 operation。
-
-### 对象命名与完整交付
-
-完整命令树、原业务保留和第一方指引须一起落地，Toolkit 原 add／remove 能力改为 create／delete，update／action 保留；具体过滤与载体实现仍受上述真实来源和 typed 合同约束。
-
-少量独立端到端切片可并行推进，最终验收消费同一候选的公共 RPC、完整对象 CLI 与 Project／Space PMO 工作流，不以纯文档或 helper 通过交付。
+一条公开连接可承载多个关联请求：每个普通请求只有对应的一次响应；订阅先以一次响应回应原操作与缺口事实，再以独立 notification 传递后续事件。HTTP 由同一公开服务输送响应与事件，不为流式需要放宽普通帧的合法性。业务身份与取消语义见上文《请求关联与业务操作身份分开》。
 
 ## 统一全局搜索
 
 全局搜索由无 UI 依赖的同一 Core 公共能力提供，公开为 `app.search`／`amux app search`，Focus 与其他 Client 消费同一查询语义、结果身份、续读与覆盖回执。Core 提供浏览器可复用的纯 metadata 查询与原事实构建合同，以及组合原只读来源的统一 reader；不能只共用类型或函数名，却由 GUI、CLI 各自匹配、拼接来源、调度历史及判定完整性。本节定义已确认目标，不代签当前源码、安装或验收。
 
-- **两种模式，明确范围。** metadata 查询原对象身份及已确认的名称、活动、已加载摘录、状态、Provider、资源路径、项目／分支／Topic 等资料；普通文字不区分大小写，原 ID 按准确大小写连续匹配，支持完整、前缀和中间片段。完整 `amux://agent/region/tab/space/zone` 链接只沿[原严格 parser 合同](#对象地址分享与方向)按原种类和完整身份匹配，无效链接不降为名称查询。history 查询已保留会话中输入、回复及可读 reasoning／工具调用与结果等区分大小写的连续原文字，复用原 `agent.history kind:text` reader、文字资源与 Provider 语义，保原记录；缺省 user-message 查询的输入历史含义不变。两模式共用 typed request／result、cursor 与 coverage 合同，模式和实际范围明确，不将 metadata、标题、预览或已读窗口冒成历史全文。全局指所声明的原对象与已保留会话来源，不承诺任意项目文件、未发现的外部会话、知识库全文或图片 OCR。
-- **对象与关联保真。** 支持已保留的 AgentSession、Run、Provider 原生会话、Tab、Region、Workspace、Group、Project、Space、Zone 与 Topic ID，以及上述五类完整链接。沿[概念词典](spaces-and-layout.md#统一概念与空间寻址)区分对象种类、执行身份、资源和展示位置；Workspace 不冒 Project。原 Session 身份不因查询、改名、位置变化或恢复观察缺口改变；Run 不以当前执行回填未记录的旧引用。跨 Host 的相同 SID、不同 Provider 的原生 ID、同名对象及同正文的不同记录不合并。原生句柄的已确认、已观察与此前保留阶段可辨，不将命中提升为当前绑定、恢复或输入资格。资源 Host 与 execution Host 分开，未知 execution Host 不从 Zone、显示 Workspace、cwd 或名称补猜。Session 的多个展示、Zone 的多 Space 绑定及准确展示位置全部保留；普通 Terminal 仍按原 Run／Region 和原上下文可查，不因名称或同字段 ID 获得 AgentSession 身份或命中 `amux://agent/`。没有位置只表达未确认，不冒对象已终局。
+- **两种模式，明确范围。** metadata 查询原对象身份及已确认的名称、活动、已加载摘录、状态、Provider、资源路径、项目／分支／Topic 等资料；普通文字不区分大小写，原 ID 按准确大小写连续匹配，支持完整、前缀和中间片段。完整 `amux://` 对象链接（种类与编码见[amux 协议的对象链接](../../specs/amux-protocol.md#对象链接)）只沿[原严格 parser 合同](#对象地址分享与方向)按原种类和完整身份匹配，无效链接不降为名称查询。history 查询已保留会话中输入、回复及可读 reasoning／工具调用与结果等区分大小写的连续原文字，复用原 `agent.history kind:text` reader、文字资源与 Provider 语义，保原记录；缺省 user-message 查询的输入历史含义不变。两模式共用 typed request／result、cursor 与 coverage 合同，模式和实际范围明确，不将 metadata、标题、预览或已读窗口冒成历史全文。全局指所声明的原对象与已保留会话来源，不承诺任意项目文件、未发现的外部会话、知识库全文或图片 OCR。
+- **对象与关联保真。** 支持已保留的 AgentSession、Run、Provider 原生会话、Tab、Region、Workspace、Group、Project、Space、Zone、Topic 与 Capsule ID，以及上述对象链接。沿[概念词典](spaces-and-layout.md#统一概念与空间寻址)区分对象种类、执行身份、资源和展示位置；Workspace 不冒 Project。原 Session 身份不因查询、改名、位置变化或恢复观察缺口改变；Run 不以当前执行回填未记录的旧引用。跨 Host 的相同 SID、不同 Provider 的原生 ID、同名对象及同正文的不同记录不合并。原生句柄的已确认、已观察与此前保留阶段可辨，不将命中提升为当前绑定、恢复或输入资格。资源 Host 与 execution Host 分开，未知 execution Host 不从 Zone、显示 Workspace、cwd 或名称补猜。Session 的多个展示、Zone 的多 Space 绑定及准确展示位置全部保留；普通 Terminal 仍按原 Run／Region 和原上下文可查，不因名称或同字段 ID 获得 AgentSession 身份或命中 `amux://agent/`。没有位置只表达未确认，不冒对象已终局。
 - **原 owner 供事实，Core 统一查询。** Session／Run 引用、空间图及全部绑定、Project／Workspace 资源、Topic 内容和原历史继续各由既有 owner 持有；统一能力通过原 typed 只读端口取得事实，不另建 registry、持久镜像、全文索引或历史 Store。Client 可提供沿准确原对象引用的已加载名字、recap、访问观察与呈现补充，明确其来源与范围，不将补充资料冒作权威 membership、活动或授权。无 Desktop 端口时仍可查询 Core 自身可用的原身份、空间及历史，缺少的 Host／Client 来源明确不可用或未确认，不能要求 UI 选中或挂载后才成立。精确来源、路由和续用范围沿[Endpoint、Host 路由与源身份](#endpointhost-路由与源身份)，不能以一个 endpoint 内的 Host ID 冒跨服务全局身份。
 - **覆盖与成本有界。** 来源发现、原记录扫描、匹配返回和字节各有明确的有限批次；metadata 不隐式读取全部正文，history 不由输入变化、无关输出或时间窗口变化触发全来源后台扫描。回执分开说明已查范围、尚未查完及 continuation、来源目录尚未确认、不可用／不支持／未记录和已确认无匹配；来源发现不完整时，已知来源全部查完仍不冒全局完成。结果保准确 Host／Session、原 Source、记录种类与 ID、原生来源及可继续寻址的对象和位置，未知作者、时间和归属不补造；不能按名字、正文或最近位置去重。原资源只经准确 reader 查询与读取，不把预览当完整文字；redacted、未知资源种类或不能完整查询的来源如实表达覆盖缺口。
 - **续读与取消属于本次读取。** cursor 绑定原查询模式、文字、范围、endpoint 内路由及准确来源／版本；换模式、换目标、失效、过期或源变化均明确拒绝该次续读并给原范围重查方式，不静默换源、跳页或从头重读后冒续读。原 reader 的预算回执可驱动对同一位置的准确只读重试，不截断完整原记录或伪造完成。取消信号从公共 API、RPC／CLI 与 Client 到达相关原 reader，取消或断线只释放这次消费，不停止健康 Run；Client 丢弃已过期查询的迟到结果，不覆盖后来的输入、焦点或工作面。
@@ -267,15 +228,15 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 - **内容修订与空间提交各有原 revision。** 分类描述与知识正文保存沿原文件／内容修订，主归属转移沿 Core 的 exact-revision 空间提交；回执分别表达实际目标、应用事实、持久确认与局部未知。陈旧目标或 revision 明确拒绝该次动作，原内容与健康工作继续；部分读取保已确认结果，歧义保真实候选。创建／迁移的未知回执沿同一原对象与操作核读，不因失去回执盲建或重放。普通知识读写不隐式启动、发送、续跑 Agent，也不默认注入整库内容。
 - **承接预演是实际数据的准确差异。** 公共预演说明受影响的旧空间节点、保留内容身份与原 Zone/Tab/Region、目标分类及原图 revision；应用沿同一 owner，返回备份、预演与实际保存事实。较新数据或原目标变化后重新核对，不以旧预演覆盖用户后来工作；未知结果保原引用与恢复入口。完整迁移的保全约束仍由知识库合同持有。
 
-以上是正在实现的新 Topics 公共能力合同，不声称当前已安装 CLI 已具备完整知识库、分类转移或迁移接口。准确 method、参数、codec、命令与 help／skill 从[公共能力来源](../../specs/public-capabilities.md)及实际候选取得；当前 `space` 导航或 `file view` 不能代签完整 CUI，协议／help 存在也不代签真实 Host、GUI／CLI 消费、保存或迁移验收。
+某个安装副本是否具备这些入口，以其实际 `amux topic --help` 为准；准确 method、参数、codec、命令与 help／skill 从[公共能力来源](../../specs/public-capabilities.md)及实际候选取得；当前 `space` 导航或 `file view` 不能代签完整 CUI，协议／help 存在也不代签真实 Host、GUI／CLI 消费、保存或迁移验收。
 
 ## Agent-first 的 Space 工作入口
 
-用户要的流程是：「人在别的 Workspace，指定一个项目，给它创建 worktree，在这个 worktree 上开出第一张 tab，拉起指定 Agent，并把第一句任务交给它执行。」随后明确「还是要 agent first，所以命令是同等重要，但是必须完全满足 pmo 视角」。人和 PMO 使用同一套控制命令，PMO 无需切换当前工作面即可发现别处的 Space、Zone、Tab 与 Region，创建目标的首张 Tab，取得新 AgentSession 的精确 ID 并发送后续任务；不能要求目标已经有锚点 Tab。
+人在别的 Workspace 时，可以指定一个项目，为它创建 worktree（或选用其他资源来源），在新 Zone 上开出第一张 Tab，拉起指定 Agent 并交付第一句任务。入口保持 Agent-first：命令与 GUI 同等重要，并且必须完全满足 PMO 视角。人和 PMO 使用同一套控制命令，PMO 无需切换当前工作面即可发现别处的 Space、Zone、Tab 与 Region，创建目标的首张 Tab，取得新 AgentSession 的精确 ID 并发送后续任务；不能要求目标已经有锚点 Tab。
 
-最新主干是 `amux agent open ...` 与 `amux space mv ...`，空间目标使用[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)的 **Space / Zone / Tab / Region**。`agent open` 能显式选择已有 Zone 或创建新 Zone，并在首张/新 Tab、已有空 Region 或明确分屏位置打开指定 Agent、交付首句。worktree 只是新 Zone 的一种资源来源，Topic/Mote 和非 Git 目录沿相同空间模型可用；Project 与 Workspace 作为真实绑定事实返回，不能冒充 Space/Zone 身份。精确子目标应能反推其上层，不强迫每次逐层填写四个 ID。新 Tab 的落点表达目标 Zone，`--new-tab-after` 不再承担落点语义；不引入旧命令兼容层或焦点 fallback。
+创建与移动的入口是 `amux agent open` 与 `amux space mv`，空间目标使用[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)的 **Space / Zone / Tab / Region**。`agent open` 能显式选择已有 Zone 或创建新 Zone，并在首张/新 Tab、已有空 Region 或明确分屏位置打开指定 Agent、交付首句。worktree 只是新 Zone 的一种资源来源，Topic/Mote 和非 Git 目录沿相同空间模型可用；Project 与 Workspace 作为真实绑定事实返回，不能冒充 Space/Zone 身份。精确子目标应能反推其上层，不强迫每次逐层填写四个 ID。新 Tab 的落点只由目标 Zone 表达，不从相邻 Tab 或当前焦点推断；不引入旧命令兼容层或焦点 fallback。
 
-用户要求把「在某处打开的 agent 移动到别处」，并确认「不改变执行目录，只改变在agentmux里的空间位置」。`space mv` 绑定源 Region 及其预期 Session，使用同一目标层级；多投影时不得凭 Session 猜来源，目标占用时不得静默替换健康 Agent。落地结果须明确源投影移除、目标位置保留，同一 Session/Run/cwd/原生句柄与其他投影保留；不能复制、合并到第一块同 Session 投影或把关闭源 Region 当成停止 Agent。跨 Zone 目标如实显示原执行目录。源与目标的持久化恢复一致，未知提交不能报告已移动或盲目重移。
+`space mv` 把已打开的 Agent 移到别处时，只改变它在 AgentMux 中的空间位置，不改变执行目录。`space mv` 绑定源 Region 及其预期 Session，使用同一目标层级；多投影时不得凭 Session 猜来源，目标占用时不得静默替换健康 Agent。落地结果须明确源投影移除、目标位置保留，同一 Session/Run/cwd/原生句柄与其他投影保留；不能复制、合并到第一块同 Session 投影或把关闭源 Region 当成停止 Agent。跨 Zone 目标如实显示原执行目录。源与目标的持久化恢复一致，未知提交不能报告已移动或盲目重移。
 
 普通本机后台创建由原 Host 承担配置与上下文策略，沿 Core 的同一空间锁登记原操作与准确 Tab／Region／Session 关联，再交原 Core 创建 owner；不依赖 Desktop 是否在线。范围由原请求语义及原 Zone 的真实执行 Host 决定，既有远端、原生接续、资源创建或前台聚焦流程继续沿自己的准确 owner，不能按客户端品牌或观察失败切换。桌面和手机消费同一后台能力，不把手机当前支持范围变成桌面已有能力的限制。
 
@@ -285,22 +246,21 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 
 布局已应用、客户端偏好已写入、宿主 flush 已请求与磁盘耐久性已确认分别报告；耐久性只能由 Core 的[持久空间状态 owner](../../architecture/spatial-state.md)完成耐久写入后确认，不能因为 localStorage 写入或 await IPC 就声称已经落盘。未取得确认时如实报告 unconfirmed，保留原工作面、未保存改动与健康 Agent；客户端偏好、草稿或呈现快照不能替代、覆盖 Core 的空间状态。源移除与目标落点沿同一次 Core 空间提交保存；真实私有普通进程重启后读回同一空间绑定、布局与 Session 引用，才证明恢复验收。CLI 回执保持现有 JSON 输出，身份可原样用于后续命令。
 
-具体 grammar、缺省规则、失败保留、请求对账及真实私有重启验收见 [Agent-first 的 Space 工作入口](#agent-first-的-space-工作入口)；CLI 合同与推荐方案（本机过程资料：`docs/plans/pmo-cross-workspace-worktree-cli-design.md`）。上一版 `worktree create/start` 主流程不再是当前方案；技术文档或 proposal 状态不能冒充功能交付。
-
+精确语法、缺省规则与错误以当前 `amux agent open --help`、`amux space mv --help` 为准；技术文档或 proposal 状态不能冒充功能交付。
 
 ## 手机版 Relay 连接
 
-本节持有手机连接、授权、对象操作与恢复行为；手机界面的尺度、控件、文案、状态与动效见[手机客户端的呈现](../presentation/mobile-client.md)。
+本节持有手机等设备经 Relay 接入原 Host 的连接、设备身份、授权、撤销与重连，以及桌面退出后的 Host 可用性。手机客户端的导航、目录、对话与输入、附件、设备工作面保全和网页更新行为见[手机客户端](mobile-client.md)；手机界面的尺度、控件、文案、状态与动效见[手机客户端的呈现](../presentation/mobile-client.md)。
 
 Mac 设置与手机连接 Toolkit 消费同一 Host 设备 owner 的连接事实和完整链接，不各自维护地址、offer 或设备状态。Toolkit 的结果传递与呈现失败须明确说明并保留原结果及恢复入口，不能静默停在没有二维码的扫码提示；机器结果与终端诊断的边界沿[Toolkit 合同](settings-and-observation.md#toolkit-与官方-performance-工具)。
 
-手机是适合移动使用的 AgentMux 第一方 client。连通后的一级导航从左到右为 Goals、Topics、Mote、Focus、Space，Mote 位于正中；原会话内也可切换主工作面。Survey、连接与设备设置及其他辅助能力收进菜单，不重复五个主入口。Mote 只列原协调对象；Space 沿原 Space→Zone→Tab→Region 绑定导航；Focus 按原 Core 执行状态与待处理交互组织，已有 Session 继续可达。目录不可读不按 cwd 或 Session ID 猜归属，原会话、草稿与阅读引用保留。手机启动优先显示聊天：依次使用本设备最近访问的原对话、最近访问 Mote 的已保存主对话、原 owner 确认的主 Mote 的已保存主对话。最近访问是本设备的明确导航记录，不以 Agent 活动、名称、列表顺序或头像推断；元信息暂未读到不丢弃已保存的原对话。没有可确认引用时保留聊天起点、原对象与就近核对／设置入口，不自动新建替代 Session。原主工作面与资料编辑引用、草稿及未知操作继续保留并可返回；原设备存储未知不覆盖。既有主页偏好只作为退出聊天后的目录选择，用户可显式切换五个工作面。未连通且无保留工作面时显示接入页；重连、迟到目录和元信息不能抢走本次打开后用户选择的工作面，默认打开不自动恢复 Run 或重发输入。
+手机在同一局域网扫描 Mac 设置页或右下角手机 Toolkit 的二维码，或打开其中复制的完整链接，即可继续同一已有 AgentSession 的对话、Prompt、交互请求和终端。正常接入不手输地址、配对码，不回 Mac 二次批准，不弹系统确认。Mac 自带手机网页与局域网 Relay，无公网服务或部署前置条件；公网部署、Linux 发行、新建工作区、商店发布和系统推送不在本连接范围内。
 
-目录展示消费原 Focus 的名称、项目、状态与 recap，以及原 Mote 自定义头像。公共 carrier 保留这些 owner 的原展示值，不另加字段容量或再次截断摘要；类型、准确身份、权限和既有整条传输容量边界仍成立。正常中文与 emoji 展示数据不能使整份目录不可读。
+连接沿成熟 Relay V2 的稳定 Host ID、公钥 offer、端到端加密握手、多设备通道、心跳与自动重连。前台可见的手机工作面应能持续观察原连接，空闲不应人为造成周期性断连；实际断连时如实说明并接回原观察，保留原工作面、草稿、健康 Run 和未知操作，不凭载入成功或旧观察冒充当前连接健康。Relay 只转发密文，不持有业务语义、Agent Session 或 Runtime。
 
-手机在同一局域网扫描 Mac 设置页或右下角手机 Toolkit 的二维码，或打开其中复制的完整链接，即可继续同一已有 AgentSession 的对话、Prompt、交互请求和终端。正常接入不手输地址、配对码，不回 Mac 二次批准，不弹系统确认。Mac 自带手机网页与局域网 Relay，无公网服务或部署前置条件；公网部署、Linux 发行、新建工作区、商店发布和系统推送不属于本批。
+Host 身份与地址分离：监听通配网卡地址，读取连接链接时取得当前可用局域网地址；地址变化不换身份或删除设备记录。Mac 同时有多个局域网地址（例如网线与 Wi-Fi）时，链接默认用默认路由所在网卡的地址，连接结果同时列出全部候选地址及其网卡；用户可在设置中选择手机所在网络的地址，CLI 可用同一读取指定地址。指定的地址不是当前候选时明确拒绝，不改用另一个地址；候选只说明本机网卡，不证明手机可达。旧 IP 链接在原地址失效后需从 Mac 重新取得，局域网方案不承诺跨网络寻址。
 
-连接沿成熟 Relay V2 的稳定 Host ID、公钥 offer、端到端加密握手、多设备通道、心跳与自动重连。前台可见的手机工作面应能持续观察原连接，空闲不应人为造成周期性断连；实际断连时如实说明并接回原观察，保留原工作面、草稿、健康 Run 和未知操作，不凭载入成功或旧观察冒充当前连接健康。Relay 只转发密文，不持有业务语义、Agent Session 或 Runtime。Host 身份与地址分离：监听通配网卡地址，读取连接链接时取得当前可用局域网地址；地址变化不换身份或删除设备记录。Mac 同时有多个局域网地址（例如网线与 Wi-Fi）时，链接默认用默认路由所在网卡的地址，连接结果同时列出全部候选地址及其网卡；用户可在设置中选择手机所在网络的地址，CLI 可用同一读取指定地址。指定的地址不是当前候选时明确拒绝，不改用另一个地址；候选只说明本机网卡，不证明手机可达。旧 IP 链接在原地址失效后需从 Mac 重新取得，局域网方案不承诺跨网络寻址。手机 Toolkit 按[《Toolkit 展示时求值》](settings-and-observation.md#toolkit-展示时求值)取得原 device.ls/link 的当前设备事实和 offer URL；读取链接不创建邀请或变更授权。二维码、复制与完整原文查看使用同一次已确认结果中的同一个完整 URL，不改写地址、参数或公有 offer，保留完整 fragment；复制原结果不再次求值。连接链接采用紧凑格式：页面地址后的 fragment 一次编码版本、Mac 的完整公钥与准确 Host 身份，Relay 端点与页面地址相同时省略，让二维码点阵更稀、复制更短；公钥是手机核验对方与建立端到端加密的唯一依据，不能为缩短链接而截短、改用短码或助记词向 Mac 换取，也不因此新增配对确认步骤。格式只有一种，解析严格，旧格式不再接受；手机已保存的连接记录是解析后的身份，不受链接格式变化影响。历史链接保留结果时间和未重新核实的范围，明确刷新可取得当前地址。求值失败或回执未知不把更早链接充当本次成功，旧 action 的未知与恢复仍沿原普通执行合同；二维码呈现失败保留完整链接查看与复制。局域网网页与 WS 可用 HTTP，公网入口须 HTTPS/WSS；页面地址的可信来源仍是用户从原 Mac 取得的链接。
+手机 Toolkit 按[《Toolkit 展示时求值》](settings-and-observation.md#toolkit-展示时求值)取得原 device.ls/link 的当前设备事实和 offer URL；读取链接不创建邀请或变更授权。二维码、复制与完整原文查看使用同一次已确认结果中的同一个完整 URL，不改写地址、参数或公有 offer，保留完整 fragment；复制原结果不再次求值。连接链接采用紧凑格式：页面地址后的 fragment 一次编码版本、Mac 的完整公钥与准确 Host 身份，Relay 端点与页面地址相同时省略，让二维码点阵更稀、复制更短；公钥是手机核验对方与建立端到端加密的唯一依据，不能为缩短链接而截短、改用短码或助记词向 Mac 换取，也不因此新增配对确认步骤。格式只有一种，解析严格，旧格式不再接受；手机已保存的连接记录是解析后的身份，不受链接格式变化影响。历史链接保留结果时间和未重新核实的范围，明确刷新可取得当前地址。求值失败或回执未知不把更早链接充当本次成功，旧 action 的未知与恢复仍沿原普通执行合同；二维码呈现失败保留完整链接查看与复制。局域网网页与 WS 可用 HTTP，公网入口须 HTTPS/WSS；页面地址的可信来源仍是用户从原 Mac 取得的链接。
 
 链接承载公有 offer，不携带长期私钥或一次连接码；打开后从页面地址清除并保留公有连接信息。Host 私钥持久保存在原 Store 旁的受保护文件，损坏时保留原件；设备持久加密密钥沿设备拥有的存储保留，浏览器使用同源 IndexedDB，不进入 URL、日志、普通 localStorage 或工作面导出。链接不是限时单设备邀请；完成加密握手的设备按真实公钥登记独立身份，撤销立即终止该公钥的请求与订阅。旧设备、操作记录、Host 身份和工作面数据保留；旧固定 IP/TLS manifest、邀请、claim、OS 批准和原生 Cookie 传输实现删除。
 
@@ -308,15 +268,13 @@ Mac 设置与手机连接 Toolkit 消费同一 Host 设备 owner 的连接事实
 
 **桌面退出后，手机访问不打断。** 已连接的手机可以继续原工作，新打开的手机可以连接原 Host、发现并打开原工作面与会话。目录、原名称和对象关系、Agent 创建与恢复、对话和输入、文件与笔记、Topics、Mote、Goals 以及手机已有的配置读取，由原 Core 或 Host 领域 owner 提供；不能因为 Desktop 退出而隐藏入口、清空目录、另建替代 Session，或要求回桌面才能继续。Desktop 返回后消费同一持久空间图和领域事实，不能用退出前的快照覆盖手机期间的更新。屏幕呈现、窗口、真实输入焦点和 Native Browser 控制仍由 Desktop 提供；这些能力离线只影响对应操作，原手机工作面、草稿、未确认操作及健康 Agent 保留，并明确说明不可用的 owner 与恢复动作。
 
-Goal 列表的完整范围与有界读取分别表达：`goal.ls` 默认保持有界，明确 `all:true`（CLI `--all`）才读取完整筛选集合，与 `limit` 互斥。Desktop 原完整目标清单消费完整范围，不能把截断外的原 Goal 当作不存在；准确变更只沿对应 `goal.inspect` 重读，观察失败保留原投影。重连初始集合表达完整成员范围，不能遗漏断连期间的新增或删除。`goal.inspect` 的可选 `dispatchOperationId` 只核同一 Goal 的准确原 Start 回执，复用原输入来源确认并更新其已发生阶段，不准备或提交输入、不创建或激活持续安排；省略时仍是原普通观察。
-
 Host 的服务生命周期独立于展示客户端，并由执行环境的唯一服务管理者负责持续运行与退出后的恢复；持有 Core 的 Host 不在 Core 内监督自身，也不复制 ctxmux 的 Run Runtime。原 Host 恢复继续同一持久 namespace、设备授权和会话，具体身份与恢复边界沿[长期 Host 与客户端生命周期](session-recovery.md#长期-host-与客户端生命周期)。Relay 的部署位置与 Host 执行环境分开：Relay 继续只转发密文，不能取得业务语义、设备授权或 Session owner 身份。桌面退出后的可用性为独立 Relay 部署提供基础，不自动授权公网部署，也不承诺执行机器关机、注销或网络不可达时在线。
 
 跨进程转发保留原认证主体及授权来源。Host 借 Desktop 的文件、窗口或其他能力时，接收方必须从可信传输边界取得准确主体，并在原业务 owner 需要授权的执行点复核；不能把设备请求改记为本机用户，也不能从业务参数接受调用者自报的身份、授权或回调。转发中的原 method、目标、参数、operation 和接收 owner 保持绑定，业务回执与原归因原样返回；凭据失效或授权未知只影响这次操作，不能退回更高权限的本机身份。
 
 原始终端按键、粘贴与高阶输入都保留本次调用的可信授权有效期。原始字节输入在排队、异步准备后及实际字节派发前检查原授权、准确 Session／Run 和原 owner 有效期；设备撤销、已取消且尚未派发的原始字节调用或已结束的 owner 不能在后续重连时发送旧输入，也不能取消另一项健康输入的观察。本次远端操作所需的原授权无法核实则保留原意图并明确不可用，不冒撤销或准许执行；已由语义 owner 接受的持久输入仍沿其原等待与恢复合同。字节已经派发后，观察中断不撤销已发生业务、不将未知回执冒成未执行、不自动重放；原 operation、输入回执与已保存内容保持。授权检查不依赖展示文案，也不阻断无关本地输入或停止健康 Run。
 
-公共设备方法只借原 Host Authority：`device.ls/revoke` 由本机用户读取状态及撤销设备，managed Agent 和远端设备不能调用；`device.link` 的本机用户入口和受管 Agent 只读边界见[手机入口的只读发现与加载](#手机入口的只读发现与加载)。`device.hello` 仅允许已认证 Relay 设备命名自己的身份，目标由真实加密握手 principal 确定，不能由 JSON 选择。GUI、SDK、CLI、方法发现和回执共用这些方法；原邀请、approve、reject、intent 方法删除。请求或订阅只能观察、释放自己的 Runtime consumer。
+公共设备方法只借原 Host Authority：`device.ls/revoke` 由本机用户读取状态及撤销设备，managed Agent 和远端设备不能调用；`device.link` 的本机用户入口和受管 Agent 只读边界见[手机连接链接的只读读取](#手机连接链接的只读读取)。`device.hello` 仅允许已认证 Relay 设备命名自己的身份，目标由真实加密握手 principal 确定，不能由 JSON 选择。GUI、SDK、CLI、方法发现和回执共用这些方法；原邀请、approve、reject、intent 方法删除。请求或订阅只能观察、释放自己的 Runtime consumer。
 
 Toolkit 的设备列表只列原 Host 已确认连接中的设备，不铺离线设备；未确认或读取失败不伪装成离线或空结果，原展示及时间和旧请求 unknown 的独立服务窗保持。设置保留已登记设备与撤销能力，其设备记录只呈最近 connected/disconnected 及发生时间，不铺逐次业务操作日志；原授权、设备身份与已有操作记录保全。`device.ls` 每台设备只带最新一段操作记录；更早的记录由原 Host 设备 owner 在本机只追加地保存，不因展示窗口或写入次数删除。当前连接状态、最近连接事实与授权状态分别表达，失联不冒撤销。同一公钥的多个已认证通道只计一台；设备连接从零变为非零、最后一个通道释放时沿原 owner 记录连接／断开，重复释放不制造事件或影响其他通道。
 
@@ -328,111 +286,18 @@ Toolkit 的设备列表只列原 Host 已确认连接中的设备，不铺离线
 
 连接已由原 consumer 确认不可自动恢复时，如实说明自动重连已暂停，并保留核对原连接与授权后显式重检的入口；不继续声称正在重试，也不以 Native 观察故障代替手机到 Host 的语义连接状态。
 
-切页或连接变化取消了本次内容读取后，重新显示原内容时仍须按当前原资源继续读取；一次取消不能阻断以后对同一原文件的读取。旧读取的迟到结果不覆盖后来选择，已读正文与草稿保留。读取只随相关可见内容、连接和原资源变化发生，不轮询或因无关工作面变化重读。
-
-观看与控制可辨。手机终端默认沿原 Run 已确认网格显示，支持本地视觉缩放与正常触摸上下阅读历史，横向内容也可在本地平移查看；缩放、滚动、旋转或 viewport 变化不自动改变 PTY，也不生成输入。历史仍沿同一原 Run 的字节、reader 与 cursor，连续阅读和成本遵守[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)。用户明确进入控制并主动调整尺寸，才向原 owner 请求。被动阅读不 resize，不发鼠标输入或 DA/DSR/颜色查询回写，checkpoint/replay 不触发输入、通知或剪贴板，不伪造 ctxmux 排他 lease。
-
-设备工作面采用明确的持久来源和可导出保全记录。同源多个页面的草稿与意图按准确 key 更新，不能以旧页面快照覆盖其他会话或未知原请求；同 key 冲突保全原请求和双方正文，供用户核对与复制。导航、附件与目标意图和草稿共享原存储 owner 的跨页面原子更新，导入备份切换记录身份，迟到回执不能据旧页面状态改写新工作面。存储不可用时保留当前内存和导出能力，持续说明刷新保障不足，不因此关闭健康 Agent。重启与卸载后的存储条件分别说明，不假定密钥跨卸载必存。身份丢失后打开原 Mac 链接登记新设备，不创建替代 Host Session。iPhone 与 Android 保留同能力范围，未执行真机验收不得据构建成功宣称两类设备验收通过。
-
-手机对原 Goal 的有限执行、分配、交接、删除及关联请求保留准确 Host／Runtime、Goal、操作身份和完整原参数；在途或未知结果不因页面刷新丢失。沿同一设备工作面保全，刷新后在固定的恢复入口仍可读取，即使原 Goal 已删除、目录不可达或当前连接不是原 Host；显示已收起只改变呈现。读取当前 Goal 是当前事实，不代签某次原操作的回执；没有权威结果时保持未知，不自动重发或替换。设备保存失败时当前请求和工作面保留并说明刷新保障不足，不因记账失败关闭健康 Goal 或 Agent 能力。
-
-原请求已持久时，即使回执仍在途也可显式更新，恢复后保持未知。设备无法持久时，成功复制完整原请求及当时已知的回执状态且用户明确确认已另行保全，才允许取消该次尚未完成的写入并移除本页副本；复制失败或未确认不移除，取消后迟到写锁不得执行原写。原记录不可读或身份冲突时如实说明状态未知；该选择不写、不删除任何设备记录，回执未知须自行核对，不冒充原操作已完成。若请求已实际写入，保留设备原记录；已收到的回执也须沿原设备工作面准确保存后才更新。确认写锁持续故障时保留当前页并说明须恢复设备存储，不以不完整记录冒充安全载入。移除后如仍在原页收到迟到确认，恢复同一原请求的确认状态并按原记录身份保全；不能持久时重新提供确认状态的复制与明确保全。此选择不改变原 Goal，也不重发或确认操作结果；设备存储本身的刷新限制仍须独立解决。
-
-### 手机入口的只读发现与加载
+### 手机连接链接的只读读取
 
 本机用户可从原 Unix 入口读取链接。受管 Agent 可沿原 `device.link` 一次读取其已认证执行 Host 的手机网页入口、完整公有连接链接、已有 Relay 端点及当前连接状态。结构化地址来自同一次原链接观察，不重新推算另一份地址；原端点是域名或 IP 时原样保留，不以 DNS 猜测、外部探测或新公网部署补造地址。已知地址的读取不要求 Relay 此刻已连接，未就绪或断连状态单独表达；尚无地址时明确不可用，健康 Agent 及其他入口继续可用。读取链接不登记设备、不授予管理权限；设备列表、接入握手与撤销继续沿各自原主体和授权边界。聚合或远端调用不允许用另一个 Host 的 Agent 资格读取本机地址；SSH/stdio 仅转发带原 caller 的链接读取，由原服务核实身份，不把无 caller 的远端请求提升为本机用户。
-
-手机首屏只等待当前工作面所需代码与事实；未访问的终端、目录和知识面板按需准备。进入后再切换仍保留原编辑器、阅读位置、草稿及未确认操作，不以卸载、重建 Session 或重发业务换取提速。模块加载失败仅影响对应面板，原聊天及导航保持可用，并提供明确返回和“保全并重新打开网页”的路径；不能把重建组件冒称资源已重新读取。明确返回、关闭或离开失败面板可撤回本次尚未导航的重开；不撤回原输入、上传或未知请求，也不拦截其他健康操作。当前版本或版本观察未知均可由用户发起重开，是否能离开沿[原网页保全与身份交接](#手机网页诊断与更新)核对；阻断时说明原原因，保留正文、图片、原操作及返回入口。加载性能须分别观察资源下载、脚本执行、连接建立和首段内容可读，局部菜单响应不能代签首次打开或真机网络结果。
-
-### 手机网页诊断与更新
-
-手机网页已有的问题观察须能沿原公共诊断入口被 Agent 查询，准确区分认证设备、页面实例、来源、构建和原操作，减少截图转述。诊断沿[原证据机制](../diagnostic-evidence.md)，复用既有 client incident 档案与读取能力；原业务已经能查询的事实仍用原业务入口，不另造目录、Session 或错误状态 Store。原连接状态事件若携带可安全报送的有限协议错误码，诊断须保留该原码及事件边界；缺失或不属于允许范围时保持未知，不收集错误正文，不据此推断连接权限或操作结果。目录查询成功但原 Space 的 issue 字段存在也是需要保留的部分观察：只记录字段存在、原不透明 Space 引用、来源与数量，未知错误码保持未知，不读取或匹配提示文字推断原因、权限或健康；完整原因从原 Space 查询取得。
-
-手机报送仅由真实认证 device principal 或保持该主体的原可信转发接收，设备身份不由业务 JSON 选择；Agent 查询不升级为设备管理，也不能代报自己是手机。原页面报告的构建、观察时间与接收方当时的构建、接收时间分别表达，不能用当前值回填旧事实。有限安全元数据、原文和缺证继续沿原诊断合同；未接入、未上报、离线、超界、被淘汰或原档案不可达不能冒充无问题，诊断失败不阻断原手机业务、输入或健康 Agent。
-
-手机 Web 静态资源由同一原 Host 的资源 owner 接受完整候选、激活和查询原操作，静态更新不要求重启 Host、Session 或 Run。CLI 与 App 经默认公共入口到准确原 Host，Desktop 的反向调用保留原 caller、主体、参数和 Runtime fence；Host 不拥有该能力时明确不可用，不再回转 Desktop 形成循环，也不改连另一端点冒充成功。服务已提供新资源与准确原页面实际载入新构建分别确认，HTTP 成功、激活回执或当前 manifest 不能代签本页 loaded。
-
-受管 Agent 的激活资格以原能力核验后得到的准确 Host、Session、Run 和执行 Workspace 为界；候选只接受该执行资源根下的字面相对构建路径，真实文件路径与完整性在原文件边界核对。异步校验后、实际交换前复核同一资格和执行资源；不能凭 Unix 连接、显示位置、名称或调用者自报的目录扩大权限，不能发布主机任意文件。资格、来源或资源范围未确认只拒绝这次激活，原 inspect、工作面和业务保持。原激活冻结候选与预期 active 修订，未知回执先查原操作，不自动改目标或重发。
-
-候选、保留 namespace、在途 IO、载入观察与待报诊断均有明确的并发、总字节及数量边界，保留范围和超界结果可查询。旧资源仅在公布的有限范围内承诺可读，不能暗中淘汰却声称旧页始终可用；超界只影响本次准入或观察，保留当前有效服务并给出未施效、未保留或未知的准确结果与原恢复路径。没有必要的范围和资源预算时，不以排队或缓存无限积压代替处理。
-
-手机浏览器重新访问符合原内容入口路径形状、当前未保留的页面入口时，原 Host 有当前有效发布则将该次 GET／HEAD 文档请求引向同源当前入口；仍保留的旧入口继续提供自身版本，旧脚本、样式和其他资源不能改指新版本。入口恢复保留原查询与浏览器持有的片段，不发送或回显片段中的连接资料；重定向不代表原设备身份已恢复或新页面已载入。没有有效发布或请求暂时不可服务时，按真实状态返回明确内容类型与可重试的可读页面，不能以缺少类型的空响应让页面变成文件下载。此机制只处理已经发起的访问，不因发布主动刷新存活页面，也不承诺保全浏览器未持久的内存内容；应用内选择更新仍沿下述原 owner 保全合同。 Host 的候选准入要求原 build 身份可表达为单一且不会被标准 URL 归一化改变的路径段；无法表达的候选只拒绝本次激活，保留原候选资料、当前版本和健康 Agent。合法非 ASCII 或转义身份仍可用，HTTP build 观察头使用原身份的百分号编码，不把头值改写为另一身份。
-
-手机网页在使用中主动核对准确原 Host 所提供的版本与本页真实载入版本；确认两者不同时就近提示有新版本，可关闭或收起，设置中的网页版本入口始终可发现并可主动查询和选择载入。页面恢复前台或重新连接后应能再次取得当前观察；查询应合并并限制成本，不因目录、消息或无关 Session 变化而重复请求。离线、读取失败、旧观察或来源无法确认时明确保留未知，不能宣称已是最新版或虚构待更新。关闭提示只影响本设备呈现，不改变版本事实，新的已确认版本仍可提示。
-
-发布不自动重载或卸载原页面。用户明确选择载入时，先由原 owner 确认未提交文字、仅在本机的已选图片、工作面和在途或 unknown 原操作及意图已保全，再重新载入同一原入口；未知原操作不自动重放，重新载入后接回原身份并保留核对路径。保全缺证时继续原页并说明待载入和可行恢复动作，不用丢弃输入、猜无草稿或绕过未知请求换取更新成功。重新载入动作、服务资源已提供与新页面实际载入仍分别确认；重新载入失败保留或恢复可用的原工作面，不以点击动作代签载入成功。首次让旧进程取得新能力与后续静态资源更新分别交付，不声称源码更新已使旧 Host 热获新方法。本合同针对手机 Web，不新增 Native App OTA。
-
-对话的发送准备、重试或停止尚未派发时，用户可在原消息附近明确取消该次意图；载入网页本身不代替取消，取消不发送正文、重试、停止或撤销原上传。原正文、选图、已发起的上传及原操作保留，迟到的准备结果不能继续派发；若设备保存仍未确认，保留当前页面并说明真实等待和恢复动作。同一原请求已实际派发、完整原意图已可靠保存且后续不再发起业务写时，可由用户明确载入；冷读保留原身份与 unknown，不自动重放。派发判断归原操作 owner 与实际调用事实，不从输入文字、显示状态或预先保存的意图推测。
-
-新建 Agent 已由原回执确认并持久保全后，原已提交表单不再单独阻止网页更新；提交后的编辑仍须保留并单独确认，迟到回执不能清掉后来的输入。隐藏创建表单不复制或投影无关设备草稿与请求，保留原表单、意图和读取路径。
-
-### 手机对象身份与工作面
-
-手机 Agent 列表项支持长按和可见的更多入口，打开同一原 SID 的操作菜单；短按仍继续原对话，滚动、取消触摸与多指操作不误开菜单或误导航。菜单就近提供复制原 Agent 身份链接、查看消耗与既有原会话恢复动作，复制沿对象分享合同，不另造名片格式。消耗仅消费原 Core／Provider 的原生 Session 累计、最近回复与上下文观测，明确范围及观察时间；未上报或读取失败保持未知并可刷新，不补零、不推算费用，不把名称或所在行当作执行身份。打开、关闭菜单及读取消耗不提交输入、恢复或更换 Run，不改变原导航和草稿。菜单响应本地打开动作，不等待远端读取；一级直接提供已确认的原生消耗摘要，异步核对保留准确原目标、观测范围与刷新路径，未上报与读取中不混同。远端迟到、失败或断连不妨碍关闭、复制原身份链接及其他已有可用动作；菜单开合的本地工作不随无关 Session 的历史或目录组合放大。同一边界适用于手机主工作面切换及当前面板、控件交互：对已受理的本地意图立即给出可见反馈，不等待无关远端读取或昂贵的目录、历史组合；后续读取只更新对应范围，不阻塞已有可用操作。反馈只说明本地动作或等待，不冒充业务完成；隐藏工作面不因其他 Agent 的状态变化反复投影全部目录或历史，原已挂载编辑器、阅读位置、草稿与已接 Run 保留。
-
-手机 Agent 消息窗直接提供 Commands 入口，默认紧凑工具栏可达；命令从原 Provider／Core composer 能力读取，可搜索并插入当前草稿，不因选择命令自动发送、清空草稿或切换原目标。尚未列出命令时如实说明，原消息输入与终端能力保留，不凭展示文字编造命令资格。
-
-手机的服务、故障和 unknown 提醒均提供显式收起或关闭；菜单固定保留「提醒与诊断」入口，可重看或恢复显示已收起的原提醒，并到达其原恢复动作。收起只改变本设备呈现，不确认健康、投递或操作结果，不删除原意图、回执和草稿，不重发请求，也不授予任何操作权限。新的原对象／原操作问题不能被另一对象的收起状态覆盖；需要权限或答复的原请求仍按其原合同保留。头像与项目图标的原外观读取异常也遵循这一边界：在对应原对象读取完整原因并明确重试，收起后仍能从固定入口恢复；同名对象、其他头像观察或资料读取不能代签原异常。
-
-提醒绑定实际受影响的目录、对象与读取范围。仅属于某个 Session 的元信息问题，在离开该对话后不继续占据无关目录的常驻提示；返回该对象或打开「提醒与诊断」仍可查看原问题。目录问题提供就近的展开入口，列出受影响对象、失败步骤、具体原因和可行处理；准确身份与技术原文按需可读、可复制。明确刷新仅重读对应目录或对象的原公共事实，不自动恢复、创建、删除 Session 或重发未知操作；读取仍失败时保留原对象、已有内容和恢复路径，不把缺失元信息归为死亡或删掉条目。
-
-手机网页与 App 共享同一对象可达和业务能力：Mote、Topic、Space 里的原 Agent 即使尚未出现在手机 SDK 元信息目录，也保留原 SID、准确位置与打开/读取原会话入口，元信息未知就地说明，不把观察缺口当成未启动。明确新建 Agent 在已选原空间/Zone 中沿原 `agent.open` 完成 Executor、执行资源与展示目标选择，保留创建 operation、真实回执与查询原操作的恢复路径；不自动重放 unknown，不因打开目录或重连创建 Agent。
-
-手机对话顶部直接提供命令行与对话切换，不要求打开更多菜单。Goal 和 History 以就近独立入口打开当前原 Session 的目标与输入／通信历史；复用原唯一面板与读取 owner，关闭回到原触发处，保留草稿、阅读位置和未确认输入。入口移动不发消息、不改变执行身份、恢复资格或授权。原生包装的撰写消息动作位于当前对话动作面板，用户明确选择后关闭面板并聚焦该原对话的编辑器；失败就地说明、保留草稿，不发送或切换会话。
-
-手机 Commands 同时消费原 Provider 命令与 Desktop 保存的自定义 Prompt，沿同一 Provider 绑定与插入语义；自定义配置只从原 Settings 资源 owner 读取，不另存手机配置或补回用户已删除的默认项。明确来源，读取失败保留原命令、已读结果和健康输入，并提供重试及关闭。输入历史入口须直接可辨，复用[按 Agent 的输入历史](conversation-input.md#message-tool-按-agent-的输入历史)，搜索、复制或回填均不自动发送。
-
-手机 Focus 完整消费 App 原项目分组 owner 的准确 Host/Project、Topic／Mote 对象归属与待处理、执行中、近期工作优先顺序，组内沿原 Agent 呈现 owner 保名称、recap 与状态；不以持久目录或 Session 创建顺序代替工作优先级，不按同名项目合并、不按 cwd 或显示文字推业务归属。近期活动、稳定次序及阅读保护沿[原 Focus 规则](focus-context.md#项目归属任务状态与恢复)，不从心跳、终端字节或打开视图推导活动。较早与未确认条目仍保留准确身份、原位置和可达入口；未知不冒充闲置、死亡或新结果。项目/对象图标和已完成、待输入、执行中等状态图标消费 App 同一外观与语义呈现来源，呈现未知不改变运行或输入资格。
-
-手机 Mote 的日常入口围绕同一个原对象组织：进入原主对话、阅读进展、继续输入、回应事项与查看结果。主对话及合作资料消费原保存配置与业务 owner；主对话未确认时保留原对话候选和手动继续能力。同一 Session 在多处呈现时，入口保留此次 Space／Zone／Tab／Region 与 occurrence，不从 SID 的首个位置推导 Mote 身份。头像揭示该对象的 Profile、当前工作和就近动作。
-
-手机 Mote 用横排选择原对象，当前 Mote 的 Profile 是直接入口，与主对话及 Agents 平级，不作为需要逐层展开的树形子项；不枚举全部文件 Tab。Profile 沿[原搭档主页](motes-and-coordination.md#mote-快捷入口与当前协调上下文)提供已保存资料与按需文件编辑，Agents 只呈现原空间关系明确关联的 Agent 及其 recap；文件 Tab 和 Launcher 不冒充 Agent。选择已有 Agent 保留其准确 Session 与原展示位置，多 Region 或多处展示仍明确选择，不任取一个 Session。完整文件与其他工作面继续沿原 Space／资料入口可达，目录重排不删除或迁移内容。
-
-当前选中 Mote 的主 Agent 入口就近常驻于对象标题处，不依赖展开目录、已有运行 Session 或已保存默认主会话。目录呈现、展开、资料读取、刷新和重连不额外启动或恢复 Agent；用户明确点击主入口后才进入该原 Mote 的主对话流程。已保存主会话沿[原默认会话与主对话恢复合同](motes-and-coordination.md#主对话的自动接回)核对原 Host、Session 与准确展示位置，健康会话直接继续，需恢复时通过原 Core 接回同一身份；配置确实未保存主会话时可进入该 Mote 的原创建表单，明确创建后沿原配置 owner 保存准确主会话绑定。组合由原公共／共享 Mote 机制承担，不另建手机主会话或生命周期 owner。配置、身份或原操作未知时保入口、原引用、草稿与核对路径，不从第一个 SID、Launcher、名称或当前焦点猜主 Agent，不自动新建替代会话；既有独立的启动恢复时机仍由原恢复合同持有。
-
-Space 等完整工作面目录中的 Launcher 提供可发现的创建 Agent 入口，沿[原工作起点](workface-launcher.md)进入既有创建流程，保留该入口的准确 Space／Zone／Tab／Region 来源，不按名称、当前焦点或首个位置改投。打开目录或创建表单不启动 Agent；用户明确确认后才沿原创建 owner 执行，并保留原操作及真实回执。原位置或绑定未确认时保留原工作面与输入，提供核对原目标的路径，不能只以“在 Mac 上查看”封住工作起点，也不能用未知回执自动重建。
-
-手机 Topics 在同一目录中展开或收起 Category 下的原 Topic 子项，分类和成员由准确身份及原绑定确定；选择 Topic 仍进入原 Topic／Zone／Tab 工作面，讨论、知识及管理保持可达。对象和来源沿[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)，同屏展开只改变手机呈现，不另造分类或改写 Desktop 的导航范围。
-
-手机 Space 与 Desktop 共用原项目分组和目录树的呈现规则，沿[《Project 与 Workspace》](spaces-and-layout.md#project-与-workspace)消费原 Project、手动分组与 Host 事实；目录派生分组只表达呈现。Zone／worktree、Tab 和 Region 的归属仍由原资源和绑定确认，不按路径猜 Session 的业务归属或执行资源。目录发现或呈现读取未确认时保留已知目录与原可用工作面，说明失败步骤和观察范围并提供原目标的读取／恢复；折叠说明和改变密度不判定健康、身份或操作资格。
-
-手机所有原 Agent 对话都可显式复制由原 SID 生成的 `amux://agent/<SID>` 身份地址；名称、Run 和展示位置不替代原身份。复制失败保留可选的完整链接。查看尚未恢复或状态未确认的 Agent 时，保留原历史和输入草稿，并可显式请求 Core 恢复原 Session。恢复绑定原 Runtime、设备记录、Session、Run 与 operation；目录元信息缺失时沿原 `agent.inspect` 点读，不冒充死亡。未知结果保原恢复意图，只核对同一操作或明确继续该操作；重连、切页或刷新不自动重放，也不以新建或 Level A 重启代替语义恢复。复用 Hosted `ensureAgentContinuity`、公共 `agent.inspect` 与同 owner 的 `agent resume`，不新增同义 RPC／CLI。
-
-手机返回一次只离开当前最上层呈现：面板、来源或详情、终端／结果、对话、目录逐层返回。非顶层工作面提供直接可达的返回动作，不能要求先打开菜单才能返回，也不以回到默认主页代替原上一层。网页和原生包装遵守同一语义；切换主入口、打开资料与返回保留挂载的 Composer、原草稿、阅读位置和未确认操作。本设备保存呈现引用，原 Host 或目录迟到不得替换用户后来选择的工作面。
-
-手机版整体设计可分版本交付；每版须形成实际可用的完整流程，其他已有工作面与能力仍可达。各版的 Source、真实 Renderer、公共调用链与物理手机体验分别验收，浏览器窄屏、编译或原生同步不代签真机。
-
-手机 Send／Cmd+Enter 的单条输入语义沿[《Composer 消息队列与紧凑状态》](conversation-input.md#composer-消息队列与紧凑状态)，消费原 Core 的显式输入能力；普通 Enter 保持原常规输入，重连与读取不生成发送授权。已取得 `admitted` 或 `terminal-confirmed` 回执的显式输入按原 typed 事实安静收敛，不在输入区下常驻故障诊断卡，也不把终端字节确认或 Native 接纳冒充为 Agent 任务完成；`waiting`、`stopped`、`not-applied`、`unknown` 与投递失败保留真实状态、原请求／Run／正文与手动恢复动作。收起或关闭内联投递说明只改变当前呈现，不删除原 attempt、不重置草稿、不改变输入资格且不重发；收起后可通过紧凑状态入口或通信记录重新查看同一原回执，刷新、切页或返回不使已收起旧框重新常驻或串成新操作。同一原输入已确认的准确回执优先于之后一次旧 Run 准入检查的错误；该错误只说明这次检查，不证明原输入从未投递，也不能覆盖或替代原回执。输入关联或结果未确认时继续查询同一原 operation，不凭错误码猜投递或重发。原 Run 权威确认终止且原 Session 具备恢复资格时，在对话就近提供显式恢复原 Session 的动作；恢复与原输入投递分别确认，仍沿原输入合同处理用户后续明确发送。提示与恢复动作在输入区外完整可读，不因长诊断挤压正文或编辑器。
-
-手机问题与权限沿[共同对话协议](conversation-mode.md#共同对话协议与外部交流入口)消费原公共方法。设备保全的答复 intent 冻结原操作、准确请求、Host／Runtime 与 Run，只供原操作核对，不恢复回答权限；重挂载、重连和当前 pending 不能补造丢失的原 intent。原请求完成或替换后，已保全原操作仍可只读查询；unknown 保留原答案与新草稿，不自动重投。较旧阅读窗接收原 reader 已接受的同源最近页答案事实，另一入口的准确答案可更新原问题的呈现，但不替换已读正文、选区或阅读位置；不同来源不继承答案资格。
-
-手机 Skills 选择器按需消费公共 `skill.ls`（CLI：`amux skill ls --host ID --session ID`），由准确原 Session 的 Provider 目录与执行工作区发现，调用者不能替换 cwd。选择沿共享 Composer 插入可撤销引用，不执行 Skill、不授权发送；读取失败保留原草稿及已有输入能力，提供重试，切 Host／Session／工作面后的迟到结果不进入新草稿。Provider Commands、Agent 引用与 Posture 继续消费原 catalog 和输入 owner，不另建手机语义实现。
-
-手机附件入口在默认紧凑工具栏下直接可达，支持系统选择图片／普通文件或剪贴板粘贴图片，在原输入区就地预览、移除或明确上传；选择、粘贴、上传和网络重连都不授权发送消息。取消系统选择保持原草稿且不报故障，网页文件选择不因窗口焦点切换限时误判取消。长期无 UI Host 与 Desktop 共用同一私有附件存储 owner 服务公共 `file.upload` 与 `file.upload.inspect`，把附件字节送到准确原 Host／Session／Run；私有目的路径由 Host 决定，不接受调用者文件路径，也不覆盖已有操作。只有实际保存并读回、完整内容修订与原 operation 一致的回执，才沿共享 Composer 把文件引用加入原草稿；原 Send 再走 Core 单条输入。晚到回执不进入后来消息或另一会话，后来编辑的文字保留。未知回执保原 intent，通过 `file.upload.inspect` 核对同一操作，不自动重传；切连接、切会话和重启设备后保有准确原目标及核对入口。设备只持久化原 intent／回执，不把文件字节塞入工作面备份；未上传的系统选择随本次设备选择保留，离线不禁用正文输入。支持格式（含 PNG、JPEG／JPG、GIF、WebP、HEIC／HEIF 及普通有界文件）、单文件与传输上限由公共 codec 定义，不扩大 Relay／Hosted 原消息预算；超限或不可读取只拒绝本次附件，健康 Agent 与原草稿保持可用。
-
-系统选择或文件读取未返回时，用户可明确终止该次未完成的选择或读取，保留已完成的其他选择、正文和原上传；不能把窗口焦点或用户终止本页等待冒充系统取消。被终止动作的迟到结果不得添加附件、上传或修改草稿；其他选择与读取不被连带取消。仅在本页内存的完整文件逐项提供保全或明确移除入口；原上传已发起时，明确放弃本机副本不删除原上传记录或 Host 文件。文件导出是否实际落盘须如实表达，不能以发起下载代签保全；用户确认已另行保全或明确放弃该本机副本后，才解除对应内存字节对网页更新的限制。跨 Session 的附件按准确原身份提供返回或处理入口，不能让不可见的原附件成为无出口的阻断。
-
-原上传意图已可靠保存，且原 `file.upload` 已实际发起或原 Host 对同一 operation 的权威观察明确确认存在时，用户可明确结束该次本页等待，保留原操作身份和 unknown 回执，通过原 `file.upload.inspect` 核对；此动作不撤销、重发或确认原上传。纯核对可由用户明确终止本页等待，不能把已发起的 `file.upload.inspect` 当作上传已派发或原操作存在的证据；本页仍有未发起的上传续做时须显式取消该续做，迟到结果不得继续上传。若该等待还会自动向草稿插入引用，必须同时显式终止该次插入续做，迟到结果不得修改当前或其他草稿；已有确认回执沿原对象保全。设备保存尚未确认或本机字节仍未保全时继续保留当前页，分别说明真实原因和可行恢复动作。
-
-手机 Focus 行同时展示已确认的项目、Agent 名称与语义状态。项目关系消费公共事实，不以 cwd 猜空间归属；显示名沿原名称解析链；事实不可读时标记未确认并保留原工作面。Mote 使用原保存头像及动画；会话顶部仅呈头像，身份与状态按需查看，不以不透明标题栏遮挡对话。辅助菜单揭示侧栏并保留工作面；连接与设备设置位于侧栏，菜单不代替当前层的直接返回。
-
-`space.ls` / `space.inspect` 的只读 `presentation: true` 由 client 原呈现 owner 返回空间的 `catalog.appearance`，仅传有界 glyph、parts、图片引用版本与已选空间的原 App 图片（PNG、JPEG、GIF、WebP、SVG 或图标格式）。Core 不解释头像外观，不保存新 identity。图片字节按选中 Space 的 inspect 读取；列表不批量传图片。现有 JSON-RPC／CLI raw RPC 可消费同一参数和回执，手机导航与头像为生产调用者。无新增写操作。
-
-Mobile 的 Mote 外观沿原耐久身份 target，图片／图标／捏脸自定义及原动画完整消费；主 Mote 的默认身份不用于其他对象。Focus 的原显示名、项目、Executor头像、recap、项目分组和状态由现有呈现owner返回，不能用手动名称override代替显示名，不能在手机复制分类推断。缺事实沿服务窗保原可用会话。只读 presentation catalog 传有界 agentPresentation 事实，RPC与CLI raw可消费，无新增写操作。
-
-手机目录完整消费原呈现 owner 的名称、项目、详情和 recap，不另加任意字段长度限制或截断正常数据。传输容量沿既有公共消息预算，不用重复的更小字段预算阻断原可用目录。中文／emoji 不能导致整个 Focus、Mote 目录失效；验收包含原呈现生产者到实际公共 codec 的链路及原内容保真。
-
-Mobile 消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，入口位置沿本节一级导航。Topic 保 Category、Topic、Chat 和知识来源身份；Survey 只显示原明确收集的研究 Zone、原名称和准确 Tab／Region，不能把全量空间当研究或复制内容。Goals 沿原公共目标 owner 保目标身份、状态、决策和操作回执，不维护手机独立目标系统。所选 File Region 以原目录元信息确定准确资源，通过既有 `file.read` 读取原内容与修订；列表不批量读取文件，不凭路径猜内容，不新增另一套文件读取接口。手机 Note 编辑和保存消费原共享 schema 与 revision-aware 文件写入 owner；冲突、未知写入和未保存草稿明确保全，未取得确认不冒保存成功。正文写入若缺公共入口，在同一交付中暴露原 owner 的最小 RPC／CLI 能力并验证实际手机消费，不停留只读占位。Browser 沿原 browserId 发现当前网页。原对话、Message Tools 与 Terminal 继续同源，自定义头像和动画保真，失败保原对象和草稿。
-
 
 ## 对象地址、分享与方向
 
 - **分享对象地址时，复制的是一个寻址方式。** 接收方（人或另一个 Agent）仅凭这份分享就能识别对象身份并执行准确命令，无须猜 ID 层级、flag 或回头问人。普通路径、URL、代码选区、终端输出与分支名的直接复制仍按其原任务生成内容，不包成身份名片；明确面向 Agent 的上下文分享按本节共用外框呈现。
 
-- **三类地址回答三个不同的问题，绝不互为别名**（与上文 Session/Run/Tab 的身份边界同源）：
-  - **Session** 回答"**哪个 Agent**"——Provider 语义身份，跨 Tab 稳定，一个 Session 可同时投影到多个 Region 与多个 Tab；
-  - **Region** 回答"**哪一格内容**"——Tab 内的精确内容 leaf；物理位置命令必须使用已知准确 Region 与原展示上下文，不从一个 SID 猜唯一位置；
-  - **Tab** 回答"**哪张完整工作面**"——只有其中恰好一个不同的 Agent Session ID 时才可用于语义发送；同一 SID 的多个 Region 投影仍是一个 Agent。既有 View 用语不形成另一层身份。
+- **不同种类的对象地址不互为别名。** 对象链接的种类与编码只见 [amux 协议的对象链接](../../specs/amux-protocol.md#对象链接)。Space、Zone 与 Capsule 链接分别指向持久空间、Zone 与持久页面；与发送和导航消歧直接相关的是下面三类：
+  - **Agent（Session）** 回答“哪个 Agent”：Core 语义身份，跨 Tab 稳定，一个 Session 可同时投影到多个 Region 与多个 Tab；
+  - **Region** 回答“哪一格内容”：Tab 内的准确内容 leaf；物理位置命令必须使用已知准确 Region 与原展示上下文，不从一个 SID 猜唯一位置；
+  - **Tab** 回答“哪张完整工作面”：只有其中恰好一个不同的 Agent Session ID 时才可用于语义发送；同一 SID 的多个 Region 投影仍是一个 Agent。既有 View 用语不形成另一层身份，Session、Run 与 View 的身份边界见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)。
 
 - **对象分享直接复制 `amux://` 链接。** 对象类型与准确编码只见 [amux 协议的对象链接](../../specs/amux-protocol.md#对象链接)；每份只包含原对象类型与一个准确身份，不再复制身份名片、执行器资料或重复命令说明。Agent 链接始终指向 Core SID，不以原生会话 ID、显示名、执行器、Run 或空间位置替代。右键菜单按真实动作命名 Copy Agent/Region/Tab/Category/Topic Link，同一目标只保一个复制入口；复制本身不发送、不导航、不改变焦点、展示、草稿或健康 Run。
   - 新 ID 的等长 Base58 规则见[产品实体 ID 分配](spaces-and-layout.md#产品实体-id-分配)，Session 既有 ID／持久创建重试保全见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)；链接仍准确引用原对象身份，不增加分享别名或另一种地址格式。
@@ -447,49 +312,44 @@ Mobile 消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，�
 - **已有的 Agent 上下文分享复用同一外框。** 编辑器的 Copy as Agent Context 和 Browser 的元素／批注上下文消费 [amux 协议的内容分享外框](../../specs/amux-protocol.md#内容分享外框)。它们是内容与来源分享，不冒称 Agent 身份，不强加 `ID`、`Exe` 或无关发送命令；外框只包原 owner 已产出的正文。
   - File 保留原工作区相对路径、起止行、语言围栏和所选代码；Browser 保留真实页面、元素／选区与批注来源、原顺序和原内容上限。格式器不读取文件或页面，不解析正文、不改原文或提升正文中的声明为身份、授权和可执行指引；范围、内容预算、复制失败反馈与重试继续由原 owner 执行，正文上限不能靠增加外框被绕过，最终外框须完整闭合。
 
-- **歧义在源头消除，不甩给接收方**。一张 Tab 承载多个不同 SID 时，整张 Tab 不能唯一指定消息收件人。右键已知某个 Agent 的那一格时，Agent 链接直接给出其语义 SID；准确 Region 通过独立 Region 链接分享；不能让接收方先撞 `MESSAGE_TARGET_NOT_UNIQUE` 再挑候选。同一 SID 的多个投影不构成语义发送歧义；精确位置查询、导航和移动仍不能据此猜成唯一位置。
+- **歧义在源头消除，不甩给接收方。**一张 Tab 承载多个不同 SID 时，整张 Tab 不能唯一指定消息收件人。右键已知某个 Agent 的那一格时，Agent 链接直接给出其语义 SID；准确 Region 通过独立 Region 链接分享；不能让接收方先撞 `MESSAGE_TARGET_NOT_UNIQUE` 再挑候选。同一 SID 的多个投影不构成语义发送歧义；精确位置查询、导航和移动仍不能据此猜成唯一位置。
 
-- **复制入口按其能消除的歧义就近放置**。Region 菜单的 Copy Region Link 指向准确 Region，Copy Agent Link 指向该格的 SID，不取当前焦点。Tab Link 用于检查整张工作面；只有唯一不同 SID 时才给 Agent Link，不取首格。同一 Session 从 Region、Tab、Roster、Focus、终端入口产出相同 Agent Link；准确位置通过独立空间链接分享。
-
-- 复制的 CLI 指引**只使用公开对象 CLI 与 Control 面接受的寻址方式**（`agent send` 的 `--to-session` / `--to-region` / `--to-tab`、`agent inspect --session` 和 `space inspect` 的对应空间 flag），不为复制发明第二套语法。地址里的 id 一律按 shell 语义转义，使带空格、引号或像 option 的 id 粘贴即可执行，命令不得改变原值。
+- **复制入口按其能消除的歧义就近放置。**Region 菜单的 Copy Region Link 指向准确 Region，Copy Agent Link 指向该格的 SID，不取当前焦点。Tab Link 用于检查整张工作面；只有唯一不同 SID 时才给 Agent Link，不取首格。同一 Session 从 Region、Tab、Roster、Focus、终端入口产出相同 Agent Link；准确位置通过独立空间链接分享。
 
 - **Tab 发送消歧与精确回执同源。** 消息按不同 SID 聚合，一个 SID 的所有 Region 候选完整保留；同 SID 多投影只入队和提交一次。多个不同 SID 或零 Agent 时给出合法 typed candidates，不能让错误回执自身成为协议错误。已捕获的收件人、Run 条件与消息身份保持，后来位置变化不能改投替换者、自动重发或谎称当前呈现已确认。
 
 - **复制入口清楚表达对象与动作。** Agent Link 分享语义身份，Region／Tab Link 分享准确空间对象；发送、检查与导航由 skill 可发现。不能把复制链接冒称已经发送消息或打开目标。
 
-- **每一处能看见某个 Agent 的地方都要能寻址到它，TUI 里面也算**。终端画布自己的右键菜单知道这一格的准确 Session，应与 Region／Tab／Roster／Focus 共用 Copy Agent Link 和同一 Core 格式化出口，同一 SID 的链接逐字一致；不另查执行器 metadata，也不从焦点或 SID 猜空间位置。准确 Region 由独立 Region Link 分享。
+- **每一处能看见某个 Agent 的地方都能寻址到它，终端画布也算。**终端画布自己的右键菜单知道这一格的准确 Session，应与 Region／Tab／Roster／Focus 共用 Copy Agent Link 和同一 Core 格式化出口，同一 SID 的链接逐字一致；不另查执行器 metadata，也不从焦点或 SID 猜空间位置。准确 Region 由独立 Region Link 分享。
   - 只有这一格是 Agent 时才出现 Agent Link；普通终端没有 Agent 语义身份，不显示灰掉的虚假入口。
   - 原有终端 Copy 仍复制选区／可视区／回滚；Agent Link 复制语义对象身份，两者沿既有分隔线分组，不能让用户误以为链接是终端内容或已发送消息。
 
-- **失败结果要自带下一步命令，而不只是候选清单**。`MESSAGE_TARGET_NOT_UNIQUE` 已经带 `candidates`，但候选清单仍要求接收方自己拼出命令——那正是"歧义不甩给接收方"这条原则在错误路径上的漏洞。因此这类失败要额外返回**可直接执行的恢复命令**；stale View、目标不是 Agent、Agent 已退出各自给自己的恢复入口。恢复命令与复制出去的地址**共用同一个格式化出口**，不为错误路径另写一份拼接（两份拼接会各自演进，且漂移时不会有测试变红）。
-  - **恢复文本挂在控制错误的出口层，不挂在抛出点**。同一个失败码往往有多个抛出点（例如 `TAB_NOT_OPEN` 与 `REGION_NOT_OPEN`），在每个抛出点拼一次恢复文本，必然随时间各自演进，而漂移的那天不会有任何测试变红。控制错误离开渲染进程只有一个出口，恢复文本要说服的正是**出口对面那个调用方**——所以那一层是它唯一该长出来的地方。
-  - **哪些码算"寻址失败"由地址模块自己判定，出口层不列第二份码表**——两份码表同样会漂移。不属于寻址失败的码**不附加恢复文本**：一句放之四海的"再试一次"既没有信息，又会盖住原始 message 里真正的原因。
-  - **恢复命令只用已通过校验的候选**。未校验的 id 可能带换行或保留字，会把恢复文本切成一段执行不了、甚至误导人的命令——那比不给恢复更糟。
-  - **给出的每一行命令都必须真能跑；给不出就不写命令**。"下一步"的价值全在于粘贴即可执行，一条命令形状但跑不了的文字比不给更糟——它看起来像出路，用户照做撞的是第二次失败。判据不是"读起来像命令"，而是用实际 CLI parser 逐行校验对象、动词与必填项：`agent inspect`／`space inspect` 有准确选择器，`agent send` 除选择器外还必须带 `--text`，列实际 Session 用 `agent ls`。检查共用出口的命令，不能只匹配一段看似正确的前缀。
-  - **守卫的粒度必须细过它要防的那个 bug**。上一条的裸 `inspect` 修好后，形状表把 `send` 与 `inspect` 合写成一条，于是漏掉 `--text` 的 `send` 又一次照样匹配——同一个洞换了个位置复发。凡是修"断言太粗"，都要回头检查同一条断言里还有没有第二个粗的地方；不同动词有不同必填项，就不能共用一条形状。
-  - **写"下一步"之前，先证明这个失败是怎么到达的**。判据是抛出点外层的分支条件，不是错误码的名字。`AMBIGUOUS_REGION_TARGET` / `AMBIGUOUS_TAB_TARGET` 听起来像"你给的地址匹配到多个"，实际只从 `self` 分支抛，真实含义是"发起方自己同时显示在多处"——显式 id 走不到那里（Region id 是全局唯一的稳定身份）。按名字直觉写出来的文案会让用户去改地址，而问题出在"我在哪"这个前提上：**一条方向错的下一步比没有下一步更糟**。这类文案要用语义断言钉住（必须点名 `self`，不许套用另一个码的说法），形状断言（"命令能跑"）对措辞错误一视同仁，抓不到张冠李戴。
-  - **这条判据对复制侧与恢复侧同时成立**。"粘贴即可执行"本就是复制这件事的全部意义，而它一度只被施加在恢复文本上：改掉命令出口的 `--text`，三个地址的复制断言纹丝不动，因为它们只校验到 id 就收手了。共用出口的两侧，判据也要共用同一个校验函数，各自带"检查了几行"的下界防"一行都没检查"。
+- **失败结果自带可执行的下一步，而不只是候选清单。** `MESSAGE_TARGET_NOT_UNIQUE` 已带 `candidates`，但只给候选仍要求接收方自己拼命令，违背“歧义在源头消除”。这类寻址失败额外返回可直接执行的恢复命令；stale View、目标不是 Agent、Agent 当前未被观察到各给自己的恢复入口。
+  - **恢复命令来自同一 Core 命令格式化出口。** 客户端不为错误路径另写拼接，否则两份拼接会各自演进且漂移时没有测试变红。命令只使用公开对象 CLI 接受的寻址方式（例如 `agent send --to-session`、`agent inspect --session` 与 `space inspect` 的空间选择器）；其中的 id 按 shell 语义转义，带空格、引号或像 option 的 id 粘贴即可执行，且不改变原值。
+  - **恢复文本挂在控制错误离开 client 的唯一出口，不挂在各抛出点。** 同一失败码往往有多个抛出点（例如 `TAB_NOT_OPEN` 与 `REGION_NOT_OPEN`），在每处各拼一份会随时间各自演进。哪些码算寻址失败由地址恢复模块唯一判定，出口层不另列一份码表；不属于寻址失败的码不附加恢复文本，避免一句泛泛的“再试一次”盖住原始原因。
+  - **只用已通过校验的候选。** 未校验的 id 可能带换行或保留字，会把恢复文本切成无法执行甚至误导人的命令。
+  - **每一行命令都必须能被实际 CLI parser 执行；给不出就不写命令。** 按对象、动词与必填项逐行校验：`agent inspect`／`space inspect` 带准确选择器，`agent send` 除选择器外还必须带 `--text`，列出实际 Session 用 `agent ls`。不同动词的必填项不同，不能共用一条形状判断，也不能只匹配一段看似正确的前缀。看起来像命令却跑不通的文字会把用户引向第二次失败。
+  - **文案方向与失败的真实到达路径一致。** 判断依据是抛出点所在分支的条件，不是错误码的名字。例如 `AMBIGUOUS_TAB_TARGET` 只在 `self` 解析中出现，含义是“发起方自己同时显示在多处”，下一步是改用与位置无关的 Session 身份，而不是修改地址；方向错的下一步会让用户去改一个没有问题的地址。同一错误码有多条到达路径而文案只适用其中一条时，须确认其余路径在生产中不可达；一旦可达，应拆分错误码，而不是把文案写得含糊。当前判定见 [`addressingRecovery`](../../../apps/desktop/src/renderer/src/lib/agent-address.ts)。
   - **缺少准确目标时不给猜出的恢复命令。** 失败结果没有足够的 Tab／Region 身份时，提供原位置的重取地址动作；已有准确 Session 身份时，可提供能操作同一 Agent 的稳定 Session 旁路。Tab／Region 的持久身份仍沿[空间模型](spaces-and-layout.md#空间模型)，暂未取得地址不表示身份失效。
   - **列实际 Agent Session 与列已配置 Executor 是不同动作。** 前者用 `agent ls`，后者归 `settings executors ls`；unknown／unavailable 保持真实，列表不擅称全部仍活着。两者即使命令都能跑，也必须校验下一步与错误原因的语义对应。
 
-- **「左边/右边/上面/下面」在创建时表示分栏，在查看时也能落到相邻 Tab。** 创建与方向查询各消费原公开能力，遵循以下共同方向语义。
-  - **创建与查看的默认落点不同，这是有意的，不是不一致**：创建一个方向只有一种诚实解释——用户要多一格，那就是 split（新开一个 Tab 不叫"在右边"）；而查看一个方向时，屏幕上"右边"的东西可能是同一 View 里的另一格 Region，**也可能在没有分栏时就是 Tab 条上相邻的那张 Tab**。查看端拒绝回答"没有分栏所以没有右边"，等于对着用户眼睛看得见的东西说不存在。
-  - **优先级由"屏幕上更近"决定：先 Region 后 Tab**。同一 View 内有分栏时，方向解析必须落在 Region 上——那才是用户视线里紧挨着的那一格；只有当该方向上没有兄弟 Region 时，才退到 Tab 邻接。反过来（先 Tab）会让一个分了栏的 View 把用户指向另一张 Tab，与所见不符。
-  - **上下方向对 Tab 不成立**。Tab 条是一维水平序列，"上面那张 Tab"没有所指；此时如实回答该方向没有邻居，**不许把 up/down 悄悄折成 prev/next**——那会让 Agent 以为自己拿到了上方的东西，实际拿到的是左边那张。
-  - **"哪个算右边"只有一处定义**。创建与查看做的**不是**同一件事——split 是在 Region 树上劈开一个节点，查看是在已排好的版面上找邻居——但两者对 left/right/up/down 的**轴向解释**必须来自同一处（横向轴属 left/right，纵向轴属 up/down）。方向查询自身写成纯函数，从既有的版面几何（Region 的归一化 bounds）与既有的 Tab 序列推导，不为它另建一份布局真相；否则漂移时只表现为 Agent 偶尔寻址到隔壁，而没有测试会红。
+- **方向词在创建时表示分栏，在查看时也能落到相邻 Tab。** 创建与方向查询（`space resolve`）各消费原公开能力，遵循以下共同方向语义。
+  - **创建与查看的默认落点不同。** 创建一个方向只有一种解释：用户要多一格，即 split；新开 Tab 不叫“在右边”。查看一个方向时，屏幕上“右边”的东西可能是同一 View 里的另一格 Region，也可能在没有分栏时是 Tab 条上相邻的 Tab；查看端不能因为没有分栏就回答没有右边。
+  - **先 Region 后 Tab。** 同一 View 内有分栏时，方向解析落在用户视线里紧挨着的 Region；该方向上没有兄弟 Region 时才退到 Tab 邻接。先 Tab 会让分了栏的 View 把用户指向另一张 Tab，与所见不符。
+  - **上下方向对 Tab 不成立。** Tab 条是一维水平序列，此时如实回答该方向没有邻居，不把 up／down 折成 prev／next；否则 Agent 以为拿到了上方的对象，实际拿到的是左边那张。
+  - **轴向解释只有一处定义。** split 是在 Region 树上劈开一个节点，查看是在已排好的版面上找邻居，两者是不同动作；但 left／right／up／down 的轴向（横向轴属 left／right，纵向轴属 up／down）来自同一处。方向查询写成纯函数，从既有版面几何（Region 的归一化 bounds）与 Tab 序列推导，不另建一份布局事实；否则漂移时只表现为 Agent 偶尔寻址到隔壁，且没有测试会变红。
   - **方向结果不形成新的身份或地址层级。** 解析结果仍是既有的 Region 或 Tab 地址，沿其原公开选择器，不新增 surface kind。
 
 - 后台 Agent 由 Agents 工具重新发现和打开，不建立第二份 Session Registry。
 
-- **Agent 自己就能把 terminal、browser 或文件开到某个方向的分栏里**，走的是既有的 `open` / `arrange` CLI——那已经是"Agent 驱动界面"的接口，**不新建第二条通路、不新增 surface kind**。缺的从来不是能力而是发现：因此由启动时注入的提示负责让每个 Agent 知道这件事存在、并知道去哪查确切用法，而**不把完整 CLI 语法抄进提示**（那会与 skill 争夺唯一真相，并在语法演进时立刻过期）。这条的验收是行为断言——证明启动路径确实携带了该提示，而不是断言 skill 文本里含某个字符串：后者在改动前也会通过，证明不了任何事。
-
+- **Agent 能把 Terminal、Browser 或文件开到指定方向的分栏。** 入口是既有的 `open`／`arrange` CLI，不新建第二条通路，也不新增 surface kind。需要补的是发现：启动时注入的提示让每个 Agent 知道这项能力存在、去哪里查确切用法，但不把完整 CLI 语法抄进提示，以免与 skill 争夺唯一事实并在语法演进时过期。验收证明启动路径确实携带该提示，而不是断言 skill 文本含某个字符串——后者在改动前也会通过。
 
 ## Agent 自助创建与空间操作
 
-- **自定义 Executor 与内置 Executor 走同一创建路径**。用户说“应该要可以开出来，且也有完整的元信息”。发现结果必须区分用户名称和稳定 Executor ID，并以当前配置为准；按名称指定时，唯一名称可解析到稳定 ID，重名须返回候选而不猜。未找到名称不能被描述为“这个 Provider 不支持自定义 Agent”，也不能擅自用默认 Executor 代替用户选中的配置。
+- **自定义 Executor 与内置 Executor 走同一创建路径。** 自定义 Executor 要能开出 Agent，并带完整元信息。发现结果必须区分用户名称和稳定 Executor ID，并以当前配置为准；按名称指定时，唯一名称可解析到稳定 ID，重名须返回候选而不猜。未找到名称不能被描述为“这个 Provider 不支持自定义 Agent”，也不能擅自用默认 Executor 代替用户选中的配置。
 - **新建 Agent 的执行工作区与展示目标可分别选择。** 明确选择的执行工作区须是已登记的资源 Workspace，由原 owner 解析准确 Host 与目录；展示仍沿原 Space/Zone/Tab/Region 定位，因此本地分屏可承载远端新会话。未另选执行工作区时沿原创建上下文；显式引用不存在、未知或歧义时拒绝本次创建并保原工作面，不猜目标或顺便登记资源。此独立选择只用于新会话，不覆盖已有 Session 或 fork/resume 的执行事实，也不与本次新建 Zone 资源并用；一项创建只有一个执行资源来源。请求与回执分别保留执行资源和实际展示位置，资源登记不替代 Runtime 或来源作者授权。
-- **元信息足以发现、启动和核验同一个 Agent**：创建前可见 Executor ID、名称、Provider 与目标 Host 的探测状态；创建后可关联 Session、Run、Host、Workspace、View、Region 和能力。Session/Run/能力来自 Core，布局坐标来自布局 Owner；配置里的环境值与凭据不是发现元信息。未探测、探测失败与确认缺失必须可区分，不把“未探测”说成“不能启动”。
-- **“在右边新开一个”不是“查找右边已有的”**。旁边已有 Agent 不满足新建请求，也不构成空间已满。Tab 条相邻只表达导航关系，不能被当作当前 View 中可见的分屏占用；空间判断取同一次 View 几何与内容快照，不按 Tab 标题、列表次序或树深度猜。
-- **技能中的空间原则保持简短、通用**：先看当前视图，优先复用符合方向意图的空位；需要拆分时，选择能让新旧内容都清晰可用且扰动最小的区域；保留现有工作，完成后核对实际落点。由 Agent 根据可见空间决定具体拆哪格，不枚举窄/宽/左右的特例，不要求面积相等；用户明确给定的目标与方向优先。
-- **成功以提交后的实际归属为准**。创建、拆分、移动与重排不能用过时计划的 Tab/Region 身份宣称成功；源、目标、树叶、内容索引和焦点必须一致。异步创建期间布局变化不得覆盖较新的布局；Agent 已经健康启动但展示目标失效时，保留其 Session 可发现性并明确说明当前落点或未展示状态，不因为布局流程失败停止它。
-- **独立布局包必须是真正的唯一实现**。通用树结构、几何、方向、分割、移动和不变量属于可独立使用、无 React/Electron/Agent 依赖的布局包；Desktop 用它的公开 API 绑定内容、渲染与持久化。Workspace 的 Tab Group 树与 View 的 Region 树保持不同身份，复用同一套布局代数；不把 Session、Provider 或 Run 生命周期装进布局包，也不在 Desktop 保留第二份树实现。是否完成以独立包消费验证和产品调用为准。
+- **元信息足以发现、启动和核验同一个 Agent。**创建前可见 Executor ID、名称、Provider 与目标 Host 的探测状态；创建后可关联 Session、Run、Host、Workspace、View、Region 和能力。Session/Run/能力来自 Core，布局坐标来自布局 Owner；配置里的环境值与凭据不是发现元信息。未探测、探测失败与确认缺失必须可区分，不把“未探测”说成“不能启动”。
+- **“在右边新开一个”不是“查找右边已有的”。**旁边已有 Agent 不满足新建请求，也不构成空间已满。Tab 条相邻只表达导航关系，不能被当作当前 View 中可见的分屏占用；空间判断取同一次 View 几何与内容快照，不按 Tab 标题、列表次序或树深度猜。
+- **技能中的空间原则保持简短、通用。**先看当前视图，优先复用符合方向意图的空位；需要拆分时，选择能让新旧内容都清晰可用且扰动最小的区域；保留现有工作，完成后核对实际落点。由 Agent 根据可见空间决定具体拆哪格，不枚举窄/宽/左右的特例，不要求面积相等；用户明确给定的目标与方向优先。
+- **成功以提交后的实际归属为准。**创建、拆分、移动与重排不能用过时计划的 Tab/Region 身份宣称成功；源、目标、树叶、内容索引和焦点必须一致。异步创建期间布局变化不得覆盖较新的布局；Agent 已经健康启动但展示目标失效时，保留其 Session 可发现性并明确说明当前落点或未展示状态，不因为布局流程失败停止它。
+- **独立布局包必须是真正的唯一实现。**通用树结构、几何、方向、分割、移动和不变量属于可独立使用、无 React/Electron/Agent 依赖的布局包；Desktop 用它的公开 API 绑定内容、渲染与持久化。Workspace 的 Tab Group 树与 View 的 Region 树保持不同身份，复用同一套布局代数；不把 Session、Provider 或 Run 生命周期装进布局包，也不在 Desktop 保留第二份树实现。是否完成以独立包消费验证和产品调用为准。

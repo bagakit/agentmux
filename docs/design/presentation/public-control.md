@@ -11,9 +11,9 @@
 
 ## Agent-first 的 Space 工作入口
 
-Space / Zone / Tab / Region、Project 与 Workspace 的统一含义只定义在交互 SSOT[《统一概念与空间寻址》](../behavior/spaces-and-layout.md#统一概念与空间寻址)；`agent open` 与 `space mv` 的行为只定义在[《Agent-first 的 Space 工作入口》](../behavior/public-control.md#agent-first-的-space-工作入口)。工作面、原执行目录与失败说明沿用现有 Tab/Region、服务窗和身份展示语言；本轮统一合同并闭合 CLI，不新增 Renderer 控件或视觉层，不把全仓改名当成概念统一。
+Space / Zone / Tab / Region、Project 与 Workspace 的统一含义只定义在交互 SSOT[《统一概念与空间寻址》](../behavior/spaces-and-layout.md#统一概念与空间寻址)；`agent open` 与 `space mv` 的行为只定义在[《Agent-first 的 Space 工作入口》](../behavior/public-control.md#agent-first-的-space-工作入口)。工作面、原执行目录与失败说明沿用现有 Tab/Region、服务窗和身份展示语言；这两个入口通过统一合同与 CLI 闭合，不新增 Renderer 控件或视觉层，不把全仓改名当成概念统一。
 
 
 ## 手机版 Relay 连接的呈现
 
-手机客户端的视觉、密度、控件、文案、状态、动效与验收唯一见[手机客户端的呈现](mobile-client.md)。本节只保留原锚点，供已有链接进入；新约束写进该页对应章节，不在这里追加。
+手机客户端的视觉、密度、控件、文案、状态、动效与验收唯一见[手机客户端的呈现](mobile-client.md)，对应行为见[手机客户端](../behavior/mobile-client.md)与[手机版 Relay 连接](../behavior/public-control.md#手机版-relay-连接)。本节只保留原锚点，供已有链接进入；新约束写进该页对应章节，不在这里追加。
