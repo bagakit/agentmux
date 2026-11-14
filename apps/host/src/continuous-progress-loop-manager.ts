@@ -12,6 +12,8 @@ import type { ContinuousProgressLoopStore } from './continuous-progress-loop-sto
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE } from '@agentmux/core/schedule'
 import { decideCheckIn, type CheckInObservation } from './agent-schedule-check-in.js'
 import type { ContinuousProgressDefinitionReference, ContinuousProgressGuidanceAdoption } from '@agentmux/core'
+import { agentPromptInputId, projectContinuousProgressInput, type ContinuousProgressInputReading } from '@agentmux/core'
+import { scheduledDefinitionOperation } from './scheduled-input-source.js'
 
 export type LoopTickOutcome = 'sent' | 'skipped' | 'unknown'
 export type LoopTickHandler = (loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal) => Promise<LoopTickOutcome>
@@ -26,6 +28,7 @@ export type GoalProgressStart = ContinuousProgressTarget & { goalId: string; ali
 export type FutureProgressInputOwner = {
   saveFutureIntent(loop: ContinuousProgressLoop, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   inspectFutureIntent?(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
+  inspectInput?(loop: ContinuousProgressLoop): Promise<ContinuousProgressInputReading | undefined>
   authorizeFutureIntent?(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
   observeCheckIn?(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
 }
@@ -528,7 +531,15 @@ export class ContinuousProgressLoopManager {
     }
     if (method === 'schedule.inspect') {
       const p = params as ScheduleParamsMap['schedule.inspect']
-      return { ...scope, schedule: this.list().find(loop => isAgentSchedule(loop) && (p.scheduleId ? loop.loopId === p.scheduleId : loop.creationOperationId === p.operationId || loop.guidanceAdoptions?.some(value => value.operationId === p.operationId) || loop.lastMutation?.operationId === p.operationId || loop.pendingCompletion?.operationId === p.operationId || loop.lastTickId === p.operationId)) ?? null } as ScheduleResultMap[M]
+      const selected = p.scheduleId ? this.scheduler.get(p.scheduleId) : this.list().find(loop => isAgentSchedule(loop) && (loop.creationOperationId === p.operationId || loop.guidanceAdoptions?.some(value => value.operationId === p.operationId) || loop.lastMutation?.operationId === p.operationId || loop.pendingCompletion?.operationId === p.operationId || loop.lastTickId === p.operationId || loop.lastInputRef && agentPromptInputId(loop.lastInputRef.inputKey) === p.operationId))
+      const schedule = selected && isAgentSchedule(selected) ? selected : null
+      let input: ContinuousProgressInputReading | undefined
+      if (schedule?.lastInputRef) {
+        try { input = await awaitUntilCancelled(async () => await this.futureInputs?.inspectInput?.(schedule), context?.signal ?? new AbortController().signal) }
+        catch { /* This one observation is unknown; the original schedule remains. */ }
+        input ??= projectContinuousProgressInput(schedule.lastInputRef, null)
+      }
+      return { ...scope, schedule, ...(input ? { input } : {}) } as ScheduleResultMap[M]
     }
     if (method === 'schedule.create') {
       const p = params as ScheduleParamsMap['schedule.create']
@@ -1000,7 +1011,14 @@ export class ContinuousProgressLoopManager {
               prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }), ...(futureIntent ? { futureIntent } : {}) }
           }
           if (futureIntent || pending.id === decision.completionId) {
-            this.patch(claim.loop.loopId, { pendingCompletion: pending })
+            const definitionOperationId = pending.futureIntent ? scheduledDefinitionOperation(claim.loop, pending.futureIntent.intentId) : null
+            const inputKey = pending.condition ? { kind: 'prompt' as const, agentSessionId: claim.loop.agentSessionId, expectedRun: pending.condition.expectedRun, submissionId: pending.operationId } : undefined
+            const previous = this.require(claim.loop.loopId).lastInputRef
+            const lastInputRef = pending.futureIntent && definitionOperationId && inputKey ?
+              previous && isDeepStrictEqual(previous.inputKey, inputKey) && isDeepStrictEqual(previous.futureIntent, pending.futureIntent) ? previous : {
+                inputKey, futureIntent: pending.futureIntent, definitionOperationId, preparedAt: checkAt,
+                ...(claim.loop.managedSource ? { managedSource: claim.loop.managedSource } : {}) } : undefined
+            this.patch(claim.loop.loopId, { pendingCompletion: pending, ...(lastInputRef ? { lastInputRef } : {}) })
             await this.store.save(this.scheduler.list())
             if (!isCurrent()) break delivery
             dispatched = true

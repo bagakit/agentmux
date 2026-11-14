@@ -9,6 +9,8 @@ import type { ConnectionEnrollmentCallContext } from '@agentmux/core/connections
 import { MOTE_SUPERVISION_GUIDANCE, type MoteMainReader, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ContinuousProgressLoop } from '@agentmux/core'
+import type { MoteHeartbeatSource, MoteDialogueCallContext } from '@agentmux/core/mote-dialogue'
+import { assertScheduledInputSource, scheduledDefinitionOperation } from './scheduled-input-source.js'
 import type { GoalExecutionClient } from './goal-runtime.js'
 import { MAINTENANCE_RETRY_LIMIT_MS, MAINTENANCE_RETRY_MS, type ContinuousProgressLoopManager, type MaintenanceSourceDecision } from './continuous-progress-loop-manager.js'
 import { readMoteQuickModeSource, moteQuickModeDefaults } from './mote-quick-mode-source.js'
@@ -45,6 +47,23 @@ export function createHostMotePresence(options: {
     return matches[0]!.client
   }
   const invalidate = (target: MotePreferencesTarget) => { const id = key(target); targets.set(id, target); dirty.add(id) }
+  async function qualifyHeartbeatSource(source: MoteHeartbeatSource, main: MoteMainSnapshot, context: MoteDialogueCallContext) {
+    const loop = options.schedules.inspectLoop(source.scheduleId), caller = context.caller
+    if (!main.identity || !loop?.managedSource || motePresenceSourceId(main.identity) !== loop.managedSource.sourceId || loop.managedSource.revision !== source.mainRoleRevision ||
+        source.inputKey.agentSessionId !== loop.agentSessionId || !caller?.run || caller.hostId !== loop.hostId || caller.agentSessionId !== loop.agentSessionId || !isDeepStrictEqual(caller.run, source.inputKey.expectedRun) || !context.readInput)
+      throw new AgentMuxError('Only this original heartbeat input participant may report its work statement. Existing inputs and Agents remain available.', 'CONTROL_PERMISSION_DENIED')
+    const operationId = scheduledDefinitionOperation(loop, source.definitionIntentId)
+    if (!operationId) throw new AgentMuxError('The original heartbeat definition is unconfirmed.', 'SCHEDULE_INPUT_SOURCE_UNCONFIRMED')
+    const record = await context.readInput(loop.hostId, source.inputKey)
+    const intent = await exact(loop.hostId).readAgentFuturePromptIntent(loop.agentSessionId, source.definitionIntentId)
+    assertScheduledInputSource(loop, { inputKey: source.inputKey, futureIntent: { intentId: source.definitionIntentId, occurrenceAt: source.occurrenceAt }, definitionOperationId: operationId, managedSource: loop.managedSource }, record, intent)
+    // A historical source remains historical across Main changes. Recheck only
+    // this original Mote identity, without granting current-role ownership.
+    const fresh = await options.main.readCurrentMoteMain(main.target, context.signal)
+    if (fresh.status !== 'ready' || !fresh.identity || motePresenceSourceId(fresh.identity) !== loop.managedSource.sourceId)
+      throw new AgentMuxError('The original Mote source identity is unconfirmed. Keep this same report operation.', 'SCHEDULE_INPUT_SOURCE_UNCONFIRMED')
+    context.signal?.throwIfAborted(); await context.assertCurrent?.()
+  }
   async function adoptGuidance(input: MoteQuickPreferencesSaveParams, before: MoteMainSnapshot, context: ConnectionEnrollmentCallContext, mode?: { reconcilePublished: true }): Promise<NonNullable<MoteQuickPreferencesSaveResult['maintenanceAdoption']>> {
     const action = input.action
     if (!action || !['user', 'device'].includes(context.actor.kind) || !context.actor.id.trim()) throw new AgentMuxError('Adopting future guidance requires the original authenticated person or device.', 'CONTROL_PERMISSION_DENIED')
@@ -238,7 +257,7 @@ export function createHostMotePresence(options: {
     }) })
   }
   let releaseClients: (() => void) | undefined
-  return { invalidate, adoptGuidance, read(target: MotePreferencesTarget): MotePresenceReading {
+  return { invalidate, adoptGuidance, qualifyHeartbeatSource, read(target: MotePreferencesTarget): MotePresenceReading {
     const withGuidance = (value: MotePresenceReading): MotePresenceReading => ({ ...value, guidance: {
       availableRevision: moteGuidanceRevision(), currentDefinition: value.schedule?.currentDefinition ?? (value.schedule?.futureIntentId && value.schedule.creationOperationId ? { intentId: value.schedule.futureIntentId, operationId: value.schedule.creationOperationId } : null),
       adoptedRevision: value.schedule?.guidanceAdoptions?.find(record => record.state === 'adopted' && record.newDefinition.intentId === value.schedule?.futureIntentId)?.newDefinition.guidanceRevision ?? null, adoptions: value.schedule?.guidanceAdoptions ?? [] } })

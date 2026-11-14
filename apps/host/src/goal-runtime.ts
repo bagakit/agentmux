@@ -20,6 +20,7 @@ import type { AgentInputContextCaptureReference } from '@agentmux/core/agent-inp
 import type { DemandDispatch } from '@agentmux/demand'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { CheckInObservation } from './agent-schedule-check-in.js'
+import { readOriginalScheduledInput } from './scheduled-input-source.js'
 
 /** One explicit Goal operation borrows this exact original input carrier. */
 export type GoalFiniteInputPort = {
@@ -64,6 +65,7 @@ export interface GoalRuntimePort {
   authorizeFutureIntent(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
   saveFutureIntent(loop: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'futureIntentId' | 'creationOperationId' | 'managedSource' | 'prompt' | 'checkIn' | 'currentDefinition' | 'guidanceAdoptions'>, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   inspectFutureIntent(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
+  inspectInput(loop: ContinuousProgressLoop): Promise<import('@agentmux/core').ContinuousProgressInputReading | undefined>
   observeCheckIn(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
   inspectContinuousProgressInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
 }
@@ -252,6 +254,7 @@ export function createGoalRuntime(options: {
       }
       return { active: original.active }
     },
+    inspectInput: async loop => readOriginalScheduledInput(loop, exact(loop.hostId)),
     observeCheckIn: options.checkIn,
     inspectContinuousProgressInitial: async loop => {
       const initial = loop.initialDelivery
