@@ -3,6 +3,9 @@ import { formatMobileTime, withMobileTime } from '../presentation/time'
 import { mobileGoalStatus as statuses, mobileGoalOutcome } from './presentation'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
+import goalsCompanions from '@agentmux/client-ui/brand/illustrations/goals/goals-companions-header.png'
+import goalsEmpty from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
 import { MobileHeaderMenu } from '../navigation/MobileHeaderMenu'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
@@ -147,6 +150,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     if (receipt.agentSessionId && receipt.hostId === 'local' && openSession) openSession(receipt.agentSessionId, { name: '目标 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
+  const confirmedEmpty = goals?.length === 0 && !status && !query && !issue
   return <MobileNoticeScope owner={client}><section className="mobile-goals" aria-label="Goals" hidden={!visible}>
     <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(selected || discussionTab)} />{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><div className="mobile-section-actions">{!selected && !discussionTab && <><button type="button" className="mobile-icon-button mobile-goals-new" aria-label="新建目标" title="新建目标" aria-expanded={createOpen} onClick={() => setCreateOpen(value => !value)}><SemanticIcon name="action.add-item" size={20} /></button><details className="mobile-goal-lookup"><summary aria-label="按 Goal ID 打开" title="按 Goal ID 打开"><SemanticIcon name="action.search" size={18} /><span className="mobile-visually-hidden">按 Goal ID 打开</span></summary><div className="mobile-goal-lookup__panel"><form onSubmit={event => {
         event.preventDefault()
@@ -162,6 +166,11 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     {!client?.forwardRpc && <MobileNotice owner={client} role="status">Mac 上的目标服务暂不可用，已读目标仍可查看。</MobileNotice>}
     {issue && <MobileNotice identity={[issue]} role="status">{issue}</MobileNotice>}
     {goals?.length === 1000 && <MobileNotice identity={[goals?.length]} role="status">目录只读到前 1000 个目标，搜索只覆盖这些；其他目标可按 Goal ID 打开。</MobileNotice>}
+    {visible && !selected && !discussionTab && <section className={`mobile-goals-start${confirmedEmpty ? ' mobile-goals-start--empty' : ''}`} aria-label="目标工坊">
+      <img className="mobile-goals-start__art" src={confirmedEmpty ? goalsEmpty : goalsCompanions} alt="" width={confirmedEmpty ? 160 : 84} height={confirmedEmpty ? 107 : 58} loading="lazy" decoding="async" />
+      <div className="mobile-goals-start__copy"><h2>{confirmedEmpty ? '从一个想法开始' : '把目标落到成果'}</h2><p>{confirmedEmpty ? '还没有目标。和 Mote 一起说清想法，再逐步推进。' : '拆清目标，协作推进，核对成果。'}</p></div>
+      {!createOpen && <Button variant="primary" className="mobile-goals-start__create" aria-label="开始新目标" onClick={() => setCreateOpen(true)}><SemanticIcon name="action.add-item" size={16} />新建目标</Button>}
+    </section>}
       <MobileGoalCreate client={client} expanded={createOpen} visible={visible && selected === null && !discussionTab} openDiscussion={openDiscussion} beginPresentation={beginPresentation} created={(goal, present) => {
         factEpoch.current.list += 1
         setGoals(previous => previous ? [...previous.filter(value => value.id !== goal.id), goal] : previous)
@@ -182,7 +191,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
         <ul className="mobile-goals-list">{(visibleGoals ?? []).map(goal => <li key={goal.id}>
           <button onClick={() => choose(goal)}><SemanticIcon name="object.goal" size={24} /><div className="mobile-goal-row-copy"><strong>{goal.title || '待定义目标'}</strong><span>{goal.projectName ?? goal.projectId ?? '未分配项目'} · {statuses[goal.status]}</span><small>{goal.description}</small></div><SemanticIcon name="navigation.submenu" size={16} /></button>
         </li>)}</ul>
-        {!goals.length && <p>暂无目标。</p>}
+        {!goals.length && !confirmedEmpty && <p>{status || query ? '已读列表中没有匹配的目标。可清除搜索或筛选。' : '上次读取没有目标，可刷新核对。'}</p>}
         {!!goals.length && !visibleGoals?.length && <p>已读列表中没有匹配的目标。可清除搜索或筛选。</p>}
       </>}
 
@@ -190,7 +199,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div key={id} hidden={selected !== id || !!discussionTab}>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[id,value]} key={index} role="status">{value}</MobileNotice>)}
       <GoalDetail key={id} goalId={id} goal={detail ?? null} factScope={detailScopes[id] ?? null} visible={visible && selected === id && !discussionTab} editing={context.mode === 'edit' && selected === id} edit={editing => setContext(value => ({ ...value, mode: editing ? 'edit' : 'detail' }))} decisions={decisions[id] ?? null} client={client} connected={connected} updated={updated} refresh={() => refresh(value => value + 1)} copyText={copyText}>
         {detail && <>
-        <MobileGoalAlignment client={client} goal={detail} updated={updated} openDiscussion={openDiscussion} beginPresentation={beginPresentation} />
+        <MobileGoalAlignment visible={visible && selected === id && !discussionTab} client={client} goal={detail} updated={updated} openDiscussion={openDiscussion} beginPresentation={beginPresentation} />
         </>}
       </GoalDetail>
       {detail && <><MobileGoalSessions client={client} goal={detail} factScope={detailScopes[id] ?? null} sessionIds={detail.sessionIds} visible={visible && selected === detail.id && !discussionTab} openSession={openSession} />

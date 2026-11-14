@@ -1,6 +1,8 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
+import dialogueArt from '@agentmux/client-ui/brand/illustrations/goals/demand-dialogue.png'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcParams } from '@agentmux/core'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
@@ -9,8 +11,8 @@ import { assertGoalIntentScope, goalIntentScope, useGoalIntents } from './goal-i
 import type { GoalIntent } from '../recovery/device-workface'
 
 /** Proposals remain with the Goal owner; only explicit people acknowledge them. */
-export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beginPresentation }: {
-  client: AgentMuxHostedClient | null; goal: AgentMuxRpcGoal
+export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beginPresentation, visible }: {
+  client: AgentMuxHostedClient | null; goal: AgentMuxRpcGoal; visible: boolean
   updated(goal: AgentMuxRpcGoal, fields: Array<keyof AgentMuxRpcGoal>): void
   openDiscussion(receipt: GoalDiscussionReceipt): void
   beginPresentation(): () => boolean
@@ -96,20 +98,21 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
   }
   const acknowledgementAvailable = !needsRead && !humanPending && !pending.includes('read')
   return <section className="mobile-goal-alignment" aria-label="目标确认与讨论">
-    {needsRead && <button type="button" disabled={pending.includes('read')} onClick={() => void readCurrent()}>读取当前提案与报告</button>}
-    {!alignment?.confirmedAt && alignment && !confirmIssue && acknowledgementAvailable && <button type="button" className="mobile-goal-decision" onClick={() => void invoke('goal.confirm', { goalId: goal.id, expectedRevision: alignment.revision })}>确认当前目标</button>}
+    {needsRead && <Button type="button" disabled={pending.includes('read')} onClick={() => void readCurrent()}>读取当前提案与报告</Button>}
+    {!alignment?.confirmedAt && alignment && !confirmIssue && acknowledgementAvailable && <Button type="button" variant="primary" className="mobile-goal-decision" onClick={() => void invoke('goal.confirm', { goalId: goal.id, expectedRevision: alignment.revision })}>确认当前目标</Button>}
     {confirmIssue && alignment && <p>目标待明确：{confirmIssue}</p>}
-    {alignment && grounding && gapIssue === null && goal.status !== 'done' && acknowledgementAvailable && <button type="button" className="mobile-goal-decision" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: grounding.checks.some(check => check.outcome === 'gap'), finish: true })}>{accepted ? '结束目标' : grounding.checks.some(check => check.outcome === 'gap') ? '接受差距并结束目标' : '接受并结束目标'}</button>}
+    {alignment && grounding && gapIssue === null && goal.status !== 'done' && acknowledgementAvailable && <Button type="button" variant="primary" className="mobile-goal-decision" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: grounding.checks.some(check => check.outcome === 'gap'), finish: true })}>{accepted ? '结束目标' : grounding.checks.some(check => check.outcome === 'gap') ? '接受差距并结束目标' : '接受并结束目标'}</Button>}
     {accepted && <p>{goal.status === 'done' ? '已验收，目标已结束。' : '已验收，目标仍开放。'}</p>}
-    {!accepted && alignment && grounding && !acceptIssue && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: false })}>接受当前结果</button>}
-    {!accepted && alignment && grounding && acceptIssue && gapIssue === null && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: true })}>接受结果并保留差距</button>}
+    {!accepted && alignment && grounding && !acceptIssue && acknowledgementAvailable && <Button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: false })}>接受当前结果</Button>}
+    {!accepted && alignment && grounding && acceptIssue && gapIssue === null && acknowledgementAvailable && <Button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: true })}>接受结果并保留差距</Button>}
     {acceptIssue && grounding && !accepted && <p>结果待核对：{acceptIssue}</p>}
     {humanPending && <p role="status">正在等待 Mac 确认…</p>}{issue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{issue}</MobileNotice>}{deviceIssue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{deviceIssue}</MobileNotice>}
     {retained && !humanPending && <MobileNotice identity={[retained?.operationId]} role="status">还不确定你的确认是否已生效；请先读取当前提案与报告。</MobileNotice>}
+    <div className="mobile-goal-discussion-heading">{visible && <img src={dialogueArt} alt="" width="64" height="46" loading="lazy" decoding="async" />}<div><h3>和 Mote 一起想清楚</h3><p>讨论目标，也核对做成的结果。</p></div></div>
     <div className="mobile-goal-discussion-actions">
-      <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'open' })}>打开目标讨论</button>
-      <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'grill' })}>{alignment ? '讨论目标变更' : '澄清目标'}</button>
-      {alignment?.confirmedAt && <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'grounding' })}>{grounding ? '请求重新核对结果' : '请求核对结果'}</button>}
+      <Button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'open' })}>打开目标讨论</Button>
+      <Button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'grill' })}>{alignment ? '讨论目标变更' : '澄清目标'}</Button>
+      {alignment?.confirmedAt && <Button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'grounding' })}>{grounding ? '请求重新核对结果' : '请求核对结果'}</Button>}
     </div>
     {retained && <details><summary>本机记录的确认请求</summary><pre>{JSON.stringify(retained, null, 2)}</pre></details>}
     {!!records.length && <details><summary>未确认的操作（{records.length}）</summary>{records.map((value, index) => <div key={index}><p>{value.message}</p><code>{value.method}</code><pre>{JSON.stringify(value.params, null, 2)}</pre></div>)}</details>}

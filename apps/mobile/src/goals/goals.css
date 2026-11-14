@@ -70,3 +70,20 @@
 .mobile-goal-row-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .mobile-goal-row-copy > strong, .mobile-goal-row-copy > span { max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-goal-row-copy > small { display: none; }
+
+/* Workshop art supports the current action without displacing the directory. */
+.mobile-goals-start { display: grid; grid-template-columns: minmax(0, 1fr) 84px; align-items: center; gap: 8px 12px; padding-block: 12px; }
+.mobile-goals-start__art { grid-column: 2; grid-row: 1 / 3; width: 84px; height: 58px; object-fit: contain; }
+.mobile-goals-start__copy { grid-column: 1; grid-row: 1; min-width: 0; }
+.mobile-goals-start__copy h2 { margin: 0 0 4px; font-size: var(--fs-lead); line-height: 1.4; }
+.mobile-goals-start__copy p, .mobile-goal-discussion-heading p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.mobile-goals .mobile-goals-start__create { grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
+.mobile-goals .primary-button { color: var(--bg); background: var(--mobile-accent); font-weight: 600; }
+.mobile-goals .primary-button:active:not(:disabled) { background: var(--green-2); }
+.mobile-goals-start--empty { grid-template-columns: 1fr; justify-items: center; padding-block: 16px; text-align: center; }
+.mobile-goals-start--empty .mobile-goals-start__art { grid-column: 1; grid-row: 1; width: 160px; height: 107px; border-radius: var(--mobile-radius); }
+.mobile-goals-start--empty .mobile-goals-start__copy { grid-row: 2; max-width: 280px; }
+.mobile-goals .mobile-goals-start--empty .mobile-goals-start__create { justify-self: center; }
+.mobile-goal-discussion-heading { display: flex; align-items: center; gap: 10px; flex-basis: 100%; margin-top: 8px; }
+.mobile-goal-discussion-heading img { width: 64px; height: 46px; flex: none; object-fit: contain; }
+.mobile-goal-discussion-heading h3 { margin: 0 0 3px; font-weight: 600; }
