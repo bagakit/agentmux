@@ -26,6 +26,7 @@ import { ZoomCommands } from './zoom-commands.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
+import { offerSessionDatabaseMigration } from './session-database-migration-prompt.js'
 import { CrashLog } from './crash-log.js'
 import { crashReporterOptions, registerCrashCapture } from './crash-capture-wiring.js'
 import { registerWorkbenchStartupCapture } from './workbench-startup-capture.js'
@@ -133,8 +134,9 @@ function startPrimaryInstance(): void {
   app.once('will-quit', () => performanceHeap.dispose())
   const scratchTopics = new ScratchTopics()
   const configStore = new ConfigStore()
+  const sessionStore = new AgentMuxFileAgentSessionStore(storePath)
   const runtime = new RuntimeController(
-    new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
+    sessionStore,
     configuredDesktopAgentMuxHost(configStore.filePath, process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
       ? join(homedir(), '.agentmux', 'connectors') : join(app.getPath('userData'), 'connectors'), app.isPackaged),
     scratchTopics
@@ -548,6 +550,9 @@ function startPrimaryInstance(): void {
       recoverInterface: () => { void recoverInterface?.() }
     })))
     await createWindow(appReadyAtMs)
+    if (workbenchWindow) void offerSessionDatabaseMigration(workbenchWindow, dialog, sessionStore).catch(error => {
+      console.warn('Session database filename inspection was unavailable.', error)
+    })
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) void createWindow()
     })

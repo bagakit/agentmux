@@ -2,6 +2,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { watch } from 'node:fs'
 import { lstat, mkdir, readdir } from 'node:fs/promises'
 import { AgentMuxFileAgentSessionStore } from './agent-session-store.js'
+import { canonicalSessionFile } from './agent-session-database.js'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
 import type { RecoveryInputSelector, RecoveryRestoreMember } from './storage-recovery.js'
@@ -96,8 +97,12 @@ export function sessionRecoverySource(store: AgentMuxFileAgentSessionStore): Rec
     restoreMissing: member => store.restoreRecoveryMember(member), subscribe: (changed, unavailable) => {
       const stop = store.observeDurableChanges(changed)
       let watcher: ReturnType<typeof watch>
+      const targets = [store.path, store.path + '.sqlite-identity', store.path + '.sqlite-identity.original']
+      const database = canonicalSessionFile(store.path)
+      if (database) targets.push(database)
+      const names = new Set(targets.map(path => basename(path)))
       try { watcher = watch(dirname(store.path), (_event, name) => {
-        if (name && [basename(store.path), basename(store.path) + '.sqlite-identity', basename(store.path) + '.sqlite-identity.original'].includes(String(name))) changed()
+        if (name && names.has(String(name))) changed()
       }); watcher.on('error', error => { unavailable?.({ sourceId: 'core.sessions', code: (error as NodeJS.ErrnoException).code ?? 'RECOVERY_WATCH_UNAVAILABLE' }); changed() }) }
       catch (error) { stop(); throw error }
       return () => { stop(); watcher.close() }

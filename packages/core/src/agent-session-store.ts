@@ -45,7 +45,8 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { DatabaseSync } from 'node:sqlite'
-import { openSessionDatabase, initializeLegacyClosedCreationSchema, promptAdmissionSchema, promptSubmissionIndexSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
+import { openSessionDatabase, initializeLegacyClosedCreationSchema, promptAdmissionSchema, promptSubmissionIndexSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase,
+  hasLegacySessionDatabaseName, logicalSessionDatabasePath, migrateSessionDatabaseFile, sessionDatabaseRestoreFile } from './agent-session-database.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { requireRecoverySpace, restoreMissingRecoveryFile, type RecoveryGap, type RecoverySourceMember, type RecoveryRestoreMember } from './storage-recovery.js'
@@ -3116,7 +3117,20 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return this.database
   }
 
-  constructor(readonly path = defaultAgentMuxAgentSessionStorePath()) {}
+  readonly path: string
+
+  constructor(path = defaultAgentMuxAgentSessionStorePath()) {
+    this.path = logicalSessionDatabasePath(path)
+  }
+
+  hasLegacyDatabaseName(): Promise<boolean> { return hasLegacySessionDatabaseName(this.path) }
+
+  async migrateDatabaseName(): Promise<void> {
+    await this.tail
+    const release = await this.acquireLock()
+    try { await migrateSessionDatabaseFile(this.path, (db, raw) => this.writeDocument(db, this.strictOriginalDocument(raw))) }
+    finally { await release() }
+  }
 
   private readonly durableChangeObservers = new Set<() => void>()
   /** Background maintenance observes accepted changes without joining the writer's ACK. */
@@ -3196,7 +3210,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         try { if (await readFile(counterpart, 'utf8') !== sourceIncarnation) return 'conflict' }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
       }
-      return await restoreMissingRecoveryFile(member.file, member.target, member.sha256)
+      const target = member.kind === 'session-database' ? await sessionDatabaseRestoreFile(this.path) : member.target
+      return target === null ? 'conflict' : await restoreMissingRecoveryFile(member.file, target, member.sha256)
     } finally { await release() }
   }
 
