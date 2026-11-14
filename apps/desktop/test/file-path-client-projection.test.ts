@@ -34,6 +34,7 @@ it.runIf(!native)('runs the shipping UserState consumer in its own private proce
   let log = ''
   child.stdout.on('data', bytes => { log += bytes }); child.stderr.on('data', bytes => { log += bytes })
   const code = await new Promise<number | null>((yes, no) => { child.once('error', no); child.once('close', yes) })
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_EVIDENCE) await writeFile(join(process.env.AGENTMUX_TEST_FILE_CLIENT_EVIDENCE, 'native-business.log'), log)
   expect(code, log).toBe(0); expect(log).toMatch(/[1-9]\d* passed/)
 }, 180000)
 
@@ -247,6 +248,13 @@ it.runIf(business)('a lost directory registration reply keeps the original packe
   const { checkpointMountedSpaceInputs } = await import('../src/renderer/src/store.js')
   await checkpointMountedSpaceInputs()
   expect(JSON.parse((await f.user.read())!).state.sourceFilesInputs.selections[f.workspace.id]).toMatchObject({ registration: original.registration, registrationStatus: 'unknown' })
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM) {
+    await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+    const scene = await visualScene(f, 'folder-registration-unconfirmed', 'Source Files · folder found, original registration reply unconfirmed')
+    const check = [...scene!.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original registration')!
+    expect(check).toBeTruthy(); await act(async () => check.click()); expect(registrations).toBe(1)
+    await scene?.capture('folder-registration-unconfirmed')
+  }
 }, 60000)
 
 it.runIf(business)('consecutive Source saves keep their original binding and refresh same-FD identity; another Runtime sharing the physical file cannot receive the old draft', async () => {
