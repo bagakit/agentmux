@@ -14,8 +14,12 @@ import { relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export async function captureFrame({ root, evidence, mutation = null, scope = "all" }) {
-  assert.ok(scope === "all" || scope === "phone-only", "Bounded Toolkit capture scope");
-  assert.ok(scope === "all" || mutation === null, "Phone-only capture has no unrelated frame mutation");
+  assert.ok(["all", "phone-only", "pending-launch"].includes(scope), "Bounded Toolkit capture scope");
+  const pendingLaunch = scope === "pending-launch";
+  assert.ok(scope === "all" || mutation === null || (pendingLaunch && mutation === "stop-options"), "Mutation belongs to the selected frame");
+  const html = pendingLaunch ? "pending-launch.html" : "index.html",
+    main = pendingLaunch ? "pending-launch-main.cjs" : "main.cjs",
+    entry = pendingLaunch ? "pending-launch-entry.tsx" : "entry.tsx";
   const fixture = resolve(root, "apps/desktop/scripts/fixtures/toolkit-frame"),
     desktop = resolve(root, "apps/desktop");
   const require = createRequire(resolve(desktop, "package.json")),
@@ -34,7 +38,9 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
     inputs: {},
     loadedCSS: [],
     frames: [],
-    boundary:
+    boundary: pendingLaunch
+      ? "Private Electron, real Toolkit popover, TUI result, production preload and Main IPC, isolated in-memory Core port. No Runtime, credentials or command execution."
+      :
       "Selected actual Result/Popover/WindowUtilityBar/Settings compact consumers and production CSS in private Electron; synthetic DTOs and recorded API callback replies. No full App, semantic Host, live Runtime, OS dialog or installation qualification.",
   };
   async function bind(file) {
@@ -51,7 +57,7 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
     await mkdir(compiled, { recursive: true });
     for (const key of ["home", "userData", "sessionData"])
       await mkdir(resolve(privateRoot, key));
-    for (const name of ["index.html", "entry.tsx", "main.cjs", "capture.mjs"])
+    for (const name of [html, entry, main, "capture.mjs"])
       await bind(resolve(fixture, name));
     for (const path of [
       "package.json",
@@ -61,6 +67,48 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
     ])
       await bind(resolve(root, path));
     const { workspaceSourceExport } = await import(pathToFileURL(resolve(root, "packages/core/test/helpers/workspace-source-export.mjs")).href);
+    if (pendingLaunch) {
+      const { build: buildIpc } = createRequire(require.resolve("vite"))("esbuild");
+      const preload = "apps/desktop/src/preload/index.ts", owner = "apps/desktop/src/main/toolkit-ipc.ts";
+      for (const [source, target] of [[preload, "preload.cjs"], [owner, "owner.cjs"]]) {
+        const preloadBundle = source === preload;
+        const result = await buildIpc({
+          absWorkingDir: root,
+          entryPoints: [source],
+          outfile: resolve(compiled, target),
+          bundle: true,
+          format: "cjs",
+          platform: preloadBundle ? "browser" : "node",
+          ...(preloadBundle ? { conditions: ["module", "browser", "production"], mainFields: ["browser", "module", "main"] } : {}),
+          external: ["electron"],
+          metafile: true,
+          logLevel: "warning",
+          plugins: [{ name: "bind-toolkit-pending-ipc", setup(builder) {
+            builder.onResolve({ filter: /^@agentmux\// }, args => {
+              // Main imports AgentMuxError via the barrel. Its exact defining export is also on the control entry.
+              const id = !preloadBundle && args.path === "@agentmux/core" ? "@agentmux/core/control" : args.path;
+              const file = workspaceSourceExport(root, id);
+              return file ? { path: file } : undefined;
+            });
+            if (preloadBundle && mutation === "stop-options") {
+              builder.onLoad({ filter: /\/preload\/index\.ts$/ }, async ({ path }) => {
+                if (path !== resolve(root, preload)) return;
+                const original = (await bind(path)).toString();
+                const anchor = "ipcRenderer.invoke('toolkit:stop', toolId, executionId, options)";
+                assert.equal(original.split(anchor).length, 2, "One built preload mutation anchor");
+                const contents = original.replace(anchor, "ipcRenderer.invoke('toolkit:stop', toolId, executionId)");
+                receipt.stopOptionsMutation = { path: preload, source: sha(original), loaded: sha(contents) };
+                return { contents, loader: "ts", resolveDir: resolve(root, "apps/desktop/src/preload") };
+              });
+            }
+          } }],
+        });
+        for (const file of Object.keys(result.metafile.inputs)) await bind(resolve(root, file));
+        if (preloadBundle) {
+          assert.deepEqual([...new Set(Object.values(result.metafile.outputs).flatMap(output => output.imports.map(item => item.path)))], ["electron"], "Sandbox preload has no Node module imports");
+        }
+      }
+    }
     const { bundleIdentityRuntime } = await import(pathToFileURL(resolve(root, "packages/identity/scripts/runtime-bundle.mjs")).href);
     const identitySource = (await bundleIdentityRuntime()).source;
     const identityId = "\0toolkit-frame-identity-source";
@@ -142,7 +190,7 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
       esbuild: { jsx: "automatic" },
       worker: { format: "es", plugins: () => [sourcePlugin()] },
       define: {
-        __AGENTMUX_WEB_PREVIEW__: "true",
+        __AGENTMUX_WEB_PREVIEW__: pendingLaunch ? "false" : "true",
         "process.env.NODE_ENV": '"production"',
       },
       plugins: [sourcePlugin()],
@@ -158,8 +206,8 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
                     files.add(node.source.input.file);
                 });
                 await Promise.all([...files].map(bind));
-                const owning =
-                  "apps/desktop/src/renderer/src/styles/performance-toolkit.css";
+                const owning = "apps/desktop/src/renderer/src/styles/" +
+                  (pendingLaunch ? "toolkit-tui.css" : "performance-toolkit.css");
                 const rules = [];
                 sheet.walkRules((rule) => {
                   if (relative(root, rule.source?.input.file ?? "") === owning)
@@ -226,6 +274,7 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
         outDir: compiled,
         sourcemap: false,
         emptyOutDir: false,
+        ...(pendingLaunch ? { rollupOptions: { input: resolve(fixture, html) } } : {}),
       },
     });
     assert.ok(receipt.loadedCSS.length, "Actual product stylesheet loaded");
@@ -247,8 +296,8 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
     receipt.process = await runProbeProcess(
       require("electron"),
       [
-        resolve(fixture, "main.cjs"),
-        resolve(compiled, "index.html"),
+        resolve(fixture, main),
+        resolve(compiled, html),
         privateRoot,
         evidence,
         scope === "phone-only" ? scope : mutation ?? "baseline",
@@ -268,7 +317,18 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
     receipt.frames = receipt.scene.frames;
     assert.equal(receipt.process.timedOut, false);
     assert.equal(receipt.process.interruption, null);
-    if (mutation) {
+    if (pendingLaunch) {
+      assert.equal(receipt.process.exitCode, mutation ? 1 : 0, JSON.stringify(receipt.scene.failure));
+      assert.equal(receipt.scene.completed, !mutation);
+      if (mutation) {
+        assert.ok(receipt.stopOptionsMutation, "Compiled the mutated production preload");
+        assert.equal(receipt.scene.failure?.name, "AssertionError");
+        assert.equal(receipt.scene.assertion, "exact-stop-ipc-arguments");
+        receipt.specificAssertionRED = true;
+      } else {
+        assert.equal(receipt.frames.length, 6);
+      }
+    } else if (mutation) {
       assert.equal(receipt.process.exitCode, 1);
       assert.equal(receipt.scene.failure?.name, "AssertionError");
       assert.equal(
