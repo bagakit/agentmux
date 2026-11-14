@@ -36,9 +36,13 @@
 .goal-plan__edges { position: absolute; inset: 0 auto auto 0; pointer-events: none; overflow: visible; }
 .goal-plan__edge { fill: none; stroke: color-mix(in srgb, var(--text-3) 70%, var(--line)); stroke-width: 1.25; stroke-linecap: round; transition: stroke .24s ease; }
 .goal-plan__edge--live { stroke: var(--green); stroke-width: 1.5; }
-.goal-plan__columns { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(156px, 1fr); gap: clamp(24px, 3cqw, 40px); align-items: center; margin: 0; padding: 0; list-style: none; }
+.goal-plan__columns { position: relative; display: grid; grid-auto-flow: column; grid-template-columns: max-content; grid-auto-columns: minmax(132px, 1fr); gap: clamp(18px, 2cqw, 32px); align-items: center; margin: 0; padding: 0; list-style: none; }
 .goal-plan__column { scroll-snap-align: start; }
-.goal-plan__columns[data-single-column] { grid-auto-columns: minmax(156px, 260px); }
+.goal-plan__columns[data-single-column] { grid-template-columns: max-content minmax(132px, 300px) max-content; justify-content: center; min-height: 104px; }
+.goal-plan__boundary { display: grid; grid-template-columns: auto auto; justify-self: center; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text-2); font-size: var(--fs-meta); }
+.goal-plan__boundary small { grid-column: 2; font: inherit; color: var(--text-3); }
+.goal-plan__boundary[data-goal-finish-state="Succeeded"] { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); color: var(--green); }
+.goal-plan__boundary[data-goal-finish-state="Closed with gaps"], .goal-plan__boundary[data-goal-finish-state="Unverified"] { color: var(--amber-text); }
 .goal-plan__nodes { display: grid; align-content: start; gap: var(--sp-3); margin: 0; padding: 0; list-style: none; }
 .goal-plan-node { position: relative; display: grid; box-sizing: border-box; width: 100%; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2);
   box-shadow: inset 0 0 0 1px var(--line-soft); transition: background-color .24s ease, color .24s ease, box-shadow .24s ease, transform .24s cubic-bezier(.2, .8, .2, 1); }
@@ -102,8 +106,9 @@
 
 /* Narrow: columns become stacked groups; dependencies are written, no crossing lines. */
 @container goal-plan (max-width: 640px) {
+  .goal-plan__canvas { max-height: none; }
   .goal-plan-node__depends { display: block; }
-  .goal-plan__columns, .goal-plan__columns[data-single-column] { grid-auto-flow: row; grid-auto-columns: auto; }
+  .goal-plan__columns, .goal-plan__columns[data-single-column] { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
   .goal-plan__edges { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -127,19 +132,22 @@
   .goal-plan__assignments button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
 }
 .goal-plan-node:has(.goal-plan-node__head[aria-expanded='true']) { box-shadow: inset 0 0 0 2px var(--green); background: color-mix(in srgb, var(--green) 7%, var(--surface-2)); }
-.goal-execution-time { border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); }
-.goal-execution-time > summary { width: fit-content; font-weight: 650; cursor: pointer; color: var(--text); }
-.goal-execution-time__scroll { overflow: auto; margin-top: var(--sp-2); }
+.goal-execution-time { border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); }
+.goal-execution-time > h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: var(--sp-3); color: var(--text); font: 650 var(--fs-body)/1.35 var(--font-sans); }
+.goal-execution-time__scroll { overflow: auto; }
 .goal-execution-time__rows { display: grid; }
 .goal-execution-time__rows[data-timed] { min-width: 436px; }
-.goal-execution-time__row { display: grid; grid-template-columns: minmax(136px, 26%) minmax(0, 1fr); gap: var(--sp-4); align-items: center; min-height: 35px; padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
+.goal-execution-time__row { display: grid; grid-template-columns: minmax(98px, 26%) minmax(0, 1fr); gap: var(--sp-4); align-items: center; min-height: 35px; padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
 .goal-execution-time__row[data-selected] { background: color-mix(in srgb, var(--green) 9%, var(--surface-1)); }
 .goal-execution-time__task { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
 .goal-execution-time__row button { border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); font: 560 var(--fs-meta)/1.4 var(--font-sans); text-align: start; padding: 0; cursor: pointer; }
 .goal-execution-time__row small, .goal-execution-time__unrecorded { display: block; color: var(--text-3); }
 .goal-execution-time__axis > div { display: flex; justify-content: space-between; gap: var(--sp-2); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .goal-execution-time__track { position: relative; height: 18px; background: linear-gradient(var(--line-soft), var(--line-soft)) center / 100% 1px no-repeat; }
+.goal-execution-time__track--empty { display: flex; align-items: center; min-height: 24px; height: auto; gap: var(--sp-2); color: var(--text-3); background: none; }
+.goal-execution-time__track--empty::after { content: ''; flex: 1; min-width: var(--sp-3); border-top: 1px dashed var(--line); }
 .goal-execution-time__guide { position: absolute; inset-block: -4px; border-inline-start: 1px dashed var(--line-soft); }
 .goal-execution-time__point { position: absolute; top: 6px; width: 6px; height: 6px; transform: translateX(-50%); border-radius: 50%; background: var(--text-2); }
 .goal-execution-time__live { position: absolute; top: 1px; height: 16px; border: 1px solid var(--blue); border-inline-end-style: dashed; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--blue) 36%, var(--surface-2)); }
+.goal-execution-time__planned { position: absolute; top: 0; min-width: 2px; height: 18px; overflow: hidden; padding-inline: var(--sp-2); border: 1px dashed var(--blue); border-radius: var(--radius-sm); color: var(--text-2); }
 @media (prefers-reduced-motion: reduce) { .goal-plan__assignments button { transition: none; } }

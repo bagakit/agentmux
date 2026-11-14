@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from '../lib/global-demand-board'
@@ -6,7 +6,8 @@ import type { GoalPlanNodeView, GoalPlanReadingTarget } from './GoalPlanGraph'
 import { GoalPlanMark, goalPlanStateLabel } from './GoalPlanState'
 
 type Event = { id: string; at: number; label: string }
-type Row = { id: string; title: string; number?: number; target?: GoalPlanReadingTarget; events: Event[]; active?: { from: number; to: number } }
+type TimeSpan = { from: number; to: number }
+type Row = { id: string; title: string; number?: number; target?: GoalPlanReadingTarget; events: Event[]; active?: TimeSpan; planned?: TimeSpan }
 const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 const TimelineIcon = semanticIconComponent('object.workflow')
@@ -54,28 +55,38 @@ export function goalExecutionRows(demand: Pick<DemandRecord, 'plan' | 'delegatio
 
 export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { demand: DemandRecord; nodes: readonly GoalPlanNodeView[]; selected: GoalPlanReadingTarget | null;
   onSelect: (target: GoalPlanReadingTarget, trigger: HTMLButtonElement) => void }) {
-  const timeline = useRef<HTMLDetailsElement>(null)
   const recorded = useMemo(() => goalExecutionRows(demand), [demand.plan, demand.delegations, demand.dispatches, demand.responsibility])
-  const rows: Row[] = recorded.length ? recorded : nodes.map(item => ({ id: `node:${item.node.id}`, title: item.node.title,
-    target: { nodeId: item.node.id, ...(item.wholeGoal ? { wholeGoal: true } : {}) }, events: [] }))
+  const wholeGoal = nodes.find(item => item.wholeGoal)
+  const rows: Row[] = wholeGoal && !recorded.length ? [{ id: `node:${wholeGoal.node.id}`, title: wholeGoal.node.title,
+    target: { nodeId: wholeGoal.node.id, wholeGoal: true }, events: [] }] : [...recorded]
+  const { plannedStartAt, targetAt } = demand
+  if (plannedStartAt != null || targetAt != null) {
+    const schedule: Row = { id: 'goal-schedule', title: 'Goal schedule', events: [] }
+    if (plannedStartAt != null && targetAt != null && plannedStartAt <= targetAt) schedule.planned = { from: plannedStartAt, to: targetAt }
+    else {
+      if (plannedStartAt != null) schedule.events.push({ id: 'planned-start', at: plannedStartAt, label: 'Planned start' })
+      if (targetAt != null) schedule.events.push({ id: 'planned-finish', at: targetAt, label: 'Target date' })
+    }
+    rows.unshift(schedule)
+  }
   const byId = new Map(nodes.map(item => [item.node.id, item]))
   let start = Infinity, end = -Infinity
-  for (const row of rows) for (const at of [...row.events.map(event => event.at), ...(row.active ? [row.active.from, row.active.to] : [])]) {
-    start = Math.min(start, at); end = Math.max(end, at)
+  for (const row of rows) {
+    for (const event of row.events) { start = Math.min(start, event.at); end = Math.max(end, event.at) }
+    const interval = row.active ?? row.planned
+    if (interval) { start = Math.min(start, interval.from); end = Math.max(end, interval.to) }
   }
-  useLayoutEffect(() => {
-    if (timeline.current) timeline.current.open = (timeline.current.closest('.goals-detail')?.clientWidth ?? 0) >= 960
-  }, [demand.id])
   const hasTimes = Number.isFinite(start), span = end - start
   const ticks = !hasTimes ? [] : span < 60_000 ? [start] : span < 240_000 ? [start, end]
     : [start, start + span / 3, start + span * 2 / 3, end]
   const tickFormat = hasTimes && new Date(start).toDateString() === new Date(end).toDateString() ? clock : format
   const offset = (at: number) => (at - start) / Math.max(1, end - start) * 100
-  return <details ref={timeline} className="goal-execution-time" data-goal-execution-time>
-    <summary><TimelineIcon size={14} aria-hidden="true" />Execution history</summary>
+  return <section className="goal-execution-time" aria-label="Execution timeline" data-goal-execution-time>
+    <h3><TimelineIcon size={14} aria-hidden="true" />Execution timeline</h3>
     <div className="goal-execution-time__scroll"><div className="goal-execution-time__rows" data-timed={hasTimes || undefined}>
-      {hasTimes ? <div className="goal-execution-time__row goal-execution-time__axis"><span>Task and attempt</span>
-        <div>{ticks.map(at => <time key={at} dateTime={new Date(at).toISOString()} title={format.format(at)}>{tickFormat.format(at)}</time>)}</div></div> : null}
+      <div className="goal-execution-time__row goal-execution-time__axis"><span>Task and attempt</span>
+        <div>{hasTimes ? ticks.map(at => <time key={at} dateTime={new Date(at).toISOString()} title={format.format(at)}>{tickFormat.format(at)}</time>)
+          : <span className="goal-execution-time__unrecorded">No schedule or execution times</span>}</div></div>
       {rows.map(row => {
         const { target } = row
         const active = target && selected?.nodeId === target.nodeId && selected.attemptId === target.attemptId && selected.wholeGoal === target.wholeGoal
@@ -87,18 +98,21 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { d
             <div>{target ? <button type="button" aria-pressed={Boolean(active)} onClick={event => onSelect(target, event.currentTarget)}>{row.title}</button> : <strong>{row.title}</strong>}
               {state || row.number ? <small>{state}{row.number && row.number > 1 ? ` · Attempt ${row.number}` : ''}</small> : null}</div>
           </div>
-          {row.events.length || row.active ? <div className="goal-execution-time__track" role="img" aria-label={[
+          {row.events.length || row.active || row.planned ? <div className="goal-execution-time__track" role="img" aria-label={[
             ...row.events.map(event => `${event.label}, ${format.format(event.at)}`),
-            ...(row.active ? [`Observed activity, ${format.format(row.active.from)} – ${format.format(row.active.to)}`] : [])
+            ...(row.active ? [`Observed activity, ${format.format(row.active.from)} – ${format.format(row.active.to)}`] : []),
+            ...(row.planned ? [`Planned, ${format.format(row.planned.from)} – ${format.format(row.planned.to)}`] : [])
           ].join(' · ')}>
             {ticks.slice(1, -1).map(at => <span className="goal-execution-time__guide" key={at} style={{ left: `${offset(at)}%` }} aria-hidden="true" />)}
             {row.active ? <span className="goal-execution-time__live" data-goal-observed-activity style={{ left: `${offset(row.active.from)}%`, width: `${offset(row.active.to) - offset(row.active.from)}%` }}
               title={`Observed activity · ${format.format(row.active.from)} – ${format.format(row.active.to)}`} /> : null}
+            {row.planned ? <span className="goal-execution-time__planned" data-goal-planned-period style={{ left: `${offset(row.planned.from)}%`, width: `${offset(row.planned.to) - offset(row.planned.from)}%` }}
+              title={`Planned · ${format.format(row.planned.from)} – ${format.format(row.planned.to)}`}>Planned</span> : null}
             {row.events.map(event => <span className="goal-execution-time__point" key={event.id} data-goal-time-event={event.label} style={{ left: `${offset(event.at)}%` }}
               title={`${event.label} · ${format.format(event.at)}`} />)}
-          </div> : <span className="goal-execution-time__unrecorded">No attempt recorded</span>}
+          </div> : <div className="goal-execution-time__track goal-execution-time__track--empty"><span>No attempt recorded</span></div>}
         </div>
       })}
     </div></div>
-  </details>
+  </section>
 }

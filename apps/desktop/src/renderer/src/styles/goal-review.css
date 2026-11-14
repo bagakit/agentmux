@@ -8,3 +8,21 @@
 .goal-review__no-results--compact > .goals-inline-actions { margin: 0; }
 .goal-review__extra-checks { margin-top: var(--sp-6); }
 .goal-review__extra-checks h3 { margin-bottom: var(--sp-4); color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
+
+.goals-grounding.goal-review--report { padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); }
+.goal-review--report .goals-section-heading { align-items: baseline; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0 0 var(--sp-2); }
+.goal-review--report .goals-section-heading h2 { display: inline-flex; align-items: center; gap: var(--sp-2); margin: 0; }
+.goal-review__status { margin-inline-start: auto; color: var(--text-2); font-size: var(--fs-meta); }
+.goal-review--report[data-goal-result-state="reported"] .goal-review__status { color: var(--amber-text); }
+.goals-proposal.goal-review__summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-block: 0 var(--sp-2); white-space: normal; }
+.goal-review--report:has(> .goal-review__disclosure[open]) .goal-review__summary { display: block; overflow: visible; white-space: pre-wrap; }
+.goal-review__counts { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.goal-review__counts > span { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.goal-review--report > .goals-inline-actions { margin-block: var(--sp-3); }
+.goal-review--report > .goals-inline-actions:empty { display: none; }
+.goal-review--report > .goal-review__disclosure { margin-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.goal-review--report > .goal-review__disclosure > summary, .goal-review__evidence > summary { width: fit-content; max-width: 100%; padding-block: var(--sp-2); cursor: pointer; color: var(--text-2); }
+.goal-review--report > .goal-review__disclosure > summary { font-size: var(--fs-body); font-weight: 570; }
+.goal-review--report .goal-review__body { padding-top: var(--sp-2); }
+.goal-review__evidence { color: var(--text-3); font-size: var(--fs-meta); }
+.goal-review__evidence > .goals-evidence { padding-inline-start: var(--sp-3); border-inline-start: 1px solid var(--line); }
