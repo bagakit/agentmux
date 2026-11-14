@@ -11960,7 +11960,10 @@ export class AgentMuxClient {
             ...(promotedHandle?.kind === 'provider' && current.nativeHandle?.kind === 'provider' &&
               matchesProviderNativeSessionTarget(promotedHandle, current.nativeHandle) && promotedHandle.transcriptPath === undefined &&
               current.nativeHandle.transcriptPath ? { transcriptPath: current.nativeHandle.transcriptPath } : {}) },
-          nativeBinding: { source: current.nativeBinding?.source ?? (witness.handle ? 'process-witness' as const : 'native-hook' as const), run: { ...current.run }, observedAt: normalized.status.observedAt }
+          nativeBinding: { source: current.nativeBinding?.source === 'semantic-resume-target' &&
+              hasCurrentNativeMainBinding({ ...current, hookReceipt: persistedReceipt })
+            ? (witness.handle ? 'process-witness' as const : 'native-hook' as const)
+            : current.nativeBinding?.source ?? (witness.handle ? 'process-witness' as const : 'native-hook' as const), run: { ...current.run }, observedAt: normalized.status.observedAt }
         } : {}),
         // turnUsage 三分支权威解析。清空这一半与上面把 turnUsage 从 ...currentBase 里 destructure 掉
         // 的那半成对（同 fix #1 陷阱）：turnUsage 已从基础展开剔出，此处「不写入」等于「清掉」，而非「保留」。
