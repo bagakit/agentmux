@@ -66,8 +66,10 @@ function MoteChatPersonRow({ person, profileRead, configuration, hostingTarget, 
     finally { setBusy(false) }
   }
   return <article className="mote-chat-person" data-mote-chat-person={person.actor.userId}>
-    <ConnectorEntityIdentity identityKey={actorKey(person)} kind="person" profileRead={profileRead} name={profile?.name ?? person.name} avatarUrl={profile?.avatarUrl} missingName={person.creator ? 'Bot creator' : 'Chat participant'} />
-    <details className="agent-connector-disclosure"><summary>Account details</summary><ConnectorIdentityField identityKey={actorKey(person)} label={person.actor.idType} value={person.actor.userId} /><ConnectorIdentityField identityKey={actorKey(person)} label="App ID" value={person.actor.application.appId} /></details>
+    <ConnectorEntityIdentity identityKey={actorKey(person)} kind="person" profileRead={profileRead} profileIssueSummary="Profile update unconfirmed" name={profile?.name ?? person.name} avatarUrl={profile?.avatarUrl} missingName={person.creator ? 'Bot creator' : 'Chat participant'} />
+    <details className="agent-connector-disclosure"><summary>Account details</summary><ConnectorIdentityField identityKey={actorKey(person)} label={person.actor.idType} value={person.actor.userId} /><ConnectorIdentityField identityKey={actorKey(person)} label="App ID" value={person.actor.application.appId} />
+      {profileRead?.issue ? <p className="mote-details__hint">{profileRead.issue}</p> : null}
+    </details>
     <dl><div><dt>Used</dt><dd>{person.used}</dd></div><div><dt>Total</dt><dd>{person.creator ? 'Unlimited' : person.total}</dd></div><div><dt>Remaining</dt><dd>{person.creator ? 'Unlimited' : person.remaining}</dd></div></dl>
     {!person.creator ? editing ? <form className="mote-chat-person__allocation" onSubmit={event => { event.preventDefault(); void save() }}>
       <label><span>Total message allowance</span><TextInput type="number" min="0" step="1" aria-label={`Total allowance for ${person.name ?? person.actor.userId}`} value={total} disabled={busy} onChange={event => setTotal(event.target.value)} /></label>

@@ -24,10 +24,12 @@ type IdentityProps = {
   actions?: ReactNode
   compact?: boolean | undefined
   profileRead?: ConnectorEntityProfileRead | undefined
+  /** When the caller presents the original issue in its existing details. */
+  profileIssueSummary?: string | undefined
 }
 
 /** Display observations only. The caller retains the exact object, authority and read lifecycle. */
-export function ConnectorEntityIdentity({ identityKey, kind, name, label, missingName, avatarUrl, secondary, status, actions, compact = false, profileRead }: IdentityProps) {
+export function ConnectorEntityIdentity({ identityKey, kind, name, label, missingName, avatarUrl, secondary, status, actions, compact = false, profileRead, profileIssueSummary }: IdentityProps) {
   const Icon = identityIcons[kind]
   const size = compact ? 28 : 32
   const nameCopy = name ? <ContentCopyButton text={name} identity={`${identityKey}:name`} label={`Copy ${kind} name`} className="connector-entity__copy" /> : null
@@ -42,7 +44,7 @@ export function ConnectorEntityIdentity({ identityKey, kind, name, label, missin
       </div>
       {status ? <div className="connector-entity__status">{status}</div> : null}
       {secondary ? <div className="connector-entity__secondary">{secondary}</div> : null}
-      {profileRead?.issue ? <small className="connector-entity__profile-note" role="status">{profileRead.issue}</small> : null}
+      {profileRead?.issue ? <small className="connector-entity__profile-note" role="status">{profileIssueSummary ?? profileRead.issue}</small> : null}
     </div>
   </div>
 }
