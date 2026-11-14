@@ -105,18 +105,25 @@
 .focus-context-group[data-bucket='attention'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='attention'] { color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, transparent); }
 .focus-context-group[data-bucket='working'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='working'] { color: var(--green); background: color-mix(in srgb, var(--green) 5%, transparent); }
 .focus-context-group[data-bucket='results'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='results'] { color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, transparent); }
+.focus-context, .focus-context-card[data-focus-card-key] { --focus-selected-surface: color-mix(in srgb, var(--text) 10%, var(--surface-1)); }
 .focus-context { width: 100%; min-width: 0; min-height: var(--focus-card-track-height, 52px); display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
 .focus-context--compact { min-height: 28px; height: 28px; padding-top: 0; padding-bottom: 0; }
 .focus-context--compact .focus-context__detail { display: none; }
 .focus-context--compact .focus-context__identity strong { font-size: var(--fs-micro); font-weight: 500; }
 .focus-context:hover, .focus-context.is-menu-open { background: var(--surface-2); color: var(--text); }
-.focus-context.is-selected { background: var(--surface-3); color: var(--text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 72%, transparent), inset 3px 0 0 var(--green); }
-.focus-context:focus-visible, .focus-project-lanes__axis:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
+.focus-context.is-selected { background: var(--focus-selected-surface); color: var(--text); }
+.focus-context:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.focus-project-lanes__axis:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .focus-context__avatar { flex: none; display: flex; }
 .focus-context__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .focus-context__identity { display: flex; align-items: baseline; min-width: 0; gap: var(--sp-2); }
 .focus-context__identity strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .focus-context-card[data-focus-card-body='pending'] .focus-context__copy > strong { min-width: 0; min-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 600; }
+.focus-context.is-selected .focus-context__identity strong, .focus-context-card .focus-context.is-selected .focus-context__copy > strong { font-weight: 700; }
+@media (forced-colors: active) {
+  .focus-context.is-selected { outline: 1px solid Highlight; outline-offset: -1px; }
+  .focus-context:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+}
 .focus-context__state { flex: none; display: inline-flex; align-items: center; }
 .focus-state-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 5px; color: var(--text-3); background: color-mix(in srgb, currentColor 9%, transparent); }
 .focus-state-mark[data-focus-state-icon='working'] { color: var(--green); }
@@ -330,10 +337,13 @@
 .focus-project-lanes__row[data-collapsed='true'] .focus-project-lanes__heading { min-height: 28px; }
 .focus-project-lanes__row[data-collapsed='true'] .focus-project-lanes__groups { display: none; }
 .focus-project-lanes__row .focus-context-group { background: transparent; border-radius: var(--radius-sm); }
+.focus-context-card[data-focus-card-key] { box-shadow: var(--elev-1); outline: .5px solid color-mix(in srgb, var(--text) 8%, transparent); outline-offset: -.5px; }
 .focus-context-card[data-focus-heat='recent'] { background: color-mix(in srgb, var(--text-3) 7%, transparent); border-radius: var(--radius-sm); }
 .focus-context-card[data-focus-heat='warm'] { background: color-mix(in srgb, var(--text-3) 4%, transparent); border-radius: var(--radius-sm); }
 .focus-context-card[data-focus-heat='cool'] { background: color-mix(in srgb, var(--text-3) 2%, transparent); border-radius: var(--radius-sm); }
-.focus-context-card:is(:hover, :focus-within) { background: var(--surface-2); }
+.focus-context-card[data-focus-card-key]:is(:hover, :focus-within) { background: var(--surface-2); }
+.focus-context-card[data-focus-card-key][data-focus-agent-selected='true'] { background: var(--focus-selected-surface); }
+.focus-context-card[data-focus-card-key][data-focus-agent-selected='true'] .focus-context.is-selected { background: transparent; }
 .focus-project-order-error { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 
 /* Container controls and subordinate original Zone labels share the existing type scale. */
