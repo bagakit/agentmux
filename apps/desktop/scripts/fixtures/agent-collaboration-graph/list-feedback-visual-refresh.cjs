@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
-const { observe, requestOriginalStop, paintObservation, movingMiddle, verifyClockSample, verifyPaintedAdvance } = require('./list-feedback.cjs')
+const { observe, requestOriginalStop, paintObservation, movingMiddle, verifyClockSample, verifyPaintedAdvance, detailObservation, verifyDetail, revealOperationDetail } = require('./list-feedback.cjs')
 
 const labels = ['list-feedback-wide-dark-message-middle', 'list-feedback-stop-failed']
 const prefix = 'apps/desktop/scripts/fixtures/agent-collaboration-graph/'
@@ -14,35 +14,6 @@ const digest = value => createHash('sha256').update(value).digest('hex')
 const mapDigest = value => digest(JSON.stringify(Object.entries(value).sort(([first], [second]) => first < second ? -1 : first > second ? 1 : 0)))
 const cardSelector = subject => `.focus-context-card[data-focus-agent-host=${JSON.stringify(subject.hostId)}][data-focus-agent-session=${JSON.stringify(subject.agentSessionId)}]`
 
-function detailObservation(subject, operationId) {
-  const card = document.querySelector(`.focus-context-card[data-focus-agent-host=${JSON.stringify(subject.hostId)}][data-focus-agent-session=${JSON.stringify(subject.agentSessionId)}]`)
-  const item = [...card?.querySelectorAll('.agent-operation-feedback__item') ?? []].find(value => value.querySelector('code')?.textContent === operationId)
-  if (!item) return null
-  const summary = item.querySelector('summary.agent-operation-feedback__label'), detail = item.querySelector('.agent-operation-feedback__detail'), actions = detail?.querySelector('.agent-operation-feedback__actions')
-  const owners = []; let clip = { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
-  for (let owner = item.parentElement; owner; owner = owner.parentElement) {
-    const style = getComputedStyle(owner), bounds = owner.getBoundingClientRect()
-    if (/auto|scroll|hidden|clip/.test(style.overflowX)) { clip.left = Math.max(clip.left, bounds.left); clip.right = Math.min(clip.right, bounds.right) }
-    if (/auto|scroll|hidden|clip/.test(style.overflowY)) { clip.top = Math.max(clip.top, bounds.top); clip.bottom = Math.min(clip.bottom, bounds.bottom) }
-    if (/auto|scroll/.test(style.overflowY)) owners.push({ className: owner.className, scrollTop: owner.scrollTop, clientHeight: owner.clientHeight, scrollHeight: owner.scrollHeight })
-  }
-  const target = element => {
-    if (!element) return null
-    const bounds = element.getBoundingClientRect(), style = getComputedStyle(element)
-    const hits = [.1, .5, .9].flatMap(horizontal => [.1, .5, .9].map(vertical => {
-      const point = { x: bounds.left + bounds.width * horizontal, y: bounds.top + bounds.height * vertical }, hit = document.elementFromPoint(point.x, point.y)
-      return { ...point, hit: element.contains(hit), top: hit ? { tag: hit.tagName, className: hit.getAttribute('class') } : null }
-    }))
-    return { bounds: bounds.toJSON(), visible: element.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true }),
-      opacity: style.opacity, hits, text: element.textContent, insideClip: bounds.left >= clip.left - .5 && bounds.top >= clip.top - .5 && bounds.right <= clip.right + .5 && bounds.bottom <= clip.bottom + .5 }
-  }
-  return { hostId: subject.hostId, agentSessionId: subject.agentSessionId, operationId, phase: item.dataset.phase, open: item.open, viewport: [innerWidth, innerHeight], theme: getComputedStyle(document.documentElement).colorScheme,
-    expanded: summary?.getAttribute('aria-expanded'), describedDetail: summary?.getAttribute('aria-controls'), detailId: detail?.id,
-    inert: detail?.inert, ariaHidden: detail?.getAttribute('aria-hidden'), summary: target(summary), detail: target(detail), actions: target(actions),
-    buttons: [...actions?.querySelectorAll('button') ?? []].map(button => ({ text: button.textContent.trim(), disabled: button.disabled, ...target(button) })),
-    finiteAnimations: item.getAnimations({ subtree: true }).filter(animation => Number.isFinite(animation.effect?.getComputedTiming().iterations)).map(animation => ({ name: animation.animationName, state: animation.playState })),
-    clip, owners, readerPresent: Boolean(document.querySelector('.agent-information-reader')), footers: [...document.querySelectorAll('.focus-project-lanes__footer')].map(element => element.getBoundingClientRect().toJSON()) }
-}
 
 function verifyMiddle(data) {
   assert.equal(data.failure, undefined, data.failure)
@@ -58,15 +29,6 @@ function verifyMiddle(data) {
   assert.equal(data.event.live, true); assert.ok(data.event.wallAfter >= data.event.wallBefore)
 }
 
-function verifyDetail(value, request) {
-  assert.ok(value && value.open && !value.inert && value.ariaHidden === 'false' && value.expanded === 'true')
-  assert.equal(value.operationId, request.operationId); assert.equal(value.hostId, request.control.hostId); assert.equal(value.agentSessionId, request.control.agentSessionId)
-  assert.equal(value.phase, 'failed'); assert.ok(value.detailId && value.detailId === value.describedDetail)
-  assert.equal(value.theme, 'dark'); assert.deepEqual(value.viewport, [1440, 900])
-  for (const target of [value.summary, value.detail, value.actions]) assert.ok(target?.visible && target.insideClip && Number(target.opacity) > 0 && target.hits.length === 9 && target.hits.every(point => point.hit), 'The same original failed detail and actions must be completely exposed and hit-testable')
-  assert.ok(value.detail.text.includes(request.operationId)); assert.ok(value.detail.text.includes(request.control.run.runId))
-  assert.ok(value.buttons.some(button => button.text === '核对原操作' && !button.disabled && button.visible && button.insideClip && button.hits.every(point => point.hit)))
-}
 
 function qualification(receipt) {
   assert.equal(receipt.schema, 'agentmux.collaboration-graph-capture.v1'); assert.equal(receipt.scenario, 'focus-map-list-feedback')
@@ -173,15 +135,7 @@ module.exports = async function visualRefresh(ctx) {
       await click(`[data-list-visual-refresh-operation=${JSON.stringify(request.operationId)}] summary.agent-operation-feedback__label`)
       data.failed.summaryClicked = true; data.failed.opened = await read(detailProbe(request.operationId))
       assert.ok(data.failed.opened?.open)
-      data.failed.reveal = await read(`(()=>{const item=document.querySelector('[data-list-visual-refresh-operation='+${JSON.stringify(JSON.stringify(request.operationId))}+']'),detail=item.querySelector('.agent-operation-feedback__detail'),actions=detail.querySelector('.agent-operation-feedback__actions');const before={item:item.getBoundingClientRect().toJSON(),detail:detail.getBoundingClientRect().toJSON(),actions:actions.getBoundingClientRect().toJSON()};item.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});detail.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});actions.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});return before})()`)
-      data.failed.revealSamples = []
-      await until('same detail and original actions are exposed', async () => {
-        const current = await read(detailProbe(request.operationId))
-        if (data.failed.revealSamples.length < 8) data.failed.revealSamples.push(current)
-        data.failed.lastReveal = current
-        if (!current || current.finiteAnimations.some(animation => animation.state === 'running')) return false
-        try { verifyDetail(current, request); return true } catch (error) { if (!(error instanceof assert.AssertionError)) throw error; data.failed.lastRevealIssue = error.message; return false }
-      })
+      data.failed.reveal = await revealOperationDetail(ctx, subject, request)
       data.failed.before = await read(detailProbe(request.operationId)); verifyDetail(data.failed.before, request)
       await frame(labels[1]); data.failed.after = await read(detailProbe(request.operationId)); verifyDetail(data.failed.after, request)
       data.failed.statusAfter = await read('window.graphCapture.listStopStatus()'); await collectFrame(labels[1])

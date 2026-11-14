@@ -199,6 +199,61 @@ function protectedFacts(value, before) {
   assert.deepEqual(value.chrome.preferences, before.chrome.preferences)
 }
 
+function detailObservation(subject, operationId) {
+  const card = document.querySelector(`.focus-context-card[data-focus-agent-host=${JSON.stringify(subject.hostId)}][data-focus-agent-session=${JSON.stringify(subject.agentSessionId)}]`)
+  const item = [...card?.querySelectorAll('.agent-operation-feedback__item') ?? []].find(value => value.querySelector('code')?.textContent === operationId)
+  if (!item) return null
+  const summary = item.querySelector('summary.agent-operation-feedback__label'), detail = item.querySelector('.agent-operation-feedback__detail'), actions = detail?.querySelector('.agent-operation-feedback__actions')
+  const owners = []; let clip = { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
+  for (let owner = item.parentElement; owner; owner = owner.parentElement) {
+    const style = getComputedStyle(owner), bounds = owner.getBoundingClientRect()
+    if (/auto|scroll|hidden|clip/.test(style.overflowX)) { clip.left = Math.max(clip.left, bounds.left); clip.right = Math.min(clip.right, bounds.right) }
+    if (/auto|scroll|hidden|clip/.test(style.overflowY)) { clip.top = Math.max(clip.top, bounds.top); clip.bottom = Math.min(clip.bottom, bounds.bottom) }
+    if (/auto|scroll/.test(style.overflowY)) owners.push({ className: owner.className, scrollTop: owner.scrollTop, clientHeight: owner.clientHeight, scrollHeight: owner.scrollHeight })
+  }
+  const target = element => {
+    if (!element) return null
+    const bounds = element.getBoundingClientRect(), style = getComputedStyle(element)
+    const hits = [.1, .5, .9].flatMap(horizontal => [.1, .5, .9].map(vertical => {
+      const point = { x: bounds.left + bounds.width * horizontal, y: bounds.top + bounds.height * vertical }, hit = document.elementFromPoint(point.x, point.y)
+      return { ...point, hit: element.contains(hit), top: hit ? { tag: hit.tagName, className: hit.getAttribute('class') } : null }
+    }))
+    return { bounds: bounds.toJSON(), visible: element.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true }),
+      opacity: style.opacity, hits, text: element.textContent, insideClip: bounds.left >= clip.left - .5 && bounds.top >= clip.top - .5 && bounds.right <= clip.right + .5 && bounds.bottom <= clip.bottom + .5 }
+  }
+  return { hostId: subject.hostId, agentSessionId: subject.agentSessionId, operationId, phase: item.dataset.phase, open: item.open, viewport: [innerWidth, innerHeight], theme: getComputedStyle(document.documentElement).colorScheme,
+    expanded: summary?.getAttribute('aria-expanded'), describedDetail: summary?.getAttribute('aria-controls'), detailId: detail?.id,
+    inert: detail?.inert, ariaHidden: detail?.getAttribute('aria-hidden'), summary: target(summary), detail: target(detail), actions: target(actions),
+    buttons: [...actions?.querySelectorAll('button') ?? []].map(button => ({ text: button.textContent.trim(), disabled: button.disabled, ...target(button) })),
+    finiteAnimations: item.getAnimations({ subtree: true }).filter(animation => Number.isFinite(animation.effect?.getComputedTiming().iterations)).map(animation => ({ name: animation.animationName, state: animation.playState })),
+    clip, owners, readerPresent: Boolean(document.querySelector('.agent-information-reader')), footers: [...document.querySelectorAll('.focus-project-lanes__footer')].map(element => element.getBoundingClientRect().toJSON()) }
+}
+
+function verifyDetail(value, request) {
+  assert.ok(value && value.open && !value.inert && value.ariaHidden === 'false' && value.expanded === 'true')
+  assert.equal(value.operationId, request.operationId); assert.equal(value.hostId, request.control.hostId); assert.equal(value.agentSessionId, request.control.agentSessionId)
+  assert.equal(value.phase, 'failed'); assert.ok(value.detailId && value.detailId === value.describedDetail)
+  assert.equal(value.theme, 'dark'); assert.deepEqual(value.viewport, [1440, 900])
+  for (const target of [value.summary, value.detail, value.actions]) assert.ok(target?.visible && target.insideClip && Number(target.opacity) > 0 && target.hits.length === 9 && target.hits.every(point => point.hit), 'The same original failed detail and actions must be completely exposed and hit-testable')
+  assert.ok(value.detail.text.includes(request.operationId)); assert.ok(value.detail.text.includes(request.control.run.runId))
+  assert.ok(value.buttons.some(button => button.text === '核对原操作' && !button.disabled && button.visible && button.insideClip && button.hits.every(point => point.hit)))
+}
+
+async function revealOperationDetail(ctx, subject, request) {
+  const { read, until } = ctx
+  const probe = `(${detailObservation.toString()})(${JSON.stringify(subject)},${JSON.stringify(request.operationId)})`
+  const before = await read(probe)
+  assert.ok(before?.open && before.operationId === request.operationId, 'Reveal only the same already-open original operation')
+  const reveal = await read(`(()=>{const card=document.querySelector(${JSON.stringify(cardSelector(subject))}),item=[...card.querySelectorAll('.agent-operation-feedback__item')].find(item=>item.querySelector('code')?.textContent===${JSON.stringify(request.operationId)}),detail=item.querySelector('.agent-operation-feedback__detail'),actions=detail.querySelector('.agent-operation-feedback__actions');const before={item:item.getBoundingClientRect().toJSON(),detail:detail.getBoundingClientRect().toJSON(),actions:actions.getBoundingClientRect().toJSON()};item.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});detail.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});actions.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});return before})()`)
+  await until('same original operation detail and actions are exposed', async () => {
+    const current = await read(probe)
+    if (!current || current.finiteAnimations.some(animation => animation.state === 'running')) return false
+    try { verifyDetail(current, request); return true } catch (error) { if (error instanceof assert.AssertionError) return false; throw error }
+  })
+  const after = await read(probe); verifyDetail(after, request)
+  return { before, reveal, after }
+}
+
 function verifyMiddle(record) {
   assert.equal(record.failure, undefined, record.failure)
   verifyPaintedAdvance(record.previous, record.before); verifyClockSample(record.after)
@@ -301,6 +356,7 @@ function verify(data, captured) {
   assert.equal(data.beforeStop.calls.length, 0)
   verifyStopTargets(data.stop.calls, data.subjects)
   const pending = data.stop.calls[0]
+  verifyDetail(data.failedDetail.before, data.stop.calls[2]); verifyDetail(data.failedDetail.after, data.stop.calls[2])
   assert.equal(pending.settled, false, 'The same original Stop remains pending through the native cost handoff')
   assert.equal(pending.control.hostId, data.subjects.sender.hostId); assert.equal(pending.control.agentSessionId, data.subjects.sender.agentSessionId)
   const byId = (sample, id, subject = 'sender') => sample.cards[subject].operations.find(item => item.operationId === id)
@@ -461,7 +517,12 @@ module.exports = async function listFeedback(ctx) {
     await prepare(false, 'dark'); const failed = await originalStop('neighbor')
     await read(`window.graphCapture.listRejectStop(${JSON.stringify(failed.operationId)},{code:'STALE_AGENT_SESSION',message:'Private typed Stop result identifies the original Run as stale.'})`)
     await until('original failed Stop reference', async () => (await sample()).cards.neighbor.operations.some(item => item.operationId === failed.operationId && item.phase === 'failed'))
-    await openOperation(failed.operationId, 'neighbor'); await capture(frames[13]); await show(data.subjects.sender)
+    await openOperation(failed.operationId, 'neighbor')
+    data.failedDetail = { reveal: await revealOperationDetail(ctx, data.subjects.neighbor, failed) }
+    const failedProbe = `(${detailObservation.toString()})(${JSON.stringify(data.subjects.neighbor)},${JSON.stringify(failed.operationId)})`
+    data.failedDetail.before = await read(failedProbe); verifyDetail(data.failedDetail.before, failed)
+    await capture(frames[13]); data.failedDetail.after = await read(failedProbe); verifyDetail(data.failedDetail.after, failed)
+    await show(data.subjects.sender)
     data.stop = { ...await read('window.graphCapture.listStopStatus()'), insideClose, tabEnteredClosedDetail }
     assert.equal(data.stop.calls[0].operationId, pending.operationId)
     data.after = await facts(); protectedFacts(data.after, data.original)
@@ -475,6 +536,9 @@ module.exports.movingMiddle = movingMiddle
 module.exports.verifyClockSample = verifyClockSample
 module.exports.verifyPaintedAdvance = verifyPaintedAdvance
 module.exports.requestOriginalStop = requestOriginalStop
+module.exports.detailObservation = detailObservation
+module.exports.verifyDetail = verifyDetail
+module.exports.revealOperationDetail = revealOperationDetail
 module.exports.verifyViewport = verifyViewport
 module.exports.verifyStopTargets = verifyStopTargets
 module.exports.frames = frames
