@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { SemanticIcon } from '../theme/icons.js'
-import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
-import { agentInteractionRequestTarget } from '@agentmux/core/agent-interaction-state'
+import { useEffect, useId, useRef, useState, type ReactNode, type Ref } from 'react'
+import { agentInteractionOperationReceiptMatches, agentInteractionRequestsMatch } from '@agentmux/core/agent-interaction-state'
 import type {
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
@@ -11,6 +11,7 @@ import type {
 import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } from '../lib/agent-interaction-plan.js'
 import { AgentQuestionChoices } from './AgentQuestionChoices.js'
 import { presentError } from '../lib/error-presentation.js'
+import { ConversationDisclosure } from './ConversationDisclosure.js'
 
 const defaultLabels = {
   readOnly: 'Read-only · Answer in the original Session', sending: 'Sending answer…',
@@ -21,7 +22,19 @@ const defaultLabels = {
   retry: 'Choose an option to retry.', cancel: 'Cancel', question: 'Agent question',
   permission: 'Agent permission request', native: 'Agent interaction needs native confirmation'
 }
-export type AgentInteractionLabels = { [K in keyof typeof defaultLabels]: string }
+const defaultRecoveryLabels = {
+  receiptUnconfirmed: 'Response receipt association is unconfirmed. Check the original operation before retrying.',
+  inspectionUnavailable: 'Original-operation inspection is unavailable here. Delivery remains unconfirmed.'
+}
+export type AgentInteractionLabels = { [K in keyof typeof defaultLabels]: string } & Partial<typeof defaultRecoveryLabels>
+type InteractionObservation = {
+  receipt: AgentMuxInteractionOperationReceipt | null
+  failure: string | null
+  receiptUnconfirmed: boolean
+}
+function hasNativeCompletion(receipt: AgentMuxInteractionOperationReceipt | null) {
+  return Boolean(receipt?.nativeCompleted) && receipt!.delivery !== 'saved' && receipt!.delivery !== 'unknown'
+}
 
 /** The single typed plan owns answer semantics; this card owns presentation and submission state. */
 export function AgentInteractionCard({
@@ -58,14 +71,46 @@ export function AgentInteractionCard({
   const [phase, setPhase] = useState<'idle' | 'sending' | 'awaiting'>('idle')
   const submission = useRef(false)
   const operation = useRef<(AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }) | null>(null)
-  const [receipt, setReceipt] = useState<AgentMuxInteractionOperationReceipt | null>(null)
-  const requestKey = JSON.stringify(agentInteractionRequestTarget(request))
+  const [{ receipt, failure, receiptUnconfirmed }, setObservation] = useState<InteractionObservation>({ receipt: null, failure: null, receiptUnconfirmed: false })
+  const requestIdentity = useRef(request)
+  if (!agentInteractionRequestsMatch(requestIdentity.current, request)) requestIdentity.current = request
+  const requestKey = requestIdentity.current
+  const currentRequest = useRef(request)
+  currentRequest.current = request
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const detailsRef = useRef<HTMLButtonElement>(null)
+  const panelId = useId()
   useEffect(() => {
     operation.current = null; submission.current = false
-    setPhase('idle'); setReceipt(null); setSelectedOption(null); setFailure(null)
+    setPhase('idle'); setObservation({ receipt: null, failure: null, receiptUnconfirmed: false }); setSelectedOption(null); setDetailsOpen(false)
   }, [requestKey])
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
-  const [failure, setFailure] = useState<string | null>(null)
+  const originalResponse = useRef<AgentMuxInteractionResponse | null>(null)
+  function isCurrent(original: AgentMuxInteractionOperationIntent) {
+    return operation.current === original && agentInteractionRequestsMatch(currentRequest.current, original.expectedRequest)
+  }
+  function matches(original: AgentMuxInteractionOperationIntent, value: AgentMuxInteractionOperationReceipt) {
+    return originalResponse.current !== null && agentInteractionOperationReceiptMatches({ ...original,
+      agentSessionId: original.expectedRequest.agentSessionId,
+      expectedRun: original.expectedRequest.evidence.run ?? value.run, response: originalResponse.current }, value)
+  }
+  function observeReceipt(original: AgentMuxInteractionOperationIntent, value: AgentMuxInteractionOperationReceipt | null) {
+    if (!isCurrent(original)) return
+    const matched = value !== null && matches(original, value)
+    setObservation(current => {
+      if (hasNativeCompletion(current.receipt)) return current
+      return { receipt: matched ? value : current.receipt, failure: null, receiptUnconfirmed: !matched }
+    })
+  }
+  async function inspect(original: AgentMuxInteractionOperationIntent) {
+    if (!onInspect) return
+    try {
+      observeReceipt(original, await onInspect(original.operationId))
+    } catch (error) {
+      if (!isCurrent(original)) return
+      setObservation(current => hasNativeCompletion(current.receipt) ? current : { ...current, failure: presentError(error) })
+    }
+  }
   const unavailable = readOnly || disabled || phase !== 'idle' || Boolean(responseUnavailableReason)
   async function respond(response: AgentMuxInteractionResponse): Promise<void> {
     if (unavailable || submission.current) return
@@ -74,44 +119,56 @@ export function AgentInteractionCard({
     setSelectedOption(response.kind === 'permission'
       ? response.decision.outcome === 'selected' ? response.decision.optionId : null
       : response.outcome === 'answered' ? response.answers[0]?.optionId ?? null : null)
-    setFailure(null)
+    setObservation(current => ({ ...current, failure: null }))
+    let original = operation.current
     try {
-      if (!operation.current) {
+      if (!original) {
         const moteSource = getMoteSource?.()
-        operation.current = { operationId: mintObjectId(), expectedRequest: structuredClone(request), ...(moteSource ? { moteSource: structuredClone(moteSource) } : {}) }
+        original = { operationId: mintObjectId(), expectedRequest: structuredClone(request), ...(moteSource ? { moteSource: structuredClone(moteSource) } : {}) }
+        operation.current = original
       }
-      const original = operation.current
+      originalResponse.current = response
       const result = await onRespond(response, original)
-      if (operation.current !== original) return
-      if (result) setReceipt(result)
+      if (!isCurrent(original)) return
+      if (result) observeReceipt(original, result)
       setPhase('awaiting')
     } catch (error) {
-      setFailure(presentError(error))
+      if (original ? !isCurrent(original) : currentRequest.current !== request) return
+      setObservation(current => ({ ...current, failure: presentError(error) }))
       submission.current = false
       setPhase('idle')
     }
   }
 
+  const completed = phase === 'awaiting' && hasNativeCompletion(receipt) &&
+    agentInteractionRequestsMatch(request, receipt!.expectedRequest)
   const reason = responseUnavailableReason ?? (request.kind === 'question' ? request.responseUnavailableReason : undefined)
   const status = readOnly ? labels.readOnly
     : phase === 'sending' ? labels.sending
-    : phase === 'awaiting' ? receipt?.nativeCompleted ? labels.completed
-      : receipt?.delivery === 'unknown' ? labels.unknown
+    : phase === 'awaiting' ? completed ? labels.completed
+      : receiptUnconfirmed || receipt?.delivery === 'unknown' ? labels.unknown
       : receipt?.delivery === 'saved' ? labels.saved
       : labels.awaiting
     : reason ? labels.pending
     : disabled ? labels.unavailable
     : labels.needed
-  const requestStatus = responseStatus ?? <div>
-    <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
-    {receipt && renderReceipt ? renderReceipt(receipt) : null}
-    {onInspect && operation.current && (receipt?.delivery === 'unknown' || receipt?.delivery === 'saved') ?
-      <button type="button" onClick={() => { const original = operation.current!; void onInspect(original.operationId).then(value => {
-        if (value && operation.current === original) setReceipt(value)
-      }).catch(error => setFailure(presentError(error))) }}>{labels.inspect}</button> : null}
-  </div>
+  const needsInspection = phase === 'awaiting' && !completed && operation.current !== null &&
+    (receiptUnconfirmed || receipt?.delivery === 'unknown' || receipt?.delivery === 'saved')
+  const requestStatus = <>
+    {responseStatus ?? <div>
+      <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
+      {receipt && renderReceipt ? renderReceipt(receipt) : null}
+    </div>}
+    {receiptUnconfirmed ? <p className="agent-interaction__error" role="status" aria-live="polite">{labels.receiptUnconfirmed ?? defaultRecoveryLabels.receiptUnconfirmed}</p> : null}
+    {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} {phase === 'idle' ? labels.retry : null}</p> : null}
+    {needsInspection ? <div className="agent-interaction__actions">
+      {onInspect ? <button type="button" onClick={() => void inspect(operation.current!)}>{labels.inspect}</button>
+        : <p className="agent-interaction__source-notice" role="status">{labels.inspectionUnavailable ?? defaultRecoveryLabels.inspectionUnavailable}</p>}
+      {onOpenTerminal && !readOnly && !reason ? <button type="button" onClick={onOpenTerminal}>{labels.terminal}</button> : null}
+    </div> : null}
+  </>
 
-  if (reason) return (
+  if (reason && !completed) return (
     <section ref={surfaceRef} className="agent-interaction agent-interaction--native" aria-label={labels.native} data-request-id={request.id}>
       <div className="agent-interaction__native-heading">
         {request.kind === 'permission' ? <SemanticIcon name="status.permission" size={15} /> : <SemanticIcon name="status.unknown" size={15} />}
@@ -140,25 +197,35 @@ export function AgentInteractionCard({
     </section>
   )
 
+  const heading = request.kind === 'permission' ? request.title : request.questions[0]?.title || labels.question
+  function card(content: ReactNode) {
+    return <section ref={surfaceRef} className="agent-interaction" aria-label={request.kind === 'permission' ? labels.permission : labels.question}
+      data-request-id={request.id} data-completed={completed}>
+      <div className="agent-interaction__summary">
+        <SemanticIcon name={completed ? 'action.confirm' : request.kind === 'permission' ? 'status.permission' : 'status.unknown'} size={15} />
+        <div className="agent-interaction__summary-text"><strong>{heading}</strong>{requestStatus}</div>
+        {completed ? <button ref={detailsRef} type="button" className="agent-interaction__details-toggle" aria-expanded={detailsOpen}
+          aria-controls={panelId} onClick={() => setDetailsOpen(!detailsOpen)}>
+          {labels.details}<SemanticIcon name="navigation.disclosure" size={12} />
+        </button> : null}
+      </div>
+      <ConversationDisclosure id={panelId} open={!completed || detailsOpen} triggerRef={detailsRef} className="agent-interaction__body">
+        {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
+        {reason ? <p className="agent-interaction__source-notice">{reason}</p> : null}
+        {content}
+      </ConversationDisclosure>
+    </section>
+  }
+
   // 按 request 自己的 kind 分派，让 TS 收窄出这一支独有的展示字段（title/toolName/toolInput）；
   // 取值仍然只有一处，就是下面这个 plan。
   if (request.kind === 'permission') {
     // 分档由取值层算：两个以上肯定答复时它们升进竖排编号列，与 CLI 自己的提示列同形；
     // 否则塌回紧凑动作行。判据与「答的是什么」同住一处，不在这里重算。
     const { choices, allows, rejects, scoped, dismiss } = permissionPlan(request)
-    return (
-      <section ref={surfaceRef} className="agent-interaction" aria-label={labels.permission} data-request-id={request.id}>
-        {requestStatus}
-        {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
-        <div className="agent-interaction__heading">
-          <SemanticIcon name="status.permission" size={15} />
-          <div>
-            <strong>{request.title}</strong>
-            {request.toolName ? <span>{request.toolName}</span> : null}
-          </div>
-        </div>
+    return card(<>
+        {request.toolName ? <p className="agent-interaction__tool">{labels.tool}: {request.toolName}</p> : null}
         {request.toolInput ? <pre>{request.toolInput}</pre> : null}
-        {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} {labels.retry}</p> : null}
         {scoped ? (
           <div className="agent-interaction__grants">
             {allows.map(({ option, response }) => (
@@ -208,23 +275,16 @@ export function AgentInteractionCard({
             </button>
           ))}
         </div>
-      </section>
-    )
+    </>)
   }
 
   const { question, choices, dismiss } = questionPlan(request)
-  return (
-    <section ref={surfaceRef} className="agent-interaction" aria-label={labels.question} data-request-id={request.id}>
-      {requestStatus}
-      {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
+  return card(<>
       <div className="agent-interaction__heading">
-        <SemanticIcon name="status.unknown" size={15} />
         <div>
-          {question.title ? <strong>{question.title}</strong> : null}
           <span>{question.prompt}</span>
         </div>
       </div>
-      {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} {labels.retry}</p> : null}
       <AgentQuestionChoices options={choices.map(choice => choice.option)} selectedId={selectedOption} disabled={unavailable}
         onChoose={id => { const choice = choices.find(choice => choice.option.id === id); if (choice) void respond(choice.response) }} />
       <div className="agent-interaction__actions">
@@ -237,6 +297,5 @@ export function AgentInteractionCard({
           {labels.cancel}
         </button>
       </div>
-    </section>
-  )
+  </>)
 }
