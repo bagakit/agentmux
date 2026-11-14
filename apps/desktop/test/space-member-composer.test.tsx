@@ -91,12 +91,14 @@ it('the shared document checkpoints the canonical copy before pruning old input,
  const {recoveredSourceInput:_raw,inputIntakeStarted:_intake,...ordinary}=historyEntry
  const ordinaryRestore={...ordinary,operationId:'ordinary-source-restore',archived:true as const}
  useAppStore.setState(state=>({agentSteerQueues:{...state.agentSteerQueues,[owner]:[...state.agentSteerQueues[owner]!,ordinaryRestore]}}))
- await expect(useAppStore.getState().archiveAgentSteer(owner,ordinaryRestore.operationId,ordinaryRestore.text,false))
-   .resolves.toMatchObject({changed:true,entry:{operationId:ordinaryRestore.operationId,awaitingExplicitSend:true}})
+ const ordinaryResult=await useAppStore.getState().archiveAgentSteer(owner,ordinaryRestore.operationId,ordinaryRestore.text,false)
+   .then(value=>({value}),error=>({error}))
+ expect(ordinaryResult).toMatchObject({value:{changed:true,entry:{operationId:ordinaryRestore.operationId,awaitingExplicitSend:true}}})
  useAppStore.setState(state=>({agentSteerQueues:{...state.agentSteerQueues,[owner]:[
    ...Array.from({length:100},(_,index)=>({...ordinary,operationId:'independent-active-'+index})),{...historyEntry,archived:true as const}]}}))
- await expect(useAppStore.getState().archiveAgentSteer(owner,historyEntry.operationId,historyEntry.text,false))
-   .resolves.toMatchObject({changed:true,entry:{operationId:historyEntry.operationId,awaitingExplicitSend:true}})
+ const recoveredResult=await useAppStore.getState().archiveAgentSteer(owner,historyEntry.operationId,historyEntry.text,false)
+   .then(value=>({value}),error=>({error}))
+ expect(recoveredResult).toMatchObject({value:{changed:true,entry:{operationId:historyEntry.operationId,awaitingExplicitSend:true}}})
  expect(submit).toHaveBeenCalledTimes(2)
 })
 
