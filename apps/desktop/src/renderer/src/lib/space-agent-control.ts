@@ -437,7 +437,8 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
   const resource = binding.resource ? { projectId: source ? directoryIdentity(source.hostId, source.repoPath ?? source.path) : null,
     sourceWorkspaceId: binding.resource.sourceWorkspaceId ?? null, hostId: binding.resource.hostId, path: binding.resource.path,
     kind: binding.resource.kind, branch: binding.resource.branch, workspaceId: workspace?.id ?? null } : null
-  if (!atTarget && !agent?.retirement) issues.push(issue('layout-read', 'SPACE_PLACEMENT_UNKNOWN', 'The request has a durable correlation, but its reserved target placement is not observed. Its current Region location is returned without claiming completion.'))
+  const unsavedBeforeDispatch = binding.originalFailure?.code === 'SPACE_INTENT_SAVE_FAILED' && !agent && !to
+  if (!atTarget && !agent?.retirement && !unsavedBeforeDispatch) issues.push(issue('layout-read', 'SPACE_PLACEMENT_UNKNOWN', 'Its reserved target placement is not observed. Any observed current Region location is returned without claiming completion.'))
   if (!agent?.retirement && (agent?.initialPrompt === 'unconfirmed' || agent?.initialPrompt === 'unknown' && binding.createAgent)) {
     issues.push(issue('first-prompt', 'INITIAL_PROMPT_UNCONFIRMED', 'Core has not confirmed the original first prompt protocol.'))
   }

@@ -8,7 +8,7 @@ import { useAppStore } from '../store'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { agentOperationKey, dismissAgentOperation, inspectAgentOperation, type AgentOperationFeedback as Operation, type AgentOperationSubject } from '../lib/agent-operation-feedback'
 import { stopSessionInBackground } from '../lib/session-stop-background'
-import { agentOperationsForSubject, isDurableTakeoverCancellation } from '../lib/agent-operation'
+import { agentOperationsForSubject, isDurableTakeoverCancellation, isRetainedTakeoverRecord } from '../lib/agent-operation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
 import { useSessionStop } from './SessionStop'
@@ -63,7 +63,8 @@ function label(operation: Operation) {
 /** Both the real card and Region header read these exact original references. */
 export function AgentOperationFeedback({ subject, compact = false }: { subject: AgentOperationSubject; compact?: boolean }) {
   const operations = useAppStore(useShallow(state => agentOperationsForSubject(state.agentOperations, subject).filter(operation =>
-    operation.kind !== 'takeover' || !isDurableTakeoverCancellation(operation.cancellation?.result) || operation.cancellation?.settlingFeedback)))
+    !isRetainedTakeoverRecord(operation) &&
+    (operation.kind !== 'takeover' || !isDurableTakeoverCancellation(operation.cancellation?.result) || operation.cancellation?.settlingFeedback))))
   const active = useWorkbenchPresentationActive()
   if (!operations.length) return null
   return <AgentOperationFeedbackBody operations={operations} compact={compact} active={active} />

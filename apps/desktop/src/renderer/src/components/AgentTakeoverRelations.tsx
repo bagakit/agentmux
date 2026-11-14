@@ -6,6 +6,7 @@ import type { SessionHistoryReference, SessionSnapshot } from '../../../shared/c
 import type { FocusContextAccess } from '../lib/focus-context-access'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
+import { RetainedTakeoverRecords } from './RetainedTakeoverRecords'
 
 type CreationReading = { status: 'unread' | 'read' | 'unconfirmed'; creation?: AgentMuxAgentCreationFact; retired?: boolean; issue?: string }
 type Reading = { scope: string; creation: CreationReading; query?: AgentTakeoverQuery; outgoing?: AgentTakeoverPage | undefined; incoming?: AgentTakeoverPage | undefined; incomingIssue?: string | undefined; pending: boolean; issue?: string | undefined }
@@ -131,6 +132,7 @@ export function AgentTakeoverRelations({ subject, access, sourceRuntimeId: origi
     </li>
   }
   return <section className="agent-information-takeovers" aria-label="Recorded Takeover relationships">
+    {active && !access && subject ? <RetainedTakeoverRecords subject={subject} /> : null}
     <h4>Work taken over from</h4>
     {held?.incoming?.records.length ? <ul>{held.incoming.records.map(record => relationship(record, 'incoming'))}</ul>
       : held?.incoming ? <p>No incoming Takeovers are recorded in this owner’s returned records.</p> : null}

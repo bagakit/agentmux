@@ -25,6 +25,11 @@ export type AgentOperationFeedback = OperationBase & (
   { kind: 'stop'; control: AgentSessionControl } | { kind: 'takeover'; takeoverSource: TakeoverSource; cancellation?: TakeoverCancellation } | { kind: 'fork' }
 )
 export type AgentOperationReferences = Record<string, AgentOperationFeedback>
+/** Historical records have only the original read action. Active and custom actions stay in feedback. */
+export function isRetainedTakeoverRecord(operation: AgentOperationFeedback): boolean {
+  return operation.kind === 'takeover' && operation.phase !== 'pending' && !operation.cancellation &&
+    !operation.takeoverSource.coreRequest && !operation.takeoverSource.clubPreparation && !operation.takeoverSource.derived
+}
 export const agentOperationKey = (operation: Pick<AgentOperationFeedback, 'kind' | 'operationId' | 'subject'>) =>
   JSON.stringify([operation.subject.hostId, operation.subject.agentSessionId ?? operation.subject.regionId, operation.kind, operation.operationId])
 
@@ -64,7 +69,7 @@ export function persistedAgentOperations(operations: AgentOperationReferences): 
   let projection = retained.get(operations)
   if (!projection) {
     projection = Object.fromEntries(Object.entries(operations)
-      .filter(([, operation]) => operation.phase !== 'succeeded' || operation.kind === 'takeover' && operation.cancellation)
+      .filter(([, operation]) => operation.phase !== 'succeeded' || isRetainedTakeoverRecord(operation) || operation.kind === 'takeover' && operation.cancellation)
       .map(([key, operation]) => [key, operation.kind === 'takeover' && operation.cancellation?.settlingFeedback
         ? { ...operation, cancellation: withoutCancellationFeedback(operation.cancellation) } : operation]))
     retained.set(operations, projection)

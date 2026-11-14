@@ -6,7 +6,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { TakeoverSource } from './session-takeover'
 import type { AgentMuxAgentStopReceipt } from '@agentmux/core'
 
-import { agentOperationKey, withoutCancellationFeedback, type AgentOperationFeedback } from './agent-operation'
+import { agentOperationKey, isRetainedTakeoverRecord, withoutCancellationFeedback, type AgentOperationFeedback } from './agent-operation'
 export { agentOperationKey, restoredAgentOperations } from './agent-operation'
 export type { AgentOperationFeedback, AgentOperationKind, AgentOperationPhase, AgentOperationReferences, AgentOperationSubject } from './agent-operation'
 
@@ -53,7 +53,7 @@ export function dismissAgentOperation(operation: AgentOperationFeedback) {
       const cancellation = withoutCancellationFeedback(held.cancellation)
       return { agentOperations: { ...state.agentOperations, [key]: { ...held, cancellation } } }
     }
-    if (held?.phase !== 'succeeded' || held.kind === 'takeover' && held.cancellation) return state
+    if (held?.phase !== 'succeeded' || isRetainedTakeoverRecord(held) || held.kind === 'takeover' && held.cancellation) return state
     const { [key]: _finished, ...agentOperations } = state.agentOperations
     return { agentOperations }
   })
