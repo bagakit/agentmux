@@ -383,8 +383,14 @@ export class AgentMuxAgentSessionRegistry {
     return await this.store.prepareReopen(reservation, session)
   }
 
-  async prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation) {
-    return await this.store.prepareCreate(reservation, seed)
+  async prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation, dispatch?: import('./agent-session-store.js').AgentMuxPreparedAgentDispatch) {
+    return await this.store.prepareCreate(reservation, seed, dispatch)
+  }
+
+  async admitCreationResolution(original: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, request: import('./agent-creation-resolution.js').AgentMuxCreationResolveInput, authority?: import('./agent-session-store.js').AgentMuxCreationResolutionAdmission) {
+    const now = Date.now()
+    return await this.store.admitCreationResolution(original, request, { ownerId: this.lifecycleOwnerId, ownerPid: process.pid,
+      now, expiresAt: now + AgentMuxAgentSessionRegistry.lifecycleLeaseMs, reservationId: mintObjectId() }, authority)
   }
 
   async claimCreate(agentSessionId: string, operationId: string, intentDigest: string) {

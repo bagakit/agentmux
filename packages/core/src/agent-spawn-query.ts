@@ -14,7 +14,7 @@ export type AgentMuxSpawnQuery = {
 }
 export type AgentMuxSpawnRecord = {
   agentSessionId: string
-  phase: 'prepared' | 'active' | 'retired'
+  phase: 'prepared' | 'active' | 'retired' | 'closed'
   currentRun: AgentMuxRunRef | null
   createdAt: number
   creation: AgentMuxAgentCreationFact & { createdBy: AgentMuxSpawnCreator }
@@ -79,7 +79,8 @@ export function agentSpawnPage(query: AgentMuxSpawnQuery, owner: string, records
 const sources = [
   { table: 'sessions', phase: 'active', path: '$.creation' },
   { table: 'retired_sessions', phase: 'retired', path: '$.history.creation' },
-  { table: 'reservations', phase: 'prepared', path: '$.preparedCreation.creation' }
+  { table: 'reservations', phase: 'prepared', path: '$.preparedCreation.creation' },
+  { table: 'closed_creations', phase: 'closed', path: '$.preparedCreation.creation' }
 ] as const
 
 /** Rebuildable lookup indexes over the original metadata; no second relation table. */
@@ -94,6 +95,7 @@ export function readAgentSpawnRows(db: DatabaseSync, query: AgentMuxSpawnQuery):
   if (typeof owner !== 'string') throw new AgentMuxError('The original Session persistence identity is unconfirmed.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
   const bound = after(query, owner), limit = (query.limit ?? 50) + 1
   const rows = sources.flatMap(({ table, phase, path }) => {
+    if (table === 'closed_creations' && !db.prepare("SELECT 1 FROM sqlite_schema WHERE name='closed_creations'").get()) return []
     const parameters: SQLInputValue[] = [query.participantSessionId]
     let where: string
     if (query.direction === 'creator') where = 'id=?'

@@ -1,3 +1,5 @@
+import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
+import { parseCreationInspectionResult } from './agent-creation-inspection.js'
 import { isCaptureSequenceMethod, parseCaptureSequenceParams, parseCaptureSequenceResult } from './capture-sequence.js'
 import { FOCUS_METHODS, parseFocusParams, parseFocusResult, type FocusMethod } from './focus-control.js'
 import { parseAgentTakeoverPage, type AgentTakeoverQuery } from './agent-takeover.js'
@@ -439,6 +441,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       return parseRpcNativeResult(input.call.method, value, input.call.params, credentials)
     }
     if (Object.hasOwn(HOST_ROUTE_METHODS, method)) return parseHostRouteResult(method as keyof typeof HOST_ROUTE_METHODS, value) as Record<string, unknown>
+    if (method === 'agent.creation.inspect' || method === 'agent.creation.resolve') return parseCreationInspectionResult(value, method === 'agent.creation.resolve' ? parseCreationResolveParams(params) : parseCreationInspectParams(params)) as unknown as Record<string, unknown>
     if (method === 'agent.creation.continue') return parseCreationContinueResult(value, parseCreationContinueParams(params)) as unknown as Record<string, unknown>
     if (method === 'agent.execution.watch') return parseAgentExecutionBindingObservation(value, parseAgentExecutionBinding(params).bindingId) as unknown as Record<string, unknown>
     if (method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
@@ -1034,12 +1037,13 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           const row = record(value, ['agentSessionId', 'phase', 'currentRun', 'createdAt', 'creation'])
           string(row.agentSessionId); const sid = row.agentSessionId as string
           if (Buffer.compare(Buffer.from(sid), Buffer.from(previous)) <= 0) fail(); previous = sid
-          member(row.phase, ['prepared', 'active', 'retired']); timestamp(row.createdAt)
-          if (row.phase === 'prepared' ? row.currentRun !== null : row.currentRun === null) fail()
+          member(row.phase, ['prepared', 'active', 'retired', 'closed']); timestamp(row.createdAt)
+          if (['prepared', 'closed'].includes(String(row.phase)) ? row.currentRun !== null : row.currentRun === null) fail()
           if (row.currentRun !== null) runRef(row.currentRun)
           const creation = parseAgentCreationFact(row.creation)
           const creator = creation.createdBy ?? fail()
-          if (!isDeepStrictEqual(creation, row.creation) || row.phase === 'prepared' && creation.createdRun) fail()
+          if (!isDeepStrictEqual(creation, row.creation) || ['prepared', 'closed'].includes(String(row.phase)) && creation.createdRun ||
+            row.phase === 'closed' && (creation.resolution?.outcome !== 'fenced' || creation.resolution.agentSessionId !== sid || creation.resolution.createOperationId !== creation.createOperationId)) fail()
           if (p.direction === 'creator' ? sid !== p.participantSessionId : creator.agentSessionId !== p.participantSessionId ||
             (p.creatorRuntimeId === null ? creator.owner.kind !== 'local' : creator.owner.kind !== 'runtime' || creator.owner.runtimeId !== p.creatorRuntimeId)) fail()
         })

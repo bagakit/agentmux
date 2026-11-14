@@ -8,6 +8,8 @@ import { immutableIdentityFile } from './immutable-identity-file.js'
 
 const applicationId = 0x414d5353
 const sqliteHeader = Buffer.from('SQLite format 3\0')
+export const closedCreationSchema = `CREATE TABLE IF NOT EXISTS closed_creations (
+  id TEXT PRIMARY KEY, creation_operation TEXT NOT NULL UNIQUE, json TEXT NOT NULL);`
 export const promptAdmissionSchema = `CREATE TABLE IF NOT EXISTS prompt_admissions (
   session_id TEXT NOT NULL, run_id TEXT NOT NULL, record_id TEXT NOT NULL,
   json TEXT NOT NULL, PRIMARY KEY(session_id, run_id, record_id));`
@@ -19,7 +21,7 @@ export const promptSubmissionIndexSchema = `CREATE UNIQUE INDEX IF NOT EXISTS te
   WHERE json_extract(json,'$.terminalPromptSubmission.submissionId') IS NOT NULL;`
 const schema = `
   PRAGMA application_id = ${applicationId};
-  PRAGMA user_version = 1;
+  PRAGMA user_version = 2;
   CREATE TABLE identity (incarnation TEXT NOT NULL, original_hash TEXT);
   CREATE TABLE sessions (id TEXT PRIMARY KEY, json TEXT NOT NULL, future_present INTEGER NOT NULL,
     creation_operation TEXT);
@@ -37,6 +39,7 @@ const schema = `
   CREATE TABLE native_bindings (native_key TEXT PRIMARY KEY, session_id TEXT NOT NULL);
   CREATE INDEX session_natives ON native_bindings(session_id);
   ${promptAdmissionSchema}
+  ${closedCreationSchema}
 `
 
 /** File/directory confirmation also covers an earlier commit whose durability ACK was lost. */
@@ -112,7 +115,7 @@ async function confirmOriginalIncarnation(path: string, incarnation: string): Pr
 
 function validate(db: DatabaseSync, acknowledged: string | null): string {
   if (db.prepare('PRAGMA application_id').get()?.application_id !== applicationId ||
-    db.prepare('PRAGMA user_version').get()?.user_version !== 1) throw new Error('Not an AgentMux Session database.')
+    ![1, 2].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) throw new Error('Not an AgentMux Session database.')
   const incarnation = db.prepare('SELECT incarnation FROM identity').get()?.incarnation
   if (typeof incarnation !== 'string' || acknowledged !== null && acknowledged !== incarnation) {
     throw new Error('The acknowledged Session database identity changed. Restore its original file; no facts have been re-imported.')

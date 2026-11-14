@@ -8,16 +8,26 @@ import { decodePreparedRun, type PreparedRun } from './prepared-run.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxStoredAgentSession } from './types.js'
 
-/** One private Agent binding check for durable freeze and positive legacy retained evidence. */
-export function assertPreparedResumeBinding(prepared: PreparedRun, session: AgentMuxStoredAgentSession | undefined,
+/** Both initial creation and resume bind the same exact private execution subject. */
+export function assertPreparedAgentBinding(prepared: PreparedRun, session: Pick<AgentMuxStoredAgentSession,
+  'agentSessionId' | 'workspacePath' | 'providerId' | 'executorId' | 'capabilityHash' | 'hookToken' | 'hookBindingId'> | undefined,
   operationId: string, code = 'INVALID_AGENT_SESSION_STORE'): void {
-  const { request } = decodePreparedRun(prepared, code), env = request.env, continuity = session?.continuity
-  const messagePlan = continuity?.messageInput?.plan
-  const launch = continuity?.restartLaunch ?? continuity?.launchInput?.launchPlan ?? messagePlan
+  const { request } = decodePreparedRun(prepared, code), env = request.env
   if (!session || prepared.createOperationId !== operationId || request.cwd !== session.workspacePath ||
       !session.capabilityHash || !env.AGENTMUX_AGENT_CAPABILITY || hashAgentCapability(env.AGENTMUX_AGENT_CAPABILITY) !== session.capabilityHash ||
       !session.hookToken || env.AGENTMUX_HOOK_TOKEN !== session.hookToken || session.hookBindingId !== hookBindingIdentity(operationId) ||
-      env.AGENTMUX_AGENT_SESSION_ID !== session.agentSessionId || env.AGENTMUX_PROVIDER_ID !== session.providerId || env.AGENTMUX_EXECUTOR_ID !== session.executorId ||
+      env.AGENTMUX_AGENT_SESSION_ID !== session.agentSessionId || env.AGENTMUX_PROVIDER_ID !== session.providerId || env.AGENTMUX_EXECUTOR_ID !== session.executorId)
+    throw new AgentMuxError('The original Start does not match its prepared Agent binding. Its original operation is retained.', code)
+}
+
+/** One private Agent binding check for durable freeze and positive legacy retained evidence. */
+export function assertPreparedResumeBinding(prepared: PreparedRun, session: AgentMuxStoredAgentSession | undefined,
+  operationId: string, code = 'INVALID_AGENT_SESSION_STORE'): void {
+  assertPreparedAgentBinding(prepared, session, operationId, code)
+  const { request } = decodePreparedRun(prepared, code), continuity = session?.continuity
+  const messagePlan = continuity?.messageInput?.plan
+  const launch = continuity?.restartLaunch ?? continuity?.launchInput?.launchPlan ?? messagePlan
+  if (!session ||
       !continuity || continuity.previousRun.runId !== session.run.runId || session.nativeHandle?.kind !== 'provider' ||
       !matchesProviderNativeSessionTarget(continuity.nativeTarget, session.nativeHandle) ||
       (messagePlan && (messagePlan.lifecycleOperationId !== operationId ||

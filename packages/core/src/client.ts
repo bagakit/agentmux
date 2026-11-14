@@ -1,3 +1,5 @@
+import { parseCreationResolveInput, type AgentMuxCreationResolveInput } from './agent-creation-resolution.js'
+import { assertPreparedAgentBinding } from './agent-prepared-resume.js'
 import { parseInputInitialization } from './agent-initialization.js'
 import { invalidateSubagentSource, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, subagentScopeMatches } from './agent-subagent-state.js'
 import { parseAgentOpenLaunchFields } from './agent-open-contract.js'
@@ -882,7 +884,7 @@ export class AgentMuxClient {
       }
       const pending = await preparation(() => this.registry.claimCreate(input.agentSessionId!, agentLifecycleOperationIdentity('create', input.agentSessionId!, input.createOperationId!), intentDigest))
       if (pending) {
-        const session = await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId))
+        const session = await this.completePreparedCreate(pending, await this.inspectPreparedCreation(pending))
         return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!) }
       }
       if (!resolved) {
@@ -2501,7 +2503,7 @@ export class AgentMuxClient {
   }
 
   /** Exact durable facts precede the registry, including an original creation's later retirement. */
-  private async readCreationSession(agentSessionId: string, createOperationId?: string): Promise<AgentMuxAgentCreationInspection | undefined> {
+  private async readCreationSession(agentSessionId: string, createOperationId?: string): Promise<Extract<AgentMuxAgentCreationInspection, { kind: 'agent' | 'retired-agent' }> | undefined> {
     if (createOperationId !== undefined) {
       const originalId = await this.store.loadCreationSessionId(createOperationId)
       if (originalId && originalId !== agentSessionId) throw new AgentMuxError(
@@ -2559,20 +2561,98 @@ export class AgentMuxClient {
     return storedId ?? queuedId ?? await deriveAgentSessionId(createOperationId)
   }
 
-  /** Reconcile only the original prepared operation with authoritative Runs, never start or input. */
-  async inspectAgentCreation(agentSessionId: string): Promise<AgentMuxAgentCreationInspection> {
+  private projectPreparedCreation(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, closed = false, observedRun?: CtxmuxAdapterRun): AgentMuxAgentCreationInspection {
+    const seed = reservation.preparedCreation
+    if (!seed?.creation) throw new AgentMuxError('The original preparation is incomplete and remains retained.', 'AGENT_CREATION_UNKNOWN')
+    return { kind: closed ? 'closed-agent-creation' : 'prepared-agent-creation', agentSessionId: seed.agentSessionId,
+      providerId: seed.providerId, executorId: seed.executorId, hostId: seed.hostId, workspacePath: seed.workspacePath,
+      creation: structuredClone(seed.creation), ...(observedRun ? { observation: { runtimeId: this.kernel.creationRuntimeIdentity().runtimeId, retainedRun: { runId: observedRun.runId } } } : {}), ...(reservation.creationResolution ? { resolution: structuredClone(reservation.creationResolution.receipt) } : {}) }
+  }
+
+  /** Complete-spec observation only; historical missing launch material is never reconstructed. */
+  private async inspectPreparedCreation(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>): Promise<CtxmuxAdapterRun | null> {
+    const dispatch = reservation.preparedDispatch ?? reservation.creationResolution?.observedRetained, seed = reservation.preparedCreation
+    if (dispatch) {
+      assertPreparedAgentBinding(dispatch.prepared, seed, reservation.operationId, 'AGENT_CREATION_RETAINED_MISMATCH')
+      const run = await this.kernel.inspectPreparedStart(decodePreparedRun(dispatch.prepared).request, reservation.operationId, undefined, dispatch.runtime)
+      if (run && reservation.creationResolution?.observedRetained && run.runId !== reservation.creationResolution.observedRetained.run.runId)
+        throw new AgentMuxError('The original retained observation names another Run. No original identity was rebound.', 'AGENT_CREATION_RETAINED_MISMATCH')
+      return run
+    }
+    const retained = await this.kernel.inspectRetainedStart(reservation.operationId)
+    if (!retained) return null
+    assertPreparedAgentBinding(retained.prepared, seed, reservation.operationId, 'AGENT_CREATION_RETAINED_MISMATCH')
+    return retained.run
+  }
+
+  /** Reconcile the original prepared operation, never another Start or input. */
+  async inspectAgentCreation(target: string | { createOperationId: string; agentSessionId?: string }): Promise<AgentMuxAgentCreationInspection> {
+    const agentSessionId = typeof target === 'string' ? target : await this.store.loadCreationSessionId(target.createOperationId)
+    if (!agentSessionId || typeof target !== 'string' && target.agentSessionId !== undefined && target.agentSessionId !== agentSessionId) throw new AgentMuxError(
+      'This original creation is unknown or names another Session. No identity was reconstructed.', 'AGENT_CREATION_UNKNOWN')
     const existing = await this.readCreationSession(agentSessionId)
-    if (existing?.kind === 'retired-agent') return existing
-    if (existing && existing.creation?.persistence !== 'unconfirmed') return existing
+    if (existing?.kind === 'retired-agent' || existing && existing.creation?.persistence !== 'unconfirmed') return existing
+    const closed = await this.store.loadClosedCreation(agentSessionId)
+    if (closed) return this.projectPreparedCreation(closed, true)
     const correlation = await this.store.loadCreationCorrelation(agentSessionId)
     if (!correlation?.preparedCreation?.creation?.intentDigest) {
       if (existing) return existing
-      throw new AgentMuxError('The original creation has no confirmed Session or prepared start. Inspect the same operation without replaying.', 'AGENT_CREATION_UNKNOWN')
+      throw new AgentMuxError('The original creation has no confirmed Session or complete preparation. Its original facts remain retained.', 'AGENT_CREATION_UNKNOWN')
     }
     await this.connectRuntime()
-    const pending = await this.registry.claimCreate(agentSessionId, correlation.operationId, correlation.preparedCreation.creation.intentDigest)
-    if (!pending) throw new AgentMuxError('The original creation changed while inspecting. Read the same operation again without replaying.', 'AGENT_CREATION_UNCONFIRMED')
-    return this.projectSession(await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId)))
+    const run = await this.inspectPreparedCreation(correlation)
+    return this.projectPreparedCreation(correlation, false, run ?? undefined)
+  }
+
+  /** Explicitly observe/fence this exact original key. No Start, successor or input is authorized. */
+  async resolveAgentCreation(value: AgentMuxCreationResolveInput, context?: AgentRawInputCallContext): Promise<AgentMuxAgentCreationInspection> {
+    const input = parseCreationResolveInput(value), sid = await this.store.loadCreationSessionId(input.createOperationId)
+    if (!sid || input.agentSessionId !== undefined && input.agentSessionId !== sid) throw new AgentMuxError(
+      'The original creation target is unknown or changed. No replacement identity was created.', 'AGENT_CREATION_UNKNOWN')
+    if (this.activeCreations.has(input.createOperationId)) throw new AgentMuxError('The original creation owner is still executing; inspect its operation.', 'AGENT_SESSION_BUSY')
+    const existing = await this.readCreationSession(sid, input.createOperationId)
+    if (existing && (existing.kind === 'retired-agent' || existing.creation?.persistence !== 'unconfirmed')) {
+      const receipt = existing.kind === 'agent' ? existing.creation?.resolution : existing.history?.creation?.resolution
+      if (receipt && receipt.operationId !== input.operationId) throw new AgentMuxError('The original creation already has a different resolution. Inspect its retained receipt.', 'AGENT_CREATION_RESOLUTION_CONFLICT')
+      return existing
+    }
+    const closed = await this.store.loadClosedCreation(sid)
+    if (closed) {
+      if (closed.creationResolution?.request.operationId !== input.operationId) throw new AgentMuxError('The original no-Run creation already has a different resolution.', 'AGENT_CREATION_RESOLUTION_CONFLICT')
+      return this.projectPreparedCreation(closed, true)
+    }
+    const original = await this.store.loadCreationCorrelation(sid)
+    if (!original?.preparedCreation) throw new AgentMuxError('The original creation lacks its saved seed. Its identity remains unknown.', 'AGENT_CREATION_RESOLUTION_UNAVAILABLE')
+    let observedRetained = original.creationResolution?.observedRetained
+    if (!original.preparedDispatch && !observedRetained) {
+      await this.connectRuntime()
+      const retained = await this.kernel.inspectRetainedStart(original.operationId)
+      if (!retained) throw new AgentMuxError('This historical creation has no exact retained witness. No preparation or retirement authority was reconstructed.', 'AGENT_CREATION_RESOLUTION_UNAVAILABLE')
+      assertPreparedAgentBinding(retained.prepared, original.preparedCreation, original.operationId, 'AGENT_CREATION_RETAINED_MISMATCH')
+      observedRetained = { prepared: retained.prepared, runtime: this.kernel.creationRuntimeIdentity(), run: runRef(retained.run.runId) }
+    }
+    const pending = await this.registry.admitCreationResolution(original, { ...input, agentSessionId: sid }, { ...(observedRetained ? { observedRetained } : {}), ...(context?.requestSignal ? { signal: context.requestSignal } : {}), ...(context?.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) })
+    try {
+      await this.connectRuntime()
+      let run = await this.inspectPreparedCreation(pending)
+      if (!run) {
+        // A post-dispatch observation is never retroactive permission to fence an unknown Start.
+        if (pending.creationResolution?.observedRetained) return this.projectPreparedCreation(pending)
+        const dispatch = pending.preparedDispatch!
+        const observed = await this.kernel.observePreparedStartRetirement(pending.operationId, dispatch.runtime)
+        if (observed.outcome === 'retired') return this.projectPreparedCreation(await this.store.closeCreation(pending, observed.runtime), true)
+        // The durable same-control admission authorizes redriving only this idempotent, monotone original key fence.
+        // Passive inspection never spends that authorization. No Start or old input is retried.
+        const fence = await this.kernel.retirePreparedStart(decodePreparedRun(dispatch.prepared).request, pending.operationId, dispatch.runtime)
+        if (fence.outcome === 'retired') return this.projectPreparedCreation(await this.store.closeCreation(pending, fence.runtime), true)
+        run = fence.run
+      }
+      const session = await this.completePreparedCreate(pending, run)
+      if (session.initialInput && (session.creation?.initialPrompt === 'unknown' || session.creation?.agentMuxContext === 'unknown')) this.publisher.publish({ type: 'agent-error', agentSessionId: sid, code: 'AGENT_CREATION_RESOLUTION_INPUT_HELD',
+        message: 'The original creation was recovered. Its old initial input remains held with its original unknown outcome; inspect that input before explicitly sending any new request.',
+        evidence: { source: 'agentmux', observedAt: Date.now(), run: session.run } })
+      return this.projectSession(session)
+    } finally { await this.store.releaseCreationResolutionOwner(pending) }
   }
 
   /** Original creation metadata only; never connects, adopts, resumes or starts a Run. */
@@ -5842,7 +5922,7 @@ export class AgentMuxClient {
     }
     const pending = await preparation(() => this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest))
     if (pending) {
-      const session = await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId))
+      const session = await this.completePreparedCreate(pending, await this.inspectPreparedCreation(pending))
       return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!, contextRequested) }
     }
     await preparation(() => this.assertExecutionDirectoryCreationAllowed(input.workspacePath))
@@ -6003,8 +6083,6 @@ export class AgentMuxClient {
             initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}), ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
           ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}), ...(launchOptions ? { launchOptions } : {}) }
-        reservation = await this.registry.prepareCreate(reservation, preparedCreation!)
-        this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
       }
       const startInput = {
         operationKey: lifecycleOperationId,
@@ -6024,6 +6102,18 @@ export class AgentMuxClient {
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       }
+      const preparedRequest = this.kernel.prepareStart(startInput)
+      const preparedDispatch = { prepared: { createOperationId: lifecycleOperationId, workspacePath: input.workspacePath,
+        launch: JSON.stringify({ createOperationId: lifecycleOperationId, request: preparedRequest }) }, runtime: this.kernel.creationRuntimeIdentity() }
+      // The adapter may wrap the CLI. Freeze the actual argv/environment and its input carrier together.
+      if (initialInput) initialInput.launchPlan = { program: preparedRequest.program,
+        argsDigest: createHash('sha256').update(JSON.stringify(preparedRequest.args)).digest('base64url') }
+      if (reservation.kind === 'create') {
+        reservation = await this.registry.prepareCreate(reservation, preparedCreation!, preparedDispatch)
+        if (!isDeepStrictEqual(reservation.preparedDispatch, preparedDispatch)) throw new AgentMuxError(
+          'The original Store did not confirm the complete frozen Start and Runtime. No Run was started.', 'AGENT_CREATION_PREPARATION_UNCONFIRMED')
+        this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
+      }
       // If any final read had to wait, earlier authority reads must be fresh too.
       let checkedRevision: number
       do {
@@ -6041,7 +6131,7 @@ export class AgentMuxClient {
       await preparation(() => this.validateOwnedAgentCreation(input, agentSessionId))
       preservePreparedCreation = true
       startAttempted = true
-      const run = await this.kernel.start(startInput).catch(error => {
+      const run = await this.kernel.startPrepared(preparedRequest, lifecycleOperationId, preparedDispatch.runtime).catch(error => {
         if (!(error instanceof AgentMuxError && error.creationFailure?.operationId === lifecycleOperationId &&
           error.creationFailure.disposition === 'not_applied')) {
           const failure = new AgentMuxError(`Agent start is unconfirmed. Inspect the original operation; no start or input was resent. ${error instanceof Error ? error.message : String(error)}`,
@@ -6312,7 +6402,7 @@ export class AgentMuxClient {
     const initialInput = bindInitialInput(seed.initialInput, seed.agentSessionId, runRef(run.runId))
     const session: AgentMuxStoredAgentSession = { ...structuredClone(seed), run: runRef(run.runId), retiredRuns: [],
       ...(initialInput ? { initialInput } : {}), creation: { ...seed.creation!, ...(initialInput?.key ? { initialInputKey: initialInput.key } : {}),
-        createdRun: runRef(run.runId) } }
+        createdRun: runRef(run.runId), ...(reservation.creationResolution ? { resolution: { ...reservation.creationResolution.receipt, outcome: 'retained' as const, retainedRun: runRef(run.runId) } } : {}) } }
     let committed: AgentMuxStoredAgentSession | null = null
     try { committed = await this.registry.commitLifecycle(reservation, session) }
     catch (error) {
@@ -9081,7 +9171,7 @@ export class AgentMuxClient {
     let unpreparedRuns: readonly CtxmuxAdapterRun[] | undefined
     for (const reservation of reservations) {
       if (reservation.kind === 'create' && reservation.preparedCreation) {
-        try { await this.completePreparedCreate(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
+        try { await this.completePreparedCreate(reservation, await this.inspectPreparedCreation(reservation)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_CREATION_UNCONFIRMED', message: error instanceof Error ? error.message : String(error),
           lifecycle: lifecycleDiagnosticSource(reservation), failure: deliveryFailure(error),
@@ -10227,7 +10317,7 @@ export class AgentMuxClient {
     const refused = () => new AgentMuxError('The original creation input owner changed or its Run was stopped. No initial input was dispatched.',
       'AGENT_INITIAL_INPUT_SUPERSEDED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
     const current = await this.store.readMetadata(original.agentSessionId), input = original.initialInput
-    if (!current || !input?.key || !sameRun(current.run, original.run) || current.run.runId !== run.runId ||
+    if (!current || current.creation?.resolution?.initialInputContinuation === 'held' || !input?.key || !sameRun(current.run, original.run) || current.run.runId !== run.runId ||
         current.hostId !== original.hostId || current.providerId !== original.providerId || current.executorId !== original.executorId ||
         current.workspacePath !== original.workspacePath || current.capabilityHash !== original.capabilityHash ||
         original.nativeActor && !isDeepStrictEqual(current.nativeActor, original.nativeActor) ||
@@ -10238,6 +10328,8 @@ export class AgentMuxClient {
     const live = await this.kernel.status(run.runId)
     this.assertAgentRun(current, live)
     if (live.state.type !== 'running' || live.pid !== run.pid) throw refused()
+    // Re-read after Runtime IO; a queued observer cannot outrun a durable resolve control.
+    if ((await this.store.readMetadata(original.agentSessionId))?.creation?.resolution?.initialInputContinuation === 'held') throw refused()
   }
 
   /** Continue only the original input owner. Native recovery decisions stay in the recovery service. */
@@ -10245,7 +10337,7 @@ export class AgentMuxClient {
     assertCurrent?: () => Promise<void>): Promise<AgentMuxStoredAgentSession> {
     let current = await this.registry.refresh(session.agentSessionId, session.run)
     const input = current.initialInput
-    if (!input?.key || !sameRun(current.run, session.run) ||
+    if (current.creation?.resolution?.initialInputContinuation === 'held' || !input?.key || !sameRun(current.run, session.run) ||
         input.key.expectedRun.runId !== run.runId || current.run.runId !== run.runId) return current
     if (input.delivery === 'launch') {
       if (input.state !== 'launch-carried' || input.receipt?.run.runId !== run.runId || input.receipt.operationId !== input.lifecycleOperationId) return current
@@ -10269,7 +10361,7 @@ export class AgentMuxClient {
         nativeSource = { providerId: handle.providerId, nativeSessionId: handle.sessionId }
       }
       await this.deliverPostLaunchPrompt(this.providers.get(current.providerId), current, run, input.lifecycleOperationId,
-        input.prompt, input.message, input.key.submissionId, nativeSource, assertCurrent)
+        input.prompt, input.message, input.key.submissionId, nativeSource, async () => { await assertCurrent?.(); await this.assertCreationInputCurrent(session, run) })
       record = await this.inspectAgentPromptSubmission(input.key)
     }
     // Absence of a receipt is absence of knowledge, never a possibly-applied claim.

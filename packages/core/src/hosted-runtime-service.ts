@@ -1,3 +1,5 @@
+import { parseCreationResolveInput } from './agent-creation-resolution.js'
+import { parseCreationInspection } from './agent-creation-inspection.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect } from './terminal-creation.js'
 import { HostedSessionReaders } from './hosted-session-readers.js'
 import { parseCreationContinueInput, parseCreationContinueReceipt } from './agent-creation-continue.js'
@@ -283,6 +285,11 @@ export class AgentMuxHostedRuntimeService {
       if (invocation.args.length > 1) throw new AgentMuxError('Host environment reads accept zero arguments or one exact Agent Session selector.', 'INVALID_CONTROL_REQUEST')
       if (invocation.args.length === 1) invocation.args[0] = parseHostEnvironmentSelector(invocation.args[0])
     }
+    if (invocation.method === 'resolveAgentCreation') {
+      if (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Explicit creation resolution requires its original transport-approved person/device.', 'CONTROL_PERMISSION_DENIED')
+      if (invocation.args.length !== 1) throw new AgentMuxError('Resolve one exact original creation.', 'INVALID_CONTROL_REQUEST')
+      invocation.args[0] = parseCreationResolveInput(invocation.args[0])
+    }
     if (invocation.method === 'continueAgentCreation') {
       if (invocation.args.length !== 1) throw new AgentMuxError('Creation continuation accepts one original target.', 'INVALID_CONTROL_REQUEST')
       invocation.args[0] = parseCreationContinueInput(invocation.args[0])
@@ -395,7 +402,7 @@ export class AgentMuxHostedRuntimeService {
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
       throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
-    const modifying = invocation.method === 'deleteAgentSessionRecord' || invocation.method === 'continueAgentCreation' || continuityControl || invocation.method === 'broadcastMessages' || /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
+    const modifying = invocation.method === 'deleteAgentSessionRecord' || invocation.method === 'resolveAgentCreation' || invocation.method === 'continueAgentCreation' || continuityControl || invocation.method === 'broadcastMessages' || /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
     const first = invocation.args[0] as unknown
     // Match the public human question-reply owner. Only transport-approved
     // user/device intent supplies human authorship; a wire claim cannot name an Agent.
@@ -460,11 +467,12 @@ export class AgentMuxHostedRuntimeService {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
       }
-      if (invocation.method === 'continueAgentCreation') {
+      if (invocation.method === 'continueAgentCreation' || invocation.method === 'resolveAgentCreation') {
         await context.assertCurrent?.()
         context.signal?.throwIfAborted(); this.assertFence(p.fence)
       }
       const pending = operation.apply(this.client, postureInput ? [invocation.args[0], { actor: context.principal!, ...(context.signal ? { requestSignal: context.signal } : {}), ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) } satisfies import('./run-control-context.js').RunControlContext] : rawAgentInput ? [invocation.args[0], rawContext]
+        : invocation.method === 'resolveAgentCreation' ? [invocation.args[0], rawContext]
         : rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2], rawContext]
         : (invocation.method === 'readAgentInputMailbox' || invocation.method === 'readAgentInputChanges' || invocation.method === 'readAgentInputResource') ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
@@ -483,6 +491,8 @@ export class AgentMuxHostedRuntimeService {
       value = invocation.method === 'sessionHistorySources' ? await observe(Promise.resolve(pending), context.signal) : await pending
     }
     } catch (error) { await recordActivity('unknown'); throw error }
+    if (invocation.method === 'inspectAgentCreation') value = parseCreationInspection(value, invocation.args[0] as string | { createOperationId: string; agentSessionId?: string })
+    if (invocation.method === 'resolveAgentCreation') value = parseCreationInspection(value, parseCreationResolveInput(invocation.args[0]))
     if (invocation.method === 'continueAgentCreation') value = parseCreationContinueReceipt(value, invocation.args[0])
     if (invocation.method === 'sessionHistoryResource') {
       context.signal?.throwIfAborted(); this.assertFence(p.fence)

@@ -1271,7 +1271,11 @@ export type AgentLaunchPromptInputPlan = Readonly<{
 
 /** Original creation facts survive explicit retirement without becoming an active Session. */
 export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
-  ({ kind: 'retired-agent' } & Omit<import('./agent-session-store.js').AgentMuxRetiredAgentSession, 'executorInvocation' | 'nativeCreationKeys'>)
+  ({ kind: 'retired-agent' } & Omit<import('./agent-session-store.js').AgentMuxRetiredAgentSession, 'executorInvocation' | 'nativeCreationKeys'>) |
+  { kind: 'prepared-agent-creation' | 'closed-agent-creation'; agentSessionId: string; providerId: string; executorId: string;
+    hostId: string; workspacePath: string; creation: AgentMuxAgentCreationFact; resolution?: import('./agent-creation-resolution.js').AgentMuxCreationResolution;
+    /** Exact Native read only; this does not grant Session or input qualification. */
+    observation?: { runtimeId: string; retainedRun: AgentMuxRunRef } }
 
 export type AgentMuxAgentSession = {
   toolExecution?: import('./agent-tool-execution.js').AgentToolExecutionBinding
@@ -1437,6 +1441,8 @@ export type AgentPromptSubmissionRecord = {
 export type AgentMuxAgentCreationSpatialIntent = { tabId: string; regionId: string; executionWorkspaceId: string }
 
 export type AgentMuxAgentCreationFact = {
+  /** Explicit original-creation resolution; its old automatic initial input remains held. */
+  resolution?: import('./agent-creation-resolution.js').AgentMuxCreationResolution
   /** Original Takeover work source and admitted destination, separate from creator/fork identity. */
   takeover?: import('./agent-takeover.js').AgentTakeoverProvenance
   createOperationId: string

@@ -1,3 +1,5 @@
+import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
+import { parseCreationInspection, parseCreationInspectionResult } from './agent-creation-inspection.js'
 import { isCaptureSequenceMethod, parseCaptureSequenceParams, parseCaptureSequenceResult, type CaptureSequencePort, type CaptureSequenceMethod } from './capture-sequence.js'
 import { FOCUS_METHODS, parseFocusParams, parseFocusResult, type FocusMethod } from './focus-control.js'
 import { spatialDestination } from './spatial-destination.js'
@@ -203,7 +205,7 @@ import { parseTerminalTarget, parseTerminalOutputParams, parseTerminalInspection
 
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'inspectAgentSessionRecord' | 'deleteAgentSessionRecord' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
-  'resolveAgentCreationSessionId' | 'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
+  'resolveAgentCreationSessionId' | 'inspectAgentCreation' | 'resolveAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
@@ -464,6 +466,8 @@ const NATIVE_FIELDS = {
   'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'providerId', 'status', 'semantic', 'readiness', 'since', 'activitySince', 'cursor', 'limit'],
   'agent.inspect': ['target'],
+  'agent.creation.inspect': ['hostId', 'createOperationId', 'agentSessionId'],
+  'agent.creation.resolve': ['hostId', 'createOperationId', 'agentSessionId', 'operationId'],
   'agent.creation.continue': ['hostId', 'createOperationId', 'agentSessionId'],
   'agent.execution.inspect': ['hostId', 'bindingId', 'streamGeneration', 'nativeRequestId'],
   'agent.execution.admit': AGENT_EXECUTION_CREATE_FIELDS,
@@ -1651,6 +1655,23 @@ export class AgentMuxRpcService {
       }) as AgentMuxRpcResult<M>
     }
     await this.assertRuntimeFence(context)
+    if (method === 'agent.creation.inspect' || method === 'agent.creation.resolve') {
+      const resolving = method === 'agent.creation.resolve'
+      if (resolving && (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
+        'Resolving a creation requires a transport-approved user/device, without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
+      const request = resolving ? parseCreationResolveParams(params) : parseCreationInspectParams(params), { hostId, ...input } = request
+      const scopes = (await this.ports.coreClients?.() ?? []).filter(scope => scope.hostId === hostId)
+      if (scopes.length !== 1 || this.endpointUnverified(scopes[0]!.client)) throw new AgentMuxError('The original creation Host is unavailable or ambiguous. Its identity is retained.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted(); await this.inputCallContext(context).assertCurrent?.(); context.signal?.throwIfAborted()
+      const scope = scopes[0]!, original = { ...input, hostId: 'local' }
+      const inspection = scope.client.forwardRpc
+        ? parseCreationInspectionResult(resolving
+          ? await scope.client.forwardRpc('agent.creation.resolve', original as import('./agent-creation-resolution.js').AgentMuxCreationResolveParams, await this.inputForwardContext(context))
+          : await scope.client.forwardRpc('agent.creation.inspect', original, await this.inputForwardContext(context)), original).inspection
+        : resolving ? parseCreationInspection(await scope.client.resolveAgentCreation(input as import('./agent-creation-resolution.js').AgentMuxCreationResolveInput, { ...(context.signal ? { requestSignal: context.signal } : {}), ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) }), input)
+          : parseCreationInspection(await scope.client.inspectAgentCreation(input), input)
+      return { hostId, inspection } as AgentMuxRpcResult<M>
+    }
     if (method === 'agent.creation.continue') {
       if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
         'Continuing a creation wait requires a transport-approved user or device, without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
