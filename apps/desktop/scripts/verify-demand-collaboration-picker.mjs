@@ -24,7 +24,7 @@ const mutations = [
  {id:'original-cas-consumer',file:files[1],before:'await updateDemand(demand.id, patch, undefined, expectedUpdatedAt, relationAccess)',after:'await updateDemand(demand.id, patch, undefined, undefined, relationAccess)'},
  {id:'slow-create-busy',file:files[0],before:"if (draft?.phase === 'may-have-dispatched' && creating.current !== draft.operationId) void inspectOriginal(draft)",after:"if (draft?.phase === 'may-have-dispatched') void inspectOriginal(draft)"},
  {id:'retained-selection-remount',file:files[0],before:'const raw = useAppStore(state => state.goalAgentSelectionDrafts[goalCreationDraftKey(demand.id, role)])',after:'const raw = undefined'},
- {id:'unknown-inspect-only',file:files[0],before:"{ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `goal-agent-inspect-${crypto.randomUUID()}`, operation: 'space.inspect', target: { requestId: original.operationId } }",after:'original.request'},
+ {id:'unknown-inspect-only',file:files[0],before:"{ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `goal-agent-inspect-${mintObjectId()}`, operation: 'space.inspect', target: { requestId: original.operationId } }",after:'original.request'},
  {id:'not-dispatched-first-recovery',file:files[0],before:"if (draft.phase === 'not-dispatched') void dispatchOriginal(draft); else void inspectOriginal(draft)",after:'void inspectOriginal(draft)'},
  {id:'mote-original-directory',file:files[0],before:"...(mode === 'agent' ? { executionWorkspaceId: workspace!.id } : {})",after:"...{ executionWorkspaceId: workspaceId || '__scratch__' }"}
 ]
