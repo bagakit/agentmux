@@ -48,6 +48,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   void shutdown().catch(error => { console.error(error); process.exit(1) })
 })
 startup = startAgentMuxHost({ prepareExecutionEnvironment, store: agentMuxHostStore(storePath), mobileBuildDirectory, shutdown,
+  hostConfiguration: hostId => configured.configuration(hostId),
   ...(configurationPath === undefined ? {} : { configurationPath }),
   ...(connectionDirectory === undefined && moteConfigurationPath === undefined ? {} : { connections: { directory: connectionDirectory, clients: () => configured.clients(), subscribeClients: listener => configured.subscribeClients(listener),
     ...(moteConfigurationPath === undefined ? {} : { moteConfigurationPath }) } }) }).catch(async error => {

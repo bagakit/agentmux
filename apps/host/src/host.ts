@@ -50,6 +50,8 @@ export type AgentMuxHostOptions = {
   connections?: HostConnectionOptions
   /** Reference to the original client configuration, never a Host configuration copy. */
   configurationPath?: string
+  /** The saved Host record behind each served route, read by Host observations. */
+  hostConfiguration?: (hostId: string) => import('./host-configuration.js').HostConfig | null
   mobileBuildDirectory?: string
   mobilePort?: number
   fileUploads?: import('@agentmux/core/files').AgentMuxRpcFileUploadsOwner
@@ -173,6 +175,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const service = {
     spatialState,
     hostTailcat: (hostId: string) => hostId === 'local' ? tailcat!.inspect() : undefined,
+    ...(options.hostConfiguration ? { hostConfiguration: options.hostConfiguration } : {}),
     ...(moteDialogue ? { moteDialogue } : {}),
     ...(moteQuickPreferences ? { moteQuickPreferences } : {}),
     ...(configurationPath ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: spatialState, runtime: originalRuntime, agentMuxContext: async request => await goals?.contextForSpatialOpen(request) }) } : {}),

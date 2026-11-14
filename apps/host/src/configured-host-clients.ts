@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { connectSshAgentMux, type AgentMuxSshHostedClient } from '@agentmux/core'
-import { parseHostConfigurations, type SshHostConfig } from './host-configuration.js'
+import { parseHostConfigurations, type LocalHostConfig, type SshHostConfig } from './host-configuration.js'
 
 type Lease = { config: SshHostConfig; client: AgentMuxSshHostedClient }
 /** Read the original application configuration; own only these SSH consumer leases. */
@@ -18,6 +18,7 @@ export function configuredHostClients(path: string | undefined) {
   const work = new Set<Promise<void>>()
   let watcher: FSWatcher | undefined, pending: Promise<void> | undefined, retry: NodeJS.Timeout | undefined
   let dirty = false, closed = false, started = false, lastIssue: string | undefined
+  let local: LocalHostConfig | undefined
   let retryDelay = 1000
   const issue = (step: string) => {
     if (lastIssue === step || closed) return
@@ -35,6 +36,7 @@ export function configuredHostClients(path: string | undefined) {
     if (!parsed.success) { issue('The original Hosts configuration is invalid: ' + parsed.issues.map(problem => [...problem.path, problem.message].join('.')).join('; ')); return }
     if (!current()) return
     lastIssue = undefined
+    local = parsed.data.find((host): host is LocalHostConfig => host.kind === 'local')
     const configured = parsed.data.filter((host): host is SshHostConfig => host.kind === 'ssh')
     const desired = new Map(configured.map(config => [config.id, config]))
     for (const [id, route] of routes) if (!isDeepStrictEqual(route.config, desired.get(id))) {
@@ -122,6 +124,9 @@ export function configuredHostClients(path: string | undefined) {
     start() { if (!started && !closed) { started = true; void refresh() } },
     subscribeClients(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
     clients: () => [...leases].map(([hostId, lease]) => ({ hostId, client: lease.client })),
+    /** The saved record behind each served route: an SSH lease's adopted config, or the last valid local record. */
+    configuration: (hostId: string): LocalHostConfig | SshHostConfig | null =>
+      structuredClone(hostId === 'local' ? local ?? null : leases.get(hostId)?.config ?? null),
     async close() {
       closed = true; configurationRead.abort(); if (retry) clearTimeout(retry); watcher?.close(); watcher = undefined
       for (const route of routes.values()) route.controller.abort()
