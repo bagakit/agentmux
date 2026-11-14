@@ -1658,7 +1658,7 @@ export type AgentMuxDesktopApi = {
     call<M extends import('@agentmux/core').ApplicationAccessMethod>(method: M,
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<import('@agentmux/core').ApplicationAccessResultMap[M]>
   }
-  nodePublishing: import('@agentmux/core/node-publishing').NodePublishingPort
+  nodePublishing: import('./node-publishing.js').DesktopNodePublishingPort
   hosts: {
     prepareTailcatKey(input: AgentMuxRpcParams<'settings.hosts.tailcat-key'>): Promise<AgentMuxRpcResult<'settings.hosts.tailcat-key'>>
     home(host: HostConfig, context?: { signal?: AbortSignal }): Promise<AgentMuxRpcResult<'settings.hosts.home'>>
@@ -2275,7 +2275,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<SessionInputOperationResult<import('@agentmux/core').ApplicationAccessResultMap[M]>>
   }
   conversation: import('./conversation-read').ConversationReadPreloadApi
-  nodePublishing: { call<M extends import('@agentmux/core/node-publishing').NodePublishingMethod>(method: M, params: import('@agentmux/core/node-publishing').NodePublishingParams[M], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/node-publishing').NodePublishingResults[M]>> }
+  nodePublishing: { call<M extends import('./node-publishing.js').NodePublicMethod>(method: M, params: import('@agentmux/core/node-publishing').NodePublishingParams[M], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/node-publishing').NodePublishingResults[M]>>; owner<M extends import('./node-publishing.js').NodeOwnerMethod>(target: import('./node-publishing.js').NodeOwnerTarget, method: M, params: import('@agentmux/core/node-publishing').NodePublishingParams[M], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/node-publishing').NodePublishingResults[M]>> }
   hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect' | 'network' | 'home'> & {
     home(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<AgentMuxRpcResult<'settings.hosts.home'>>>
     inspect(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostRuntimeObservation>>

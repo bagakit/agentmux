@@ -1072,7 +1072,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       return { ...operation(f), target: { kind: 'mote', spaceId: mote, ...(eventId === undefined ? {} : { eventId }) }, inputPolicy: value(f, '--input') ?? 'preserve' }
     }
     if (sectionId !== undefined || f.booleans.has('--close-settings')) {
-      if (sectionId !== undefined && f.booleans.has('--close-settings') || surface !== undefined || hostId !== undefined && sectionId !== 'hosts' || agentSessionId !== undefined || view !== undefined) invalid('An exact Settings section cannot be combined with Surface or Agent navigation; --host selects only the Hosts page.')
+      if (sectionId !== undefined && f.booleans.has('--close-settings') || surface !== undefined || hostId !== undefined && sectionId !== 'hosts' && sectionId !== 'network-node' || agentSessionId !== undefined || view !== undefined) invalid('An exact Settings section cannot be combined with Surface or Agent navigation; --host selects only the Hosts or Node page.')
       return { ...operation(f), target: { kind: 'settings', sectionId: sectionId ?? null,
         ...(hostId === undefined ? {} : { hostId }) }, inputPolicy: value(f, '--input') ?? 'preserve' }
     }

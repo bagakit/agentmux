@@ -12,11 +12,48 @@ import { NodeShareAddress } from './NodeShareAddress'
 import { useResourceDrafts } from './use-resource-drafts'
 import { useSettingsSave, SettingsSaveBar } from './SettingsSaveBar'
 import { saveConfigSlice } from './save-config-slice'
+import type { HostConfig } from '../../../../shared/contracts'
+import type { NodeOwnerTarget } from '../../../../shared/node-publishing'
 import type { SettingsPaneProps } from './settings-catalog'
 import './network-node.css'
 
-/** Core owns publication. The existing Config owner independently owns the incoming listener. */
-export function NetworkNodeSettingsPane({ config, active, onNavigate }: SettingsPaneProps) {
+/** Selection is presentation; only the answering original Core supplies its identity. */
+export function NetworkNodeSettingsPane({ config, active, onNavigate, navigationRequest }: SettingsPaneProps) {
+  const local = config.hosts.find(host => host.kind === 'local')
+  const [selected, setSelected] = useState(navigationRequest?.hostId ?? local?.id ?? '')
+  useEffect(() => { if (navigationRequest?.hostId) setSelected(navigationRequest.hostId) }, [navigationRequest])
+  const host = config.hosts.find(item => item.id === selected)
+  const route = host ? JSON.stringify((({ label: _label, ...value }) => value)(host)) : ''
+  const [identity, setIdentity] = useState<{ route: string; target?: NodeOwnerTarget; error?: string }>()
+  const [refresh, setRefresh] = useState(0)
+  useEffect(() => {
+    if (!active || !host) return
+    const controller = new AbortController()
+    if (host.kind === 'ssh' && host.runtimeId) {
+      setIdentity({ route, target: { hostId: host.id, expectedRuntimeId: host.runtimeId } })
+      return () => controller.abort()
+    }
+    void api.nodePublishing.call('node.inspect', { hostId: host.id }, controller.signal).then(observed => {
+      if (controller.signal.aborted) return
+      if (!observed.node.runtimeId) throw new Error('The original Node identity is not available. Refresh this saved Host; its input and Agents are kept.')
+      setIdentity({ route, target: { hostId: host.id, expectedRuntimeId: observed.node.runtimeId } })
+    }).catch(cause => { if (!controller.signal.aborted) setIdentity({ route, error: cause instanceof Error ? cause.message : String(cause) }) })
+    return () => controller.abort()
+  }, [route, active, refresh])
+  const target = identity?.route === route ? identity.target : undefined
+  return <div className="settings-pane-stack network-node-settings" data-settings-host={host?.id}>
+    <div className="network-node-intro"><h3>Manage a node</h3><p>Select a saved Host to manage what its original Core publishes. Connecting and starting work stay separate.</p><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>View Host connections</button></div>
+    <label className="network-node-field"><span>Node to manage</span><select aria-label="Node to manage" value={selected} onChange={event => setSelected(event.target.value)}>
+      {!host ? <option value={selected}>Original saved Host unavailable</option> : null}
+      {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label} · {item.kind === 'local' ? 'This device' : 'Remote Host'}</option>)}
+    </select><small>{host ? `${host.id}${target ? ` · Runtime ${target.expectedRuntimeId}` : ' · Identity not confirmed'}` : 'Select an original saved Host; no replacement target is selected automatically.'}</small></label>
+    {host && target ? <NodePublicationEditor key={route + target.expectedRuntimeId} host={host} target={target} active={active} /> : <section className="network-node-section"><p role="status">{identity?.route === route && identity.error ? identity.error : host ? 'Reading the selected Node identity…' : 'The requested saved Host is unavailable. Original drafts are retained.'}</p><button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Refresh Node identity</button></section>}
+    <LocalIncomingConnections config={config} active={active && host?.kind === 'local'} visible={host?.kind === 'local'} />
+  </div>
+}
+
+/** Core owns publication. Each mounted editor retains exactly one original Runtime. */
+function NodePublicationEditor({ host, target, active }: { host: HostConfig; target: NodeOwnerTarget; active: boolean }) {
   const [observed, setObserved] = useState<NodeSettings>(), [newer, setNewer] = useState<NodeSettings>()
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const edits = useAppStore(state => state.nodePublicationDrafts)
@@ -52,9 +89,9 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate }: Settings
     const editsBeforeRead = useAppStore.getState().nodePublicationDrafts
     const request = ++epoch.current; setBusy(true); setError('')
     try {
-      const next = await api.nodePublishing.call('settings.node.inspect', originalOperation ? { operationId: originalOperation } : {}, controller.signal)
+      const next = await api.nodePublishing.owner(target, 'settings.node.inspect', originalOperation ? { operationId: originalOperation } : {}, controller.signal)
       if (request !== epoch.current || controller.signal.aborted) return
-      if (expectedRuntimeId && next.node.runtimeId !== expectedRuntimeId) throw new Error('The original Node Runtime changed. Its publication edit and request are kept for that Runtime; this read did not retarget them.')
+      if (next.node.runtimeId !== (expectedRuntimeId ?? target.expectedRuntimeId)) throw new Error('The original Node Runtime changed. Its publication edit and request are kept for that Runtime; this read did not retarget them.')
       setObserved(next)
       const retained = nodePublicationDraftForRuntime(useAppStore.getState().nodePublicationDrafts, next.node.runtimeId)
       const beforeRead = nodePublicationDraftForRuntime(editsBeforeRead, next.node.runtimeId)
@@ -113,7 +150,7 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate }: Settings
       }, true)
       if (nodePublicationDraftForRuntime(useAppStore.getState().nodePublicationDrafts, runtimeId)?.pending?.operationId !== operationId) throw new Error('The original local publication intent changed before dispatch. No policy request was sent.')
       dispatched = true
-      const next = await api.nodePublishing.call('settings.node.configure', { expectedRevision: saved.policyRevision, operationId, policy: submitted })
+      const next = await api.nodePublishing.owner(target, 'settings.node.configure', { expectedRevision: saved.policyRevision, operationId, policy: submitted })
       if (next.node.runtimeId !== runtimeId) throw new Error('Publication returned another Runtime. The original request and edit are retained for inspection.')
       const review = next.operation?.status === 'confirmed' ? await confirmed(runtimeId, operationId, next) : false
       if (request !== epoch.current) return
@@ -137,26 +174,14 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate }: Settings
       setObserved(value); setNewer(undefined); setError(keepDraft ? 'Your draft is kept against the current saved revision.' : '')
     } catch (cause) { setError(`The local publication edit is not confirmed saved. ${cause instanceof Error ? cause.message : String(cause)}`) }
   }
-  const local = config.hosts.find(host => host.kind === 'local')
-  const listener = useResourceDrafts(Object.fromEntries(local ? [[local.id, local]] : [])), listenerSave = useSettingsSave()
-  const localDraft = local ? listener.value[local.id] : undefined
-  async function saveListener() {
-    if (!local || localDraft?.kind !== 'local') return
-    const submitted = listener.beginSave(), next = localDraft.tailcat, expected = listener.expected[local.id]?.tailcat
-    const ok = await listenerSave.run(async () => {
-      await saveConfigSlice((current, tailcat: typeof next) => ({ ...current, hosts: current.hosts.map(host => { if (host.id !== local.id || host.kind !== 'local') return host; if (tailcat) return { ...host, tailcat }; const { tailcat: _previous, ...rest } = host; return rest }) }), next, expected)
-    })
-    submitted.finish(ok ? submitted.value : undefined)
-  }
   const dirty = Boolean(saved && draft && !configValuesEqual(saved.policy, draft))
   const patch = (value: Partial<NodePublishingPolicy>) => {
     if (!observed || editIssue) return
     void retain(observed.node.runtimeId, current => unresolved({ baseline: current?.baseline ?? baseline(observed), draft: { ...(current?.draft ?? observed.policy), ...value }, ...(current?.pending ? { pending: current.pending } : {}) })).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
   }
-  return <div className="settings-pane-stack network-node-settings">
-    <div className="network-node-intro"><h3>This device, in your network</h3><p>Choose what this Core publishes. Connecting to another Host and starting work stay separate.</p><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>View Host connections</button></div>
+  return <>
     <section className="network-node-section" data-settings-field="publishing" aria-label="Node publishing">
-      <header><div><h3>Publish this node</h3><p>Share selected resources through the Node interface. Existing owner access stays independent.</p></div><button type="button" className="small-button" disabled={busy} onClick={() => void inspect(operation, operation ? observed?.node.runtimeId : undefined)}>Refresh</button></header>
+      <header><div><h3>Publish {host.label}</h3><p>Review the full publication policy on this Node. Saving re-confirms all listed folders; existing owner access stays independent.</p></div><button type="button" className="small-button" disabled={busy} onClick={() => void inspect(operation, operation ? observed?.node.runtimeId : undefined)}>Refresh</button></header>
       {observed ? <NodeShareAddress node={observed.node} /> : null}
       {draft ? <>
         <label className="network-node-field"><span>Node alias</span><TextInput aria-label="Node alias" value={draft.alias} onChange={event => patch({ alias: event.target.value })} placeholder="Optional lowercase name" /><small>A readable locator. Original Runtime identity remains unchanged.</small></label>
@@ -170,7 +195,24 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate }: Settings
       {operation ? <button type="button" className="small-button" disabled={busy} onClick={() => void inspect(operation, operation ? observed?.node.runtimeId : undefined)}>Inspect original save</button> : null}
       {saved ? <details className="network-node-identities"><summary>Original node identity</summary><dl><dt>Runtime</dt><dd>{saved.node.runtimeId}</dd><dt>Core instance</dt><dd>{saved.node.ownerInstanceId}</dd><dt>Policy revision</dt><dd>{saved.policyRevision}</dd></dl><button type="button" className="small-button" disabled={busy || Boolean(operation)} onClick={() => { if (observed) void useSaved(observed) }}>Use saved settings</button></details> : null}
     </section>
+    <details className="network-node-section" data-settings-field="monitoring" open={monitor} onToggle={event => setMonitor(event.currentTarget.open)}><summary>Service status <span>Private owner observation · {host.label}</span></summary><HostRuntimePanel host={host} committed={host} ownerTarget={target} active={active && monitor} /></details>
+  </>
+}
+
+function LocalIncomingConnections({ config, active, visible }: Pick<SettingsPaneProps, 'config' | 'active'> & { visible: boolean }) {
+  const local = config.hosts.find(host => host.kind === 'local')
+  const listener = useResourceDrafts(Object.fromEntries(local ? [[local.id, local]] : [])), listenerSave = useSettingsSave()
+  const localDraft = local ? listener.value[local.id] : undefined
+  async function saveListener() {
+    if (!local || localDraft?.kind !== 'local') return
+    const submitted = listener.beginSave(), next = localDraft.tailcat, expected = listener.expected[local.id]?.tailcat
+    const ok = await listenerSave.run(async () => {
+      await saveConfigSlice((current, tailcat: typeof next) => ({ ...current, hosts: current.hosts.map(host => { if (host.id !== local.id || host.kind !== 'local') return host; if (tailcat) return { ...host, tailcat }; const { tailcat: _previous, ...rest } = host; return rest }) }), next, expected)
+    })
+    submitted.finish(ok ? submitted.value : undefined)
+  }
+  if (!visible) return null
+  return <>
     {local && localDraft?.kind === 'local' ? <section className="network-node-section" data-settings-field="incoming"><header><div><h3>Incoming connections</h3><p>Let an approved client reach this running service. Connection keys do not grant Agent creation or message trust.</p></div></header><HostTailcatListenerFields host={localDraft} committed={local} active={active} saveLabel="Save incoming connections" onChange={tailcat => listener.setValue(current => ({ ...current, [local.id]: { ...localDraft, tailcat } }))} /><SettingsSaveBar save={listenerSave} dirty={listener.dirty} resolution={listener} scopeLabel="Incoming connections" label="Save incoming connections" onSave={() => void saveListener()} /></section> : null}
-    {local ? <details className="network-node-section" data-settings-field="monitoring" open={monitor} onToggle={event => setMonitor(event.currentTarget.open)}><summary>Service status <span>Private owner observation</span></summary><HostRuntimePanel host={local} committed={local} active={active && monitor} /></details> : null}
-  </div>
+  </>
 }

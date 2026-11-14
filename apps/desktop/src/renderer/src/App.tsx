@@ -124,7 +124,7 @@ function DesktopApp() {
     setSettingsRoute(request)
     setSettingsOpen(true)
   }, [])
-  const openSettings = useCallback((section: SettingsPageId, executorId?: string, field?: string): void => navigateSettings({ section, executorId, field }), [navigateSettings])
+  const openSettings = useCallback((section: SettingsPageId, executorId?: string, field?: string, hostId?: string): void => navigateSettings({ section, executorId, field, ...(hostId === undefined ? {} : { hostId }) }), [navigateSettings])
   const closeSettings = useCallback((): void => setSettingsOpen(false), [])
   const openToolkit = useCallback((toolId: string): void => navigateSettings({ section: 'toolkit', toolId }), [navigateSettings])
   const openHostExecutors = useCallback((hostId: string): void => navigateSettings({ section: 'agents', field: 'host-executors', hostId }), [navigateSettings])
@@ -187,7 +187,7 @@ function DesktopApp() {
       settings: { sectionIds: desktopSettingsSectionIds,
         read: () => settingsObservation.current,
         open: (sectionId, hostId) => navigateSettings({ section: sectionId as SettingsPageId,
-          ...(hostId === undefined ? {} : { hostId, field: 'resources' }) }, 'preserve'),
+          ...(hostId === undefined ? {} : { hostId, ...(sectionId === 'hosts' ? { field: 'resources' } : {}) }) }, 'preserve'),
         close: () => { setSettingsInputPolicy('preserve'); closeSettings() } },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),

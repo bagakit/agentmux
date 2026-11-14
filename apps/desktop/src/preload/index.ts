@@ -198,6 +198,10 @@ const api: AgentMuxPreloadApi = {
     const token = mintObjectId(), pending = ipcRenderer.invoke('nodePublishing:call', token, method, params)
     const release = context?.onAbort?.(() => { void ipcRenderer.invoke('nodePublishing:cancel', token).catch(() => {}) })
     try { return await pending } finally { release?.() }
+  }, owner: async (target, method, params, context) => {
+    const token = mintObjectId(), pending = ipcRenderer.invoke('nodePublishing:owner', token, target, method, params)
+    const release = context?.onAbort?.(() => { void ipcRenderer.invoke('nodePublishing:cancel', token).catch(() => {}) })
+    try { return await pending } finally { release?.() }
   } },
   hosts: {
     prepareTailcatKey: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('hosts:prepareTailcatKey', input)),

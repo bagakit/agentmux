@@ -969,7 +969,7 @@ export async function registerIpc(args: {
   handle('config:get', () => config)
   // A conflict crosses IPC with its code; the Renderer offers recovery from that fact, never from wording.
   handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))
-  const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, call: callUserRpc })
+  const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, call: callUserRpc, owner: (target, method, params, context) => args.runtime.callNodeOwner(target, method, params, context) })
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
     call: callUserRpc })
   handleWithEvent('hosts:prepareTailcatKey', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.hosts.tailcat-key'>) =>

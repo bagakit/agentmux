@@ -60,7 +60,7 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
   if (source.kind === 'settings') {
     fields(source, ['kind', 'sectionId', 'hostId'], code)
     const sectionId = nullableId(source.sectionId, 'Settings section ID', code)
-    if (source.hostId !== undefined && sectionId !== 'hosts') fail('A Host selection requires the original Hosts page.', code)
+    if (source.hostId !== undefined && sectionId !== 'hosts' && sectionId !== 'network-node') fail('A Host selection requires the original Hosts or Node page.', code)
     return { kind: 'settings', sectionId,
       ...(source.hostId === undefined ? {} : { hostId: spaceControlId(source.hostId, 'Settings Host ID', code) }) }
   }

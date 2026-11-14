@@ -67,7 +67,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     observationRef.current = { sectionId: active, visible: Boolean(config) && visible && !showResults,
       // Presentation only: the original Host pane supplies its actual selection,
       // independently of a requested route. This never grants resource access.
-      get hostId() { return active === 'hosts' ? page.current?.querySelector<HTMLElement>('[data-settings-host]')?.dataset.settingsHost ?? null : null } }
+      get hostId() { return active === 'hosts' || active === 'network-node' ? originalScroll(active)?.querySelector<HTMLElement>('[data-settings-host]')?.dataset.settingsHost ?? null : null } }
     return () => { observationRef.current = null }
   }, [active, config, observationRef, showResults, visible])
 

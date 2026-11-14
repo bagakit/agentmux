@@ -344,7 +344,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <div className="settings-local-host"><strong>This device’s network node</strong><p>Incoming connections, publishing and shared folders are managed in Network node.</p><button type="button" className="small-button" onClick={() => settingsNavigation?.open('network-node')}>Open Network node</button></div> : null}
+              ) : <div className="settings-local-host"><strong>This device’s node</strong><p>Incoming connections, publishing and shared folders are managed in Node.</p><button type="button" className="small-button" onClick={() => settingsNavigation?.open('network-node', undefined, 'incoming', host.id)}>Open Node</button></div> : null}
               {panel === 'connection' && sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )

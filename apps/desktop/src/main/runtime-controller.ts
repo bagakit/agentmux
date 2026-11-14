@@ -25,6 +25,7 @@ import type { MoteChatMethod } from '@agentmux/core/mote-chat'
 
 export type ConnectionHostMethod = ConnectionMethod | MoteConnectionMethod | MoteChatMethod | 'space.mote.preferences.read' | 'space.mote.preferences.save'
 import type { ConnectionHostingTarget } from '../shared/contracts.js'
+import type { NodeOwnerTarget, NodeOwnerMethod } from '../shared/node-publishing.js'
 import type { DesktopRuntimeClient as AgentMuxClient, DesktopRuntimeConnector } from './desktop-host.js'
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
 // 是为了让两侧 import 的是同一个模块——包根那条链拖 node:crypto，renderer 引不动。
@@ -2535,6 +2536,32 @@ export class RuntimeController {
       ? { ...params, hostId: 'local' } as AgentMuxRpcParams<M> : params
     const result = await callOriginalDesktopHost(client, method, originalParams, context)
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
+  }
+
+  /** One trusted App intent, bound to its original configured transport and Core owner.
+   * Sampling reuses an already connected owner observation; no extra probe gates healthy samples. */
+  callNodeOwner<M extends NodeOwnerMethod>(
+    target: NodeOwnerTarget, method: M,
+    params: import('@agentmux/core/node-publishing').NodePublishingParams[M], context?: { signal?: AbortSignal }
+  ): Promise<import('@agentmux/core/node-publishing').NodePublishingResults[M]>
+  async callNodeOwner(
+    target: NodeOwnerTarget, method: NodeOwnerMethod,
+    params: import('@agentmux/core/node-publishing').NodePublishingParams[NodeOwnerMethod], context: { signal?: AbortSignal } = {}
+  ): Promise<import('@agentmux/core/node-publishing').NodePublishingResults[NodeOwnerMethod]> {
+    const client = this.configuredClient(target.hostId)
+    const assertCurrent = () => {
+      context.signal?.throwIfAborted()
+      if (this.configuredClient(target.hostId) !== client) throw new AgentMuxError('The original Node route changed. Keep its request and inspect the original Node.', 'RUNTIME_OWNER_MISMATCH')
+    }
+    const cached = runtimeOwner(client)
+    const owner = method === 'settings.node.resources' && cached?.availability === 'connected' && cached.runtimeId === target.expectedRuntimeId
+      ? cached : (await callOriginalDesktopHost(client, 'runtime.owner.identity', { expectedRuntimeId: target.expectedRuntimeId }, context)).owner
+    assertCurrent()
+    if (owner.runtimeId !== target.expectedRuntimeId) throw new AgentMuxError('The selected Node Runtime changed. Original input and requests are retained.', 'RUNTIME_OWNER_MISMATCH')
+    const result = await callOriginalDesktopHost<NodeOwnerMethod>(client, method, params, context, { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId })
+    assertCurrent()
+    if (result.node.runtimeId !== target.expectedRuntimeId) throw new AgentMuxError('The Node reply belongs to another Runtime. Inspect the original request before saving again.', 'RUNTIME_OWNER_MISMATCH')
+    return result
   }
 
   /** Trusted Desktop acquisition freezes this configured transport and its original Runtime instance.

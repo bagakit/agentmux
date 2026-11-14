@@ -1,3 +1,4 @@
+import type { NodeOwnerTarget } from '../../../../shared/node-publishing'
 import type { NodeResources } from '@agentmux/core/node-publishing'
 import { appendNodeSample, type NodeSampleFrame } from './node-resource-view'
 import { HostNodeResources } from './HostNodeResources'
@@ -39,8 +40,8 @@ function SourceIssue({ source, retained }: { source: HostRuntimeSource<unknown> 
     <span>{source.message}{retained?.state === 'available' ? ` Last confirmed ${time(retained.readAt)}.` : ''}</span></p> : null
 }
 /** A single visible consumer of one saved route; it owns no Runtime or shared sampling clock. */
-export function HostRuntimePanel({ host, committed, active }: { host: HostConfig; committed?: HostConfig | undefined; active: boolean }) {
-  const target = JSON.stringify(host)
+export function HostRuntimePanel({ host, committed, active, ownerTarget }: { host: HostConfig; committed?: HostConfig | undefined; active: boolean; ownerTarget?: NodeOwnerTarget | undefined }) {
+  const target = JSON.stringify([host, ownerTarget])
   const committedTarget = JSON.stringify(committed)
   const saved = committed !== undefined && configValuesEqual(route(host), route(committed))
   const [state, setState] = useState<State>({ target })
@@ -51,15 +52,21 @@ export function HostRuntimePanel({ host, committed, active }: { host: HostConfig
   useEffect(() => {
     if (!active || !saved || !visible) return
     const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined, localRuntimeId: string | undefined
     const observe = async () => {
       setState(previous => ({ ...(previous.target === target ? previous : { target }), busy: true, error: undefined }))
       try {
-        const [runtimeRead, nodeRead] = await Promise.allSettled([
-          api.hosts.inspect(committed!, { signal: controller.signal }),
-          host.kind === 'local' ? api.nodePublishing.call('settings.node.resources', {}, controller.signal)
-            : api.nodePublishing.call('node.resources', { hostId: host.id, ...(host.runtimeId ? { expectedRuntimeId: host.runtimeId } : {}) }, controller.signal)
-        ])
+        const runtime = api.hosts.inspect(committed!, { signal: controller.signal })
+        const node = ownerTarget ? api.nodePublishing.owner(ownerTarget, 'settings.node.resources', {}, controller.signal)
+          : host.kind === 'ssh' ? api.nodePublishing.call('node.resources', { hostId: host.id, ...(host.runtimeId ? { expectedRuntimeId: host.runtimeId } : {}) }, controller.signal)
+          : (async () => {
+            if (!localRuntimeId) {
+              const original = await api.nodePublishing.call('node.inspect', { hostId: host.id }, controller.signal)
+              localRuntimeId = original.node.runtimeId
+            }
+            return api.nodePublishing.owner({ hostId: host.id, expectedRuntimeId: localRuntimeId }, 'settings.node.resources', {}, controller.signal)
+          })()
+        const [runtimeRead, nodeRead] = await Promise.allSettled([runtime, node])
         if (controller.signal.aborted) return
         setState(previous => {
           const next: State = { ...(previous.target === target ? previous : { target }), busy: false }
@@ -71,7 +78,7 @@ export function HostRuntimePanel({ host, committed, active }: { host: HostConfig
           } else next.error = runtimeRead.reason instanceof Error ? runtimeRead.reason.message : String(runtimeRead.reason)
           if (nodeRead.status === 'fulfilled') {
             const reply = nodeRead.value
-            if (host.kind === 'ssh' && host.runtimeId && reply.node.runtimeId !== host.runtimeId) next.nodeError = 'Resource identity differs from this saved Runtime. The original connection is kept.'
+            if ((ownerTarget?.expectedRuntimeId ?? (host.kind === 'ssh' ? host.runtimeId : localRuntimeId)) && reply.node.runtimeId !== (ownerTarget?.expectedRuntimeId ?? (host.kind === 'ssh' ? host.runtimeId : localRuntimeId))) next.nodeError = 'Resource identity differs from this saved Runtime. The original connection is kept.'
             else {
               next.nodeReply = reply; next.nodeError = undefined
               if (reply.status === 'withheld') next.frames = []
@@ -101,7 +108,7 @@ export function HostRuntimePanel({ host, committed, active }: { host: HostConfig
     </header>
     {failed ? <p className="host-runtime__issue" role="status" data-diagnostics><InfoIcon size={13} /><span>{failed} {retained ? 'Last confirmed values are kept below.' : 'Refresh to read this original connection again.'}</span></p> : null}
     {saved ? <>
-      <HostNodeResources reply={state.target === target ? state.nodeReply : undefined} frames={state.target === target ? state.frames ?? [] : []} error={state.target === target ? state.nodeError : undefined} busy={busy} active={active && visible} privateOwner={host.kind === 'local'} />
+      <HostNodeResources reply={state.target === target ? state.nodeReply : undefined} frames={state.target === target ? state.frames ?? [] : []} error={state.target === target ? state.nodeError : undefined} busy={busy} active={active && visible} privateOwner={Boolean(ownerTarget) || host.kind === 'local'} />
       <div className="host-runtime__resources" aria-label="Retained Runtime resources">
         <div><span>Running Runs</span><strong>{resources?.runningRuns ?? '—'}</strong><small>{resources ? `${resources.runCount} retained in total` : 'Not observed'}</small></div>
         <div><span>Attachments</span><strong>{resources?.attachments ?? '—'}</strong><small>Service readers</small></div>
