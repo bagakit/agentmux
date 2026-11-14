@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { createRequire } from 'node:module';
-import { mkdir, open, readFile } from 'node:fs/promises';
+import { mkdir, open, readFile, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
@@ -27,6 +27,11 @@ export function defaultAgentMuxSpatialStatePath(env: Readonly<Record<string, str
 }
 type AgentRegionAttachment = { tabId: string; regionId: string; agentSessionId: string; runId: string;
   execution: { hostId: string; cwd: string }; resource: SpatialJson };
+type SpaceAgentIndex = Map<string, { kind: AgentMuxSpatialGraph['spaces'][number]['kind']; agents: Set<string> }>;
+type SpaceAgentSnapshot = { stamp: string; index: SpaceAgentIndex };
+const spatialFileStamp = (file: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) =>
+  [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join(':');
+const spatialAgentKey = (agent: { hostId: string; agentSessionId: string }) => JSON.stringify([agent.hostId, agent.agentSessionId]);
 /**
  * Place a producer-confirmed Agent at its exact Region in `graph`. Only an empty Launcher, or a Region of the
  * same Session whose Run and execution location are still unset or equal, may take it; a newer Run of the
@@ -54,6 +59,7 @@ const REGION_CHANGED = 'The exact Region no longer matches this Agent attachment
 const requireNative = createRequire(import.meta.url);
 /** A single filesystem owner. Lock inode is never removed, including after process death. */
 export class AgentMuxSpatialStateStore {
+  private agentMembership: { stamp: string; load: Promise<SpaceAgentSnapshot> } | undefined;
   private readonly listeners = new Set<(state: AgentMuxSpatialState) => void>();
   private watcher: FSWatcher | null = null;
   private watching = 0;
@@ -122,6 +128,52 @@ export class AgentMuxSpatialStateStore {
       throw error;
     }
     return this.decode(source);
+  }
+  /** Read this opened file's exact membership. Missing storage is unknown, not a confirmed nonmember.
+   * Stable files reuse a private index; public read/commit graphs remain independently mutable. */
+  async readSpaceAgentMembership(input: { spaceId: string; hostId: string; agentSessionId: string }): Promise<{
+    spaceKind: AgentMuxSpatialGraph['spaces'][number]['kind'] | null; member: boolean;
+  } | null> {
+    let file: FileHandle | undefined, selected = this.agentMembership;
+    try {
+      file = await open(this.path, 'r');
+      const stamp = spatialFileStamp(await file.stat({ bigint: true }));
+      selected = this.agentMembership;
+      if (!selected || selected.stamp !== stamp) {
+        selected = { stamp, load: this.readAgentIndex(file) };
+        this.agentMembership = selected;
+      }
+      const snapshot = await selected.load;
+      // A concurrent in-place write may change this handle while it is read. Keep
+      // the original read semantics, but never reuse that unstable observation.
+      if (snapshot.stamp !== stamp && this.agentMembership === selected) this.agentMembership = undefined;
+      const space = snapshot.index.get(input.spaceId);
+      return { spaceKind: space?.kind ?? null, member: space?.agents.has(spatialAgentKey(input)) ?? false };
+    } catch (error) {
+      if (this.agentMembership === selected) this.agentMembership = undefined;
+      if (!file && (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    } finally {
+      await file?.close();
+    }
+  }
+  private async readAgentIndex(file: FileHandle): Promise<SpaceAgentSnapshot> {
+    const { graph } = this.decode(await file.readFile('utf8'));
+    const index: SpaceAgentIndex = new Map(graph.spaces.map(space => [space.spaceId, { kind: space.kind, agents: new Set<string>() }]));
+    const spacesByZone = new Map<string, string[]>();
+    for (const binding of graph.bindings) {
+      const spaces = spacesByZone.get(binding.zoneId) ?? [];
+      spaces.push(binding.spaceId); spacesByZone.set(binding.zoneId, spaces);
+    }
+    const zonesByTab = new Map(graph.tabs.map(tab => [tab.tabId, tab.zoneId]));
+    for (const region of graph.regions) {
+      if (region.kind !== 'agent' || !region.agentSessionId || !region.execution) continue;
+      const zone = zonesByTab.get(region.tabId);
+      if (zone === null || zone === undefined) continue;
+      const key = spatialAgentKey({ hostId: region.execution.hostId, agentSessionId: region.agentSessionId });
+      for (const spaceId of spacesByZone.get(zone) ?? []) index.get(spaceId)?.agents.add(key);
+    }
+    return { stamp: spatialFileStamp(await file.stat({ bigint: true })), index };
   }
   async readForLayout(): Promise<AgentMuxSpatialState | null> {
     const state = await this.read();
