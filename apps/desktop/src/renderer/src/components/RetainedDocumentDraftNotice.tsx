@@ -1,4 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { useEffect, useRef, useState } from 'react'
@@ -64,7 +65,7 @@ export function RetainedDocumentDrafts({ tabId, surface, active, observation, in
   const selectedDraft = retainedDrafts?.[Math.min(selected, Math.max(0, count - 1))]
   const useDraft = useAppStore(state => state.useRetainedDocumentDraft)
   if (!count && !conversion && !issues.length && !observationIssue) return null
-  return <>{issues.map((issue, index) => <div key={index} className="editor-file-notice" role="status"><span>{issue.message}</span><button type="button" className="small-button" disabled={retrying} onClick={() => void retry()}>Retry original Note conversion</button></div>)}
+  return <>{issues.map((issue, index) => <div key={index} className="editor-file-notice" role="status"><span>{issue.message}</span><Button type="button" disabled={retrying} onClick={() => void retry()}>Retry original Note conversion</Button></div>)}
   {observationIssue ? <p className="editor-file-notice" role="status">{observationIssue}</p> : null}{count && !inPanel ? <div className="editor-file-notice" role="status">
     <span>{count === 1 ? 'Another draft is kept.' : `${count} other drafts are kept.`} Choosing a draft also keeps your current one. Save is a separate action.</span>
   </div> : null}

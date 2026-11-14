@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -189,20 +190,20 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
               <span className="project-rail-row__identity"><strong>{name}</strong>{archived ? <small>Archived</small> : null}</span>
               {selected ? <ThemeStatusSelectedIcon className="mote-directory-current" size={11} aria-hidden="true" /> : null}
             </button>
-            <button type="button" className="icon-button space-row-action mote-directory-more" aria-label={`More actions for ${name}`} title={`More actions for ${name}`}
+            <IconButton type="button" className="space-row-action mote-directory-more" aria-label={`More actions for ${name}`} title={`More actions for ${name}`}
               onClick={event => {
                 const rect = event.currentTarget.getBoundingClientRect()
                 event.currentTarget.closest('[data-space-entry]')?.dispatchEvent(new MouseEvent('contextmenu', {
                   bubbles: true, cancelable: true, button: 2, clientX: rect.left, clientY: rect.bottom
                 }))
-              }}><ThemeActionMoreIcon size={14} /></button>
+              }}><ThemeActionMoreIcon size={14} /></IconButton>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}
               aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${name}`} aria-pressed={isPinned} title={`${isPinned ? 'Unpin' : 'Pin'} ${name}`}
               onClick={togglePin}><ThemeActionPinIcon size={11} /></button>
-            {isMote ? <button type="button" className="icon-button space-row-action space-mote-edit" aria-label={`Edit ${name} SOUL.md`}
-              title="Edit SOUL.md · New sessions use saved changes" onClick={editMote}><ThemeActionEditNoteIcon size={12} /></button> : null}
-            {archived ? <button type="button" className="icon-button space-row-action" aria-label={`Restore Mote ${name}`} title="Restore Mote"
-              disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ThemeActionRestoreIcon size={12} /></button> : null}
+            {isMote ? <IconButton type="button" className="space-row-action space-mote-edit" aria-label={`Edit ${name} SOUL.md`}
+              title="Edit SOUL.md · New sessions use saved changes" onClick={editMote}><ThemeActionEditNoteIcon size={12} /></IconButton> : null}
+            {archived ? <IconButton type="button" className="space-row-action" aria-label={`Restore Mote ${name}`} title="Restore Mote"
+              disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ThemeActionRestoreIcon size={12} /></IconButton> : null}
             {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={bucket} /> : null}
           </div>
           {topic.readError ? <div className="surface-inline-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}

@@ -10,6 +10,7 @@ const ThemeObjectConnectionCodeIcon = semanticIconComponent('object.connection-c
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
 import { useContext, useEffect, useRef, useState } from 'react'
 import type { ToolkitConfirmedResult, ToolkitResultDocument, ToolkitRunInput } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MOBILE_CONNECTION_TOOL_ID } from '../../../../shared/toolkit-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
@@ -150,16 +151,16 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
           {!currentCode ? <p className="phone-connection__code-state">{evaluating || refreshing ? 'Updating connection details…' : 'Saved code · current details not confirmed'}</p> : null}
           <PhoneConnectionCard url={connection.url} network={null} state={evaluating || refreshing ? 'updating' : currentCode ? 'current' : 'saved'} />
           <p className="phone-connection__scan">Scan with your phone’s camera</p>
-          <div className="phone-connection__buttons"><button type="button" className="primary-button" disabled={!canEvaluate || Boolean(copyRequest)} onClick={() => void refreshAndCopy()}>{copyRequest ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCopyIcon size={14} />} {copyRequest ? 'Reading current link…' : 'Refresh & copy link'}</button>
+          <div className="phone-connection__buttons"><Button type="button" variant="primary" disabled={!canEvaluate || Boolean(copyRequest)} onClick={() => void refreshAndCopy()}>{copyRequest ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCopyIcon size={14} />} {copyRequest ? 'Reading current link…' : 'Refresh & copy link'}</Button>
             <OpenInSurveyButton url={connection.url} note="Opens your phone page in Survey on this Mac. It connects as another device." />
-            <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />} Refresh</button></div>
+            <Button type="button" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />} Refresh</Button></div>
           <p className="phone-connection__hint">Opening in Survey connects this Mac as another device. Choose a different network in Phone settings.</p>
           <p className="phone-connection__updated">{connection.current ? 'Checked' : 'Saved'} <time dateTime={new Date(connection.result.endedAt).toISOString()}>{new Date(connection.result.endedAt).toLocaleString()}</time></p>
-          <details className="phone-connection__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={connection.url} onFocus={event => event.target.select()} /><button type="button" className="small-button" onClick={() => void copy()}><ThemeActionCopyIcon size={14} /> Copy shown link</button></details>
+          <details className="phone-connection__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={connection.url} onFocus={event => event.target.select()} /><Button type="button" onClick={() => void copy()}><ThemeActionCopyIcon size={14} /> Copy shown link</Button></details>
         </> : <>
           <div className="phone-connection__placeholder"><ThemeObjectConnectionCodeIcon size={48} strokeWidth={1.2} aria-hidden="true" /></div>
           <p className="phone-connection__scan">{evaluating || reading.pending || refreshing ? 'Preparing your connection code…' : 'Connection code is not available yet'}</p>
-          {!(evaluating || reading.pending || refreshing) ? <button type="button" className="primary-button phone-connection__generate" disabled={!canEvaluate} onClick={() => void refresh()}><ThemeActionRefreshIcon size={15} /> Refresh connection</button> : null}
+          {!(evaluating || reading.pending || refreshing) ? <Button type="button" variant="primary" className="phone-connection__generate" disabled={!canEvaluate} onClick={() => void refresh()}><ThemeActionRefreshIcon size={15} /> Refresh connection</Button> : null}
         </>}
         {notice ? <p className="phone-connection__feedback" role="status">{notice}</p> : null}
         {copyError ? <p className="phone-connection__feedback" role="alert">{copyError}</p> : null}
@@ -167,7 +168,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
       {displayIssue ? <section className="phone-connection__service" role="status">
         <strong>Current connection details are unavailable</strong><p>{displayIssue}</p>
         {connection ? <p>The saved code and its original time are kept. Refresh to check current details.</p> : null}
-        <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void refresh()}><ThemeActionRefreshIcon size={13} /> Retry connection</button>
+        <Button type="button" disabled={!canEvaluate} onClick={() => void refresh()}><ThemeActionRefreshIcon size={13} /> Retry connection</Button>
       </section> : null}
       <section className="phone-connection__devices" aria-label="Device status">
         <header><h3>Devices</h3><button type="button" className="performance-icon-button" aria-label="Refresh devices" title="Refresh devices" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />}</button></header>
@@ -182,8 +183,8 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
         {snapshot?.reason ? <p>{snapshot.reason}</p> : null}
         {previousError ? <p role="alert">{previousError}</p> : null}
         {admission ? <p>Execution · {admission.executionId}</p> : null}
-        {oldUnknown && admission?.run === null ? <><p>{CONTINUE_TOOLKIT_NOTICE}</p><button type="button" className="small-button" disabled={continuing} onClick={() => void continueOriginal()}><ThemeActionRefreshIcon size={13} />{continuing ? 'Continuing…' : 'Continue original request'}</button></> : null}
-        <button type="button" className="small-button" disabled={reading.pending} onClick={() => void reading.check()}><ThemeActionRefreshIcon size={13} /> Check previous request</button>
+        {oldUnknown && admission?.run === null ? <><p>{CONTINUE_TOOLKIT_NOTICE}</p><Button type="button" disabled={continuing} onClick={() => void continueOriginal()}><ThemeActionRefreshIcon size={13} />{continuing ? 'Continuing…' : 'Continue original request'}</Button></> : null}
+        <Button type="button" disabled={reading.pending} onClick={() => void reading.check()}><ThemeActionRefreshIcon size={13} /> Check previous request</Button>
       </details> : null}
     </div>
     <footer className="performance-actions phone-connection__footer"><button type="button" className="phone-connection__settings" data-phone-settings onClick={() => { close(); navigation?.open('mobile') }}><ThemeObjectPhoneIcon size={14} /> Phone settings</button><button type="button" aria-label="Phone connection settings" title="Phone connection settings" onClick={() => { close(); navigation?.openToolkit(MOBILE_CONNECTION_TOOL_ID) }}><ThemeObjectSettingsIcon size={14} /></button></footer>

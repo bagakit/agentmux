@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { SourceFolderNavigation, useSourceFolderNavigation, sourceFolderMatchesWorkspace } from './SourceFolderNavigation'
 import { TextInput } from '@agentmux/client-ui/input'
 import { HostBadge, HostIcon } from './HostBadge'
@@ -341,12 +342,12 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
 
           </span>
         </button>
-        {related.length > 0 ? <button type="button" className="icon-button project-association"
+        {related.length > 0 ? <IconButton type="button" className="project-association"
           aria-label={`Related projects for ${project.name}`} title={`Related Git projects\n${related.map(id => {
             const candidate = projects.find(candidate => candidate.id === id)!
             return `${candidate.name} · ${config?.hosts.find(host => host.id === candidate.hostId)?.label ?? candidate.hostId} · ${displayPath(candidate.repoPath, candidate.hostId)}`
           }).join('\n')}\nSame Git origin; grouping is optional`}
-          onClick={() => setGroupDialog({ seed: project.id })}><ThemeObjectLinkIcon size={13} /></button> : null}
+          onClick={() => setGroupDialog({ seed: project.id })}><ThemeObjectLinkIcon size={13} /></IconButton> : null}
         </div>
       )
       return (
@@ -415,10 +416,10 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           }}
         />
         {query ? (
-          <button type="button" className="icon-button" aria-label="Clear Space search" title="Clear · Esc"
+          <IconButton type="button" aria-label="Clear Space search" title="Clear · Esc"
             onClick={() => { changeQuery(''); searchRef.current?.focus() }}>
             <ThemeActionClearIcon size={12} />
-          </button>
+          </IconButton>
         ) : null}
         <button
           className="icon-button"

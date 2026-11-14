@@ -4,6 +4,7 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import { ClientUiProvider, useClientUiPlatform } from '@agentmux/client-ui/platform'
 import { useMemo, useRef, useState, type RefObject } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import './amux-protocol-reference.css'
 
 /** Examples use the real reader without resolving fictional objects or user identities. */
@@ -52,7 +53,7 @@ export function AmuxProtocolReference({ active }: { active: boolean }) {
       <label className="amux-protocols__search"><SemanticIcon name="action.search" size={15} aria-hidden="true" /><TextInput ref={search} data-documentation-search aria-label="Search amux Protocols" placeholder="Find a format or example…" value={query} onChange={event => setQuery(event.target.value)} />
         {query ? <button type="button" className="icon-button" aria-label="Clear documentation search" onClick={() => { setQuery(''); search.current?.focus() }}><SemanticIcon name="action.clear" size={13} /></button> : null}</label>
       <span className="amux-protocols__count" role="status">{visible.length === AGENTMUX_PROTOCOL_CATALOG.length ? `${visible.length} formats` : `${visible.length} of ${AGENTMUX_PROTOCOL_CATALOG.length} formats`}</span>
-      {visible.length ? <button type="button" className="small-button" onClick={openFirstExample}>View first example</button> : null}
+      {visible.length ? <Button type="button" onClick={openFirstExample}>View first example</Button> : null}
     </div>
     <p className="amux-protocols__read-only">Read-only examples do not contact Agents, open links or execute protocol hints.</p>
     <div className="amux-protocols__index">{visible.length ? <div className="amux-protocols__list">{visible.map((entry, index) => <ProtocolRow key={entry.id} entry={entry} active={active} rowRef={index === 0 ? firstExample : undefined} />)}</div>

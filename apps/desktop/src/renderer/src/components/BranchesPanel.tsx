@@ -3,6 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type {
   WorkspaceBranchesSnapshot,
   WorkspaceBranchRecord,
@@ -589,11 +590,11 @@ export function BranchesPanel({ workspace, inventoryWorkspace = workspace, activ
           <summary>Cleanup pending <span>{pendingCloseouts.length}</span></summary>
           <div className="worktree-cleanup__list">{pendingCloseouts.map(item => <div className="worktree-cleanup__item" key={item.id}>
             <div className="worktree-cleanup__identity"><strong title={item.name}>{item.name}</strong>
-            <button type="button" className="small-button" disabled={removing} aria-label={`Retry cleanup for ${item.name}`} onClick={() => setRemoval({
+            <Button type="button" disabled={removing} aria-label={`Retry cleanup for ${item.name}`} onClick={() => setRemoval({
               workspaceId: item.id, branch: item.branch ?? item.name, path: item.path,
               stage: item.closeout!.retention === 'uncommitted-changes'
                 ? { kind: 'blocked', retention: 'uncommitted-changes', reason: item.closeout!.reason } : { kind: 'confirm' }
-            })}>Retry cleanup</button></div>
+            })}>Retry cleanup</Button></div>
             <p>{item.closeout!.reason}</p>
           </div>)}</div>
         </details>}
@@ -668,12 +669,12 @@ export function BranchesPanel({ workspace, inventoryWorkspace = workspace, activ
               {actionError ? <p role="alert">{actionError}</p> : null}
               <footer>
                 <Dialog.Close asChild>
-                  <button className="small-button" type="button" disabled={busyBranch !== null}>Cancel</button>
+                  <Button type="button" disabled={busyBranch !== null}>Cancel</Button>
                 </Dialog.Close>
-                <button className="primary-button" type="submit" disabled={!worktreePath.trim() || busyBranch !== null}>
+                <Button variant="primary" type="submit" disabled={!worktreePath.trim() || busyBranch !== null}>
                   {busyBranch ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionCreateWorktreeIcon size={12} />}
                   {busyBranch ? 'Creating…' : 'Create Worktree'}
-                </button>
+                </Button>
               </footer>
             </form>
           </Dialog.Content>
@@ -734,12 +735,12 @@ export function BranchesPanel({ workspace, inventoryWorkspace = workspace, activ
               {actionError ? <p role="alert">{actionError}</p> : null}
               <footer>
                 <Dialog.Close asChild>
-                  <button className="small-button" type="button" disabled={fanningOut}>Cancel</button>
+                  <Button type="button" disabled={fanningOut}>Cancel</Button>
                 </Dialog.Close>
-                <button className="primary-button" type="submit" disabled={!fanOutPrompt.trim() || fanningOut}>
+                <Button variant="primary" type="submit" disabled={!fanOutPrompt.trim() || fanningOut}>
                   {fanningOut ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitCompareIcon size={12} />}
                   {fanningOut ? 'Starting…' : `Fan out ${fanOutCount} lanes`}
-                </button>
+                </Button>
               </footer>
             </form>
           </Dialog.Content>

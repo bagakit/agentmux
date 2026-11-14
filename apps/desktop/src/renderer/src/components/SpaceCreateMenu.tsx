@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
@@ -22,7 +23,7 @@ export function SpaceCreateMenu({ onOpenFolder, onCreateProjectGroup }: { onOpen
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button type="button" className="icon-button" aria-label="Add Space" title="Add Space" disabled={busy}><ThemeActionCreateSpaceIcon size={15} /></button>
+        <IconButton type="button" aria-label="Add Space" title="Add Space" disabled={busy}><ThemeActionCreateSpaceIcon size={15} /></IconButton>
       </DropdownMenu.Trigger>
       <DocumentOverlayPortal component={DropdownMenu.Portal}>
         <DropdownMenu.Content className="tab-context-menu" collisionPadding={8} align="end">

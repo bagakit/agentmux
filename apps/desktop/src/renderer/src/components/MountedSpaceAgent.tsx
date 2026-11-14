@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { RuntimeEvent, SessionSnapshot, TerminalSessionSnapshot } from '../../../shared/contracts'
 import type { SpaceMountMemberSurface, SpaceMountMemberTarget, SpaceMountReadingSurface, SpaceMountReadingTarget, SpaceMountRecord } from '../../../shared/space-mount'
 import { spaceMountKey } from '../../../shared/space-mount'
@@ -177,18 +178,18 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
           session ? `Last confirmed: ${sessionStatusLabel(session)}.` : terminalSession ? `Last confirmed terminal: ${terminalSession.processState}. Session details are unconfirmed.` : 'The current Session and Run state are unknown.',
           'Original conversation reading is separate. Your draft is kept.'].filter(Boolean).join(' '),
         restore: 'Refresh this observation, or check the original terminal for startup and permission questions.'
-      } }} actions={<button type="button" className="small-button" onClick={() => void refresh()}>Refresh member observation</button>} /> : null}
+      } }} actions={<Button type="button" onClick={() => void refresh()}>Refresh member observation</Button>} /> : null}
     {observed?.inputIssue ? <ServiceWindowNotice
       disclosure={{ scope: key + ':saved-input', id: 'saved-input', cause: observed.inputIssue, visible }}
       notice={{ kind: 'indeterminate', notice: { step: 'Saved input recovery unconfirmed', mode: observed.inputIssue,
         restore: 'Your original saved inputs remain. Retry their recovery without resending them.' } }}
-      actions={<button type="button" className="small-button" onClick={() => void retryInputRecovery()}>Retry saved input recovery</button>} /> : null}
+      actions={<Button type="button" onClick={() => void retryInputRecovery()}>Retry saved input recovery</Button>} /> : null}
     {!session && mode === 'activity' ? runtimeRecovery?.('inline') : null}
     {mode === 'activity' && conversation && conversationIssue ? <ServiceWindowNotice
       disclosure={{ scope: readingKey, id: 'conversation-updates', cause: conversationIssue, visible }}
       notice={{ kind: 'indeterminate', notice: { step: 'Conversation updates unconfirmed', mode: conversationIssue,
         restore: 'The last readable original records are kept. Retry reading from the same original source.' } }}
-      actions={<button type="button" className="small-button" onClick={() => retryReading(value => value + 1)}>Retry original reading</button>} /> : null}
+      actions={<Button type="button" onClick={() => retryReading(value => value + 1)}>Retry original reading</Button>} /> : null}
     <div ref={bodyRef} className="agent-body" data-observation-surface={mode === 'activity' ? 'workflow' : undefined}><div className="agent-terminal-stage">
       {terminalSession && original ?
         <div className="mounted-space-agent__terminal" hidden={mode !== 'terminal'}><TerminalView session={terminalSession} sessionSource={original.source}
@@ -197,7 +198,7 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
         : mode === 'terminal' ? runtimeRecovery?.('surface') ?? <FullPageLoadingSurface scope="region" visible={visible}
           phase={hasIssue ? 'parked' : 'loading'} title={hasIssue ? 'Terminal observation unconfirmed' : 'Reading the original terminal'}
           detail="The original Agent and draft are kept. Conversation reading has its own original source."
-          actions={<button type="button" className="small-button" onClick={() => void refresh()}>Refresh member observation</button>} /> : null}
+          actions={<Button type="button" onClick={() => void refresh()}>Refresh member observation</Button>} /> : null}
       {activityOpened.current ? <div className="mounted-space-agent__terminal" hidden={mode !== 'activity'} inert={mode !== 'activity'}>
         {conversation ? <ActivityView sessionId={target.target.agentSessionId} executionHostId={originalReading?.surface.initial.hostId ?? original?.surface.initial.hostId ?? ownerKey}
           capability={session?.kind === 'agent' ? session.capabilities.timeline : undefined}

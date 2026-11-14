@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { serviceNoticeAriaLive, type ServiceNoticeKind } from '../lib/service-window-notice'
 import { notificationPreview } from '../lib/notification-preview'
@@ -82,7 +83,7 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
             {summary && !detail.includes(summary) ? <p>{summary}</p> : null}
             {impact && !detail.includes(impact) ? <p>{impact}</p> : null}
             {children ?? <p>{detail}</p>}
-            <button type="button" className="small-button" disabled={copy?.detail === detail && copy.label === 'Copying…'} onClick={() => void copyDetails()}>Copy details</button>
+            <Button type="button" disabled={copy?.detail === detail && copy.label === 'Copying…'} onClick={() => void copyDetails()}>Copy details</Button>
             {copy?.detail === detail ? <span role="status">{copy.label}</span> : null}
           </div> : null}
         </details>

@@ -1,4 +1,5 @@
 import { useMemo, useRef, type ReactNode } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ordinaryAgentSpaceMember, useAppStore } from '../store'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { SpaceMemberWorkface } from './MountedSpaceAgent'
@@ -64,13 +65,13 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
       description={checking ? 'Reading this session from its original device.' : sessionState?.status === 'missing'
         ? 'The original device did not return this session. Its current state is still unknown.' : 'The original session cannot be read through this connection yet.'}
       detail="Your workspace, original conversation and draft are kept."
-      actions={<button type="button" className="primary-button" onClick={refreshSource}>Check again</button>}
+      actions={<Button type="button" variant="primary" onClick={refreshSource}>Check again</Button>}
       details={{ summary: 'Connection details', content: <>{issue ? <p>{issue}</p> : null}{reference}</> }} />
     : <ServiceWindowNotice disclosure={{ scope: recoveryWitness, id: 'session-observation', cause: issue ?? sessionState?.status ?? 'unconfirmed', visible }}
       notice={{ kind: 'indeterminate', notice: { step: checking ? 'Checking the original session' : 'Session connection unconfirmed',
         mode: issue ?? 'The original Session observation is unconfirmed. Its conversation is read through its own original source.',
         restore: 'Check the execution device, then refresh this observation. Your draft is kept.' } }}
-      actions={<button type="button" className="small-button" onClick={refreshSource}>Check again</button>} />
+      actions={<Button type="button" onClick={refreshSource}>Check again</Button>} />
     : recoverCreation ? (layout: 'inline' | 'surface') => <MountedCreationRecovery target={occurrence.source} member={occurrence.presentation}
       visible={visible} onRefresh={refreshSource} reference={reference} sessionIssue={sourceError} layout={layout} /> : undefined
   const { expectedRun: _initialRun, ...member } = occurrence.member.target

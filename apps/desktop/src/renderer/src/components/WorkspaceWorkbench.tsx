@@ -1,4 +1,5 @@
 import type { AppWindowDescriptor } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { workbenchReturnContext } from '../lib/workbench-return-context'
 import type { SpaceCloseReceipt } from '@agentmux/core'
 import { samePreparedCloseReview } from '../lib/workbench-close-owner'
@@ -1129,8 +1130,8 @@ function EmptyWorkbench({ onCreate, visible, tabGroupId, creationTarget }: { onC
       avatarWorkspaceId={mote.workspace.id} avatarTopicId={mote.topic.id} visible={visible} moteAvailability="no-agent" /> : undefined}
     heading={mote ? 'What’s on your mind?' : source?.target ? 'No original member is selected' : 'A fresh space to work'}
     description={mote ? 'A question, an idea, or your next task.' : source?.target ? 'Prepare new work in the original project without changing its Tabs or Regions before you start.' : 'Open a new Tab to get started.'}
-    action={<button type="button" className="primary-button" aria-label={mote ? 'New discussion' : source?.target ? 'New work' : 'New Tab'}
-      onClick={onCreate}><ThemeActionCreateTabIcon size={15} />{mote ? 'New discussion' : source?.target ? 'New work' : 'New Tab'}</button>} />
+    action={<Button type="button" variant="primary" aria-label={mote ? 'New discussion' : source?.target ? 'New work' : 'New Tab'}
+      onClick={onCreate}><ThemeActionCreateTabIcon size={15} />{mote ? 'New discussion' : source?.target ? 'New work' : 'New Tab'}</Button>} />
 }
 
 function PaneGroup({

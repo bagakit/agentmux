@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { WorkspaceBranchRecord } from '../../../shared/contracts'
 import type { GitBranchCompareMode, GitBranchComparisonResult } from '../../../shared/git-contracts'
 import { gitBridge } from '../lib/git-bridge'
@@ -65,9 +66,9 @@ export function BranchComparisonPanel({ workspaceId, branches }: {
             <option value="two-point">Commit A → commit B</option>
           </select>
         </label>
-        <button className="small-button" type="submit" disabled={!branchesExist || loading}>
+        <Button type="submit" disabled={!branchesExist || loading}>
           {loading ? 'Comparing…' : selectionMatches ? 'Refresh comparison' : 'Compare branches'}
-        </button>
+        </Button>
       </form>
       {error ? <div className="branches-inline-error" role="alert">{error}</div> : null}
       {result?.kind === 'not-a-git-repository' ? <p>Not a Git repository.</p> : null}

@@ -1,5 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useState, type ReactNode } from 'react'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import type { GitFileChange } from '../../../shared/git-contracts'
 import { useGitStatus } from '../hooks/useGitStatus'
@@ -352,27 +354,27 @@ export function ChangesPanel({ workspace, active = true }: { workspace: Workspac
             </button>
           ) : null}
           {canStage ? (
-            <button
+            <IconButton
               type="button"
-              className="icon-button change-row__stage"
+              className="change-row__stage"
               aria-label={`Stage ${change.path}`}
               title="Stage file"
               disabled={busyPath !== null}
               onClick={() => void stageFile(change)}
             >
               {busyPath === change.path ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitStageIcon size={12} />}
-            </button>
+            </IconButton>
           ) : (
-            <button
+            <IconButton
               type="button"
-              className="icon-button change-row__unstage"
+              className="change-row__unstage"
               aria-label={`Unstage ${change.path}`}
               title="Unstage file"
               disabled={busyPath !== null}
               onClick={() => void unstageFile(change)}
             >
               {busyPath === change.path ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitUnstageIcon size={12} />}
-            </button>
+            </IconButton>
           )}
         </span>
       </div>
@@ -432,9 +434,9 @@ export function ChangesPanel({ workspace, active = true }: { workspace: Workspac
               开 PR 挨着 push，因为它就是 push 之后那一步。它不共用 remoteButton：那三个动词的忙态与
               失败分类是同一族（见 describeGitRemote），而这一个的结果是一个表单，不是一次回执。
             */}
-            <button
+            <IconButton
               type="button"
-              className="icon-button changes-remote__action"
+              className="changes-remote__action"
               aria-label="Open a pull request"
               title="Open a pull request"
               disabled={prReadiness.loading || prSubmitting}
@@ -443,7 +445,7 @@ export function ChangesPanel({ workspace, active = true }: { workspace: Workspac
               {prReadiness.loading
                 ? <ThemeStatusLoadingIcon animation="spin" size={12} />
                 : <ThemeGitPullRequestIcon size={12} />}
-            </button>
+            </IconButton>
           </div>
         </div>
       ) : null}
@@ -510,14 +512,14 @@ export function ChangesPanel({ workspace, active = true }: { workspace: Workspac
             disabled={staged.length === 0 || committing}
             onValueChange={setCommitMessage}
           />
-          <button
+          <Button
             type="submit"
-            className="primary-button commit-box__submit"
+            variant="primary" className="commit-box__submit"
             disabled={staged.length === 0 || !commitMessage.trim() || committing}
           >
             {committing ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitCommitIcon size={13} />}
             {committing ? 'Committing…' : `Commit ${staged.length > 0 ? `(${staged.length})` : ''}`.trim()}
-          </button>
+          </Button>
         </form>
       ) : null}
     </section>

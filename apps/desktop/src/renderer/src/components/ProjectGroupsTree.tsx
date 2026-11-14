@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -71,8 +72,8 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
             <span className="project-rail-row__identity"><strong>{group.name}</strong></span><small className="project-group__count">{members.length}</small>
           </button>
           <GroupActivity projects={projects} projectIds={group.projectIds} visible={visible} />
-          <span className="project-group__actions"><button type="button" className="icon-button" aria-label={`Edit ${group.name}`} title="Edit project group" onClick={() => onEdit(group)}><ThemeActionEditIcon size={12} /></button>
-            <button type="button" className="icon-button" aria-label={`Dissolve ${group.name}`} title="Dissolve project group" onClick={() => onDissolve(group)}><ThemeActionUnlinkIcon size={12} /></button></span>
+          <span className="project-group__actions"><IconButton type="button" aria-label={`Edit ${group.name}`} title="Edit project group" onClick={() => onEdit(group)}><ThemeActionEditIcon size={12} /></IconButton>
+            <IconButton type="button" aria-label={`Dissolve ${group.name}`} title="Dissolve project group" onClick={() => onDissolve(group)}><ThemeActionUnlinkIcon size={12} /></IconButton></span>
         </div>
         {folded ? null : shown.map(member => {
           const hostIdentity = hostIdentityProjection(member.hostId, hosts?.find(host => host.id === member.hostId))

@@ -1,5 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { formatZoneAddress } from '@agentmux/core/sharing'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { isKnowledgeTopicInBindings } from '@agentmux/host/topic-categories'
 import { originalTopicAddress } from '../../../shared/space-addresses'
@@ -283,8 +285,7 @@ export function WorkspaceTopicsPanel({
         title={category?.title ?? 'All Topics'}
         count={userTopics?.length ?? null}
         actions={
-          <button
-            className="icon-button"
+          <IconButton
             type="button"
             aria-label="Create new Topic"
             title="Create new Topic"
@@ -294,16 +295,16 @@ export function WorkspaceTopicsPanel({
             {reading || pending === 'create'
               ? <ThemeStatusLoadingIcon animation="spin" size={13} />
               : <ThemeActionCreateTopicIcon size={14} />}
-          </button>
+          </IconButton>
         }
       />
       {categorySpaceId && (!category || category.readError) ? <div className="workspace-topic-category-status" role="status">
         <ThemeStatusInfoIcon size={14} aria-hidden="true" />
         <span>{categoryRefreshState?.error ?? category?.readError ?? 'The selected Category description is still restoring.'} Existing Topics and discussions remain available.</span>
-        <button type="button" className="icon-button" aria-label="Refresh category description" title="Refresh category description"
+        <IconButton type="button" aria-label="Refresh category description" title="Refresh category description"
           disabled={categoryRefreshState?.busy} onClick={() => void refreshCategoryDescription()}>
           <ThemeActionRefreshIcon size={13} animation={categoryRefreshState?.busy ? 'spin' : 'none'} />
-        </button>
+        </IconButton>
       </div> : null}
       {topics === null ? (
         <div className="workspace-topic-state" role="status">
@@ -314,10 +315,10 @@ export function WorkspaceTopicsPanel({
         <div className="workspace-topic-state workspace-topic-state--empty">
           <span className="workspace-topic-state__icon" aria-hidden="true"><ThemeObjectTopicIcon size={16} /></span>
           <span><strong>{category ? 'No Topics in this category' : 'No Topics yet'}</strong><small>Create a Topic to keep its knowledge and discussions together.</small></span>
-          <button className="small-button" type="button" disabled={pending !== null} onClick={() => void createTopic()}>
+          <Button type="button" disabled={pending !== null} onClick={() => void createTopic()}>
             {pending === 'create' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionCreateTopicIcon size={12} />}
             {pending === 'create' ? 'Creating…' : 'Create Topic'}
-          </button>
+          </Button>
         </div>
       ) : null}
       {projected && projected.length > 0 ? (

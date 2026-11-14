@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useObjectAvatarSave } from '../lib/use-object-avatar-save'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -402,8 +403,8 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
               {target.avatarTarget ? <div className="mote-avatar-stage__aside">
                 <div className="mote-avatar-stage__header">
                   <span className="mote-avatar-stage__source"><strong>{stageSourceTitle}</strong><small>{stageSourceTag}</small></span>
-                  <button type="button" disabled={busy} aria-label="Shuffle style" className="small-button mote-avatar-stage__shuffle"
-                    onClick={() => setShuffleRevision(value => value + 1)}>Shuffle</button>
+                  <Button type="button" disabled={busy} aria-label="Shuffle style" className="mote-avatar-stage__shuffle"
+                    onClick={() => setShuffleRevision(value => value + 1)}>Shuffle</Button>
                 </div>
                 <div className="mote-avatar-stage__sizes" aria-label="Actual avatar sizes">
                   <div className="mote-avatar-stage__chip">
@@ -452,22 +453,22 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
           {seriesAttempt?.issue || avatarReadIssue || seriesStorageIssue ? <details><summary>Details</summary><p>{[...new Set([seriesAttempt?.issue, avatarReadIssue, seriesStorageIssue].filter(Boolean))].join('\n')}</p>
             {seriesAttempt ? <p>Save {seriesAttempt.request.operationId}</p> : null}</details> : null}
           <div>
-            {seriesAttempt?.state === 'unknown' || seriesAttempt?.state === 'unsent' ? <><button type="button" className="small-button" data-avatar-inspect-save disabled={busy || avatarReading} onClick={() => void readAvatarBaseline(target)}>Inspect save</button>
-              <button type="button" className="small-button" data-avatar-retry-save disabled={busy || avatarReading} onClick={() => void submitSeriesSave(seriesAttempt.request, target)}>Retry original save</button></>
-              : seriesAttempt?.state === 'saved' && seriesAttempt.issue ? <button type="button" className="small-button" data-avatar-refresh-display disabled={busy || avatarReading} onClick={() => void refreshSavedConfig(target, editor.current, true)}>Refresh display</button>
-                : <button type="button" className="small-button" data-avatar-review-current disabled={busy || avatarReading} onClick={() => void readAvatarBaseline(target, true)}>{seriesAttempt?.state === 'refused' ? 'Review current avatar' : 'Read current avatar'}</button>}
+            {seriesAttempt?.state === 'unknown' || seriesAttempt?.state === 'unsent' ? <><Button type="button" data-avatar-inspect-save disabled={busy || avatarReading} onClick={() => void readAvatarBaseline(target)}>Inspect save</Button>
+              <Button type="button" data-avatar-retry-save disabled={busy || avatarReading} onClick={() => void submitSeriesSave(seriesAttempt.request, target)}>Retry original save</Button></>
+              : seriesAttempt?.state === 'saved' && seriesAttempt.issue ? <Button type="button" data-avatar-refresh-display disabled={busy || avatarReading} onClick={() => void refreshSavedConfig(target, editor.current, true)}>Refresh display</Button>
+                : <Button type="button" data-avatar-review-current disabled={busy || avatarReading} onClick={() => void readAvatarBaseline(target, true)}>{seriesAttempt?.state === 'refused' ? 'Review current avatar' : 'Read current avatar'}</Button>}
           </div>
         </div> : null}
         {target?.imageTarget && (objectAvatar.issue || objectAvatar.pending.length > 0) ? <div className="mote-series__notice" role="status" data-object-avatar-save-notice>
           {objectAvatar.issue ? <p>{objectAvatar.issue}</p> : null}
           {objectAvatar.needsNewIntent ? <p>The original save remains unconfirmed. Inspect its receipt; choose or edit an image or icon for a separate save.</p> : null}
           {objectAvatar.pending.length ? <details><summary>Original save requests</summary>{objectAvatar.pending.map(value => <p key={value.request.operationId}>Save {value.request.operationId}: {value.issue}</p>)}</details> : null}
-          <button type="button" className="small-button" disabled={busy || objectAvatar.reading} onClick={() => void objectAvatar.read()}>Inspect save</button>
+          <Button type="button" disabled={busy || objectAvatar.reading} onClick={() => void objectAvatar.read()}>Inspect save</Button>
         </div> : null}
         <footer>
           <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={automaticSelected}
             disabled={busy} onClick={() => select(null, true)}><ThemeActionRestoreDefaultsIcon size={13} />Restore automatic</button>
-          <button type="button" className="small-button" disabled={busy} onClick={onClose}>{seriesAttempt || seriesStorageIssue || error && errorStep === 'save' ? 'Close' : 'Cancel'}</button>
+          <Button type="button" disabled={busy} onClick={onClose}>{seriesAttempt || seriesStorageIssue || error && errorStep === 'save' ? 'Close' : 'Cancel'}</Button>
           <button type="button" className={`${supportsImages ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={saveButtonLabel} disabled={busy || preparing || Boolean(target?.imageTarget && (!objectAvatar.baseline || objectAvatar.reading || objectAvatar.needsNewIntent)) || Boolean(editingSeries && !automaticPending && seriesPreparing) || Boolean(seriesAttempt && seriesAttempt.state !== 'saved' && editingSeries && !automaticPending) || Boolean(editingSeries && !automaticPending && (!avatarBaseline || avatarReading || !seriesDraft || seriesStorageIssue)) || Boolean(!editingFace && !automaticPending && preview && !previewReady)} onClick={() => void save()}>
             {saveButtonLabel}
           </button>

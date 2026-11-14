@@ -1,4 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -245,7 +247,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     const paneNavigationRequest = destination?.route === route && destination.section === pane ? destination.request
       : normalizedNavigationRequest?.section === pane ? normalizedNavigationRequest : undefined
     return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
-      {paneVisible && searching ? <div className="settings-search-return"><button type="button" className="small-button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
+      {paneVisible && searching ? <div className="settings-search-return"><Button type="button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</Button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
         : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
       <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} onSubpageChange={pane === 'hosts' ? setActiveSubpage : undefined} />
     </div>
@@ -310,7 +312,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
           </div>
           <div className="settings-content__actions">
             <span className="settings-content__hint"><kbd>Esc</kbd><span>{query ? 'Clear search' : 'Close'}</span></span>
-            <button className="settings-content__close icon-button" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><ThemeActionCloseIcon size={15} /></button>
+            <IconButton className="settings-content__close" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><ThemeActionCloseIcon size={15} /></IconButton>
           </div>
         </header>
         {searching && showResults ? <SettingsSearchResults results={searchResults} query={query} onChoose={chooseSection} /> : null}

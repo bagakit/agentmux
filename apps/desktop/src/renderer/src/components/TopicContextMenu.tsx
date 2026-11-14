@@ -1,4 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
@@ -79,9 +80,9 @@ export function TopicContextMenu({ children, ...actions }: TopicMenuActions & { 
 export function TopicActionsMenu({ title, ...actions }: TopicMenuActions & { title: string }) {
   const menu = useSpaceObjectActionsMenu()
   return <DropdownMenu.Root onOpenChange={menu.onOpenChange}>
-    <DropdownMenu.Trigger asChild><button ref={menu.trigger} type="button" className="icon-button workspace-topic-entry__actions" aria-label={`Actions for ${title}`} title={`Actions for ${title}`}
+    <DropdownMenu.Trigger asChild><IconButton ref={menu.trigger} type="button" className="workspace-topic-entry__actions" aria-label={`Actions for ${title}`} title={`Actions for ${title}`}
       onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
-      onKeyDown={event => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) event.stopPropagation() }}><ThemeActionMoreIcon size={15} /></button></DropdownMenu.Trigger>
+      onKeyDown={event => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) event.stopPropagation() }}><ThemeActionMoreIcon size={15} /></IconButton></DropdownMenu.Trigger>
     <DocumentOverlayPortal component={DropdownMenu.Portal}>
       <DropdownMenu.Content className="tab-context-menu topic-context-menu" align="end" collisionPadding={8}
         onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onCloseAutoFocus={menu.onCloseAutoFocus}>

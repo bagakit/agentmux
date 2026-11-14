@@ -4,6 +4,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { TopicPromotionReceipt } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useContext, useEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { refreshTopicSpatial } from '../lib/topic-knowledge-actions'
 import { useAppStore } from '../store'
@@ -114,7 +115,7 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
           {blocked && !reading && phase !== 'unknown' ? <div className="topic-promotion__recovery" role="status">
             <strong>{allowed === false ? 'Promotion 已关闭' : '晋升设置待确认'}</strong>
             <p>新的晋升暂未开始。已有伙伴与未完成的晋升仍然保留。</p>
-            {settings ? <button type="button" className="small-button" onClick={() => { onClose(); settings.open('mote-promotion', undefined, 'promotion.enabled') }}>打开 Promotion 设置</button> : null}
+            {settings ? <Button type="button" onClick={() => { onClose(); settings.open('mote-promotion', undefined, 'promotion.enabled') }}>打开 Promotion 设置</Button> : null}
           </div> : null}
           {!busy && (partial || error) ? <div className="topic-promotion__recovery" role="status">
             <strong>{partial ? '晋升尚未完成' : '结果待确认'}</strong>
@@ -122,11 +123,11 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
             <details><summary>查看详情</summary><p>{error ?? receipt?.unavailable.map(issue => issue.message).join(' ')}</p></details>
           </div> : null}
           <footer className="topic-promotion__actions">
-            <button type="button" className="small-button topic-promotion__cancel" onClick={onClose}>{busy || partial || phase === 'unknown' ? '稍后查看' : '暂时不用'}</button>
-            {phase === 'unknown' ? <button type="button" className="primary-button topic-promotion__submit" onClick={() => void observe()}>查看结果</button>
-              : <button type="button" className="primary-button topic-promotion__submit" disabled={busy || reading || blocked} onClick={() => void promote()}>
+            <Button type="button" className="topic-promotion__cancel" onClick={onClose}>{busy || partial || phase === 'unknown' ? '稍后查看' : '暂时不用'}</Button>
+            {phase === 'unknown' ? <Button type="button" variant="primary" className="topic-promotion__submit" onClick={() => void observe()}>查看结果</Button>
+              : <Button type="button" variant="primary" className="topic-promotion__submit" disabled={busy || reading || blocked} onClick={() => void promote()}>
                 {busy ? <LoadingIcon size={15} animation="spin" aria-hidden="true" /> : <MoteIcon size={17} />}{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote Club'}
-              </button>}
+              </Button>}
           </footer>
           {busy ? <p className="topic-promotion__progress" role="status">正在延续原来的工作。关闭后也可回来查看。</p> : null}
         </div>

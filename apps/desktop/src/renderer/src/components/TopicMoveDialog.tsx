@@ -3,6 +3,7 @@ import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { moveKnowledgeTopic, refreshTopicSpatial } from '../lib/topic-knowledge-actions'
 import { useAppStore } from '../store'
@@ -97,11 +98,11 @@ function TopicMoveContent({ target, onClose, onMoved }: TopicMoveDialogProps & {
             {loading ? <p role="status" className="topic-knowledge-hint">Reading Topic and categories…</p> : null}
             {!loading && !destinations.some(category => !category.readError) ? <p className="topic-knowledge-hint">{destinations.length ? 'No destination category is available. Refresh or create a category.' : 'Create a category to give this Topic a new home.'}</p> : null}
             <div className="topic-move-dialog__actions">
-              <button type="button" className="small-button" disabled={busy || loading} onClick={() => setCreating(true)}><ThemeActionCreateCategoryIcon size={13} />New category…</button>
-              <button type="button" className="small-button" aria-label="Refresh Topic and categories" disabled={busy || loading} onClick={() => void reload()}><ThemeActionRefreshIcon size={13} />Refresh</button>
+              <Button type="button" disabled={busy || loading} onClick={() => setCreating(true)}><ThemeActionCreateCategoryIcon size={13} />New category…</Button>
+              <Button type="button" aria-label="Refresh Topic and categories" disabled={busy || loading} onClick={() => void reload()}><ThemeActionRefreshIcon size={13} />Refresh</Button>
             </div>
             {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
-            <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={!canMove}>{busy ? 'Moving…' : 'Move Topic'}</button></footer>
+            <footer><Button type="button" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" disabled={!canMove}>{busy ? 'Moving…' : 'Move Topic'}</Button></footer>
           </form>
         </Dialog.Content>
       </DocumentOverlayPortal>
