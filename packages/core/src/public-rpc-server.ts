@@ -301,17 +301,21 @@ export class AgentMuxControlServer {
       }
       const owner = forwarded ?? channel
       let openingId: string | number | undefined
+      let openingStream = false
       try {
         const request = Array.isArray(incoming) ? undefined : parseRpcRequest(incoming)
-        if (request && Object.hasOwn(request, 'id') && request.id !== null && isAgentMuxRpcMethod(request.method) &&
-          !isAgentMuxRpcStream(request.method, rpcRecord(request.params ?? {}))) openingId = request.id
+        if (request && Object.hasOwn(request, 'id') && request.id !== null && isAgentMuxRpcMethod(request.method)) {
+          openingId = request.id
+          openingStream = isAgentMuxRpcStream(request.method, rpcRecord(request.params ?? {}))
+        }
       } catch {
         // The dispatcher below owns malformed-frame validation and its original numeric error mapping.
       }
       const openingController = openingId === undefined ? undefined : new AbortController()
       if (openingId !== undefined) openingControllers.set(openingId, openingController!)
+      const openingSignal = openingController ? AbortSignal.any([owner.context.signal, openingController.signal]) : undefined
       const context = { ...owner.context, afterResponse: [] as Array<() => void | Promise<void>>,
-        ...(openingController ? { openingSignal: AbortSignal.any([owner.context.signal, openingController.signal]) } : {}) }
+        ...(openingSignal ? { openingSignal, ...(openingStream ? { signal: openingSignal } : {}) } : {}) }
       let responded = false
       activeCalls++
       try {

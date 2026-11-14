@@ -502,7 +502,7 @@ class RpcClient implements AgentMuxRpcClient {
               route.stdio = channel
             }
             sharedDispatch = 'queued'
-            opening = route.stdio.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() }, { cancelOpening: handlers === undefined })
+            opening = route.stdio.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() }, { cancelOpening: true })
           } else if (route.endpoint.transport === 'unix' && !(options.forwarding ?? this.forwarding)) {
             if (!route.unix) {
               const socket = new Socket(), lifetime = new AbortController(), path = route.endpoint.path
@@ -526,7 +526,7 @@ class RpcClient implements AgentMuxRpcClient {
               route.unix = channel
             }
             sharedDispatch = 'queued'
-            opening = route.unix.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() }, { cancelOpening: handlers === undefined })
+            opening = route.unix.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() }, { cancelOpening: true })
           } else if (route.endpoint.transport === 'relay' && !(options.forwarding ?? this.forwarding)) {
             route.relay ??= createAgentMuxRpcRelayClient({ offer: route.endpoint.offer, ...(this.relayKeyPair ? { keyPair: this.relayKeyPair } : {}) })
             armDeadline()
