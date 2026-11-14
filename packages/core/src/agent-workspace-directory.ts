@@ -122,6 +122,7 @@ export class AgentWorkspaceDirectory {
       await this.requirePlatformSupport()
       if (phase === 'retained') return await this.validateLocation(location)
       const existing = await this.readMarker(location)
+      if (existing) await this.reAckMarker(location)
       if (existing?.value.phase === 'provisioned') return await this.validateLocation(location)
       if (existing) return await this.completePending(location)
       return await this.reserve(location)
@@ -227,6 +228,19 @@ export class AgentWorkspaceDirectory {
     }
   }
 
+  private async reAckMarker(location: AgentWorkspaceDirectoryLocation): Promise<void> {
+    await this.proveMarkerNamespace(location)
+    const handle = await open(location.markerPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      const stats = await handle.stat({ bigint: true })
+      if (!stats.isFile() || stats.uid !== this.uid()) throw refuse('The re-acknowledged workspace marker is not a same-UID ordinary file.')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    await this.syncDirectory(dirname(location.markerPath))
+  }
+
   private async reserve(location: AgentWorkspaceDirectoryLocation): Promise<string> {
     const stateRealpath = await realpath(this.stateDirectory)
     // Only a genuinely absent reservation pays the allocation preflight barrier.
@@ -270,6 +284,7 @@ export class AgentWorkspaceDirectory {
   private async admitExisting(location: AgentWorkspaceDirectoryLocation): Promise<string> {
     const existing = await this.readMarker(location)
     if (!existing) return await this.reserve(location)
+    await this.reAckMarker(location)
     if (existing.value.phase === 'provisioned') return await this.validateLocation(location)
     return await this.completePending(location)
   }
