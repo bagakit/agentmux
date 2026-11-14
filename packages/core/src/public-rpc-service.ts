@@ -319,7 +319,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   }
   /** Read only original host metadata; topology and execution remain with their Core owners. */
   spatialPresentation?(input: { graph: import('./spatial-graph.js').AgentMuxSpatialGraph;
-    catalog: import('./space-control.js').AgentMuxSpaceCatalog; target: import('./space-control.js').AgentMuxSpaceSelector; imageSpaceId?: string },
+    catalog: import('./space-control.js').AgentMuxSpaceCatalog; target: import('./space-control.js').AgentMuxSpaceSelector;
+    presentation?: import('./space-control.js').AgentMuxSpacePresentationSelection; imageSpaceId?: string },
     context: AgentMuxRpcCallContext): Promise<Pick<import('./space-control.js').AgentMuxSpaceCatalog,
       'agentPresentation' | 'motePresentation' | 'appearance' | 'survey'>>
   /** Optional host aggregation of original named owners; Core interprets no host target kinds. */
@@ -1015,6 +1016,9 @@ export class AgentMuxRpcService {
   private async callOwnedBusiness<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> {
     this.assertExposed(method)
+    // These finite directory reads borrow the exact opening lifetime. Cancelling
+    // this reader does not cancel an admitted write or the shared connection.
+    if ((method === 'space.ls' || method === 'space.inspect') && context.openingSignal) context = { ...context, signal: context.openingSignal }
     if (isStorageRecoveryMethod(method)) {
       if (context.transport !== 'unix' || context.principal?.kind !== 'user' || !context.principal.id || context.caller !== undefined || context.routeDelegation !== undefined)
         throw new AgentMuxError('Storage recovery requires the original local Unix user without an Agent caller or delegated route.', 'CONTROL_PERMISSION_DENIED')
@@ -2887,18 +2891,21 @@ export class AgentMuxRpcService {
             const original = await this.ports.callOriginalCore('local', method, params, context)
             // The Host retains its domain catalog. Only an unfiltered, explicitly
             // requested Survey observation comes from the original client owner.
-            if (method !== 'space.ls' || p.presentation !== true || Object.values(target).some(Boolean) || !this.ports.spatialPresentation) return original
+            if (method !== 'space.ls' || p.presentation !== true && p.presentation !== 'status' || Object.values(target).some(Boolean) || !this.ports.spatialPresentation) return original
             const result = original as AgentMuxRpcResult<'space.ls'>
             try {
               const state = await this.spatial.readForLayout()
               if (!state) throw new AgentMuxError('The original client spatial observation is unavailable. Host resources remain available.', 'CONTROL_UNAVAILABLE')
-              const observed = await this.ports.spatialPresentation({ graph: state.graph, catalog: result.catalog, target: {} }, context)
+              context.signal?.throwIfAborted()
+              const observed = await this.ports.spatialPresentation({ graph: state.graph, catalog: result.catalog, target: {}, presentation: p.presentation as true | 'status' }, context)
+              context.signal?.throwIfAborted()
               const candidate = { ...result.catalog, ...(observed.survey === undefined ? {} : { survey: observed.survey }) }
               // An invalid weak client observation must not poison the healthy
               // Host result when the actual public client consumes this DTO.
               parseRpcControlResult('space.ls', { catalog: candidate }, params)
               return { ...result, catalog: candidate } as AgentMuxRpcResult<M>
             } catch (error) {
+              context.signal?.throwIfAborted()
               return { ...result, presentation: { region: null, tab: null,
                 unavailable: [...(result.presentation?.unavailable ?? []), unavailable(error)] } } as AgentMuxRpcResult<M>
             }
@@ -2906,10 +2913,12 @@ export class AgentMuxRpcService {
           const state = await this.spatial.readForLayout()
           if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
           const selector = request.operation === 'space.ls' || request.operation === 'space.inspect' ? request.target as import('./space-control.js').AgentMuxSpaceSelector : {}
+          context.signal?.throwIfAborted()
           const catalog = spatialCatalog(state.graph, selector)
-          if (p.presentation === true && this.ports.spatialPresentation) Object.assign(catalog,
-            await this.ports.spatialPresentation({ graph: state.graph, catalog, target: selector,
+          if ((p.presentation === true || p.presentation === 'status') && this.ports.spatialPresentation) Object.assign(catalog,
+            await this.ports.spatialPresentation({ graph: state.graph, catalog, target: selector, presentation: p.presentation,
               ...(method === 'space.inspect' && typeof target.spaceId === 'string' ? { imageSpaceId: target.spaceId } : {}) }, context))
+          context.signal?.throwIfAborted()
           return rpcControlResult(method, { operation: method, catalog }) as AgentMuxRpcResult<M>
         }
       }

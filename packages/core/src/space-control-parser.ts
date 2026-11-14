@@ -234,14 +234,15 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code) }
   } else if (operation === 'space.ls' || operation === 'space.inspect') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation'], code)
+    const presentation = Object.hasOwn(source, 'presentation') ? { presentation: source.presentation === 'status' ? 'status' as const : bool(source.presentation, 'presentation', code) } : {}
     if (operation === 'space.inspect' && source.target && typeof source.target === 'object' && Object.hasOwn(source.target, 'requestId')) {
       const target = fields(source.target, ['requestId'], code)
-      request = { ...base, operation, target: { requestId: spaceControlId(target.requestId, 'Inspected Request ID', code) } }
+      request = { ...base, operation, target: { requestId: spaceControlId(target.requestId, 'Inspected Request ID', code) }, ...presentation }
     } else {
       const target = selector(source.target, code)
       if (operation === 'space.inspect' && !['spaceId', 'zoneId', 'tabId', 'regionId'].some(key => Object.hasOwn(target, key))) fail('Space inspect requires one exact Space, Zone, Tab, Region, or Request.', code)
       if (operation === 'space.ls' && (target.tabId || target.regionId || Object.keys(target).length > 1)) fail('Space ls accepts one Space or Zone filter.', code)
-      request = { ...base, operation, target, ...(Object.hasOwn(source, 'presentation') ? { presentation: bool(source.presentation, 'presentation', code) } : {}) }
+      request = { ...base, operation, target, ...presentation }
     }
   } else if (operation === 'space.bind' || operation === 'space.unbind') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'binding'], code)

@@ -42,10 +42,11 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
       setObservation({ client, key, issue: !client?.forwardRpc ? '当前来源连接尚未确认，原已读内容和草稿仍保留。' : '这个 Zone 或 Tab 还没确认，请刷新目录。' }); return
     }
     let live = true
-    void client.forwardRpc(zoneId ? 'space.ls' : 'space.inspect', { target: zoneId ? { zoneId } : { tabId: tabId! }, presentation: true }).then(value => {
+    const controller = new AbortController()
+    void client.forwardRpc(zoneId ? 'space.ls' : 'space.inspect', { target: zoneId ? { zoneId } : { tabId: tabId! }, presentation: 'status' }, { signal: controller.signal }).then(value => {
       if (live) { setAccepted(previous => ({ client, key, contentOwner: previous?.client === client ? previous.contentOwner : (previous?.contentOwner ?? 0) + 1, catalog: value.catalog, zoneId, tabId, regionId, expectedAgent, name })); setObservation({ client, key, issue: '' }) }
     }).catch(error => { if (live) setObservation({ client, key, issue: error instanceof Error ? error.message : String(error) }) })
-    return () => { live = false }
+    return () => { live = false; controller.abort() }
   }, [client, key, visible, revision])
   return <MobileNoticeScope owner={client} identity={[zoneId,tabId,regionId]}><section className="mobile-zone-workface" aria-label={`${name} 的讨论与内容`}>
     <div className="mobile-zone-tools"><MobileDirectoryNotice issues={issue || pendingIssue ? [{ source: name, message: issue || pendingIssue }] : []} retry={() => refresh(value => value + 1)} />{zoneId && onCreateAgent && <button className="mobile-icon-button" aria-label="在此 Topic 新建 Agent" onClick={() => onCreateAgent({ zoneId })}><SemanticIcon name="action.create-agent" size={18} /></button>}<button className="mobile-icon-button" aria-label="刷新讨论" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={17} /></button></div>

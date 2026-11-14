@@ -14,14 +14,16 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
   agentSessionId: string; name: string; visible: boolean; open: boolean; onOpenChange(open: boolean): void; beforeChoose?(): boolean; onChoose(place: AgentMuxSpaceAddress): void
 }) {
   const [issue, setIssue] = useState(''), [pending, setPending] = useState(false)
+  const reading = useRef<AbortController | undefined>(undefined)
   const description = useId(), mounted = useRef(false), request = useRef(0)
   const current = useRef({ client, agentSessionId, hostId: locations?.hostId, visible, open, onChoose, beforeChoose })
   current.current = { client, agentSessionId, hostId: locations?.hostId, visible, open, onChoose, beforeChoose }
   useEffect(() => {
-    request.current++; setPending(false)
+    request.current++; reading.current?.abort(); setPending(false)
     if (current.current.open) setIssue('连接或目标已改变，这次没有打开；请在当前目录重新选择。')
+    return () => reading.current?.abort()
   }, [client, agentSessionId, locations?.hostId, visible])
-  useEffect(() => { if (!open) { request.current++; setPending(false) } }, [open])
+  useEffect(() => { if (!open) { request.current++; reading.current?.abort(); setPending(false) } }, [open])
   // The callback ref also fences a late response after its row has unmounted.
   const anchor = (node: HTMLButtonElement | null) => { mounted.current = node !== null }
   const known = catalog !== null && Boolean(locations?.hostId)
@@ -47,10 +49,12 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
     if (!source.client?.forwardRpc || !source.hostId) { setIssue('这个位置还没确认，对话仍可打开。'); return }
     const stillCurrent = () => mounted.current && operation === request.current && current.current.client === source.client &&
       current.current.agentSessionId === source.agentSessionId && current.current.hostId === source.hostId && current.current.open && current.current.visible
+    reading.current?.abort()
+    const controller = new AbortController(); reading.current = controller
     setPending(true); setIssue('')
     try {
       const { spaceId, zoneId, displayWorkspaceId, groupId, tabId, regionId } = place
-      const value = await source.client.forwardRpc('space.inspect', { target: { ...(spaceId ? { spaceId } : {}), ...(zoneId ? { zoneId } : {}), displayWorkspaceId, groupId, tabId, regionId }, presentation: true })
+      const value = await source.client.forwardRpc('space.inspect', { target: { ...(spaceId ? { spaceId } : {}), ...(zoneId ? { zoneId } : {}), displayWorkspaceId, groupId, tabId, regionId }, presentation: 'status' }, { signal: controller.signal })
       const now = current.current, owner = now.client?.runtimeOwnerIdentity()
       const sameOwner = Boolean(runtime && owner && runtime.runtimeId === owner.runtimeId && runtime.ownerInstanceId === owner.ownerInstanceId)
       if (!mounted.current) return
@@ -68,9 +72,9 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
         ? '读取期间连接已改变，这次没有打开；请在当前目录重新选择。'
         : `位置暂时读不到，对话仍可打开。${error instanceof Error ? error.message : String(error)}`)
     }
-    finally { if (stillCurrent()) setPending(false) }
+    finally { if (reading.current === controller) reading.current = undefined; if (stillCurrent()) setPending(false) }
   }
-  const changeOpen = (value: boolean) => { request.current++; setPending(false); if (value) setIssue(''); onOpenChange(value) }
+  const changeOpen = (value: boolean) => { request.current++; reading.current?.abort(); setPending(false); if (value) setIssue(''); onOpenChange(value) }
   return <Dialog.Root open={open} onOpenChange={changeOpen}><Dialog.Trigger asChild>
     <button ref={anchor} type="button" className="mobile-menu-row mobile-agent-locations-entry" aria-label={`${name} · ${label}`} title="查看展示位置"><SemanticIcon name="object.region" size={15} /><span>查看展示位置<small>{label}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
   </Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-agent-locations-sheet" aria-describedby={description}>

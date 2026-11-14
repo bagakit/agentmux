@@ -32,7 +32,7 @@ import { MobileWorkfaceFrame, MobileWorkfacePane } from '../layout/MobileWorkfac
 import { workfacePanes } from '../layout/workface-presentation'
 
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
-type CatalogObservation = { client: AgentMuxHostedClient; catalog: Catalog | null;
+type CatalogObservation = { client: AgentMuxHostedClient; presentation: true | 'status'; catalog: Catalog | null;
   focusRows: Catalog['agentPresentation']; focusConfirmed: boolean; issue: string; pending: boolean }
 export type MobileSpatialContext = { spaceId: string | null; tabId: string | null; regionId: string | null }
 export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
@@ -60,10 +60,11 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const observation = catalogObservation?.client === client ? catalogObservation : null
   const catalog = observation?.catalog ?? null, issue = observation?.issue ?? ''
   const focusRows = observation?.focusRows
-  const focusConfirmed = connected && observation?.focusConfirmed === true
   const [query, setQuery] = useState('')
   const [focusQuery, setFocusQuery] = useState('')
   const focusActive = focusVisible ?? (visible && home === 'focus')
+  const presentation = focusActive ? true : 'status'
+  const focusConfirmed = connected && presentation === true && observation?.presentation === true && observation.focusConfirmed
   const contentVisible = visible && home !== 'focus'
   const wideSpace = wide && home === 'space'
   const focusVisited = useRef(focusActive), contentVisited = useRef(contentVisible)
@@ -95,41 +96,42 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   useEffect(() => { directoryMounted.current = true; return () => { directoryMounted.current = false } }, [])
   useEffect(() => {
     if (!client || !connected || !catalogActive) return
-    let disposed = false, inFlight = false
+    let disposed = false, inFlight = false, request: AbortController | undefined
     const read = async () => {
-      if (inFlight || document.visibilityState === 'hidden') return
+      if (disposed || inFlight || document.visibilityState === 'hidden') return
       inFlight = true
-      setCatalogObservation(previous => previous?.client === client ? { ...previous, pending: true }
-        : { client, catalog: null, focusRows: undefined, focusConfirmed: false, issue: '', pending: true })
+      const controller = new AbortController(); request = controller
+      setCatalogObservation(previous => previous?.client === client ? { ...previous, presentation, focusConfirmed: presentation === true && previous.presentation === true && previous.focusConfirmed, pending: true }
+        : { client, presentation, catalog: null, focusRows: undefined, focusConfirmed: false, issue: '', pending: true })
       let observed: Catalog | null = null
       try {
         if (!client.forwardRpc) throw new Error('空间目录暂不可读；已有会话仍可在 Focus 中访问。')
-        const value = await client.forwardRpc('space.ls', { target: {}, presentation: true })
+        const value = await client.forwardRpc('space.ls', { target: {}, presentation }, { signal: controller.signal })
         if (!disposed && directorySource.current.client === client) {
           const missing = value.catalog.agentPresentation === undefined
           const reasons = value.presentation?.unavailable.map(reason => `${reason.code}: ${reason.message}\n${reason.recovery}`).join('\n') ?? ''
-          const readIssue = missing ? ['Focus 的项目与工作排序资料未返回；已有会话仍可打开。', reasons].filter(Boolean).join('\n') : reasons
-          setCatalogObservation(previous => ({ client, catalog: value.catalog,
-            focusRows: missing ? previous?.client === client ? previous.focusRows : undefined : value.catalog.agentPresentation,
-            focusConfirmed: !missing, issue: readIssue, pending: false }))
+          const readIssue = missing ? ['目录的呈现资料未返回；已有会话仍可打开。', reasons].filter(Boolean).join('\n') : reasons
+          setCatalogObservation(previous => ({ client, presentation, catalog: value.catalog,
+            focusRows: presentation === true && !missing ? value.catalog.agentPresentation : previous?.client === client ? previous.focusRows : undefined,
+            focusConfirmed: presentation === true && !missing, issue: readIssue, pending: false }))
           observed = value.catalog
           onPresentation?.(client, value.catalog.agentPresentation, missing ? readIssue : null)
         }
       } catch (error) { if (!disposed && directorySource.current.client === client) {
         const message = error instanceof Error ? error.message : '空间目录暂时读不到，可以刷新重试。'
-        setCatalogObservation(previous => ({ client, catalog: previous?.client === client ? previous.catalog : null,
+        setCatalogObservation(previous => ({ client, presentation, catalog: previous?.client === client ? previous.catalog : null,
           focusRows: previous?.client === client ? previous.focusRows : undefined, focusConfirmed: false, issue: message, pending: false }))
         onPresentation?.(client, undefined, message)
       } }
-      finally { inFlight = false }
+      finally { inFlight = false; if (request === controller) request = undefined }
       if (observed) observeCatalog?.(observed)
     }
     void read()
     const timer = setInterval(() => { void read() }, 10000)
     const foreground = () => { if (document.visibilityState === 'visible') void read() }
     document.addEventListener('visibilitychange', foreground)
-    return () => { disposed = true; clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
-  }, [client, connected, catalogActive, revision, observeCatalog, onPresentation])
+    return () => { disposed = true; request?.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
+  }, [client, connected, catalogActive, presentation, revision, observeCatalog, onPresentation])
   const answered = useCallback(() => refresh(value => value + 1), [])
   const retryDirectory = useCallback(() => {
     refresh(value => value + 1)

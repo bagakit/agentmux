@@ -37,17 +37,18 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
   const spaceId = identity.mote?.spaceId
   useEffect(() => {
     if (!visible || !spaceId || !connected || !client?.forwardRpc || !session && !selected?.image) return
-    let live = true, reading = false, dirty = false, epoch = 0
+    let live = true, reading = false, dirty = false, epoch = 0, request: AbortController | undefined
     let attemptedImage: string | undefined, imageIssue = ''
     const invalidateActivity = () => setLiveAppearance(value => value?.owner === observationOwner ? { ...value, requestStartedMono: null } : value)
     async function read() {
       if (!live || document.hidden || !ref.current?.getClientRects().length) return
       if (reading) { dirty = true; epoch++; return }
       reading = true
+      const controller = new AbortController(); request = controller
       const generation = epoch, requestStartedMono = performance.now()
       try {
         // Activity reads carry the original revision, without re-reading image bytes for every tool event.
-        const value = await client!.forwardRpc!('space.ls', { target: { spaceId: spaceId! }, presentation: true })
+        const value = await client!.forwardRpc!('space.ls', { target: { spaceId: spaceId! }, presentation: 'status' }, { signal: controller.signal })
         if (!live || generation !== epoch) return
         const original = value.catalog.appearance?.find(item => item.spaceId === spaceId)
         if (!original) { invalidateActivity(); setIssue('头像外观还没确认，暂用已保存的头像。'); return }
@@ -56,7 +57,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
         if (confirmed || !original.image) imageIssue = ''
         if (original.image && !confirmed && attemptedImage !== imageKey) {
           attemptedImage = imageKey
-          const detail = await client!.forwardRpc!('space.inspect', { target: { spaceId: spaceId! }, presentation: true })
+          const detail = await client!.forwardRpc!('space.inspect', { target: { spaceId: spaceId! }, presentation: 'status' }, { signal: controller.signal })
           if (!live || generation !== epoch) return
           const imageFact = detail.catalog.appearance?.find(item => item.spaceId === spaceId)
           if (!imageFact?.image?.dataUrl || imageFact.image.revision !== original.image.revision) {
@@ -70,7 +71,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
         setLiveAppearance({ spaceId: spaceId!, value: original, source: appearanceOwner, owner: observationOwner, requestStartedMono })
         setIssue(original.issue ?? imageIssue)
       } catch (error) { if (live && generation === epoch) { invalidateActivity(); imageIssue = error instanceof Error ? error.message : '头像暂时读不到。'; setIssue(imageIssue) } }
-      finally { reading = false; if (live && dirty) { dirty = false; void read() } }
+      finally { if (request === controller) request = undefined; reading = false; if (live && dirty) { dirty = false; void read() } }
     }
     const release = client.onEvent(event => {
       if (event.type === 'connection-state' && event.state === 'restored' ||
@@ -80,7 +81,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
     const foreground = () => { if (document.hidden) { epoch++; invalidateActivity() } else void read() }
     document.addEventListener('visibilitychange', foreground)
     void read()
-    return () => { live = false; epoch++; release(); document.removeEventListener('visibilitychange', foreground) }
+    return () => { live = false; request?.abort(); epoch++; release(); document.removeEventListener('visibilitychange', foreground) }
   }, [spaceId, identity.mote?.appearance, appearanceRevision, client, connected, session?.agentSessionId, visible, observationOwner, sourceOwner, appearanceOwner, retryRevision])
   const expressions = ['identity', 'sleep', 'idle', 'thinking', 'tool', 'starting', 'waiting', 'error', 'unknown', 'stopped']
   const activitySource = liveAppearance?.owner === observationOwner ? liveAppearance : null

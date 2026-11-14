@@ -22,12 +22,13 @@ export function MobileSpaceIcon({ spaceId, name, appearance, client, connected, 
   const setIssue = (message: string) => setFailure({ owner: observationOwner, message })
   useEffect(() => {
     if (!spaceId || !client?.forwardRpc || !connected || !visible || appearance?.glyph && retryRevision === 0) return
+    const controller = new AbortController()
     let live = true, requested = false
     const read = async () => {
       if (!live || requested || document.hidden) return
       requested = true
       try {
-        const result = await client.forwardRpc!('space.inspect', { target: { spaceId }, presentation: true })
+        const result = await client.forwardRpc!('space.inspect', { target: { spaceId }, presentation: 'status' }, { signal: controller.signal })
         const original = result.catalog.appearance?.find(value => value.spaceId === spaceId)
         if (!live) return
         if (!original) { setIssue('图标还没确认，可以刷新目录。'); return }
@@ -41,7 +42,7 @@ export function MobileSpaceIcon({ spaceId, name, appearance, client, connected, 
     else void read()
     const foreground = () => { if (!document.hidden && node.current && node.current.getBoundingClientRect().bottom >= 0 && node.current.getBoundingClientRect().top <= window.innerHeight) { void read(); if (requested) observer?.disconnect() } }
     document.addEventListener('visibilitychange', foreground)
-    return () => { live = false; observer?.disconnect(); document.removeEventListener('visibilitychange', foreground) }
+    return () => { live = false; controller.abort(); observer?.disconnect(); document.removeEventListener('visibilitychange', foreground) }
   }, [client, connected, visible, reference, appearanceRevision, observationOwner, retryRevision])
   // A fresh directory response may recreate an equivalent input object. Keep the
   // confirmed observation in that case, but honor a changed incoming fact.

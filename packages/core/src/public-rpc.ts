@@ -193,7 +193,7 @@ type OperationKeys<T> = T extends object ? {
   [K in keyof T as K extends 'requestId' ? 'operationId' : K]: K extends 'request' | 'report' | 'binding' | 'receipt' ? OperationKeys<T[K]> : T[K]
 } : T
 type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
-  ? { target: import('./space-control.js').AgentMuxSpaceSelector | { operationId: string }; presentation?: boolean }
+  ? { target: import('./space-control.js').AgentMuxSpaceSelector | { operationId: string }; presentation?: import('./space-control.js').AgentMuxSpacePresentationSelection }
   : M extends 'space.mote.preferences.save' ? import('./mote/preferences.js').MotePreferencesSaveParams
   : M extends 'goal.ls' ? AgentMuxRpcGoalFilters
   : M extends 'goal.create' ? GoalKeys<Omit<BusinessParams<M>, 'decision'>> & {

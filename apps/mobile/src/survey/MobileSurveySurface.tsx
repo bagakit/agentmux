@@ -31,26 +31,27 @@ export function MobileSurveySurface({ client, connected, visible = true, ...acti
   const [revision, refresh] = useState(0)
   useEffect(() => {
     if (!client || !connected || !visible) return
-    let disposed = false, inFlight = false
+    let disposed = false, inFlight = false, request: AbortController | undefined
     const read = async () => {
-      if (inFlight || document.visibilityState === 'hidden') return
+      if (disposed || inFlight || document.visibilityState === 'hidden') return
       inFlight = true
+      const controller = new AbortController(); request = controller
       try {
         if (!client.forwardRpc) throw new Error('连接暂不可用，暂时读不到研究列表。')
-        const result = await client.forwardRpc('space.ls', { target: {}, presentation: true })
+        const result = await client.forwardRpc('space.ls', { target: {}, presentation: 'status' }, { signal: controller.signal })
         if (!disposed) {
           if (result.catalog.survey) { setCatalog(result.catalog); setIssue('') }
           else setIssue('研究列表还没确认，可以刷新重试。')
         }
       } catch (error) {
         if (!disposed) setIssue(`研究列表读取未完成：${error instanceof Error ? error.message : String(error)}。可以刷新重试。`)
-      } finally { inFlight = false }
+      } finally { inFlight = false; if (request === controller) request = undefined }
     }
     void read()
     const timer = setInterval(() => { void read() }, 10000)
     const foreground = () => { if (document.visibilityState === 'visible') void read() }
     document.addEventListener('visibilitychange', foreground)
-    return () => { disposed = true; clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
+    return () => { disposed = true; request?.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
   }, [client, connected, visible, revision])
   return <MobileSurveyCatalog visible={visible} client={client} connected={connected} catalog={catalog} {...actions}
     issue={!connected ? '连接暂不可用，连上 Mac 后可以刷新研究。' : issue} refresh={() => refresh(value => value + 1)} />

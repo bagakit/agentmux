@@ -14,15 +14,16 @@ export function useMobileMoteTeam(client: AgentMuxHostedClient | null, spaceId: 
   const members = useRef(new Set<string>()); members.current = new Set(team?.members.map(member => member.sessionId))
   useEffect(() => {
     if (!client || !spaceId || !connected || !active) return
-    let live = true, inFlight = false, dirty = false
+    let live = true, inFlight = false, dirty = false, request: AbortController | undefined
     const read = async () => {
       if (!live || document.hidden) return
       if (inFlight) { dirty = true; return }
       inFlight = true
+      const controller = new AbortController(); request = controller
       try {
         if (!client.forwardRpc) throw new Error('连接暂不可用，暂时读不到团队。')
         const owner = client.runtimeOwnerIdentity?.()
-        const result = await client.forwardRpc('space.ls', { target: { spaceId }, presentation: true })
+        const result = await client.forwardRpc('space.ls', { target: { spaceId }, presentation: 'status' }, { signal: controller.signal })
         const current = client.runtimeOwnerIdentity?.()
         if (!live) return
         if (owner?.runtimeId !== current?.runtimeId || owner?.ownerInstanceId !== current?.ownerInstanceId)
@@ -30,7 +31,7 @@ export function useMobileMoteTeam(client: AgentMuxHostedClient | null, spaceId: 
         if (!mobileMoteTeam(result.catalog, spaceId, client)) throw new Error('这个 Mote 的范围还没确认，请刷新团队。')
         setReading({ client, spaceId, catalog: result.catalog }); setFailure(null)
       } catch (error) { if (live) setFailure({ client, spaceId, message: error instanceof Error ? error.message : String(error) }) }
-      finally { inFlight = false; if (dirty && live) { dirty = false; void read() } }
+      finally { if (request === controller) request = undefined; inFlight = false; if (dirty && live) { dirty = false; void read() } }
     }
     void read()
     const release = client.onEvent(event => {
@@ -39,7 +40,7 @@ export function useMobileMoteTeam(client: AgentMuxHostedClient | null, spaceId: 
     })
     const foreground = () => { if (!document.hidden) void read() }
     document.addEventListener('visibilitychange', foreground)
-    return () => { live = false; release(); document.removeEventListener('visibilitychange', foreground) }
+    return () => { live = false; request?.abort(); release(); document.removeEventListener('visibilitychange', foreground) }
   }, [client, spaceId, connected, active, revision])
   return { team, issue: failure?.client === client && failure.spaceId === spaceId ? failure.message :
     !connected ? '连接暂不可用，连上 Mac 后刷新团队。' : null, refresh: () => refresh(value => value + 1) }

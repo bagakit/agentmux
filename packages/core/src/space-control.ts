@@ -1,6 +1,9 @@
 import type { SplitDirection } from './split-direction-ssot.js'
 
 /** Core spatial identities and relationships. Hosts retain Git, files, Native content and execution. */
+/** true requests full names/recap; status reads original metadata and current status without history. */
+export type AgentMuxSpacePresentationSelection = boolean | 'status'
+
 export type AgentMuxSpaceSelector = {
   spaceId?: string
   zoneId?: string
@@ -346,8 +349,8 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'agent.rename'; agentSessionId: string; name: string | null; expectedNameRevision: number; nameSource?: 'derived' }
   | { operation: 'agent.inspect'; agentSessionId: string }
   | { operation: 'space.rename'; tabId: string; name: string | null; expectedNameRevision: number; nameSource?: 'derived' }
-  | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: boolean }
-  | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
+  | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: AgentMuxSpacePresentationSelection }
+  | { operation: 'space.inspect'; presentation?: AgentMuxSpacePresentationSelection; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
       | ({ kind: 'new-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string } & import('./agent-open-contract.js').AgentOpenLaunchFields)
       | ({ kind: 'takeover-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; source: import('./agent-takeover.js').AgentTakeoverSource } & import('./agent-open-contract.js').AgentOpenLaunchFields)

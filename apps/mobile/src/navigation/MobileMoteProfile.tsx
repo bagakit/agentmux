@@ -38,7 +38,8 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
   useEffect(() => {
     if (!visible || !spaceId) return
     let current = true
-    if (client?.forwardRpc) void client.forwardRpc('space.ls', { target: { spaceId }, presentation: true }).then(value => {
+    const controller = new AbortController()
+    if (client?.forwardRpc) void client.forwardRpc('space.ls', { target: { spaceId }, presentation: 'status' }, { signal: controller.signal }).then(value => {
       if (!current) return
       setQueryDiagnostic('')
       const original = value.catalog.motePresentation?.find(value => value.spaceId === spaceId)
@@ -57,7 +58,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       }
     })
     else setIssue('连接暂不可用，暂时读不到配置。')
-    return () => { current = false }
+    return () => { current = false; controller.abort() }
   }, [client, spaceId, visible, refresh])
   const changeSource = useCallback((path: string | null) => {
     setEditing(false); setQuickEditing(false)

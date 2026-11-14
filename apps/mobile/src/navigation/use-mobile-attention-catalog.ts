@@ -41,25 +41,26 @@ export function useMobileAttentionCatalog(client: AgentMuxHostedClient | null, a
       publish(client, undefined, '暂时无法读取需要你列表，可以重新连接；已有对话仍可使用。')
       return
     }
-    let disposed = false, inFlight = false
+    let disposed = false, inFlight = false, request: AbortController | undefined
     const read = async () => {
-      if (inFlight || document.visibilityState === 'hidden') return
+      if (disposed || inFlight || document.visibilityState === 'hidden') return
       inFlight = true
+      const controller = new AbortController(); request = controller
       try {
-        const { catalog } = await client.forwardRpc!('space.ls', { target: {}, presentation: true })
+        const { catalog } = await client.forwardRpc!('space.ls', { target: {}, presentation: 'status' }, { signal: controller.signal })
         if (!disposed && owner.current === client) {
           if (catalog.agentPresentation === undefined) publish(client, undefined, '需要你列表暂时没有返回，可重新读取；已有对话仍可使用。')
           else publish(client, catalog.agentPresentation)
         }
       } catch (error) {
         if (!disposed) publish(client, undefined, error instanceof Error ? error.message : String(error))
-      } finally { inFlight = false }
+      } finally { inFlight = false; if (request === controller) request = undefined }
     }
     const foreground = () => { if (document.visibilityState === 'visible') void read() }
     const interval = setInterval(() => { void read() }, INTERVAL_MS)
     document.addEventListener('visibilitychange', foreground)
     void read()
-    return () => { disposed = true; clearInterval(interval); document.removeEventListener('visibilitychange', foreground) }
+    return () => { disposed = true; request?.abort(); clearInterval(interval); document.removeEventListener('visibilitychange', foreground) }
   }, [client, active, paused, publish, revision])
   const current = state.client === client
   return { items: current ? state.items : EMPTY_ITEMS, unconfirmed: !active || !current || !state.confirmed,

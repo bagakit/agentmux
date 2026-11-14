@@ -22,13 +22,14 @@ const emptyConfiguration = (): PresentationConfiguration => ({ workspaces: [], e
 /** Original durable positions + fresh Core facts. This owner has no screen or configuration store. */
 export function createHostSpatialPresentation(options: { configurationPath?: string; clients(): readonly { hostId: string; client: Client }[] }): NonNullable<AgentMuxRpcServiceOptions['spatialPresentation']> {
   const topics = new ScratchTopics()
-  return async ({ graph, catalog, target, imageSpaceId }, context) => {
+  return async ({ graph, catalog, target, imageSpaceId, presentation: requestedPresentation = true }, context) => {
     context.signal?.throwIfAborted()
     let configuration = emptyConfiguration(), configurationIssue: string | undefined
     try {
       if (options.configurationPath) configuration = await readPresentationConfiguration(options.configurationPath)
       else configurationIssue = 'The original Workspace presentation configuration is unavailable. Original spatial references and Agent input remain available.'
     } catch (error) { configurationIssue = message(error) }
+    context.signal?.throwIfAborted()
     const names = displayLabelDocument(graph).labels
     const zones = new Map(catalog.zones.map(zone => [zone.zoneId, zone])), tabs = new Map(catalog.tabs.map(tab => [tab.tabId, tab]))
     const spaces = new Map(catalog.spaces.map(space => [space.spaceId, space]))
@@ -51,11 +52,12 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
         const workspace = configuration.workspaces.find(value => value.id === zone.workspaceId && value.hostId === objectHostId)
         try {
           const copy = workspace ? await topics.readDisplayCopy(workspace, topicId) : null
+          context.signal?.throwIfAborted()
           if (!copy?.identityDirectoryPath || directoryIdentity(objectHostId, copy.identityDirectoryPath) !== contentId) {
             return { group, issue: copy?.readError ?? 'The original Topic name and directory identity are unconfirmed. Refresh this same directory; its workface is retained.' }
           }
           return { group: { ...group, name: copy.title }, ...(copy.readError ? { issue: copy.readError } : {}) }
-        } catch (error) { return { group, issue: message(error) } }
+        } catch (error) { context.signal?.throwIfAborted(); return { group, issue: message(error) } }
       })()
       objectReads.set(key, read)
       return read
@@ -71,7 +73,9 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
     if (Object.keys(target).length === 0) {
       const local = clients.filter(route => route.hostId === 'local')
       if (local.length === 1) try {
-        for (const session of await local[0]!.client.readAgentSessions()) if (session.hostId === 'local' && !bySession.has(session.agentSessionId)) {
+        const inventory = await local[0]!.client.readAgentSessions()
+        context.signal?.throwIfAborted()
+        for (const session of inventory) if (session.hostId === 'local' && !bySession.has(session.agentSessionId)) {
           bySession.set(session.agentSessionId, []); unplaced.set(session.agentSessionId, session)
         }
       } catch (error) { configurationIssue = [configurationIssue, message(error)].filter(Boolean).join('\n') }
@@ -89,11 +93,13 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
           session = null; issue = 'The original execution Host observation is unconfirmed. Original positions and Session identity are retained; reconnect its exact Host.'
         }
       } catch (error) { issue = message(error) }
+      context.signal?.throwIfAborted()
       const known = session
       const [observed, conversation] = await Promise.allSettled([
         client && known ? client.statusAgent(agentSessionId) : Promise.resolve(null),
-        client && known ? client.sessionTimeline(agentSessionId) : Promise.resolve(undefined)
+        client && known && requestedPresentation !== 'status' ? client.sessionTimeline(agentSessionId) : Promise.resolve(undefined)
       ])
+      context.signal?.throwIfAborted()
       const status = observed.status === 'fulfilled' ? observed.value : null
       if (observed.status === 'rejected') issue = message(observed.reason)
       const exact = status?.session.agentSessionId === agentSessionId && status.session.hostId === known?.hostId
@@ -110,6 +116,7 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
       const ownerSpaces = [...new Set(catalog.bindings.filter(binding => ownerZoneIds.has(binding.zoneId)).map(binding => binding.spaceId))]
         .flatMap(id => spaces.get(id) ? [spaces.get(id)!] : [])
       const objects = [...new Map((await Promise.all([...ownerZoneIds].map(objectForZone))).flatMap(value => value ? [[value.group.key, value] as const] : [])).values()]
+      context.signal?.throwIfAborted()
       const originalObject = objects.length === 1 ? objects[0] : undefined
       if (originalObject?.issue) issue = [issue, originalObject.issue].filter(Boolean).join('\n')
       // A unique durable object binding survives unavailable execution metadata.
@@ -150,12 +157,14 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
         stateMark: focusStateMarkKind({ ...presentation, activitySemantic: exact?.observation.semantic, runUnobserved: !exact, processState: exact?.run.state }),
         ...(avatar ? { avatar } : {}), ...(projectGroup ? { projectGroup } : {}) }
     }))
+    context.signal?.throwIfAborted()
     const motePresentation = await Promise.all(catalog.spaces.filter(space => space.kind === 'mote').map(async space => {
       const workspace = configuration.workspaces.find(value => value.id === SCRATCH_WORKSPACE_ID && value.hostId === space.hostId)
       const home = catalog.zones.find(zone => zone.zoneId === homeZoneId(space.spaceId) && zone.workspaceId === workspace?.id && zone.hostId === workspace.hostId)
       const content = workspace && home ? { zoneId: home.zoneId, hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } : null
       try {
         const topic = workspace && space.topicId ? await topics.read(workspace, space.topicId) : null
+        context.signal?.throwIfAborted()
         const quickMode = topic?.quickMode ?? { status: 'unconfirmed' as const, message: 'The original MOTE.md preferences are unconfirmed. Original conversations and manual navigation remain available.' }
         const saved = quickMode.status === 'saved' ? quickMode.defaults.conversation : undefined
         const region = saved && catalog.regions.find(region => region.regionId === saved.regionId && region.tabId === saved.tabId)
@@ -164,9 +173,11 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
             && location.groupId === saved.groupId && location.tabId === saved.tabId && location.regionId === saved.regionId)
         return { spaceId: space.spaceId, quickMode, content,
           conversation: confirmed ? saved : null, ...(saved && !confirmed ? { issue: 'The saved default conversation is unconfirmed at its original location. Keep its original reference and refresh the same Mote.' } : {}) }
-      } catch (error) { return { spaceId: space.spaceId, content, quickMode: { status: 'unconfirmed' as const, message: message(error) }, conversation: null, issue: message(error) } }
+      } catch (error) { context.signal?.throwIfAborted(); return { spaceId: space.spaceId, content, quickMode: { status: 'unconfirmed' as const, message: message(error) }, conversation: null, issue: message(error) } }
     }))
+    context.signal?.throwIfAborted()
     const appearance = await Promise.all(catalog.spaces.map(async space => {
+      context.signal?.throwIfAborted()
       const choice = configuration.appearance.spaceObjectIcons?.[space.spaceId]
       const base = { spaceId: space.spaceId, ...(configurationIssue ? { issue: configurationIssue } : {}) }
       if (typeof choice === 'string') return { ...base, glyph: choice }
@@ -181,15 +192,17 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
               const workspace = configuration.workspaces.find(value => value.id === SCRATCH_WORKSPACE_ID && value.hostId === space.hostId)
               if (workspace) {
                 const read = await createHostMoteAvatarRead({ configurationPath: options.configurationPath }).read({ workspaceId: workspace.id, topicId: space.topicId, objectKey: space.spaceId })
+                context.signal?.throwIfAborted()
                 return { ...base, image: { dataUrl: read.image?.dataUrl ?? null, revision }, ...(read.issues.length ? { issue: read.issues.join('\n') } : {}) }
               }
-            } catch (error) { return { ...base, image: { dataUrl: null, revision }, issue: message(error) } }
+            } catch (error) { context.signal?.throwIfAborted(); return { ...base, image: { dataUrl: null, revision }, issue: message(error) } }
           }
           return { ...base, image: { dataUrl: null, revision } }
         }
       }
       return { ...base, ...(space.kind === 'folder' ? { preset: 'project' } : {}) }
     }))
+    context.signal?.throwIfAborted()
     return { agentPresentation: orderFocusPresentation(agentPresentation, resolveFocusRecentActivityHours(configuration.focus?.recentActivityHours) * 3_600_000), motePresentation, appearance }
   }
 }

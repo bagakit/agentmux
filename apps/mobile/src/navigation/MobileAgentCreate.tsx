@@ -45,16 +45,17 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
   useEffect(() => {
     if (!visible || !client?.forwardRpc || !connected) return
     let live = true
+    const controller = new AbortController()
     setDiscovery(null); setIssue({ message: '' })
     localForm.current.space = target.spaceId ?? ''; localForm.current.zone = target.zoneId ?? ''
     setSpace(target.spaceId ?? ''); setZone(target.zoneId ?? '')
-    void Promise.allSettled([client.forwardRpc('space.ls', { target: {}, presentation: true }), client.forwardRpc('settings.executors.ls', {})]).then(results => {
+    void Promise.allSettled([client.forwardRpc('space.ls', { target: {}, presentation: 'status' }, { signal: controller.signal }), client.forwardRpc('settings.executors.ls', {}, { signal: controller.signal })]).then(results => {
       if (!live) return
       const [spaces, resources] = results
       setDiscovery({ client, catalog: spaces.status === 'fulfilled' ? spaces.value.catalog : null, executors: resources.status === 'fulfilled' ? resources.value.items : [] })
       setIssue({ message: [...(resources.status === 'fulfilled' ? resources.value.issues?.map(issue => `${issue.id}: ${issue.message}`) ?? [] : []), ...results.flatMap(result => result.status === 'rejected' ? [String(result.reason instanceof Error ? result.reason.message : result.reason)] : [])].join('\n') })
     })
-    return () => { live = false }
+    return () => { live = false; controller.abort() }
   }, [client, connected, visible, target.spaceId, target.zoneId, target.tabId, target.regionId])
   const boundZones = catalog?.zones.filter(zone => catalog.bindings.some(binding => binding.spaceId === spaceId && binding.zoneId === zone.zoneId)) ?? []
   const targetTab = catalog?.tabs.find(tab => tab.tabId === target.tabId)

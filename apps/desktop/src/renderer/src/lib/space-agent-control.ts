@@ -468,7 +468,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     const selected = selectSpatialCatalog(catalog, target ?? {})
     const imageSpaceId = request.operation === 'space.inspect' ? target?.spaceId : undefined
     catalog = { ...selected,
-      ...(ports.agentPresentation && request.operation === 'space.ls' ? { agentPresentation: ports.agentPresentation(catalog) } : {}),
+      ...(ports.agentPresentation && request.operation === 'space.ls' && request.presentation === true ? { agentPresentation: ports.agentPresentation(catalog) } : {}),
       ...(ports.surveyPresentation && request.operation === 'space.ls' && !Object.values(target ?? {}).some(Boolean) ? { survey: ports.surveyPresentation(selected) } : {}) }
     if (ports.motePresentation) {
       try { catalog.motePresentation = ports.motePresentation(selected, topics) }
