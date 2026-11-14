@@ -1,6 +1,6 @@
 import { fixtureEpoch as _tailFixtureEpoch, fixturePath as _tailFixturePath } from "../../../../../test/fixture-values.mjs"
 import { createRoot } from 'react-dom/client'
-import { ClientUiProvider } from '@agentmux/client-ui'
+import { ClientUiProvider } from '@agentmux/client-ui/platform'
 import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import type { AgentMuxAgentSession, AgentSessionHistoryReadPage, AgentSessionUserMessage } from '@agentmux/core'
 import { MobileMailbox } from '../../../../mobile/src/conversation/MobileMailbox'

@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import { ClientUiProvider } from '@agentmux/client-ui'
+import { ClientUiProvider } from '@agentmux/client-ui/platform'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { GRAPHITE_THEME, mountThemeRuntime, updateObservedTheme } from '@agentmux/client-ui/theme'
 import { MobileMoteProfile } from '../../../src/navigation/MobileMoteProfile'

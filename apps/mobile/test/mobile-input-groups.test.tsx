@@ -5,7 +5,7 @@ import type { AgentInputMailboxItem, AgentInputMailboxPage } from '@agentmux/cor
 import type { AgentSessionHistoryPage, AgentSessionHistoryReadInput, AgentSessionHistoryReadPage, AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
 import { createNativeInputCorrelation } from '../../../packages/core/src/native-input-correlation'
 import { projectConversationReading } from '@agentmux/core/conversation'
-import { ClientUiProvider } from '@agentmux/client-ui'
+import { ClientUiProvider } from '@agentmux/client-ui/platform'
 import { MobileConversationHeaderFixture as MobileConversationSurface } from './conversation-header-fixture'
 import { MobileMailbox } from '../src/conversation/MobileMailbox'
 import { createBrowserPlatform } from '../src/platform/browser'

@@ -1,5 +1,5 @@
 import { act } from 'react'
-import { ClientUiProvider } from '@agentmux/client-ui'
+import { ClientUiProvider } from '@agentmux/client-ui/platform'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
 import { MobileMessageTools } from '../src/conversation/MobileMessageTools'
@@ -26,7 +26,7 @@ it('opens original Provider Commands directly from the collapsed composer and in
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'compact')
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  const choices = [...document.querySelectorAll<HTMLButtonElement>('.mobile-command-menu [role="menuitem"]')]
+  const choices = [...document.querySelectorAll<HTMLButtonElement>('.mobile-command-menu button[data-choice]')]
   expect(choices.length).toBeGreaterThan(0)
   const originalCommand = choices[0]!.querySelector('strong')!.textContent!
   await click(choices[0]!)
@@ -72,8 +72,8 @@ it('reads original custom Prompts on demand, distinguishes native collisions and
   expect(view.rpc).toHaveBeenCalledWith('settings.prompts.ls', {}, expect.objectContaining({ signal: expect.any(AbortSignal) }))
   expect(menu().textContent).toContain('Shortcuts'); expect(menu().querySelector('[role=group][aria-label="Agent commands"]')).not.toBeNull()
   expect(menu().textContent).toContain('原 Provider 专用'); expect(menu().textContent).not.toContain('另一 Provider 专用')
-  expect([...menu().querySelectorAll('[role=menuitem]')].filter(node => node.textContent?.includes('compact')).length).toBeGreaterThanOrEqual(2)
-  await click([...menu().querySelectorAll<HTMLButtonElement>('button[role=menuitem]')].find(node => node.textContent?.includes('整理依据'))!)
+  expect([...menu().querySelectorAll('button[data-choice]')].filter(node => node.textContent?.includes('compact')).length).toBeGreaterThanOrEqual(2)
+  await click([...menu().querySelectorAll<HTMLButtonElement>('button[data-choice]')].find(node => node.textContent?.includes('整理依据'))!)
   expect(editor(view.element)).toBe(original)
   expect(original.textContent).toContain('原草稿')
   expect(original.querySelector('[data-tool-reference]')?.getAttribute('title')).toBe('Expand prompt: 原提示词正文\n保留 $TOKEN 与引用。')

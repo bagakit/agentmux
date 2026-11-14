@@ -12,7 +12,7 @@ vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: ({ sur
   return <pre data-file-content>{document?.content}</pre>
 } }))
 import { ConversationFiles } from '@agentmux/client-ui/components/ConversationFiles'
-import { AgentMarkdown } from '@agentmux/client-ui'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { SessionActivityPresentation } from '../src/renderer/src/components/SessionActivityPresentation'
 import { executionHostProjection } from '../src/renderer/src/lib/region-execution-host'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'

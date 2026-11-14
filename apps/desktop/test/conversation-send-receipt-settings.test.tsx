@@ -22,13 +22,13 @@ import { createBrowserPlatform } from '../../mobile/src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../../mobile/src/recovery/device-workface'
 
 // Add a read-only witness inside the original Provider; preserve every original child and adapter.
-vi.mock('@agentmux/client-ui', async importOriginal => {
-  const actual = await importOriginal<typeof import('@agentmux/client-ui')>()
+vi.mock('@agentmux/client-ui/platform', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/client-ui/platform')>()
   function Witness() {
     const platform = actual.useClientUiPlatform()
     return <output data-send-receipt-context>{JSON.stringify([platform.conversationShowSendReceipts, platform.conversationConfirmedSendReceipt])}</output>
   }
-  return { ...actual, ClientUiProvider: ({ children, platform }: { children: ReactNode; platform: import('@agentmux/client-ui').ClientUiPlatform }) =>
+  return { ...actual, ClientUiProvider: ({ children, platform }: { children: ReactNode; platform: import('@agentmux/client-ui/platform').ClientUiPlatform }) =>
     <actual.ClientUiProvider platform={platform}><Witness />{children}</actual.ClientUiProvider> }
 })
 

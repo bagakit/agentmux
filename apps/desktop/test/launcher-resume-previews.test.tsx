@@ -2,8 +2,8 @@ const { fixturePath: _reshape_fixturePath, fixtureEpoch: _reshape_fixtureEpoch }
 // @vitest-environment happy-dom
 import { act } from 'react'
 const renders = vi.hoisted(() => ({ messages: 0 }))
-vi.mock('@agentmux/client-ui', async importOriginal => {
- const actual = await importOriginal<typeof import('@agentmux/client-ui')>()
+vi.mock('@agentmux/client-ui/components/ConversationMessage', async importOriginal => {
+ const actual = await importOriginal<typeof import('@agentmux/client-ui/components/ConversationMessage')>()
  return { ...actual, ConversationMessage: (props: import('@agentmux/client-ui/components/ConversationMessage').ConversationMessageProps) => {
   renders.messages += 1
   return <actual.ConversationMessage {...props} />
