@@ -145,6 +145,29 @@ async function fixture() {
     loseReply: () => { loseReply = true }, connect: () => { Reflect.set(client, 'connected', true) } }
 }
 
+it.each(['same Run', 'new Run'])('rechecks the original input after its first queue write fails with %s', async target => {
+  const h = await fixture(), id = 'write-refused'
+  const write = vi.spyOn(h.queue, 'savePromptInput').mockRejectedValueOnce(Object.assign(
+    new Error('Original journal write failed'), { code: 'MESSAGE_QUEUE_UNAVAILABLE' }))
+  const { authorHuman: _authorHuman, ...original } = h.input(id)
+  const submit = () => h.rpc.call('agent.input.submit', original)
+  await expect(submit()).rejects.toMatchObject({ code: 'MESSAGE_QUEUE_UNAVAILABLE' })
+  expect(await h.read(id)).toBeUndefined()
+  if (target === 'same Run') {
+    await expect(submit()).resolves.toMatchObject({ key: h.key(id), input: { persistence: 'confirmed' } })
+    expect(write).toHaveBeenCalledTimes(2)
+  } else {
+    const resumed = await h.resumeFacts()
+    await expect(submit()).rejects.toMatchObject({
+      code: 'STALE_AGENT_SESSION', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 },
+      detail: JSON.stringify({ stage: 'before-save', expectedRunId: h.original.run.runId, currentRunId: resumed.run.runId })
+    })
+    expect(await h.read(id)).toBeUndefined()
+    expect(write).toHaveBeenCalledOnce()
+  }
+  expect(h.writes).not.toHaveBeenCalled()
+})
+
 it('first delivers a retained human input on the verified resumed Session and exposes the actual admission through the original RPC key', async () => {
   const h = await fixture(), saved = await h.save('accepted-human'), resumed = await h.resumeFacts()
   await h.wake()

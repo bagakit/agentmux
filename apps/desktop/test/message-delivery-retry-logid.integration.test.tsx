@@ -374,6 +374,53 @@ it('offers stale-Run Send for an unknown old operation but preserves its exact c
   expect(submit).not.toHaveBeenCalled()
 })
 
+it('recovers the original draft after a queue write failure and a Run change without sending again', async () => {
+  const initial = composerSession(), run = initial.control.run
+  const replacement = { ...initial, control: { ...initial.control, run: { runId: 'resumed-run' } } }
+  const binding = { admissionIntent: { kind: 'manual-actor' as const }, expectedRun: run }
+  const storageFailure = Object.assign(new Error('Unable to open database file'), { code: 'MESSAGE_QUEUE_UNAVAILABLE' })
+  const stale = Object.assign(new Error('The original input Run changed before saving.'), {
+    code: 'STALE_AGENT_SESSION', detail: JSON.stringify({ stage: 'before-save', expectedRunId: run.runId, currentRunId: 'resumed-run' }),
+    controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 }
+  })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(storageFailure).mockRejectedValueOnce(stale)
+  useAppStore.setState({ agentComposerDrafts: { [sid]: 'Existing draft' }, agentSteerQueues: { [sid]: [
+    entry(originalOp, { promptCondition: null, directInputBinding: binding, directInputControl: initial.control })
+  ] } })
+  await dom.render(<AgentSessionComposer sessionId={sid} />)
+  await click(action(card(), '立即发送这条待发消息'))
+  await settled(() => expect(original().errorCode).toBe('MESSAGE_QUEUE_UNAVAILABLE'))
+  expect(messageDeliveryDiagnostics.get(original().logId!)?.record).toMatchObject({
+    expectedRunId: run.runId, conditionAvailable: false, operationId: originalOp
+  })
+  await act(async () => useAppStore.setState({ sessions: [replacement] }))
+  await click(action(card(), '立即发送这条待发消息'))
+  await settled(() => expect(original().errorCode).toBe('STALE_AGENT_SESSION'))
+  expect(submit.mock.calls.map(args => [args[0], args[2], args[3]])).toEqual([
+    [initial.control, originalOp, binding], [initial.control, originalOp, binding]
+  ])
+  const logId = original().logId!
+  expect(messageDeliveryDiagnostics.get(logId)?.record).toMatchObject({
+    expectedRunId: run.runId, error: { code: 'STALE_AGENT_SESSION', detail: stale.detail }
+  })
+  expect(card().textContent).toContain('消息绑定的 Run 已变更')
+  expect(card().querySelector('button[aria-label="立即发送这条待发消息"]')).toBeNull()
+  await showMailbox()
+  expect(row().querySelector('button[aria-label="Send queued message immediately"]')).toBeNull()
+  vi.mocked(api.sessions.inspectInput).mockRejectedValueOnce(new Error('Original journal temporarily unavailable'))
+  await click(action(row(), '移至草稿'))
+  await settled(() => expect(original().archived).toBeUndefined())
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Existing draft')
+  await click(action(row(), '移至草稿'))
+  await settled(() => expect(original()).toMatchObject({
+    archived: true, movedToDraft: true, operationId: originalOp, text: body, runId: run.runId, logId, inputIntakeStarted: true
+  }))
+  expect(api.sessions.inspectInput).toHaveBeenLastCalledWith(initial.control,
+    { kind: 'prompt', agentSessionId: sid, expectedRun: run, submissionId: originalOp })
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe(`Existing draft\n\n${body}`)
+  expect(submit).toHaveBeenCalledTimes(2)
+})
+
 it('shows actual copy failure before success and keeps an old unknown operation unknown despite this-call CF0', async () => {
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(refusal('read-only preparation refused'))
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('clipboard refused')).mockResolvedValue()
