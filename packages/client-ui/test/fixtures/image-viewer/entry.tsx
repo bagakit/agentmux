@@ -7,6 +7,7 @@ import { InlineComposer } from '../../../src/components/InlineComposer.js'
 import { ConversationView } from '../../../src/components/ConversationView.js'
 import { projectConversationReading } from '../../../src/lib/conversation-records.js'
 import { mountThemeRuntime, updateThemeSelection } from '../../../src/theme/runtime.js'
+import { ImageContent } from '../../../../../packages/editor-extensions/src/ui/ImageContent'
 import type { AgentSessionHistoryPage, AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 import '../../../src/styles/index.css'
 import '../../../../../apps/desktop/src/renderer/src/styles/tokens.css'
@@ -63,6 +64,9 @@ function Scene() {
     <section id="draft"><h2>Original editable draft</h2><InlineComposer value={draft} onValueChange={setDraft} disabled={false} placeholder="Message" aria-label="Image draft" readPastedImage={readImage} onKeyDown={() => {}} /></section>
     <section id="native"><ConversationView sessionId={nativePage.agentSessionId} executionHostId="local" readHistoryResource={nativeRead}
       page={nativePage} records={nativeReading.records} originalRecords={nativeReading.originalRecords} coverage={nativeReading.timeline.coverage} /></section>
+    <section id="file"><h2>Original file preview</h2><div style={{ height: 460 }}>
+      <ImageContent src={images[0]!.dataUrl} name="architecture.png" />
+    </div></section>
   </main></ClientUiProvider>
 }
 createRoot(document.getElementById('root')!).render(<Scene />)

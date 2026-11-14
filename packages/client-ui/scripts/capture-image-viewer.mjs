@@ -32,6 +32,8 @@ try {
       for (const path of this.getWatchFiles()) if (path.startsWith(root + sep) && !path.includes('/node_modules/') && path.endsWith('.css')) source[relative(root, path)] = hash(await readFile(path))
     } }] })
   assert.ok(source['packages/client-ui/src/styles/conversation-image.css'], 'The actual owning image CSS must be captured')
+  assert.ok(source['packages/editor-extensions/src/ui/ImageContent.tsx'], 'The actual file image consumer must be captured')
+  assert.ok(source['packages/client-ui/src/lib/use-image-pan.ts'], 'The shared pan implementation must be loaded')
   for (const name of ['capture-image-viewer.mjs', 'image-viewer-electron.cjs']) {
     const path = resolve(root, 'packages/client-ui/scripts', name); source[relative(root, path)] = hash(await readFile(path))
   }
