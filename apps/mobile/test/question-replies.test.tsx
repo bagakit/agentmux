@@ -263,3 +263,28 @@ it('mounted mobile retains selected-target drafts and original operations when c
   expect(button(view.element, '继续原发送')).toBeDefined()
   expect(f.reply).not.toHaveBeenCalled(); expect(attempt()).toEqual(held)
 })
+
+it('MobileApp retains the original question and answers when a different operation receipt arrives', async () => {
+  const f = questionFixture()
+  const foreign = (input: Parameters<AgentMuxHostedClient['replySessionQuestion']>[0]) => ({
+    agentSessionId: input.agentSessionId, source: input.source, recordId: input.recordId,
+    questionIds: input.answers.map(answer => answer.questionId), operationId: 'foreign-operation', outcome: 'submitted' as const
+  })
+  f.reply.mockImplementationOnce(async input => foreign(input))
+  await getDeviceWorkface().updateNavigation({ selectedSessionId: sid, hostUrl: '', panel: 'conversation' })
+  const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} />)
+  await click(button(view.element, 'Keep original')); await type(view.element, 'Exact original answer')
+  await click(button(view.element, '发送答案'))
+  const original = f.reply.mock.calls[0]![0]
+  expect(attempt()).toMatchObject({ phase: 'unknown', input: { ...target, operationId: original.operationId, answers: original.answers } })
+  expect(view.element.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('unknown')
+  expect(view.element.textContent).toContain('原始问题正文')
+  await type(view.element, 'Independent later draft')
+  await click(button(view.element, '继续原发送'))
+  expect(f.reply.mock.calls).toEqual([[original], [original]])
+  expect(attempt().phase).toBe('submitted')
+  expect(view.element.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('submitted')
+  expect(record().questionDrafts[0][1]).toContainEqual({ questionId: 'second', answer: 'Independent later draft' })
+  expect(f.submit).not.toHaveBeenCalled()
+  expect(f.write).not.toHaveBeenCalled()
+})

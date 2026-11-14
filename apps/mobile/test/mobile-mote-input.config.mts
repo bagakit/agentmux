@@ -20,6 +20,12 @@ const mutations: Record<string, { file: string; before: string; after: string }>
   'question-source': { file: '/src/conversation/question-replies.ts', before: '...(moteSource ? { moteSource } : {})', after: '...{}' },
   'permission-source': { file: '/src/conversation/MobileConversationSurface.tsx', before: 'getMoteSource={() => moteSource}', after: 'getMoteSource={() => undefined}' },
   'recipient-source': { file: '/src/conversation/mote-input-source.ts', before: '!recipient || recipient !== identityRecipient || !identity?.mote', after: '!recipient || !identity?.mote' },
+  'question-receipt-unchecked': { file: '/client-ui/src/lib/conversation-question-reply.ts',
+    before: 'if (!questionReplyReceiptMatches(sessionId, attempt.input, receipt))', after: 'if (false)' },
+  'permission-completion-from-saved': { file: '/src/conversation/use-mobile-interaction-controller.ts',
+    before: 'const phase = interactionReceiptPhase(receipt)', after: "const phase = receipt.nativeCompleted ? 'completed' : interactionReceiptPhase(receipt)" },
+  'permission-foreign-receipt': { file: '/src/conversation/use-mobile-interaction-controller.ts',
+    before: 'if (!agentInteractionOperationReceiptMatches(input, receipt))', after: 'if (false)' },
   'permission-retry': { file: '/src/conversation/use-mobile-interaction-controller.ts', before: 'const priorInput = previous?.original?.input', after: 'const priorInput = false ? previous?.original?.input : undefined' }
 }
 const name = process.env.AGENTMUX_TEST_MOBILE_MOTE_MUTATION

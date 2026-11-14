@@ -69,13 +69,13 @@ describe('one shared conversation composition with explicit client IO', () => {
     expect(element.textContent).toContain('完整消息')
     await click(button(element, 'Copy message'))
     expect(copy).toHaveBeenNthCalledWith(1, '完整消息', expect.any(Function))
-    expect(element.textContent).toContain('Copy failed')
+    expect(element.textContent).toContain('clipboard unavailable · Retry Copy')
     await click(button(element, 'Copy message'))
     expect(copy).toHaveBeenNthCalledWith(2, '完整消息', expect.any(Function))
-    expect(element.textContent).not.toContain('Copy failed')
+    expect(element.textContent).not.toContain('Retry Copy')
   })
 
-  it('submits the original request option once and waits for authoritative confirmation', async () => {
+  it('submits the original request option once and marks an absent receipt unknown', async () => {
     const request: AgentMuxInteractionRequest = {
       kind: 'permission', id: 'request-original', agentSessionId: 'session-original', title: 'Allow write?',
       options: [{ id: 'allow-write', label: 'Allow once', kind: 'allow-once' }, { id: 'deny', label: 'Deny', kind: 'reject-once' }],
@@ -88,7 +88,8 @@ describe('one shared conversation composition with explicit client IO', () => {
       operationId: expect.stringMatching(/\S/u), expectedRequest: request
     })
     expect(respond.mock.calls[0]![1].expectedRequest).not.toBe(request)
-    expect(element.textContent).toContain('Waiting for confirmation')
+    expect(element.textContent).toContain('Delivery unknown')
+    expect(element.textContent).not.toContain('Answer sent')
     expect([...element.querySelectorAll('button')]).toHaveLength(3)
     expect([...element.querySelectorAll('button')].map(candidate => candidate.disabled)).toEqual([true, true, true])
     await click(button(element, 'Allow once'))

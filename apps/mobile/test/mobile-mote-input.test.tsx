@@ -235,3 +235,54 @@ it.each([source, undefined])('a cold refused permission retry keeps its entire o
   await click(button(view.element, 'Original option'))
   expect(f.respond).toHaveBeenCalledExactlyOnceWith(original)
 })
+
+it.each(['saved', 'unknown'] as const)('the original Mote permission distinguishes %s from native completion through read-only inspection', async delivery => {
+  const f = fixture(), original = session()
+  original.pendingInteraction = { request: { kind: 'permission', agentSessionId: sid, id: 'original-permission',
+    title: 'Original permission', evidence, permissionHook: { receiptId: 'original-hook' },
+    options: [{ id: 'exact-allow', label: 'Original option', kind: 'allow-once' }] } }
+  f.sessions.set(sid, original)
+  await getDeviceWorkface().updatePresentation({ selectedSessionId: sid, hostUrl: '', panel: 'conversation' },
+    { primary: 'mote', showSession: true, showGoalWork: false, identity, profile: null })
+  f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => method === 'space.ls' || method === 'space.inspect'
+    ? { catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [], agentPresentation: [] } }
+    : { agents: [], workspaces: [], projects: [], executors: [], unavailable: [], goals: [], topics: [], categories: [] })
+  f.respond.mockImplementationOnce(async input => {
+    expect(record().responses[0]?.[1]).toMatchObject({ phase: 'sending', original: { input: { operationId: input.operationId, moteSource: source } } })
+    return { agentSessionId: input.agentSessionId, operationId: input.operationId, run: input.expectedRun,
+      expectedRequest: input.expectedRequest, response: input.response, delivery, nativeAdoption: 'unknown', nativeCompleted: evidence }
+  })
+  const inspect = vi.fn<AgentMuxHostedClient['inspectAgentInteractionOperation']>()
+  f.client.inspectAgentInteractionOperation = inspect
+  const app = <MobileApp client={f.client} connection={connected} platform={platform} />
+  const view = await mount(app)
+  await click(button(view.element, 'Original option'))
+  const input = f.respond.mock.calls[0]![0]
+  const exact = { agentSessionId: sid, operationId: input.operationId, run: input.expectedRun,
+    expectedRequest: input.expectedRequest, response: input.response, delivery: 'hook-written' as const,
+    nativeAdoption: 'unknown' as const, nativeCompleted: evidence }
+  expect(input.moteSource).toEqual(source)
+  expect(view.element.textContent).toContain(delivery === 'saved' ? '答复已保存' : '还没确认答复是否送达')
+  expect(view.element.textContent).not.toContain('这个请求已完成')
+  expect(view.element.querySelector('[data-request-id="original-permission"]')?.getAttribute('data-completed')).toBe('false')
+  inspect.mockResolvedValueOnce({ ...exact, operationId: 'other-operation' }).mockResolvedValueOnce(exact)
+  await click(button(view.element, '查询答复结果'))
+  expect(view.element.textContent).toContain('没有查到答复结果')
+  expect(view.element.querySelector('[data-request-id="original-permission"]')?.getAttribute('data-completed')).toBe('false')
+  await click(button(view.element, '查询答复结果'))
+  expect(inspect.mock.calls).toEqual([[{ agentSessionId: sid, operationId: input.operationId }], [{ agentSessionId: sid, operationId: input.operationId }]])
+  expect(view.element.querySelector('[data-request-id="original-permission"]')?.getAttribute('data-completed')).toBe('true')
+  expect(view.element.textContent).toContain('这个请求已完成')
+  expect(f.respond).toHaveBeenCalledOnce()
+  expect(record().responses[0]?.[1]).not.toHaveProperty('receipt')
+  expect(createLocalDrafts().responses.values().next().value).not.toHaveProperty('receipt')
+  await view.render(<div />)
+  await view.render(app)
+  expect(view.element.textContent).not.toContain('这个请求已完成')
+  expect(view.element.querySelector('[data-request-id="original-permission"]')?.getAttribute('data-completed')).toBe('false')
+  inspect.mockResolvedValueOnce(exact)
+  await click(button(view.element, '查询答复结果'))
+  expect(inspect).toHaveBeenLastCalledWith({ agentSessionId: sid, operationId: input.operationId })
+  expect(view.element.textContent).toContain('这个请求已完成')
+  expect(f.respond).toHaveBeenCalledOnce()
+})
