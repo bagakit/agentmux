@@ -21,7 +21,7 @@ import { deliverContinuousProgress } from '../src/continuous-progress-delivery.j
 const closes: Array<() => Promise<unknown> | void> = []
 async function evidence(name: string, value: unknown) { if (process.env.MOTE_SOURCE_EVIDENCE) { await mkdir(process.env.MOTE_SOURCE_EVIDENCE, { recursive: true }); await writeFile(join(process.env.MOTE_SOURCE_EVIDENCE, name + '.json'), JSON.stringify(value, null, 2) + '\n') } }
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
-async function fixture() {
+async function fixture(options: { loseDeliveryReceipt?: boolean } = {}) {
   const h = await rpcOwnerFixture(['main', 'stranger'], core)
   closes.push(h.close)
   for (const id of ['main', 'stranger']) {
@@ -53,7 +53,10 @@ async function fixture() {
   const files = createHostContent({ configurationPath, spatial, storage }).files!, main = createHostMoteMainReader({ configurationPath, spatial, files })
   const runtime = createGoalRuntime({ clients: h.coreClients, checkIn: async () => ({ known: false, reason: 'Unused' }) })
   const store = new ContinuousProgressLoopStore(join(h.root, 'loops.json'))
-  const manager = new ContinuousProgressLoopManager(store, (loop, op, current, signal) => deliverContinuousProgress(runtime, loop, op, current, signal), () => now, (loop, id, at, signal) => runtime.observeContinuousProgress(loop, id, at, signal), runtime)
+  const manager = new ContinuousProgressLoopManager(store, async (loop, op, current, signal) => {
+    const outcome = await deliverContinuousProgress(runtime, loop, op, current, signal)
+    return outcome === 'sent' && options.loseDeliveryReceipt ? 'unknown' : outcome
+  }, () => now, (loop, id, at, signal) => runtime.observeContinuousProgress(loop, id, at, signal), runtime)
   closes.push(() => manager.stop())
   const presence = createHostMotePresence({ configurationPath, spatial, files, main, schedules: manager, clients: h.coreClients })
   closes.push(() => presence.dispose())
@@ -166,6 +169,30 @@ it('a failed exact input read remains isolated to that inspection and recovers o
   expect(h.manager.inspectLoop(loop.loopId)?.status).toBe('active')
   read.mockRestore()
   expect((await h.manager.call('schedule.inspect', { scheduleId: loop.loopId })).input).toEqual(known)
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('the original Mote schedule recovers a lost Host acknowledgement from Core and exposes that occurrence through the actual CLI', async () => {
+  const h = await fixture({ loseDeliveryReceipt: true }), due = h.loop.nextCheckAt
+  h.at(due)
+  await h.manager.check(due)
+  const held = h.manager.inspectLoop(h.loop.loopId)!
+  expect(held).toMatchObject({ status: 'paused', pause: { reason: 'input-unconfirmed' }, pendingCompletion: { operationId: held.lastInputRef?.inputKey.submissionId } })
+  const reference = held.lastInputRef!
+  const before = (await h.client.statusAgent('main')).run.acceptedInputBytes
+  expect(before).toBeGreaterThan(0)
+
+  await h.manager.check(due)
+  const service = new core.AgentMuxRpcService({ coreClients: h.coreClients, schedules: h.manager }); closes.push(() => service.dispose())
+  const probe = new ObjectCliProbe(request => service.call(request.method as any, request.params as any, { caller: h.credentials })); await probe.start(); closes.push(() => probe.stop())
+  const cli = await runSourceObjectCli(['--endpoint', 'unix:' + probe.socketPath, 'schedule', 'inspect', '--data', '-'], probe.environment(), JSON.stringify({ scheduleId: h.loop.loopId }))
+  expect(cli.code, cli.stderr).toBe(0)
+  const readback = JSON.parse(cli.stdout).result
+  expect(readback).toMatchObject({ schedule: { loopId: h.loop.loopId, status: 'active', revision: h.loop.revision, lastInputRef: reference, lastOutcome: 'sent', lastOccurrenceAt: due, nextCheckAt: due + 60_000 },
+    input: { reference, status: 'confirmed', delivery: 'terminal-confirmed', nativeResult: { state: 'unsupported' } } })
+  expect(readback.schedule.pendingCompletion).toBeUndefined()
+  expect((await h.store.load()).find(loop => loop.loopId === h.loop.loopId)).toEqual(readback.schedule)
+  expect((await h.client.statusAgent('main')).run.acceptedInputBytes).toBe(before)
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 

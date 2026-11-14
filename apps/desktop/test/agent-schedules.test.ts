@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { nextCalendarOccurrence, latestCalendarOccurrence } from '@agentmux/core/schedule-calendar'
 import { ContinuousProgressLoopManager, type LoopTickHandler, type LoopObservationProvider, type FutureProgressInputOwner } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
-import { observeAgent, type ContinuousProgressLoop, type AgentMuxRpcCallContext, type AgentMuxPendingInteraction } from '@agentmux/core'
+import { observeAgent, type ContinuousProgressInputReading, type ContinuousProgressLoop, type AgentMuxRpcCallContext, type AgentMuxPendingInteraction } from '@agentmux/core'
 import { parseAgentScheduleCalendar, type AgentScheduleCalendar } from '../../../packages/core/src/agent-schedule.js'
 import { parseScheduleRpcParams, parseScheduleRecord, validateScheduleRpcResult } from '../../../packages/core/src/public-rpc-schedules.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -21,18 +21,26 @@ const stamp = (text: string) => Date.parse(text)
 const managers: ContinuousProgressLoopManager[] = [], dirs: string[] = []
 afterEach(async () => { await Promise.all(managers.splice(0).map(m => m.stop())); await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))) })
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r }); return { promise, resolve } }
-async function owner(onTick: LoopTickHandler = async () => 'sent', save = async (_loop: ContinuousProgressLoop, _active: boolean, _context?: AgentMuxRpcCallContext) => {}, authorize = async () => {}) {
+async function owner(onTick: LoopTickHandler = async () => 'sent', save = async (_loop: ContinuousProgressLoop, _active: boolean, _context?: AgentMuxRpcCallContext) => {}, authorize = async () => {}, inspectInput?: FutureProgressInputOwner['inspectInput']) {
   const dir = await mkdtemp(_hygiene_fixturePath("tmp/am-schedule-unit-")); dirs.push(dir)
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
   const intents: Record<string, { operationId: string; prompt: string; message: { userContent: string }; active: boolean }> = {}
   let now = stamp(_hygiene_fixtureIso(24134400000, "second")), occupied = false, working = false, permission = false, missing = false
-  const manager = new ContinuousProgressLoopManager(store, onTick, () => now, async (loop, tickId) => {
+  const observe: LoopObservationProvider = async (_loop, tickId) => {
     const status = { state: working ? 'working' as const : 'done' as const, source: 'native-hook' as const, observedAt: 1 }
     return { session: { ...target, run: { runId: 'run' }, promptCompletionAdmission: { submissionId: 'old-input', completionId: '["run",1]', operationId: 'old-input', startByte: 0, endByte: 1 }, semanticStatus: status, futurePromptIntents: intents, ...(permission ? { pendingInteraction: pendingPermission } : {}) },
       observation: observeAgent({ process: 'running', status, timelineCapability: 'complete-events', awaitingRequest: permission, terminalCapabilityUnverified: false }, now), inputOccupied: occupied, inputByte: missing ? null : 0, tickId, now }
-  }, { saveFutureIntent: async (loop, active, context) => { await save(loop, active, context); intents[loop.futureIntentId!] = { operationId: loop.creationOperationId!, prompt: loop.prompt, message: { userContent: loop.prompt }, active } }, authorizeFutureIntent: authorize })
-  managers.push(manager)
-  return { manager, store, reload: () => new ContinuousProgressLoopStore(join(dir, 'loops.json')).load(), set: (values: { now?: number; occupied?: boolean; working?: boolean; permission?: boolean; missing?: boolean }) => { if (values.now !== undefined) now = values.now; if (values.occupied !== undefined) occupied = values.occupied; if (values.working !== undefined) working = values.working; if (values.permission !== undefined) permission = values.permission; if (values.missing !== undefined) missing = values.missing } }
+  }
+  const inputs: FutureProgressInputOwner = { saveFutureIntent: async (loop, active, context) => { await save(loop, active, context); intents[loop.futureIntentId!] = { operationId: loop.creationOperationId!, prompt: loop.prompt, message: { userContent: loop.prompt }, active } }, authorizeFutureIntent: authorize,
+    ...(inspectInput ? { inspectInput, inspectFutureIntent: async (loop: ContinuousProgressLoop) => ({ active: intents[loop.futureIntentId!]?.active === true }) } : {}),
+    observeCheckIn: async (_target, at) => ({ known: true, human: { id: 'original-human', createdAt: at - 36 * 3_600_000 } }) }
+  const open = (storage: ContinuousProgressLoopStore) => {
+    const manager = new ContinuousProgressLoopManager(storage, onTick, () => now, observe, inputs)
+    managers.push(manager)
+    return manager
+  }
+  const manager = open(store)
+  return { manager, store, reopen: () => open(new ContinuousProgressLoopStore(join(dir, 'loops.json'))), reload: () => new ContinuousProgressLoopStore(join(dir, 'loops.json')).load(), set: (values: { now?: number; occupied?: boolean; working?: boolean; permission?: boolean; missing?: boolean }) => { if (values.now !== undefined) now = values.now; if (values.occupied !== undefined) occupied = values.occupied; if (values.working !== undefined) working = values.working; if (values.permission !== undefined) permission = values.permission; if (values.missing !== undefined) missing = values.missing } }
 }
 
 describe('civil calendar', () => {
@@ -108,9 +116,11 @@ describe('original schedule owner', () => {
       managedSource: { sourceId: 'original-care', revision: 'original-role' } })
     h.set({ now: schedule.nextCheckAt })
     const save = h.store.save.bind(h.store), entered = deferred(), release = deferred()
+    let interrupted = false
     const fault = vi.spyOn(h.store, 'save').mockImplementation(async loops => {
       await save(loops)
-      if (loops.some(loop => loop.loopId === schedule.loopId && loop.pendingCompletion)) {
+      if (!interrupted && loops.some(loop => loop.loopId === schedule.loopId && loop.pendingCompletion)) {
+        interrupted = true
         entered.resolve()
         await release.promise
         throw Object.assign(new Error('Original directory sync unconfirmed after replacing the file'), { code: 'ENOSPC' })
@@ -473,6 +483,110 @@ describe('minute repeating schedule', () => {
     await h.manager.check(due + 600_000)
     expect(operations).toEqual([operations[0], operations[0]])
     expect(h.manager.list()[0]).toMatchObject({ status: 'active', nextCheckAt: due + 660_000, lastOccurrenceAt: due })
+  })
+
+  it.each(['terminal-confirmed', 'native-admitted', 'not-applied'] as const)('settles the original %s receipt after Host restart without sending it again', async delivery => {
+    const dispatched = vi.fn<LoopTickHandler>().mockResolvedValueOnce('unknown').mockResolvedValue('sent')
+    let foreign = true
+    const read = vi.fn<NonNullable<FutureProgressInputOwner['inspectInput']>>(async loop => {
+      const reference = loop.lastInputRef!
+      return { reference: foreign ? { ...reference, preparedAt: reference.preparedAt + 1 } : reference, status: 'confirmed', delivery, nativeResult: { state: 'unknown' } }
+    })
+    const h = await owner(dispatched, undefined, undefined, read)
+    const { schedule } = await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'original', operationId: 'receipt-create' })
+    const due = schedule.nextCheckAt
+    h.set({ now: due }); await h.manager.check()
+    const held = h.manager.list()[0]!
+    expect(held.pendingCompletion).toBeDefined()
+    expect(dispatched).toHaveBeenCalledTimes(1)
+    await h.manager.stop()
+
+    const restored = h.reopen()
+    await restored.start()
+    await restored.check()
+    expect(read).toHaveBeenCalledOnce()
+    expect(restored.list()[0]).toEqual(held)
+    foreign = false
+    h.set({ now: due + 1_000 })
+    await restored.check()
+    expect(dispatched).toHaveBeenCalledTimes(1)
+    const applied = delivery !== 'not-applied'
+    expect(restored.list()[0]).toMatchObject({ loopId: schedule.loopId, status: 'active', nextCheckAt: due + 60_000,
+      lastInputRef: held.lastInputRef, lastOutcome: applied ? 'sent' : 'skipped' })
+    expect(restored.list()[0]!.pendingCompletion).toBeUndefined()
+    expect(restored.list()[0]!.lastOccurrenceAt).toBe(applied ? due : undefined)
+    expect(await h.reload()).toEqual(restored.list())
+    h.set({ now: due + 60_000 }); await restored.check()
+    expect(dispatched).toHaveBeenCalledTimes(2)
+    expect(dispatched.mock.calls[1]![1]).not.toBe(dispatched.mock.calls[0]![1])
+  })
+
+  it('keeps the user pause when the original receipt arrives after the pause', async () => {
+    const dispatched = vi.fn<LoopTickHandler>().mockResolvedValue('unknown')
+    const entered = deferred(), release = deferred()
+    const h = await owner(dispatched, undefined, undefined, async loop => {
+      entered.resolve(); await release.promise
+      return { reference: loop.lastInputRef!, status: 'confirmed', delivery: 'terminal-confirmed', nativeResult: { state: 'unknown' } }
+    })
+    const { schedule } = await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'original', operationId: 'late-receipt' })
+    h.set({ now: schedule.nextCheckAt }); await h.manager.check()
+    const checking = h.manager.check()
+    try {
+      await entered.promise
+      await h.manager.call('schedule.pause', { scheduleId: schedule.loopId, expectedRevision: 1, operationId: 'user-pause' })
+    } finally { release.resolve(); await checking }
+    expect(dispatched).toHaveBeenCalledOnce()
+    expect((await h.reload())[0]).toMatchObject({ status: 'paused', pause: { reason: 'manual' }, revision: 2 })
+  })
+
+  it('lets a due arrangement of the same Agent send while an old receipt read is held', async () => {
+    const dispatched = vi.fn<LoopTickHandler>().mockResolvedValueOnce('unknown').mockResolvedValue('sent')
+    const entered = deferred(), release = deferred()
+    const h = await owner(dispatched, undefined, undefined, async () => { entered.resolve(); await release.promise; return undefined })
+    const first = (await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'first', operationId: 'inspect-held' })).schedule
+    const second = (await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'second', operationId: 'independent-due' })).schedule
+    h.set({ now: first.nextCheckAt }); await h.manager.check(first.nextCheckAt, first.loopId)
+    const checking = h.manager.check()
+    try {
+      await entered.promise
+      await vi.waitFor(() => expect(dispatched).toHaveBeenCalledTimes(2), { timeout: 500 })
+      expect(dispatched.mock.calls[1]?.[0].loopId).toBe(second.loopId)
+      expect(h.manager.inspectLoop(first.loopId)?.status).toBe('paused')
+    } finally { release.resolve(); await checking }
+  })
+
+  it('allows the next scheduled follow-up when the previous one was explicitly not applied', async () => {
+    const dispatched = vi.fn<LoopTickHandler>().mockResolvedValueOnce('unknown').mockResolvedValue('sent')
+    const h = await owner(dispatched, undefined, undefined, async loop => ({
+      reference: loop.lastInputRef!, status: 'confirmed', delivery: 'not-applied', nativeResult: { state: 'unknown' },
+    }))
+    const { schedule } = await h.manager.call('schedule.create', { target, calendar: rules('daily'), prompt: 'check the original work', operationId: 'followup-create',
+      checkIn: { silenceMs: 18 * 3_600_000, minIntervalMs: 20 * 3_600_000, dailyBudget: 1, quiet: { start: _hygiene_fixtureClock(22, 0), end: _hygiene_fixtureClock(8, 0) } } }, { principal: { kind: 'user', id: 'original-human' } })
+    const due = schedule.nextCheckAt
+    h.set({ now: due }); await h.manager.check()
+    expect(h.manager.inspectLoop(schedule.loopId)?.checkInState?.unanswered?.claimAt).toBe(due)
+    await h.manager.check()
+    const settled = h.manager.inspectLoop(schedule.loopId)!
+    expect(settled.checkInState).toMatchObject({ lastClaimAt: due, budgetUsed: 1 })
+    expect(settled.checkInState!.unanswered).toBeUndefined()
+    h.set({ now: settled.nextCheckAt }); await h.manager.check()
+    expect(dispatched).toHaveBeenCalledTimes(2)
+    expect(h.manager.inspectLoop(schedule.loopId)?.lastOutcome).toBe('sent')
+  })
+
+  it('retains the original one-shot occurrence when the exact receipt confirms it was not applied', async () => {
+    const dispatched = vi.fn<LoopTickHandler>().mockResolvedValue('unknown')
+    const read = vi.fn(async (loop: ContinuousProgressLoop): Promise<ContinuousProgressInputReading> => ({
+      reference: loop.lastInputRef!, status: 'confirmed', delivery: 'not-applied', nativeResult: { state: 'unknown' },
+    }))
+    const h = await owner(dispatched, undefined, undefined, read)
+    const { schedule } = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'original', operationId: 'one-shot-receipt' })
+    h.set({ now: schedule.nextCheckAt }); await h.manager.check()
+    const prior = h.manager.list()[0]
+    await h.manager.check()
+    expect(read).toHaveBeenCalledOnce()
+    expect(dispatched).toHaveBeenCalledOnce()
+    expect(h.manager.list()[0]).toEqual(prior)
   })
   it('rejects ambiguous or non-minute repetition at the public request boundary', () => {
     for (const timing of [{ everyMs: 59_999 }, { everyMs: 60_001 }, { everyMs: 0 }, { everyMs: 60_000, afterMs: 60_000 }, { everyMs: 60_000, calendar: rules('daily') }, { everyMs: 60_000, checkIn: {} }]) {
