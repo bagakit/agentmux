@@ -10,8 +10,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const evidence = join(root, '.local/hook-durability/codex-claude-proof')
 await mkdir(evidence, { recursive: true, mode: 0o700 })
 const paths = ['packages/core/src/managed-hook-runtime.ts', 'packages/core/src/providers/shared.ts',
-  'packages/core/src/providers/claude.ts', 'packages/core/src/providers/claude-plugin.ts', 'packages/providers/src/claude/native-activity.ts',
-  'packages/core/src/providers/codex.ts', 'packages/providers/src/codex/launch-hooks.ts',
+  'packages/core/src/providers/claude.ts', 'packages/core/src/providers/claude-plugin.ts', 'packages/providers/src/claude/provider.ts', 'packages/providers/src/claude/native-activity.ts',
+  'packages/core/src/providers/codex.ts', 'packages/providers/src/codex/provider.ts', 'packages/providers/src/codex/launch-hooks.ts',
   'packages/core/src/hook-server.ts', 'packages/core/dist/agentmux-hook.mjs',
   'packages/core/test/codex-claude-retained-hook.test.ts', 'packages/core/test/fixtures/codex-claude-retained-hook.py',
   'packages/core/test/vitest.codex-claude-retained-hook.config.mts', 'packages/core/scripts/verify-codex-claude-retained-hook.mjs']

@@ -4,13 +4,14 @@ import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
   'traex-wrong-target': ['packages/providers/src/traex/provider.ts', "['resume', sessionId, ...(prompt ? [prompt] : []), ...args]", "['resume', 'another-native-session', ...(prompt ? [prompt] : []), ...args]"],
-  'codex-unbracketed-input': ['packages/core/src/providers/codex.ts', 'payload: buildPromptInputPayload(prompt)', 'payload: sanitizeBracketedPasteText(prompt)'],
+  'codex-unbracketed-input': ['packages/providers/src/codex/provider.ts', 'payload: buildPromptInputPayload(prompt)', 'payload: sanitizeBracketedPasteText(prompt)'],
   'codex-locator-as-witness': ['packages/providers/src/app-server/native-session.ts', "  const originals = await locate(context, mainRole, 'run-group')", "  if (context.nativeHandle?.kind === 'provider') return { handle: context.nativeHandle, assertCurrent: async () => {} }\n  const originals = await locate(context, mainRole, 'run-group')"]
 }
 const mutation = process.env.AGENTMUX_PROVIDER_FORK_AUDIT_MUTATION
 if (mutation && !mutations[mutation]) throw new Error('Unknown Provider audit mutation')
 export default defineConfig({ root, cacheDir: resolve(root, '.tmp/provider-fork-audit/cache'),
   resolve: { alias: {
+    '@agentmux/providers/codex/provider': resolve(root, 'packages/providers/src/codex/provider.ts'),
     '@agentmux/providers/traex/provider': resolve(root, 'packages/providers/src/traex/provider.ts'),
     '@agentmux/providers/app-server/native-session': resolve(root, 'packages/providers/src/app-server/native-session.ts')
   } },

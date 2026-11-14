@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../../src/client.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../../src/agent-session-store.js'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { CODEX_HOOK_EVENTS, CODEX_HOOKS } from '../../src/providers/codex.js'
 import type { AgentSessionHistoryPageOptions } from '../../src/types.js'
 
 type ProtocolRequest = { id?: number; method: string; params?: Record<string, unknown> }

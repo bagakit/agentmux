@@ -31,7 +31,7 @@ const definitions = {
       'ignore-claude-inspection-home', 'ignore-claude-trust-env', 'ignore-grok-home', 'trim-opencode-override'] },
   runtime: { config: 'vitest.managed-hook-runtime.config.mts', env: 'AGENTMUX_HOOK_RUNTIME_MUTATION', owners: ['managed-hook-runtime.ts'],
     inputs: ['managed-hook-runtime.ts', 'runtime-paths.ts', 'client.ts', 'agent-provider.ts', 'providers/shared.ts', 'hook-server.ts',
-      'providers/claude.ts', 'providers/claude-plugin.ts', 'packages/providers/src/claude/provider.ts', 'packages/providers/src/claude/native-activity.ts', 'providers/codex.ts', 'providers/codex-hook-services.ts', 'packages/providers/src/codex/launch-hooks.ts'].map(source),
+      'providers/claude.ts', 'providers/claude-plugin.ts', 'packages/providers/src/claude/provider.ts', 'packages/providers/src/claude/native-activity.ts', 'providers/codex.ts', 'providers/codex-hook-services.ts', 'packages/providers/src/codex/provider.ts', 'packages/providers/src/codex/launch-hooks.ts'].map(source),
     tests: ['managed-hook-runtime.test.ts', 'launch-scoped-hook-environment.test.ts', 'codex-claude-retained-hook.test.ts',
       'fixtures/codex-claude-retained-hook.py', 'vitest.codex-claude-retained-hook.config.mts', 'vitest.hook-runtime-core.config.mts'],
     extras: [core('scripts/verify-codex-claude-retained-hook.mjs')],
