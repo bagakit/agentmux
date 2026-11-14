@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { DEFAULT_SURVEY_THUMBNAIL_LAYOUT, SURVEY_THUMBNAIL_HEIGHT, SURVEY_THUMBNAIL_COLUMNS, resolveSurveyThumbnailLayout, surveyThumbnailStyle, type SurveyThumbnailLayout } from '../../../../shared/survey-thumbnail-layout'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -29,8 +30,8 @@ export function SurveyThumbnailSettings({ preferences, navigationWidth, onSave }
         <label data-settings-field="thumbnail-columns"><span>Maximum per row<output>{draft.value.maxColumns}</output></span>
           <input aria-label="Maximum thumbnails per row" type="range" min={SURVEY_THUMBNAIL_COLUMNS.min} max={SURVEY_THUMBNAIL_COLUMNS.max} step={1} value={draft.value.maxColumns} onChange={event => draft.setField('maxColumns', Number(event.target.value))} />
           <small>A narrow sidebar shows fewer columns to keep each card readable.</small></label>
-        <div className="settings-survey-thumbnails__reset"><button type="button" className="small-button" onClick={() => { draft.setField('height', DEFAULT_SURVEY_THUMBNAIL_LAYOUT.height); draft.setField('maxColumns', DEFAULT_SURVEY_THUMBNAIL_LAYOUT.maxColumns) }}>Use default sizes</button>
-          {draft.dirty ? <button type="button" className="small-button" disabled={draft.saving} onClick={draft.useSaved}>Discard layout changes</button> : null}</div>
+        <div className="settings-survey-thumbnails__reset"><Button type="button" onClick={() => { draft.setField('height', DEFAULT_SURVEY_THUMBNAIL_LAYOUT.height); draft.setField('maxColumns', DEFAULT_SURVEY_THUMBNAIL_LAYOUT.maxColumns) }}>Use default sizes</Button>
+          {draft.dirty ? <Button type="button" disabled={draft.saving} onClick={draft.useSaved}>Discard layout changes</Button> : null}</div>
       </div>
       <aside className="survey-thumbnail-preview" aria-label="Research thumbnail draft preview" style={{ ...surveyThumbnailStyle(draft.value), '--survey-preview-navigation-width': `${navigationWidth}px` } as CSSProperties}>
         <header><strong>Example navigation</strong><small>{draft.dirty ? 'Unsaved preview' : 'Saved settings'}</small></header>

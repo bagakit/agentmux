@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { NodeResourceSample } from '@agentmux/core/node-publishing'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { hostConnectionSummary, hostTransportLabel } from '../../lib/host-transport'
@@ -93,14 +94,14 @@ export function ClusterMachinesPane({ hosts, active, compact = false, onAddDevic
       <div>{compact ? <h3>Machines</h3> : null}<div className="cluster-machines-coverage" role="status">{observed} / {hosts.length} sampled <span>· Saved connections</span></div></div>
       <div className="cluster-machines-actions">
         <TextInput type="search" aria-label="Filter saved devices" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a machine" />
-        <button type="button" className="small-button" disabled={reading} onClick={() => request.current()}>{reading ? 'Reading resources…' : 'Refresh resources'}</button>
-        {onAddDevice ? <button type="button" className="small-button cluster-add-device" onClick={onAddDevice}>Add device</button> : null}
+        <Button type="button" disabled={reading} onClick={() => request.current()}>{reading ? 'Reading resources…' : 'Refresh resources'}</Button>
+        {onAddDevice ? <Button type="button" className="cluster-add-device" onClick={onAddDevice}>Add device</Button> : null}
       </div>
     </header>
     {!compact ? <div className="cluster-machines-toolbar" role="group" aria-label="Machine status filter">{(['all', 'observed', 'attention'] as const).map(value => <button type="button" className="small-button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === 'all' ? 'All hosts' : value === 'observed' ? 'With samples' : 'Needs attention'}</button>)}</div> : null}
     {shown.length ? <div className="cluster-machines-column-headings" aria-hidden="true"><span>Device / saved connection</span><span>CPU</span><span>Memory</span><span>Storage</span><span>Sample</span><span /></div> : null}
     <div className="cluster-machines-grid">{shown.map(({ host, row }) => <MachineCard key={host.id} host={host} row={row} onRefresh={() => request.current(host.id)} onConnections={onConnections} />)}</div>
-    {!shown.length ? <p className="cluster-machines-empty">{hosts.length ? `No saved devices match this filter. ${hosts.length} saved connections remain available.` : 'No saved connections yet.'}{needle ? <> <button type="button" className="small-button" onClick={() => setQuery('')}>Clear filter</button></> : null}</p> : null}
+    {!shown.length ? <p className="cluster-machines-empty">{hosts.length ? `No saved devices match this filter. ${hosts.length} saved connections remain available.` : 'No saved connections yet.'}{needle ? <> <Button type="button" onClick={() => setQuery('')}>Clear filter</Button></> : null}</p> : null}
   </section>
 }
 function MachineCard({ host, row, onRefresh, onConnections }: { host: HostConfig; row?: Row | undefined; onRefresh: () => void; onConnections?: ((hostId: string) => void) | undefined }) {
@@ -122,7 +123,7 @@ function MachineCard({ host, row, onRefresh, onConnections }: { host: HostConfig
       <div className="cluster-machine-sample"><strong className="cluster-machine-state" data-state={row?.phase ?? 'unknown'}>{state}</strong>
         {sample ? <small>{stale ? 'Last confirmed ' : ''}{when(sample.observedAt)}{sample.system.state === 'available' ? ` · Up ${uptime(sample.system.value.uptimeSeconds)}` : ''}</small> : null}
       </div>
-      {onConnections ? <button type="button" className="small-button cluster-machine-manage" aria-label={`Manage ${host.label}`} onClick={() => onConnections(host.id)}>Manage</button> : <span />}
+      {onConnections ? <Button type="button" className="cluster-machine-manage" aria-label={`Manage ${host.label}`} onClick={() => onConnections(host.id)}>Manage</Button> : <span />}
     </div>
     <details className="cluster-machine-details"><summary title="Sample details" aria-label={`Sample details for ${host.label}`}><SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" /></summary>
       {reply?.status === 'withheld' ? <p>This node does not publish system resources.</p> : null}
@@ -133,7 +134,7 @@ function MachineCard({ host, row, onRefresh, onConnections }: { host: HostConfig
         <dt>Checked</dt><dd>{row?.completedAt ? when(row.completedAt) : 'Not observed'}</dd></dl>
       {row?.read?.privateIssue ? <p>Private read: {row.read.privateIssue}</p> : null}
       {details.map((value, index) => <p key={index}>{value.state === 'unavailable' ? value.message : ''}</p>)}
-      <div className="cluster-machine-footer"><button type="button" className="small-button" disabled={row?.phase === 'reading' || row?.phase === 'queued'} onClick={onRefresh} aria-label={`Refresh ${host.label}`}>Refresh this machine</button></div>
+      <div className="cluster-machine-footer"><Button type="button" disabled={row?.phase === 'reading' || row?.phase === 'queued'} onClick={onRefresh} aria-label={`Refresh ${host.label}`}>Refresh this machine</Button></div>
     </details>
   </article>
 }

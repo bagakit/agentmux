@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { A2A_NOTIFICATION_IDS, a2aNotificationPresentation, type A2ANotificationPreference } from '../../../../shared/a2a-preferences'
 import { NOTIFICATION_TIERS, type NotificationSettings } from '../../../../shared/notification-presentation'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -51,7 +52,7 @@ export function A2ASettingsPane({ notifications, globalNotifications, onSave, on
         <p className="a2a-settings__preview-note">{presentation ? 'Duration is a request to your system; actual presentation may vary.' : 'Messages remain available to the receiving Agent.'}</p>
       </figure>
       </div>
-      {onOpenNotifications && <div className="a2a-settings__global"><span>Review global banner duration and sound.</span><button type="button" className="small-button" onClick={onOpenNotifications}>Open Notifications</button></div>}
+      {onOpenNotifications && <div className="a2a-settings__global"><span>Review global banner duration and sound.</span><Button type="button" onClick={onOpenNotifications}>Open Notifications</Button></div>}
     </section>
     <p className="a2a-settings__scope">Agents still receive message references when their Provider offers an automatic opportunity, or when you notify them from the Inbox, and read original messages by ID. A banner does not mark a message read or accepted.</p>
     <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} label="Save A2A notifications" onSave={() => void persist()} />

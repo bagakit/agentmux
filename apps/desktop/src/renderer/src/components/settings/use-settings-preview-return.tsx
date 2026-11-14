@@ -1,5 +1,6 @@
 import { useRef, useState, type SyntheticEvent } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import './settings-preview-return.css'
 
 const BackIcon = semanticIconComponent('navigation.back')
@@ -46,6 +47,6 @@ export function useSettingsPreviewReturn(initialLabel: string) {
     }
   }
 
-  const returnAction = <button type="button" className="small-button settings-preview-return" data-settings-preview-return onClick={restore} aria-label={`Back to ${returnLabel}`} title={`Back to ${returnLabel}`}><BackIcon size={14} aria-hidden="true" /><span>{returnLabel}</span></button>
+  const returnAction = <Button type="button" className="settings-preview-return" data-settings-preview-return onClick={restore} aria-label={`Back to ${returnLabel}`} title={`Back to ${returnLabel}`}><BackIcon size={14} aria-hidden="true" /><span>{returnLabel}</span></Button>
   return { rootRef, previewRef, remember, open, returnAction }
 }

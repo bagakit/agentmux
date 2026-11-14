@@ -3,6 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DEFAULT_TOOLKIT_WORKSPACE_PATH, type ToolkitToolConfiguration, type ToolkitConfigurationFields, type ToolkitToolFields } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { DEFAULT_MOBILE_CONNECTION_PREFERENCES, MOBILE_CONNECTION_TOOL_ID, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
 import { ToolkitIcon } from '../toolkit/ToolkitIcon'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
@@ -114,10 +115,10 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
   return <div ref={host} className="settings-pane-stack toolkit-workbench" data-view={view} data-creation-empty={!entries.length && selectedId === null}>
     <header className="settings-pane-toolbar toolkit-workbench__toolbar">
       <p className="toolkit-workbench__intro">{entries.length} custom {entries.length === 1 ? 'tool' : 'tools'}</p>
-      <button type="button" className="small-button" disabled={entries.length >= 128} onClick={install}><ThemeActionInstallPackageIcon size={13} /> Install package</button>
-      <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> New custom tool</button>
+      <Button type="button" disabled={entries.length >= 128} onClick={install}><ThemeActionInstallPackageIcon size={13} /> Install package</Button>
+      <Button type="button" variant="primary" className="toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> New custom tool</Button>
     </header>
-    {metadata.error ? <p className="settings-inline-error" role="status">Package files could not be read: {metadata.error} Your configuration and drafts are kept. <button type="button" className="small-button" onClick={() => void metadata.refresh()}>Refresh files</button></p> : null}
+    {metadata.error ? <p className="settings-inline-error" role="status">Package files could not be read: {metadata.error} Your configuration and drafts are kept. <Button type="button" onClick={() => void metadata.refresh()}>Refresh files</Button></p> : null}
     <div className="toolkit-workbench__body">
       <section className="toolkit-library" aria-label="Toolkit Library">
         <label className="toolkit-library__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search tools" placeholder="Find a tool…" value={query} onChange={event => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear tool search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}</label>
@@ -137,8 +138,8 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
         </div>
       </section>
       <div className="toolkit-workbench__detail">
-        <div hidden={selectedId !== 'performance'} inert={selectedId !== 'performance'}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</button><BuiltinPerformanceSettings performance={performance} active={active && selectedId === 'performance' && (!narrow || view === 'editor')} onSave={onSave} /></div>
-        <div hidden={selectedId !== MOBILE_CONNECTION_TOOL_ID} inert={selectedId !== MOBILE_CONNECTION_TOOL_ID}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</button><BuiltinMobileConnectionSettings preferences={mobileConnection} active={active && selectedId === MOBILE_CONNECTION_TOOL_ID && (!narrow || view === 'editor')} onSave={async (value, expected) => { if (!onSaveMobileConnection) throw new Error('Mobile connection preferences have not loaded. Your draft is kept.'); await onSaveMobileConnection(value, expected) }} /></div>
+        <div hidden={selectedId !== 'performance'} inert={selectedId !== 'performance'}><Button type="button" className="toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</Button><BuiltinPerformanceSettings performance={performance} active={active && selectedId === 'performance' && (!narrow || view === 'editor')} onSave={onSave} /></div>
+        <div hidden={selectedId !== MOBILE_CONNECTION_TOOL_ID} inert={selectedId !== MOBILE_CONNECTION_TOOL_ID}><Button type="button" className="toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</Button><BuiltinMobileConnectionSettings preferences={mobileConnection} active={active && selectedId === MOBILE_CONNECTION_TOOL_ID && (!narrow || view === 'editor')} onSave={async (value, expected) => { if (!onSaveMobileConnection) throw new Error('Mobile connection preferences have not loaded. Your draft is kept.'); await onSaveMobileConnection(value, expected) }} /></div>
         {selectedId === 'performance' || selectedId === MOBILE_CONNECTION_TOOL_ID ? null : selected && selectedId !== null ? isPackageDraft(selected) ? <ToolkitPackageEditor key={selectedId} id={selectedId} entry={selected} fact={selected.expected ? packageFact(selected.expected, metadata.packages) : undefined} active={active && (!narrow || view === 'editor')} pathInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={() => onRunTool(selectedId)} onBack={back} onRefresh={metadata.refresh} /> : isInlineDraft(selected) ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} palette={palettes.forTool(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => { const id = selectedId; void (async () => { if (toolkitDraftDirty(selected) && !await resource.save(id, writer)) return; await palettes.save(id) })() }} onRemove={remove} onRun={definition => onRunTool(definition.id)} onBack={back} /> : null : toolId && toolId === selectedId ? <section className="toolkit-workbench__empty"><ThemeObjectToolsIcon size={28} /><h3>This saved tool is unavailable.</h3><p>The requested tool is not in the current configuration. No other tool has been substituted.</p></section> : <section className="settings-starting-points" aria-label="Tool starting points">
           <SettingsConceptSummary icon="object.tool-library" title="A small tool for your workflow"
             description="Combine a script, its results and optional actions. Built-in tools are ready in the library." />
@@ -150,8 +151,8 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
           </button>
           <p className="settings-starting-points__note">Opens a disabled, unsaved draft. Review the script and working directory before saving or running it.</p>
           <div className="settings-starting-points__alternatives">
-            <button type="button" className="small-button" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> Create your first tool</button>
-            <button type="button" className="small-button" disabled={entries.length >= 128} onClick={install}><ThemeActionInstallPackageIcon size={13} /> Choose a local package</button>
+            <Button type="button" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> Create your first tool</Button>
+            <Button type="button" disabled={entries.length >= 128} onClick={install}><ThemeActionInstallPackageIcon size={13} /> Choose a local package</Button>
           </div>
         </section>}
       </div>

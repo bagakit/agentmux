@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../../lib/api'
 import { crashLogRevealNotice } from '../../lib/crash-log-reveal'
 import type { CrashLogRevealResult } from '../../../../shared/contracts'
@@ -66,13 +67,13 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecover
           <div>
             <dt data-settings-field="session-recovery"><SemanticIcon name="object.session-recovery" size={16} aria-hidden="true" />Session recovery</dt>
             <dd>Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.
-              {onOpenRecovery && <button type="button" className="small-button" onClick={onOpenRecovery}>Open Session recovery</button>}
+              {onOpenRecovery && <Button type="button" onClick={onOpenRecovery}>Open Session recovery</Button>}
             </dd>
           </div>
           <div>
             <dt data-settings-field="system-ssh"><SemanticIcon name="object.host" size={16} aria-hidden="true" />System SSH</dt>
             <dd>Connection metadata and key file paths stay on this machine; private key contents are never stored.
-              {onOpenHosts && <button type="button" className="small-button" onClick={onOpenHosts}>Open Hosts</button>}
+              {onOpenHosts && <Button type="button" onClick={onOpenHosts}>Open Hosts</Button>}
             </dd>
           </div>
         </dl>

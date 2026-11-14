@@ -5,6 +5,7 @@ import {
   type AgentBuiltInDerivedActionId, type AgentDerivedAction, type AgentDerivedActionsConfig
 } from '@agentmux/core/agent-derived-actions'
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { configuredExecutors } from '../../lib/executors'
@@ -145,12 +146,12 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
     <span className="derived-actions__tile" aria-hidden="true"><Icon size={18} /></span>
     <div>{title}<span className="derived-actions__tag">{tag}</span></div>
   </div>
-  const back = <button type="button" className="small-button prompt-editor__back" onClick={() => setView('library')}><BackIcon size={13} /> Back to actions</button>
+  const back = <Button type="button" className="prompt-editor__back" onClick={() => setView('library')}><BackIcon size={13} /> Back to actions</Button>
 
   return <div className="settings-pane-stack prompt-workbench derived-actions" data-view={view}>
     <div className="settings-pane-toolbar prompt-workbench__toolbar">
       <span className="settings-resource-count">{AGENT_BUILT_IN_DERIVED_ACTIONS.length - hidden.value.length + drafts.length} in the Agent menu</span>
-      <button type="button" className="small-button" onClick={() => add()} disabled={drafts.length >= AGENT_DERIVED_ACTION_LIMITS.actions}><AddIcon size={13} /> Add action</button>
+      <Button type="button" onClick={() => add()} disabled={drafts.length >= AGENT_DERIVED_ACTION_LIMITS.actions}><AddIcon size={13} /> Add action</Button>
     </div>
     <div className="prompt-workbench__body">
       <section className="prompt-library" aria-label="Derived actions">
@@ -174,8 +175,8 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
           <span><strong>Show in the Agent menu</strong><small>Hiding only affects the menu. Recovery options, such as Take over after a Session cannot resume, stay available.</small></span></label>
         <dl className="derived-actions__facts">{OFFICIAL_FACTS[official.id].map(([term, detail]) => <div key={term}><dt>{term}</dt><dd>{detail}</dd></div>)}</dl>
         <section className="derived-actions__block" aria-label="Menu placement"><h4>In the Agent menu</h4>{preview(official.id)}</section>
-        {official.id === 'take-over' ? <div className="derived-actions__actions"><button type="button" className="small-button" onClick={() => add({ label: 'Take over with a note', base: 'new-agent', instruction: 'Continue the original work. Before you start, ' })}>
-          <DerivedIcon size={13} /> Start your own from this</button><small>Keeps the full original context; you add the instruction.</small></div> : null}
+        {official.id === 'take-over' ? <div className="derived-actions__actions"><Button type="button" onClick={() => add({ label: 'Take over with a note', base: 'new-agent', instruction: 'Continue the original work. Before you start, ' })}>
+          <DerivedIcon size={13} /> Start your own from this</Button><small>Keeps the full original context; you add the instruction.</small></div> : null}
       </section> : custom ? <section className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`Edit ${nameOf(custom)}`} data-derived-editor={custom.id}>
         <div className="prompt-editor__heading">{back}
           {problems.has(custom.id) ? <span className="prompt-editor__status" data-prompt-status="invalid">Needs attention</span> : null}</div>
@@ -199,8 +200,8 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
             <small>Listed first when you start the action. You still choose before anything starts.</small></div> : null}
           <section className="derived-actions__block" aria-label="Menu placement"><h4>In the Agent menu</h4>{preview(custom.id)}
             <small>It starts beside the original. Nothing is sent to the original Agent.</small></section>
-          <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(custom.id)}>{Object.hasOwn(resource.expected, custom.id)
-            ? <><RemoveIcon size={13} /> Delete action</> : <><CancelIcon size={13} /> Cancel new action</>}</button></div>
+          <div className="prompt-editor__remove"><Button type="button" onClick={() => remove(custom.id)}>{Object.hasOwn(resource.expected, custom.id)
+            ? <><RemoveIcon size={13} /> Delete action</> : <><CancelIcon size={13} /> Cancel new action</>}</Button></div>
         </div>
       </section> : null}
     </div>

@@ -1,6 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { BROWSER_START_PAGE_IMAGE_LIMIT, validBrowserStartPageImage } from '../../../../shared/browser-start-page'
 
 const ImageIcon = semanticIconComponent('object.image')
@@ -67,9 +68,9 @@ export function StartPageImageField({ kind, value, preview, revision, onChange }
         <strong>{label}</strong>
         <small>{reading ? 'Reading image…' : value ? (inline ? 'Image selected' : 'Image URL selected') : 'No image'}</small>
         <div className="settings-survey__image-buttons">
-          <button ref={choose} type="button" className="small-button" aria-label={`${value ? 'Replace' : 'Choose'} ${kind} image`}
-            onClick={() => { request.current++; setReading(false); upload.current?.click() }}>{value ? <ReplaceImageIcon size={14} aria-hidden="true" /> : <AddImageIcon size={14} aria-hidden="true" />}{value ? 'Replace image' : 'Choose image'}</button>
-          {value && <button type="button" className="small-button" aria-label={`Clear ${kind} image`} onClick={() => { change(''); choose.current?.focus() }}><ClearImageIcon size={14} aria-hidden="true" />Clear</button>}
+          <Button ref={choose} type="button" aria-label={`${value ? 'Replace' : 'Choose'} ${kind} image`}
+            onClick={() => { request.current++; setReading(false); upload.current?.click() }}>{value ? <ReplaceImageIcon size={14} aria-hidden="true" /> : <AddImageIcon size={14} aria-hidden="true" />}{value ? 'Replace image' : 'Choose image'}</Button>
+          {value && <Button type="button" aria-label={`Clear ${kind} image`} onClick={() => { change(''); choose.current?.focus() }}><ClearImageIcon size={14} aria-hidden="true" />Clear</Button>}
         </div>
       </div>
     </div>

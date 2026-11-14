@@ -3,6 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig, ComposerShortcut, GoalsCommonActionRef, GoalsCommonActionsConfig } from '../../../../shared/contracts'
 import { commonActionKey, DEFAULT_GOALS_COMMON_ACTIONS, resolveGoalsCommonAction, type GoalsCommonAction } from '../../lib/goals-common-actions'
 import { resolveComposerShortcuts } from '../../../../shared/composer-shortcut-library'
@@ -61,7 +62,7 @@ export function GoalsCommonActionsSettings({ config, prompts, directory, saving,
     <summary><strong>Goals common actions</strong><span>{directory.items.length} {directory.items.length === 1 ? 'shortcut' : 'shortcuts'}</span></summary>
     <p>Choose the requests shown in Goals. Edit instructions in Prompts by their original identity. Removing a shortcut here keeps its prompt in the library.</p>
     <label className="settings-goals-actions__visibility"><input type="checkbox" aria-label="Collapse common actions" checked={directory.collapsed} onChange={event => onCollapsedChange(event.target.checked)} /><span>Start with common actions collapsed</span></label>
-    <div className="settings-goals-actions__toolbar"><button type="button" className="small-button" data-common-create disabled={saving} onClick={onAdd}><Add size={13} /> Add common action</button><button type="button" className="small-button" disabled={saving} aria-expanded={referencesOpen} onClick={() => setReferencesOpen(!referencesOpen)}>Reference a prompt</button></div>
+    <div className="settings-goals-actions__toolbar"><Button type="button" data-common-create disabled={saving} onClick={onAdd}><Add size={13} /> Add common action</Button><Button type="button" disabled={saving} aria-expanded={referencesOpen} onClick={() => setReferencesOpen(!referencesOpen)}>Reference a prompt</Button></div>
     <div role="region" aria-label="Goals common action order" className="settings-goals-actions__directory" tabIndex={0}>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={event => { if (event.over) move(String(event.active.id), directory.items.findIndex(ref => commonActionKey(ref) === String(event.over!.id))) }}>
         <SortableContext items={actions.map(action => action.key)} strategy={verticalListSortingStrategy}>{actions.map((action, index) => <DirectoryRow key={action.key} action={action} index={index} count={actions.length} saving={saving}
@@ -70,7 +71,7 @@ export function GoalsCommonActionsSettings({ config, prompts, directory, saving,
       </DndContext>
       {!actions.length ? <p>No common actions. Add a request or reference a prompt when you need one.</p> : null}
     </div>
-    {referencesOpen ? <div className="settings-goals-actions__available" aria-label="Available common actions">{available.map(ref => { const action = resolveGoalsCommonAction(ref, authored, null); return <button type="button" className="small-button" key={action.key} data-common-add={action.key} disabled={saving} onClick={() => { focusAfter.current = action.key; onItemsChange([...directory.items, ref]) }}>{action.label}</button> })}{!available.length ? <p>All available requests are already referenced.</p> : null}</div> : null}
+    {referencesOpen ? <div className="settings-goals-actions__available" aria-label="Available common actions">{available.map(ref => { const action = resolveGoalsCommonAction(ref, authored, null); return <Button type="button" key={action.key} data-common-add={action.key} disabled={saving} onClick={() => { focusAfter.current = action.key; onItemsChange([...directory.items, ref]) }}>{action.label}</Button> })}{!available.length ? <p>All available requests are already referenced.</p> : null}</div> : null}
     {shown ? <div className="settings-goals-actions__preview"><strong>{shown.label}</strong><p>{shown.body || shown.reason}</p>{shown.ref.kind === 'builtin' ? <small>Default wording is read only. The project and receiving Agent are resolved when you use it in Goals.</small> : null}</div> : null}
   </details>
 }

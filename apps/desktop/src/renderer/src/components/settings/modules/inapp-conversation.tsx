@@ -4,6 +4,7 @@ import { semanticIconComponent, SemanticIcon } from '@agentmux/client-ui/icons'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { resolveComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { APP_APPEARANCE_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../../../shared/contracts'
 import type { SettingsModule } from '../settings-catalog'
 import { DocumentationNavigation } from '../../documentation/DocumentationNavigation'
@@ -78,20 +79,20 @@ export const inappConversationSettingsModule = {
         <div><h3>User Input</h3>
         <p className="settings-group-note">Shared by every view using the same message input.</p>
         <div className="inapp-conversation__saved" data-inapp-input-summary><span>{layout === 'one-line' ? 'One line' : 'Two lines'}</span><span>Commands <kbd>{completion.command ?? 'Off'}</kbd></span><span>Skills <kbd>{completion.skill ?? 'Off'}</kbd></span><span>Agents & files <kbd>{completion.reference ?? 'Off'}</kbd></span></div></div>
-        <button type="button" className="small-button" onClick={() => onNavigate('message-tool')}>Open User Input</button>
+        <Button type="button" onClick={() => onNavigate('message-tool')}>Open User Input</Button>
       </section>
       <section className="inapp-conversation__destination" data-settings-field="appearance-preferences">
         <div><h3>Appearance</h3>
         <p className="settings-group-note">Shared app colors, typography and reading density.</p>
         <div className="inapp-conversation__saved" data-inapp-appearance-summary><span>{theme?.value.name ?? 'Unavailable theme'}</span><span>{appearance[0]!.toUpperCase() + appearance.slice(1)} appearance</span></div></div>
-        <button type="button" className="small-button" onClick={() => onNavigate('appearance')}>Open Appearance</button>
+        <Button type="button" onClick={() => onNavigate('appearance')}>Open Appearance</Button>
       </section>
       <section className="inapp-conversation__references" data-settings-field="references">
         <h3>Reading & controls</h3>
         <p className="settings-group-note">Read the existing keyboard bindings and supported message formats.</p>
         <div className="settings-workflows__inline-action">
-          <button type="button" className="small-button" onClick={() => onNavigate('keyboard-shortcuts')}>Open Keyboard shortcuts</button>
-          <button type="button" className="small-button" onClick={() => documentation.open()}>Open amux Protocols</button>
+          <Button type="button" onClick={() => onNavigate('keyboard-shortcuts')}>Open Keyboard shortcuts</Button>
+          <Button type="button" onClick={() => documentation.open()}>Open amux Protocols</Button>
         </div>
       </section>
       <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} onSave={() => void commit()} />

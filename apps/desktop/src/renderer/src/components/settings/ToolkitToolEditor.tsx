@@ -3,6 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { TuiToolkitSettings } from '../toolkit/TuiToolkitResult'
 import { ToolkitIcon } from '../toolkit/ToolkitIcon'
 import { ToolkitIconPicker } from '../toolkit/ToolkitIconPicker'
@@ -107,9 +108,9 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
   }
   return <section className="toolkit-editor" data-tool-editor={id} aria-label={`Edit ${tool.name.trim() || 'new tool'}`}>
     <header className="toolkit-editor__heading">
-      <button type="button" className="small-button toolkit-editor__back" onClick={onBack}><ThemeNavigationBackIcon size={13} /> Back to tools</button>
+      <Button type="button" className="toolkit-editor__back" onClick={onBack}><ThemeNavigationBackIcon size={13} /> Back to tools</Button>
       <span className="toolkit-editor__metadata"><span>Custom tool · {tui ? 'TUI' : 'JavaScript ESM'}</span><span className="toolkit-editor__status" data-dirty={dirty}>{saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span></span>
-      {!tui ? <button type="button" className="small-button toolkit-editor__run" disabled={dirty || entry.saving || !entry.expected || !tool.enabled || executing || entry.missing} onClick={() => void run()}><ThemeActionStartIcon size={13} /> {executing ? 'Starting…' : actionId === null ? 'Run' : 'Run main script'}</button> : null}
+      {!tui ? <Button type="button" className="toolkit-editor__run" disabled={dirty || entry.saving || !entry.expected || !tool.enabled || executing || entry.missing} onClick={() => void run()}><ThemeActionStartIcon size={13} /> {executing ? 'Starting…' : actionId === null ? 'Run' : 'Run main script'}</Button> : null}
     </header>
     {entry.missing ? <p className="settings-inline-error" role="status">The saved tool is no longer available. Your draft is kept.</p> : null}
     <div className="toolkit-editor__identity">
@@ -121,7 +122,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
     </fieldset>
     <ToolkitWorkingDirectoryField directory={directory} saveError={directorySaveError} active={active} onChange={workspacePath => onEdit({ workspacePath })} />
     {displayOpen || actionId !== null ? <div className="toolkit-editor__action-heading">
-      <button type="button" className="small-button" onClick={() => { setActionId(null); setDisplayOpen(false) }}><ThemeNavigationBackIcon size={13} /> Main script</button>
+      <Button type="button" onClick={() => { setActionId(null); setDisplayOpen(false) }}><ThemeNavigationBackIcon size={13} /> Main script</Button>
       {displayOpen ? <p className="settings-hint">Runs once when the tool is displayed, including a hover that opens its panel. Refresh runs it again. Use a script that is safe to repeat.</p> : action ? <label><span>Action button label</span><TextInput ref={actionLabel} value={action.label} onChange={event => editScript({ label: event.target.value })} placeholder="Refresh identity" /></label> : <p className="settings-inline-error" role="status">This action is no longer in the current draft. Choose the main script or another action.</p>}
     </div> : null}
     <section className="toolkit-editor__script" aria-label={tui ? 'Shell command' : displayOpen ? 'Display JavaScript script' : actionId === null ? 'JavaScript script' : 'Action JavaScript script'}>
@@ -136,10 +137,10 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
       <div className="toolkit-action-list">
         {actions.map(item => <div className="toolkit-action-list__row" key={item.id}>
           <button type="button" aria-pressed={actionId === item.id} data-toolkit-edit-action={item.id} onClick={() => chooseAction(item.id)}><ThemeObjectSourceCodeIcon size={13} /><span>{item.label.trim() || 'Untitled action'}</span></button>
-          <button type="button" className="small-button" aria-label={`Remove action ${item.label.trim() || 'Untitled action'}`} onClick={() => { onEdit({ actions: actions.filter(value => value.id !== item.id) }); if (actionId === item.id) setActionId(null) }}><ThemeActionRemoveIcon size={13} /></button>
+          <Button type="button" aria-label={`Remove action ${item.label.trim() || 'Untitled action'}`} onClick={() => { onEdit({ actions: actions.filter(value => value.id !== item.id) }); if (actionId === item.id) setActionId(null) }}><ThemeActionRemoveIcon size={13} /></Button>
         </div>)}
       </div>
-      <button type="button" className="small-button" disabled={actions.length >= 16} onClick={addAction}><ThemeActionAddOperationIcon size={13} /> Add action</button>
+      <Button type="button" disabled={actions.length >= 16} onClick={addAction}><ThemeActionAddOperationIcon size={13} /> Add action</Button>
     </details> : null}
     {entry.expected ? <TuiToolkitSettings definition={entry.expected} active={active} /> : null}
     <details className="toolkit-editor__scope"><summary>Local execution scope</summary><p>Your script can read and write local files, environment variables and the network. It uses your current user account; it is not sandboxed.</p></details>
@@ -159,15 +160,15 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
       </div></fieldset>
       {(displayOpen ? Boolean(tool.display) : actionId === null || action) ? <details className="toolkit-editor__arguments"><summary>{displayOpen ? 'Display arguments' : actionId === null ? 'Arguments' : 'Action arguments'} <span>{args.length ? `· ${args.length}` : '· optional'}</span></summary>
         <p className="settings-hint">{tui ? tool.script.trim() ? 'Passed as separate shell positional arguments: $1, $2, and so on. Quote them in your command to preserve spaces.' : 'Passed directly to the Host’s default shell as separate arguments.' : 'Each argument is a separate value. No shell expansion or interpolation.'}</p>
-        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveArgumentIcon size={13} /></button></label>)}
-        <button type="button" className="small-button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><ThemeActionAddArgumentIcon size={13} /> Add argument</button>
+        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><Button type="button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveArgumentIcon size={13} /></Button></label>)}
+        <Button type="button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><ThemeActionAddArgumentIcon size={13} /> Add argument</Button>
       </details> : null}
     </div>
     {runFeedback ? <p className="settings-hint" role="status">{runFeedback}</p> : null}
     {operationError ? <p className="settings-inline-error" role="alert">{operationError}</p> : null}
     <footer className="toolkit-editor__footer">
       {invalid ? <p className="toolkit-editor__save-requirements" role="status">To save this tool, add {new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(missingFields)}.</p> : null}
-      <button type="button" className="small-button" disabled={saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel new tool</>}</button>
+      <Button type="button" disabled={saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel new tool</>}</Button>
       <SettingsSaveBar save={directorySaveError ? { ...feedback, error: palette?.error ?? '' } : feedback} dirty={dirty} blocked={entry.missing ? 'the saved tool is no longer available.' : directory.invalid ? 'review the working directory.' : invalid ? `add ${new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(missingFields)}.` : undefined} label="Save tool" onSave={onSave} />
     </footer>
     <ConfirmationDialog open={active && confirmTui} title="Switch this tool to TUI?" subject={tool.name} description="The main script is kept. Result actions and the display script will be removed from this draft. Update the command for the shell before saving." confirmLabel="Switch to TUI" onCancel={() => setConfirmTui(false)} onConfirm={() => applyMode('tui')} />

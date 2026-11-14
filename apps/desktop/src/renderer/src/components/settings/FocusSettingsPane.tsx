@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_REPLY_LINES, FOCUS_RECENT_INPUTS, FOCUS_SELECTION_FILL_PERCENT, FOCUS_SELECTION_BORDER_PERCENT, FOCUS_SELECTION_ACCENTS, resolveFocusPreferences, type FocusPreferences } from '../../../../shared/focus-preferences'
 import { useAppStore } from '../../store'
 import { FocusTimelineRulerSettings } from '../FocusTimelineRulerSettings'
@@ -50,11 +51,11 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
     for (const key of Object.keys(defaults) as (keyof FocusSettingsValues)[]) draft.setField(key, defaults[key])
   }
   function previewButton(group: string, title: string, nextScene: FocusPreviewScene) {
-    return <button type="button" className="small-button settings-preview-open" data-settings-preview-open={group} data-settings-preview-title={title} onClick={event => { setScene(nextScene); preview.open(event.currentTarget) }}><PreviewIcon size={14} />View preview</button>
+    return <Button type="button" className="settings-preview-open" data-settings-preview-open={group} data-settings-preview-title={title} onClick={event => { setScene(nextScene); preview.open(event.currentTarget) }}><PreviewIcon size={14} />View preview</Button>
   }
   return <div ref={preview.rootRef} className="settings-pane-stack focus-settings" data-active={active} onFocusCapture={preview.remember} onInputCapture={preview.remember} onChangeCapture={preview.remember} onClickCapture={preview.remember}>
     <FocusIntroduction />
-    <div className="focus-settings__intro"><p>Preview your choices before saving.</p><button type="button" className="small-button" onClick={reset}>Restore defaults</button></div>
+    <div className="focus-settings__intro"><p>Preview your choices before saving.</p><Button type="button" onClick={reset}>Restore defaults</Button></div>
     <div className="focus-settings__workspace">
       <div className="focus-settings__controls">
         <section className="settings-group" data-settings-preview-group="project-scanning"><header><span>Project scanning</span></header>
@@ -82,7 +83,7 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
           <p className="focus-settings-description">Alt-click chooses a position for that link.</p>
           {previewButton('opening-resources', 'Opening resources', 'links')}
         </section>
-        <section className="settings-group" data-settings-field="map" data-settings-preview-group="map" onFocusCapture={() => setScene('map')}><header><span>Map</span><button type="button" className="small-button" onClick={() => change('map', DEFAULT_FOCUS_MAP_PREFERENCES, 'map')}>Restore Map defaults</button></header>
+        <section className="settings-group" data-settings-field="map" data-settings-preview-group="map" onFocusCapture={() => setScene('map')}><header><span>Map</span><Button type="button" onClick={() => change('map', DEFAULT_FOCUS_MAP_PREFERENCES, 'map')}>Restore Map defaults</Button></header>
           <FocusMapSettings value={draft.value.map} onChange={value => change('map', value, 'map')} />
           {mapIssue ? <p className="settings-inline-error" role="alert">{mapIssue} Your draft is kept.</p> : null}
           <Choices id="map-motion" legend="Map motion" value={draft.value.mapMotion} options={[{ value: 'system', label: 'Follow system', hint: 'Respect reduced motion' }, { value: 'on', label: 'On', hint: 'Animate recent activity' }, { value: 'off', label: 'Off', hint: 'Keep activity still' }]} onChange={value => draft.setField('mapMotion', value)} />

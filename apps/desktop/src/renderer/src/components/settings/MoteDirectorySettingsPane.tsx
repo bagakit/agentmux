@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_VIEW_IDS, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_MIN, MOTE_DIRECTORY_AVATAR_SIZE_MAX, type MoteDirectoryView } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
@@ -58,7 +59,7 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
       <header><span>Your collaborators</span></header>
       <div className="settings-workflows__inline-action">
         <p className="settings-workflows__note">Profiles, avatars and behavior belong to each Club.</p>
-        <button type="button" className="small-button" onClick={onOpen}>Open Clubs</button>
+        <Button type="button" onClick={onOpen}>Open Clubs</Button>
       </div>
     </section>
     <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} onSave={() => void commit()} />

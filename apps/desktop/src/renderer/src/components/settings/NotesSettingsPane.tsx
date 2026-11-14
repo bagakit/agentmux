@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useId, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { NOTE_CONTENT_WIDTHS, NOTE_FONT_SIZE_MIN, NOTE_FONT_SIZE_MAX, resolveNotesPreferences, validNoteFontSize, type NotesPreferences } from '../../../../shared/notes-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { RecallIntroduction } from './SettingsConceptIntro'
@@ -65,17 +66,17 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
       </div></div>
     </section>
     <div className="settings-workflows__inline-action"><p className="settings-workflows__note">Organize notebooks, pages and sources in Recall.</p>
-      <button type="button" className="small-button" onClick={onOpenNotes}>Open Recall</button>
+      <Button type="button" onClick={onOpenNotes}>Open Recall</Button>
     </div>
     <section className="settings-group" data-settings-field="notes-storage"><header><span>Notebook storage</span><small>{storage?.directory ?? (directoryIssue ? 'Directory unavailable' : 'Reading the saved directory…')}</small></header>
       <label className="settings-reading-size settings-notes-directory"><span><strong>Notes directory</strong><small>Move your notebook directory and stored notes together.</small></span>
         <TextInput aria-label="Notes directory" value={directory} disabled={moving || !!intent} onChange={event => setDirectory(event.target.value)} /></label>
-      <div className="settings-recall__storage-actions"><button type="button" className="small-button" disabled={!storage || moving || (!intent && directory.trim() === storage.directory)} onClick={() => void moveDirectory()}>{moving ? 'Moving…' : intent ? 'Retry original move' : 'Move notes'}</button>
-      <button type="button" className="small-button" disabled={moving} onClick={() => { void useAppStore.getState().refreshNotesStorage().then(() => api.notesStorage.inspect()).then(value => { setStorage(value); setDirectoryIssue(null); if (!directory) setDirectory(value.directory) }).catch(error => setDirectoryIssue(String(error))) }}>Refresh directory</button></div>
+      <div className="settings-recall__storage-actions"><Button type="button" disabled={!storage || moving || (!intent && directory.trim() === storage.directory)} onClick={() => void moveDirectory()}>{moving ? 'Moving…' : intent ? 'Retry original move' : 'Move notes'}</Button>
+      <Button type="button" disabled={moving} onClick={() => { void useAppStore.getState().refreshNotesStorage().then(() => api.notesStorage.inspect()).then(value => { setStorage(value); setDirectoryIssue(null); if (!directory) setDirectory(value.directory) }).catch(error => setDirectoryIssue(String(error))) }}>Refresh directory</Button></div>
       {directoryIssue && <p role="alert" className="settings-workflows__note">{directoryIssue}</p>}
       {!!storage?.conversionIssues?.length && <div className="settings-workflows__note" role="status"><p>Some original Notes still need conversion. Other local Notes remain available.</p>
         <ul>{storage.conversionIssues.map((issue, index) => <li key={index}><strong>{issue.noteId ?? 'Original resource not confirmed'}</strong>{issue.resource ? <code>{issue.resource.hostId} · {issue.resource.workspaceId} / {issue.resource.path}</code> : null}<p>{issue.message}</p></li>)}</ul>
-        <button type="button" className="small-button" disabled={moving} onClick={() => void changeStorage(storage.operation ?? { operationId: mintObjectId(), expectedDirectory: storage.directory, directory: storage.directory })}>Retry original Note conversion</button>
+        <Button type="button" disabled={moving} onClick={() => void changeStorage(storage.operation ?? { operationId: mintObjectId(), expectedDirectory: storage.directory, directory: storage.directory })}>Retry original Note conversion</Button>
       </div>}
     </section>
     <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} onSave={() => void save()} />

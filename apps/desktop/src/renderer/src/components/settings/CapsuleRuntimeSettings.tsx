@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { CapsuleRuntimeObservation, CapsuleRuntimeParamsMap } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../../lib/api'
 
 type Attempt = { kind: 'start'; params: CapsuleRuntimeParamsMap['capsule.runtime.start']; phase: 'pending' | 'unknown' | 'confirmed' | 'failed'; message: string }
@@ -59,14 +60,14 @@ export function CapsuleRuntimeSettings({ active, observed }: { active: boolean; 
   return <section className="settings-group" data-settings-field="capsule-service" aria-label="Capsule service">
     <header><span>Page service</span><small>Runs independently of the App and its management connection.</small></header>
     <div className="capsule-settings__actions"><span role="status">{value ? labels[value.phase] : issue ? 'Status unknown' : 'Reading service status…'}</span>
-      <button type="button" className="small-button" onClick={() => void inspect()}>{attempt?.phase === 'unknown' ? 'Check original service command' : 'Read service status'}</button>
+      <Button type="button" onClick={() => void inspect()}>{attempt?.phase === 'unknown' ? 'Check original service command' : 'Read service status'}</Button>
       {value?.issue?.retry === 'start' && !value.run
-        ? <button type="button" className="primary-button" disabled={locked} onClick={() => void submit('start')}>Try Start again</button>
+        ? <Button type="button" variant="primary" disabled={locked} onClick={() => void submit('start')}>Try Start again</Button>
         : value ? value.desired === 'running'
-        ? <button type="button" className="small-button" disabled={locked} onClick={() => void submit('stop')}>Stop service</button>
-        : <button type="button" className="primary-button" disabled={locked} onClick={() => void submit('start')}>Start service</button> : null}
+        ? <Button type="button" disabled={locked} onClick={() => void submit('stop')}>Stop service</Button>
+        : <Button type="button" variant="primary" disabled={locked} onClick={() => void submit('start')}>Start service</Button> : null}
       {value?.issue?.retry === 'stop' && value.run
-        ? <button type="button" className="small-button" disabled={locked} onClick={() => void submit('stop')}>Try Stop again</button> : null}
+        ? <Button type="button" disabled={locked} onClick={() => void submit('stop')}>Try Stop again</Button> : null}
     </div>
     {value ? <details><summary>Service identity</summary><dl>
       {value.runtime ? <><dt>Runtime</dt><dd><code>{value.runtime.runtimeId}</code></dd><dt>Instance</dt><dd><code>{value.runtime.ownerInstanceId}</code></dd></> : null}

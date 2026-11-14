@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { useAppStore, setAuthoredWorkbench } from '../../store'
@@ -83,13 +84,13 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
             ? <label>Private destination<input type="password" readOnly value={entry.value.tailcat.address} /></label>
             : <p>Original SSH Host: <code>{entry.value.hostname}</code></p>
             : <pre>{entry.allowedText ?? entry.value.tailcat?.allowedClients.join('\n') ?? ''}</pre>}</> : <p>The original record is kept without rewriting it.</p>}
-        <button type="button" className="small-button" onClick={() => {
+        <Button type="button" onClick={() => {
           const state=useAppStore.getState(),all=tailcatDraftRecord(state.tailcatConnectionDrafts),current=all&&tailcatDraftRecord(all[scope]);if(!all||!current)return
           const next={...current},holder=tailcatDraftRecord(current[id]),rows=Array.isArray(holder?.retained)?holder.retained:[]
           if(index<rows.length){const remaining=rows.filter((_,i)=>i!==index),active=tailcatConnectionDraft(current[id]);next[id]=active?{...active,retained:remaining}:{retained:remaining};if(!active&&!remaining.length)delete next[id]}
           else delete next[id]
           setAuthoredWorkbench({tailcatConnectionDrafts:{...all,[scope]:next}})
-        }}>Discard this retained edit</button></details>
+        }}>Discard this retained edit</Button></details>
     }) : null}</div> : null}</>
   return { ...resource, retained, selectedHostId, selectHost, allowedText, setAllowedText: (id: string, value: string) => setAllowedText(current => ({ ...current, [id]: value })) }
 }

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentTurnUsage } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../../shared/contracts'
 import type { AgentMuxSpaceCatalog, TopicCategory } from '@agentmux/core/control'
 import { homeZoneId, type SpaceZoneBindings } from '../../../../shared/space-addresses'
@@ -159,21 +160,21 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
       {scene === 'reading' ? <div className="focus-settings-preview__reading" onKeyDown={event => { if (event.key === 'Escape' && (peek || inspected !== null)) { event.preventDefault(); event.stopPropagation(); if (inspected !== null) setInspected(null); else closePeek() } }}>
         <p className="focus-settings-preview__hint">{values.previewTrigger === 'keyboard' ? 'Focus the card and press ↓, or try the preview button.' : 'Hover the card to feel the preview timing.'}</p>
         {card(contexts[0]!, true)}
-        {agentOpen ? <div className="focus-settings-preview__workface" role="status"><strong>Example Agent workspace</strong><p>Clicking the card opens its Agent. Use ↓ to read the preview.</p><button type="button" className="small-button" onClick={() => setAgentOpen(false)}>Back to the example</button></div> : null}
-        <button type="button" className="small-button focus-settings-preview__try" aria-expanded={peek} onClick={() => { intent.cancel(); if (peek) setPeek(false); else openPeek(true) }}>Try preview <SemanticIcon name="navigation.disclosure" size={12} /></button>
+        {agentOpen ? <div className="focus-settings-preview__workface" role="status"><strong>Example Agent workspace</strong><p>Clicking the card opens its Agent. Use ↓ to read the preview.</p><Button type="button" onClick={() => setAgentOpen(false)}>Back to the example</Button></div> : null}
+        <Button type="button" className="focus-settings-preview__try" aria-expanded={peek} onClick={() => { intent.cancel(); if (peek) setPeek(false); else openPeek(true) }}>Try preview <SemanticIcon name="navigation.disclosure" size={12} /></Button>
         {peek ? <section ref={readingRef} tabIndex={-1} className="focus-settings-preview__peek" aria-label="Example Agent reading">
           <header><strong>Refine the workspace</strong><span><SemanticIcon name="status.completed" size={12} />Completed</span></header>
           <div hidden={inspected !== null} inert={inspected !== null}><p>{exampleReply}</p><section className="agent-input-recall"><h4>Recent inputs <small>{Math.min(values.recentInputs, inputs.length)} shown</small></h4><ol>{inputs.slice(-values.recentInputs).map((text, index) => {
             const presentation: InputPresentation = { reading: { text, truncated: false }, date: null, author: 'You', time: 'Example input', provenance: 'Example only · No Session is read' }
             return <li key={text}><AgentInputEntry presentation={presentation} expanded={false} controls={id + '-input'} onOpen={anchor => { entryRef.current = anchor; setInspected(inputs.length - values.recentInputs + index) }} /></li>
-          })}</ol></section></div>{inspected !== null ? <section ref={inspectionRef} tabIndex={-1} id={id + '-input'} aria-label="Example original input"><button type="button" className="small-button" onClick={() => setInspected(null)}><SemanticIcon name="navigation.back" size={12} /> Recent inputs</button><p>{inputs[inspected]}</p></section> : null}
+          })}</ol></section></div>{inspected !== null ? <section ref={inspectionRef} tabIndex={-1} id={id + '-input'} aria-label="Example original input"><Button type="button" onClick={() => setInspected(null)}><SemanticIcon name="navigation.back" size={12} /> Recent inputs</Button><p>{inputs[inspected]}</p></section> : null}
           <footer><AgentInformationSummary usage={usage} descriptionId={id + '-metrics'} /><small>Example</small></footer>
         </section> : <div className="focus-settings-preview__idle"><SemanticIcon name="object.conversation" size={28} /><span>Read without leaving the board.</span></div>}
       </div> : null}
       {scene === 'links' ? <div className="focus-settings-preview__links" data-destination={values.linkDestination} data-open={resourceOpen}>
         <div className="focus-settings-preview__tabs"><span data-selected={!resourceOpen || values.linkDestination === 'region'}>Agent</span>{resourceOpen && values.linkDestination === 'tab' ? <span data-selected>Resource</span> : null}</div>
         <div className="focus-settings-preview__resource-layout"><section><ResolvedAgentAvatar label="Example Executor" providerId="codex" size={24} /><strong>Refine the workspace</strong><p>The source is ready to inspect.</p><button type="button" onClick={() => setResourceOpen(true)} className="focus-settings-preview__link">Open example source</button></section>
-          {resourceOpen ? <section className="focus-settings-preview__resource"><SemanticIcon name="object.file" size={24} /><strong>Original source</strong><p>{values.linkDestination === 'region' ? 'The Agent stays beside it.' : 'The resource has its own Tab in Space.'}</p><button type="button" className="small-button" onClick={() => setResourceOpen(false)}>Try again</button></section> : null}</div>
+          {resourceOpen ? <section className="focus-settings-preview__resource"><SemanticIcon name="object.file" size={24} /><strong>Original source</strong><p>{values.linkDestination === 'region' ? 'The Agent stays beside it.' : 'The resource has its own Tab in Space.'}</p><Button type="button" onClick={() => setResourceOpen(false)}>Try again</Button></section> : null}</div>
       </div> : null}
     </div>
     <p className="focus-settings-preview__footnote">Changes here are a preview until you save.</p>
