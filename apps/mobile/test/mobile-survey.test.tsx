@@ -399,6 +399,40 @@ describe('T-006 existing Note editing and original cross-file references', () =>
     expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['original.note.md', 'original.note.md', 'target.note.md'])
     expect(view.rpc).toHaveBeenCalledWith('file.read', { ...view.params, path: 'target.note.md' })
   })
+  it.each(['unknown', 'directory-listed'] as const)('keeps the Note edit and original draft when names-only reference discovery receives %s, without reading another body', async status => {
+    localStorage.clear()
+    const view = await realNoteView(true)
+    await view.click('读取引用原文')
+    const candidates = () => view.element.querySelectorAll('section[aria-label="选择引用的文件"] ul button')
+    await vi.waitFor(() => expect(candidates().length).toBe(3))
+    await view.click('编辑原笔记'); await view.edit('保留尚未保存的手机笔记')
+    const drafts = () => Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith('agentmux-mobile-note-draft:')).map(key => [key, localStorage.getItem(key)]))
+    await vi.waitFor(() => expect(Object.keys(drafts()).length).toBeGreaterThan(0))
+    const before = drafts(), bodyReads = view.fileRead.mock.calls.length, invoke = view.rpc.getMockImplementation()!
+    // The actual owner still supplies ordinary names. Only this reply leaf is
+    // controlled; the public codec would reject directory mode for this request.
+    view.rpc.mockImplementation(async (method: string, input: unknown) => {
+      const value = await invoke(method, input)
+      if (method !== 'file.list') return value
+      return { ...value, result: status === 'unknown'
+        ? { status, code: 'FILE_OBSERVATION_UNCONFIRMED', message: '原文件名称观察暂未确认' }
+        : { status, entries: [{ name: 'not-a-recursive-name.note.md', path: 'not-a-recursive-name.note.md', isDirectory: false, isSymlink: false }], complete: true, partialReason: null } }
+    })
+    await view.click('刷新引用来源')
+    if (status === 'directory-listed') {
+      expect(candidates().length).toBe(0)
+      expect(view.element.textContent).toContain('引用需要的文件名称列表尚未确认')
+      expect(view.element.textContent).not.toContain('not-a-recursive-name.note.md')
+    } else {
+      expect(view.element.textContent).toContain('原文件名称观察暂未确认')
+      expect(candidates().length).toBe(3)
+    }
+    expect(view.element.querySelector('[contenteditable=true]')?.textContent).toContain('保留尚未保存的手机笔记')
+    expect(drafts()).toEqual(before)
+    expect(view.fileRead).toHaveBeenCalledTimes(bodyReads); expect(view.fileWrite).not.toHaveBeenCalled()
+    expect(view.rpc.mock.calls.filter(([method]) => method === 'file.list').every(([, input]) => input.mode === undefined)).toBe(true)
+    expect(view.rpc.mock.calls.some(([method]) => method === 'file.write')).toBe(false)
+  })
   it('maps an exact registered same Scope reference through strict file.list while retaining the original read byte cap', async () => {
     localStorage.clear()
     const view = await realNoteView(true, false, true)
