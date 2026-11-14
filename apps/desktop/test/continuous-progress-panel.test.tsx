@@ -8,7 +8,7 @@ import { ContinuousProgressControl } from '../src/renderer/src/components/Contin
 import { api } from '../src/renderer/src/lib/api'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
-import type { ContinuousProgressLoop } from '@agentmux/core'
+import { continuousProgressRequestDigest, type ContinuousProgressLoop } from '@agentmux/core'
 
 const dom = composerDOM()
 beforeEach(() => {
@@ -208,6 +208,7 @@ describe('continuous progress panel', () => {
     expect(dom.container.textContent).toContain('save request could not be retained')
     expect(dom.container.textContent).not.toContain('Previous save is unconfirmed')
     expect(Object.values(useLauncherState.getState().drafts).some(draft => !!draft.progressUpdate)).toBe(false)
+    expect(Object.values(useLauncherState.getState().drafts).flatMap(draft => draft.unconfirmedProgressUpdates ?? [])).toEqual([expect.objectContaining({ prompt: 'Retained in the editor', notDispatched: true })])
     expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.disabled).toBe(false)
     remember.mockRestore()
     await edit('textarea', 'The next explicit value')
@@ -367,19 +368,25 @@ describe('continuous progress panel', () => {
     const action = vi.spyOn(api.continuousProgress, 'action').mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     const pause = dom.container.querySelector<HTMLButtonElement>('[aria-label="Pause continuous progress"]')!
     await act(async () => pause.click())
-    expect(action).toHaveBeenCalledExactlyOnceWith(target, 'original-loop', 'pause', saved(), expect.any(String))
+    await vi.waitFor(() => expect(action).toHaveBeenCalledExactlyOnceWith(target, 'original-loop', 'pause', saved(), expect.any(String)))
     expect([...dom.container.querySelectorAll<HTMLButtonElement>('.continuous-progress-panel__actions button')].map(el => el.disabled)).toEqual([true, true, true])
     await act(async () => pause.click())
     expect(action).toHaveBeenCalledTimes(1)
-    await act(async () => finish(saved('paused')))
+    const receipt = (loop: ContinuousProgressLoop, call: Parameters<typeof api.continuousProgress.action>): ContinuousProgressLoop => ({ ...loop, revision: (call[3].revision ?? 0) + 1,
+      lastMutation: { operationId: call[4], action: call[2], expectedRevision: call[3].revision ?? 0, requestDigest: continuousProgressRequestDigest({ target: call[0], loopId: call[1], action: call[2], expectedLoop: call[3], operationId: call[4] }), phase: 'settled' } })
+    const paused = receipt(saved('paused'), action.mock.calls[0]!)
+    await act(async () => finish(paused))
+    await vi.waitFor(() => expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Resume and check continuous progress"]')!.disabled).toBe(false))
     expect(dom.container.querySelector('[aria-label="Check continuous progress now"]')).toBeNull()
     expect(dom.container.querySelector('[aria-label="Resume and check continuous progress"]')!.textContent).toBe('Resume and check')
-    action.mockResolvedValueOnce(saved())
+    let resumed!: ContinuousProgressLoop
+    action.mockImplementationOnce(async (...call) => resumed = receipt(saved(), call))
     await dom.click('[aria-label="Resume and check continuous progress"]')
-    expect(action).toHaveBeenLastCalledWith(target, 'original-loop', 'resume', saved('paused'), expect.any(String))
+    await vi.waitFor(() => expect(action).toHaveBeenLastCalledWith(target, 'original-loop', 'resume', paused, expect.any(String)))
+    await vi.waitFor(() => expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Check continuous progress now"]')!.disabled).toBe(false))
     action.mockRejectedValueOnce(new Error('Original action failure reason'))
     await dom.click('[aria-label="Check continuous progress now"]')
-    expect(action).toHaveBeenLastCalledWith(target, 'original-loop', 'check', saved(), expect.any(String))
+    await vi.waitFor(() => expect(action).toHaveBeenLastCalledWith(target, 'original-loop', 'check', resumed, expect.any(String)))
     expect(dom.container.querySelector('.continuous-progress-panel [role="status"]')!.textContent).toContain('Original action failure reason')
     expect(dom.container.querySelector('.continuous-progress-panel__summary')!.textContent).toContain('Last known loop status')
     const reads = vi.mocked(api.continuousProgress.list).mock.calls.length
@@ -387,8 +394,15 @@ describe('continuous progress panel', () => {
     expect(api.continuousProgress.list).toHaveBeenCalledTimes(reads + 1)
     expect(dom.container.querySelector('.continuous-progress-panel [role="status"]')).not.toBeNull()
     expect(dom.container.querySelector('.continuous-progress-panel [role="status"]')!.textContent).toContain('Original action failure reason')
-    action.mockResolvedValueOnce(saved('stopped'))
+    // A missing original receipt stays unknown; explicitly return to the exact
+    // known loop before an independent stop, retaining the original request.
+    vi.mocked(api.continuousProgress.list).mockImplementation(async (_target, operationId) => operationId ? [] : [resumed])
+    await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Return to original loop')!.click())
+    await vi.waitFor(() => expect(Object.values(useLauncherState.getState().drafts).some(draft => draft.progressRequest)).toBe(false))
+    expect(Object.values(useLauncherState.getState().drafts).flatMap(draft => draft.unconfirmedProgressRequests ?? [])).toHaveLength(1)
+    action.mockImplementationOnce(async (...call) => receipt(saved('stopped'), call))
     await dom.click('[aria-label="Stop continuous progress"]')
+    await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(4))
     expect(action.mock.calls.map(call => call.slice(0, 3))).toEqual([[target, 'original-loop', 'pause'], [target, 'original-loop', 'resume'], [target, 'original-loop', 'check'], [target, 'original-loop', 'stop']])
     expect(dom.container.querySelector('form')).not.toBeNull()
   })
@@ -396,11 +410,14 @@ describe('continuous progress panel', () => {
   it('shows a pending check and its skipped outcome without treating completion as delivery', async () => {
     await mount(saved())
     let finish!: (loop: ContinuousProgressLoop) => void
-    vi.spyOn(api.continuousProgress, 'action').mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const action = vi.spyOn(api.continuousProgress, 'action').mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     await dom.click('[aria-label="Check continuous progress now"]')
+    await vi.waitFor(() => expect(action).toHaveBeenCalledOnce())
     expect(dom.container.querySelector('.continuous-progress-panel')!.getAttribute('aria-busy')).toBe('true')
     expect(dom.container.querySelector('.continuous-progress-panel [role="status"]')!.textContent).toBe('Checking this Agent…')
-    await act(async () => finish({ ...saved(), lastOutcome: 'skipped', lastDecision: 'working' }))
+    const call = action.mock.calls[0]!
+    await act(async () => finish({ ...saved(), lastOutcome: 'skipped', lastDecision: 'working', revision: 1,
+      lastMutation: { operationId: call[4], action: 'check', expectedRevision: 0, requestDigest: continuousProgressRequestDigest({ target: call[0], loopId: call[1], action: call[2], expectedLoop: call[3], operationId: call[4] }), phase: 'settled' } }))
     expect(dom.container.querySelector('.continuous-progress-panel')!.getAttribute('aria-busy')).toBe('false')
     expect(dom.container.querySelector('.continuous-progress-panel [role="status"]')!.textContent).toBe('Check complete. No continuation prompt was sent.')
     expect(dom.container.querySelector('.continuous-progress-panel__decision')!.textContent).toContain('The Agent is still working.')

@@ -26,11 +26,11 @@ it('fresh restored-cut progress gesture crosses actual preload registered IPC Ma
  const f=await fixture()
  const inputEpoch=await bridge.api!.sessions.readInputEpoch('local')
  expect(inputEpoch).toBe(f.cut.inputEpoch)
- const result=await bridge.api!.continuousProgress.create(f.target,60_000,'new explicit original progress',undefined,inputEpoch!)
+ const result=await bridge.api!.continuousProgress.create({target:f.target,intervalMs:60_000,prompt:'new explicit original progress',inputEpoch:inputEpoch!,operationId:'original-explicit-progress'})
  expect(result.inputEpoch).toBe(f.cut.inputEpoch)
  expect(f.manager.list()[0]).toEqual(result);expect(await f.store.load()).toEqual([result])
  const call=bridge.invoke.mock.calls.find(([channel])=>channel==='continuousProgress:create')!
- expect(call[5]).toBe(f.cut.inputEpoch);expect(f.inner.kernel.input).not.toHaveBeenCalled()
+ expect(call[1]).toMatchObject({inputEpoch:f.cut.inputEpoch,operationId:'original-explicit-progress'});expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 it('actual preload IPC never upgrades a legacy schedule request, while a new exact arrangement reaches the original Core future ledger',async()=>{
  const f=await fixture(),old={target:f.target,everyMs:60_000,prompt:'original retained text',operationId:'old-request'}

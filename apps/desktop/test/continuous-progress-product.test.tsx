@@ -1,4 +1,3 @@
-import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _batchFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -12,7 +11,7 @@ import { join } from 'node:path'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentMuxRpcService, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import { createHostGoals } from '../../host/src/goals.js'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
@@ -38,13 +37,21 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     off: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn),
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
   globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() },
-  webFrame: { getZoomFactor: () => 1 }, app: { once: vi.fn(), getPath: () => bridge.storagePath, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
+  webFrame: { getZoomFactor: () => 1 }, app: { once: vi.fn(), on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), getPath: () => bridge.storagePath, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: {}
 }))
-vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class {
+  storage = { setConfirmationHandler() {} }
+  cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }
+  extensions = { setConfirmationHandler() {} }
+  onChange() { return () => {} }
+  onEnvironmentApplicationChange() { return () => {} }
+  listProfiles() { return [] }
+  async initialize() {} async dispose() {}
+} }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} async flushProfileActivity() {} dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 vi.mock('@agentmux/connectors', async actual => ({ ...await actual<typeof import('@agentmux/connectors')>(), createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
 // Install the actual mocked Electron bridge before transitive renderer consumers load api.
@@ -58,9 +65,12 @@ import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progres
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
+import { checkpointLauncherState, useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { privateTracker } from './helpers/continuous-progress-tracker'
 import { NotesStorageOwner } from '../src/main/notes-storage-owner'
+import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 
 // Actual Composer → preload → registered Main IPC → public Core service → original Host
 // Goal/loop owner → original Core input ingress. Electron, Browser and Native I/O are
@@ -74,6 +84,14 @@ let root: Root, container: HTMLDivElement, config: AppConfig, session: AgentMuxS
 let writes: string[], cursor: number | null, requests: any[], observations: string[]
 let snapshot: Extract<SessionSnapshot, { kind: 'agent' }>, ended: boolean
 let notesReady: Promise<unknown>[]
+let userStateRoot: string, userState: WorkbenchUserStateStore
+// This file retains one Renderer document cache. Its native document therefore
+// keeps the same owner across cases, as one real App lifetime does.
+beforeAll(async () => {
+  userStateRoot = await mkdtemp(join(tmpdir(), 'cp-user-'))
+  userState = new WorkbenchUserStateStore(join(userStateRoot, 'user-state.json'))
+})
+afterAll(async () => { await rm(userStateRoot, { recursive: true, force: true }) })
 const initializeNotes = NotesStorageOwner.prototype.initialize
 beforeEach(async () => {
   notesReady = []
@@ -113,6 +131,14 @@ beforeEach(async () => {
     cursor! += Buffer.byteLength(input.data)
     return { run: projection(), appliedByteRange: { startByte: input.expectedByte, endByte: cursor } }
   }
+  // Current public raw/prompt input owns a channel independent from output.
+  // The private Native seam keeps the same cursor and bytes through that port.
+  inner.kernel.openInput = async () => ({ run: projection(), waitWritable: async () => {},
+    input: async (data: string) => {
+      if (cursor === null) throw new Error('The original Native cursor is unknown')
+      const startByte = cursor; writes.push(data); requests.push({ data }); cursor += Buffer.byteLength(data)
+      return { appliedByteRange: { startByte, endByte: cursor } }
+    } })
   const originalStatus = client.statusAgent.bind(client)
   vi.spyOn(client, 'statusAgent').mockImplementation(async (...args) => { observations.push(args[0]); return originalStatus(...args) })
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(0)
@@ -124,7 +150,7 @@ beforeEach(async () => {
   hostGoals = createHostGoals({ configurationPath: join(directory, 'config.json'), projects: async () => [],
     runtime: () => ({ client, ownerIdentity: () => ({ ownerInstanceId: 'original-progress-owner' }) }) as never,
     coreCall: (hostId, method, params, context) => { expect(hostId).toBe('local'); return hostService.call(method, params, context) } })
-  manager = hostGoals.schedules
+  manager = hostGoals.schedules; await manager.start()
   hostService = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }], goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges,
     progress: hostGoals.progress, schedules: hostGoals.schedules, automaticInput: hostGoals.automaticInput })
   const originalCore = runtime.callOriginalCore.bind(runtime)
@@ -144,11 +170,11 @@ beforeEach(async () => {
     send()
   }
   const configStore = new ConfigStore(join(directory, 'config.json')); config = await configStore.save(config)
-  disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(bridge.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  disposeIpc = await registerIpc({ workbenchUserState: userState, appDocumentSources: testAppDocumentSources(bridge.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime, configStore,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     applicationAccess: {} as Parameters<typeof registerIpc>[0]['applicationAccess'],
-    scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as unknown as WorkspaceFiles })
+    scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], readDirectory: async () => [], dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ senderFrame: Reflect.get(bridge.sender as object, 'mainFrame'), sender: bridge.sender } as IpcMainInvokeEvent, ...values)
@@ -176,10 +202,10 @@ afterEach(async () => {
   disposeIpc = undefined
   bridge.main.clear(); bridge.renderer.clear(); bridge.handlers.clear(); bridge.invoke.mockReset()
   vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true })
-  expect(cleanup.filter(r => r.status === 'rejected')).toEqual([])
+  expect(cleanup.filter(r => r.status === 'rejected'), cleanup.flatMap(result => result.status === 'rejected' ? [String(result.reason)] : []).join('\n')).toEqual([])
 })
 const target = () => ({ hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath })
-async function create() { return await api.continuousProgress.create(target(), 60_000, 'continue the assigned work') }
+async function create() { return await api.continuousProgress.create({ target: target(), intervalMs: 60_000, prompt: 'continue the assigned work', operationId: 'direct-create-' + mintObjectId() }) }
 async function showProgressForm() {
   const edit = container.querySelector<HTMLButtonElement>('[aria-label="Edit continuous progress"]')
   if (edit) await act(async () => edit.click())
@@ -204,6 +230,241 @@ async function click(label: string) {
     await action.mock.results[before]!.value
   })
 }
+const originalProgressDraft = () => useLauncherState.getState().drafts['progress-update:' + JSON.stringify([
+  target().hostId, target().agentSessionId, target().providerId, target().workspacePath])]
+async function persistedProgressRequest() {
+  const document = JSON.parse(await userState.read() ?? '{}')
+  const launcher = JSON.parse(document.desktopFragments?.launcher ?? '{"state":{"drafts":{}}}')
+  return launcher.state.drafts['progress-update:' + JSON.stringify([target().hostId, target().agentSessionId, target().providerId, target().workspacePath])]?.progressRequest
+}
+async function prepareOriginalProgress() {
+  await showProgressForm()
+  const prompt = container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(prompt, 'continue the assigned work')
+    prompt.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.disabled).toBe(false)
+  return container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!
+}
+async function enableOriginalProgress() {
+  const enable = await prepareOriginalProgress()
+  await act(async () => enable.click())
+  await vi.waitFor(() => expect(manager.list(), JSON.stringify({ ui: container.textContent, calls: bridge.invoke.mock.calls.filter(([channel]) => channel.startsWith('continuousProgress:')), draft: originalProgressDraft() })).toHaveLength(1), { timeout: 5000 })
+  await vi.waitFor(() => expect(container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')?.disabled).toBe(false))
+}
+
+it('retains the original create request after the actual Host response is lost and only queries that operation', async () => {
+  let savedBeforeDispatch: unknown
+  const original = bridge.invoke.getMockImplementation()!
+  bridge.invoke.mockImplementation(async (channel, ...args) => {
+    if (channel === 'continuousProgress:create') savedBeforeDispatch = await persistedProgressRequest()
+    const result = await original(channel, ...args)
+    if (channel === 'continuousProgress:create') throw new Error('The original create response was lost.')
+    return result
+  })
+  await enableOriginalProgress()
+  const request = originalProgressDraft()?.progressRequest
+  expect(request).toMatchObject({ kind: 'create', dispatch: 'started', input: { target: target(), operationId: manager.list()[0]!.creationOperationId } })
+  expect(savedBeforeDispatch, 'The native document must retain the exact request before IPC dispatch.').toEqual(request)
+  const creates = bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:create')
+  expect(creates).toHaveLength(1)
+  expect(creates[0]![1]).toMatchObject({ operationId: request!.input.operationId })
+  await act(async () => root.render(null))
+  await act(async () => root.render(<AgentSessionComposer sessionId={session.agentSessionId} />))
+  const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!, opened = new Event('toggle')
+  Object.defineProperty(opened, 'newState', { value: 'open' })
+  await act(async () => { mailbox.dispatchEvent(opened); mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!.click() })
+  expect(originalProgressDraft()?.progressRequest).toEqual(request)
+  const inspect = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original request')
+  expect(inspect).toBeDefined()
+  await vi.waitFor(() => expect(inspect!.disabled).toBe(false))
+  await act(async () => inspect!.click())
+  await vi.waitFor(() => expect(originalProgressDraft()?.progressRequest).toBeUndefined())
+  expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:create')).toHaveLength(1)
+  expect(manager.list()).toHaveLength(1)
+  expect(writes).toEqual([])
+})
+
+it('retains the original action after the actual Host response is lost without repeating it on refresh', async () => {
+  await enableOriginalProgress()
+  let savedBeforeDispatch: unknown
+  const original = bridge.invoke.getMockImplementation()!
+  bridge.invoke.mockImplementation(async (channel, ...args) => {
+    if (channel === 'continuousProgress:action') savedBeforeDispatch = await persistedProgressRequest()
+    const result = await original(channel, ...args)
+    if (channel === 'continuousProgress:action') throw new Error('The original action response was lost.')
+    return result
+  })
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Back to automations"]')!.click())
+  const pause = container.querySelector<HTMLButtonElement>('[aria-label="Pause continuous progress"]')!
+  expect(pause).not.toBeNull()
+  await act(async () => pause.click())
+  await vi.waitFor(() => expect(manager.list()[0]?.status).toBe('paused'))
+  const request = originalProgressDraft()?.progressRequest
+  expect(request).toMatchObject({ kind: 'action', input: { target: target(), action: 'pause', operationId: manager.list()[0]!.lastMutation?.operationId } })
+  expect(savedBeforeDispatch).toEqual(request)
+  const inspect = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original request')
+  expect(inspect).toBeDefined()
+  await vi.waitFor(() => expect(inspect!.disabled).toBe(false))
+  await act(async () => inspect!.click())
+  await vi.waitFor(() => expect(originalProgressDraft()?.progressRequest).toBeUndefined())
+  expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:action')).toHaveLength(1)
+  expect(manager.list()[0]?.status).toBe('paused')
+  expect(writes).toEqual([])
+})
+it.each(['prepared', 'started'] as const)('does not dispatch a create when retaining its original request fails at the %s native document boundary', async phase => {
+  const enable = await prepareOriginalProgress(), invoke = bridge.invoke.getMockImplementation()!
+  bridge.invoke.mockImplementation(async (channel, ...args) => {
+    if (channel === 'ui:writeWorkbenchState') {
+      const document = JSON.parse(args[0].value), launcher = JSON.parse(document.desktopFragments?.launcher ?? '{"state":{"drafts":{}}}')
+      if (Object.values(launcher.state.drafts ?? {}).some(draft => (draft as { progressRequest?: { dispatch?: string } }).progressRequest?.dispatch === phase))
+        throw new Error('Private original document save failure')
+    }
+    return invoke(channel, ...args)
+  })
+  try {
+    await act(async () => enable.click())
+    await vi.waitFor(() => expect(container.textContent).toContain('No action was dispatched'))
+    expect(originalProgressDraft()?.progressRequest).toMatchObject({ kind: 'create', dispatch: 'prepared', input: { target: target(), operationId: expect.any(String) } })
+    expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:create')).toEqual([])
+    expect(manager.list()).toEqual([])
+  } finally {
+    bridge.invoke.mockImplementation(invoke)
+    await checkpointLauncherState()
+  }
+  expect(manager.list(), 'Recovering storage cannot automatically replay the retained request.').toEqual([])
+  const retained = structuredClone(originalProgressDraft()!.progressRequest!)
+  const edit = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Keep request and edit')!
+  await act(async () => edit.click())
+  expect(originalProgressDraft()?.progressRequest).toBeUndefined()
+  expect(originalProgressDraft()?.unconfirmedProgressRequests).toEqual([retained])
+  const prompt = container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(prompt, 'A new explicit value after storage recovery')
+    prompt.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.click())
+  await vi.waitFor(() => expect(manager.list()[0]?.prompt).toBe('A new explicit value after storage recovery'))
+  expect(manager.list()[0]?.creationOperationId).not.toBe(retained.input.operationId)
+  await vi.waitFor(() => expect(originalProgressDraft()?.progressRequest).toBeUndefined())
+  expect(container.querySelector('.continuous-progress-control')?.getAttribute('data-progress-state'), 'A retained proven-unsent request cannot make the current confirmed automation unknown.').toBe('active')
+  expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:create')).toHaveLength(1)
+  expect(originalProgressDraft()?.unconfirmedProgressRequests).toEqual([retained])
+  expect(writes).toEqual([])
+})
+
+it('keeps an unknown original action when a later authorized action has replaced its stored operation', async () => {
+  await enableOriginalProgress()
+  const invoke = bridge.invoke.getMockImplementation()!
+  bridge.invoke.mockImplementation(async (channel, ...args) => {
+    const result = await invoke(channel, ...args)
+    if (channel === 'continuousProgress:action') throw new Error('Private original action response loss')
+    return result
+  })
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Back to automations"]')!.click())
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Pause continuous progress"]')!.click())
+  await vi.waitFor(() => expect(originalProgressDraft()?.progressRequest?.kind).toBe('action'))
+  await vi.waitFor(() => expect(container.textContent).toContain('Private original action response loss'))
+  const request = structuredClone(originalProgressDraft()!.progressRequest!)
+  bridge.invoke.mockImplementation(invoke)
+  const current = manager.list()[0]!
+  await api.continuousProgress.action(target(), current.loopId, 'stop', current, 'later-independent-stop')
+  const inspect = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original request')!
+  await vi.waitFor(() => expect(inspect.disabled).toBe(false))
+  await act(async () => inspect.click())
+  await vi.waitFor(() => expect(container.textContent).toContain('Missing records do not prove it was not applied'))
+  expect(originalProgressDraft()?.progressRequest).toEqual(request)
+  expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:action')).toHaveLength(2)
+  expect(bridge.invoke.mock.calls.filter(([channel, , operationId]) => channel === 'continuousProgress:list' && operationId === request.input.operationId)).toHaveLength(1)
+  expect(manager.list()[0]).toMatchObject({ status: 'stopped', lastMutation: { operationId: 'later-independent-stop' } })
+  const returnToLoop = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Return to original loop')!
+  await vi.waitFor(() => expect(returnToLoop.disabled).toBe(false))
+  await act(async () => returnToLoop.click())
+  await vi.waitFor(() => expect(originalProgressDraft()?.progressRequest).toBeUndefined())
+  expect(originalProgressDraft()?.unconfirmedProgressRequests).toEqual([request])
+  expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:action')).toHaveLength(2)
+  expect(writes).toEqual([])
+})
+
+it('shows the current live loop while recovering an older stored creation observation', async () => {
+  const invoke = bridge.invoke.getMockImplementation()!
+  bridge.invoke.mockImplementation(async (channel, ...args) => {
+    const result = await invoke(channel, ...args)
+    if (channel === 'continuousProgress:create') throw new Error('Private creation response loss')
+    return result
+  })
+  await enableOriginalProgress()
+  const current = manager.list()[0]!, store = Reflect.get(manager, 'store') as ContinuousProgressLoopStore
+  const failure = vi.spyOn(store, 'save').mockRejectedValue(new Error('Private pause save failure'))
+  await expect(api.continuousProgress.action(target(), current.loopId, 'pause', current, 'later-independent-pause')).rejects.toThrow('Private pause save failure')
+  const inspect = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original request')!
+  await vi.waitFor(() => expect(inspect.disabled).toBe(false))
+  await act(async () => inspect.click())
+  await vi.waitFor(() => expect(originalProgressDraft()?.progressRequest).toBeUndefined())
+  expect(container.querySelector('.continuous-progress-control')?.getAttribute('data-progress-state'), 'Stored old active configuration must not replace the current paused live loop.').toBe('paused')
+  expect(manager.list()[0]).toMatchObject({ status: 'paused', lastMutation: { phase: 'prepared' } })
+  expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:create')).toHaveLength(1)
+  expect(writes).toEqual([]); failure.mockRestore()
+})
+
+it('keeps a started request with no Host record unknown and offers an explicit independent editing exit', async () => {
+  const invoke = bridge.invoke.getMockImplementation()!
+  bridge.invoke.mockImplementation(async (channel, ...args) => {
+    if (channel === 'continuousProgress:create') throw new Error('Private transport ended before the owner was reached')
+    return invoke(channel, ...args)
+  })
+  const enable = await prepareOriginalProgress()
+  await act(async () => enable.click())
+  await vi.waitFor(() => expect(container.textContent).toContain('Private transport ended'))
+  const request = structuredClone(originalProgressDraft()!.progressRequest!)
+  expect(request.dispatch).toBe('started'); expect(await persistedProgressRequest()).toEqual(request)
+  expect(manager.list()).toEqual([])
+  const inspect = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original request')!
+  await vi.waitFor(() => expect(inspect.disabled).toBe(false)); await act(async () => inspect.click())
+  await vi.waitFor(() => expect(container.textContent).toContain('Missing records do not prove it was not applied'))
+  expect(originalProgressDraft()?.progressRequest).toEqual(request)
+  const edit = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Keep unknown request and edit')!
+  await vi.waitFor(() => expect(edit.disabled).toBe(false)); await act(async () => edit.click())
+  expect(originalProgressDraft()?.unconfirmedProgressRequests).toEqual([request])
+  expect(originalProgressDraft()?.progressRequest).toBeUndefined()
+  expect(manager.list()).toEqual([])
+  bridge.invoke.mockImplementation(invoke)
+  const prompt = container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(prompt, 'A separately authorized new intent')
+    prompt.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.click())
+  await vi.waitFor(() => expect(manager.list()[0]?.prompt).toBe('A separately authorized new intent'))
+  expect(manager.list()[0]?.creationOperationId).not.toBe(request.input.operationId)
+  expect(originalProgressDraft()?.unconfirmedProgressRequests).toEqual([request])
+  expect(writes).toEqual([])
+})
+
+it('does not confirm an original action from a stored receipt with another complete request body', async () => {
+  await enableOriginalProgress()
+  const invoke = bridge.invoke.getMockImplementation()!
+  bridge.invoke.mockImplementation(async (channel, ...args) => {
+    if (channel !== 'continuousProgress:action') return invoke(channel, ...args)
+    const altered = structuredClone(args)
+    altered[3] = { ...altered[3], nextCheckAt: altered[3].nextCheckAt + 1 }
+    await invoke(channel, ...altered)
+    throw new Error('Private altered request response loss')
+  })
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Back to automations"]')!.click())
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Pause continuous progress"]')!.click())
+  await vi.waitFor(() => expect(container.textContent).toContain('Private altered request response loss'))
+  const request = structuredClone(originalProgressDraft()!.progressRequest!)
+  const inspect = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original request')!
+  await vi.waitFor(() => expect(inspect.disabled).toBe(false)); await act(async () => inspect.click())
+  await vi.waitFor(() => expect(container.textContent).toContain('The original operation remains unconfirmed'))
+  expect(originalProgressDraft()?.progressRequest, 'Matching bare id/action/revision does not prove this complete original body.').toEqual(request)
+  expect(manager.list()[0]).toMatchObject({ status: 'paused', lastMutation: { operationId: request.input.operationId, phase: 'settled' } })
+  expect(bridge.invoke.mock.calls.filter(([channel]) => channel === 'continuousProgress:action')).toHaveLength(1)
+  expect(writes).toEqual([])
+})
+
 it('mounts the existing Composer leaf and real create/pause/resume/check/stop routes, with no second target work', async () => {
   const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!; expect(mailbox).not.toBeNull()
   const page = mailbox.querySelector<HTMLElement>('[role="region"][aria-label="Automation settings"]')!; expect(page.hidden).toBe(false)
@@ -220,7 +481,7 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   const created = vi.spyOn(api.continuousProgress, 'create')
   await act(async () => {
     enable.click()
-    expect(created).toHaveBeenCalledExactlyOnceWith(target(), 1_800_000, 'continue the assigned work', undefined)
+    await vi.waitFor(() => expect(created).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ target: target(), intervalMs: 1_800_000, prompt: 'continue the assigned work', operationId: expect.any(String) })))
     await expect(created.mock.results[0]!.value).resolves.toMatchObject({ status: 'active', agentSessionId: session.agentSessionId })
   })
   expect(manager.list()).toHaveLength(1)
@@ -334,6 +595,7 @@ it('saved defaults reach both original Composer creation routes and durable task
   const calendarCreate = vi.spyOn(api.schedule, 'create')
   await act(async () => {
     calendar.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
+    await vi.waitFor(() => expect(calendarCreate).toHaveBeenCalledOnce())
     await calendarCreate.mock.results[0]!.value
   })
   await vi.waitFor(() => expect(manager.list().find(loop => loop.calendar)).toMatchObject({ ...target(), calendar: { timezone: 'Europe/Berlin' }, prompt: 'One explicit calendar question',
@@ -390,8 +652,8 @@ it('keeps an unconfirmed continuation composition through an independent loop no
     textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'final confirmed continuation' }))
   })
   await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-  await vi.waitFor(() => expect(created).toHaveBeenCalledExactlyOnceWith(target(), 1_800_000,
-    'final confirmed continuation', undefined))
+  await vi.waitFor(() => expect(created).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ target: target(), intervalMs: 1_800_000,
+    prompt: 'final confirmed continuation', operationId: expect.any(String) })))
   await vi.waitFor(() => expect(manager.list().find(loop => loop.status === 'active')?.prompt)
     .toBe('final confirmed continuation'))
   expect(useAppStore.getState().agentComposerDrafts).toEqual(drafts)
@@ -488,7 +750,7 @@ it('keeps a late create result on its original workspace while the same Session 
   })
   await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   await vi.waitFor(() => expect(save).toHaveBeenCalledOnce())
-  expect(form.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true)
+  expect(form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true)
   const other = { ...snapshot, workspacePath: join(directory, 'second-workspace') }
   await act(async () => {
     useAppStore.setState({ sessions: [other] })
@@ -504,7 +766,7 @@ it('keeps a late create result on its original workspace while the same Session 
   })
   await vi.waitFor(() => expect(manager.list()).toHaveLength(1))
   expect(manager.list()[0]).toMatchObject({ ...target(), prompt: 'original target prompt' })
-  expect(next.querySelector<HTMLButtonElement>('button')!.disabled).toBe(false)
+  expect(next.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false)
   expect(nextText.value).toBe('new target draft')
   expect(container.querySelector('[aria-label="Pause continuous progress"]')).toBeNull()
   expect(writes).toEqual([])
@@ -545,7 +807,7 @@ it('binds an explicit real Tracker through the mounted leaf and IPC, keeping don
   expect(requests).toEqual([])
   await tracker.run('closeout-feature', '--feature', binding.ownerId, '--mode', 'archive', '--execute', ...tracker.closeoutArgs)
   await click('Resume and check continuous progress')
-  await click('Check continuous progress now')
+  // Resume already checks the archived source and ends this original loop.
   await vi.waitFor(() => expect(manager.list()[0]!.status).toBe('stopped'))
   await vi.waitFor(() => expect(container.textContent).toContain('business complete (archived)'))
   expect(requests).toEqual([])

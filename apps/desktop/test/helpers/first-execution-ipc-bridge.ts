@@ -73,6 +73,7 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ subscribe: () => 
   recordParticipation: async (id: string) => { const goal = bridge.goals.get(id); if (!goal) throw Error('Unknown original fixture Goal'); return goal }
 }) }))
 vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class {
+  storage = { setConfirmationHandler() {} }
   cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }
   extensions = { setConfirmationHandler() {} }
   async initialize() {} async dispose() {} onChange() { return () => {} } onEnvironmentApplicationChange() { return () => {} } profileOfSession() { return undefined }
