@@ -141,6 +141,8 @@ Recent inputs 的首次可见阅读沿同一公共 Reader，在配置输入数�
 
 Focus 卡片与格内的 Agent 菜单对明确选中的语义 Agent 共用 `Stop Agent` 动作和原确认框；停止本次准确 Host／SID／Run，不是当前 Tab、Region、Chat 收件 Mote 或后来替换的 Run。Session 的明确停止资格不依赖是否存在已确认的 Tab／Region 展示位置；位置未知、无投影或多位置不能隐藏准确 Agent 的停止入口，也不要求先打开、恢复或新建工作面才能停止。确认前沿原 owner 重新核对身份，缺失或改变只拒绝这次停止并给原 subject 服务说明；活动 unknown 不自行拿走已确认控制身份的显式停止能力。pending 防双点，确认取消与关闭保原键盘返回和较晚主动焦点优先。调用沿公共停止接口，未确认、失败或等待超时保原工作面与草稿并明确未知，不乐观删投影、不冒称已停止、不自动重试或停止其他 Session。Core 确认准确 Run 终局后，沿原退休／run-removed owner 移除已停止投影，保原 Session、native conversation 与历史退休资料供原显式恢复；不承诺成功后旧 Tab 仍在，也不因查询或重启恢复退休 Run。旁边健康工作面、草稿和 Run 不受影响。Focus 收起仍只改变呈现，不与停止混名。
 
+来源任务的原执行身份尚未确认时，同一卡片仍应让用户辨认其准确来源和原位置，并能对明确选择的位置进入原工作面关闭流程；不能以缺少 Host、Runtime 或当前观察为由让准确位置永远无法关闭。多个原位置先由用户选定准确位置；关闭计划沿[Session、Run 与 View](session-recovery.md#sessionrun-与-view)由原 owner 准备，允许真人明确选择仅关闭该视图，保留未知 Session、Run、草稿与其他位置，不把视图关闭说成 Agent 已停止。可确认的原 Session 仍沿共享 Agent 菜单和原生命周期入口处理，不按名称、路径或裸 SID 将不同来源合并，也不为此建立第二套任务或关闭状态。读取、准备或关闭未确认时显示原缺口与可继续动作，不能静默消失或自动重试。
+
 Attention 中的失败 Agent 沿原处理面提供可发现的查看与关闭动作。只有公开 Core 已确认该准确 Session 的进程结束或终局事实时，显式关闭失败 Session 才沿原 Session 生命周期能力收尾；已确认结束的 Run 不要求再次取得停止运行进程的回执，无确认展示位置也不阻断准确 Session 的收尾。关闭请求面和关闭 Focus 投影仍只改变呈现，不能冒成 Session 已关闭。关闭的返回、排队或超时不代替 Core 确认：未确认及失败保留原对象、工作面和可读恢复原因，迟到旧 Run 的回执不能关闭同一 SID 的新 Run。一次关闭未完成后，原准确目标的服务说明与可执行继续动作保持可达，不能因原位置缺席或上一请求未收口让后续点击静默无效；等待边界、租约释放与局部关闭保全沿[《Session、Run 与 View》](session-recovery.md#sessionrun-与-view)。错误状态、握手或观察失败不自行证明进程已结束；健康或未知 Run 保原可用能力及既有显式停止边界，不凭错误文字猜终局。准备失败尚未产生 Session 时，保原 Launcher 与完整草稿供重试，不伪造可关闭的执行对象。Agent Region 的展示关闭与生命周期后果仍归[《Agent Region 关闭与身份入口》](spaces-and-layout.md#agent-region-关闭与身份入口)。
 
 #### Activity 活跃入口与空间级联
