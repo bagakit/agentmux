@@ -150,7 +150,7 @@ Remote 集中配置和观察准确路线。每一跳解释自己 owner 下已配
 
 完整路径和跳数由原路由 owner 的具名逻辑路径回执提供。跳数计该路径的转发边：同一已确认 Runtime 的项目与 Agent 为同机，明确一条边为直连，多于一条为级联。执行路径与客户端到两端的访问路径各有自己的跳数、来源、观察时间及完整／部分／未知状态。SSH ProxyJump 的配置、IP 路由器或界面求得的最短路不能充当当前执行跳数。中断、回执缺失和路由变化保留原请求，不改路重放业务操作。
 
-**当前能力边界：**已实现的一跳公共 Host 调用与双端执行，不等于完整级联、远端 Space 挂载或跨节点空间订阅已经交付。完整 B→C→D 需同时接通准确调用、流、取消、身份 fence、授权与原执行消费者；A 不递归导入其他节点配置或自动发现全网。源码实现与实际验收沿[实现基线](#公共能力与当前实现基线)分别核对，不能用本节目标或示意图代签。
+**当前能力边界：**Core 已提供显式级联的公共调用、流、取消、逐跳授权及原分端执行入口；源 Space 的快照、变更和成员访问也沿其原业务身份提供。它们不等于完整桌面挂载、级联选择和每种输入方式已经交付。客户端仍须接通原消费者，保全原工作面与输入，并完成实际验收；A 不递归导入其他节点配置或自动发现全网。源码入口与仍缺的闭环沿[实现基线](#公共能力与当前实现基线)分别核对，不能用本节目标或示意图代签。
 
 ### 开始与继续工作
 
@@ -339,6 +339,8 @@ GUI、CLI 和其他客户端消费相同业务 owner。已有公开能力足够�
 | Host 读取、Test 与路由修复 | [settings-hosts-control](../../../apps/desktop/src/main/settings-hosts-control.ts)、[公共 RPC](../../../packages/core/src/public-rpc.ts) | 已公开清单、测试及沿同配置 owner 的已绑定 SSH 路由更新；修复范围见本页连接合同。Test 结果为完整输入、outcome 与人读 detail，不能解析 detail 猜结构化版本、PID 或实时连接 |
 | Session 与项目投影 | [SessionSnapshot / WorkspaceRecord](../../../apps/desktop/src/shared/contracts.ts)、[HostProjectsPane](../../../apps/desktop/src/renderer/src/components/settings/HostProjectsPane.tsx) | 原 Host / Session / Workspace 引用与已有状态可复用；引用数量与当前运行数量须分口径，读取缺口不能补成零 |
 | Host 执行器和来源信任 | [public-rpc-host-settings](../../../packages/core/src/public-rpc-host-settings.ts)、[executor-contract](../../../packages/core/src/executor-contract.ts)、[HostCreationTrustPanel](../../../apps/desktop/src/renderer/src/components/settings/HostCreationTrustPanel.tsx) | 已有准确 Host 的发现、注册、可信来源读取与真人批准入口；不由拓扑另建配置或审批系统 |
+| 显式级联路线与安全发现 | [公共路线合同](../../../packages/core/src/host-route.ts)、[原路线 owner](../../../packages/core/src/host-route-gateway.ts)、[同源 CLI 指南](../../../packages/core/guides/modules/route.md) | 原连接承载有限调用与流；每个接收节点独立批准原 actor、前一签名节点、终点与准确用途。安全连接清单不建连，显式 inspect 只读取所选对端身份；读取、保存与授信独立，当前桌面编辑及 Launcher 消费仍需各自闭环 |
+| 原 Space 共享业务状态 | [空间权威合同](../../../packages/core/src/space-authority.ts)、[成员状态](../../../packages/core/src/space-sessions.ts)、[准确成员访问](../../../packages/core/src/space-member.ts) | Runtime 与 Space 限定的快照、watch 和 CAS 修改沿原 owner；远端 Agent 的成员身份与查看者权限分开。公共能力不自动共享窗口焦点、布局或草稿，也不代签完整桌面工作面的呈现与重启恢复 |
 | 应用授权同步 | [应用授权 owner](../../../packages/core/src/application-access-owner.ts)、[Desktop 执行绑定](../../../apps/desktop/src/main/application-access-owner.ts)、[HostApplicationAccessPanel](../../../apps/desktop/src/renderer/src/components/settings/HostApplicationAccessPanel.tsx) | 用户配置连接器，GUI 与 CLI 共用配置、比较、显式执行、目标验真和原操作查询；准确范围与未知恢复归[应用授权同步合同](remote-application-access.md)，不代签任意外部应用支持迁移 |
 | 所选 Host 的只读运行观察 | [分源观察](../../../packages/core/src/host-runtime-observation.ts)、[公共 Host 方法](../../../packages/core/src/public-rpc-host-settings.ts)、[HostRuntimePanel](../../../apps/desktop/src/renderer/src/components/settings/HostRuntimePanel.tsx) | 原 runtimeIdentity、runtimeDiagnostics、runtimeResourceSnapshot 由公共服务按准确 Host 组合；GUI 与 `settings hosts inspect` 消费同一结果。只观察当前已连接来源，缺失按来源报告，不冷启动 Native |
 | 所选 Host 的只读网络观察 | [原 Owner 接口事实](../../../packages/core/src/runtime-network.ts)、[Host 分源组合](../../../packages/core/src/host-network-observation.ts)、[HostNetworkPanel](../../../apps/desktop/src/renderer/src/components/settings/HostNetworkPanel.tsx)、[HostNetworkMap](../../../apps/desktop/src/renderer/src/components/settings/HostNetworkMap.tsx) | 新鲜 Owner 请求耗时、观察进程与目标 Owner 的接口、当前 SSH 保活配置和 ProxyJump 顺序分别读取；GUI 的 Read link / Refresh 与 `settings hosts network` 共用原服务，不轮询。聚合先认证原调用者，固定只读叶借原 Host 传输，不将来源 Agent 凭据当成目标身份；原 runtime 域授权保持不变 |
