@@ -9,7 +9,7 @@ when: "Open a manual scrolling capture or GIF recording, inspect or stop the ori
 <!-- amux:content -->
 Use `amux capture sequence ACTION --help` for exact arguments. Open takes
 `{hostId,operationId,mode:"scroll"|"gif"}` and presents a region picker and capture
-controls. The user explicitly starts recording or samples after scrolling; opening
+controls. The user explicitly starts recording or continuous scroll sampling, or captures individual frames after scrolling; opening
 a sequence does not scroll another app or begin unattended recording.
 
 Keep the original operation ID. Inspect and read never replay a selection or
